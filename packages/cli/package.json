@@ -1,0 +1,19 @@
+{
+  "name": "@jaira/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "jaira": "./bin/jaira.js"
+  },
+  "dependencies": {
+    "@ai-exec/core": "file:../../../ai-exec/packages/core",
+    "@ai-exec/hw": "file:../../../ai-exec/packages/hw",
+    "@ai-exec/llm": "file:../../../ai-exec/packages/llm",
+    "@ai-exec/services": "file:../../../ai-exec/packages/services",
+    "@jaira/persistence": "*",
+    "@jaira/shared": "*"
+  }
+}

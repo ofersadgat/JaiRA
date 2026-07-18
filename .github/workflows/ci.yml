@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# JaiRA's packages depend on the sibling ai-exec repo via
+# `file:../../../ai-exec/packages/*`. CI therefore checks out ai-exec next to
+# JaiRA and installs its deps first: the file: links are symlinks, so Node
+# resolves the linked packages' own dependencies from ai-exec/node_modules.
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout JaiRA
+        uses: actions/checkout@v4
+        with:
+          path: JaiRA
+
+      - name: Checkout ai-exec (sibling for file: deps)
+        uses: actions/checkout@v4
+        with:
+          repository: ofersadgat/ai-exec
+          ref: main
+          path: ai-exec
+          # github.token works when ai-exec is public. If it is private, add a
+          # PAT with read access to ai-exec as the AI_EXEC_TOKEN secret.
+          token: ${{ secrets.AI_EXEC_TOKEN || github.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install ai-exec deps
+        run: npm install
+        working-directory: ai-exec
+
+      - name: Install JaiRA deps
+        run: npm install
+        working-directory: JaiRA
+
+      - name: Typecheck
+        run: npm run typecheck
+        working-directory: JaiRA
+
+      - name: Test
+        run: npm test
+        working-directory: JaiRA
