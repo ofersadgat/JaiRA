@@ -1,0 +1,17 @@
+{
+  "name": "@jaira/persistence",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@ai-exec/core": "file:../../../ai-exec/packages/core",
+    "@ai-exec/hw": "file:../../../ai-exec/packages/hw",
+    "@jaira/shared": "*",
+    "better-sqlite3": "^12.2.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13"
+  }
+}

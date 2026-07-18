@@ -1,0 +1,22 @@
+{
+  "name": "jaira",
+  "private": true,
+  "version": "0.1.0",
+  "description": "JaiRA: interactive agent-orchestration app on top of ai-exec (hierarchical workflows with humans in the loop).",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p packages/shared && tsc --noEmit -p packages/persistence && tsc --noEmit -p packages/cli && tsc --noEmit -p packages/app",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "jaira": "tsx packages/cli/src/main.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
+  }
+}

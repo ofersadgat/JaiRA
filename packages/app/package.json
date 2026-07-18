@@ -1,0 +1,12 @@
+{
+  "name": "@jaira/app",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@jaira/persistence": "*",
+    "@jaira/shared": "*"
+  }
+}

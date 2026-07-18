@@ -1,0 +1,118 @@
+/**
+ * Workflow snapshots — `.jaira/snapshots/<hash>/` (DESIGN §5.3, SPEC §12).
+ *
+ * At task start the transitive closure of state files (a `WorkflowBundle`) is
+ * copied into a directory named by its `@ai-exec/hw` snapshotHash. Directories
+ * are content-addressed and immutable: identical workflow versions across
+ * tasks share one snapshot. Execution always reads from the snapshot, never
+ * from live `workflows/`.
+ *
+ * Files are written without the (possibly loader-derived) `id` field —
+ * `snapshotHash` ignores `id`, and reloading derives it from the path, so the
+ * written form is canonical and round-trips to the same hash.
+ */
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, sep } from "node:path";
+import { loadBundle, snapshotHash, stateIdFromPath, type WorkflowBundle } from "@ai-exec/hw";
+import { readJsonFile } from "@jaira/shared";
+
+const META_FILE = ".meta.json";
+
+interface SnapshotMeta {
+  rootId: string;
+  hash: string;
+}
+
+function assertSafeStateId(stateId: string): void {
+  if (stateId.split("/").some((seg) => seg === "" || seg === "." || seg === "..")) {
+    throw new Error(`state id '${stateId}' is not a safe relative path`);
+  }
+}
+
+/** Read every `*.json` under a workflows dir as loader input (relPath → parsed JSON). */
+export function readWorkflowFiles(workflowsDir: string): Record<string, unknown> {
+  const files: Record<string, unknown> = {};
+  const walk = (dir: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".")) continue; // editor/tool droppings, snapshot .meta.json
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith(".json")) {
+        files[relative(workflowsDir, full)] = readJsonFile(full);
+      }
+    }
+  };
+  walk(workflowsDir);
+  return files;
+}
+
+export interface SnapshotRef {
+  hash: string;
+  dir: string;
+  /** false when an identical snapshot already existed (deduplicated). */
+  created: boolean;
+}
+
+export function ensureSnapshot(snapshotsDir: string, bundle: WorkflowBundle): SnapshotRef {
+  const hash = snapshotHash(bundle);
+  const dir = join(snapshotsDir, hash);
+  if (existsSync(dir)) return { hash, dir, created: false };
+
+  // Stage then rename, so a crash mid-write never leaves a half snapshot
+  // behind under its final content-addressed name.
+  const staging = join(snapshotsDir, `.staging-${hash}-${process.pid}`);
+  rmSync(staging, { recursive: true, force: true });
+  mkdirSync(staging, { recursive: true });
+  for (const [stateId, def] of Object.entries(bundle.states)) {
+    assertSafeStateId(stateId);
+    const { id: _id, ...authored } = def;
+    const file = join(staging, ...stateId.split("/")) + ".json";
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(authored, null, 2) + "\n", "utf8");
+  }
+  const meta: SnapshotMeta = { rootId: bundle.rootId, hash };
+  writeFileSync(join(staging, META_FILE), JSON.stringify(meta, null, 2) + "\n", "utf8");
+  try {
+    renameSync(staging, dir);
+  } catch (e) {
+    // Lost a race with a concurrent writer of the same content — fine.
+    rmSync(staging, { recursive: true, force: true });
+    if (!existsSync(dir)) throw e;
+  }
+  return { hash, dir, created: true };
+}
+
+/** Load a pinned snapshot back into a bundle, verifying content addressing. */
+export function loadSnapshot(snapshotsDir: string, hash: string): WorkflowBundle {
+  const dir = join(snapshotsDir, hash);
+  const metaFile = join(dir, META_FILE);
+  if (!existsSync(metaFile)) throw new Error(`snapshot '${hash}' not found under ${snapshotsDir}`);
+  const meta = readJsonFile(metaFile) as SnapshotMeta;
+
+  const files: Record<string, unknown> = {};
+  const walk = (d: string): void => {
+    for (const entry of readdirSync(d, { withFileTypes: true })) {
+      const full = join(d, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile() && entry.name.endsWith(".json") && entry.name !== META_FILE) {
+        files[relative(dir, full).split(sep).join("/")] = readJsonFile(full);
+      }
+    }
+  };
+  walk(dir);
+
+  const bundle = loadBundle(files, meta.rootId);
+  const actual = snapshotHash(bundle);
+  if (actual !== hash) {
+    throw new Error(`snapshot '${hash}' is corrupt: contents hash to ${actual}`);
+  }
+  return bundle;
+}
+
+export { stateIdFromPath };
