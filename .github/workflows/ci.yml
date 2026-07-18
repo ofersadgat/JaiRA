@@ -18,15 +18,15 @@ jobs:
         with:
           path: JaiRA
 
-      - name: Checkout ai-exec (sibling for file: deps)
+      # ai-exec is public, so the default token checks it out with no extra
+      # config. If it is ever made private, add a PAT with read access to
+      # ai-exec as an AI_EXEC_TOKEN secret and pass `token: ${{ secrets.AI_EXEC_TOKEN }}`.
+      - name: Checkout ai-exec sibling for file deps
         uses: actions/checkout@v4
         with:
           repository: ofersadgat/ai-exec
           ref: main
           path: ai-exec
-          # github.token works when ai-exec is public. If it is private, add a
-          # PAT with read access to ai-exec as the AI_EXEC_TOKEN secret.
-          token: ${{ secrets.AI_EXEC_TOKEN || github.token }}
 
       - uses: actions/setup-node@v4
         with:
