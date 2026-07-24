@@ -52,6 +52,11 @@ export function modelNamesOf(bundle: WorkflowBundle): string[] {
   return [...names].sort();
 }
 
+/** True when any state runs a `PromptOp` — i.e. when the run needs a model at all. */
+export function hasPromptOp(bundle: WorkflowBundle): boolean {
+  return Object.values(bundle.states).some((def) => def.operation?.kind === "prompt");
+}
+
 /** Function names referenced by `operation.function` across a bundle's states. */
 export function functionNamesOf(bundle: WorkflowBundle): string[] {
   const names = new Set<string>();
@@ -145,9 +150,12 @@ export function statusOfResult(result: WorkflowExecResult): "completed" | "faile
 /** Provider/model defaults for real (non-fake) runs, from project config. */
 export function modelDefaults(config: JairaConfig, bundle: WorkflowBundle, opts?: { fake?: boolean }): Record<string, JsonValue> {
   if (opts?.fake) return {};
+  // A workflow made only of function states (host code, UI gates, agents) never
+  // calls a model, so demanding one would refuse a perfectly runnable workflow.
+  if (!hasPromptOp(bundle)) return {};
   const models = modelNamesOf(bundle);
-  // A state naming no model relies on the configured default; with neither, the
-  // provider router has nothing to route and the run would fail deep in the
+  // A prompt state naming no model relies on the configured default; with neither,
+  // the provider router has nothing to route and the run would fail deep in the
   // engine — so refuse up front with a message naming the fix.
   if (models.length === 0 && config.models.default === undefined) {
     throw new Error(

@@ -148,6 +148,18 @@ describe("jaira task lifecycle (e2e, temp project)", () => {
     expect(afterRuns.map((r) => r["outcome"])).toEqual(["interrupted", "success"]);
   });
 
+  it("reports the root cause of a failure, not just the parent's summary", async () => {
+    const taskId = await createPlanningTask();
+    const failing = await cli(["task", "start", taskId, "--fake", JSON.stringify([{ error: "provider exploded" }])]);
+    expect(failing.code).toBe(1);
+    const report = failing.json() as Record<string, unknown>;
+    // The composite failure names the child; on its own that hides what broke.
+    expect(JSON.stringify(report["failure"])).toMatch(/child 'goals' terminated/);
+    // `causes` comes from the journal's operation-level failures.
+    const causes = report["causes"] as Array<Record<string, string>>;
+    expect(causes[0]).toMatchObject({ stateId: "feature/plan/goals", reason: "provider exploded" });
+  });
+
   it("failed runs record the failure and allow retry", async () => {
     const taskId = await createPlanningTask();
     const failing = await cli([

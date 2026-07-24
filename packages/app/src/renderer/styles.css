@@ -356,6 +356,93 @@ h3 {
   gap: 8px;
   margin-top: 14px;
 }
+.modal .field {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+}
+.modal .field > span {
+  font-size: 11px;
+  color: var(--dim);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.modal .field small {
+  color: var(--dim);
+}
+.modal .field input[type="checkbox"] {
+  width: auto;
+  justify-self: start;
+}
+textarea,
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  width: 100%;
+  resize: vertical;
+}
+textarea {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+}
+button.danger {
+  border-color: #5c2b2b;
+  color: #ffb4b4;
+}
+button.danger:hover {
+  border-color: var(--bad);
+}
+
+/* The artifact preview inside review_artifact. */
+.artifact {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 12px;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+}
+
+/* --- approvals inbox --- */
+.inbox {
+  margin-bottom: 16px;
+  padding: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.inbox h3 {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: var(--warn);
+}
+.inbox ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.inbox li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.inbox li:hover,
+.inbox li.selected {
+  background: var(--panel);
+}
+
 .toast {
   position: fixed;
   bottom: 16px;

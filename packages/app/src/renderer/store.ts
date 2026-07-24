@@ -17,7 +17,7 @@ import type {
   PushMessage,
   TaskDetail,
   TaskSummary,
-} from "@jaira/shared";
+} from "@jaira/shared/browser";
 
 declare global {
   interface Window {

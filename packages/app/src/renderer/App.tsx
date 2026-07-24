@@ -8,7 +8,8 @@
 // React 19 no longer declares a global `JSX` namespace — it comes from the
 // package now.
 import { useState, type JSX } from "react";
-import type { BoardCard, InstanceNode, PendingInteraction, TaskDetail } from "@jaira/shared";
+import type { BoardCard, InstanceNode, PendingInteraction, TaskDetail } from "@jaira/shared/browser";
+import { InteractionDialog } from "./components";
 import { useApp } from "./store";
 
 const BADGE: Record<string, string> = {
@@ -169,53 +170,40 @@ function Detail({
 }
 
 /**
- * The pending-interaction surface (DESIGN §7.1). This is the only path a human
- * decision can enter a run, which is what SPEC §11.4 requires. The generic
- * renderer below covers `choose_option`-shaped gates; the five typed components
- * are phase-4 work.
+ * The approvals inbox (DESIGN §10.2, phase-4 scaffolding).
+ *
+ * Today it lists the pending human gates across every task, which is the whole
+ * inbox: per-command `require_approval` decisions are provider-initiated and
+ * arrive with the policy engine and process executors (phase 6), so there is
+ * nothing to show for them yet rather than a placeholder pretending otherwise.
  */
-function Interaction({
+function Inbox({
   pending,
-  onAnswer,
+  selected,
+  onSelect,
 }: {
-  pending: PendingInteraction;
-  onAnswer: (value: unknown) => void;
-}): JSX.Element {
-  const config = (pending.inputs["config"] ?? {}) as { prompt?: string; options?: string[] };
-  const options = Array.isArray(config.options) ? config.options : [];
-  const [text, setText] = useState("");
+  pending: PendingInteraction[];
+  selected: string | null;
+  onSelect: (taskId: string) => void;
+}): JSX.Element | null {
+  if (pending.length === 0) return null;
   return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        <h3>{config.prompt ?? pending.component}</h3>
-        <div className="sub">
-          {pending.component} · {pending.taskId}
-        </div>
-        {options.length > 0 ? (
-          <div className="options">
-            {options.map((option) => (
-              <button key={option} onClick={() => onAnswer({ decision: option })}>
-                {option}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="options">
-            <input value={text} onChange={(e) => setText(e.target.value)} placeholder="response JSON or text" />
-            <button
-              onClick={() => {
-                try {
-                  onAnswer(JSON.parse(text) as unknown);
-                } catch {
-                  onAnswer(text);
-                }
-              }}
-            >
-              Submit
-            </button>
-          </div>
-        )}
-      </div>
+    <div className="inbox">
+      <h3>
+        Awaiting you <span className="count">{pending.length}</span>
+      </h3>
+      <ul>
+        {pending.map((item) => (
+          <li
+            key={item.requestId}
+            className={item.taskId === selected ? "selected" : undefined}
+            onClick={() => onSelect(item.taskId)}
+          >
+            <span className="badge badge-waiting_for_user">⏸</span>
+            <span className="task-title">{item.config?.prompt ?? item.component}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -254,6 +242,7 @@ export default function App(): JSX.Element {
           {state.projectDir ?? "no project open"}
         </div>
         <NewTask onCreate={actions.createTask} busy={state.busy} />
+        <Inbox pending={pending} selected={state.selected} onSelect={actions.select} />
         <h3>Tasks</h3>
         <ul className="tasks">
           {state.tasks.map((task) => (
@@ -340,7 +329,11 @@ export default function App(): JSX.Element {
       </aside>
 
       {pending.length > 0 ? (
-        <Interaction pending={pending[0]!} onAnswer={(value) => actions.answer(pending[0]!.requestId, value)} />
+        <InteractionDialog
+          pending={pending[0]!}
+          error={state.error}
+          onSubmit={(value) => actions.answer(pending[0]!.requestId, value)}
+        />
       ) : null}
 
       {state.error ? (

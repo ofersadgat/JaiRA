@@ -13,6 +13,7 @@
  * and no agent process can reach this surface.
  */
 import type { JsonValue } from "@declarative-ai/json";
+import type { ComponentConfig } from "./components";
 import type { BoardView, TaskDetail, TaskSummary } from "./view";
 
 // --- invoke channels ---------------------------------------------------------
@@ -49,6 +50,12 @@ export interface PendingInteraction {
   component: string;
   /** Resolved inputs, including the state's authored `config` surface. */
   inputs: Record<string, JsonValue>;
+  /** The parsed component contract, normalized in main so the renderer does not
+   *  re-derive it. Absent for a function that is not a built-in component. */
+  config?: ComponentConfig;
+  /** Set instead of `config` when the state's authored config is malformed, so the
+   *  UI can show the authoring error rather than an empty dialog. */
+  configError?: string;
 }
 
 /**

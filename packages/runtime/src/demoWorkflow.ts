@@ -24,7 +24,18 @@ const artifact = (format: string) => ({ kind: "blob", schema: { type: "string", 
 const str = () => ({ schema: { type: "string" } });
 const strArray = () => ({ schema: { type: "array", items: { type: "string" } } });
 
-export function specPlanningFiles(): Record<string, unknown> {
+export interface DemoWorkflowOptions {
+  /**
+   * Model id for every prompt state. Real runs need a ROUTE-PREFIXED id
+   * (`anthropic/claude-sonnet-5`); the default keeps the SPEC's role names
+   * (`planner`/`critic`/`fixer`), which are labels the scripted fake executor
+   * dispatches on and which a real provider router correctly refuses.
+   */
+  model?: string;
+}
+
+export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<string, unknown> {
+  const model = (role: string): string => options.model ?? role;
   return {
     "feature/plan": {
       label: "Planning",
@@ -70,7 +81,7 @@ export function specPlanningFiles(): Record<string, unknown> {
       operation: {
         kind: "prompt",
         prompt: { template: "Extract goals from {{inputs.issue}}." },
-        config: { model: "planner" },
+        config: { model: model("planner") },
       },
     },
     "feature/plan/context": {
@@ -80,7 +91,7 @@ export function specPlanningFiles(): Record<string, unknown> {
       operation: {
         kind: "prompt",
         prompt: { template: "Write the plan for {{inputs.issue}}." },
-        config: { model: "planner" },
+        config: { model: model("planner") },
       },
     },
     "feature/plan/critique": {
@@ -106,7 +117,7 @@ export function specPlanningFiles(): Record<string, unknown> {
       environment: { conversation: { mode: "full_history" } },
       operation: {
         kind: "prompt",
-        config: { model: "critic" },
+        config: { model: model("critic") },
         prompt: {
           template:
             "Review the plan document. Find significant weaknesses at or above the configured severity threshold. Return structured output matching this state's output schema.",
@@ -141,7 +152,7 @@ export function specPlanningFiles(): Record<string, unknown> {
       operation: {
         kind: "prompt",
         prompt: { template: "Fix the listed weaknesses." },
-        config: { model: "fixer" },
+        config: { model: model("fixer") },
       },
     },
     "feature/plan/critique/human_review": {

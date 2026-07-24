@@ -174,6 +174,42 @@ describe("AppService live human gate", () => {
     expect(() => service.submitInteraction("nope", { decision: "approve" })).toThrow(/no pending interaction/);
   });
 
+  it("refuses an out-of-contract answer, and the gate stays open for a valid one", async () => {
+    const taskId = newTask();
+    await service.startTask({ taskId, fake: blockedRules() });
+    await until(() => service.pendingInteractions().length === 1, "the gate to park");
+    const pending = service.pendingInteractions()[0]!;
+
+    // The renderer is the untrusted half of the boundary: an undeclared decision
+    // must not reach the engine (DESIGN §7.1).
+    expect(() => service.submitInteraction(pending.requestId, { decision: "ship-it" })).toThrow(
+      /invalid choose_option response.*not one of/,
+    );
+    expect(() => service.submitInteraction(pending.requestId, "approve")).toThrow(/must be an object/);
+    // Still parked, so a rejected answer loses nothing.
+    expect(service.pendingInteractions()).toHaveLength(1);
+
+    service.submitInteraction(pending.requestId, { decision: "approve" });
+    await until(() => finished(taskId), "the run to finish after a valid answer");
+    expect(service.pendingInteractions()).toEqual([]);
+  });
+
+  it("hands the renderer a parsed component contract", async () => {
+    const taskId = newTask();
+    await service.startTask({ taskId, fake: blockedRules() });
+    await until(() => service.pendingInteractions().length === 1, "the gate to park");
+    const pending = service.pendingInteractions()[0]!;
+    // Normalized in main, so the renderer never re-derives the contract.
+    expect(pending.config).toMatchObject({
+      component: "choose_option",
+      prompt: "Review the critique result.",
+      options: [{ value: "approve" }, { value: "request_changes" }, { value: "block" }],
+    });
+    expect(pending.configError).toBeUndefined();
+    service.submitInteraction(pending.requestId, { decision: "block" });
+    await until(() => finished(taskId), "the run to finish");
+  });
+
   it("canceling a parked run fails the gate rather than hanging", async () => {
     const taskId = newTask();
     await service.startTask({ taskId, fake: blockedRules() });

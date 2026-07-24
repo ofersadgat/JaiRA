@@ -90,6 +90,30 @@ function shapeFor(
   return { shape: workflowShape(bundle, { interactiveFunctions: interactive }), rootId: bundle.rootId };
 }
 
+/**
+ * The operation failures and blocked children recorded for a run, innermost
+ * first.
+ *
+ * A composite workflow reports the *parent's* view of a failure ("child 'goals'
+ * terminated with error and no transition handled it"), which says nothing about
+ * what actually went wrong. The root cause is in the journal, so surfacing it is
+ * how a failed run becomes diagnosable instead of a shrug.
+ */
+export function runCauses(project: Project, taskId: string, runId?: number): Array<{ stateId: string; reason: string }> {
+  const runs = project.runtime.listRuns(taskId);
+  const target = runId ?? runs[runs.length - 1]?.id;
+  if (target === undefined) return [];
+  const causes: Array<{ stateId: string; reason: string }> = [];
+  for (const row of project.events.list(taskId, { runId: target })) {
+    if (row.event.type === "operation.failed") {
+      causes.push({ stateId: row.event.stateId, reason: row.event.failure.reason });
+    } else if (row.event.type === "instance.blocked") {
+      causes.push({ stateId: row.event.stateId, reason: row.event.reason });
+    }
+  }
+  return causes;
+}
+
 /** The projected latest run of a task (empty when it has never run). */
 export function latestRun(project: Project, taskId: string, shape?: WorkflowShape): ProjectedRun {
   const runs = project.runtime.listRuns(taskId);

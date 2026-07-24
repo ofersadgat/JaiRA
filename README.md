@@ -111,6 +111,31 @@ decision — that dialog is the *only* way a human answer can enter a run
 `JAIRA_CAPTURE=<file.png>` screenshots the window once it settles and exits,
 which is how the UI is checked without a human at the keyboard.
 
+### Human gates
+
+A UI state is a `FunctionOp` naming one of the five built-in components —
+`choose_option`, `review_artifact`, `edit_markdown`, `fill_form`,
+`confirm_action` — with its surface in the state's `config`. When a run reaches
+one it parks, the dialog opens, and the answer is re-validated against the
+component's contract **in the main process** before it can become a workflow
+output: an undeclared decision or a missing required field is refused, so a
+renderer bug cannot corrupt a run. Pending gates across all tasks are listed in
+the sidebar inbox.
+
+Gates run one at a time only when they *depend* on each other: a `sequence` is a
+cursor, not a barrier, so independent children park simultaneously. Ordering comes
+from dataflow — wire one gate's output into the next (see
+`componentsWorkflowFiles()` for a worked example that walks all five).
+
+### Real providers
+
+Set a route-prefixed model — `models.default` in `.jaira/config.json`, or a
+state's `operation.config.model` — and export `ANTHROPIC_API_KEY` (or
+`OPENROUTER_API_KEY`). Without `--fake`, prompt states execute through
+`@declarative-ai/promptop` over `@declarative-ai/llm`. A failed run prints
+`causes`: the operation-level reasons from the journal, rather than only the
+parent's "child X terminated with error".
+
 > **Native-module ABI.** `better-sqlite3` is a V8-ABI addon, so one build cannot
 > serve both Node and Electron (Node 22 wants `NODE_MODULE_VERSION` 127, Electron
 > 33 wants 130). `npm run app` switches it automatically; switch back with

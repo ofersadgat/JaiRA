@@ -18,6 +18,7 @@ import {
   initProject,
   openProject,
   readWorkflowFiles,
+  runCauses,
   type Project,
 } from "@jaira/persistence";
 import { defaultConfig, parseJsonText, type BoardCard, type BoardView, type JairaConfig } from "@jaira/shared";
@@ -345,7 +346,16 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
       outputs: result.value,
       ...("error" in result && result.error !== undefined ? { failure: result.error } : {}),
     });
-    io.stdout(JSON.stringify({ taskId, runId: started.runId, ...resultReport(result) }, null, 2) + "\n");
+    // A composite failure reads "child 'goals' terminated with error…", which hides
+    // what broke; the journal has the operation-level reason, so report both.
+    const causes = status === "completed" ? [] : runCauses(project, taskId, started.runId);
+    io.stdout(
+      JSON.stringify(
+        { taskId, runId: started.runId, ...resultReport(result), ...(causes.length > 0 ? { causes } : {}) },
+        null,
+        2,
+      ) + "\n",
+    );
     return status === "completed" ? 0 : 1;
   } finally {
     project.close();

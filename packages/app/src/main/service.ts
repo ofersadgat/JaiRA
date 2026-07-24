@@ -33,8 +33,10 @@ import {
   type FakeRule,
   type HubRequest,
 } from "@jaira/runtime";
+import { isComponentName, parseComponentConfig, validateComponentResult } from "@jaira/shared";
 import type {
   BoardView,
+  ComponentConfig,
   CreateTaskRequest,
   PendingInteraction,
   PushMessage,
@@ -141,12 +143,34 @@ export class AppService {
   }
 
   private pendingOf(request: HubRequest): PendingInteraction {
-    return {
+    const pending: PendingInteraction = {
       requestId: request.requestId,
       taskId: this.requestTask.get(request.requestId) ?? "",
       component: request.component,
       inputs: request.inputs,
     };
+    // Parse the authored config here, once, so the renderer receives a normalized
+    // contract instead of re-deriving it — and so a malformed state file surfaces
+    // as a parse error on the request rather than an empty dialog.
+    if (isComponentName(request.component)) {
+      try {
+        pending.config = parseComponentConfig(request.component, request.inputs["config"]);
+      } catch (e) {
+        pending.configError = (e as Error).message;
+      }
+    }
+    return pending;
+  }
+
+  /** The parsed contract for a parked request, when it has one. */
+  private configOf(requestId: string): ComponentConfig | undefined {
+    const request = this.hub.list().find((r) => r.requestId === requestId);
+    if (!request || !isComponentName(request.component)) return undefined;
+    try {
+      return parseComponentConfig(request.component, request.inputs["config"]);
+    } catch {
+      return undefined;
+    }
   }
 
   // --- reads -----------------------------------------------------------------
@@ -308,7 +332,21 @@ export class AppService {
     return this.hub.list().map((request) => this.pendingOf(request));
   }
 
+  /**
+   * Answer a parked interaction.
+   *
+   * The submitted value is re-validated against the component's contract here, in
+   * the main process (DESIGN §7.1). The renderer is the untrusted half of the
+   * boundary, so an undeclared decision or a missing required field is refused
+   * before it can become a workflow output — the engine's own output-schema check
+   * is a second, independent gate.
+   */
   submitInteraction(requestId: string, value: JsonValue): { requestId: string } {
+    const config = this.configOf(requestId);
+    if (config) {
+      const check = validateComponentResult(config, value);
+      if (!check.ok) throw new Error(`invalid ${config.component} response: ${check.errors}`);
+    }
     if (!this.hub.submit(requestId, value)) {
       throw new Error(`no pending interaction '${requestId}'`);
     }
