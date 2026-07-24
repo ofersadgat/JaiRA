@@ -11,3 +11,4 @@ export * from "./fakeExecutor";
 export * from "./scriptedFunctions";
 export * from "./interaction";
 export * from "./demoWorkflow";
+export * from "./componentsWorkflow";

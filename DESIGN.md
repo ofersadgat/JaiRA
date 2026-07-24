@@ -270,6 +270,64 @@ a real run's window, not only by typecheck.
    today renders `choose_option`-shaped gates generically from the state's
    authored `config`, which is enough for the critique workflow's review gate.
 
+## 1f. Status Update — 2026-07-24 (phase 4: interaction + approvals)
+
+The five built-in components (SPEC §8.1) and the approvals-inbox scaffolding are
+built and verified — driven through a real run in the app, screenshot by
+screenshot, plus 83 tests. What that phase settled:
+
+1. **Component contracts live in `shared`, and main re-validates every answer.**
+   `parseComponentConfig` reads the *authored* config (a malformed state file fails
+   with a path-shaped message instead of rendering an empty dialog);
+   `validateComponentResult` checks what the *user* submitted. The second half is
+   the load-bearing one: the renderer is the untrusted side of the IPC boundary, so
+   an undeclared decision or a missing required field is refused in the main
+   process before it can become a workflow output (DESIGN §7.1). The engine's own
+   output-schema check remains a second, independent gate.
+2. **Result shapes are chosen to land on declared outputs** — `choose_option` and
+   `review_artifact` return `{ decision, comments? }`, `edit_markdown`
+   `{ content }`, `confirm_action` `{ confirmed }`, and `fill_form` a flat object
+   of its fields. So a UI state's outputs are ordinary state outputs, with no
+   adapter layer in between.
+3. **`fill_form` reads a JSON-Schema *subset*** (`string`/`number`/`boolean`/`enum`
+   with `optional`, `default`, `multiline`) rather than arbitrary schemas, which is
+   what §7.1 allows and what a form can honestly render.
+4. **A `sequence` is a cursor, not a barrier** (discovered while building the
+   component tour, and worth knowing when authoring). The engine enters the next
+   sequence member as soon as the previous one has a *record*, so children with no
+   data dependency between them run concurrently — five independent gates all park
+   at once. Ordering is dataflow-driven (SPEC §10.4): a child whose inputs
+   reference an unresolved sibling parks until they resolve. The components demo
+   therefore threads each gate's output into the next, which is the same mechanism
+   SPEC §9's planning workflow relies on (context needs goals).
+5. **The renderer imports `@jaira/shared/browser`, never the package root.** The
+   root barrel also exports Node-only helpers (`readJsonFile`, the `.jaira/` path
+   layout); pulling those into the renderer's graph breaks the Vite build outright
+   (`node:fs` has no meaning in Chromium). A separate browser entry makes that a
+   build-time impossibility rather than a warning — the failure mode it prevents is
+   nasty, because a *stale* bundle keeps loading and the app looks fine while
+   running old code.
+6. **Failures report their root cause.** A composite failure reads "child 'goals'
+   terminated with error and no transition handled it", which hides what broke;
+   `runCauses` pulls the operation-level reasons out of the journal, and
+   `jaira task start` prints them as `causes`. This is what turned a real-provider
+   run's opaque failure into "Anthropic API key is missing".
+7. **A model is only required when a workflow actually calls one.** `modelDefaults`
+   used to refuse any run without a configured model, which wrongly rejected a
+   workflow made entirely of function states (host code, UI gates, agents).
+8. **Real-provider status.** The path is wired — `models.default` (or a state's
+   `operation.config.model`) → `@declarative-ai/promptop` → `@declarative-ai/llm`
+   → the Anthropic SDK — and a run reaches the provider and fails *only* on the
+   missing `ANTHROPIC_API_KEY`. The milestone's "end-to-end against real Claude"
+   half is therefore **unverified**: it needs a key in the environment. Note a
+   state's model must be route-prefixed for a real run (`anthropic/claude-sonnet-5`);
+   the demo workflow's role names (`planner`/`critic`/`fixer`) are fake-executor
+   labels, and `specPlanningFiles({ model })` swaps in a real id.
+9. **The approvals inbox lists pending human gates across tasks** — which is the
+   whole inbox today. Per-command `require_approval` decisions (§10.2) are
+   provider-initiated and arrive with the policy engine and process executors in
+   phase 6, so they are absent rather than mocked.
+
 ## 2. Architecture Overview
 
 ```text
@@ -891,11 +949,12 @@ subscribes to task/instance change events and maintains a local store
    with live event stream, task creation. *Milestone met: the planning workflow's
    tasks appear in the column their active path runs through, on the board and via
    `jaira board`.*
-4. **Interaction + approvals** — the five UI components (§7.1) as
+4. **Interaction + approvals** — ✅ done (§1f) — the five UI components (§7.1) as
    renderer-backed **interactive host functions** in the capability registry
-   (§1c item 4); approvals inbox scaffolding (§10.2). *Milestone: critique
-   workflow with a real human review gate, end-to-end against real Claude via
-   `@declarative-ai/promptop`.*
+   (§1c item 4); approvals inbox scaffolding (§10.2). *Milestone: the critique
+   workflow's human review gate runs end-to-end in the app. The "against real
+   Claude" half is wired but unverified — it needs `ANTHROPIC_API_KEY` in the
+   environment (§1f item 8).*
 5. **Git isolation + WSL** — worktrees, branch binding, Exec/WSL layer (§9).
 6. **Process executors + policy** — adopt `@declarative-ai/agents-api` /
    `agents-cli` (already implemented there) against DESIGN §8/§10 requirements;
