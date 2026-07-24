@@ -14,10 +14,11 @@ the loop.
 
 | Package | Contents |
 | --- | --- |
-| `@jaira/shared` | Task model, project config, `.jaira/` path layout, JSON helpers |
-| `@jaira/persistence` | Durable stores: task JSON files, better-sqlite3 DB (task lifecycle, runs, `EngineEvent` journal), content-addressed workflow snapshots, crash recovery |
-| `@jaira/cli` | Headless `jaira` CLI: project init, ad-hoc workflow runs, task lifecycle |
-| `@jaira/app` | Electron shell + React renderer (phase 3; stub) |
+| `@jaira/shared` | Task model, project config, `.jaira/` path layout, JSON helpers, view models, the typed IPC contract |
+| `@jaira/persistence` | Durable stores: task JSON files, better-sqlite3 DB (task lifecycle, runs, `EngineEvent` journal), content-addressed workflow snapshots, crash recovery, and the board/detail projection |
+| `@jaira/runtime` | The engine harness: capability registry, prompt executor, scripted fake/interaction doubles, the interaction hub, the demo workflow |
+| `@jaira/cli` | Headless `jaira` CLI: project init, ad-hoc workflow runs, task lifecycle, board |
+| `@jaira/app` | Electron main + preload + React renderer (board, task detail, human gates) |
 
 Engine semantics live in the sibling repo's packages — `@declarative-ai/hw` (the
 workflow engine), `@declarative-ai/exec` (the one execution seam, plus the op
@@ -91,6 +92,30 @@ states that name none, and must be route-prefixed
 in declarative-ai and a bare id is a fail-fast error. Calls execute via
 `@declarative-ai/promptop` over `@declarative-ai/llm`, with API keys from the
 environment.
+
+## The app
+
+```bash
+npm run app        # build main + renderer, switch the native ABI, launch Electron
+```
+
+The window opens on the project named by `JAIRA_PROJECT`, the first CLI argument,
+or the current directory if it already contains `.jaira/`. The board shows the
+workflow's child states as columns with each task in the column its active path
+runs through; double-click a card whose path goes deeper to open the sub-board.
+The right panel holds the instance tree, run history, a live event stream and the
+run's outputs. When a workflow reaches an interactive state, a dialog asks for the
+decision — that dialog is the *only* way a human answer can enter a run
+(SPEC §11.4), because the interaction hub is reachable only from the IPC layer.
+
+`JAIRA_CAPTURE=<file.png>` screenshots the window once it settles and exits,
+which is how the UI is checked without a human at the keyboard.
+
+> **Native-module ABI.** `better-sqlite3` is a V8-ABI addon, so one build cannot
+> serve both Node and Electron (Node 22 wants `NODE_MODULE_VERSION` 127, Electron
+> 33 wants 130). `npm run app` switches it automatically; switch back with
+> `npm run abi:node` before running the tests or the CLI. Getting it wrong throws
+> a loud "compiled against a different Node.js version" on the first DB open.
 
 ## License
 

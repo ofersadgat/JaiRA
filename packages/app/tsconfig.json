@@ -1,4 +1,13 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "compilerOptions": {
+    // The renderer runs in Chromium, so this package needs DOM types and JSX on
+    // top of the shared Node-oriented base config.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["node"]
+  },
+  // `vite.config.ts` is type-checked by Vite itself; including it here would
+  // compare two copies of Vite's plugin types (root vs. nested) and fail.
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts"]
 }

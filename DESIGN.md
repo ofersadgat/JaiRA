@@ -234,6 +234,42 @@ The Electron shell and React renderer are the remaining phase-3 work.
    interrupted task shows in the column it died in, a completed one moves to
    *finished*.
 
+## 1e. Status Update — 2026-07-24 (phase 3 complete)
+
+The Electron shell and React renderer are built and verified: the app launches,
+opens a project, and renders the board (columns from the workflow, cards placed by
+active path), the task-detail panel (instance tree, run history, live event
+stream, outputs) and a dialog for interactive states. Verified by screenshotting
+a real run's window, not only by typecheck.
+
+1. **Main is a thin IPC adapter.** `app/src/main/index.ts` owns windows and maps
+   each contract channel to an `AppService` method; the service stays
+   Electron-free, which is what makes the app surface testable headlessly (11
+   service tests, including the live human gate).
+2. **The renderer's only capability is the preload bridge.** `contextIsolation`
+   on, `nodeIntegration` off, an explicit channel whitelist in the preload, and a
+   CSP that allows no remote code. The renderer receives *pre-projected* views, so
+   it cannot disagree with the engine — and cannot reach the interaction hub
+   except through `interaction:submit` (SPEC §11.4).
+3. **Board state is a subscription, not a poll** (§11.2): main pushes
+   `engine:event` / `store:invalidate` / `interaction:*` / `run:finished`, and the
+   store refetches only the affected view. Plain React state rather than Zustand,
+   and no dnd-kit: cards move because the *engine* advances, so dragging one would
+   mean forcing a transition — out of scope here (Δ to §2.1 tooling).
+4. **Native-module ABI is a two-runtime problem** (a real trap, now scripted).
+   `better-sqlite3` is a V8-ABI addon, so a single build cannot serve Node 22
+   (`NODE_MODULE_VERSION` 127) and Electron 33 (130); `scripts/nativeAbi.mjs`
+   swaps the prebuilt binary and `npm run app` calls it, with `npm run abi:node`
+   to go back for tests and the CLI. (Prebuilds are downloaded, so no compiler is
+   needed.)
+5. **`JAIRA_CAPTURE` screenshots the window and exits** — a debug affordance that
+   makes the UI verifiable from a script and, later, in CI.
+6. **CI now also builds the app** (esbuild main/preload + Vite renderer) so a
+   broken bundle fails the pipeline; the app itself is not launched there.
+7. **Remaining phase-4 work:** the five typed UI components (§7.1). The dialog
+   today renders `choose_option`-shaped gates generically from the state's
+   authored `config`, which is enough for the critique workflow's review gate.
+
 ## 2. Architecture Overview
 
 ```text
@@ -851,9 +887,10 @@ subscribes to task/instance change events and maintains a local store
    streams, snapshots via `@declarative-ai/hw` `snapshotHash`, task lifecycle
    (create/start/cancel/status/list), workflow-level crash recovery (§4.3
    note).
-3. **Electron app** — board/sub-board projection, task detail with live event
-   stream, task creation. *Milestone: watch the planning workflow move across
-   the board.*
+3. **Electron app** — ✅ done (§1d, §1e) — board/sub-board projection, task detail
+   with live event stream, task creation. *Milestone met: the planning workflow's
+   tasks appear in the column their active path runs through, on the board and via
+   `jaira board`.*
 4. **Interaction + approvals** — the five UI components (§7.1) as
    renderer-backed **interactive host functions** in the capability registry
    (§1c item 4); approvals inbox scaffolding (§10.2). *Milestone: critique

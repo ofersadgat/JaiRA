@@ -49,3 +49,9 @@ jobs:
       - name: Test
         run: npm test
         working-directory: JaiRA
+
+      # Bundles the Electron main/preload (esbuild) and the renderer (Vite). The
+      # app is not launched in CI, but a broken build fails here.
+      - name: Build app
+        run: npm run app:build
+        working-directory: JaiRA

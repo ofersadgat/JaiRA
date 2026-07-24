@@ -2,8 +2,17 @@
   "name": "@jaira/app",
   "version": "0.1.0",
   "type": "module",
+  "main": "dist/main.cjs",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build:main": "node build.mjs",
+    "build:renderer": "vite build",
+    "build": "npm run build:main && npm run build:renderer",
+    "start": "npm run build && npm run abi:electron && electron .",
+    "abi:electron": "node ../../scripts/nativeAbi.mjs electron",
+    "abi:node": "node ../../scripts/nativeAbi.mjs node"
   },
   "dependencies": {
     "@declarative-ai/exec": "file:../../../declarative-ai/packages/exec",
@@ -11,6 +20,15 @@
     "@declarative-ai/json": "file:../../../declarative-ai/packages/json",
     "@jaira/persistence": "*",
     "@jaira/runtime": "*",
-    "@jaira/shared": "*"
+    "@jaira/shared": "*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.1",
+    "vite": "^6.0.5"
   }
 }
