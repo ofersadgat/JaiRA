@@ -2,7 +2,7 @@
   "name": "jaira",
   "private": true,
   "version": "0.1.0",
-  "description": "JaiRA: interactive agent-orchestration app on top of ai-exec (hierarchical workflows with humans in the loop).",
+  "description": "JaiRA: interactive agent-orchestration app on top of declarative-ai (hierarchical workflows with humans in the loop).",
   "type": "module",
   "workspaces": [
     "packages/*"

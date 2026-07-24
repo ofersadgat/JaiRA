@@ -20,6 +20,11 @@ These were confirmed with the project owner and anchor everything below:
 
 ## 1a. Status Update — 2026-07-17
 
+> **Superseded in part by §1c (2026-07-24):** the shared library has since been
+> renamed **declarative-ai** and its API redesigned around a typed operation
+> model. Package names below (`@ai-exec/*`) and the `InteractionPort` are
+> historical; see §1c for the current shape.
+
 The shared library was implemented first: the **ai-exec repo**
 (`C:\UbuntuCode\ai-exec`) now contains `@ai-exec/core` (execution contract, error
 classification, hashing/memo keys), `@ai-exec/services` (Ajv validation, retry,
@@ -114,11 +119,78 @@ workflow-level crash recovery. Deviations from this document as drafted:
    states, `@file` CLI args) — PowerShell's `utf8` encoding writes a BOM that
    plain `JSON.parse` rejects.
 10. **CI on GitLab + GitHub.** `.gitlab-ci.yml` and
-    `.github/workflows/ci.yml` both check out the sibling `ai-exec` repo,
+    `.github/workflows/ci.yml` both check out the sibling library repo,
     install it (its `file:` links are symlinks, so the linked packages resolve
-    their own deps from `ai-exec/node_modules`), install JaiRA, and run
+    their own deps from its `node_modules`), install JaiRA, and run
     `npm run typecheck` + `npm test`. Validated from a clean checkout
-    (fresh sibling installs → 32 tests green). JaiRA is GPLv3; `ai-exec` is MIT.
+    (fresh sibling installs → tests green). JaiRA is GPLv3; the library is MIT.
+
+## 1c. Status Update — 2026-07-24 (declarative-ai rename + ops redesign)
+
+The shared library was renamed **ai-exec → declarative-ai**
+(`@ai-exec/*` → `@declarative-ai/*`, now eleven packages) and its API redesigned
+around a typed **operation model**. JaiRA phases 1–2 are migrated onto it:
+typecheck-clean, 33 tests green, and the `jaira` CLI verified end-to-end against
+a temp project (happy path, scripted human gate, unregistered-gate failure,
+crash recovery). What changed here, and why:
+
+1. **Dependencies.** `@ai-exec/core` + `@ai-exec/services` are replaced by
+   `@declarative-ai/exec` (which re-exports `ops` → `json`, so one import site
+   supplies the contract, op model, `Failure`, and `JsonValue`),
+   `@declarative-ai/validate` (`SchemaValidator`), `@declarative-ai/promptop` +
+   `@declarative-ai/llm` (prompt execution), and `@declarative-ai/hw` (the
+   engine). The sibling checkout must be named `declarative-ai` — `file:` paths
+   and both CI configs assume it.
+2. **No `ExecutionSpec`; a run is an operation.** `createWorkflowExecutor` holds
+   the bundle at *construction* (a workflow's identity is its snapshot), and a run
+   starts from a `FunctionOp` whose bound inputs are the workflow's inputs.
+   `handle.outcome` → `handle.result`; `Outcome` → `ExecResult`.
+3. **Providers → a registry + a prompt executor.** The `providers` map and
+   `llmCallBinding` are gone. A state's `PromptOp` dispatches to one injected
+   prompt `Executor`; everything else is a `FunctionOp` resolved through
+   `registry.functions`. Project config accordingly drops `providers` for
+   `models.default` (route-prefixed, e.g. `anthropic/claude-sonnet-5`), and the
+   bounded repair loop (§7.5) is now `withRetry({ validation: … })` composed
+   around the prompt executor rather than a `repairTurns` field.
+4. **`InteractionPort` is gone — a UI state is an interactive function.** This
+   supersedes §1a item 2 (missing-port-is-run-fatal) and §7.1's port sketch: an
+   interactive state is an ordinary `FunctionOp` whose `function` resolves to a
+   registry entry marked `interactive`. Consequences: `--interactions` keys
+   responses by **function name**, not state id; a never-registered function is a
+   *state-level* failure only if that state is actually reached (so declining to
+   register a gate is how a headless/search context refuses human input); and
+   JaiRA's renderer-backed implementation in phase 4 becomes a registered host
+   function rather than a port. The approval-gate guarantee (SPEC §11.4) is
+   unchanged — the registry is caller-supplied and unreachable from inside a run.
+5. **State-file format.** A state's work is ONE `operation` (`prompt` |
+   `function`) — `agent`/`ui`/`skill` blocks are gone; params are unified into
+   `inputs`; slots carry JSON Schemas instead of `type:`, with an *artifact*
+   being a `blob`-kind slot derived from `contentMediaType` (no bespoke marker);
+   and wiring is authored binding sugar (`{ input }`, `{ child, output }`,
+   `{ expr }`) that the loader lowers to base refs. A `passthrough` output is
+   just an unconstrained slot bound to a producer. Session/tool/conversation/
+   permission concerns move to a sibling `environment` block.
+6. **Snapshots store the bundle's `source`.** `loadBundle` now returns desugared
+   `states` *plus* the states as authored (`source`), and `snapshotHash` hashes
+   the authored form. `ensureSnapshot` therefore writes `source`, so improving the
+   lowering never invalidates a stored snapshot and a reloaded snapshot re-hashes
+   to its own directory name.
+7. **Validation takes the registry.** `validateBundle(bundle, { functions })`
+   resolves `functionRef`s, so `beginTaskRun` accepts the registry's `functions`
+   facet and a missing interactive function is caught at task start.
+8. **Metrics.** `cost` → `costUsd` (+ `costSource`, `childLlmCalls`,
+   `childCostUsd`); token counts belong to the model payload (`LlmOutput`), which
+   stops at the prompt executor, so they no longer appear in workflow metrics.
+   There is also no `artifacts` side channel on a result — a produced artifact is
+   an output *slot*, so artifact content rides in the outputs.
+9. **Task inputs are typed as JSON.** `TaskMeta.inputs` is
+   `Record<string, JsonValue>` (from `@declarative-ai/json`) rather than
+   `unknown`, since they are read from a JSON file and bound as operation inputs.
+10. **Local-directory caveat.** The library's working copy is still at
+    `C:\UbuntuCode\ai-exec` (a lock held by another process blocked the rename);
+    a directory junction `C:\UbuntuCode\declarative-ai` → `ai-exec` bridges it so
+    the repo can reference the correct name. Renaming the real directory and
+    deleting the junction is a no-op for this repo.
 
 ## 2. Architecture Overview
 
@@ -173,13 +245,14 @@ packages/
   cli/        headless `jaira` CLI (engine harness, workflow lint, task ops)
 ```
 
-> **Layout revision (see §1a):** `engine/` exists as `@ai-exec/hw` and
-> `runners/` as `@ai-exec/llm` (+ future `@ai-exec/agents`), both implemented in
-> `C:\UbuntuCode\ai-exec` and consumed via a `file:` workspace link. This repo
-> builds: `shared/` (IPC/task types), `app/` (Electron main + renderer),
-> `persistence/` (durable SQLite implementation of the engine's `Persistence`
-> port + task store), and `cli/` for JaiRA-specific concerns (task ops,
-> worktrees); workflow lint/execution harnesses ship with the engine.
+> **Layout revision (see §1a, §1c):** `engine/` exists as `@declarative-ai/hw`
+> and `runners/` as `@declarative-ai/promptop` + `@declarative-ai/llm` (with
+> delegated agents in `@declarative-ai/agents-api` / `agents-cli`), all
+> implemented in the sibling `declarative-ai` repo and consumed via `file:`
+> links. This repo builds: `shared/` (IPC/task types), `app/` (Electron main +
+> renderer), `persistence/` (durable SQLite implementation of the engine's
+> `Persistence` port + task store), and `cli/` for JaiRA-specific concerns (task
+> ops, worktrees); workflow lint/execution harnesses ship with the engine.
 
 Tooling: npm workspaces (revised from pnpm — see §1b item 1), Vite (renderer),
 esbuild (main/CLI), Vitest, better-sqlite3, Ajv (schema validation), React +
@@ -282,7 +355,7 @@ Notes:
 > transactions itself; JaiRA persists the engine's `EngineEvent` stream and
 > task-level status. v1 recovery is workflow-level (re-run interrupted tasks
 > from the workflow start); the step-level protocol below is the target state
-> once `@ai-exec/hw` gains durable mid-run resume, and the schema in §4.2
+> once `@declarative-ai/hw` gains durable mid-run resume, and the schema in §4.2
 > should be built to accommodate it.
 
 On startup, for every task with `status = running`:
@@ -514,14 +587,15 @@ the confirmed "ask it to correct itself" strategy, bounded and audited.
 
 ## 8. Runner Adapter Layer
 
-> **Superseded — implemented in ai-exec:** the contract below shipped as the
-> `@ai-exec/core` `Executor`/`ExecutionSpec`/`ExecHandle` contract (same shape,
-> richer events/metrics), consumed by both JaiRA and findmyprompt. The
-> `llm_api` adapter exists as `@ai-exec/llm`; the process adapters below are
-> future `@ai-exec/agents` work (JaiRA is the driving consumer); the engine
-> plus its `hierarchical-workflow` executor exist as `@ai-exec/hw` (§2.1 note).
+> **Superseded — implemented in declarative-ai:** the contract below shipped as
+> the `@declarative-ai/exec` `Executor`/`Operation`/`ExecHandle` contract (same
+> role, redesigned around a typed operation model — see §1c), consumed by both
+> JaiRA and findmyprompt. The `llm_api` adapter exists as
+> `@declarative-ai/promptop` over `@declarative-ai/llm`; the process adapters
+> below shipped as `@declarative-ai/agents-api` / `agents-cli`; the engine plus
+> its workflow executor exist as `@declarative-ai/hw` (§2.1 note).
 > Semantics in this section (adapter list, capability gating, output contract)
-> remain accurate as requirements for `@ai-exec/agents`.
+> remain accurate as requirements for the agent adapters.
 
 ```ts
 interface RunnerAdapter {
@@ -721,30 +795,32 @@ subscribes to task/instance change events and maintains a local store
 ## 14. Implementation Phases
 
 > Revised per §1a — the original phases 1–4 (expression language, loader,
-> engine core, `llm_api` runner) are complete in the ai-exec repo. JaiRA's
+> engine core, `llm_api` runner) are complete in the declarative-ai repo. JaiRA's
 > build starts here:
 
-1. **Adopt ai-exec + scaffold** — ✅ done (§1b) — monorepo (`shared/`, `app/`,
-   `persistence/`, `cli/`), `file:` links to `C:\UbuntuCode\ai-exec` packages,
-   typecheck + vitest. *Milestone met: the spec §9 planning workflow runs
-   headless via `jaira run` through `@ai-exec/hw` with a scripted
-   InteractionPort and fake executor.*
-2. **Task model + durable persistence** — ✅ done (§1b) — `.jaira/` layout
-   (§3), task JSON files + SQLite (§4) recording `EngineEvent` streams,
-   snapshots via `@ai-exec/hw` `snapshotHash`, task lifecycle
+1. **Adopt declarative-ai + scaffold** — ✅ done (§1b, migrated §1c) — monorepo
+   (`shared/`, `app/`, `persistence/`, `cli/`), `file:` links to the sibling
+   `declarative-ai` packages, typecheck + vitest. *Milestone met: the spec §9
+   planning workflow runs headless via `jaira run` through
+   `@declarative-ai/hw` with a fake prompt executor and scripted interactive
+   functions.*
+2. **Task model + durable persistence** — ✅ done (§1b, migrated §1c) —
+   `.jaira/` layout (§3), task JSON files + SQLite (§4) recording `EngineEvent`
+   streams, snapshots via `@declarative-ai/hw` `snapshotHash`, task lifecycle
    (create/start/cancel/status/list), workflow-level crash recovery (§4.3
    note).
 3. **Electron app** — board/sub-board projection, task detail with live event
    stream, task creation. *Milestone: watch the planning workflow move across
    the board.*
-4. **Interaction + approvals** — the five UI components (§7.1) behind a
-   renderer-backed `InteractionPort`; approvals inbox scaffolding (§10.2).
-   *Milestone: critique workflow with a real human review gate, end-to-end
-   against real Claude via `@ai-exec/llm`.*
+4. **Interaction + approvals** — the five UI components (§7.1) as
+   renderer-backed **interactive host functions** in the capability registry
+   (§1c item 4); approvals inbox scaffolding (§10.2). *Milestone: critique
+   workflow with a real human review gate, end-to-end against real Claude via
+   `@declarative-ai/promptop`.*
 5. **Git isolation + WSL** — worktrees, branch binding, Exec/WSL layer (§9).
-6. **Process executors + policy** — `@ai-exec/agents` (`agent-sdk` first) built
-   in the ai-exec repo against DESIGN §8/§10 requirements; policy engine +
-   command parser; capability gating.
+6. **Process executors + policy** — adopt `@declarative-ai/agents-api` /
+   `agents-cli` (already implemented there) against DESIGN §8/§10 requirements;
+   policy engine via `@declarative-ai/permissions`; capability gating.
 7. **Breadth** — `claude-cli` (hook loopback) and `generic-cli` executors,
    conversation `summary` mode (summarizer via `llm-call`), pruning UI,
    workflow browser/lint surface.

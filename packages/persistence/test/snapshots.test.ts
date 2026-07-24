@@ -2,22 +2,24 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadBundle, snapshotHash } from "@ai-exec/hw";
+import { loadBundle, snapshotHash } from "@declarative-ai/hw";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "../src/snapshots";
 
+/** Post-ops-redesign format: slots carry JSON Schemas, wiring is binding sugar,
+ *  and a state's work is one `operation`. */
 const STATES: Record<string, unknown> = {
   wf: {
     label: "Root",
-    inputs: { x: { type: "string" } },
-    outputs: { y: { type: "string", from: "children.step.outputs.y" } },
-    children: { step: { state: "wf/step", inputs: { x: "inputs.x" } } },
+    inputs: { x: { schema: { type: "string" } } },
+    outputs: { y: { schema: { type: "string" }, binding: { child: "step", output: "y" } } },
+    children: { step: { state: "wf/step", inputs: { x: { input: "x" } } } },
     sequence: ["step"],
   },
   "wf/step": {
     label: "Step",
-    inputs: { x: { type: "string" } },
-    outputs: { y: { type: "string" } },
-    agent: { provider: "p", prompt: { template: "do {{inputs.x}}" } },
+    inputs: { x: { schema: { type: "string" } } },
+    outputs: { y: { schema: { type: "string" } } },
+    operation: { kind: "prompt", prompt: { template: "do {{inputs.x}}" }, config: { model: "p" } },
   },
 };
 

@@ -4,8 +4,8 @@
  * (executors, providers, interaction) is the caller's concern — this module
  * owns only the durable bookkeeping around a run.
  */
-import type { ExecFailure } from "@ai-exec/core";
-import { loadBundle, validateBundle, type WorkflowBundle } from "@ai-exec/hw";
+import type { Failure, FunctionCapabilities, JsonValue } from "@declarative-ai/exec";
+import { loadBundle, validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
 import { newTaskId, isStartableStatus, type TaskMeta, type TaskStatus } from "@jaira/shared";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "./snapshots";
 import type { Project } from "./project";
@@ -15,7 +15,7 @@ export interface CreateTaskInput {
   workflow: string;
   description?: string;
   labels?: string[];
-  inputs?: Record<string, unknown>;
+  inputs?: Record<string, JsonValue>;
   branch?: string;
   parentTaskId?: string;
   id?: string;
@@ -49,6 +49,18 @@ export interface StartedRun {
   pinned: boolean;
 }
 
+export interface BeginRunOptions {
+  /**
+   * The registry's `functions` facet the bundle will run against. Passing it
+   * lets validation resolve every `functionRef` (an interactive host function,
+   * a delegated agent, a sub-workflow) at task start instead of failing partway
+   * into the run. Omitted ⇒ unregistered refs are warnings, per
+   * `validateBundle`'s default.
+   */
+  functions?: ReadonlyMap<string, FunctionCapabilities>;
+  nowMs?: number;
+}
+
 /**
  * Transition a task to `running` and pin its workflow version.
  *
@@ -57,7 +69,8 @@ export interface StartedRun {
  * failure: execute the *pinned* snapshot again from the workflow start
  * (DESIGN §1a item 1) — live workflow edits never affect an existing task.
  */
-export function beginTaskRun(project: Project, taskId: string, nowMs = Date.now()): StartedRun {
+export function beginTaskRun(project: Project, taskId: string, options: BeginRunOptions = {}): StartedRun {
+  const nowMs = options.nowMs ?? Date.now();
   const runtime = project.runtime.get(taskId);
   if (!runtime) throw new Error(`unknown task '${taskId}'`);
   if (!isStartableStatus(runtime.status)) {
@@ -76,7 +89,7 @@ export function beginTaskRun(project: Project, taskId: string, nowMs = Date.now(
   } else {
     const files = readWorkflowFiles(project.paths.workflowsDir);
     bundle = loadBundle(files, meta.workflow);
-    const report = validateBundle(bundle);
+    const report = validateBundle(bundle, options.functions ? { functions: options.functions } : {});
     if (report.errors.length > 0) {
       const detail = report.errors.map((e) => `${e.stateId} ${e.path}: ${e.message}`).join("\n  ");
       throw new Error(`workflow validation failed for '${meta.workflow}':\n  ${detail}`);
@@ -102,7 +115,7 @@ export function finishTaskRun(
   taskId: string,
   runId: number,
   status: RunEndStatus,
-  result?: { outputs?: unknown; failure?: ExecFailure },
+  result?: { outputs?: unknown; failure?: Failure },
   nowMs = Date.now(),
 ): void {
   const outcome = status === "completed" ? "success" : status === "canceled" ? "canceled" : "error";

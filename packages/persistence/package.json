@@ -6,8 +6,12 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@ai-exec/core": "file:../../../ai-exec/packages/core",
-    "@ai-exec/hw": "file:../../../ai-exec/packages/hw",
+    "@declarative-ai/exec": "file:../../../declarative-ai/packages/exec",
+    "@declarative-ai/hw": "file:../../../declarative-ai/packages/hw",
+    "@declarative-ai/json": "file:../../../declarative-ai/packages/json",
+    "@declarative-ai/ops": "file:../../../declarative-ai/packages/ops",
+    "@declarative-ai/permissions": "file:../../../declarative-ai/packages/permissions",
+    "@declarative-ai/validate": "file:../../../declarative-ai/packages/validate",
     "@jaira/shared": "*",
     "better-sqlite3": "^12.2.0"
   },

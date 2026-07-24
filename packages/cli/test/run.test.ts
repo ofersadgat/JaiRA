@@ -1,7 +1,7 @@
 /**
  * Phase-1 milestone (DESIGN §14.1): the SPEC §9 planning workflow runs
- * headless from a `jaira` CLI command via @ai-exec/hw, with a scripted
- * InteractionPort and a fake executor.
+ * headless from a `jaira` CLI command via @declarative-ai/hw, with a fake prompt
+ * executor and scripted interactive functions.
  */
 import { execFileSync } from "node:child_process";
 import { rmSync, writeFileSync } from "node:fs";
@@ -9,7 +9,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runCli, type CliIo } from "../src/cli";
-import { blockedRules, happyRules, makePlanningProject } from "./fixtures";
+import { blockedRules, happyRules, HUMAN_REVIEW_FUNCTION, makePlanningProject } from "./fixtures";
+
+/** Scripted answer for the human-review gate, keyed by FUNCTION name (there is
+ *  no InteractionPort any more — a UI state is a registered function). */
+const blockDecision = JSON.stringify({ [HUMAN_REVIEW_FUNCTION]: [{ decision: "block" }] });
 
 let dir: string;
 
@@ -45,11 +49,13 @@ describe("jaira run (headless planning workflow)", () => {
     const report = JSON.parse(stdout) as Record<string, unknown>;
     expect(report["status"]).toBe("completed");
     expect((report["outputs"] as Record<string, unknown>)["outcome"]).toBe("complete");
-    const artifacts = report["artifacts"] as Array<Record<string, unknown>>;
-    expect(artifacts.some((a) => a["content"] === "# The Plan")).toBe(true);
+    // No `artifacts` side channel since the ops redesign: a produced artifact is
+    // an output SLOT, so the plan document rides in the outputs.
+    expect(JSON.stringify(report["outputs"])).toContain("# The Plan");
+    expect((report["metrics"] as Record<string, unknown>)["costUsd"]).toBeCloseTo(0.03);
   }, 60_000);
 
-  it("routes a blocked critique through the scripted InteractionPort", async () => {
+  it("routes a blocked critique through a scripted interactive function", async () => {
     const cli = io();
     const code = await runCli(
       [
@@ -61,7 +67,7 @@ describe("jaira run (headless planning workflow)", () => {
         "--fake",
         JSON.stringify(blockedRules()),
         "--interactions",
-        '{"feature/plan/critique/human_review":[{"decision":"block"}]}',
+        blockDecision,
       ],
       cli,
     );
@@ -73,7 +79,7 @@ describe("jaira run (headless planning workflow)", () => {
     expect((outputs["critique"] as Record<string, unknown>)["human_decision"]).toBe("block");
   });
 
-  it("fails when a ui state is reached with no interaction script", async () => {
+  it("fails the state when an interactive function is reached unregistered", async () => {
     const cli = io();
     const code = await runCli(
       ["run", "--root", "feature/plan", "--inputs", '{"issue":"i"}', "--fake", JSON.stringify(blockedRules())],
@@ -82,7 +88,8 @@ describe("jaira run (headless planning workflow)", () => {
     expect(code).toBe(1);
     const report = JSON.parse(cli.out()) as Record<string, unknown>;
     expect(report["status"]).toBe("failed");
-    expect(JSON.stringify(report["failure"])).toMatch(/InteractionPort/);
+    // The failure names the missing capability, not a removed port.
+    expect(JSON.stringify(report["failure"])).toMatch(new RegExp(HUMAN_REVIEW_FUNCTION));
   });
 
   it("rejects an invalid workflow before executing anything", async () => {

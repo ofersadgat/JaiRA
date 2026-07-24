@@ -2,18 +2,22 @@
  * Workflow snapshots — `.jaira/snapshots/<hash>/` (DESIGN §5.3, SPEC §12).
  *
  * At task start the transitive closure of state files (a `WorkflowBundle`) is
- * copied into a directory named by its `@ai-exec/hw` snapshotHash. Directories
- * are content-addressed and immutable: identical workflow versions across
- * tasks share one snapshot. Execution always reads from the snapshot, never
- * from live `workflows/`.
+ * copied into a directory named by its `@declarative-ai/hw` snapshotHash.
+ * Directories are content-addressed and immutable: identical workflow versions
+ * across tasks share one snapshot. Execution always reads from the snapshot,
+ * never from live `workflows/`.
  *
- * Files are written without the (possibly loader-derived) `id` field —
- * `snapshotHash` ignores `id`, and reloading derives it from the path, so the
- * written form is canonical and round-trips to the same hash.
+ * What gets written is the bundle's `source` — the states **as authored**, before
+ * the loader desugars binding sugar into base refs. That is deliberate and
+ * load-bearing: `snapshotHash` is the identity of what the author wrote, so
+ * writing the desugared form would both change the hash and freeze today's
+ * lowering into stored snapshots. Files are written without the (possibly
+ * loader-derived) `id` field — `snapshotHash` ignores `id` and reloading derives
+ * it from the path, so the written form round-trips to the same hash.
  */
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
-import { loadBundle, snapshotHash, stateIdFromPath, type WorkflowBundle } from "@ai-exec/hw";
+import { loadBundle, snapshotHash, stateIdFromPath, type WorkflowBundle } from "@declarative-ai/hw";
 import { readJsonFile } from "@jaira/shared";
 
 const META_FILE = ".meta.json";
@@ -69,8 +73,12 @@ export function ensureSnapshot(snapshotsDir: string, bundle: WorkflowBundle): Sn
   const staging = join(snapshotsDir, `.staging-${hash}-${process.pid}`);
   rmSync(staging, { recursive: true, force: true });
   mkdirSync(staging, { recursive: true });
-  for (const [stateId, def] of Object.entries(bundle.states)) {
+  // The AUTHORED states (see the module note) — `source` is present on every
+  // bundle `loadBundle` produces; the desugared `states` are the fallback only
+  // for a hand-built bundle.
+  for (const stateId of Object.keys(bundle.states)) {
     assertSafeStateId(stateId);
+    const def = bundle.source?.[stateId] ?? bundle.states[stateId]!;
     const { id: _id, ...authored } = def;
     const file = join(staging, ...stateId.split("/")) + ".json";
     mkdirSync(dirname(file), { recursive: true });

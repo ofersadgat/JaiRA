@@ -7,8 +7,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { loadBundle, validateBundle } from "@ai-exec/hw";
-import type { Outcome } from "@ai-exec/core";
+import { loadBundle, validateBundle } from "@declarative-ai/hw";
+import type { JsonValue } from "@declarative-ai/exec";
 import {
   beginTaskRun,
   cancelTask,
@@ -21,8 +21,16 @@ import {
 } from "@jaira/persistence";
 import { defaultConfig, parseJsonText, type JairaConfig } from "@jaira/shared";
 import { parseFakeRules, type FakeRule } from "./fakeExecutor";
-import { parseInteractionScript, ScriptedInteractionPort } from "./scriptedPort";
-import { buildRegistry, executeWorkflow, providerBindings, statusOfOutcome } from "./wiring";
+import { parseInteractionScript, ScriptedFunctions } from "./scriptedFunctions";
+import {
+  buildPromptExecutor,
+  executeWorkflow,
+  functionNamesOf,
+  modelDefaults,
+  newRegistry,
+  statusOfResult,
+  type WorkflowExecResult,
+} from "./wiring";
 
 export interface CliIo {
   cwd: string;
@@ -102,11 +110,12 @@ function jsonValue(label: string, value: string, cwd: string): unknown {
   return parseJsonText(text, `--${label}`);
 }
 
-function recordValue(label: string, raw: unknown): Record<string, unknown> {
+/** A parsed `--inputs`-style object. Parsed JSON is `JsonValue` by construction. */
+function recordValue(label: string, raw: unknown): Record<string, JsonValue> {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(`--${label} must be a JSON object`);
   }
-  return raw as Record<string, unknown>;
+  return raw as Record<string, JsonValue>;
 }
 
 function projectDirOf(values: { project?: string }, io: CliIo): string {
@@ -123,7 +132,7 @@ function openWithRecoveryNote(dir: string, io: CliIo): Project {
 
 interface RunWiring {
   fakeRules?: FakeRule[];
-  interaction?: ScriptedInteractionPort;
+  interactions?: ScriptedFunctions;
   repairTurns?: number;
 }
 
@@ -136,7 +145,7 @@ function runWiringOf(
     wiring.fakeRules = parseFakeRules(jsonValue("fake", values.fake, cwd));
   }
   if (values.interactions !== undefined) {
-    wiring.interaction = new ScriptedInteractionPort(
+    wiring.interactions = new ScriptedFunctions(
       parseInteractionScript(jsonValue("interactions", values.interactions, cwd)),
     );
   }
@@ -148,13 +157,37 @@ function runWiringOf(
   return wiring;
 }
 
-function outcomeReport(outcome: Outcome): Record<string, unknown> {
+/**
+ * Assemble the registry + prompt executor for one run. Interactive functions the
+ * bundle references are registered from the `--interactions` script; an
+ * unscripted one is simply absent, and the engine fails that state if it is ever
+ * reached (states that are never entered never need their function).
+ */
+function buildRunEnvironment(
+  bundle: Parameters<typeof functionNamesOf>[0],
+  config: JairaConfig,
+  wiring: RunWiring,
+): { registry: ReturnType<typeof newRegistry>; prompt: ReturnType<typeof buildPromptExecutor> } {
+  const registry = newRegistry();
+  if (wiring.interactions) {
+    wiring.interactions.register(registry);
+    for (const name of functionNamesOf(bundle)) wiring.interactions.registerWildcard(registry, name);
+  }
+  const prompt = buildPromptExecutor({
+    ...(wiring.fakeRules !== undefined ? { fakeRules: wiring.fakeRules } : {}),
+    ...(wiring.repairTurns !== undefined ? { repairTurns: wiring.repairTurns } : {}),
+    defaults: modelDefaults(config, bundle, { fake: wiring.fakeRules !== undefined }),
+  });
+  return { registry, prompt };
+}
+
+function resultReport(result: WorkflowExecResult): Record<string, unknown> {
+  const failure = "error" in result ? result.error : undefined;
   return {
-    status: statusOfOutcome(outcome),
-    ...(outcome.value !== undefined ? { outputs: outcome.value } : {}),
-    ...(outcome.artifacts !== undefined && outcome.artifacts.length > 0 ? { artifacts: outcome.artifacts } : {}),
-    ...(outcome.error !== undefined ? { failure: outcome.error } : {}),
-    metrics: outcome.metrics,
+    status: statusOfResult(result),
+    ...(result.value !== undefined ? { outputs: result.value } : {}),
+    ...(failure !== undefined ? { failure } : {}),
+    metrics: result.metrics,
   };
 }
 
@@ -208,18 +241,16 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
 
   const wiring = runWiringOf(values, io.cwd);
   const inputs = values.inputs !== undefined ? recordValue("inputs", jsonValue("inputs", values.inputs, io.cwd)) : {};
-  const { registry } = buildRegistry(wiring.fakeRules);
-  const outcome = await executeWorkflow({
+  const { registry, prompt } = buildRunEnvironment(bundle, config, wiring);
+  const result = await executeWorkflow({
     bundle,
     inputs,
-    providers: providerBindings(config, bundle, { fake: wiring.fakeRules !== undefined }),
     registry,
-    interaction: wiring.interaction,
-    repairTurns: wiring.repairTurns,
-    abortSignal: io.abortSignal,
+    prompt,
+    ...(io.abortSignal !== undefined ? { abortSignal: io.abortSignal } : {}),
   });
-  io.stdout(JSON.stringify(outcomeReport(outcome), null, 2) + "\n");
-  return outcome.error === undefined ? 0 : 1;
+  io.stdout(JSON.stringify(resultReport(result), null, 2) + "\n");
+  return statusOfResult(result) === "completed" ? 0 : 1;
 }
 
 function tryProjectConfig(projectDir: string): JairaConfig | undefined {
@@ -284,30 +315,31 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
   const wiring = runWiringOf(values, io.cwd);
   const project = openWithRecoveryNote(projectDirOf(values, io), io);
   try {
-    const started = beginTaskRun(project, taskId);
+    // Validation at task start resolves every `functionRef` against the registry
+    // this run will actually use, so a missing interactive function is an
+    // authoring error caught here rather than mid-run.
+    const probe = newRegistry();
+    wiring.interactions?.register(probe);
+    const started = beginTaskRun(project, taskId, { functions: probe.functions });
     io.stderr(
       `task ${taskId} run ${started.runId}: workflow '${started.meta.workflow}' ` +
         `snapshot ${started.snapshotHash.slice(0, 12)}${started.pinned ? " (pinned)" : ""}\n`,
     );
-    const { registry } = buildRegistry(wiring.fakeRules);
-    const outcome = await executeWorkflow({
+    const { registry, prompt } = buildRunEnvironment(started.bundle, project.config, wiring);
+    const result = await executeWorkflow({
       bundle: started.bundle,
       inputs: started.meta.inputs ?? {},
-      providers: providerBindings(project.config, started.bundle, { fake: wiring.fakeRules !== undefined }),
       registry,
-      interaction: wiring.interaction,
+      prompt,
       persistence: project.events.recorder(taskId, started.runId),
-      repairTurns: wiring.repairTurns,
-      abortSignal: io.abortSignal,
+      ...(io.abortSignal !== undefined ? { abortSignal: io.abortSignal } : {}),
     });
-    const status = statusOfOutcome(outcome);
+    const status = statusOfResult(result);
     finishTaskRun(project, taskId, started.runId, status, {
-      outputs: outcome.value,
-      failure: outcome.error,
+      outputs: result.value,
+      ...("error" in result && result.error !== undefined ? { failure: result.error } : {}),
     });
-    io.stdout(
-      JSON.stringify({ taskId, runId: started.runId, ...outcomeReport(outcome) }, null, 2) + "\n",
-    );
+    io.stdout(JSON.stringify({ taskId, runId: started.runId, ...resultReport(result) }, null, 2) + "\n");
     return status === "completed" ? 0 : 1;
   } finally {
     project.close();

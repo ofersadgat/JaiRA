@@ -5,10 +5,11 @@ on:
     branches: [main]
   pull_request:
 
-# JaiRA's packages depend on the sibling ai-exec repo via
-# `file:../../../ai-exec/packages/*`. CI therefore checks out ai-exec next to
-# JaiRA and installs its deps first: the file: links are symlinks, so Node
-# resolves the linked packages' own dependencies from ai-exec/node_modules.
+# JaiRA's packages depend on the sibling declarative-ai repo via
+# `file:../../../declarative-ai/packages/*`. CI therefore checks out
+# declarative-ai next to JaiRA and installs its deps first: the file: links are
+# symlinks, so Node resolves the linked packages' own dependencies from
+# declarative-ai/node_modules.
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -18,23 +19,24 @@ jobs:
         with:
           path: JaiRA
 
-      # ai-exec is public, so the default token checks it out with no extra
-      # config. If it is ever made private, add a PAT with read access to
-      # ai-exec as an AI_EXEC_TOKEN secret and pass `token: ${{ secrets.AI_EXEC_TOKEN }}`.
-      - name: Checkout ai-exec sibling for file deps
+      # declarative-ai is public, so the default token checks it out with no extra
+      # config. If it is ever made private, add a PAT with read access as an
+      # AI_EXEC_TOKEN secret and pass `token: ${{ secrets.AI_EXEC_TOKEN }}` here.
+      # NOTE the checkout `path` must match the directory name in the file: deps.
+      - name: Checkout declarative-ai sibling for file deps
         uses: actions/checkout@v4
         with:
-          repository: ofersadgat/ai-exec
+          repository: ofersadgat/declarative-ai
           ref: main
-          path: ai-exec
+          path: declarative-ai
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Install ai-exec deps
+      - name: Install declarative-ai deps
         run: npm install
-        working-directory: ai-exec
+        working-directory: declarative-ai
 
       - name: Install JaiRA deps
         run: npm install

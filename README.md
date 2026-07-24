@@ -1,12 +1,12 @@
 # JaiRA
 
-Interactive agent-orchestration app on top of [ai-exec](../ai-exec/README.md):
+Interactive agent-orchestration app on top of [declarative-ai](https://github.com/ofersadgat/declarative-ai):
 hierarchical workflows (state machines over agents, LLM calls, and human
 interaction) with durable tasks, a board UI (coming in phase 3), and humans in
 the loop.
 
 - [SPEC.md](SPEC.md) — product spec (the hierarchical-workflow formalism is
-  normative in `ai-exec/SPEC.md`).
+  normative in `declarative-ai/SPEC.md`).
 - [DESIGN.md](DESIGN.md) — implementation design; §1a/§1b track status, §14 the
   phase plan.
 
@@ -19,23 +19,27 @@ the loop.
 | `@jaira/cli` | Headless `jaira` CLI: project init, ad-hoc workflow runs, task lifecycle |
 | `@jaira/app` | Electron shell + React renderer (phase 3; stub) |
 
-Engine semantics live in the sibling repo's packages (`@ai-exec/core`,
-`@ai-exec/services`, `@ai-exec/llm`, `@ai-exec/hw`), consumed as TypeScript
-source via cross-repo `file:` links (`file:../../../ai-exec/packages/*`). The
-[ai-exec](https://github.com/ofersadgat/ai-exec) repo must be checked out next
-to this one:
+Engine semantics live in the sibling repo's packages — `@declarative-ai/hw` (the
+workflow engine), `@declarative-ai/exec` (the one execution seam, plus the op
+model and JSON core it re-exports), `@declarative-ai/promptop` +
+`@declarative-ai/llm` (structured LLM calls), `@declarative-ai/validate` (Ajv) —
+consumed as TypeScript source via cross-repo `file:` links
+(`file:../../../declarative-ai/packages/*`). The
+[declarative-ai](https://github.com/ofersadgat/declarative-ai) repo must be
+checked out next to this one, **in a directory named `declarative-ai`** (the
+`file:` paths and both CI configs assume that name):
 
 ```text
 <parent>/
-  ai-exec/     # git@github.com:ofersadgat/ai-exec.git
-  JaiRA/       # this repo
+  declarative-ai/   # git@github.com:ofersadgat/declarative-ai.git
+  JaiRA/            # this repo
 ```
 
 ## Development
 
 ```sh
-# from <parent>/, with ai-exec checked out alongside:
-( cd ../ai-exec && npm install )   # populate ai-exec deps (file: links are symlinks)
+# from <parent>/, with declarative-ai checked out alongside:
+( cd ../declarative-ai && npm install )   # populate declarative-ai deps (file: links are symlinks)
 npm install
 npm run typecheck
 npm test
@@ -44,11 +48,14 @@ npm test
 ## Continuous integration
 
 CI runs on both GitLab (`.gitlab-ci.yml`) and GitHub Actions
-(`.github/workflows/ci.yml`); each checks out ai-exec as a sibling, installs
-both, and runs `typecheck` + `test`. GitHub-hosted runners are free (unlimited
-for public repos; 2,000 min/month for private). If ai-exec is private, GitHub
-CI needs an `AI_EXEC_TOKEN` secret and GitLab CI needs this project on
-ai-exec's job-token allowlist (see the comments in each CI file).
+(`.github/workflows/ci.yml`); each checks out declarative-ai as a sibling,
+installs both, and runs `typecheck` + `test`. GitHub-hosted runners are free
+(unlimited for public repos; 2,000 min/month for private).
+
+The GitHub repos are public, so GitHub CI needs no extra configuration. The
+GitLab mirrors are private, so JaiRA's pipeline clones declarative-ai with
+`CI_JOB_TOKEN`, which requires this project on declarative-ai's *Settings →
+CI/CD → Job token allowlist*. See the comments in each CI file.
 
 ## CLI
 
@@ -68,15 +75,24 @@ engine's event stream in `.jaira/jaira.db`; interrupted tasks (crash, kill)
 are detected on the next open and re-run from the workflow start against the
 pinned snapshot.
 
-`--fake` runs against a JSON-scripted executor instead of real providers —
+`--fake` swaps in a JSON-scripted prompt executor instead of a real provider —
 rules like `[{"model": "critic", "output": {"outcome": "clean", ...}}]` are
-matched against the operation's model and prompt. `--interactions` scripts UI
-states: `{"<stateId>": [<response>, ...]}`. Real providers are configured in
-`.jaira/config.json` under `providers` (name → llm-call config, e.g.
-`{"model": "claude-sonnet-5"}`) and executed via `@ai-exec/llm` with API keys
-from the environment.
+matched against the operation's configured model and rendered prompt.
+
+`--interactions` scripts the interactive states. A UI state is an ordinary
+`FunctionOp` naming a registered function, so responses are keyed by **function
+name** (not state id): `{"choose_option": [{"decision": "approve"}, ...]}`, with
+`"*"` as a catch-all. A function that is never registered fails only if its
+state is actually reached.
+
+Real runs read `.jaira/config.json`: `models.default` supplies the model for
+states that name none, and must be route-prefixed
+(`anthropic/claude-sonnet-5`, `openrouter/openai/gpt-5`) — routing is explicit
+in declarative-ai and a bare id is a fail-fast error. Calls execute via
+`@declarative-ai/promptop` over `@declarative-ai/llm`, with API keys from the
+environment.
 
 ## License
 
 JaiRA is licensed under the [GNU General Public License v3.0](LICENSE). The
-sibling `ai-exec` library is MIT-licensed.
+sibling `declarative-ai` library is MIT-licensed.
