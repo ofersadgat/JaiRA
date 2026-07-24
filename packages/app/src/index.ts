@@ -1,5 +1,8 @@
 /**
- * @jaira/app — Electron shell + React renderer (DESIGN §2, phase 3).
- * Stub for now: the phase-1/2 surface is the headless CLI (@jaira/cli).
+ * @jaira/app — the Electron shell (DESIGN §2, phase 3).
+ *
+ * The service layer is Electron-free and exported here so it can be driven from
+ * tests and scripts; `src/main/` holds the Electron entry points and `src/renderer/`
+ * the React UI.
  */
-export const APP_STUB = true;
+export * from "./main/service";

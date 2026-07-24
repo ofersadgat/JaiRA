@@ -11,6 +11,7 @@ import { loadBundle, validateBundle } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/exec";
 import {
   beginTaskRun,
+  boardView,
   cancelTask,
   createTask,
   finishTaskRun,
@@ -19,18 +20,20 @@ import {
   readWorkflowFiles,
   type Project,
 } from "@jaira/persistence";
-import { defaultConfig, parseJsonText, type JairaConfig } from "@jaira/shared";
-import { parseFakeRules, type FakeRule } from "./fakeExecutor";
-import { parseInteractionScript, ScriptedFunctions } from "./scriptedFunctions";
+import { defaultConfig, parseJsonText, type BoardCard, type BoardView, type JairaConfig } from "@jaira/shared";
 import {
   buildPromptExecutor,
   executeWorkflow,
   functionNamesOf,
   modelDefaults,
   newRegistry,
+  parseFakeRules,
+  parseInteractionScript,
+  ScriptedFunctions,
   statusOfResult,
+  type FakeRule,
   type WorkflowExecResult,
-} from "./wiring";
+} from "@jaira/runtime";
 
 export interface CliIo {
   cwd: string;
@@ -53,6 +56,7 @@ const USAGE = `usage:
   jaira task list [--project <dir>]
   jaira task status <taskId> [--events <n>] [--project <dir>]
   jaira task cancel <taskId> [--project <dir>]
+  jaira board [--level <stateId>] [--json] [--project <dir>]
 `;
 
 export async function runCli(argv: string[], io: CliIo): Promise<number> {
@@ -75,6 +79,8 @@ async function dispatch(argv: string[], io: CliIo): Promise<number> {
       return cmdInit(rest, io);
     case "run":
       return cmdRun(rest, io);
+    case "board":
+      return cmdBoard(rest, io);
     case "task": {
       const [sub, ...taskRest] = rest;
       switch (sub) {
@@ -344,6 +350,64 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
   } finally {
     project.close();
   }
+}
+
+/**
+ * The board (DESIGN §11.1) rendered headlessly — the same projection the
+ * Electron board draws, so the phase-3 milestone ("watch the planning workflow
+ * move across the board") is observable without the GUI.
+ */
+function cmdBoard(argv: string[], io: CliIo): number {
+  const { values } = parseArgs({
+    args: argv,
+    options: { project: { type: "string" }, level: { type: "string" }, json: { type: "boolean" } },
+  });
+  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  try {
+    const board = boardView(project, values.level);
+    if (values.json) {
+      io.stdout(JSON.stringify(board, null, 2) + "\n");
+      return 0;
+    }
+    io.stdout(renderBoard(board));
+    return 0;
+  } finally {
+    project.close();
+  }
+}
+
+const BADGE: Record<string, string> = {
+  running: "▶",
+  waiting_for_user: "⏸",
+  blocked: "⛔",
+  completed: "✓",
+  failed: "✗",
+  canceled: "∅",
+  timeout: "⏱",
+};
+
+function renderCard(card: BoardCard): string {
+  const badge = BADGE[card.activeStatus ?? card.status] ?? "·";
+  const drill = card.hasSubBoard ? " ↳" : "";
+  return `    ${badge} ${card.taskId}  ${card.title}${drill}`;
+}
+
+function renderBoard(board: BoardView): string {
+  const lines: string[] = [];
+  lines.push(`board: ${board.breadcrumb.join(" › ")}${board.label ? `  (${board.label})` : ""}`);
+  for (const column of board.columns) {
+    lines.push(`  [${column.key}] ${column.label ?? column.stateId}${column.cards.length === 0 ? "  —" : ""}`);
+    for (const card of column.cards) lines.push(renderCard(card));
+  }
+  if (board.atLevel.length > 0) {
+    lines.push("  (at this level)");
+    for (const card of board.atLevel) lines.push(renderCard(card));
+  }
+  if (board.finished.length > 0) {
+    lines.push("  (finished / not started)");
+    for (const card of board.finished) lines.push(renderCard(card));
+  }
+  return lines.join("\n") + "\n";
 }
 
 function cmdTaskList(argv: string[], io: CliIo): number {

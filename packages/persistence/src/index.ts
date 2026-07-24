@@ -5,3 +5,6 @@ export * from "./taskStore";
 export * from "./snapshots";
 export * from "./project";
 export * from "./lifecycle";
+export * from "./projection";
+export * from "./shape";
+export * from "./views";

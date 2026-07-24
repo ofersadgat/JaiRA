@@ -6,7 +6,11 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@declarative-ai/exec": "file:../../../declarative-ai/packages/exec",
+    "@declarative-ai/hw": "file:../../../declarative-ai/packages/hw",
+    "@declarative-ai/json": "file:../../../declarative-ai/packages/json",
     "@jaira/persistence": "*",
+    "@jaira/runtime": "*",
     "@jaira/shared": "*"
   }
 }

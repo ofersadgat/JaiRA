@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit -p packages/shared && tsc --noEmit -p packages/persistence && tsc --noEmit -p packages/cli && tsc --noEmit -p packages/app",
+    "typecheck": "tsc --noEmit -p packages/shared && tsc --noEmit -p packages/persistence && tsc --noEmit -p packages/runtime && tsc --noEmit -p packages/cli && tsc --noEmit -p packages/app",
     "test": "vitest run",
     "test:watch": "vitest",
     "jaira": "tsx packages/cli/src/main.ts"

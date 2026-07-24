@@ -1,4 +1,4 @@
 export * from "./cli";
-export * from "./fakeExecutor";
-export * from "./scriptedFunctions";
-export * from "./wiring";
+// The engine harness lives in @jaira/runtime (shared with the Electron main
+// process); re-exported so existing importers of @jaira/cli keep working.
+export * from "@jaira/runtime";
