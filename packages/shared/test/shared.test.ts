@@ -45,13 +45,18 @@ describe("parseTaskMeta", () => {
 });
 
 describe("config", () => {
-  it("parses providers and defaults artifactDir", () => {
-    const cfg = parseConfig({ providers: { planner: { model: "m" } } });
-    expect(cfg.providers["planner"]).toEqual({ model: "m" });
+  it("parses the default model and defaults artifactDir", () => {
+    const cfg = parseConfig({ models: { default: "anthropic/claude-sonnet-5" } });
+    expect(cfg.models.default).toBe("anthropic/claude-sonnet-5");
     expect(cfg.artifactDir).toBe("jaira-artifacts");
     expect(parseConfig({})).toEqual(defaultConfig());
-    expect(() => parseConfig({ providers: { p: "nope" } })).toThrow(/must be an object/);
+    expect(() => parseConfig({ models: "nope" })).toThrow(/must be an object/);
     expect(() => parseConfig([])).toThrow(/object/);
+  });
+
+  it("requires the default model to be route-prefixed (routing is explicit)", () => {
+    expect(() => parseConfig({ models: { default: "claude-sonnet-5" } })).toThrow(/route-prefixed/);
+    expect(() => parseConfig({ models: { default: "" } })).toThrow(/non-empty/);
   });
 });
 

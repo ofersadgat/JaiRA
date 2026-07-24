@@ -1,14 +1,14 @@
 # JaiRA CI.
 #
-# JaiRA's packages depend on the sibling ai-exec repo via
-# `file:../../../ai-exec/packages/*`. CI clones ai-exec next to the JaiRA
-# checkout (../ai-exec == $CI_PROJECT_DIR/../ai-exec) and installs its deps
-# first: the file: links are symlinks, so Node resolves the linked packages'
-# own dependencies from ai-exec/node_modules.
+# JaiRA's packages depend on the sibling declarative-ai repo via
+# `file:../../../declarative-ai/packages/*`. CI clones declarative-ai next to the
+# JaiRA checkout (../declarative-ai == $CI_PROJECT_DIR/../declarative-ai) and
+# installs its deps first: the file: links are symlinks, so Node resolves the
+# linked packages' own dependencies from declarative-ai/node_modules. The clone
+# directory name must match the one in the file: deps.
 #
-# The clone uses CI_JOB_TOKEN. For a private ai-exec, add this project to
-# ai-exec's Settings > CI/CD > Job token allowlist (or replace CI_JOB_TOKEN
-# with a project/deploy token that can read ai-exec).
+# The clone uses CI_JOB_TOKEN, which requires this project on declarative-ai's
+# Settings > CI/CD > Job token allowlist (granted).
 default:
   image: node:22
 
@@ -18,8 +18,8 @@ stages:
 build:
   stage: test
   before_script:
-    - git clone --depth 1 "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/mistlabs/ai-exec.git" ../ai-exec
-    - cd ../ai-exec && npm install && cd "$CI_PROJECT_DIR"
+    - git clone --depth 1 "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/mistlabs/declarative-ai.git" ../declarative-ai
+    - cd ../declarative-ai && npm install && cd "$CI_PROJECT_DIR"
     - npm install
   script:
     - npm run typecheck

@@ -3,6 +3,7 @@
  * A TaskMeta is what lives in `.jaira/tasks/<taskId>.json`; runtime status and
  * history live in SQLite (@jaira/persistence) and reference tasks by id only.
  */
+import type { JsonValue } from "@declarative-ai/json";
 
 export type TaskStatus =
   | "queued"
@@ -19,8 +20,10 @@ export interface TaskMeta {
   labels?: string[];
   /** Root state ID of the workflow this task runs, relative to `.jaira/workflows/`. */
   workflow: string;
-  /** Root workflow inputs, fixed at task creation (e.g. the issue text). */
-  inputs?: Record<string, unknown>;
+  /** Root workflow inputs, fixed at task creation (e.g. the issue text). JSON by
+   *  construction — the task file is JSON, and these are bound as the run's
+   *  operation inputs. */
+  inputs?: Record<string, JsonValue>;
   /** Branch binding (DESIGN §9.2) — recorded now, acted on in phase 5. */
   branch?: string;
   parentTaskId?: string;

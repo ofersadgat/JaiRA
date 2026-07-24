@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { EngineEvent } from "@ai-exec/hw";
+import type { EngineEvent } from "@declarative-ai/hw";
 import { openDb, type JairaDb } from "../src/db";
 import { SqliteEventLog } from "../src/eventLog";
 import { RuntimeStore } from "../src/runtime";

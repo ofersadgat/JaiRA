@@ -3,8 +3,13 @@
  * the `Persistence` port the hw engine calls at every step, backed by the
  * append-only `events` journal. better-sqlite3 is synchronous, matching the
  * port's synchronous `record` contract exactly.
+ *
+ * The journal is deliberately schema-light — `type` plus the whole event as
+ * JSON — so the engine's event vocabulary can evolve without a migration. It
+ * already has once: `operation.*` events carry `op: "prompt" | "function"`
+ * since the declarative-ai ops redesign (was `ui | agent | skill`).
  */
-import type { EngineEvent, Persistence } from "@ai-exec/hw";
+import type { EngineEvent, Persistence } from "@declarative-ai/hw";
 import type { JairaDb } from "./db";
 
 export interface StoredEvent {

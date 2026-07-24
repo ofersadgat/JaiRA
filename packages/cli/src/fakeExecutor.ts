@@ -1,25 +1,33 @@
 /**
- * JSON-scriptable fake `llm-call` executor for headless runs — the CLI-facing
- * cousin of ai-exec's `packages/hw/test/fakes.ts` FakeExecutor. Rules are
- * matched first-to-last against the built definition's model and the rendered
- * prompt tail (conversation-history preamble stripped, so `full_history`
- * re-invocations don't accidentally match on echoed history).
+ * JSON-scriptable fake prompt `Executor` for headless runs — the CLI-facing
+ * cousin of declarative-ai's `packages/hw/test/fakes.ts` FakePromptExecutor.
+ *
+ * The engine dispatches every `PromptOp` to the injected prompt executor, so
+ * substituting this one is all it takes to run a whole workflow with no LLM in
+ * the graph. Rules are matched first-to-last against the op's configured model
+ * and the rendered prompt tail (conversation-history preamble stripped, so
+ * `full_history` re-invocations don't accidentally match on echoed history).
  */
 import type {
+  Capabilities,
   ExecHandle,
-  ExecutionSpec,
-  Executor,
-  ExecutorCapabilities,
+  ExecResult,
   ExecServices,
-  Outcome,
-  UnitKind,
-} from "@ai-exec/core";
+  Executor,
+  InlineFamily,
+  JsonValue,
+  Operation,
+  PromptOp,
+  ResolvedValue,
+} from "@declarative-ai/exec";
+import { mergeWorkflowMetrics, type WorkflowMetrics } from "@declarative-ai/hw";
 
-const CAPS: ExecutorCapabilities = {
+const CAPS: Capabilities = {
   structuredOutput: true,
   sessionResume: false,
   streaming: false,
   interactive: false,
+  readOnly: true,
   mutatesWorkspace: false,
   policyEnforcement: "none",
   memoizable: true,
@@ -29,14 +37,15 @@ const CAPS: ExecutorCapabilities = {
 async function* empty(): AsyncGenerator<never> {}
 
 export interface FakeRule {
-  /** Match on the definition's `model` (what `llmCallBinding` puts there). */
+  /** Match on the op's configured `model` (a state's `operation.config.model`). */
   model?: string;
   /** Match when the rendered prompt tail contains this substring. */
   promptIncludes?: string;
   /** The structured output value to return (exclusive with `error`). */
-  output?: unknown;
+  output?: JsonValue;
   /** Fail the operation with this reason instead of returning output. */
   error?: string;
+  /** USD cost to report, so cost roll-up is exercised headlessly. */
   cost?: number;
 }
 
@@ -54,54 +63,54 @@ export function parseFakeRules(raw: unknown): FakeRule[] {
   });
 }
 
-function modelOf(spec: ExecutionSpec): string {
-  return String((spec.definition as { model?: unknown }).model ?? "");
+function modelOf(op: PromptOp<InlineFamily>): string {
+  const config = op.config !== null && typeof op.config === "object" && !Array.isArray(op.config) ? op.config : {};
+  return typeof config.model === "string" ? config.model : "";
 }
 
-function promptTail(spec: ExecutionSpec): string {
-  const prompt = String((spec.definition as { prompt?: unknown }).prompt ?? "");
+function promptTail(op: PromptOp<InlineFamily>): string {
+  const prompt = op.user ?? "";
   const marker = "</conversation-history>";
   const at = prompt.lastIndexOf(marker);
   return at < 0 ? prompt.trim() : prompt.slice(at + marker.length).trim();
 }
 
-export class ScriptedFakeExecutor implements Executor {
-  readonly kind: UnitKind = "llm-call";
+const failed = (reason: string, classification: "permanent" | "canceled" = "permanent"): ExecResult<ResolvedValue, WorkflowMetrics> => ({
+  error: { classification, reason },
+  metrics: { durationMs: 0, costUsd: 0, costSource: "unknown" },
+});
+
+export class ScriptedFakeExecutor implements Executor<ExecServices, WorkflowMetrics> {
+  readonly metrics = { merge: mergeWorkflowMetrics };
   readonly capabilities = CAPS;
-  readonly calls: ExecutionSpec[] = [];
+  readonly calls: PromptOp<InlineFamily>[] = [];
 
   constructor(private readonly rules: FakeRule[]) {}
 
-  start(spec: ExecutionSpec, _ctx: ExecServices): ExecHandle {
-    this.calls.push(spec);
-    const outcome = Promise.resolve(this.execute(spec));
-    return { events: empty(), outcome, cancel: async () => {} };
+  start(operation: Operation<InlineFamily>, ctx: ExecServices): ExecHandle<ResolvedValue, WorkflowMetrics> {
+    const op = operation as PromptOp<InlineFamily>;
+    this.calls.push(op);
+    return { events: empty(), result: Promise.resolve(this.execute(op, ctx)), cancel: async () => {} };
   }
 
-  private execute(spec: ExecutionSpec): Outcome {
-    if (spec.abortSignal?.aborted) {
-      return { metrics: { durationMs: 0 }, error: { classification: "canceled", reason: "aborted" } };
-    }
-    const model = modelOf(spec);
-    const tail = promptTail(spec);
+  private execute(op: PromptOp<InlineFamily>, ctx: ExecServices): ExecResult<ResolvedValue, WorkflowMetrics> {
+    if (ctx.abortSignal?.aborted) return failed("aborted", "canceled");
+    const model = modelOf(op);
+    const tail = promptTail(op);
     const rule = this.rules.find(
       (r) =>
         (r.model === undefined || r.model === model) &&
         (r.promptIncludes === undefined || tail.includes(r.promptIncludes)),
     );
     if (!rule) {
-      return {
-        metrics: { durationMs: 0 },
-        error: { classification: "permanent", reason: `no fake rule matched model '${model}', prompt '${tail.slice(0, 80)}'` },
-      };
+      return failed(`no fake rule matched model '${model}', prompt '${tail.slice(0, 80)}'`);
     }
-    if (rule.error !== undefined) {
-      return { metrics: { durationMs: 0 }, error: { classification: "permanent", reason: rule.error } };
-    }
+    if (rule.error !== undefined) return failed(rule.error);
+    // Token counts belong to the model payload (`LlmOutput`), which stops at the
+    // prompt executor — a workflow measurement is duration plus spend.
     return {
-      value: rule.output,
-      rawText: JSON.stringify(rule.output),
-      metrics: { durationMs: 1, cost: rule.cost ?? 0.01, inputTokens: 10, outputTokens: 20 },
+      value: rule.output ?? null,
+      metrics: { durationMs: 1, costUsd: rule.cost ?? 0.01, costSource: "table" },
     };
   }
 }

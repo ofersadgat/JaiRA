@@ -1,13 +1,24 @@
 /**
- * Project config — `.jaira/config.json` (DESIGN §3). v1 carries provider
- * bindings (name → llm-call config) and the artifact root; exec environment,
- * policy, and runner adapters arrive in later phases.
+ * Project config — `.jaira/config.json` (DESIGN §3).
+ *
+ * Since the declarative-ai ops redesign a state names its model directly in
+ * `operation.config.model`, so the old `providers` map (name → llm-call config,
+ * bound through the removed `llmCallBinding`) is gone. What remains project-level
+ * is the DEFAULT model a state inherits when it names none, plus the artifact
+ * root. Exec environment, policy, and agent runtimes arrive in later phases.
  */
 
+export interface JairaModelConfig {
+  /**
+   * Default model id for states that name none. Must be route-prefixed
+   * (`anthropic/claude-sonnet-5`, `openrouter/openai/gpt-5`) — routing is
+   * explicit in declarative-ai, and a bare id is a fail-fast error.
+   */
+  default?: string;
+}
+
 export interface JairaConfig {
-  /** `agent.provider` name → llm-call defaults (model, sampling, …).
-   *  Bound via @ai-exec/hw `llmCallBinding` at run time. */
-  providers: Record<string, Record<string, unknown>>;
+  models: JairaModelConfig;
   /** Artifact root relative to the project dir (DESIGN §15 Q1). */
   artifactDir: string;
 }
@@ -15,7 +26,7 @@ export interface JairaConfig {
 export const DEFAULT_ARTIFACT_DIR = "jaira-artifacts";
 
 export function defaultConfig(): JairaConfig {
-  return { providers: {}, artifactDir: DEFAULT_ARTIFACT_DIR };
+  return { models: {}, artifactDir: DEFAULT_ARTIFACT_DIR };
 }
 
 export function parseConfig(raw: unknown): JairaConfig {
@@ -23,21 +34,29 @@ export function parseConfig(raw: unknown): JairaConfig {
     throw new Error("config must be a JSON object");
   }
   const cfg = raw as Record<string, unknown>;
-  const providers: Record<string, Record<string, unknown>> = {};
-  if (cfg["providers"] !== undefined) {
-    if (cfg["providers"] === null || typeof cfg["providers"] !== "object" || Array.isArray(cfg["providers"])) {
-      throw new Error("config.providers must be an object");
+
+  const models: JairaModelConfig = {};
+  if (cfg["models"] !== undefined) {
+    if (cfg["models"] === null || typeof cfg["models"] !== "object" || Array.isArray(cfg["models"])) {
+      throw new Error("config.models must be an object");
     }
-    for (const [name, value] of Object.entries(cfg["providers"] as Record<string, unknown>)) {
-      if (value === null || typeof value !== "object" || Array.isArray(value)) {
-        throw new Error(`config.providers.${name} must be an object`);
+    const raw = (cfg["models"] as Record<string, unknown>)["default"];
+    if (raw !== undefined) {
+      if (typeof raw !== "string" || raw.length === 0) {
+        throw new Error("config.models.default must be a non-empty string");
       }
-      providers[name] = value as Record<string, unknown>;
+      if (!raw.includes("/")) {
+        throw new Error(
+          `config.models.default '${raw}' must be route-prefixed, e.g. 'anthropic/claude-sonnet-5' or 'openrouter/openai/gpt-5'`,
+        );
+      }
+      models.default = raw;
     }
   }
+
   const artifactDir = cfg["artifactDir"] ?? DEFAULT_ARTIFACT_DIR;
   if (typeof artifactDir !== "string" || artifactDir.length === 0) {
     throw new Error("config.artifactDir must be a non-empty string");
   }
-  return { providers, artifactDir };
+  return { models, artifactDir };
 }

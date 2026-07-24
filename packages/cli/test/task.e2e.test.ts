@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { beginTaskRun, openProject } from "@jaira/persistence";
 import { runCli, type CliIo } from "../src/cli";
-import { blockedRules, happyRules, makePlanningProject } from "./fixtures";
+import { blockedRules, happyRules, HUMAN_REVIEW_FUNCTION, makePlanningProject } from "./fixtures";
 
 let dir: string;
 
@@ -108,7 +108,7 @@ describe("jaira task lifecycle (e2e, temp project)", () => {
       "--fake",
       JSON.stringify(blockedRules()),
       "--interactions",
-      '{"feature/plan/critique/human_review":[{"decision":"block"}]}',
+      JSON.stringify({ [HUMAN_REVIEW_FUNCTION]: [{ decision: "block" }] }),
     ]);
     expect(started.code).toBe(0);
     const outputs = (started.json() as Record<string, unknown>)["outputs"] as Record<string, unknown>;

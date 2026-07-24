@@ -1,8 +1,13 @@
 /**
  * Test fixtures: the SPEC §9 planning workflow (mirroring
- * ai-exec/packages/hw/test/fixtures.ts, which is the golden-test workflow for
- * the engine) plus helpers to materialize it as `.jaira/workflows/` files and
+ * declarative-ai/packages/hw/test/fixtures.ts, which is the golden-test workflow
+ * for the engine) plus helpers to materialize it as `.jaira/workflows/` files and
  * fake-executor scripts for the happy and blocked paths.
+ *
+ * Post-ops-redesign format: slots carry JSON Schemas (an ARTIFACT is a `blob`-kind
+ * slot derived from `contentMediaType`), a state's work is ONE `operation`
+ * (`prompt` or `function`), and wiring is authored binding sugar — `{ input }`,
+ * `{ child, output }`, `{ expr }` — that the loader lowers to base refs.
  */
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,31 +17,38 @@ import type { FakeRule } from "../src/fakeExecutor";
 
 export const PLAN_ID = "feature/plan";
 
+/** The interactive host function the human-review gate invokes. */
+export const HUMAN_REVIEW_FUNCTION = "choose_option";
+
+const artifact = (format: string) => ({ kind: "blob", schema: { type: "string", contentMediaType: format } });
+const str = () => ({ schema: { type: "string" } });
+const strArray = () => ({ schema: { type: "array", items: { type: "string" } } });
+
 export function specPlanningFiles(): Record<string, unknown> {
   return {
     "feature/plan": {
       label: "Planning",
-      inputs: { issue: { type: "artifact", format: "markdown" } },
+      inputs: { issue: artifact("markdown") },
       outputs: {
         outcome: {
-          type: "string",
-          enum: ["complete", "blocked"],
-          from: "children.critique.outputs.outcome === 'clean' ? 'complete' : 'blocked'",
+          schema: { type: "string", enum: ["complete", "blocked"] },
+          binding: { expr: "children.critique.outputs.outcome === 'clean' ? 'complete' : 'blocked'" },
         },
-        plan_doc: { type: "artifact", format: "markdown", from: "children.context.outputs.plan_doc" },
-        critique: { type: "passthrough", from: "children.critique.outputs" },
+        plan_doc: { ...artifact("markdown"), binding: { child: "context", output: "plan_doc" } },
+        // A "passthrough" output is just an unconstrained slot bound to a producer.
+        critique: { binding: { child: "critique" } },
       },
       children: {
-        goals: { state: "feature/plan/goals", inputs: { issue: "inputs.issue" } },
+        goals: { state: "feature/plan/goals", inputs: { issue: { input: "issue" } } },
         context: {
           state: "feature/plan/context",
-          inputs: { issue: "inputs.issue", goals: "children.goals.outputs.goals" },
+          inputs: { issue: { input: "issue" }, goals: { child: "goals", output: "goals" } },
         },
         critique: {
           state: "feature/plan/critique",
           inputs: {
-            plan_doc: "children.context.outputs.plan_doc",
-            severity_threshold: { value: "significant" },
+            plan_doc: { child: "context", output: "plan_doc" },
+            severity_threshold: { text: "significant" },
           },
         },
       },
@@ -53,44 +65,48 @@ export function specPlanningFiles(): Record<string, unknown> {
     },
     "feature/plan/goals": {
       label: "Goals",
-      inputs: { issue: { type: "artifact", format: "markdown" } },
-      outputs: { goals: { type: "array", items: { type: "string" } } },
-      agent: { provider: "planner", prompt: { template: "Extract goals from {{inputs.issue}}." } },
+      inputs: { issue: artifact("markdown") },
+      outputs: { goals: strArray() },
+      operation: {
+        kind: "prompt",
+        prompt: { template: "Extract goals from {{inputs.issue}}." },
+        config: { model: "planner" },
+      },
     },
     "feature/plan/context": {
       label: "Context",
-      inputs: {
-        issue: { type: "artifact", format: "markdown" },
-        goals: { type: "array", items: { type: "string" } },
+      inputs: { issue: artifact("markdown"), goals: strArray() },
+      outputs: { plan_doc: artifact("markdown") },
+      operation: {
+        kind: "prompt",
+        prompt: { template: "Write the plan for {{inputs.issue}}." },
+        config: { model: "planner" },
       },
-      outputs: { plan_doc: { type: "artifact", format: "markdown" } },
-      agent: { provider: "planner", prompt: { template: "Write the plan for {{inputs.issue}}." } },
     },
     "feature/plan/critique": {
       label: "Critique Plan",
       description: "Review the current plan for significant weaknesses.",
       inputs: {
-        plan_doc: { type: "artifact", format: "markdown" },
+        plan_doc: artifact("markdown"),
         severity_threshold: {
-          type: "string",
-          enum: ["minor", "significant", "critical"],
+          schema: { type: "string", enum: ["minor", "significant", "critical"] },
           default: "significant",
         },
       },
       outputs: {
-        outcome: { type: "string", enum: ["clean", "needs_changes", "blocked"] },
-        weaknesses: { type: "array", items: { type: "string" } },
-        critique_report: { type: "artifact", format: "markdown" },
+        outcome: { schema: { type: "string", enum: ["clean", "needs_changes", "blocked"] } },
+        weaknesses: strArray(),
+        critique_report: artifact("markdown"),
         human_decision: {
-          type: "string",
-          enum: ["approve", "request_changes", "block"],
+          schema: { type: "string", enum: ["approve", "request_changes", "block"] },
           optional: true,
-          from: "children.human_review.outputs.decision",
+          binding: { child: "human_review", output: "decision" },
         },
       },
-      agent: {
-        provider: "critic",
-        conversation: { mode: "full_history" },
+      environment: { conversation: { mode: "full_history" } },
+      operation: {
+        kind: "prompt",
+        config: { model: "critic" },
         prompt: {
           template:
             "Review the plan document. Find significant weaknesses at or above the configured severity threshold. Return structured output matching this state's output schema.",
@@ -100,14 +116,14 @@ export function specPlanningFiles(): Record<string, unknown> {
         address_weaknesses: {
           state: "feature/plan/critique/address_weaknesses",
           inputs: {
-            plan_doc: "inputs.plan_doc",
-            weaknesses: "outputs.weaknesses",
-            critique_report: "outputs.critique_report",
+            plan_doc: { input: "plan_doc" },
+            weaknesses: { expr: "outputs.weaknesses" },
+            critique_report: { expr: "outputs.critique_report" },
           },
         },
         human_review: {
           state: "feature/plan/critique/human_review",
-          inputs: { plan_doc: "inputs.plan_doc", critique_report: "outputs.critique_report" },
+          inputs: { plan_doc: { input: "plan_doc" }, critique_report: { expr: "outputs.critique_report" } },
         },
       },
       transitions: [
@@ -120,28 +136,28 @@ export function specPlanningFiles(): Record<string, unknown> {
     },
     "feature/plan/critique/address_weaknesses": {
       label: "Address Weaknesses",
-      inputs: {
-        plan_doc: { type: "artifact", format: "markdown" },
-        weaknesses: { type: "array", items: { type: "string" } },
-        critique_report: { type: "artifact", format: "markdown" },
+      inputs: { plan_doc: artifact("markdown"), weaknesses: strArray(), critique_report: artifact("markdown") },
+      outputs: { resolution: str() },
+      operation: {
+        kind: "prompt",
+        prompt: { template: "Fix the listed weaknesses." },
+        config: { model: "fixer" },
       },
-      outputs: { resolution: { type: "string" } },
-      agent: { provider: "fixer", prompt: { template: "Fix the listed weaknesses." } },
     },
     "feature/plan/critique/human_review": {
       label: "Human Review",
-      inputs: {
-        plan_doc: { type: "artifact", format: "markdown" },
-        critique_report: { type: "artifact", format: "markdown" },
-      },
+      inputs: { plan_doc: artifact("markdown"), critique_report: artifact("markdown") },
       outputs: {
-        decision: { type: "string", enum: ["approve", "request_changes", "block"] },
-        comments: { type: "string", format: "markdown", optional: true },
+        decision: { schema: { type: "string", enum: ["approve", "request_changes", "block"] } },
+        comments: { schema: { type: "string", format: "markdown" }, optional: true },
       },
-      ui: {
-        component: "choose_option",
-        prompt: "Review the critique result.",
-        options: ["approve", "request_changes", "block"],
+      // The human gate is an interactive host FUNCTION — a plain FunctionOp whose
+      // authored surface rides in `config`. JaiRA's renderer backs this in phase 4;
+      // headless runs script it with `--interactions`.
+      operation: {
+        kind: "function",
+        function: HUMAN_REVIEW_FUNCTION,
+        config: { prompt: "Review the critique result.", options: ["approve", "request_changes", "block"] },
       },
     },
   };

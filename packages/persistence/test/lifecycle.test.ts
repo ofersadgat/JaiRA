@@ -16,9 +16,9 @@ import { writeFileSync, mkdirSync } from "node:fs";
 
 const WORKFLOW: Record<string, unknown> = {
   label: "Wf",
-  inputs: { x: { type: "string" } },
-  outputs: { y: { type: "string" } },
-  agent: { provider: "p", prompt: { template: "do {{inputs.x}}" } },
+  inputs: { x: { schema: { type: "string" } } },
+  outputs: { y: { schema: { type: "string" } } },
+  operation: { kind: "prompt", prompt: { template: "do {{inputs.x}}" }, config: { model: "p" } },
 };
 
 let dir: string;
