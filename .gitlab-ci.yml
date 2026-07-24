@@ -24,3 +24,5 @@ build:
   script:
     - npm run typecheck
     - npm test
+    # Bundles main/preload + renderer; the app is not launched in CI.
+    - npm run app:build

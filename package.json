@@ -11,7 +11,11 @@
     "typecheck": "tsc --noEmit -p packages/shared && tsc --noEmit -p packages/persistence && tsc --noEmit -p packages/runtime && tsc --noEmit -p packages/cli && tsc --noEmit -p packages/app",
     "test": "vitest run",
     "test:watch": "vitest",
-    "jaira": "tsx packages/cli/src/main.ts"
+    "jaira": "tsx packages/cli/src/main.ts",
+    "app": "npm --workspace @jaira/app run start",
+    "app:build": "npm --workspace @jaira/app run build",
+    "abi:node": "node scripts/nativeAbi.mjs node",
+    "abi:electron": "node scripts/nativeAbi.mjs electron"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
