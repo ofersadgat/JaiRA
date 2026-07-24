@@ -11,13 +11,8 @@
   "dependencies": {
     "@declarative-ai/exec": "file:../../../declarative-ai/packages/exec",
     "@declarative-ai/hw": "file:../../../declarative-ai/packages/hw",
-    "@declarative-ai/json": "file:../../../declarative-ai/packages/json",
-    "@declarative-ai/llm": "file:../../../declarative-ai/packages/llm",
-    "@declarative-ai/ops": "file:../../../declarative-ai/packages/ops",
-    "@declarative-ai/permissions": "file:../../../declarative-ai/packages/permissions",
-    "@declarative-ai/promptop": "file:../../../declarative-ai/packages/promptop",
-    "@declarative-ai/validate": "file:../../../declarative-ai/packages/validate",
     "@jaira/persistence": "*",
+    "@jaira/runtime": "*",
     "@jaira/shared": "*"
   }
 }

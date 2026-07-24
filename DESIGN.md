@@ -192,6 +192,48 @@ crash recovery). What changed here, and why:
     the repo can reference the correct name. Renaming the real directory and
     deleting the junction is a no-op for this repo.
 
+## 1d. Status Update — 2026-07-24 (phase 3 foundation)
+
+The headless half of §14 phase 3 is built and tested (66 tests): the board
+projection, the view/IPC contract, the app service, and a `jaira board` command.
+The Electron shell and React renderer are the remaining phase-3 work.
+
+1. **The board is a projection of the event journal, not a second state machine**
+   (`persistence/src/projection.ts`). Folding `EngineEvent`s yields the instance
+   tree, each instance's status, and the active path; a card's column is simply
+   where its active path enters that level. This is what makes §12's "the board
+   never disagrees with the engine" structural rather than aspirational. Two
+   event shapes needed care: `child.superseded` carries the **parent's**
+   instance id (so a sequence reset marks that parent's children superseded,
+   preserving history per §4.2), and `instance.blocked` carries an
+   `instanceId: -1` sentinel — an input-wiring failure means no instance ever
+   existed, so it is recorded as a blocked child rather than a phantom node.
+2. **`waiting_for_user` needs the registry, not just the document.** The journal
+   records `operation.started { op: "function" }` without saying whether that
+   function is a human gate, so the projection takes the set of interactive
+   function names from its caller (the app passes what it routes to the
+   renderer). Without it a parked gate would read as plain `running`.
+3. **A new `runtime/` package** (Δ to §2.1) holds the engine harness — provider
+   defaults, the capability registry, the prompt executor, the scripted
+   fake/interaction doubles, and the demo workflow — shared by the CLI and the
+   Electron main process. The alternative was the app depending on the CLI, which
+   inverts the dependency; and the read models (`persistence/src/views.ts`) are
+   shared the same way, so the CLI and the app render the *same* board.
+4. **Interactive states reach the UI through an `InteractionHub`** (§7.1, and the
+   §1c item 4 replacement for `InteractionPort`). It registers interactive
+   functions that park the call and emit a request; only `submit` resolves one,
+   and only the IPC layer calls `submit` — so SPEC §11.4's guarantee (an agent
+   cannot fabricate a human decision) is preserved by construction. A scripted
+   answer takes precedence over the hub, so demo runs never block.
+5. **`AppService.close()` is async, deliberately.** An aborted run keeps
+   journaling for a beat and still has a `finishTaskRun` to write, so closing the
+   database first threw "database connection is not open" from inside the engine's
+   event tee and left the task row `running`. Close now awaits in-flight runs.
+6. **`jaira board [--level] [--json]`** renders the same projection headlessly,
+   so the phase-3 milestone is observable (and testable) without the GUI: an
+   interrupted task shows in the column it died in, a completed one moves to
+   *finished*.
+
 ## 2. Architecture Overview
 
 ```text
