@@ -28,7 +28,7 @@
  */
 import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, SmartVerdict } from "@declarative-ai/permissions";
 import { describeCommand, parseCommand, type CommandDialect, type ParsedCommand } from "./command";
-import { isWslEnv, type ExecEnv } from "./paths";
+import { dialectFor, type ExecEnv } from "./paths";
 
 /** What a rule does when it matches — DESIGN §10.1's vocabulary. */
 export type PolicyAction = "allow" | "deny" | "require_approval";
@@ -271,7 +271,9 @@ export interface PolicyAuditEntry {
  * `require_approval`, which is what routes a decision to the human gate.
  */
 export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions = {}): ExecPolicy {
-  const dialect: CommandDialect = isWslEnv(options.execEnv ?? "windows") ? "posix" : "powershell";
+  // Same rule as the interpreter that will actually run the command (see
+  // `interpreterFor`): WSL is POSIX, and native follows the host platform.
+  const dialect: CommandDialect = dialectFor(options.execEnv ?? "windows");
   const audit = (entry: PolicyAuditEntry): void => options.onDecision?.(entry);
 
   const verdictFor = (tool: string, req: PermissionRequest): SmartVerdict => {

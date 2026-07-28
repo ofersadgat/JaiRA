@@ -3,7 +3,7 @@
  * mapping edge cases": one mapper, exhaustively exercised).
  */
 import { describe, expect, it } from "vitest";
-import { distroOf, hostPathFor, isWslEnv, pathFor, samePath, samePathKey, toWindowsPath, toWslPath } from "../src/paths";
+import { dialectFor, distroOf, hostPathFor, interpreterFor, isWindowsHost, isWslEnv, pathFor, samePath, samePathKey, toWindowsPath, toWslPath } from "../src/paths";
 
 describe("toWslPath", () => {
   const cases: Array<[string, string]> = [
@@ -105,5 +105,28 @@ describe("samePath", () => {
     expect(samePath(hostPathFor({ wsl: "Ubuntu" }, fromGit), recorded)).toBe(true);
     // Native projects need only the separator/case normalization.
     expect(samePath(hostPathFor("windows", "C:/work/x"), "C:\\work\\x")).toBe(true);
+  });
+});
+
+describe("host-shaped execution", () => {
+  it("picks the interpreter and dialect together, per host", () => {
+    // The property that matters: the language the policy PARSES must be the language
+    // the interpreter EXECUTES. Verified for both hosts from either OS, because CI
+    // runs on Linux where there is no PowerShell (this was a real CI failure).
+    expect(interpreterFor("windows", "win32")[0]).toBe("powershell.exe");
+    expect(dialectFor("windows", "win32")).toBe("powershell");
+
+    expect(interpreterFor("windows", "linux")).toEqual(["/bin/sh", "-c"]);
+    expect(dialectFor("windows", "linux")).toBe("posix");
+    expect(interpreterFor("windows", "darwin")).toEqual(["/bin/sh", "-c"]);
+
+    // WSL is POSIX regardless of the host it is launched from.
+    for (const platform of ["win32", "linux"]) {
+      expect(interpreterFor({ wsl: "Ubuntu" }, platform)).toEqual(["bash", "-lc"]);
+      expect(dialectFor({ wsl: "Ubuntu" }, platform)).toBe("posix");
+    }
+
+    expect(isWindowsHost("win32")).toBe(true);
+    expect(isWindowsHost("linux")).toBe(false);
   });
 });

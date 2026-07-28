@@ -26,7 +26,7 @@ import { isPermissionDenied, PermissionLedger, withPermission } from "@declarati
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { NodeExec, type Exec } from "./exec";
 import { isDeniedPath } from "./policy";
-import { isWslEnv, type ExecEnv } from "./paths";
+import { interpreterFor, type ExecEnv } from "./paths";
 
 export interface ToolOptions {
   exec?: Exec;
@@ -83,16 +83,14 @@ export function createBashTool(options: ToolOptions = {}): Tool {
       const cwd = root !== undefined && relative !== undefined ? `${root}/${relative}` : root;
 
       // The model hands over ONE string, which needs an interpreter — unlike every
-      // other Exec caller, which passes argv. Rather than letting Exec spawn a
-      // shell (it never does, by design), the interpreter is named explicitly and
-      // the command is passed to it as a single argument. Naming it also keeps the
-      // interpreter consistent with the dialect the POLICY parsed the command with
-      // (`compilePolicy` picks posix for WSL, PowerShell otherwise) — a mismatch
-      // there would mean judging one language and executing another.
+      // other Exec caller, which passes argv. Rather than letting Exec spawn a shell
+      // (it never does, by design), the interpreter is named explicitly and the
+      // command passed to it as a single argument. `interpreterFor` and the policy's
+      // `dialectFor` are the same decision, so the language judged is the language
+      // executed — and both follow the real host, since native execution on Linux
+      // has no PowerShell.
       const env: ExecEnv = options.execEnv ?? "windows";
-      const [interpreter, ...prefix] = isWslEnv(env)
-        ? (["bash", "-lc"] as const)
-        : (["powershell.exe", "-NoProfile", "-NonInteractive", "-Command"] as const);
+      const [interpreter, ...prefix] = interpreterFor(env);
 
       const result = await exec.run(interpreter, [...prefix, command], {
         ...(cwd !== undefined ? { cwd } : {}),
