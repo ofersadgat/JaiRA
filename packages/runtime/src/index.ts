@@ -15,3 +15,4 @@ export * from "./componentsWorkflow";
 export * from "./paths";
 export * from "./exec";
 export * from "./git";
+export * from "./command";
