@@ -130,17 +130,30 @@ then decides what to do.
 
 ### 3.2 Operations
 
-A state does its work by running operations. Operation kinds:
+A state does its work by running **one operation**, and by entering child states.
 
-- `ui`: a built-in UI component that collects structured data from the user.
-- `agent`: a local agent run driven by the state's prompt.
-- `skill`: a named reusable skill invoked through the agent runtime.
-- Child states, entered by sequence order or by explicit transition.
+There are two operation kinds:
 
-A state may declare any combination of these. Operations run one at a time in a
-fixed priority order: `ui`, then `agent`, then `skill`, then child states in
-`sequence` order. Async child states are the only exception to one-at-a-time
-execution.
+- `prompt`: one structured LLM call.
+- `function`: invoke a registered function.
+
+Everything that is not a bare LLM call is a `function`. A **UI component is a
+function** that renders a dialog and returns structured data; a **local agent is a
+function** whose implementation drives that agent; a **skill** is a named prompt
+template referenced from a `prompt` operation. What distinguishes them is the
+registered implementation's declared capabilities, never the state file — which is
+why the same workflow runs against a real agent, a different agent, or a scripted
+test double unchanged.
+
+> Revised. This section originally listed `ui` / `agent` / `skill` as separate
+> operation kinds a state could combine, run in a fixed priority order. Collapsing
+> them to one operation removed the priority rule entirely and made human
+> interaction, delegation, and host code the same mechanism. See DESIGN §1c and
+> WORKFLOWS.md.
+
+A state therefore does at most one thing itself, then transitions. Child states
+are entered by sequence order or by explicit transition; async child states are
+the only exception to one-at-a-time execution.
 
 ### 3.3 Evaluation Loop
 
@@ -279,8 +292,8 @@ Good:
   "critique": {
     "state": "feature/plan/critique",
     "inputs": {
-      "plan_doc": "children.context.outputs.plan_doc",
-      "goals": "children.goals.outputs.goals"
+      "plan_doc": { "child": "context", "output": "plan_doc" },
+      "goals": { "child": "goals", "output": "goals" }
     }
   }
 }
@@ -292,17 +305,38 @@ Bad:
 The critique state directly reads ../context.outputs.plan_doc.
 ```
 
-Wiring values are expressions evaluated against the parent's context. A bare
-string is a reference; literal values must be wrapped:
+Wiring values are **bindings**, not expression strings. Each names where the value
+comes from:
 
-```json
-{ "severity_threshold": { "value": "significant" } }
+```text
+{ "child": "context", "output": "plan_doc" }   a declared child's output
+{ "child": "critique" }                        a child's whole output object
+{ "input": "issue" }                           this state's declared input
+{ "expr": "outputs.n + 1" }                    a small computation
+{ "artifact": "name" }                         a session artifact
+{ "conversation": "review", "message": 0 }     a transcript, or one message
+{ "text": "significant" }                      a string literal
+{ "json": { "a": 1 } }                         a JSON literal
 ```
+
+> Revised. Wiring was originally a bare expression string
+> (`"children.context.outputs.plan_doc"`) with literals wrapped as
+> `{ "value": … }`. Naming the reference kind explicitly is what lets the loader
+> check every wire against the consuming slot's schema before anything runs,
+> instead of discovering a type error mid-flight. The expression language survives
+> where control flow needs it — transition guards, `limits`, and the `{ expr }`
+> binding.
 
 ### 4.3 Outputs
 
-Outputs are named values produced by a state. An output may declare a `from`
-expression, evaluated against the state's context when the state terminates.
+Outputs are named values produced by a state. An output may declare a `binding`,
+resolved against the state's context when the state terminates; an output with no
+binding must be produced by the state's operation.
+
+> Revised: an output's `from` expression is now that slot's `binding`, drawn from
+> the same vocabulary as input wiring (§4.2). `"from": "children.x.outputs.y"`
+> becomes `"binding": { "child": "x", "output": "y" }`, and a computed one becomes
+> `"binding": { "expr": "…" }`.
 
 Outputs should be schema-validated when they are used for:
 
@@ -322,12 +356,14 @@ Example:
 {
   "outputs": {
     "child_outputs": {
-      "type": "passthrough",
-      "from": "children.critique.outputs"
+      "binding": { "child": "critique" }
     }
   }
 }
 ```
+
+A passthrough is simply a slot that declares no schema — it constrains nothing —
+bound to a whole child. There is no `"type": "passthrough"`.
 
 Rule:
 
@@ -338,27 +374,29 @@ should be explicitly typed.
 
 ### 4.5 Parameters
 
-Parameters configure reusable states.
-
-Example:
+Parameters configure reusable states. They are **inputs with defaults** — there is
+no separate `params` block:
 
 ```json
 {
-  "params": {
+  "inputs": {
     "severity_threshold": {
-      "type": "string",
-      "enum": ["minor", "significant", "critical"],
+      "schema": { "type": "string", "enum": ["minor", "significant", "critical"] },
       "default": "significant"
     },
     "max_findings": {
-      "type": "number",
+      "schema": { "type": "number" },
       "default": 10
     }
   }
 }
 ```
 
-Parameters can be optional when they have defaults.
+A slot with a `default` is optional: a parent may wire it or leave it alone.
+
+> Revised: `params` was a second slot namespace that behaved exactly like an input
+> with a default, so it also needed its own expression namespace and its own
+> wiring rules. Folding it into `inputs` removed all three.
 
 ### 4.6 Artifacts
 
@@ -372,9 +410,20 @@ Artifacts are durable work products. Examples:
 - Conversation summaries.
 - Full conversation logs.
 
+An artifact is a **slot whose schema declares a content media type** — the loader
+derives the `blob` kind from it. There is no `"type": "artifact"`:
+
+```json
+{ "plan_doc": { "schema": { "type": "string", "contentMediaType": "text/markdown" } } }
+```
+
 Git is responsible for artifact versioning. JaiRA records artifact references
 and workflow metadata, but artifact history is delegated to the project Git
 repository.
+
+> Status: artifacts currently live **in memory only** — the content travels inline
+> through the run and nothing is written to the filesystem, so the delegation to
+> Git described above is not yet real. See TODO.md and DESIGN §7.5.
 
 ### 4.7 Conversations
 
@@ -406,22 +455,25 @@ but the MVP should define canonical JSON semantics first.
 id
 label
 description
-params
 inputs
 outputs
-agent
-skill
-ui
+operation
+environment
 children
 sequence
 transitions
 limits
 ```
 
+> Revised. `params`, `agent`, `skill` and `ui` are gone: configuration folded into
+> `inputs` (§4.5), and the three operation blocks collapsed into one `operation`
+> plus a sibling `environment` (§3.2). WORKFLOWS.md is the full field reference.
+
 ### 5.2 Field Summary
 
 `id`
-: State ID, equal to relative path without suffix.
+: State ID, equal to relative path without suffix. May be omitted and derived;
+  if present it must match.
 
 `label`
 : Human-readable state name.
@@ -429,29 +481,28 @@ limits
 `description`
 : Short explanation of the state purpose.
 
-`params`
-: Reusable state configuration.
-
 `inputs`
-: Schema for values the state receives.
+: Slots the state receives — schema, optional binding, default, optionality.
 
 `outputs`
-: Schema for values the state emits.
+: Slots the state emits. A slot with a `binding` is derived on termination; one
+  without is produced by the operation.
 
-`agent`
-: Local AI agent execution configuration.
+`operation`
+: The single unit of work: `{ "kind": "prompt", … }` or
+  `{ "kind": "function", … }`. Absent for a pure composite.
 
-`skill`
-: Named reusable skill invocation, executed through the agent runtime.
-
-`ui`
-: Built-in user interface component configuration.
+`environment`
+: How the operation runs rather than what it is — logical `session`, the `tools`
+  it may call, the `conversation` mode, and the authored `permissions` baseline.
 
 `children`
 : Declared child states, their input wiring, and async flags.
 
 `sequence`
-: Default order for child execution.
+: The order the engine advances its cursor through children. Not a barrier:
+  independent children run concurrently, and real ordering comes from dataflow
+  (§10.4).
 
 `transitions`
 : Local transition rules.
@@ -472,8 +523,17 @@ References to a child that has started but not yet finished are pending, not
 evaluation round, and input wiring using one waits for it to resolve
 (Section 10.4).
 
-The same language is used for transition conditions, input wiring references,
-and output `from` expressions.
+The same language is used for transition conditions and for `{ "expr": … }`
+bindings — the one binding form that computes rather than references (§4.2).
+
+**Guards are strictly boolean.** A transition condition must *infer* to boolean;
+there is no truthiness coercion, so `"when": "outputs.goals"` is a validation
+error rather than a non-empty test. Write `"outputs.goals.length > 0"`.
+
+> Revised: the paragraph above says equality and truthiness "behave exactly as in
+> JavaScript". They do inside an expression, but a guard's *result* is checked at
+> load time, which catches `when: "outputs.x"` before a run rather than silently
+> branching on a non-empty string.
 
 The expression language should support:
 
@@ -521,20 +581,24 @@ The expression language must be pure. It must not support:
 
 Expressions may read from a controlled context.
 
-Suggested namespaces:
+Namespaces, split by role:
 
 ```text
-inputs.*
+inputs.*                     data — readable from guards and { expr } bindings
 outputs.*
-params.*
-ui.*
-children.<id>.outputs.*
-children.<id>.outcome
-run.*
-limits.*
+children.<key>.outputs.*
+children.<key>.outcome
 artifacts.*
 conversations.*
+
+run.iteration                control flow — guards only
+limits.*
 ```
+
+> Revised: `params.*` is gone with the `params` block (§4.5), and `ui.*` is gone
+> because a UI component is an ordinary function whose result is a state output —
+> so guards read `outputs.*` uniformly, whatever produced them. `children` is keyed
+> by the declared **child key**, which is not necessarily the child's state id.
 
 ## 7. Agent Execution
 
@@ -580,60 +644,53 @@ Agents may not:
   "description": "Review the current plan for significant weaknesses.",
   "inputs": {
     "plan_doc": {
-      "type": "artifact",
-      "format": "markdown"
+      "schema": { "type": "string", "contentMediaType": "text/markdown" }
     },
     "severity_threshold": {
-      "type": "string",
-      "enum": ["minor", "significant", "critical"],
+      "schema": { "type": "string", "enum": ["minor", "significant", "critical"] },
       "default": "significant"
     }
   },
   "outputs": {
     "outcome": {
-      "type": "string",
-      "enum": ["clean", "needs_changes", "blocked"]
+      "schema": { "type": "string", "enum": ["clean", "needs_changes", "blocked"] }
     },
     "weaknesses": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
+      "schema": { "type": "array", "items": { "type": "string" } }
     },
     "critique_report": {
-      "type": "artifact",
-      "format": "markdown"
+      "schema": { "type": "string", "contentMediaType": "text/markdown" }
     },
     "human_decision": {
-      "type": "string",
-      "enum": ["approve", "request_changes", "block"],
+      "schema": { "type": "string", "enum": ["approve", "request_changes", "block"] },
       "optional": true,
-      "from": "children.human_review.outputs.decision"
+      "binding": { "child": "human_review", "output": "decision" }
     }
   },
-  "agent": {
-    "provider": "claude_code",
-    "conversation": {
-      "mode": "full_history"
-    },
+  "environment": {
+    "conversation": { "mode": "full_history" }
+  },
+  "operation": {
+    "kind": "prompt",
     "prompt": {
       "template": "Review the plan document. Find significant weaknesses at or above the configured severity threshold. Return structured output matching this state's output schema."
-    }
+    },
+    "config": { "model": "anthropic/claude-sonnet-5" }
   },
   "children": {
     "address_weaknesses": {
       "state": "feature/plan/critique/address_weaknesses",
       "inputs": {
-        "plan_doc": "inputs.plan_doc",
-        "weaknesses": "outputs.weaknesses",
-        "critique_report": "outputs.critique_report"
+        "plan_doc": { "input": "plan_doc" },
+        "weaknesses": { "expr": "outputs.weaknesses" },
+        "critique_report": { "expr": "outputs.critique_report" }
       }
     },
     "human_review": {
       "state": "feature/plan/critique/human_review",
       "inputs": {
-        "plan_doc": "inputs.plan_doc",
-        "critique_report": "outputs.critique_report"
+        "plan_doc": { "input": "plan_doc" },
+        "critique_report": { "expr": "outputs.critique_report" }
       }
     }
   },
@@ -696,32 +753,35 @@ Suggested MVP components:
   "label": "Human Review",
   "inputs": {
     "plan_doc": {
-      "type": "artifact",
-      "format": "markdown"
+      "schema": { "type": "string", "contentMediaType": "text/markdown" }
     },
     "critique_report": {
-      "type": "artifact",
-      "format": "markdown"
+      "schema": { "type": "string", "contentMediaType": "text/markdown" }
     }
   },
   "outputs": {
     "decision": {
-      "type": "string",
-      "enum": ["approve", "request_changes", "block"]
+      "schema": { "type": "string", "enum": ["approve", "request_changes", "block"] }
     },
     "comments": {
-      "type": "string",
-      "format": "markdown",
+      "schema": { "type": "string", "contentMediaType": "text/markdown" },
       "optional": true
     }
   },
-  "ui": {
-    "component": "choose_option",
-    "prompt": "Review the critique result.",
-    "options": ["approve", "request_changes", "block"]
+  "operation": {
+    "kind": "function",
+    "function": "choose_option",
+    "config": {
+      "prompt": "Review the critique result.",
+      "options": ["approve", "request_changes", "block"]
+    }
   }
 }
 ```
+
+> Revised: the `ui` block is an ordinary `function` operation naming a registered
+> component. The component name moves from `ui.component` to `operation.function`,
+> and the rest of the block becomes the operation's authored `config`.
 
 This state declares no transitions: once the component completes, no
 operations remain, so the state terminates with `terminate.success` and its
@@ -735,47 +795,41 @@ validated outputs. The parent branches on `outputs.decision`.
   "label": "Planning",
   "inputs": {
     "issue": {
-      "type": "artifact",
-      "format": "markdown"
+      "schema": { "type": "string", "contentMediaType": "text/markdown" }
     }
   },
   "outputs": {
     "outcome": {
-      "type": "string",
-      "enum": ["complete", "blocked"],
-      "from": "children.critique.outputs.outcome === 'clean' ? 'complete' : 'blocked'"
+      "schema": { "type": "string", "enum": ["complete", "blocked"] },
+      "binding": { "expr": "children.critique.outputs.outcome === 'clean' ? 'complete' : 'blocked'" }
     },
     "plan_doc": {
-      "type": "artifact",
-      "format": "markdown",
-      "from": "children.context.outputs.plan_doc"
+      "schema": { "type": "string", "contentMediaType": "text/markdown" },
+      "binding": { "child": "context", "output": "plan_doc" }
     },
     "critique": {
-      "type": "passthrough",
-      "from": "children.critique.outputs"
+      "binding": { "child": "critique" }
     }
   },
   "children": {
     "goals": {
       "state": "feature/plan/goals",
       "inputs": {
-        "issue": "inputs.issue"
+        "issue": { "input": "issue" }
       }
     },
     "context": {
       "state": "feature/plan/context",
       "inputs": {
-        "issue": "inputs.issue",
-        "goals": "children.goals.outputs.goals"
+        "issue": { "input": "issue" },
+        "goals": { "child": "goals", "output": "goals" }
       }
     },
     "critique": {
       "state": "feature/plan/critique",
       "inputs": {
-        "plan_doc": "children.context.outputs.plan_doc",
-        "severity_threshold": {
-          "value": "significant"
-        }
+        "plan_doc": { "child": "context", "output": "plan_doc" },
+        "severity_threshold": { "text": "significant" }
       }
     }
   },
@@ -1055,8 +1109,13 @@ resume its current active state.
 
 ## 15. Open Design Questions
 
-These questions are not required for the first implementation, but should be
-resolved before expanding beyond the MVP:
+**All twelve are resolved — see the table in DESIGN §15.** Two are worth reading
+here because the answer differs from what the question assumed: #1 (artifacts) is
+resolved as a reserved directory, but is **not yet implemented** — artifacts live
+in memory today (§4.6); and #4's five components shipped exactly as listed, but as
+*functions*, not as a `ui` block (§8).
+
+The original questions, kept for the record:
 
 1. Should artifacts be stored in a reserved JaiRA directory, or can users choose
    project-specific artifact paths?

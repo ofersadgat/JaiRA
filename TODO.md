@@ -9,16 +9,19 @@ oversights. Phase numbers refer to [DESIGN.md](DESIGN.md) §14; status updates
 These live in phases marked ✅. They are real, and each one is a bug the moment
 its assumption breaks.
 
-- [ ] **No project ownership or locking** (§1b item 4 said phase 3 would add it;
-      it did not). Recovery marks every `running` task `interrupted` at project
-      open, because v1 assumes one process owns `.jaira/` at a time. Two processes
-      on the same project — the app plus a CLI, or two app windows — means the
-      second falsely interrupts the first's live run. Needs a lock file (or a
-      single owning process the CLI defers to) before concurrent use is safe.
-- [ ] **Cancel is in-process only** (§1b item 5). `AppService.cancelTask` aborts a
-      run *this* process is driving; a run started by the CLI cannot be stopped
-      from the app, and vice versa. A cross-process cancel channel was deferred
-      with the ownership work above.
+- [ ] **No liveness signal on a `running` run** (§1b item 4 said phase 3 would add
+      ownership; it did not). SQLite is *not* the constraint — WAL handles
+      concurrent processes. The constraint is that at project open, "the writer
+      crashed" and "the writer is another live process" are indistinguishable, so
+      recovery must choose a failure mode; v1 chose assume-crashed, which falsely
+      interrupts a live run when a second process opens the project. **Cheap fix:**
+      record an owner (pid + heartbeat) on the run row and only interrupt runs whose
+      owner is provably gone.
+- [ ] **Cancel and parked requests are process-local** — the expensive half of the
+      same problem, and the reason a lock alone is not enough. The abort controller,
+      the interaction hub and the approval hub all live in the process driving the
+      run, so a gate the CLI parked on cannot be answered from the app however the
+      ownership question is settled. Real multi-process use needs a routing channel.
 - [ ] **No project-open UI.** The `project:open` IPC channel and the store's
       `openProject` action both exist and are unused: the app opens whatever
       `JAIRA_PROJECT` / argv / cwd supplies, with no folder picker.

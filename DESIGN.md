@@ -98,6 +98,23 @@ workflow-level crash recovery. Deviations from this document as drafted:
    A second process opening while a run is live would falsely interrupt it —
    acceptable headless; phase 3 must add ownership (app holds the project, CLI
    defers or locks).
+
+   > **Still open after phase 7, and the reason is worth stating precisely.**
+   > SQLite is not the constraint — WAL handles concurrent processes fine. The
+   > constraint is that a `running` row carries **no liveness signal**, so at open
+   > time "the writer crashed" and "the writer is another live process" are
+   > indistinguishable. Given that ambiguity, recovery must pick a failure mode:
+   > assume-crashed (a live run is falsely interrupted) or assume-alive (a genuinely
+   > crashed task is stuck `running` forever, with no path back). v1 picked the
+   > recoverable one.
+   >
+   > That half is cheap to fix — record an owner (pid + a heartbeat timestamp) on
+   > the run row and only interrupt runs whose owner is provably gone. The
+   > expensive half is elsewhere: **cancel and parked requests are process-local**.
+   > An abort controller, an interaction hub and an approval hub all live in the
+   > process driving the run, so a gate the CLI parked on cannot be answered by the
+   > app whatever the lock says. Real multi-process use needs a routing channel, not
+   > just a lock (TODO.md).
 5. **Cancel is in-process only for live runs.** `jaira task cancel` records a
    terminal `canceled` for queued/interrupted/stale-running tasks; a live run
    is canceled by SIGINT in the owning process (engine abort → `canceled`
@@ -826,8 +843,12 @@ access, `(…)`, `!`, the spec's binary/comparison/boolean operators, `?:`, and
 `.length`. No calls, no indexing in MVP (add `[n]` later if needed).
 
 Evaluation context is a read-only object graph assembled per instance:
-`inputs`, `outputs`, `params`, `ui`, `children.<key>` (`outputs`, `outcome`),
-`run` (`iteration`), `limits`, `artifacts`, `conversations`.
+`inputs`, `outputs`, `children.<key>` (`outputs`, `outcome`), `artifacts`,
+`conversations`, plus the guard-only scalars `run` (`iteration`) and `limits`.
+
+> Revised (§1c): `params` and `ui` are gone from the context. Parameters folded
+> into `inputs`, and a UI component's result is an ordinary state output — so
+> guards read `outputs.*` uniformly, whatever produced them.
 
 Two non-JS semantics from spec §6, implemented in the evaluator:
 
@@ -861,15 +882,30 @@ auto-enforce it, but the validator warns on unguarded cycles (§5.2).
 
 ## 7. Operations
 
+> **§7 as built.** A state has ONE `operation`, `prompt` or `function` (§1c item 1).
+> The three subsections below were written when `ui`, `agent` and `skill` were
+> separate operation kinds; each now describes a *shape of function*, not a shape
+> of state file. WORKFLOWS.md is the authoring reference.
+
 ### 7.1 UI Operations
 
-A `ui` operation writes a row to a `pending_ui` view (operations in status
-`waiting_for_user`) and sets the instance status `waiting_for_user`. The
-renderer pulls pending components over IPC, renders the built-in component with
-the instance's resolved inputs, and submits structured data back. The main
-process validates the payload against the component's contract **and** the
-state's output schema, then enqueues `ui.submitted`. Because this path is
+**As built:** a UI state is a `function` operation whose registered
+implementation is *interactive* (§1c item 4). No `pending_ui` table exists — the
+function is registered by the process that can answer it, and calling it parks the
+state until a human replies. `@jaira/runtime`'s `InteractionHub` backs it in the
+app; a headless run scripts the same function names with `--interactions`.
+
+The renderer receives the parked request over IPC with the instance's resolved
+inputs, renders the component, and submits structured data back. The main process
+validates the payload against the component's contract **and** the engine
+validates it against the state's output schema — two independent gates, because
+the renderer is the untrusted half of the boundary. Because this path is
 renderer-IPC-only, agents cannot fabricate UI outputs (spec §11.4).
+
+The projection cannot tell a gate from any other function by reading the journal
+(it records `op: "function"` either way), so the caller supplies the interactive
+function names — which is why `waiting_for_user` is a JaiRA-side fact rather than
+an engine one.
 
 MVP component set (§15, Q4): `choose_option`, `review_artifact`,
 `edit_markdown`, `fill_form`, `confirm_action`. Each is a React component with
@@ -879,7 +915,14 @@ markdown artifacts with the decision buttons supplied by the state config;
 
 ### 7.2 Agent Operations
 
-Delegated to a `RunnerAdapter` (§8) with a fully-resolved `RunSpec`:
+**As built:** an agent state is a `function` operation naming a runtime adapter
+(`claude-code`, `claude-cli`, `generic-cli`). The `RunSpec` below never existed in
+JaiRA — the adapters live upstream in `@declarative-ai/agents-api` / `agents-cli`,
+take their instruction from the op's `prompt` input and their surface from its
+`config` input, and read `ctx.workspace` / `ctx.policy` / `ctx.approve` from the
+engine. JaiRA's job is to name them and pass the exec environment (§1i item 7).
+The sketch is kept because the *fields* are still the right list of what an
+adapter needs:
 
 ```ts
 interface RunSpec {
@@ -894,54 +937,67 @@ interface RunSpec {
 }
 ```
 
-Prompt templates come from `agent.prompt.template` with `{{inputs.*}}` /
-`{{params.*}}` interpolation; artifact-typed inputs interpolate as worktree-
-relative paths plus an instruction line telling the agent to read the file.
+Prompt templates come from `operation.prompt.template` with `{{inputs.*}}`
+interpolation (there is no `params` namespace). Artifact-typed inputs were to
+interpolate as worktree-relative paths plus an instruction to read the file —
+**not built**: an artifact travels inline as content today (§7.5, TODO.md).
 
 ### 7.3 Conversation Modes (spec §4.7)
 
 - `full_history` (default): reuse the provider session when the adapter
   supports resume (Agent SDK, Claude Code `--resume`); otherwise replay the
   stored transcript artifact as prompt preamble.
-- `summary`: a stored summary artifact is injected as preamble. Summaries are
-  produced lazily by the `llm_api` adapter when a state first requests this
-  mode, and cached per conversation.
+- `summary`: **as built (§1j item 3)**, summarization is a `SessionStore`
+  decorator, not an artifact. Once a session's transcript passes a budget its
+  older turns are replaced by one summary turn produced through the run's own
+  prompt executor. It is scoped **per session**, so a session mixing `summary` and
+  `full_history` is summarized for both (the lint surface warns).
 - `fresh`: no context.
 - `selected_artifacts`: listed artifacts injected as preamble.
 
-Every agent operation appends its transcript to a conversation artifact
-(`jaira-artifacts/<taskId>/conversations/…`), so conversations are ordinary
-artifacts per the spec.
+Transcripts live in the run's session store, keyed by logical session id, and are
+readable as data through a `{ conversation }` binding. They are **not** written to
+`jaira-artifacts/…` — no artifact file is written at all yet (§7.5).
 
 ### 7.4 Skill Operations
 
 MVP skill = a directory under `.jaira/skills/<name>/` containing `skill.json`
 (params schema, expected outputs schema, provider requirements) and
-`prompt.md`. A `skill` operation is executed as an agent operation whose prompt
-is the skill's rendered template — it reuses the entire adapter/contract
-machinery and adds only registration and parameter binding (§15, Q11).
+`prompt.md`. A skill is **not a separate operation kind**: it is a `prompt`
+operation whose `prompt.skill` names a template resolved through
+`registry.skills` at render time (§15, Q11).
+
+**Not built.** `jaira init` creates `.jaira/skills/` and nothing reads it;
+`registry.skills` is never populated, so `prompt.skill` parses and lints but fails
+at run time. The remaining work is a loader plus registration — the prompt
+machinery it would reuse already exists (TODO.md).
 
 ### 7.5 Output Contract and Repair Loop
 
 Derived from the state's output schema at operation start:
 
-- **Artifact outputs** (`type: "artifact"`): the engine pre-assigns a target
-  path `jaira-artifacts/<taskId>/<instanceId>-<name>.<ext>` and injects it into
-  the prompt ("write X to path P"). After the run, the engine verifies
-  existence and format, records the artifact row + content hash.
+- **Artifact outputs** — a slot whose schema carries a `contentMediaType`, which
+  the loader lowers to the `blob` kind (there is no `type: "artifact"`).
+  **As built:** the value travels *inline* and the engine registers an
+  `ArtifactRef` — `{ artifact: true, name: "<state>#<instance>.<slot>", format,
+  content }` — held in memory for the run. A blob operation output fills exactly
+  one produced slot.
+  **Not built:** the pre-assigned `jaira-artifacts/<taskId>/<instanceId>-<name>.<ext>`
+  path, the "write X to path P" prompt injection, the post-run existence/format
+  check, and the content hash. `config.artifactDir` is parsed and unused. How this
+  *should* work is an open decision — see §7.6.
 - **Data outputs** (everything else): compiled into one JSON Schema. Delivery
-  channel is chosen by adapter capability, best first: native structured output
-  (Agent SDK, `llm_api`) → final-message fenced ```json block → an
-  `outputs.json` file at an engine-given path (fallback for generic CLI
-  runners).
-- **Passthrough outputs** are resolved engine-side from `from` expressions and
-  never appear in the contract.
+  channel is chosen by adapter capability, best first: native structured output →
+  final-message fenced ```json block → an `outputs.json` file at an engine-given
+  path (fallback for generic CLI runners).
+- **Derived outputs** (a slot with a `binding`) are resolved engine-side on
+  termination and never appear in the contract.
 
-Validation is always engine-side (Ajv), regardless of channel. On failure
-(missing artifact, unparsable payload, schema violation): the adapter re-invokes
-the **same conversation** with the concrete validation errors and the original
-contract — at most **2 repair turns** (recorded as `operations.attempt`), then
-the operation fails and the state terminates with `terminate.error`. This is
+Validation is always engine-side, regardless of channel. On failure (unparsable
+payload, schema violation): the prompt executor is re-invoked with the concrete
+validation errors and the original contract — at most **2 repair turns**
+(`DEFAULT_REPAIR_TURNS`, `withRetry({ validation: { turns, feedback: true } })`),
+then the operation fails and the state terminates with `terminate.error`. This is
 the confirmed "ask it to correct itself" strategy, bounded and audited.
 
 ## 8. Runner Adapter Layer
