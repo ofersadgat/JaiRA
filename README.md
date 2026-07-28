@@ -162,10 +162,18 @@ against `\\wsl$` — that is slow and permission-fragile.
 
 Set a route-prefixed model — `models.default` in `.jaira/config.json`, or a
 state's `operation.config.model` — and export `ANTHROPIC_API_KEY` (or
-`OPENROUTER_API_KEY`). Without `--fake`, prompt states execute through
-`@declarative-ai/promptop` over `@declarative-ai/llm`. A failed run prints
-`causes`: the operation-level reasons from the journal, rather than only the
-parent's "child X terminated with error".
+`OPENROUTER_API_KEY`); keys live in the environment, never in the repo. Without
+`--fake`, prompt states execute through `@declarative-ai/promptop` over
+`@declarative-ai/llm`. A failed run prints `causes`: the operation-level reasons
+from the journal, rather than only the parent's "child X terminated with error".
+
+> **Cost note.** The demo planning workflow uses `conversation: full_history` and
+> re-plans up to three times, so each iteration re-sends everything before it —
+> measured input tokens grew 232 → 317 → 1,396 → 3,975 → 10,598 → 21,033 → 42,828
+> across one run, reaching ~$0.25 in seven calls. That is the workflow's shape, not
+> a bug: a run taking minutes is normal, where a `--fake` run finishes in
+> milliseconds. Lower `limits.max_iterations` or use a narrower conversation mode
+> for routine use.
 
 > **Native-module ABI.** `better-sqlite3` is a V8-ABI addon, so one build cannot
 > serve both Node and Electron (Node 22 wants `NODE_MODULE_VERSION` 127, Electron

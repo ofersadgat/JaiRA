@@ -315,14 +315,13 @@ screenshot, plus 83 tests. What that phase settled:
 7. **A model is only required when a workflow actually calls one.** `modelDefaults`
    used to refuse any run without a configured model, which wrongly rejected a
    workflow made entirely of function states (host code, UI gates, agents).
-8. **Real-provider status.** The path is wired — `models.default` (or a state's
-   `operation.config.model`) → `@declarative-ai/promptop` → `@declarative-ai/llm`
-   → the Anthropic SDK — and a run reaches the provider and fails *only* on the
-   missing `ANTHROPIC_API_KEY`. The milestone's "end-to-end against real Claude"
-   half is therefore **unverified**: it needs a key in the environment. Note a
-   state's model must be route-prefixed for a real run (`anthropic/claude-sonnet-5`);
-   the demo workflow's role names (`planner`/`critic`/`fixer`) are fake-executor
-   labels, and `specPlanningFiles({ model })` swaps in a real id.
+8. **Real-provider status — verified 2026-07-28** (see §1h). The path is
+   `models.default` (or a state's `operation.config.model`) →
+   `@declarative-ai/promptop` → `@declarative-ai/llm` → the Anthropic SDK. Note a
+   state's model must be route-prefixed for a real run
+   (`anthropic/claude-sonnet-5`); the demo workflow's role names
+   (`planner`/`critic`/`fixer`) are fake-executor labels, and
+   `specPlanningFiles({ model })` swaps in a real id.
 9. **The approvals inbox lists pending human gates across tasks** — which is the
    whole inbox today. Per-command `require_approval` decisions (§10.2) are
    provider-initiated and arrive with the policy engine and process executors in
@@ -374,6 +373,39 @@ own git. What phase 5 settled:
 7. **Surfaces:** `jaira worktree list` (joined with tasks) and
    `jaira worktree remove <taskId> [--force]`; `task start` logs the worktree and
    branch; the app's detail panel shows both. `execEnvironment` is project config.
+
+## 1h. Status Update — 2026-07-28 (real Claude verified; a cost characteristic)
+
+The phase-4 milestone's remaining half is done: the SPEC §9 planning workflow ran
+against **real Claude** (`anthropic/claude-sonnet-5`) end to end, with the human
+review gate answered through the normal channel. The journal is the evidence —
+`critique → address_weaknesses (i1)`, `critique → terminate.success (i2)`,
+`plan → goals (i1)`, then the same again for `i2`, with six `child.superseded`
+events, i.e. SPEC §3.3's sequence resets clearing `goals`/`context`/`critique` on
+each re-plan. Killing the process mid-run also exercised recovery: the task came
+back `interrupted`, re-runnable from its pinned snapshot.
+
+Two things worth knowing before pointing this at real work:
+
+1. **`full_history` + a re-plan loop grows context geometrically.** Measured input
+   tokens per call across one run: 232 → 317 → 1,396 → 3,975 → 10,598 → 21,033 →
+   42,828. The critique state carries the whole conversation, and the parent's
+   `needs_changes` transition re-runs the pass up to `limits.max_iterations` (3),
+   so each iteration re-sends everything before it. That run reached **$0.25 in
+   seven calls** and was still climbing, which is why it looks like a hang next to
+   the sub-second scripted runs. Nothing is wrong — but a workflow with this shape
+   wants a `summary` conversation mode (phase 7) or a lower iteration cap before it
+   is routine.
+2. **Real critique output is not the scripted `clean`.** Sonnet returned
+   `needs_changes` on every pass, so the loop ran to its cap rather than
+   terminating early — a reminder that the fake-executor scripts encode the *happy*
+   path, and only a real run exercises the loop the SPEC was designed around.
+
+Also fixed here: **`.gitignore` did not cover `.env*`.** A `.env.local` holding
+real provider keys (and unrelated secrets) was sitting untracked in the repo while
+`git add -A` was being used routinely. Nothing ever reached a commit — verified
+across all history — and `.env`/`.env.*` are now ignored. Keys belong in the
+environment, never in the tree.
 
 ## 2. Architecture Overview
 
