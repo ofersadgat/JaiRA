@@ -18,3 +18,4 @@ export * from "./git";
 export * from "./command";
 export * from "./policy";
 export * from "./approval";
+export * from "./agents";

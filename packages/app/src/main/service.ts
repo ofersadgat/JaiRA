@@ -26,11 +26,14 @@ import {
   buildPromptExecutor,
   compilePolicy,
   executeWorkflow,
+  gateCapabilities,
+  registerAgentRuntimes,
   functionNamesOf,
   InteractionHub,
   modelDefaults,
   newRegistry,
   parseFakeRules,
+  policyCanEscalate,
   ScriptedFunctions,
   statusOfResult,
   type ApprovalRequest,
@@ -297,7 +300,23 @@ export class AppService {
     // Materialize the worktree before marking the task running, so a git failure
     // leaves it startable rather than `running` with nowhere to run (DESIGN §9.2).
     const workspace = await ensureWorkspace(project, taskId);
+    // Delegated agent runtimes are available to every run (DESIGN §8.1); a state
+    // reaches one with a `claude-code` function op.
+    registerAgentRuntimes(registry, { execEnv: project.config.execEnvironment });
+
     const started = beginTaskRun(project, taskId, { functions: registry.functions });
+
+    // §8.2: refuse a state whose runtime cannot enforce the policy it runs under,
+    // rather than letting it run unguarded.
+    const gateIssues = gateCapabilities(registry, started.bundle.source ?? {}, {
+      policyNeedsApproval: policyCanEscalate(project.config.policy),
+    });
+    if (gateIssues.length > 0) {
+      finishTaskRun(project, taskId, started.runId, "failed", {
+        failure: { classification: "permanent", reason: gateIssues[0]!.message },
+      });
+      throw new Error(gateIssues.map((i) => `${i.stateId}: ${i.message}`).join("; "));
+    }
     const abort = new AbortController();
     let settle!: () => void;
     const done = new Promise<void>((resolve) => (settle = resolve));
