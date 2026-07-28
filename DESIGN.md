@@ -725,6 +725,71 @@ Notes:
   every engine step appends its events and updates materialized rows in **one
   transaction**, so they can never disagree.
 
+### 4.2a The `jobs` Table — Process Claims and Liveness (decided 2026-07-28)
+
+Replaces the "put a pid + heartbeat on the run row" sketch in §1a item 4. A run
+and a *claim on* a run are different things and belong in different tables:
+
+- a **run** is history — durable, meaningful long after the process is gone,
+  read by the board and the detail view, pruned on its own schedule;
+- a **job** is a live process's claim — meaningful only while that process
+  breathes, and worthless the moment it doesn't.
+
+Columns on `runs` would mix a fact about the past with a fact about *now*, leave
+dead pid/heartbeat fields on every historical row, and overwrite the previous
+claim each time a task is re-run.
+
+```sql
+jobs (id PK AUTOINCREMENT,
+      kind,               -- 'run' | 'process'
+      run_id      → runs(id),      -- the run this job serves
+      task_id,
+      parent_job_id → jobs(id),    -- a child process points at its owning run job
+      owner_token,        -- random per PROCESS: identity without pid semantics
+      pid,                -- for reporting and (carefully) killing orphans
+      command,            -- what a 'process' job actually is
+      started_at, heartbeat_at,
+      cancel_requested_at,
+      ended_at, outcome)
+```
+
+**Liveness is a query, not a rule.** A `run` job whose `heartbeat_at` is older
+than the stale threshold has no live owner. Recovery becomes: for each `running`
+task, is there a live job? No ⇒ interrupt it. Yes ⇒ leave it alone. That is the
+whole fix for the false-interrupt problem, and it lives in one place instead of
+being an assumption baked into `recoverInterrupted`.
+
+**Identity is a token, not a pid.** A pid is not an identity — after a reboot or
+enough churn, pid 1234 is some other program. A random per-process `owner_token`
+plus a heartbeat answers "is the owner alive?" without pid semantics at all. `pid`
+is recorded only for the two things that genuinely need it: telling a human what
+is running, and killing an orphan — and killing needs pid **plus** start time to
+be safe, which is why v1 should *report* orphans and offer to kill rather than
+auto-killing.
+
+**Child processes are the strong argument, and were the thing missing entirely.**
+JaiRA spawns real OS children — git, `wsl.exe`, `claude`, a `generic-cli` agent, a
+`bash` command — and tracks none of them. If the app dies mid-run, an orphaned
+agent keeps running, keeps spending money, and keeps writing to the worktree,
+invisibly. Every child already goes through one seam (`runtime/exec.ts`), so
+recording them is a change in a single place.
+
+> **Layering:** `@jaira/runtime` must not import `@jaira/persistence` — the
+> dependency runs the other way. `Exec` therefore takes an optional
+> `onSpawn`/`onExit` observer that the app and CLI wire to the jobs store, rather
+> than writing rows itself.
+
+**It also buys most of cross-process cancel.** `cancel_requested_at` is a flag the
+owning process polls: no socket, no daemon. That downgrades the "expensive half"
+of §1a item 4 — *cancel* stops needing a routing channel; only **parked gates**
+still do, because answering one means routing a value back, not just raising a
+flag.
+
+Cost, stated plainly: a heartbeat timer per owning process, and a stale threshold
+that trades crash-detection latency against falsely reclaiming a live run (~5s
+beat, ~30s stale is the sane starting point). Clock skew is ignored — v1 is one
+machine.
+
 ### 4.3 Crash Recovery
 
 > **Revised by §1a item 1:** the engine no longer steps through SQLite
@@ -1004,30 +1069,68 @@ the confirmed "ask it to correct itself" strategy, bounded and audited.
 
 Resolves SPEC §15 Q1 properly. Two decisions drive everything else:
 
-**1. Where an artifact lands is configuration, not architecture.** All four
-placements are legitimate for different projects, so they are *modes*:
+**1. Where an artifact lands is configuration, expressed as a destination URI —
+not a fixed set of modes.**
 
-| `artifacts.mode` | Physical path | For |
-| --- | --- | --- |
-| `virtual` | none — content stays inline | Today's behaviour. Cheap, disposable runs; no filesystem semantics to reason about. |
-| `as-written` | exactly where the agent asked | Projects where the artifact *is* repo content — a patch, a migration, a doc that belongs in `docs/`. |
-| `central-relative` | `<root>/<dir>/<taskId>/<the agent's relative path>` | Keeps the author's structure but quarantines it out of the tree. |
-| `central` | `<root>/<dir>/<taskId>/<instanceId>-<slot>.<ext>` | Deterministic, collision-free, no path from the agent trusted at all. |
-
-`root` is the task **worktree** by default (so git versions artifacts per branch,
-which is what SPEC §4.6 asks for) and may be `.jaira/` for projects that want them
-out of the repo entirely. `.jaira/` is only viable *because* of decision 2: agents
-are policy-denied from `.jaira/**`, so nothing but JaiRA could write there.
+An enumeration of modes conflates two orthogonal things: the **storage backend**
+(memory or filesystem) and the **path derivation** (does the physical path keep
+the agent's relative path, or is it derived from task/instance/slot?). Three of
+the four scenarios differ *only* in derivation. A scheme plus a path template
+separates them, and one string then expresses all four — plus combinations no
+enumeration would have listed:
 
 ```jsonc
 // .jaira/config.json — replaces the flat `artifactDir` string
 "artifacts": {
-  "mode": "central",            // virtual | as-written | central-relative | central
-  "root": "worktree",           // worktree | jaira
-  "dir": "jaira-artifacts",     // ignored by `virtual` and `as-written`
+  "destination": "$WORKTREE/jaira-artifacts/$TASK_ID/$RELPATH",
   "inlineMaxBytes": 65536       // below this, keep content inline for cheap bindings
 }
 ```
+
+| Scenario | `destination` |
+| --- | --- |
+| Virtual — memory only (today) | `virtual:` |
+| As written — wherever the agent asked | `$WORKTREE/$RELPATH` |
+| Central, relative path preserved | `$WORKTREE/jaira-artifacts/$TASK_ID/$RELPATH` |
+| Central, flat and derived | `$WORKTREE/jaira-artifacts/$TASK_ID/$INSTANCE_ID-$SLOT.$EXT` |
+| Out of the repo entirely | `$JAIRA/artifacts/$TASK_ID/$RELPATH` |
+
+**Scheme = backend.** `virtual:` is memory; `fs:` is the filesystem and is
+**implicit when omitted**, so the common case reads as a path. Adding a backend
+later (an object store, git-lfs) adds a scheme rather than multiplying modes.
+
+**Variables = derivation**, from a closed vocabulary — unknown variables are a
+config error, not an empty string, on the same principle as the expression DSL:
+
+| Variable | Meaning |
+| --- | --- |
+| `$WORKTREE` | the task's worktree root (project dir if the task is unbound) |
+| `$PROJECT` | the project root |
+| `$JAIRA` | `<project>/.jaira` |
+| `$TASK_ID`, `$RUN_ID`, `$INSTANCE_ID`, `$STATE_ID`, `$SLOT` | run coordinates |
+| `$RELPATH` | the logical path the agent used, relative to the workspace |
+| `$BASENAME`, `$EXT` | decomposition of `$RELPATH` |
+
+Three rules keep it safe and portable:
+
+- **`$RELPATH` is agent-controlled**, so the *resolved* path is asserted to be
+  inside the template's root. This check is needed by the central-relative case
+  regardless of how the config is spelled, and it composes with the existing
+  `.jaira/**` deny rule rather than replacing it.
+- **Templates are POSIX-shaped and resolved late**, through `runtime/paths.ts`.
+  `$WORKTREE` is not one string: a WSL project's agent sees `/mnt/c/…` where the
+  host sees `C:\…`, so substitution happens *after* choosing the view.
+- **Anchor on variables, not a leading slash.** A leading `/` is ambiguous on
+  Windows; `$WORKTREE`/`$PROJECT`/`$JAIRA` say exactly what is meant. A template
+  with no anchor variable is relative to the workspace root.
+
+`$JAIRA` remains viable only because of decision 2: agents are policy-denied from
+`.jaira/**`, so nothing but JaiRA could write there.
+
+One thing this adds over an enum: a parser and a validation surface. It is worth
+it — the traversal check exists either way, the substitution is `$NAME` against a
+fixed table, and `jaira workflow lint` can check the template at config-load time
+rather than at first write.
 
 **2. JaiRA owns the write tool, so JaiRA controls the write.** This is the part
 that makes the modes possible rather than aspirational.
@@ -1079,9 +1182,10 @@ runner, or `bash` with a redirection) writes wherever it likes and never consult
 our read path. For those, reconciliation is *after the fact*: the workspace is a
 git worktree, so `git status --porcelain` names exactly the files an operation
 created or modified, and the configured mode is applied to them when the operation
-ends. In `as-written` that is a no-op. In the central modes the file is moved and
-recorded — but an agent that later re-reads its own path through its own tool will
-miss, because that read never reaches us either.
+ends. When the template is `$WORKTREE/$RELPATH` that is a no-op — the agent already
+put it where the config wanted it. When the template relocates, the file is moved
+and recorded — but an agent that later re-reads its own path through its own tool
+will miss, because that read never reaches us either.
 
 So the guarantee is tiered, and the tiers are the same ones §8.2 already grades
 runtimes by: **injected tools ⇒ the invariant holds; native tools ⇒ best-effort
@@ -1352,7 +1456,7 @@ remains the fastest debugging surface permanently.
 
 | # | Question | Resolution |
 | --- | --- | --- |
-| 1 | Artifact location | **Configurable** (§7.6): `virtual` \| `as-written` \| `central-relative` \| `central`, rooted at the task worktree (default) or `.jaira/`. JaiRA owns the agent's write tool, so it controls where bytes land while the agent still sees its own path. Designed, not built. |
+| 1 | Artifact location | **A configurable destination URI** (§7.6) — `virtual:` or an `fs:` path template over a closed variable set (`$WORKTREE`, `$TASK_ID`, `$RELPATH`, `$SLOT`, …), so backend and path derivation are independent. JaiRA owns the agent's write tool, so it controls where bytes land while the agent still sees its own path. Designed, not built. |
 | 2 | State file extension | `.json` inside `.jaira/workflows/` (directory already scopes meaning) |
 | 3 | Omit `id`? | Yes — derived from path; if present it must match (validator error otherwise) |
 | 4 | Minimum UI components | The spec's five: choose_option, review_artifact, edit_markdown, fill_form, confirm_action |

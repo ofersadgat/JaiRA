@@ -408,11 +408,11 @@ artifact and the slot's value becomes a reference:
 journal, so a large artifact bloats the database, and there is no content hash and
 no artifact viewer.
 
-DESIGN §7.6 settles how it *should* work — placement becomes configurable
-(`virtual` / `as-written` / `central-relative` / `central`, rooted at the task
-worktree or `.jaira/`), and JaiRA registers the agent's `write_file`/`read_file`
-tools so it controls where bytes land while the agent keeps seeing its own path.
-None of that is built yet; TODO.md has the list.
+DESIGN §7.6 settles how it *should* work — placement becomes a configurable
+destination URI (`virtual:`, or an `fs:` path template like
+`$WORKTREE/jaira-artifacts/$TASK_ID/$RELPATH`), and JaiRA registers the agent's
+`write_file`/`read_file` tools so it controls where bytes land while the agent
+keeps seeing its own path. None of that is built yet; TODO.md has the list.
 
 ---
 
