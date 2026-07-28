@@ -1065,7 +1065,7 @@ validation errors and the original contract — at most **2 repair turns**
 then the operation fails and the state terminates with `terminate.error`. This is
 the confirmed "ask it to correct itself" strategy, bounded and audited.
 
-### 7.6 Artifact Storage (decided 2026-07-28; not yet built)
+### 7.6 Artifact Storage (decided and built 2026-07-28)
 
 Resolves SPEC §15 Q1 properly. Two decisions drive everything else:
 
@@ -1082,31 +1082,45 @@ enumeration would have listed:
 ```jsonc
 // .jaira/config.json — replaces the flat `artifactDir` string
 "artifacts": {
-  "destination": "$WORKTREE/jaira-artifacts/$TASK_ID/$RELPATH",
+  "destination": "$DEFAULT",    // or "$CENTRAL", "$JAIRA/artifacts/$TASK_ID/$RELPATH", "virtual:", …
+  "dir": "jaira-artifacts",     // what $ARTIFACT_DIR expands to
   "inlineMaxBytes": 65536       // below this, keep content inline for cheap bindings
 }
 ```
 
 | Scenario | `destination` |
 | --- | --- |
-| Virtual — memory only (today) | `virtual:` |
-| As written — wherever the agent asked | `$WORKTREE/$RELPATH` |
-| Central, relative path preserved | `$WORKTREE/jaira-artifacts/$TASK_ID/$RELPATH` |
-| Central, flat and derived | `$WORKTREE/jaira-artifacts/$TASK_ID/$INSTANCE_ID-$SLOT.$EXT` |
+| As written — wherever the agent asked | `$DEFAULT` |
+| Central, relative path preserved | `$CENTRAL` |
+| Central, flat and derived | `$CENTRAL_FLAT` |
 | Out of the repo entirely | `$JAIRA/artifacts/$TASK_ID/$RELPATH` |
+| Virtual — memory only (today's behaviour) | `virtual:` |
 
-**Scheme = backend.** `virtual:` is memory; `fs:` is the filesystem and is
-**implicit when omitted**, so the common case reads as a path. Adding a backend
-later (an object store, git-lfs) adds a scheme rather than multiplying modes.
+**Scheme = backend.** `virtual:` is memory; `file:` is the filesystem and is
+**implicit when omitted**, so the common case reads as a plain path. Adding a
+backend later (an object store, git-lfs) adds a scheme rather than multiplying
+modes.
 
 **Variables = derivation**, from a closed vocabulary — unknown variables are a
-config error, not an empty string, on the same principle as the expression DSL:
+config error, not an empty string, on the same principle as the expression DSL.
+
+*Aliases*, so the ordinary choices are one word and the composite ones stay
+editable:
+
+| Alias | Expands to |
+| --- | --- |
+| `$DEFAULT` | `$WORKTREE/$RELPATH` |
+| `$CENTRAL` | `$WORKTREE/$ARTIFACT_DIR/$TASK_ID/$RELPATH` |
+| `$CENTRAL_FLAT` | `$WORKTREE/$ARTIFACT_DIR/$TASK_ID/$INSTANCE_ID-$SLOT.$EXT` |
+
+*Base variables:*
 
 | Variable | Meaning |
 | --- | --- |
 | `$WORKTREE` | the task's worktree root (project dir if the task is unbound) |
 | `$PROJECT` | the project root |
 | `$JAIRA` | `<project>/.jaira` |
+| `$ARTIFACT_DIR` | `artifacts.dir`, default `jaira-artifacts` |
 | `$TASK_ID`, `$RUN_ID`, `$INSTANCE_ID`, `$STATE_ID`, `$SLOT` | run coordinates |
 | `$RELPATH` | the logical path the agent used, relative to the workspace |
 | `$BASENAME`, `$EXT` | decomposition of `$RELPATH` |
@@ -1191,6 +1205,30 @@ So the guarantee is tiered, and the tiers are the same ones §8.2 already grades
 runtimes by: **injected tools ⇒ the invariant holds; native tools ⇒ best-effort
 reconciliation.** This is one more reason to prefer injected tools, alongside the
 policy argument — the same choice buys enforcement and artifact fidelity together.
+
+**Two containment levels, both found by tests rather than by reasoning:**
+
+1. *The final path must stay under the root* — where "root" is the template's
+   **author-fixed prefix**, truncated to the last directory boundary, not the
+   worktree. Anchoring on `$WORKTREE` let `$CENTRAL` plus `../../src/index.ts`
+   climb out of the artifact directory and overwrite source while still being
+   "inside the worktree" — technically true, entirely wrong.
+2. *The root itself must stay under its anchor.* The fixed prefix interpolates
+   config (`$ARTIFACT_DIR`), so `"dir": "../../escape"` placed the whole artifact
+   tree outside the project. Author-supplied, but a typo with filesystem-wide
+   reach. An explicitly **absolute** template is exempt — writing
+   `/var/artifacts/$RELPATH` is unambiguous intent, whereas `..` climbing out of an
+   anchor is not.
+
+**Two producers, one placement rule.** `write_file` covers an agent's writes; a
+state that *returns* blob content (a prompt writing a plan) never touches a tool,
+so `persistEngineArtifacts` walks the finished run's outputs for the engine's
+inline `ArtifactRef`s and applies the same destination. It runs **after** the run
+and reports rather than throws: the work is already done, and an unwritable file
+must not turn a completed run into a failed one.
+
+**Still open** (TODO.md): native-write reconciliation via `git status`, the
+detail-panel artifacts list, and pruning that follows the destination root.
 
 ## 8. Runner Adapter Layer
 
@@ -1456,7 +1494,7 @@ remains the fastest debugging surface permanently.
 
 | # | Question | Resolution |
 | --- | --- | --- |
-| 1 | Artifact location | **A configurable destination URI** (§7.6) — `virtual:` or an `fs:` path template over a closed variable set (`$WORKTREE`, `$TASK_ID`, `$RELPATH`, `$SLOT`, …), so backend and path derivation are independent. JaiRA owns the agent's write tool, so it controls where bytes land while the agent still sees its own path. Designed, not built. |
+| 1 | Artifact location | **A configurable destination URI** (§7.6) — `virtual:` or a `file:` path template over a closed variable set (`$DEFAULT`, `$CENTRAL`, `$CENTRAL_FLAT`, `$WORKTREE`, `$TASK_ID`, `$RELPATH`, `$SLOT`, …), so backend and path derivation stay independent. JaiRA owns the agent's write tool, so it controls where bytes land while the agent still sees its own path. Built. |
 | 2 | State file extension | `.json` inside `.jaira/workflows/` (directory already scopes meaning) |
 | 3 | Omit `id`? | Yes — derived from path; if present it must match (validator error otherwise) |
 | 4 | Minimum UI components | The spec's five: choose_option, review_artifact, edit_markdown, fill_form, confirm_action |

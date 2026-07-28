@@ -27,8 +27,11 @@ import {
 } from "@jaira/persistence";
 import {
   ApprovalHub,
+  artifactWiring,
   buildPromptExecutor,
   compilePolicy,
+  persistEngineArtifacts,
+  registerFileTools,
   executeWorkflow,
   gateCapabilities,
   registerAgentRuntimes,
@@ -422,6 +425,27 @@ export class AppService {
 
     const started = beginTaskRun(project, taskId, { functions: registry.functions });
 
+    // Artifact placement (DESIGN §7.6): one wiring shared by the file tools and the
+    // post-run sink, so an agent's writes and a prompt state's returned content land
+    // under the same destination.
+    const artifacts = artifactWiring({
+      destination: project.config.artifacts.destination,
+      artifactDir: project.config.artifacts.dir,
+      inlineMaxBytes: project.config.artifacts.inlineMaxBytes,
+      taskId,
+      runId: started.runId,
+      workspaceRoot: workspace.root,
+      projectDir: project.paths.projectDir,
+      jairaDir: project.paths.jairaDir,
+    });
+    // Registering these is what makes JaiRA own the agent's writes at all.
+    registerFileTools(registry, {
+      destination: artifacts.destination,
+      store: project.artifacts,
+      vars: artifacts.vars,
+      inlineMaxBytes: artifacts.inlineMaxBytes,
+    });
+
     // §8.2: refuse a state whose runtime cannot enforce the policy it runs under,
     // rather than letting it run unguarded.
     const gateIssues = gateCapabilities(registry, started.bundle.source ?? {}, {
@@ -521,6 +545,25 @@ export class AppService {
           abortSignal: abort.signal,
         });
         const status = statusOfResult(result);
+        // Blob content a state RETURNED never went through the file tools, so it is
+        // placed here under the same destination. After the run: the work is done,
+        // and an unwritable artifact must not fail it.
+        persistEngineArtifacts(result.value as JsonValue | undefined, {
+          destination: artifacts.destination,
+          store: project.artifacts,
+          vars: artifacts.vars,
+          inlineMaxBytes: artifacts.inlineMaxBytes,
+          runId: started.runId,
+          onError: (name, error) =>
+            this.publish({
+              type: "engine:event",
+              taskId,
+              runId: started.runId,
+              seq: ++seq,
+              at: Date.now(),
+              event: { type: "artifact.failed", name, reason: error.message } as unknown as JsonValue,
+            }),
+        });
         finishTaskRun(project, taskId, started.runId, status, {
           outputs: result.value,
           ...("error" in result && result.error !== undefined ? { failure: result.error } : {}),

@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { defaultConfig, jairaPaths, parseConfig, readJsonFile, type JairaConfig, type JairaPaths } from "@jaira/shared";
 import { openDb, type JairaDb } from "./db";
+import { SqliteArtifactStore } from "./artifactStore";
 import { CommandLog } from "./commandLog";
 import { SqliteEventLog } from "./eventLog";
 import { RuntimeStore } from "./runtime";
@@ -24,6 +25,8 @@ export interface Project {
   events: SqliteEventLog;
   /** The command audit trail (DESIGN §4.2, §10.2). */
   commands: CommandLog;
+  /** The artifact map: logical path → where the bytes went (DESIGN §7.6). */
+  artifacts: SqliteArtifactStore;
   /** Task ids marked `interrupted` by recovery during this open. */
   recovered: string[];
   close(): void;
@@ -84,6 +87,7 @@ export function openProject(projectDir: string, opts?: { now?: () => number }): 
     runtime,
     events: new SqliteEventLog(db),
     commands: new CommandLog(db),
+    artifacts: new SqliteArtifactStore(db),
     recovered,
     close: () => db.close(),
   };

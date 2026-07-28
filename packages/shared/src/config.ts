@@ -55,10 +55,35 @@ export interface JairaAgentConfig {
   genericCli?: JairaGenericCliAgent[];
 }
 
+/**
+ * Where artifacts are stored (DESIGN §7.6).
+ *
+ * `destination` is a URI/path template rather than an enumerated mode, because
+ * "which backend" and "how the path is derived" are independent questions and an
+ * enum conflates them. `virtual:` keeps content in memory; anything else is a
+ * `file:` path (the scheme is implicit) built from a closed variable set.
+ */
+export interface JairaArtifactConfig {
+  /** e.g. `$DEFAULT`, `$CENTRAL`, `$JAIRA/artifacts/$TASK_ID/$RELPATH`, `virtual:`. */
+  destination: string;
+  /** What `$ARTIFACT_DIR` expands to. */
+  dir: string;
+  /** Keep content inline below this size, so bindings and prompts stay cheap. */
+  inlineMaxBytes: number;
+}
+
+export const DEFAULT_ARTIFACT_DESTINATION = "$DEFAULT";
+export const DEFAULT_INLINE_MAX_BYTES = 65_536;
+
 export interface JairaConfig {
   models: JairaModelConfig;
-  /** Artifact root relative to the project dir (DESIGN §15 Q1). */
+  /**
+   * @deprecated Use `artifacts.dir`. Kept because it was the original §15 Q1
+   * surface and existing configs set it; it seeds `artifacts.dir` when present.
+   */
   artifactDir: string;
+  /** Where artifacts are stored (DESIGN §7.6). */
+  artifacts: JairaArtifactConfig;
   execEnvironment: JairaExecEnvironment;
   /**
    * The project's safety policy (DESIGN §10.1). Kept as opaque JSON here and
@@ -74,7 +99,54 @@ export interface JairaConfig {
 export const DEFAULT_ARTIFACT_DIR = "jaira-artifacts";
 
 export function defaultConfig(): JairaConfig {
-  return { models: {}, artifactDir: DEFAULT_ARTIFACT_DIR, execEnvironment: "windows", policy: {}, agents: {} };
+  return {
+    models: {},
+    artifactDir: DEFAULT_ARTIFACT_DIR,
+    artifacts: {
+      destination: DEFAULT_ARTIFACT_DESTINATION,
+      dir: DEFAULT_ARTIFACT_DIR,
+      inlineMaxBytes: DEFAULT_INLINE_MAX_BYTES,
+    },
+    execEnvironment: "windows",
+    policy: {},
+    agents: {},
+  };
+}
+
+/**
+ * Parse the artifact block (DESIGN §7.6). `artifactDir` seeds `artifacts.dir` when
+ * the newer block does not set it, so an existing config keeps working.
+ *
+ * The destination template is NOT validated here — that needs the variable
+ * vocabulary, which lives in `@jaira/runtime` (shared must stay free of it so the
+ * renderer's bundle does not pull it in). `parseDestination` there is the checker,
+ * and it runs at project open.
+ */
+function parseArtifacts(raw: unknown, artifactDir: string): JairaArtifactConfig {
+  const fallback: JairaArtifactConfig = {
+    destination: DEFAULT_ARTIFACT_DESTINATION,
+    dir: artifactDir,
+    inlineMaxBytes: DEFAULT_INLINE_MAX_BYTES,
+  };
+  if (raw === undefined) return fallback;
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("config.artifacts must be an object");
+  }
+  const cfg = raw as Record<string, unknown>;
+
+  const destination = cfg["destination"] ?? fallback.destination;
+  if (typeof destination !== "string" || destination.trim().length === 0) {
+    throw new Error("config.artifacts.destination must be a non-empty string");
+  }
+  const dir = cfg["dir"] ?? fallback.dir;
+  if (typeof dir !== "string" || dir.length === 0) {
+    throw new Error("config.artifacts.dir must be a non-empty string");
+  }
+  const inlineMaxBytes = cfg["inlineMaxBytes"] ?? fallback.inlineMaxBytes;
+  if (typeof inlineMaxBytes !== "number" || !Number.isInteger(inlineMaxBytes) || inlineMaxBytes < 0) {
+    throw new Error("config.artifacts.inlineMaxBytes must be a non-negative integer");
+  }
+  return { destination, dir, inlineMaxBytes };
 }
 
 /**
@@ -170,6 +242,7 @@ export function parseConfig(raw: unknown): JairaConfig {
   return {
     models,
     artifactDir,
+    artifacts: parseArtifacts(cfg["artifacts"], artifactDir),
     execEnvironment: parseExecEnvironment(cfg["execEnvironment"]),
     policy: (rawPolicy as Record<string, JsonValue> | undefined) ?? {},
     agents: parseAgents(cfg["agents"]),
