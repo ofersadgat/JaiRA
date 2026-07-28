@@ -52,15 +52,33 @@ pick them up either.
       op's `user` slot), so a workflow authoring one fails at run time on an
       unresolved skill rather than at lint. The work is a loader plus registration
       — the adapter machinery is already there, which is the whole point of §7.4.
-- [ ] **Artifacts are never written to disk.** `config.artifactDir` is parsed and
-      used nowhere; §15 Q1's reserved `jaira-artifacts/` is empty by construction.
-      A blob-kind output travels **inline** in the journal today, so §7.5's
-      pre-assigned `jaira-artifacts/<taskId>/<instanceId>-<name>.<ext>` path, the
-      "write X to path P" prompt injection, and the post-run existence/format check
-      are all absent. Consequences: large outputs bloat `events`, there is no
-      content hash, and the §11.1 detail panel has no **artifacts list with
-      markdown preview** and no **conversation viewer** (the transcript exists in
-      the session store but is not a view).
+- [ ] **Artifacts are never written to disk — designed, not built.** DESIGN §7.6
+      settles how it should work (2026-07-28); this is the implementation list.
+      Today a blob-kind output travels **inline** in the journal, `config.artifactDir`
+      is parsed and unused, and §15 Q1's reserved directory is empty by construction.
+      Consequences now: large outputs bloat `events`, there is no content hash, and
+      the §11.1 detail panel has no artifacts list or conversation viewer.
+  - [ ] **Register `write_file` / `read_file` tools.** Only `bash` is registered
+        today, so JaiRA sees none of an agent's file writes. This is the whole
+        mechanism: upstream injects each registered tool as
+        `run: (input) => tool.run(input, ctx)`, so our implementation is the
+        interception point.
+  - [ ] **Logical → physical path map**, durable (the deferred §4.2 `artifacts`
+        table), applied on write and consulted on read. The invariant to test:
+        write(P) then read(P) returns the content in every mode, and the agent is
+        never told the file moved.
+  - [ ] **`config.artifacts`** — `mode` / `root` / `dir` / `inlineMaxBytes`,
+        replacing the flat `artifactDir` string (keep parsing the old key).
+  - [ ] **`ArtifactRef` gains `path` + `hash`**, `content` optional below a
+        threshold — the part that actually stops journal bloat.
+  - [ ] **Native-write reconciliation** via `git status --porcelain` on the task
+        worktree when an operation ends, for agents using their own write tool.
+        Best-effort by construction (§7.6's stated leak) — a native re-read of a
+        moved file will miss.
+  - [ ] **Prune follows the root**: `.jaira/`-rooted artifacts prune with their
+        run; worktree artifacts never do.
+  - [ ] **Detail-panel artifacts list + markdown preview, and a conversation
+        viewer** (§11.1) — both only worth building once artifacts have identity.
 - [ ] **No Playwright E2E (§13, "E2E (thin)").** Board navigation, one UI-component
       round-trip and one approval flow were to be covered end to end through the
       real Electron app. What exists instead is `JAIRA_CAPTURE` screenshots (manual,
@@ -146,7 +164,6 @@ remembering.
       ever moves again: the *library's own* workspace links still pointed at the old
       path and were dangling, which broke `@declarative-ai/ops` resolution for every
       JaiRA package until `npm install` was re-run **inside** declarative-ai.
-- [ ] **Consider rotating the keys in `.env.local`.** They sat untracked in the
-      repo while `.gitignore` did not cover `.env*` (fixed in §1h). Verified that
-      nothing ever reached a commit, but the exposure window to a careless
-      `git add -A` was real.
+- [x] **`.env.local` keys — no rotation needed.** They sat untracked while
+      `.gitignore` did not cover `.env*` (fixed in §1h), but nothing ever reached a
+      commit — verified across all history. Closed on the user's call.

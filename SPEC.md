@@ -423,7 +423,10 @@ repository.
 
 > Status: artifacts currently live **in memory only** — the content travels inline
 > through the run and nothing is written to the filesystem, so the delegation to
-> Git described above is not yet real. See TODO.md and DESIGN §7.5.
+> Git described above is not yet real. **DESIGN §7.6 settles how it should work**
+> (placement is configurable — virtual, as-written, or a central directory with or
+> without the relative path — and JaiRA owns the agent's write tool so it controls
+> where the bytes actually land); TODO.md carries the implementation list.
 
 ### 4.7 Conversations
 

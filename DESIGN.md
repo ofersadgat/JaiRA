@@ -984,8 +984,8 @@ Derived from the state's output schema at operation start:
   one produced slot.
   **Not built:** the pre-assigned `jaira-artifacts/<taskId>/<instanceId>-<name>.<ext>`
   path, the "write X to path P" prompt injection, the post-run existence/format
-  check, and the content hash. `config.artifactDir` is parsed and unused. How this
-  *should* work is an open decision — see §7.6.
+  check, and the content hash. `config.artifactDir` is parsed and unused. §7.6 is
+  the design that replaces this bullet.
 - **Data outputs** (everything else): compiled into one JSON Schema. Delivery
   channel is chosen by adapter capability, best first: native structured output →
   final-message fenced ```json block → an `outputs.json` file at an engine-given
@@ -999,6 +999,94 @@ validation errors and the original contract — at most **2 repair turns**
 (`DEFAULT_REPAIR_TURNS`, `withRetry({ validation: { turns, feedback: true } })`),
 then the operation fails and the state terminates with `terminate.error`. This is
 the confirmed "ask it to correct itself" strategy, bounded and audited.
+
+### 7.6 Artifact Storage (decided 2026-07-28; not yet built)
+
+Resolves SPEC §15 Q1 properly. Two decisions drive everything else:
+
+**1. Where an artifact lands is configuration, not architecture.** All four
+placements are legitimate for different projects, so they are *modes*:
+
+| `artifacts.mode` | Physical path | For |
+| --- | --- | --- |
+| `virtual` | none — content stays inline | Today's behaviour. Cheap, disposable runs; no filesystem semantics to reason about. |
+| `as-written` | exactly where the agent asked | Projects where the artifact *is* repo content — a patch, a migration, a doc that belongs in `docs/`. |
+| `central-relative` | `<root>/<dir>/<taskId>/<the agent's relative path>` | Keeps the author's structure but quarantines it out of the tree. |
+| `central` | `<root>/<dir>/<taskId>/<instanceId>-<slot>.<ext>` | Deterministic, collision-free, no path from the agent trusted at all. |
+
+`root` is the task **worktree** by default (so git versions artifacts per branch,
+which is what SPEC §4.6 asks for) and may be `.jaira/` for projects that want them
+out of the repo entirely. `.jaira/` is only viable *because* of decision 2: agents
+are policy-denied from `.jaira/**`, so nothing but JaiRA could write there.
+
+```jsonc
+// .jaira/config.json — replaces the flat `artifactDir` string
+"artifacts": {
+  "mode": "central",            // virtual | as-written | central-relative | central
+  "root": "worktree",           // worktree | jaira
+  "dir": "jaira-artifacts",     // ignored by `virtual` and `as-written`
+  "inlineMaxBytes": 65536       // below this, keep content inline for cheap bindings
+}
+```
+
+**2. JaiRA owns the write tool, so JaiRA controls the write.** This is the part
+that makes the modes possible rather than aspirational.
+
+The engine hands a delegated agent our registered tools over MCP — upstream
+injects each one as `{ …, run: (input) => tool.run(input, ctx) }`, so **our
+implementation is called with the agent's raw arguments**. Registering
+`write_file` / `read_file` (JaiRA registers only `bash` today) turns every agent
+write into a call we service:
+
+```text
+agent: write_file({ path: "docs/plan.md", content })
+  ↓  policy check on the LOGICAL path (what a human would be asked to approve)
+  ↓  resolve logical → physical, per mode
+  ↓  write physical; record logical → physical in the run's artifact map
+  ↓  return success, naming the logical path
+agent: read_file({ path: "docs/plan.md" })  →  map hit  →  read physical
+```
+
+**The agent must never learn the file moved.** A write to `P` followed by a read
+of `P` returns the content, whatever the configured mode did with the bytes. A
+read that misses the map falls through to the real workspace path, so ordinary
+source files are unaffected.
+
+Consequences worth stating:
+
+- **Policy applies to the logical path**, before mapping. That is the path the
+  author wrote rules against and the path an approval dialog shows; mapping must
+  never move a write outside the configured root, and `../` escapes and
+  `.jaira/**` are refused as they are today.
+- **The map is durable, not per-process.** A later state in the run — and a later
+  run reading a previous artifact — resolves through it, so it is a table (the
+  deferred §4.2 `artifacts`), keyed by `(taskId, logicalPath)` → physical path,
+  hash, format, producing instance and slot.
+- **Not every intercepted write is an artifact.** Every write is recorded so reads
+  resolve; an *artifact record* is created when the write fills a declared
+  `blob` output slot — because the engine pre-assigned that path and told the
+  agent, or because the state returned that path as the slot's value.
+- **`ArtifactRef` gains `path` and `hash`; `content` becomes optional**, inlined
+  only below a size threshold. That is what stops artifact bytes bloating the
+  `events` journal, which is the concrete cost of the current inline-only model.
+- **Pruning follows the root.** Artifacts under `.jaira/` are derived state and
+  prune with their run; artifacts in the worktree are the user's work product and
+  are never pruned. No special case — the rule reads the configured root.
+
+**The leak, stated honestly.** Interception only covers tools we serve. An agent
+using its own native write (`nativeTools`, `injectTools: false`, a `generic-cli`
+runner, or `bash` with a redirection) writes wherever it likes and never consults
+our read path. For those, reconciliation is *after the fact*: the workspace is a
+git worktree, so `git status --porcelain` names exactly the files an operation
+created or modified, and the configured mode is applied to them when the operation
+ends. In `as-written` that is a no-op. In the central modes the file is moved and
+recorded — but an agent that later re-reads its own path through its own tool will
+miss, because that read never reaches us either.
+
+So the guarantee is tiered, and the tiers are the same ones §8.2 already grades
+runtimes by: **injected tools ⇒ the invariant holds; native tools ⇒ best-effort
+reconciliation.** This is one more reason to prefer injected tools, alongside the
+policy argument — the same choice buys enforcement and artifact fidelity together.
 
 ## 8. Runner Adapter Layer
 
@@ -1264,7 +1352,7 @@ remains the fastest debugging surface permanently.
 
 | # | Question | Resolution |
 | --- | --- | --- |
-| 1 | Artifact location | Reserved `jaira-artifacts/`, overridable in project config |
+| 1 | Artifact location | **Configurable** (§7.6): `virtual` \| `as-written` \| `central-relative` \| `central`, rooted at the task worktree (default) or `.jaira/`. JaiRA owns the agent's write tool, so it controls where bytes land while the agent still sees its own path. Designed, not built. |
 | 2 | State file extension | `.json` inside `.jaira/workflows/` (directory already scopes meaning) |
 | 3 | Omit `id`? | Yes — derived from path; if present it must match (validator error otherwise) |
 | 4 | Minimum UI components | The spec's five: choose_option, review_artifact, edit_markdown, fill_form, confirm_action |

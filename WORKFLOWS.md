@@ -406,7 +406,13 @@ artifact and the slot's value becomes a reference:
 ⚠️ **Artifacts are in-memory only today.** Nothing is written to disk;
 `config.artifactDir` is parsed and unused. Content travels inline in the event
 journal, so a large artifact bloats the database, and there is no content hash and
-no artifact viewer. See TODO.md — how this should work is an open decision.
+no artifact viewer.
+
+DESIGN §7.6 settles how it *should* work — placement becomes configurable
+(`virtual` / `as-written` / `central-relative` / `central`, rooted at the task
+worktree or `.jaira/`), and JaiRA registers the agent's `write_file`/`read_file`
+tools so it controls where bytes land while the agent keeps seeing its own path.
+None of that is built yet; TODO.md has the list.
 
 ---
 
