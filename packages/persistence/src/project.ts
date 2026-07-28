@@ -12,6 +12,7 @@ import { defaultConfig, jairaPaths, parseConfig, readJsonFile, type JairaConfig,
 import { openDb, type JairaDb } from "./db";
 import { SqliteArtifactStore } from "./artifactStore";
 import { CommandLog } from "./commandLog";
+import { JobStore, type JobRow } from "./jobs";
 import { SqliteEventLog } from "./eventLog";
 import { RuntimeStore } from "./runtime";
 import { TaskFileStore } from "./taskStore";
@@ -27,8 +28,15 @@ export interface Project {
   commands: CommandLog;
   /** The artifact map: logical path → where the bytes went (DESIGN §7.6). */
   artifacts: SqliteArtifactStore;
+  /** Process claims and child processes (DESIGN §4.2a). */
+  jobs: JobStore;
   /** Task ids marked `interrupted` by recovery during this open. */
   recovered: string[];
+  /**
+   * Child processes found still open with no live owner — abandoned agents and
+   * commands from a previous, crashed process. Reported, never killed.
+   */
+  orphans: JobRow[];
   close(): void;
 }
 
@@ -67,7 +75,7 @@ export function isProject(projectDir: string): boolean {
   return existsSync(jairaPaths(projectDir).jairaDir);
 }
 
-export function openProject(projectDir: string, opts?: { now?: () => number }): Project {
+export function openProject(projectDir: string, opts?: { now?: () => number; staleMs?: number }): Project {
   const paths = jairaPaths(projectDir);
   if (!existsSync(paths.jairaDir)) {
     throw new Error(`${paths.projectDir} is not a JaiRA project (no .jaira/ — run 'jaira init')`);
@@ -78,7 +86,17 @@ export function openProject(projectDir: string, opts?: { now?: () => number }): 
     : defaultConfig();
   const db = openDb(paths.dbFile);
   const runtime = new RuntimeStore(db);
-  const recovered = runtime.recoverInterrupted(now());
+  const jobs = new JobStore(db, opts?.staleMs);
+
+  // Read orphans BEFORE reaping: the rows are the only record those processes ever
+  // existed, and an abandoned agent is still running and still billing.
+  const at = now();
+  const orphans = jobs.orphans(at);
+  // A task with a live claim is being driven by another process right now — the
+  // whole point of §4.2a. Only genuinely abandoned tasks are recovered.
+  const recovered = runtime.recoverInterrupted(at, (taskId) => jobs.liveRunJob(taskId, at) !== undefined);
+  jobs.reapStale(at);
+
   return {
     paths,
     config,
@@ -88,7 +106,9 @@ export function openProject(projectDir: string, opts?: { now?: () => number }): 
     events: new SqliteEventLog(db),
     commands: new CommandLog(db),
     artifacts: new SqliteArtifactStore(db),
+    jobs,
     recovered,
+    orphans,
     close: () => db.close(),
   };
 }

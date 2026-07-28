@@ -153,17 +153,22 @@ export class RuntimeStore {
   }
 
   /**
-   * Workflow-level crash recovery (DESIGN §4.3 as revised by §1a item 1): any
-   * task still `running` at open time has no live engine behind it — mark it
-   * `interrupted` and close its dangling runs. Returns the recovered task ids.
+   * Workflow-level crash recovery (DESIGN §4.3 as revised by §1a item 1): a task
+   * still `running` at open time is marked `interrupted` and its dangling runs
+   * closed. Returns the recovered task ids.
    *
-   * v1 assumption: exactly one process owns a project's `.jaira/` at a time.
+   * `isLive` is the §4.2a fix. Without it this had to *assume* no other process
+   * existed, so opening a project while a run was live falsely interrupted it.
+   * Given a liveness oracle — the `jobs` table's heartbeat — a claimed task is
+   * left alone and only genuinely abandoned ones are recovered. Absent, the old
+   * assume-crashed behaviour stands, which is still right for a caller that has no
+   * job store (a test, a one-shot read).
    */
-  recoverInterrupted(nowMs: number): string[] {
+  recoverInterrupted(nowMs: number, isLive?: (taskId: string) => boolean): string[] {
     const running = this.db.prepare(`SELECT task_id FROM task_runtime WHERE status = 'running'`).all() as Array<{
       task_id: string;
     }>;
-    const ids = running.map((r) => r.task_id);
+    const ids = running.map((r) => r.task_id).filter((id) => isLive === undefined || !isLive(id));
     const recover = this.db.transaction(() => {
       for (const id of ids) {
         this.db

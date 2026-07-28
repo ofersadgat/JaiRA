@@ -73,6 +73,38 @@ CREATE TABLE IF NOT EXISTS command_log (
 CREATE INDEX IF NOT EXISTS command_log_task ON command_log(task_id, id);
 CREATE INDEX IF NOT EXISTS command_log_run ON command_log(run_id, id);
 
+-- Process claims (DESIGN §4.2a). A run is HISTORY; a claim on a run is a fact about
+-- NOW, and the two have different lifetimes — so columns on runs would leave dead
+-- pid/heartbeat fields on every historical row and overwrite the previous claim on
+-- each re-run.
+--
+-- kind='run'     : a process claiming a workflow run.
+-- kind='process' : a child JaiRA spawned (git, wsl.exe, claude, a bash command),
+--                  pointing at the run job that owns it. Untracked before this, so
+--                  an orphaned agent kept running and spending money invisibly.
+--
+-- owner_token is a random per-PROCESS id: liveness is "did that token heartbeat
+-- recently", which needs no pid semantics at all. pid is recorded only to report a
+-- process to a human and (carefully) to kill an orphan.
+CREATE TABLE IF NOT EXISTS jobs (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind                TEXT NOT NULL,   -- run | process
+  task_id             TEXT,
+  run_id              INTEGER,
+  parent_job_id       INTEGER REFERENCES jobs(id),
+  owner_token         TEXT NOT NULL,
+  pid                 INTEGER,
+  command             TEXT,
+  started_at          INTEGER NOT NULL,
+  heartbeat_at        INTEGER NOT NULL,
+  cancel_requested_at INTEGER,
+  ended_at            INTEGER,
+  outcome             TEXT
+);
+CREATE INDEX IF NOT EXISTS jobs_open ON jobs(ended_at, heartbeat_at);
+CREATE INDEX IF NOT EXISTS jobs_task ON jobs(task_id, id);
+CREATE INDEX IF NOT EXISTS jobs_owner ON jobs(owner_token, ended_at);
+
 -- The artifact map (DESIGN §7.6, §4.2 'artifacts'): what a producer said it wrote
 -- (logical_path) and where the bytes actually went (physical_path). This is what
 -- makes a read of the logical path resolve in a later state or a later run — so it

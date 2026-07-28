@@ -44,6 +44,26 @@ export interface Exec {
   run(command: string, args: readonly string[], options?: ExecOptions): Promise<ExecResult>;
 }
 
+/**
+ * A hook that sees every child process JaiRA starts (DESIGN §4.2a).
+ *
+ * It exists because child processes were tracked nowhere: an agent or a long
+ * command outlived a crashed app, kept running, and kept spending money with no
+ * record that it ever existed. Every child already funnels through this one seam,
+ * so recording them is a hook here rather than a change at each call site.
+ *
+ * It is a callback rather than a direct write because of package layering:
+ * `@jaira/runtime` must not import `@jaira/persistence` (the dependency runs the
+ * other way), so the app and CLI supply an observer backed by the `jobs` table.
+ *
+ * `onSpawn` returns an opaque token handed back to `onExit`, so an implementation
+ * can carry a row id without this module knowing what one is.
+ */
+export interface ExecObserver<T = unknown> {
+  onSpawn(event: { command: string; argv: readonly string[]; pid?: number; cwd?: string }): T | undefined;
+  onExit(token: T | undefined, event: { code: number | null; signal: NodeJS.Signals | null }): void;
+}
+
 /** How a command is actually invoked for an environment (also what tests assert). */
 export function resolveInvocation(
   command: string,
@@ -66,7 +86,14 @@ export function resolveInvocation(
 }
 
 export class NodeExec implements Exec {
-  constructor(private readonly defaults: { execEnv?: ExecEnv; env?: Record<string, string> } = {}) {}
+  constructor(
+    private readonly defaults: {
+      execEnv?: ExecEnv;
+      env?: Record<string, string>;
+      /** Records every child this Exec starts (DESIGN §4.2a). */
+      observer?: ExecObserver;
+    } = {},
+  ) {}
 
   run(command: string, args: readonly string[], options: ExecOptions = {}): Promise<ExecResult> {
     const merged: ExecOptions = {
@@ -87,6 +114,27 @@ export class NodeExec implements Exec {
         // No shell: arguments stay literal (see the module note).
         shell: false,
       });
+
+      // Observed after spawn, so `pid` is real. A throwing observer must not take
+      // the command down with it — recording is bookkeeping, not the work.
+      let token: unknown;
+      try {
+        token = this.defaults.observer?.onSpawn({
+          command: file,
+          argv,
+          ...(child.pid !== undefined ? { pid: child.pid } : {}),
+          ...(cwd !== undefined ? { cwd } : {}),
+        });
+      } catch {
+        token = undefined;
+      }
+      const observeExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+        try {
+          this.defaults.observer?.onExit(token, { code, signal });
+        } catch {
+          // As above: a failed record must not change the command's outcome.
+        }
+      };
 
       let stdout = "";
       let stderr = "";
@@ -123,6 +171,7 @@ export class NodeExec implements Exec {
         if (settled) return;
         settled = true;
         cleanup();
+        observeExit(null, null);
         // A failure to *start* (ENOENT for a missing git/wsl.exe) is a different
         // kind of problem from a non-zero exit, so it rejects rather than
         // returning a result.
@@ -133,6 +182,7 @@ export class NodeExec implements Exec {
         if (settled) return;
         settled = true;
         cleanup();
+        observeExit(code, signal);
         resolve({ code, signal, stdout, stderr, command: printable, timedOut, aborted });
       });
 
