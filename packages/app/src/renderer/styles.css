@@ -411,6 +411,13 @@ button.danger:hover {
   font-size: 12px;
 }
 
+/* The policy explanation on an approval dialog — informational, not an error. */
+.reason-note {
+  color: var(--warn);
+  font-size: 12px;
+  margin: 10px 0 0;
+}
+
 /* --- approvals inbox --- */
 .inbox {
   margin-bottom: 16px;

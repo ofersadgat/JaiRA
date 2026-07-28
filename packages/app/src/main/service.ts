@@ -28,6 +28,8 @@ import {
   executeWorkflow,
   gateCapabilities,
   registerAgentRuntimes,
+  registerCommandFunction,
+  registerTools,
   functionNamesOf,
   InteractionHub,
   modelDefaults,
@@ -303,6 +305,12 @@ export class AppService {
     // Delegated agent runtimes are available to every run (DESIGN §8.1); a state
     // reaches one with a `claude-code` function op.
     registerAgentRuntimes(registry, { execEnv: project.config.execEnvironment });
+    // Our own tools, so an agent's commands go through the policy at all: an agent
+    // calling its native shell would be invisible to it (DESIGN §10.1).
+    registerTools(registry, { execEnv: project.config.execEnvironment });
+    // A state can also run a command directly, without delegating to an agent; it
+    // gates itself with the same policy (DESIGN §10.1).
+    registerCommandFunction(registry, { execEnv: project.config.execEnvironment });
 
     const started = beginTaskRun(project, taskId, { functions: registry.functions });
 

@@ -34,6 +34,8 @@ import {
   newRegistry,
   parseFakeRules,
   parseInteractionScript,
+  registerCommandFunction,
+  registerTools,
   samePathKey,
   ScriptedFunctions,
   statusOfResult,
@@ -194,6 +196,8 @@ function buildRunEnvironment(
   wiring: RunWiring,
 ): { registry: ReturnType<typeof newRegistry>; prompt: ReturnType<typeof buildPromptExecutor> } {
   const registry = newRegistry();
+  registerTools(registry, { execEnv: config.execEnvironment });
+  registerCommandFunction(registry, { execEnv: config.execEnvironment });
   if (wiring.interactions) {
     wiring.interactions.register(registry);
     for (const name of functionNamesOf(bundle)) wiring.interactions.registerWildcard(registry, name);

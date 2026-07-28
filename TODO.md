@@ -2,7 +2,7 @@
 
 Deliberate omissions and deferred work, tracked so they are not mistaken for
 oversights. Phase numbers refer to [DESIGN.md](DESIGN.md) §14; status updates
-§1a–§1h record the decisions behind each entry.
+§1a–§1i record the decisions behind each entry.
 
 ## Gaps inside completed phases
 
@@ -28,11 +28,11 @@ its assumption breaks.
 - [ ] **Subtasks are a link only** (§12, §15 Q9/Q10 — the MVP position).
       `TaskMeta.parentTaskId` is stored and nothing reads it: no board grouping, no
       `waiting_for_event` state, no parent/child rollup.
-- [ ] **§4.2 tables are partly deferred** (§1b item 2). `instances`, `operations`,
-      `transitions`, `artifacts`, `conversations` and `command_log` do not exist;
-      the board and detail views are projected from the `events` journal instead.
-      They land with step-level resume (needs `@declarative-ai/hw` support),
-      artifacts, and policy (`command_log`).
+- [ ] **§4.2 tables are partly deferred** (§1b item 2). `command_log` landed with
+      phase 6, but `instances`, `operations`, `transitions`, `artifacts` and
+      `conversations` still do not exist — the board and detail views are projected
+      from the `events` journal instead. They land with step-level resume (which
+      needs `@declarative-ai/hw` support) and with artifacts.
 - [ ] **Workflow migration for a running task is out of scope** (§5.3). The escape
       hatch is "restart the task on current workflows"; there is no UI for it.
 
@@ -42,14 +42,22 @@ its assumption breaks.
       registered, the policy engine + command parser compiled onto
       `@declarative-ai/permissions`, per-command approvals with the `command_log`
       audit trail, and §8.2 capability gating. Open inside it:
-  - [ ] **No approvals dialog.** The IPC channels and service methods exist
-        (`approval:pending` / `approval:submit`, `pendingApprovals()`,
-        `submitApproval()`), and pushes fire — but the renderer's inbox lists only
-        workflow gates, so an approval currently has no UI and would be answered
-        by the unattended default (deny).
-  - [ ] **Agents unverified against a real provider.** Registration and plumbing
-        are tested through a fake `AgentQuery`; a run against the real Claude Agent
-        SDK or a `claude` binary has not happened.
+  - [x] **Approvals dialog.** Done: the inbox lists command approvals alongside
+        workflow gates (approvals first, since an agent's tool loop is blocked), and
+        the dialog shows the command, the policy's reason, and scope choices
+        (once / this run / always) plus deny. Verified by screenshot against a real
+        policy escalation.
+  - [x] **CLI agent verified against the real `claude` binary** (v2.1.142): a
+        delegated run returned its text with a provider-reported cost. Kept
+        repeatable as an opt-in live test (`JAIRA_LIVE_AGENT=1`), which skips by
+        default because it spends money.
+  - [ ] **SDK agent (`agents-api`) unverified.** It lazily imports
+        `@anthropic-ai/claude-agent-sdk`, which is not installed here, so only the
+        CLI variant has run for real.
+  - [ ] **Tool injection over MCP is untested.** The live run used the adapter's
+        default; whether our injected `bash` reaches the agent over the MCP bridge
+        (and is therefore policy-gated *inside* an agent loop) has not been observed
+        end to end — only the gate itself is tested, directly.
   - [ ] **Path policy is only the `.jaira/**` deny rule.** DESIGN §10.1's broader
         idea — an allow-list of the worktree root plus authored path rules — is not
         an authored surface yet.

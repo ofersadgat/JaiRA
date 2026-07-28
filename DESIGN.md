@@ -454,8 +454,33 @@ phase 6 settled:
    is the honest predicate (built-ins always can, since §11.3's classes are all
    approvals).
 
+9. **A tool set is what makes policy apply to an agent at all.** An agent calling
+   its *own* built-in shell is invisible to us, so JaiRA registers `bash` in
+   `registry.tools`: an injected tool call goes through `withPermission` → the
+   compiled policy → the parser → allow/deny/ask. The tool runs commands through the
+   same `Exec` seam as git, and names its interpreter explicitly (`bash -lc` for
+   WSL, `powershell -Command` otherwise) rather than letting Exec spawn a shell —
+   which also keeps the interpreter consistent with the dialect the policy *parsed*
+   the command with. It declares `readOnly: false`, so `read-only`/`plan` profiles
+   exclude it outright.
+10. **`run_command` lets a state run a command without an agent** (a build, a test
+    suite) and **gates itself**: the engine wraps registered *tools*, but a host
+    function is called directly, so a command runner that skipped the policy would be
+    a hole straight through it. It reuses upstream's `withPermission` rather than
+    re-deriving the decision.
+11. **Verified live where it counts.** The approval dialog was driven by a real
+    policy escalation (`git push --dry-run` → "pushes publish work") and
+    screenshotted; the `claude-cli` adapter ran against the real binary (v2.1.142),
+    returning its text with a provider-reported cost — which also confirms upstream's
+    `cliQuery` flags and stream-json shape, still marked "UNVERIFIED against a live
+    CLI" there. That run is preserved as an opt-in test (`JAIRA_LIVE_AGENT=1`) that
+    skips by default because it spends money.
+
 Remaining for phase 7: the `claude-cli` hook-loopback variant, `generic-cli`,
-conversation `summary` mode, history pruning, and the workflow browser.
+conversation `summary` mode, history pruning, and the workflow browser. Still
+unverified in phase 6: the SDK agent adapter (needs
+`@anthropic-ai/claude-agent-sdk` installed) and tool injection over the MCP bridge
+(TODO.md).
 
 ## 2. Architecture Overview
 

@@ -8,11 +8,13 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  ApprovalScope,
   BoardView,
   IpcChannel,
   IpcRequest,
   IpcResponse,
   JairaBridge,
+  PendingApproval,
   PendingInteraction,
   PushMessage,
   TaskDetail,
@@ -43,6 +45,8 @@ export interface AppState {
   selected: string | null;
   detail: TaskDetail | null;
   pending: PendingInteraction[];
+  /** Per-command approvals awaiting a decision (DESIGN §10.2). */
+  approvals: PendingApproval[];
   /** Live event lines for the selected task, newest last. */
   stream: string[];
   error: string | null;
@@ -57,6 +61,7 @@ const EMPTY: AppState = {
   selected: null,
   detail: null,
   pending: [],
+  approvals: [],
   stream: [],
   error: null,
   busy: false,
@@ -114,12 +119,26 @@ export function useApp() {
     }
   }, [patch, fail]);
 
+  const refreshApprovals = useCallback(async () => {
+    try {
+      patch({ approvals: await invoke("approval:pending", undefined) });
+    } catch (e) {
+      fail(e);
+    }
+  }, [patch, fail]);
+
   const refreshAll = useCallback(async () => {
     const current = await invoke("project:current", undefined).catch(() => null);
     patch({ projectDir: current?.dir ?? null });
     if (!current) return;
-    await Promise.all([refreshTasks(), refreshBoard(), refreshPending(), refreshDetail(ref.current.selected)]);
-  }, [patch, refreshTasks, refreshBoard, refreshPending, refreshDetail]);
+    await Promise.all([
+      refreshTasks(),
+      refreshBoard(),
+      refreshPending(),
+      refreshApprovals(),
+      refreshDetail(ref.current.selected),
+    ]);
+  }, [patch, refreshTasks, refreshBoard, refreshPending, refreshApprovals, refreshDetail]);
 
   // Initial load + push subscription.
   useEffect(() => {
@@ -145,6 +164,10 @@ export function useApp() {
         case "interaction:resolved":
           void refreshPending();
           break;
+        case "approval:requested":
+        case "approval:resolved":
+          void refreshApprovals();
+          break;
         case "run:finished":
           void refreshTasks();
           void refreshBoard();
@@ -152,7 +175,7 @@ export function useApp() {
           break;
       }
     });
-  }, [refreshAll, refreshTasks, refreshBoard, refreshDetail, refreshPending]);
+  }, [refreshAll, refreshTasks, refreshBoard, refreshDetail, refreshPending, refreshApprovals]);
 
   const actions = useMemo(
     () => ({
@@ -188,6 +211,17 @@ export function useApp() {
       cancelTask: async (taskId: string) => {
         try {
           await invoke("task:cancel", { taskId });
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /**
+       * Answer a per-command approval. `scope` is why a user is not asked the same
+       * question on every tool call (DESIGN §10.2).
+       */
+      decideApproval: async (requestId: string, decision: "allow" | "deny", scope: ApprovalScope = "once") => {
+        try {
+          await invoke("approval:submit", { requestId, decision, scope });
         } catch (e) {
           fail(e);
         }

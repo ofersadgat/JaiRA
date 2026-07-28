@@ -19,3 +19,4 @@ export * from "./command";
 export * from "./policy";
 export * from "./approval";
 export * from "./agents";
+export * from "./tools";
