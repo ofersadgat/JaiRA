@@ -407,6 +407,56 @@ real provider keys (and unrelated secrets) was sitting untracked in the repo whi
 across all history — and `.env`/`.env.*` are now ignored. Keys belong in the
 environment, never in the tree.
 
+## 1i. Status Update — 2026-07-28 (phase 6: process executors + policy)
+
+The safety model stops being design and starts being enforcement. 232 tests. What
+phase 6 settled:
+
+1. **Policy matches parsed intent, not strings.** `runtime/command.ts` turns a
+   command line into `ParsedCommand`s so `git reset --hard`,
+   `git -C dir reset --hard`, `git -c k=v reset --hard`, `sh -c "git reset --hard"`
+   and `env FOO=1 git reset --hard` are *one* decision (SPEC §11.2's explicit
+   requirement). It unwraps shell and prefix wrappers, and splits chained lines so
+   a destructive command hidden after a benign one is still judged.
+2. **Unparsable always escalates.** An unterminated quote, or PowerShell
+   expression syntax the heuristic refuses to model (`$(…)`, backticks,
+   `Invoke-Expression`), yields `unparsed` → `require_approval`. The failure
+   direction is the point: an unreadable command must never become an allowed one
+   (DESIGN §10.1, §16).
+3. **Ordered rules compile to upstream's `smart` mode.** DESIGN §10.1's
+   `{ match, action }` list is not a second enforcement mechanism: command-running
+   tools get `PermissionMode: "smart"`, and the approver parses the call and
+   answers `allow`/`deny`/`ask`. Authored rules win over the SPEC §11.2/§11.3
+   built-ins, first match first, and the strictest verdict on a line wins.
+4. **`.jaira/**` is denied by path** — the enforcement §1g item 5 said it had to be,
+   since a worktree normally contains `.jaira/`. Screening happens per *parsed
+   word*: a path matcher applied to a whole command line never matches, because the
+   path is preceded by a space.
+5. **Approvals are a separate channel from workflow gates** (§10.2). Both surface
+   in one inbox, but a gate is an authored UI state while an approval is
+   provider-initiated and unpredictable. The hub carries a `PermissionScope`, so
+   "allow for this run" is a real answer rather than the same question forty times —
+   and with no listener attached it **denies** rather than hanging an agent's tool
+   loop.
+6. **`command_log` lands** (the first deferred §4.2 table, because policy is what
+   needs it): every requested, allowed, blocked, approved and denied command with
+   its parsed intent, reason, decider and scope. `summary()` is a run's safety story
+   at a glance.
+7. **Agent runtimes register as `runtime` entries** — `claude-code` over the SDK
+   (`agents-api`) and `claude-cli` over a subprocess (`agents-cli`), a WSL project's
+   CLI adapter wrapped through `wsl.exe`. They are verified with a fake
+   `AgentQuery`, the seam upstream exposes for exactly that: registration,
+   workspace/policy/approve plumbing and failure-as-data are all tested with no SDK,
+   no `claude` binary and no network.
+8. **Capability gating refuses rather than degrading** (§8.2): a policy that can
+   escalate, run against an adapter whose `policyEnforcement` is `"none"`, fails the
+   task with a message naming the state — it does not run unguarded. `policyCanEscalate`
+   is the honest predicate (built-ins always can, since §11.3's classes are all
+   approvals).
+
+Remaining for phase 7: the `claude-cli` hook-loopback variant, `generic-cli`,
+conversation `summary` mode, history pruning, and the workflow browser.
+
 ## 2. Architecture Overview
 
 ```text

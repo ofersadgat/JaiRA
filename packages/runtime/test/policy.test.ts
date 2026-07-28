@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { PermissionRequest, SmartApprover } from "@declarative-ai/permissions";
-import { compilePolicy, decideCommand, isDeniedPath, type JairaPolicy, type PolicyAuditEntry } from "../src/policy";
+import { compilePolicy, decideCommand, isDeniedPath, policyCanEscalate, type JairaPolicy, type PolicyAuditEntry } from "../src/policy";
 
 const OPEN: JairaPolicy = {};
 const action = (line: string, policy: JairaPolicy = OPEN): string => decideCommand(policy, line).action;
@@ -214,5 +214,18 @@ describe("compilePolicy", () => {
     // …which is observable through decideCommand's dialect handling.
     expect(decideCommand(OPEN, "git $(cat x)", "powershell").action).toBe("require_approval");
     expect(decideCommand(OPEN, "git status", "posix").action).toBe("allow");
+  });
+});
+
+describe("policyCanEscalate", () => {
+  it("is true whenever a human could be asked — which is what §8.2 gates on", () => {
+    // The built-ins carry SPEC §11.3's approval classes, so they can always ask.
+    expect(policyCanEscalate({})).toBe(true);
+    expect(policyCanEscalate({ builtins: false })).toBe(false);
+    expect(policyCanEscalate({ builtins: false, default: "require_approval" })).toBe(true);
+    expect(
+      policyCanEscalate({ builtins: false, rules: [{ match: { program: "git" }, action: "require_approval" }] }),
+    ).toBe(true);
+    expect(policyCanEscalate({ builtins: false, rules: [{ match: { program: "git" }, action: "deny" }] })).toBe(false);
   });
 });

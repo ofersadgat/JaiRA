@@ -206,6 +206,20 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
   return worst;
 }
 
+/**
+ * Whether this policy can ever escalate a call to a human.
+ *
+ * True with the built-ins on, because SPEC §11.3's classes are all
+ * `require_approval`; otherwise only if an authored rule or the default asks. This
+ * is what capability gating (DESIGN §8.2) checks a runtime against — a policy that
+ * cannot ask needs nothing enforced interactively.
+ */
+export function policyCanEscalate(policy: JairaPolicy): boolean {
+  if (policy.builtins !== false) return true;
+  if (policy.default === "require_approval") return true;
+  return (policy.rules ?? []).some((rule) => rule.action === "require_approval");
+}
+
 /** `.jaira/` is engine-owned: agents are denied it wherever it appears. */
 export function isDeniedPath(path: string): boolean {
   const normalized = path.replace(/\\/g, "/");

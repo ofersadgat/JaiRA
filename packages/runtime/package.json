@@ -14,6 +14,8 @@
     "@declarative-ai/permissions": "file:../../../declarative-ai/packages/permissions",
     "@declarative-ai/promptop": "file:../../../declarative-ai/packages/promptop",
     "@declarative-ai/validate": "file:../../../declarative-ai/packages/validate",
-    "@jaira/shared": "*"
+    "@jaira/shared": "*",
+    "@declarative-ai/agents-api": "file:../../../declarative-ai/packages/agents-api",
+    "@declarative-ai/agents-cli": "file:../../../declarative-ai/packages/agents-cli"
   }
 }
