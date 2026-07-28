@@ -15,6 +15,7 @@ import {
   boardView,
   browseWorkflows,
   ensureWorkspace,
+  RunOwner,
   cancelTask,
   createTask,
   finishTaskRun,
@@ -42,6 +43,7 @@ import {
   InteractionHub,
   modelDefaults,
   newRegistry,
+  NodeExec,
   parseFakeRules,
   policyCanEscalate,
   promptSummarizer,
@@ -49,6 +51,7 @@ import {
   sessionStoreFor,
   statusOfResult,
   type ApprovalRequest,
+  type ExecObserver,
   type FakeRule,
   type HubRequest,
   type PolicyAuditEntry,
@@ -406,22 +409,35 @@ export class AppService {
     // Materialize the worktree before marking the task running, so a git failure
     // leaves it startable rather than `running` with nowhere to run (DESIGN §9.2).
     const workspace = await ensureWorkspace(project, taskId);
+
+    // Child-process tracking (DESIGN §4.2a). The registry is built before the run
+    // exists, so the observer forwards to a claim made below — safe because nothing
+    // spawns until the run starts.
+    let owner: RunOwner | undefined;
+    let observe: ExecObserver<number> | undefined;
+    const observer: ExecObserver = {
+      onSpawn: (event) => observe?.onSpawn(event),
+      onExit: (token, event) => observe?.onExit(token as number | undefined, event),
+    };
+    const exec = new NodeExec({ execEnv: project.config.execEnvironment, observer });
+
     // Delegated agent runtimes are available to every run (DESIGN §8.1); a state
     // reaches one with a `claude-code` function op.
-    registerAgentRuntimes(registry, { execEnv: project.config.execEnvironment });
+    registerAgentRuntimes(registry, { execEnv: project.config.execEnvironment, observer });
     // Non-Claude CLIs the project configured (DESIGN §8.1). Nothing is registered
     // when none are, so a state naming one fails honestly instead of running some
     // default binary.
     registerGenericAgents(registry, {
       execEnv: project.config.execEnvironment,
+      exec,
       ...(project.config.agents.genericCli !== undefined ? { agents: project.config.agents.genericCli } : {}),
     });
     // Our own tools, so an agent's commands go through the policy at all: an agent
     // calling its native shell would be invisible to it (DESIGN §10.1).
-    registerTools(registry, { execEnv: project.config.execEnvironment });
+    registerTools(registry, { execEnv: project.config.execEnvironment, exec });
     // A state can also run a command directly, without delegating to an agent; it
     // gates itself with the same policy (DESIGN §10.1).
-    registerCommandFunction(registry, { execEnv: project.config.execEnvironment });
+    registerCommandFunction(registry, { execEnv: project.config.execEnvironment, exec });
 
     const started = beginTaskRun(project, taskId, { functions: registry.functions });
 
@@ -461,6 +477,18 @@ export class AppService {
     let settle!: () => void;
     const done = new Promise<void>((resolve) => (settle = resolve));
     this.live.set(taskId, { taskId, runId: started.runId, abort, done });
+
+    // Claim the run (DESIGN §4.2a). Two things follow: another process opening this
+    // project will see a live heartbeat and leave the task alone instead of
+    // interrupting it, and a cancel requested from elsewhere reaches this abort
+    // controller through the polled flag.
+    owner = new RunOwner({
+      jobs: project.jobs,
+      taskId,
+      runId: started.runId,
+      onCancelRequested: () => this.cancelTask(taskId),
+    });
+    observe = owner.observer();
 
     // Every interactive function the bundle names that the script didn't answer
     // is routed to the renderer.
@@ -577,6 +605,9 @@ export class AppService {
         });
         this.publish({ type: "run:finished", taskId, runId: started.runId, status: "failed" });
       } finally {
+        // Give up the claim and close any child still recorded as running, so the
+        // next project open sees no phantom owner and no phantom orphans.
+        owner?.release();
         this.live.delete(taskId);
         this.publish({ type: "store:invalidate", scope: "tasks" });
         this.publish({ type: "store:invalidate", scope: "task", taskId });
@@ -600,6 +631,10 @@ export class AppService {
         if (run.taskId === taskId) this.approvals.decide(requestId, "deny", "once");
       }
       run.abort.abort();
+    } else if (this.p.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
+      // Another process is driving it. Raise the flag its heartbeat polls — cross-
+      // process cancel needs no socket, unlike answering a parked gate (§4.2a).
+      this.p.jobs.requestCancel(taskId, Date.now());
     } else {
       cancelTask(this.p, taskId);
       this.publish({ type: "store:invalidate", scope: "tasks" });

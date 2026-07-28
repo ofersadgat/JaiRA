@@ -26,6 +26,7 @@ import {
   readWorkflowFiles,
   removeWorktree,
   runCauses,
+  RunOwner,
   type Project,
   type WorkflowBrowser,
 } from "@jaira/persistence";
@@ -40,8 +41,10 @@ import {
   persistEngineArtifacts,
   registerFileTools,
   type ArtifactStore,
+  type ExecObserver,
   modelDefaults,
   newRegistry,
+  NodeExec,
   parseFakeRules,
   parseInteractionScript,
   policyCanEscalate,
@@ -185,6 +188,15 @@ function openWithRecoveryNote(dir: string, io: CliIo): Project {
   if (project.recovered.length > 0) {
     io.stderr(`recovered ${project.recovered.length} interrupted task(s): ${project.recovered.join(", ")}\n`);
   }
+  // Abandoned children of a process that died (DESIGN §4.2a). Reported, never
+  // killed — a pid alone is not identity — but reported *loudly*, because an
+  // orphaned agent is still running and still spending money.
+  for (const orphan of project.orphans) {
+    io.stderr(
+      `warning: process left running by a previous session: ${orphan.command ?? "(unknown)"}` +
+        `${orphan.pid !== undefined ? ` (pid ${orphan.pid})` : ""}\n`,
+    );
+  }
   return project;
 }
 
@@ -224,6 +236,8 @@ function runWiringOf(
 interface ArtifactWiringOptions {
   artifacts: ReturnType<typeof artifactWiring>;
   store: ArtifactStore;
+  /** Records child processes against the run's claim (DESIGN §4.2a). */
+  observer?: ExecObserver;
 }
 
 function buildRunEnvironment(
@@ -238,8 +252,14 @@ function buildRunEnvironment(
   summaryModes: ReturnType<typeof sessionStoreFor>["modes"];
 } {
   const registry = newRegistry();
-  registerTools(registry, { execEnv: config.execEnvironment });
-  registerCommandFunction(registry, { execEnv: config.execEnvironment });
+  // One Exec for the whole run, so every child it starts is recorded against the
+  // run's claim (DESIGN §4.2a).
+  const exec = new NodeExec({
+    execEnv: config.execEnvironment,
+    ...(files?.observer !== undefined ? { observer: files.observer } : {}),
+  });
+  registerTools(registry, { execEnv: config.execEnvironment, exec });
+  registerCommandFunction(registry, { execEnv: config.execEnvironment, exec });
   // The file tools are what make JaiRA own an agent's writes (DESIGN §7.6). Only a
   // durable run has a task to place artifacts for; an ad-hoc `jaira run` gets none,
   // which is honest — there is no task id to key them by.
@@ -254,9 +274,13 @@ function buildRunEnvironment(
   // Agent runtimes, so a workflow with a `claude-code` state runs the same way here
   // as in the app. Without them the CLI — the documented fastest debugging surface —
   // failed such a state as "unregistered function" while the app ran it fine.
-  registerAgentRuntimes(registry, { execEnv: config.execEnvironment });
+  registerAgentRuntimes(registry, {
+    execEnv: config.execEnvironment,
+    ...(files?.observer !== undefined ? { observer: files.observer } : {}),
+  });
   registerGenericAgents(registry, {
     execEnv: config.execEnvironment,
+    exec,
     ...(config.agents.genericCli !== undefined ? { agents: config.agents.genericCli } : {}),
   });
   if (wiring.interactions) {
@@ -457,6 +481,8 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
   if (taskId === undefined) throw new UsageError("task start requires a task id");
   const wiring = runWiringOf(values, io.cwd);
   const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  // Declared out here so `finally` can release the claim however the run ends.
+  let owner: RunOwner | undefined;
   try {
     // Validation at task start resolves every `functionRef` against the registry
     // this run will actually use, so a missing interactive function is an
@@ -466,6 +492,12 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
     // Materialize the worktree first: a git failure then leaves the task startable
     // instead of `running` with nowhere to run (DESIGN §9.2).
     const workspace = await ensureWorkspace(project, taskId);
+    // Refuse to start a task another live process is already driving (DESIGN §4.2a).
+    // Before jobs existed, the second process simply took it over and the first's
+    // journal writes interleaved with its own.
+    if (project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
+      throw new Error(`task '${taskId}' is already running in another process`);
+    }
     const started = beginTaskRun(project, taskId, { functions: probe.functions });
     // Artifact placement (DESIGN §7.6), assembled once and shared by the file tools
     // and the post-run sink so both put files in the same place.
@@ -484,9 +516,23 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
         `snapshot ${started.snapshotHash.slice(0, 12)}${started.pinned ? " (pinned)" : ""}` +
         `${workspace.isWorktree ? ` · worktree ${workspace.root} (${workspace.branch})` : ""}\n`,
     );
+
+    // Claim the run and record its children (DESIGN §4.2a). The claim is what stops
+    // another process interrupting this run at its next project open; the observer
+    // is what makes an abandoned `claude` or `git` findable afterwards.
+    const stop = new AbortController();
+    io.abortSignal?.addEventListener("abort", () => stop.abort(), { once: true });
+    owner = new RunOwner({
+      jobs: project.jobs,
+      taskId,
+      runId: started.runId,
+      onCancelRequested: () => stop.abort(),
+    });
+
     const { registry, prompt, sessions, summaryModes } = buildRunEnvironment(started.bundle, project.config, wiring, {
       artifacts,
       store: project.artifacts,
+      observer: owner.observer(),
     });
     warnSummaryConflicts(summaryModes, io);
     try {
@@ -507,7 +553,8 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
       ...(sessions !== undefined ? { sessions } : {}),
       persistence: project.events.recorder(taskId, started.runId),
       workspace: { root: workspace.root, ...(workspace.treeHash !== undefined ? { treeHash: workspace.treeHash } : {}) },
-      ...(io.abortSignal !== undefined ? { abortSignal: io.abortSignal } : {}),
+      // Merged: SIGINT here, or a cancel another process requested through the job.
+      abortSignal: stop.signal,
     });
     const status = statusOfResult(result);
     // A state that RETURNS blob content (a prompt writing a plan) never touched the
@@ -546,6 +593,9 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
     );
     return status === "completed" ? 0 : 1;
   } finally {
+    // Release before closing the database: the claim and any child still recorded
+    // as running must be closed, or the next open reports phantom orphans.
+    owner?.release();
     project.close();
   }
 }
@@ -882,6 +932,14 @@ function cmdTaskCancel(argv: string[], io: CliIo): number {
   if (taskId === undefined) throw new UsageError("task cancel requires a task id");
   const project = openWithRecoveryNote(projectDirOf(values, io), io);
   try {
+    // A run another process is driving cannot be canceled by writing a status here
+    // — that process owns the engine. Raise the flag its heartbeat polls instead
+    // (DESIGN §4.2a); it aborts and records the terminal status itself.
+    if (project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
+      project.jobs.requestCancel(taskId, Date.now());
+      io.stdout(JSON.stringify({ taskId, status: "cancel_requested" }, null, 2) + "\n");
+      return 0;
+    }
     cancelTask(project, taskId);
     io.stdout(JSON.stringify({ taskId, status: "canceled" }, null, 2) + "\n");
     return 0;

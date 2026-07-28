@@ -99,7 +99,8 @@ workflow-level crash recovery. Deviations from this document as drafted:
    acceptable headless; phase 3 must add ownership (app holds the project, CLI
    defers or locks).
 
-   > **Still open after phase 7, and the reason is worth stating precisely.**
+   > **Fixed 2026-07-28 by §4.2a — the reasoning is kept because it explains the
+   > shape of the fix.**
    > SQLite is not the constraint — WAL handles concurrent processes fine. The
    > constraint is that a `running` row carries **no liveness signal**, so at open
    > time "the writer crashed" and "the writer is another live process" are
@@ -108,13 +109,15 @@ workflow-level crash recovery. Deviations from this document as drafted:
    > crashed task is stuck `running` forever, with no path back). v1 picked the
    > recoverable one.
    >
-   > That half is cheap to fix — record an owner (pid + a heartbeat timestamp) on
-   > the run row and only interrupt runs whose owner is provably gone. The
-   > expensive half is elsewhere: **cancel and parked requests are process-local**.
-   > An abort controller, an interaction hub and an approval hub all live in the
-   > process driving the run, so a gate the CLI parked on cannot be answered by the
-   > app whatever the lock says. Real multi-process use needs a routing channel, not
-   > just a lock (TODO.md).
+   > That half is now fixed, though not the way this note proposed: the claim lives
+   > in a separate `jobs` table rather than as columns on the run row (§4.2a
+   > explains why), and identity is a per-process token rather than a pid.
+   >
+   > Of the "expensive half", **cancel also fell out of it** — `cancel_requested_at`
+   > is a flag the owning process polls, so no channel is needed. What remains is
+   > **parked requests**: the interaction and approval hubs live in the process
+   > driving the run, and answering a gate means routing a *value* back, not raising
+   > a flag (TODO.md).
 5. **Cancel is in-process only for live runs.** `jaira task cancel` records a
    terminal `canceled` for queued/interrupted/stale-running tasks; a live run
    is canceled by SIGINT in the owning process (engine abort → `canceled`
@@ -701,8 +704,13 @@ operations     (id PK, instance_id, kind,            -- ui | agent | skill
 transitions    (id PK, instance_id, iteration, to_target, when_expr, taken_at)
 events         (seq PK AUTOINCREMENT, task_id, instance_id, type,
                 payload_json, created_at)            -- append-only journal
-artifacts      (id PK, task_id, rel_path, format, content_hash,
-                produced_by_operation, created_at)
+artifacts      (id PK, task_id, run_id, logical_path, physical_path, content,
+                hash, bytes, format, instance_id, state_id, slot, created_at)
+                -- BUILT (§7.6): logical_path is what the producer said it wrote,
+                -- physical_path where the bytes went. UNIQUE(task_id, logical_path).
+jobs           (id PK, kind, task_id, run_id, parent_job_id, owner_token, pid,
+                command, started_at, heartbeat_at, cancel_requested_at,
+                ended_at, outcome)   -- BUILT (§4.2a): process claims + children
 conversations  (id PK, task_id, provider, provider_session_id, mode,
                 transcript_artifact_id, created_at)
 command_log    (id PK, operation_id, raw_command, parsed_intent_json,
@@ -725,7 +733,7 @@ Notes:
   every engine step appends its events and updates materialized rows in **one
   transaction**, so they can never disagree.
 
-### 4.2a The `jobs` Table — Process Claims and Liveness (decided 2026-07-28)
+### 4.2a The `jobs` Table — Process Claims and Liveness (decided and built 2026-07-28)
 
 Replaces the "put a pid + heartbeat on the run row" sketch in §1a item 4. A run
 and a *claim on* a run are different things and belong in different tables:
@@ -789,6 +797,22 @@ Cost, stated plainly: a heartbeat timer per owning process, and a stale threshol
 that trades crash-detection latency against falsely reclaiming a live run (~5s
 beat, ~30s stale is the sane starting point). Clock skew is ignored — v1 is one
 machine.
+
+**As built.** `RunOwner` (persistence) is the whole lifecycle in one place — claim,
+beat, observe children, release — because the app and CLI have already drifted once
+(§1j) and a claim only one of them takes would make recovery's answer depend on
+which program started the run. `openProject` reads orphans *before* reaping, since
+those rows are the only record the processes existed. Child tracking rides
+`ExecObserver`, a hook on the one seam every child already passes through; the
+`claude` subprocess needed JaiRA's own `SpawnProcess` because upstream's is
+module-private, and that copy preserves two hard-won details — stderr **ignored**
+rather than piped (an unread pipe fills at ~64 KB and the child blocks forever),
+and an `error` listener (an unhandled one throws, and ENOENT on a missing binary is
+the likeliest first run).
+
+Verified across processes: with a live claim, a second `openProject` recovers
+nothing and the task stays `running`; once the owner's heartbeat goes stale, the
+next open recovers it to `interrupted`.
 
 ### 4.3 Crash Recovery
 

@@ -13,3 +13,5 @@ export * from "./commandLog";
 export * from "./prune";
 export * from "./workflows";
 export * from "./artifactStore";
+export * from "./jobs";
+export * from "./jobOwner";

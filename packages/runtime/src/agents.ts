@@ -11,19 +11,87 @@
  * distro), and let the engine supply `ctx.workspace` / `ctx.policy` /
  * `ctx.approve`. Everything about *how* an agent is driven belongs upstream.
  */
+import { spawn } from "node:child_process";
+import { createInterface } from "node:readline";
 import { runtimeFunction, type CapabilityRegistry, type RuntimeCapabilities } from "@declarative-ai/exec";
 import { createClaudeCodeFunction, type AgentQuery, type ClaudeCodeFunctionOptions } from "@declarative-ai/agents-api";
-import { createCliAgentFunction } from "@declarative-ai/agents-cli";
+import { createCliAgentFunction, type SpawnProcess } from "@declarative-ai/agents-cli";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
+import type { ExecObserver } from "./exec";
 import { isWslEnv, type ExecEnv } from "./paths";
 
 /** The registry names JaiRA registers its agents under. */
 export const AGENT_SDK = "claude-code";
 export const AGENT_CLI = "claude-cli";
 
+/**
+ * Spawn the CLI agent through a seam JaiRA can watch (DESIGN §4.2a).
+ *
+ * Upstream's default spawn is module-private, so tracking the `claude` process —
+ * the orphan that most matters, since an abandoned one keeps billing — means
+ * supplying our own. Two details are copied deliberately from upstream's version
+ * and must not be "tidied":
+ *
+ *  - **stderr is ignored, not piped.** An unread pipe fills at ~64 KB and the child
+ *    then blocks forever on write, so stdout stops and `exit` never settles.
+ *  - **an `error` listener is attached.** A `ChildProcess` `'error'` with no
+ *    listener throws and would take the host process down — and ENOENT on a missing
+ *    `claude` binary is the likeliest first-run outcome.
+ */
+function observedSpawn(observer: ExecObserver): SpawnProcess {
+  return (argv, opts) => {
+    const [command, ...args] = argv;
+    const child = spawn(command!, args, { cwd: opts.cwd, stdio: ["ignore", "pipe", "ignore"] });
+    const lines = createInterface({ input: child.stdout!, crlfDelay: Infinity });
+
+    let token: unknown;
+    try {
+      token = observer.onSpawn({
+        command: command!,
+        argv: args,
+        ...(child.pid !== undefined ? { pid: child.pid } : {}),
+        ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+      });
+    } catch {
+      token = undefined;
+    }
+    const observeExit = (code: number | null): void => {
+      try {
+        observer.onExit(token, { code, signal: null });
+      } catch {
+        // Bookkeeping must not change the agent's outcome.
+      }
+    };
+
+    let spawnError: Error | undefined;
+    child.on("error", (e: Error) => {
+      spawnError = e;
+      lines.close();
+    });
+
+    return {
+      lines,
+      kill: () => void child.kill(),
+      exit: new Promise<number>((resolve) => {
+        child.on("error", () => {
+          observeExit(-1);
+          resolve(-1);
+        });
+        child.on("close", (code) => {
+          const value = spawnError ? -1 : (code ?? 0);
+          observeExit(value);
+          resolve(value);
+        });
+      }),
+    };
+  };
+}
+
 export interface AgentRuntimeOptions {
   /** Where the agent runs. A WSL project drives the CLI adapter inside the distro. */
   execEnv?: ExecEnv;
+  /** Records the agent subprocess as a job, so an abandoned one is findable. */
+  observer?: ExecObserver;
   /**
    * Replace the agent-query seam — the whole reason this is testable without an
    * SDK, a `claude` binary, or a network: a fake query drives the same adapter.
@@ -75,6 +143,9 @@ export function registerAgentRuntimes(
             // A WSL project's agent must run in the distro, not on Windows.
             ...(isWslEnv(env) ? { args: ["-d", env.wsl, "--", options.cliCommand ?? "claude"] } : {}),
             ...(isWslEnv(env) ? { command: "wsl.exe" } : {}),
+            // Only when someone is watching: upstream's own spawn is the better
+            // default, and this one exists solely to report the process.
+            ...(options.observer !== undefined ? { spawn: observedSpawn(options.observer) } : {}),
           });
     registry.functions.set(
       AGENT_CLI,

@@ -9,33 +9,27 @@ oversights. Phase numbers refer to [DESIGN.md](DESIGN.md) §14; status updates
 These live in phases marked ✅. They are real, and each one is a bug the moment
 its assumption breaks.
 
-- [ ] **No liveness signal on a `running` run** (§1b item 4 said phase 3 would add
-      ownership; it did not). SQLite is *not* the constraint — WAL handles
-      concurrent processes. The constraint is that at project open, "the writer
-      crashed" and "the writer is another live process" are indistinguishable, so
-      recovery must choose a failure mode; v1 chose assume-crashed, which falsely
-      interrupts a live run when a second process opens the project.
-      **Designed (§4.2a): a `jobs` table.** Implementation list:
-  - [ ] `jobs` table + store: `kind` (`run` | `process`), `run_id`,
-        `parent_job_id`, `owner_token` (random per process — identity without pid
-        semantics), `pid`, `command`, `heartbeat_at`, `cancel_requested_at`.
-  - [ ] Heartbeat timer in the owning process (~5s beat, ~30s stale threshold).
-  - [ ] `recoverInterrupted` asks "is there a live job?" instead of assuming there
-        is not. This is the whole false-interrupt fix.
-  - [ ] **Track child processes.** Every child already goes through
-        `runtime/exec.ts`, so this is one seam — but `@jaira/runtime` must not
-        import `@jaira/persistence` (the dependency runs the other way), so `Exec`
-        takes an `onSpawn`/`onExit` observer the app and CLI wire up.
-  - [ ] **Orphan detection at startup**: child jobs with no live parent are
-        reported (an abandoned agent keeps running and keeps spending money today,
-        invisibly). *Report and offer to kill* — never auto-kill, since a pid alone
-        is not identity.
+- [x] **Liveness on a `running` run — fixed (DESIGN §4.2a).** Built 2026-07-28:
+      a `jobs` table records process claims, `recoverInterrupted` asks "is there a
+      live job?" instead of assuming there is not, and a second process is refused
+      rather than taking a task over. Cross-process cancel came with it, as a polled
+      `cancel_requested_at` flag. Child processes (git, `wsl.exe`, `claude`, bash
+      commands, generic-cli agents) are recorded through an `ExecObserver` on the one
+      seam they all pass through, and orphans of a dead session are reported at
+      project open — reported, never killed, since a pid alone is not identity.
+      Still open inside it:
+  - [ ] **Nothing offers to kill a reported orphan.** The warning names the command
+        and pid; acting on it is manual. Killing safely needs pid + start time, so
+        this wants a deliberate design rather than a `process.kill`.
+  - [ ] **The SDK agent's subprocess is untracked.** `claude-cli` is observed
+        through JaiRA's own spawn; `claude-code` runs in-process via the SDK, which
+        has no spawn seam to hook.
+  - [ ] **The app has no "what is running" view.** `jobs.live()` answers it and
+        nothing renders it.
 - [ ] **Parked requests are process-local.** The interaction hub and the approval
       hub live in the process driving the run, so a gate the CLI parked on cannot be
       answered from the app. Answering means routing a *value* back, so unlike
       cancel this genuinely needs a channel.
-      (**Cancel is solved by the above**: `jobs.cancel_requested_at` is a flag the
-      owning process polls — no socket, no daemon.)
 - [ ] **No project-open UI.** The `project:open` IPC channel and the store's
       `openProject` action both exist and are unused: the app opens whatever
       `JAIRA_PROJECT` / argv / cwd supplies, with no folder picker.
@@ -46,10 +40,10 @@ its assumption breaks.
       `TaskMeta.parentTaskId` is stored and nothing reads it: no board grouping, no
       `waiting_for_event` state, no parent/child rollup.
 - [ ] **§4.2 tables are partly deferred** (§1b item 2). `command_log` landed with
-      phase 6, but `instances`, `operations`, `transitions`, `artifacts` and
-      `conversations` still do not exist — the board and detail views are projected
-      from the `events` journal instead. They land with step-level resume (which
-      needs `@declarative-ai/hw` support) and with artifacts.
+      phase 6, `artifacts` with §7.6 and `jobs` with §4.2a; `instances`,
+      `operations`, `transitions` and `conversations` still do not exist — the board
+      and detail views are projected from the `events` journal instead. They land
+      with step-level resume, which needs `@declarative-ai/hw` support.
 - [ ] **Workflow migration for a running task is out of scope** (§5.3). The escape
       hatch is "restart the task on current workflows"; there is no UI for it.
 
