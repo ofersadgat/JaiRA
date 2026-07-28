@@ -1031,10 +1031,9 @@ subscribes to task/instance change events and maintains a local store
    `jaira board`.*
 4. **Interaction + approvals** — ✅ done (§1f) — the five UI components (§7.1) as
    renderer-backed **interactive host functions** in the capability registry
-   (§1c item 4); approvals inbox scaffolding (§10.2). *Milestone: the critique
-   workflow's human review gate runs end-to-end in the app. The "against real
-   Claude" half is wired but unverified — it needs `ANTHROPIC_API_KEY` in the
-   environment (§1f item 8).*
+   (§1c item 4); approvals inbox scaffolding (§10.2). *Milestone met in full: the
+   critique workflow's human review gate runs end-to-end in the app, and the
+   workflow was verified against real Claude (§1h).*
 5. **Git isolation + WSL** — ✅ done (§1g) — worktrees, branch binding, Exec/WSL
    layer (§9). *Verified against a real WSL distro and real git repositories.*
 6. **Process executors + policy** — adopt `@declarative-ai/agents-api` /
