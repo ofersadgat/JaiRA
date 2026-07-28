@@ -14,14 +14,28 @@ its assumption breaks.
       concurrent processes. The constraint is that at project open, "the writer
       crashed" and "the writer is another live process" are indistinguishable, so
       recovery must choose a failure mode; v1 chose assume-crashed, which falsely
-      interrupts a live run when a second process opens the project. **Cheap fix:**
-      record an owner (pid + heartbeat) on the run row and only interrupt runs whose
-      owner is provably gone.
-- [ ] **Cancel and parked requests are process-local** — the expensive half of the
-      same problem, and the reason a lock alone is not enough. The abort controller,
-      the interaction hub and the approval hub all live in the process driving the
-      run, so a gate the CLI parked on cannot be answered from the app however the
-      ownership question is settled. Real multi-process use needs a routing channel.
+      interrupts a live run when a second process opens the project.
+      **Designed (§4.2a): a `jobs` table.** Implementation list:
+  - [ ] `jobs` table + store: `kind` (`run` | `process`), `run_id`,
+        `parent_job_id`, `owner_token` (random per process — identity without pid
+        semantics), `pid`, `command`, `heartbeat_at`, `cancel_requested_at`.
+  - [ ] Heartbeat timer in the owning process (~5s beat, ~30s stale threshold).
+  - [ ] `recoverInterrupted` asks "is there a live job?" instead of assuming there
+        is not. This is the whole false-interrupt fix.
+  - [ ] **Track child processes.** Every child already goes through
+        `runtime/exec.ts`, so this is one seam — but `@jaira/runtime` must not
+        import `@jaira/persistence` (the dependency runs the other way), so `Exec`
+        takes an `onSpawn`/`onExit` observer the app and CLI wire up.
+  - [ ] **Orphan detection at startup**: child jobs with no live parent are
+        reported (an abandoned agent keeps running and keeps spending money today,
+        invisibly). *Report and offer to kill* — never auto-kill, since a pid alone
+        is not identity.
+- [ ] **Parked requests are process-local.** The interaction hub and the approval
+      hub live in the process driving the run, so a gate the CLI parked on cannot be
+      answered from the app. Answering means routing a *value* back, so unlike
+      cancel this genuinely needs a channel.
+      (**Cancel is solved by the above**: `jobs.cancel_requested_at` is a flag the
+      owning process polls — no socket, no daemon.)
 - [ ] **No project-open UI.** The `project:open` IPC channel and the store's
       `openProject` action both exist and are unused: the app opens whatever
       `JAIRA_PROJECT` / argv / cwd supplies, with no folder picker.
@@ -67,16 +81,22 @@ pick them up either.
         table), applied on write and consulted on read. The invariant to test:
         write(P) then read(P) returns the content in every mode, and the agent is
         never told the file moved.
-  - [ ] **`config.artifacts`** — `mode` / `root` / `dir` / `inlineMaxBytes`,
-        replacing the flat `artifactDir` string (keep parsing the old key).
+  - [ ] **`config.artifacts.destination`** — a URI/path template
+        (`virtual:` or an implicit-`fs:` path over `$WORKTREE`, `$TASK_ID`,
+        `$RELPATH`, `$SLOT`, …), plus `inlineMaxBytes`; replaces the flat
+        `artifactDir` string (keep parsing the old key). Unknown variables are a
+        config error; the resolved path is asserted inside the template's root
+        (`$RELPATH` is agent-controlled); substitution happens *after* choosing the
+        host/WSL path view.
   - [ ] **`ArtifactRef` gains `path` + `hash`**, `content` optional below a
         threshold — the part that actually stops journal bloat.
   - [ ] **Native-write reconciliation** via `git status --porcelain` on the task
         worktree when an operation ends, for agents using their own write tool.
         Best-effort by construction (§7.6's stated leak) — a native re-read of a
         moved file will miss.
-  - [ ] **Prune follows the root**: `.jaira/`-rooted artifacts prune with their
-        run; worktree artifacts never do.
+  - [ ] **Prune follows the destination**: `$JAIRA`-rooted artifacts are derived
+        state and prune with their run; `$WORKTREE`-rooted ones are the user's work
+        product and never do. No special case — the rule reads the resolved root.
   - [ ] **Detail-panel artifacts list + markdown preview, and a conversation
         viewer** (§11.1) — both only worth building once artifacts have identity.
 - [ ] **No Playwright E2E (§13, "E2E (thin)").** Board navigation, one UI-component
