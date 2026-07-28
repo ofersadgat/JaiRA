@@ -16,3 +16,4 @@ export * from "./paths";
 export * from "./exec";
 export * from "./git";
 export * from "./command";
+export * from "./policy";

@@ -239,16 +239,16 @@ function parseSegment(tokens: string[], dialect: CommandDialect, via: string[] =
     }
   }
 
-  // `env X=1 git push`, `sudo git push`, `npx tsc` — strip the wrapper's own flags
-  // and re-parse the remainder.
+  // `env X=1 git push`, `sudo git push`, `npx tsc` — skip the wrapper's own flags
+  // and assignments, then re-parse from the first real word. The remainder is kept
+  // INTACT: filtering flags out here would silently drop the inner command's own
+  // (`env FOO=1 git reset --hard` must not lose `--hard`, or policy stops seeing a
+  // destructive reset).
   if (PREFIX_WRAPPERS.has(program)) {
-    const inner = rest.filter((t, i) => {
-      if (!isFlag(t)) return true;
-      void i;
-      return false;
-    });
-    if (inner.length > 0) {
-      const nested = parseSegment(inner, dialect, [...via, program]);
+    let at = 0;
+    while (at < rest.length && (isFlag(rest[at]!) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(rest[at]!))) at++;
+    if (at < rest.length) {
+      const nested = parseSegment(rest.slice(at), dialect, [...via, program]);
       if (nested.length > 0) return nested;
     }
   }
