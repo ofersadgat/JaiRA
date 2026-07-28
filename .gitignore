@@ -1,3 +1,8 @@
 node_modules/
 dist/
 *.tsbuildinfo
+
+# Secrets. Provider keys live in the environment (see README) — never in a commit.
+.env
+.env.*
+!.env.example
