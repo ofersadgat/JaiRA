@@ -1086,9 +1086,12 @@ subscribes to task/instance change events and maintains a local store
    workflow was verified against real Claude (§1h).*
 5. **Git isolation + WSL** — ✅ done (§1g) — worktrees, branch binding, Exec/WSL
    layer (§9). *Verified against a real WSL distro and real git repositories.*
-6. **Process executors + policy** — adopt `@declarative-ai/agents-api` /
-   `agents-cli` (already implemented there) against DESIGN §8/§10 requirements;
-   policy engine via `@declarative-ai/permissions`; capability gating.
+6. **Process executors + policy** — ✅ done (§1i) — `@declarative-ai/agents-api` /
+   `agents-cli` registered as runtime entries; the policy engine and command parser
+   (§10.1) compiled onto `@declarative-ai/permissions`; per-command approvals with
+   the `command_log` audit trail; capability gating (§8.2). *Agents are verified
+   against a fake `AgentQuery`; a run against the real SDK or `claude` binary, and
+   the approvals dialog, remain open (TODO.md).*
 7. **Breadth** — `claude-cli` (hook loopback) and `generic-cli` executors,
    conversation `summary` mode (summarizer via `llm-call`), pruning UI,
    workflow browser/lint surface.
