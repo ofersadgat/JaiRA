@@ -13,7 +13,8 @@
     "@declarative-ai/permissions": "file:../../../declarative-ai/packages/permissions",
     "@declarative-ai/validate": "file:../../../declarative-ai/packages/validate",
     "@jaira/shared": "*",
-    "better-sqlite3": "^12.2.0"
+    "better-sqlite3": "^12.2.0",
+    "@jaira/runtime": "*"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13"

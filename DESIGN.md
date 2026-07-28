@@ -328,6 +328,53 @@ screenshot, plus 83 tests. What that phase settled:
    provider-initiated and arrive with the policy engine and process executors in
    phase 6, so they are absent rather than mocked.
 
+## 1g. Status Update — 2026-07-28 (phase 5: git isolation + WSL)
+
+The Exec/WSL layer, the path mapper, the git wrapper and the worktree lifecycle are
+built and tested (149 tests) — including **real WSL execution** against
+Ubuntu-22.04 and a full bound-task run whose worktree was created by the distro's
+own git. What phase 5 settled:
+
+1. **One Exec seam, and no shell.** `Exec.run(command, argv, { execEnv })` spawns
+   natively or wraps as `wsl.exe -d <distro> --cd <linuxCwd> -- <cmd …>`, so WSL is
+   a configuration of one layer (§9.1). Arguments are always an argv array with
+   `shell: false`: nothing in a branch name or task title can become shell syntax,
+   and there are no quoting rules to get wrong. `wsl.exe` itself gets no cwd — the
+   distro-side directory is `--cd`, and `--` terminates its option parsing.
+2. **Path mapping lives in exactly one module** (§9.1, the §16 mitigation), with 27
+   table-driven cases. Two decisions worth recording: a bare `C:` is
+   drive-*relative* in Windows with no WSL equivalent, so it maps to the drive root
+   as a documented approximation; and both UNC spellings
+   (`\\wsl.localhost\<distro>\…`, legacy `\\wsl$\…`) are accepted while the modern
+   one is produced.
+3. **Comparing paths needs a normalizing key, not string equality** — a real bug
+   found by running it: `git worktree list` prints forward slashes (and, for a WSL
+   project, the *distro's* `/mnt/c/…` view) while JaiRA records Windows paths, so
+   the worktree ↔ task join silently matched nothing. `hostPathFor` maps git's
+   output back to the host view and `samePath` ignores separator and case.
+4. **The workspace is decided before the task is marked running.** `ensureWorkspace`
+   materializes the worktree first, so a git failure leaves the task startable
+   rather than `running` with nowhere to run. It is idempotent (a re-run reuses the
+   worktree, preserving in-progress work) and prunes git's administrative record
+   when a worktree directory has been deleted behind git's back. The resulting
+   `{ root, treeHash }` is passed as the run's `Workspace`, giving a
+   workspace-mutating op the identity it must be memoized under; the phase-6
+   process executors translate `root` for their execution environment via `pathFor`.
+5. **A worktree usually *does* contain `.jaira/` — DESIGN §10.1's aside was wrong**
+   (now corrected there). A worktree is a checkout of the branch, and
+   `.jaira/workflows/` is *source* that should be committed, so it comes along.
+   Keeping agents out of it is therefore a policy job (the `.jaira/**` deny rule),
+   not a layout accident. `jaira init` now writes `.jaira/.gitignore` for the
+   derived half (`jaira.db*`, `snapshots/`) so per-machine run history is neither
+   committed nor copied into every worktree.
+6. **Removal never destroys work silently.** `git worktree remove` refuses a dirty
+   worktree; that refusal is *returned* rather than thrown, so the CLI/UI can offer
+   `--force` as an explicit choice (§9.2's "when the user confirms"). Removing a
+   worktree keeps its branch — the work is still there to merge.
+7. **Surfaces:** `jaira worktree list` (joined with tasks) and
+   `jaira worktree remove <taskId> [--force]`; `task start` logs the worktree and
+   branch; the app's detail panel shows both. `execEnvironment` is project config.
+
 ## 2. Architecture Overview
 
 ```text
@@ -846,7 +893,8 @@ git subcommand + flags (`push --force`, `reset --hard`, `rebase`, …), so
 script execution. Unparsable commands default to `require_approval`.
 
 Path policy: adapters receive an allowlist of the worktree root and deny rules
-for `.jaira/**` (which is outside the worktree anyway) — enforced natively
+for `.jaira/**` — **not** because it is outside the worktree (it usually is not;
+see §1g item 5) but because the deny rule is the actual enforcement — enforced natively
 where possible (SDK permission callback on file tools; Claude Code permission
 rules) and by prompt-level instruction elsewhere, honestly reflected in the
 adapter's capability flags.
@@ -955,7 +1003,8 @@ subscribes to task/instance change events and maintains a local store
    workflow's human review gate runs end-to-end in the app. The "against real
    Claude" half is wired but unverified — it needs `ANTHROPIC_API_KEY` in the
    environment (§1f item 8).*
-5. **Git isolation + WSL** — worktrees, branch binding, Exec/WSL layer (§9).
+5. **Git isolation + WSL** — ✅ done (§1g) — worktrees, branch binding, Exec/WSL
+   layer (§9). *Verified against a real WSL distro and real git repositories.*
 6. **Process executors + policy** — adopt `@declarative-ai/agents-api` /
    `agents-cli` (already implemented there) against DESIGN §8/§10 requirements;
    policy engine via `@declarative-ai/permissions`; capability gating.

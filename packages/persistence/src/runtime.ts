@@ -114,6 +114,20 @@ export class RuntimeStore {
     if (res.changes === 0) throw new Error(`no task_runtime row for task '${taskId}'`);
   }
 
+  /** Record the task ↔ worktree mapping (DESIGN §3: it lives in SQLite). */
+  setWorktree(taskId: string, worktreePath: string, nowMs: number): void {
+    const res = this.db
+      .prepare(`UPDATE task_runtime SET worktree_path = ?, updated_at = ? WHERE task_id = ?`)
+      .run(worktreePath, nowMs, taskId);
+    if (res.changes === 0) throw new Error(`no task_runtime row for task '${taskId}'`);
+  }
+
+  clearWorktree(taskId: string, nowMs: number): void {
+    this.db
+      .prepare(`UPDATE task_runtime SET worktree_path = NULL, updated_at = ? WHERE task_id = ?`)
+      .run(nowMs, taskId);
+  }
+
   beginRun(taskId: string, snapshotHash: string, nowMs: number): number {
     const res = this.db
       .prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at) VALUES (?, ?, ?)`)

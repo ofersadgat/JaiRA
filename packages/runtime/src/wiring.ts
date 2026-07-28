@@ -125,6 +125,14 @@ export interface WorkflowRunConfig {
   prompt: Executor<ExecServices, WorkflowMetrics>;
   persistence?: Persistence;
   abortSignal?: AbortSignal;
+  /**
+   * The filesystem the run acts within — a task's git worktree, or the project
+   * directory for an unbound task (DESIGN §9.2). `root` is the HOST path; the
+   * process executors of phase 6 translate it for their execution environment via
+   * `pathFor`. `treeHash` is the workspace identity a workspace-mutating op must be
+   * memoized under (declarative-ai DESIGN §3.4).
+   */
+  workspace?: { root: string; treeHash?: string };
 }
 
 export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowExecResult> {
@@ -137,6 +145,7 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
   const ctx: ExecServices = {
     validator: new SchemaValidator(),
     ...(cfg.abortSignal !== undefined ? { abortSignal: cfg.abortSignal } : {}),
+    ...(cfg.workspace !== undefined ? { workspace: cfg.workspace } : {}),
   };
   return executor.start(workflowStartOp(cfg.inputs), ctx).result;
 }

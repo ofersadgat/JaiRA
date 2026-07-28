@@ -8,3 +8,4 @@ export * from "./lifecycle";
 export * from "./projection";
 export * from "./shape";
 export * from "./views";
+export * from "./worktrees";

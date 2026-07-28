@@ -146,6 +146,8 @@ export interface TaskDetail {
   status: TaskStatus;
   snapshotHash?: string;
   branch?: string;
+  /** Git worktree this task runs in, when bound to a branch (DESIGN §9.2). */
+  worktreePath?: string;
   createdAt: string;
   inputs?: Record<string, JsonValue>;
   /** Instance forest for the latest run (roots first). */

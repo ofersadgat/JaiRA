@@ -17,7 +17,10 @@ import {
   finishTaskRun,
   initProject,
   openProject,
+  ensureWorkspace,
+  gitFor,
   readWorkflowFiles,
+  removeWorktree,
   runCauses,
   type Project,
 } from "@jaira/persistence";
@@ -26,10 +29,12 @@ import {
   buildPromptExecutor,
   executeWorkflow,
   functionNamesOf,
+  hostPathFor,
   modelDefaults,
   newRegistry,
   parseFakeRules,
   parseInteractionScript,
+  samePathKey,
   ScriptedFunctions,
   statusOfResult,
   type FakeRule,
@@ -58,6 +63,8 @@ const USAGE = `usage:
   jaira task status <taskId> [--events <n>] [--project <dir>]
   jaira task cancel <taskId> [--project <dir>]
   jaira board [--level <stateId>] [--json] [--project <dir>]
+  jaira worktree list [--project <dir>]
+  jaira worktree remove <taskId> [--force] [--project <dir>]
 `;
 
 export async function runCli(argv: string[], io: CliIo): Promise<number> {
@@ -82,6 +89,17 @@ async function dispatch(argv: string[], io: CliIo): Promise<number> {
       return cmdRun(rest, io);
     case "board":
       return cmdBoard(rest, io);
+    case "worktree": {
+      const [sub, ...wtRest] = rest;
+      switch (sub) {
+        case "list":
+          return cmdWorktreeList(wtRest, io);
+        case "remove":
+          return cmdWorktreeRemove(wtRest, io);
+        default:
+          throw new UsageError(`unknown worktree subcommand '${sub ?? ""}'`);
+      }
+    }
     case "task": {
       const [sub, ...taskRest] = rest;
       switch (sub) {
@@ -327,10 +345,14 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
     // authoring error caught here rather than mid-run.
     const probe = newRegistry();
     wiring.interactions?.register(probe);
+    // Materialize the worktree first: a git failure then leaves the task startable
+    // instead of `running` with nowhere to run (DESIGN §9.2).
+    const workspace = await ensureWorkspace(project, taskId);
     const started = beginTaskRun(project, taskId, { functions: probe.functions });
     io.stderr(
       `task ${taskId} run ${started.runId}: workflow '${started.meta.workflow}' ` +
-        `snapshot ${started.snapshotHash.slice(0, 12)}${started.pinned ? " (pinned)" : ""}\n`,
+        `snapshot ${started.snapshotHash.slice(0, 12)}${started.pinned ? " (pinned)" : ""}` +
+        `${workspace.isWorktree ? ` · worktree ${workspace.root} (${workspace.branch})` : ""}\n`,
     );
     const { registry, prompt } = buildRunEnvironment(started.bundle, project.config, wiring);
     const result = await executeWorkflow({
@@ -339,6 +361,7 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
       registry,
       prompt,
       persistence: project.events.recorder(taskId, started.runId),
+      workspace: { root: workspace.root, ...(workspace.treeHash !== undefined ? { treeHash: workspace.treeHash } : {}) },
       ...(io.abortSignal !== undefined ? { abortSignal: io.abortSignal } : {}),
     });
     const status = statusOfResult(result);
@@ -418,6 +441,65 @@ function renderBoard(board: BoardView): string {
     for (const card of board.finished) lines.push(renderCard(card));
   }
   return lines.join("\n") + "\n";
+}
+
+/** Worktrees git knows about, joined with the tasks they belong to (DESIGN §9.2). */
+async function cmdWorktreeList(argv: string[], io: CliIo): Promise<number> {
+  const { values } = parseArgs({ args: argv, options: { project: { type: "string" } } });
+  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  try {
+    const byPath = new Map(
+      project.runtime
+        .list()
+        .filter((row) => row.worktreePath !== undefined)
+        .map((row) => [samePathKey(row.worktreePath!), row]),
+    );
+    const git = gitFor(project, project.paths.projectDir);
+    const rows = (await git.listWorktrees()).map((entry) => {
+      // Two normalizations are needed to join git's output against JaiRA's records:
+      // git prints forward slashes (`C:/…` where JaiRA stored `C:\…`), and for a WSL
+      // project it prints the DISTRO's view (`/mnt/c/…`) — so map back to the host
+      // view first, then compare separator- and case-insensitively.
+      const hostPath = hostPathFor(project.config.execEnvironment, entry.path);
+      const task = byPath.get(samePathKey(hostPath));
+      return {
+        path: hostPath,
+        ...(entry.branch !== undefined ? { branch: entry.branch } : {}),
+        ...(task !== undefined ? { taskId: task.taskId, status: task.status } : {}),
+        ...(entry.prunable ? { prunable: true } : {}),
+      };
+    });
+    io.stdout(JSON.stringify(rows, null, 2) + "\n");
+    return 0;
+  } finally {
+    project.close();
+  }
+}
+
+/**
+ * Remove a task's worktree. Without `--force` git refuses when it holds
+ * uncommitted work, and that refusal is reported rather than thrown — destroying
+ * work is the user's call (DESIGN §9.2).
+ */
+async function cmdWorktreeRemove(argv: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: { project: { type: "string" }, force: { type: "boolean" } },
+    allowPositionals: true,
+  });
+  const taskId = positionals[0];
+  if (taskId === undefined) throw new UsageError("worktree remove requires <taskId>");
+  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  try {
+    const result = await removeWorktree(project, taskId, { ...(values.force ? { force: true } : {}) });
+    io.stdout(JSON.stringify({ taskId, ...result }, null, 2) + "\n");
+    if (!result.removed && result.reason?.includes("modified or untracked")) {
+      io.stderr("the worktree has uncommitted work; re-run with --force to discard it\n");
+    }
+    return result.removed ? 0 : 1;
+  } finally {
+    project.close();
+  }
 }
 
 function cmdTaskList(argv: string[], io: CliIo): number {
