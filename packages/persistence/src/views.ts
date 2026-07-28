@@ -72,7 +72,9 @@ export function bundleFor(project: Project, workflow: string, snapshotHash?: str
     }
   }
   try {
-    return loadBundle(readWorkflowFiles(project.paths.workflowsDir), workflow);
+    // Tolerant: a half-saved file the workflow does not reference must not blank the
+    // board (the user is editing in another window).
+    return loadBundle(readWorkflowFiles(project.paths.workflowsDir, { onError: () => undefined }), workflow);
   } catch {
     return undefined;
   }

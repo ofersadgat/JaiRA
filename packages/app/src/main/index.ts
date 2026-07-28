@@ -49,6 +49,10 @@ const handlers: Record<IpcChannel, Handler> = {
   "approval:pending": (() => service.pendingApprovals()) as Handler,
   "approval:submit": ((request: { requestId: string; decision: "allow" | "deny"; scope?: never }) =>
     service.submitApproval(request.requestId, request.decision, request.scope)) as Handler,
+  "workflow:browse": (() => service.browseWorkflows()) as Handler,
+  "history:size": (() => service.historySize()) as Handler,
+  "history:prune": ((request: Parameters<typeof service.pruneHistory>[0]) =>
+    service.pruneHistory(request)) as Handler,
 };
 
 function registerIpc(): void {

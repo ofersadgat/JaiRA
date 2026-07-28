@@ -117,6 +117,18 @@ describe("gateCapabilities (DESIGN §8.2)", () => {
     expect(issues[0]!.message).toMatch(/refusing rather than running it unguarded/);
   });
 
+  it("reads the AUTHORED `function` field as well as the loaded `functionRef`", () => {
+    // Regression: callers pass `bundle.source` (it is what a snapshot stores), where
+    // the field is spelled `function`. Reading only `functionRef` made this gate a
+    // silent no-op on every real call site — worse than no check, because a gate
+    // that never fires reads as one that passed.
+    const registry = registerAgentRuntimes(newRegistry(), { adapters: ["sdk"], query: fakeQuery().query });
+    const authored = { "wf/agent": { operation: { kind: "function", function: AGENT_SDK } } };
+    const issues = gateCapabilities(registry, authored, { policyNeedsApproval: true, unattended: true });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ stateId: "wf/agent", functionRef: AGENT_SDK });
+  });
+
   it("warns when an escalating runtime has no one to ask", () => {
     const registry = registerAgentRuntimes(newRegistry(), { adapters: ["sdk"], query: fakeQuery().query });
     const issues = gateCapabilities(registry, states, { policyNeedsApproval: true, unattended: true });

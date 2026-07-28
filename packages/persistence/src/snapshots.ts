@@ -33,8 +33,25 @@ function assertSafeStateId(stateId: string): void {
   }
 }
 
+export interface ReadWorkflowFilesOptions {
+  /**
+   * Called for a file that could not be read or parsed, instead of throwing.
+   * Supplying it makes the read TOLERANT — the file is skipped.
+   *
+   * That tolerance is not laziness: a workflow only needs the transitive closure of
+   * its root, and `.jaira/workflows/` is a directory a human edits in another
+   * window. Failing every task start because of one unrelated half-saved file was a
+   * real bug. A broken file that *is* needed still fails the load, and the caller
+   * reports the collected errors alongside it so the diagnosis stays sharp.
+   */
+  onError?: (relPath: string, message: string) => void;
+}
+
 /** Read every `*.json` under a workflows dir as loader input (relPath → parsed JSON). */
-export function readWorkflowFiles(workflowsDir: string): Record<string, unknown> {
+export function readWorkflowFiles(
+  workflowsDir: string,
+  options: ReadWorkflowFilesOptions = {},
+): Record<string, unknown> {
   const files: Record<string, unknown> = {};
   const walk = (dir: string): void => {
     let entries;
@@ -46,9 +63,20 @@ export function readWorkflowFiles(workflowsDir: string): Record<string, unknown>
     for (const entry of entries) {
       if (entry.name.startsWith(".")) continue; // editor/tool droppings, snapshot .meta.json
       const full = join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else if (entry.isFile() && entry.name.toLowerCase().endsWith(".json")) {
-        files[relative(workflowsDir, full)] = readJsonFile(full);
+      if (entry.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".json")) continue;
+      const rel = relative(workflowsDir, full);
+      if (options.onError === undefined) {
+        files[rel] = readJsonFile(full);
+        continue;
+      }
+      try {
+        files[rel] = readJsonFile(full);
+      } catch (e) {
+        options.onError(rel, (e as Error).message);
       }
     }
   };

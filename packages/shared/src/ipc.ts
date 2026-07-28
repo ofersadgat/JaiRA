@@ -14,7 +14,7 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import type { ComponentConfig } from "./components";
-import type { BoardView, TaskDetail, TaskSummary } from "./view";
+import type { BoardView, HistorySize, PruneResult, TaskDetail, TaskSummary, WorkflowBrowser } from "./view";
 
 // --- invoke channels ---------------------------------------------------------
 
@@ -88,6 +88,18 @@ export interface PendingInteraction {
 }
 
 /**
+ * A prune request (SPEC §13). `apply` is the destructive form; without it the
+ * response is a plan, which is what the UI shows before asking.
+ */
+export interface PruneRequest {
+  /** Only prune runs that ended more than this many days ago. Default 0 (any age). */
+  olderThanDays?: number;
+  /** Most-recent runs to keep per task. Default 1. */
+  keepRunsPerTask?: number;
+  apply?: boolean;
+}
+
+/**
  * Request/response map for invoke channels. Keys are channel names; each entry
  * declares its argument and result.
  */
@@ -104,6 +116,9 @@ export interface IpcContract {
   "interaction:submit": { request: SubmitInteractionRequest; response: { requestId: string } };
   "approval:pending": { request: void; response: PendingApproval[] };
   "approval:submit": { request: SubmitApprovalRequest; response: { requestId: string } };
+  "workflow:browse": { request: void; response: WorkflowBrowser };
+  "history:size": { request: void; response: HistorySize };
+  "history:prune": { request: PruneRequest; response: PruneResult & { remaining: HistorySize } };
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -123,6 +138,9 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "interaction:submit",
   "approval:pending",
   "approval:submit",
+  "workflow:browse",
+  "history:size",
+  "history:prune",
 ];
 
 // --- push channels -----------------------------------------------------------
@@ -134,7 +152,8 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
  */
 export type PushMessage =
   | { type: "engine:event"; taskId: string; runId: number; seq: number; at: number; event: JsonValue }
-  | { type: "store:invalidate"; scope: "tasks" | "board" | "task"; taskId?: string }
+  /** `workflows` fires when `.jaira/workflows/` changes on disk (§11.1's re-lint). */
+  | { type: "store:invalidate"; scope: "tasks" | "board" | "task" | "workflows"; taskId?: string }
   | { type: "interaction:requested"; pending: PendingInteraction }
   | { type: "interaction:resolved"; requestId: string }
   | { type: "approval:requested"; pending: PendingApproval }

@@ -10,16 +10,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ApprovalScope,
   BoardView,
+  HistorySize,
   IpcChannel,
   IpcRequest,
   IpcResponse,
+  IpcResponse as Response,
   JairaBridge,
   PendingApproval,
   PendingInteraction,
   PushMessage,
   TaskDetail,
   TaskSummary,
+  WorkflowBrowser,
 } from "@jaira/shared/browser";
+
+/** A prune plan or result, as `history:prune` returns it. */
+export type PruneReport = Response<"history:prune">;
 
 declare global {
   interface Window {
@@ -49,6 +55,12 @@ export interface AppState {
   approvals: PendingApproval[];
   /** Live event lines for the selected task, newest last. */
   stream: string[];
+  /** The workflow browser + lint results (DESIGN §11.1); refetched on file change. */
+  workflows: WorkflowBrowser | null;
+  /** How much history is stored, for the pruning panel. */
+  history: HistorySize | null;
+  /** The last prune plan (dry run) or applied result — never auto-applied. */
+  prune: PruneReport | null;
   error: string | null;
   busy: boolean;
 }
@@ -63,6 +75,9 @@ const EMPTY: AppState = {
   pending: [],
   approvals: [],
   stream: [],
+  workflows: null,
+  history: null,
+  prune: null,
   error: null,
   busy: false,
 };
@@ -127,6 +142,27 @@ export function useApp() {
     }
   }, [patch, fail]);
 
+  /**
+   * Re-browse and re-lint `.jaira/workflows/`. Main pushes `store:invalidate`
+   * with scope `workflows` when the directory changes, so an edit in the user's
+   * editor shows up here without a poll (DESIGN §11.1).
+   */
+  const refreshWorkflows = useCallback(async () => {
+    try {
+      patch({ workflows: await invoke("workflow:browse", undefined) });
+    } catch (e) {
+      fail(e);
+    }
+  }, [patch, fail]);
+
+  const refreshHistory = useCallback(async () => {
+    try {
+      patch({ history: await invoke("history:size", undefined) });
+    } catch (e) {
+      fail(e);
+    }
+  }, [patch, fail]);
+
   const refreshAll = useCallback(async () => {
     const current = await invoke("project:current", undefined).catch(() => null);
     patch({ projectDir: current?.dir ?? null });
@@ -136,9 +172,11 @@ export function useApp() {
       refreshBoard(),
       refreshPending(),
       refreshApprovals(),
+      refreshWorkflows(),
+      refreshHistory(),
       refreshDetail(ref.current.selected),
     ]);
-  }, [patch, refreshTasks, refreshBoard, refreshPending, refreshApprovals, refreshDetail]);
+  }, [patch, refreshTasks, refreshBoard, refreshPending, refreshApprovals, refreshWorkflows, refreshHistory, refreshDetail]);
 
   // Initial load + push subscription.
   useEffect(() => {
@@ -146,9 +184,13 @@ export function useApp() {
     return bridge().subscribe((message: PushMessage) => {
       switch (message.type) {
         case "store:invalidate":
-          if (message.scope === "tasks") void refreshTasks();
+          if (message.scope === "tasks") {
+            void refreshTasks();
+            void refreshHistory();
+          }
           if (message.scope === "board") void refreshBoard();
           if (message.scope === "task") void refreshDetail(ref.current.selected);
+          if (message.scope === "workflows") void refreshWorkflows();
           break;
         case "engine:event": {
           if (message.taskId !== ref.current.selected) return;
@@ -175,7 +217,16 @@ export function useApp() {
           break;
       }
     });
-  }, [refreshAll, refreshTasks, refreshBoard, refreshDetail, refreshPending, refreshApprovals]);
+  }, [
+    refreshAll,
+    refreshTasks,
+    refreshBoard,
+    refreshDetail,
+    refreshPending,
+    refreshApprovals,
+    refreshWorkflows,
+    refreshHistory,
+  ]);
 
   const actions = useMemo(
     () => ({
@@ -233,6 +284,27 @@ export function useApp() {
           fail(e);
         }
       },
+      /**
+       * Preview a prune (SPEC §13). Always a dry run: the panel shows what would
+       * go before the user confirms, because deleted history does not come back.
+       */
+      planPrune: async (olderThanDays: number, keepRunsPerTask: number) => {
+        try {
+          patch({ prune: await invoke("history:prune", { olderThanDays, keepRunsPerTask }) });
+        } catch (e) {
+          fail(e);
+        }
+      },
+      applyPrune: async (olderThanDays: number, keepRunsPerTask: number) => {
+        patch({ busy: true, error: null });
+        try {
+          const result = await invoke("history:prune", { olderThanDays, keepRunsPerTask, apply: true });
+          patch({ prune: result, history: result.remaining, busy: false });
+        } catch (e) {
+          fail(e);
+        }
+      },
+      dismissPrune: () => patch({ prune: null }),
       openProject: async (dir: string) => {
         patch({ busy: true, error: null });
         try {

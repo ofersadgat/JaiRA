@@ -10,3 +10,5 @@ export * from "./shape";
 export * from "./views";
 export * from "./worktrees";
 export * from "./commandLog";
+export * from "./prune";
+export * from "./workflows";

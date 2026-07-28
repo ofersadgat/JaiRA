@@ -22,6 +22,7 @@ import {
   type JsonValue,
   type Operation,
   type ResolvedValue,
+  type SessionStore,
 } from "@declarative-ai/exec";
 import {
   createWorkflowExecutor,
@@ -143,6 +144,13 @@ export interface WorkflowRunConfig {
    */
   policy?: ExecPolicy;
   approve?: Approver;
+  /**
+   * The session store the engine reads transcripts from. Supplying one is how
+   * conversation `summary` mode works (DESIGN §14 phase 7): the engine notes that
+   * "an app-provided store wins", so a summarizing decorator needs no engine
+   * change. Absent ⇒ the engine's own in-memory store.
+   */
+  sessions?: SessionStore<JsonValue>;
 }
 
 export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowExecResult> {
@@ -158,6 +166,7 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     ...(cfg.workspace !== undefined ? { workspace: cfg.workspace } : {}),
     ...(cfg.policy !== undefined ? { policy: cfg.policy } : {}),
     ...(cfg.approve !== undefined ? { approve: cfg.approve } : {}),
+    ...(cfg.sessions !== undefined ? { sessions: cfg.sessions } : {}),
   };
   return executor.start(workflowStartOp(cfg.inputs), ctx).result;
 }

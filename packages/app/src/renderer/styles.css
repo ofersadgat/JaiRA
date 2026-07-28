@@ -450,6 +450,71 @@ button.danger:hover {
   background: var(--panel);
 }
 
+/* --- workflow browser + history (DESIGN §11.1, SPEC §13) --- */
+.workflows,
+.history {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.workflows h3,
+.history h3 {
+  margin-bottom: 6px;
+}
+.workflows ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wf-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.wf-row:hover {
+  background: var(--panel-2);
+}
+.workflows li.lint-error .badge {
+  color: var(--bad);
+}
+.workflows li.lint-warn .badge {
+  color: var(--warn);
+}
+.wf-detail {
+  padding: 4px 6px 8px 24px;
+  display: grid;
+  gap: 3px;
+}
+.prune-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+  font-size: 11px;
+  color: var(--dim);
+}
+.prune-controls label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.prune-controls input {
+  width: 48px;
+}
+.prune-report {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  padding: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
 .toast {
   position: fixed;
   bottom: 16px;

@@ -8,15 +8,19 @@
  * "task status is derived from the instance tree" is enforced: every view goes
  * through the projection, never through a UI-side copy of engine semantics.
  */
+import { watch, type FSWatcher } from "node:fs";
 import type { JsonValue } from "@declarative-ai/json";
 import {
   beginTaskRun,
   boardView,
+  browseWorkflows,
   ensureWorkspace,
   cancelTask,
   createTask,
   finishTaskRun,
+  historySize,
   openProject,
+  pruneHistory,
   taskDetailView,
   taskSummaries,
   type Project,
@@ -29,6 +33,7 @@ import {
   gateCapabilities,
   registerAgentRuntimes,
   registerCommandFunction,
+  registerGenericAgents,
   registerTools,
   functionNamesOf,
   InteractionHub,
@@ -36,7 +41,9 @@ import {
   newRegistry,
   parseFakeRules,
   policyCanEscalate,
+  promptSummarizer,
   ScriptedFunctions,
+  sessionStoreFor,
   statusOfResult,
   type ApprovalRequest,
   type FakeRule,
@@ -49,12 +56,16 @@ import type {
   BoardView,
   ComponentConfig,
   CreateTaskRequest,
+  HistorySize,
   PendingApproval,
   PendingInteraction,
+  PruneRequest,
+  PruneResult,
   PushMessage,
   StartTaskRequest,
   TaskDetail,
   TaskSummary,
+  WorkflowBrowser,
 } from "@jaira/shared";
 
 export type Publish = (message: PushMessage) => void;
@@ -65,6 +76,13 @@ export interface AppServiceOptions {
   /** Deterministic request ids in tests. */
   nextInteractionId?: () => string;
   nextApprovalId?: () => string;
+  /**
+   * Debounce for the workflows watcher, ms. An editor writes a file in several
+   * syscalls, so re-linting on every raw event would lint half-written files.
+   */
+  watchDebounceMs?: number;
+  /** Set false to skip watching `.jaira/workflows/` (tests that don't need it). */
+  watchWorkflows?: boolean;
 }
 
 /** An approval as the renderer sees it (the hub's request, minus internals). */
@@ -156,14 +174,53 @@ export class AppService {
   /** Requests seen, kept until resolved so the audit entry can name the command. */
   private readonly approvalsSeen = new Map<string, ApprovalRequest>();
 
+  /** The `.jaira/workflows/` watcher and its debounce timer (§11.1 re-lint). */
+  private watcher?: FSWatcher;
+  private watchTimer?: ReturnType<typeof setTimeout>;
+
   // --- lifecycle -------------------------------------------------------------
 
   async open(dir: string): Promise<{ dir: string; recovered: string[] }> {
     await this.close();
     const project = openProject(dir);
     this.project = project;
+    if (this.options.watchWorkflows !== false) this.watchWorkflows(project);
     if (project.recovered.length > 0) this.publish({ type: "store:invalidate", scope: "tasks" });
     return { dir: project.paths.projectDir, recovered: project.recovered };
+  }
+
+  /**
+   * Watch `.jaira/workflows/` so the browser re-lints as the user edits (DESIGN
+   * §11.1: "editing happens in the user's editor, JaiRA watches and re-lints").
+   *
+   * Recursive watching is unavailable on Linux, so a failure is not fatal — the
+   * browser is still correct on demand, it just stops being live. That matters
+   * because CI and Linux developers must not be a broken app.
+   */
+  private watchWorkflows(project: Project): void {
+    const notify = (): void => {
+      clearTimeout(this.watchTimer);
+      // Coalesce: a single save often produces several events, and an editor's
+      // temp-file dance would otherwise lint a file that no longer exists.
+      this.watchTimer = setTimeout(() => {
+        this.publish({ type: "store:invalidate", scope: "workflows" });
+      }, this.options.watchDebounceMs ?? 150);
+      this.watchTimer.unref?.();
+    };
+    try {
+      this.watcher = watch(project.paths.workflowsDir, { recursive: true }, notify);
+    } catch {
+      try {
+        this.watcher = watch(project.paths.workflowsDir, notify);
+      } catch {
+        this.watcher = undefined;
+      }
+    }
+    this.watcher?.on("error", () => {
+      // A deleted workflows directory ends the watch; on-demand browsing still works.
+      this.watcher?.close();
+      this.watcher = undefined;
+    });
   }
 
   current(): { dir: string } | null {
@@ -179,6 +236,9 @@ export class AppService {
    * engine's event tee — an unhandled rejection, and a task row left `running`.
    */
   async close(): Promise<void> {
+    clearTimeout(this.watchTimer);
+    this.watcher?.close();
+    this.watcher = undefined;
     this.hub.rejectAll("the project was closed");
     this.approvals.denyAll();
     const inFlight = [...this.live.values()];
@@ -258,6 +318,47 @@ export class AppService {
     return taskDetailView(this.p, taskId, this.viewOptions());
   }
 
+  /**
+   * The workflow browser + lint results (DESIGN §11.1). No registry is passed: an
+   * interactive function is only registered once a run needs it, so linting
+   * against this process's partial registry would flag every human gate.
+   */
+  browseWorkflows(): WorkflowBrowser {
+    return browseWorkflows(this.p);
+  }
+
+  /** Rows currently stored, for the pruning panel's "before" figure. */
+  historySize(): HistorySize {
+    return historySize(this.p);
+  }
+
+  /**
+   * Plan or apply a prune (SPEC §13).
+   *
+   * A request without `apply` is a plan and deletes nothing, which is what the UI
+   * shows before asking — history is not recoverable. The §13 safety rule lives in
+   * `pruneHistory`, so it holds no matter which caller asks.
+   */
+  pruneHistory(request: PruneRequest = {}): PruneResult & { remaining: HistorySize } {
+    const project = this.p;
+    const days = request.olderThanDays ?? 0;
+    if (!Number.isFinite(days) || days < 0) throw new Error("olderThanDays must be a non-negative number");
+    const keep = request.keepRunsPerTask ?? 1;
+    if (!Number.isInteger(keep) || keep < 0) throw new Error("keepRunsPerTask must be a non-negative integer");
+    const result = pruneHistory(project, {
+      before: Date.now() - days * 86_400_000,
+      keepRunsPerTask: keep,
+      dryRun: request.apply !== true,
+    });
+    if (!result.dryRun && result.runs.length > 0) {
+      // Run history backs the detail view and the board's finished cards.
+      this.publish({ type: "store:invalidate", scope: "tasks" });
+      this.publish({ type: "store:invalidate", scope: "board" });
+      for (const run of result.runs) this.publish({ type: "store:invalidate", scope: "task", taskId: run.taskId });
+    }
+    return { ...result, remaining: historySize(project) };
+  }
+
   // --- writes ----------------------------------------------------------------
 
   createTask(request: CreateTaskRequest): TaskSummary {
@@ -305,6 +406,13 @@ export class AppService {
     // Delegated agent runtimes are available to every run (DESIGN §8.1); a state
     // reaches one with a `claude-code` function op.
     registerAgentRuntimes(registry, { execEnv: project.config.execEnvironment });
+    // Non-Claude CLIs the project configured (DESIGN §8.1). Nothing is registered
+    // when none are, so a state naming one fails honestly instead of running some
+    // default binary.
+    registerGenericAgents(registry, {
+      execEnv: project.config.execEnvironment,
+      ...(project.config.agents.genericCli !== undefined ? { agents: project.config.agents.genericCli } : {}),
+    });
     // Our own tools, so an agent's commands go through the policy at all: an agent
     // calling its native shell would be invisible to it (DESIGN §10.1).
     registerTools(registry, { execEnv: project.config.execEnvironment });
@@ -343,6 +451,14 @@ export class AppService {
       ...(fakeRules !== undefined ? { fakeRules } : {}),
       defaults: modelDefaults(project.config, started.bundle, { fake: fakeRules !== undefined }),
     });
+
+    // Conversation `summary` mode (DESIGN §14 phase 7): installed only for the
+    // sessions whose states asked for it, and summarizing through this run's own
+    // prompt executor so a scripted run needs no provider.
+    const { store: sessions } = sessionStoreFor(
+      started.bundle,
+      promptSummarizer(prompt),
+    );
 
     // Policy for this run: authored project rules compiled to an ExecPolicy, with
     // every decision audited and `require_approval` routed to the inbox (§10.2).
@@ -397,6 +513,7 @@ export class AppService {
           },
           policy,
           approve,
+          ...(sessions !== undefined ? { sessions } : {}),
           workspace: {
             root: workspace.root,
             ...(workspace.treeHash !== undefined ? { treeHash: workspace.treeHash } : {}),

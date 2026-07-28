@@ -25,6 +25,36 @@ export interface JairaModelConfig {
  */
 export type JairaExecEnvironment = "windows" | { wsl: string };
 
+/**
+ * A non-Claude coding-agent CLI (DESIGN §8.1's `generic-cli`, §16).
+ *
+ * Registered by `@jaira/runtime`'s `registerGenericAgents` and driven through
+ * JaiRA's Exec layer, so a WSL project runs it inside the distro. It is
+ * **policy-weak by design**: a generic binary has no permission callback, so §8.2's
+ * capability gate refuses it under a policy that can require approval rather than
+ * letting it run unguarded.
+ */
+export interface JairaGenericCliAgent {
+  /** Registry name a state's `functionRef` uses. Default `generic-cli`. */
+  name?: string;
+  /** The executable. */
+  command: string;
+  /**
+   * argv template. A literal `{prompt}` element is replaced by the instruction;
+   * with no placeholder the prompt is appended after `--`.
+   */
+  args?: string[];
+  /** How the instruction reaches the binary. Default: as an argument. */
+  prompt?: "argument" | "stdin";
+  /** Extra environment for the child process. */
+  env?: Record<string, string>;
+}
+
+export interface JairaAgentConfig {
+  /** Non-Claude CLIs available to this project. */
+  genericCli?: JairaGenericCliAgent[];
+}
+
 export interface JairaConfig {
   models: JairaModelConfig;
   /** Artifact root relative to the project dir (DESIGN §15 Q1). */
@@ -37,12 +67,61 @@ export interface JairaConfig {
    * means "built-in rules only" (SPEC §11.2/§11.3), which is the safe default.
    */
   policy: Record<string, JsonValue>;
+  /** Agent runtimes beyond the built-in Claude adapters (DESIGN §8.1). */
+  agents: JairaAgentConfig;
 }
 
 export const DEFAULT_ARTIFACT_DIR = "jaira-artifacts";
 
 export function defaultConfig(): JairaConfig {
-  return { models: {}, artifactDir: DEFAULT_ARTIFACT_DIR, execEnvironment: "windows", policy: {} };
+  return { models: {}, artifactDir: DEFAULT_ARTIFACT_DIR, execEnvironment: "windows", policy: {}, agents: {} };
+}
+
+/**
+ * Parse the generic-agent list.
+ *
+ * Strict rather than forgiving: a typo here means a state either fails as
+ * "unregistered function" or runs the wrong binary, and both are worse than a
+ * config error naming the field.
+ */
+function parseAgents(raw: unknown): JairaAgentConfig {
+  if (raw === undefined) return {};
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("config.agents must be an object");
+  }
+  const list = (raw as Record<string, unknown>)["genericCli"];
+  if (list === undefined) return {};
+  if (!Array.isArray(list)) throw new Error("config.agents.genericCli must be an array");
+  const genericCli = list.map((entry, i) => {
+    const where = `config.agents.genericCli[${i}]`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`${where} must be an object`);
+    }
+    const spec = entry as Record<string, unknown>;
+    if (typeof spec["command"] !== "string" || spec["command"].length === 0) {
+      throw new Error(`${where}.command must be a non-empty string`);
+    }
+    if (spec["args"] !== undefined && !(Array.isArray(spec["args"]) && spec["args"].every((a) => typeof a === "string"))) {
+      throw new Error(`${where}.args must be an array of strings`);
+    }
+    if (spec["prompt"] !== undefined && spec["prompt"] !== "argument" && spec["prompt"] !== "stdin") {
+      throw new Error(`${where}.prompt must be "argument" or "stdin"`);
+    }
+    if (spec["name"] !== undefined && (typeof spec["name"] !== "string" || spec["name"].length === 0)) {
+      throw new Error(`${where}.name must be a non-empty string`);
+    }
+    if (
+      spec["env"] !== undefined &&
+      (spec["env"] === null ||
+        typeof spec["env"] !== "object" ||
+        Array.isArray(spec["env"]) ||
+        !Object.values(spec["env"] as Record<string, unknown>).every((v) => typeof v === "string"))
+    ) {
+      throw new Error(`${where}.env must be an object of strings`);
+    }
+    return spec as unknown as JairaGenericCliAgent;
+  });
+  return { genericCli };
 }
 
 function parseExecEnvironment(raw: unknown): JairaExecEnvironment {
@@ -93,5 +172,6 @@ export function parseConfig(raw: unknown): JairaConfig {
     artifactDir,
     execEnvironment: parseExecEnvironment(cfg["execEnvironment"]),
     policy: (rawPolicy as Record<string, JsonValue> | undefined) ?? {},
+    agents: parseAgents(cfg["agents"]),
   };
 }

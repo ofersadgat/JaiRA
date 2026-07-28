@@ -12,32 +12,43 @@ import type { JsonValue } from "@declarative-ai/exec";
 import {
   beginTaskRun,
   boardView,
+  browseWorkflows,
   cancelTask,
   createTask,
   finishTaskRun,
   initProject,
+  lintErrors,
   openProject,
   ensureWorkspace,
   gitFor,
+  historySize,
+  pruneHistory,
   readWorkflowFiles,
   removeWorktree,
   runCauses,
   type Project,
+  type WorkflowBrowser,
 } from "@jaira/persistence";
 import { defaultConfig, parseJsonText, type BoardCard, type BoardView, type JairaConfig } from "@jaira/shared";
 import {
   buildPromptExecutor,
   executeWorkflow,
   functionNamesOf,
+  gateCapabilities,
   hostPathFor,
   modelDefaults,
   newRegistry,
   parseFakeRules,
   parseInteractionScript,
+  policyCanEscalate,
+  promptSummarizer,
+  registerAgentRuntimes,
   registerCommandFunction,
+  registerGenericAgents,
   registerTools,
   samePathKey,
   ScriptedFunctions,
+  sessionStoreFor,
   statusOfResult,
   type FakeRule,
   type WorkflowExecResult,
@@ -67,6 +78,9 @@ const USAGE = `usage:
   jaira board [--level <stateId>] [--json] [--project <dir>]
   jaira worktree list [--project <dir>]
   jaira worktree remove <taskId> [--force] [--project <dir>]
+  jaira prune [--older-than <days>] [--keep-runs <n>] [--apply] [--project <dir>]
+  jaira workflow list [--json] [--project <dir>]
+  jaira workflow lint [--json] [--project <dir>]
 `;
 
 export async function runCli(argv: string[], io: CliIo): Promise<number> {
@@ -91,6 +105,19 @@ async function dispatch(argv: string[], io: CliIo): Promise<number> {
       return cmdRun(rest, io);
     case "board":
       return cmdBoard(rest, io);
+    case "prune":
+      return cmdPrune(rest, io);
+    case "workflow": {
+      const [sub, ...wfRest] = rest;
+      switch (sub) {
+        case "list":
+          return cmdWorkflowList(wfRest, io);
+        case "lint":
+          return cmdWorkflowLint(wfRest, io);
+        default:
+          throw new UsageError(`unknown workflow subcommand '${sub ?? ""}'`);
+      }
+    }
     case "worktree": {
       const [sub, ...wtRest] = rest;
       switch (sub) {
@@ -194,10 +221,23 @@ function buildRunEnvironment(
   bundle: Parameters<typeof functionNamesOf>[0],
   config: JairaConfig,
   wiring: RunWiring,
-): { registry: ReturnType<typeof newRegistry>; prompt: ReturnType<typeof buildPromptExecutor> } {
+): {
+  registry: ReturnType<typeof newRegistry>;
+  prompt: ReturnType<typeof buildPromptExecutor>;
+  sessions?: ReturnType<typeof sessionStoreFor>["store"];
+  summaryModes: ReturnType<typeof sessionStoreFor>["modes"];
+} {
   const registry = newRegistry();
   registerTools(registry, { execEnv: config.execEnvironment });
   registerCommandFunction(registry, { execEnv: config.execEnvironment });
+  // Agent runtimes, so a workflow with a `claude-code` state runs the same way here
+  // as in the app. Without them the CLI — the documented fastest debugging surface —
+  // failed such a state as "unregistered function" while the app ran it fine.
+  registerAgentRuntimes(registry, { execEnv: config.execEnvironment });
+  registerGenericAgents(registry, {
+    execEnv: config.execEnvironment,
+    ...(config.agents.genericCli !== undefined ? { agents: config.agents.genericCli } : {}),
+  });
   if (wiring.interactions) {
     wiring.interactions.register(registry);
     for (const name of functionNamesOf(bundle)) wiring.interactions.registerWildcard(registry, name);
@@ -207,7 +247,57 @@ function buildRunEnvironment(
     ...(wiring.repairTurns !== undefined ? { repairTurns: wiring.repairTurns } : {}),
     defaults: modelDefaults(config, bundle, { fake: wiring.fakeRules !== undefined }),
   });
-  return { registry, prompt };
+  // Conversation `summary` mode: only installed when a state asked for it, and it
+  // summarizes through the run's own prompt executor, so a scripted run stays
+  // scripted (DESIGN §14 phase 7).
+  const { store: sessions, modes: summaryModes } = sessionStoreFor(
+    bundle,
+    promptSummarizer(prompt),
+  );
+  return { registry, prompt, ...(sessions !== undefined ? { sessions } : {}), summaryModes };
+}
+
+/**
+ * Refuse a state whose runtime cannot enforce the policy it runs under (DESIGN
+ * §8.2), before anything executes.
+ *
+ * `unattended: true` is the honest description of this surface: the CLI has no
+ * approvals inbox, so a runtime that escalates tool calls to a human has nobody to
+ * ask. The app passes `false` because its inbox can answer.
+ */
+function assertCapabilities(
+  registry: ReturnType<typeof newRegistry>,
+  bundle: { source?: Record<string, unknown> },
+  config: JairaConfig,
+): void {
+  const issues = gateCapabilities(registry, (bundle.source ?? {}) as never, {
+    policyNeedsApproval: policyCanEscalate(config.policy),
+    unattended: true,
+  });
+  if (issues.length > 0) {
+    // Actionable, because the honest refusal is otherwise a dead end: the two real
+    // ways forward are the app (which has an inbox) or a project that does not
+    // escalate.
+    throw new Error(
+      `${issues.map((i) => `${i.stateId}: ${i.message}`).join("; ")}\n` +
+        "  run this task in the JaiRA app, which can answer approvals, or set policy.builtins to false " +
+        "in .jaira/config.json if this workspace is disposable",
+    );
+  }
+}
+
+/**
+ * One session has one transcript, so a session containing both a `summary` state
+ * and a `full_history` state cannot honour both. Reported rather than resolved:
+ * summarizing under a state that asked for full history would be a quiet lie.
+ */
+function warnSummaryConflicts(modes: ReturnType<typeof sessionStoreFor>["modes"], io: CliIo): void {
+  for (const conflict of modes.conflicts) {
+    io.stderr(
+      `warning: session '${conflict.session}' mixes summary and full_history ` +
+        `(${conflict.stateIds.join(", ")}); the transcript is summarized for all of them\n`,
+    );
+  }
 }
 
 function resultReport(result: WorkflowExecResult): Record<string, unknown> {
@@ -270,12 +360,15 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
 
   const wiring = runWiringOf(values, io.cwd);
   const inputs = values.inputs !== undefined ? recordValue("inputs", jsonValue("inputs", values.inputs, io.cwd)) : {};
-  const { registry, prompt } = buildRunEnvironment(bundle, config, wiring);
+  const { registry, prompt, sessions, summaryModes } = buildRunEnvironment(bundle, config, wiring);
+  warnSummaryConflicts(summaryModes, io);
+  assertCapabilities(registry, bundle, config);
   const result = await executeWorkflow({
     bundle,
     inputs,
     registry,
     prompt,
+    ...(sessions !== undefined ? { sessions } : {}),
     ...(io.abortSignal !== undefined ? { abortSignal: io.abortSignal } : {}),
   });
   io.stdout(JSON.stringify(resultReport(result), null, 2) + "\n");
@@ -358,12 +451,24 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
         `snapshot ${started.snapshotHash.slice(0, 12)}${started.pinned ? " (pinned)" : ""}` +
         `${workspace.isWorktree ? ` · worktree ${workspace.root} (${workspace.branch})` : ""}\n`,
     );
-    const { registry, prompt } = buildRunEnvironment(started.bundle, project.config, wiring);
+    const { registry, prompt, sessions, summaryModes } = buildRunEnvironment(started.bundle, project.config, wiring);
+    warnSummaryConflicts(summaryModes, io);
+    try {
+      assertCapabilities(registry, started.bundle, project.config);
+    } catch (e) {
+      // The run row is already open, so a refusal must close it — otherwise the task
+      // stays `running` and the next open would call it interrupted.
+      finishTaskRun(project, taskId, started.runId, "failed", {
+        failure: { classification: "permanent", reason: (e as Error).message },
+      });
+      throw e;
+    }
     const result = await executeWorkflow({
       bundle: started.bundle,
       inputs: started.meta.inputs ?? {},
       registry,
       prompt,
+      ...(sessions !== undefined ? { sessions } : {}),
       persistence: project.events.recorder(taskId, started.runId),
       workspace: { root: workspace.root, ...(workspace.treeHash !== undefined ? { treeHash: workspace.treeHash } : {}) },
       ...(io.abortSignal !== undefined ? { abortSignal: io.abortSignal } : {}),
@@ -501,6 +606,145 @@ async function cmdWorktreeRemove(argv: string[], io: CliIo): Promise<number> {
       io.stderr("the worktree has uncommitted work; re-run with --force to discard it\n");
     }
     return result.removed ? 0 : 1;
+  } finally {
+    project.close();
+  }
+}
+
+/**
+ * The workflow browser (DESIGN §11.1) on the headless surface: what workflows the
+ * project has, what states each covers, and whether anything is using them.
+ *
+ * No registry is passed to the linter on purpose. `strict` mode treats an
+ * unregistered `functionRef` as an error, but JaiRA's interactive functions are
+ * supplied per run (`--interactions`), so linting against a partial registry would
+ * flag every human gate as broken.
+ */
+function cmdWorkflowList(argv: string[], io: CliIo): number {
+  const { values } = parseArgs({
+    args: argv,
+    options: { project: { type: "string" }, json: { type: "boolean" } },
+  });
+  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  try {
+    const browser = browseWorkflows(project);
+    if (values.json) {
+      io.stdout(JSON.stringify(browser, null, 2) + "\n");
+      return 0;
+    }
+    io.stdout(renderWorkflows(browser));
+    return 0;
+  } finally {
+    project.close();
+  }
+}
+
+function renderWorkflows(browser: WorkflowBrowser): string {
+  const lines: string[] = [];
+  for (const workflow of browser.workflows) {
+    const errors = workflow.issues.filter((i) => i.severity === "error").length;
+    const warnings = workflow.issues.length - errors;
+    const health =
+      workflow.loadError !== undefined
+        ? "✗ will not load"
+        : errors > 0
+          ? `✗ ${errors} error(s)${warnings > 0 ? `, ${warnings} warning(s)` : ""}`
+          : warnings > 0
+            ? `⚠ ${warnings} warning(s)`
+            : "✓";
+    lines.push(`${workflow.rootId}${workflow.label ? `  (${workflow.label})` : ""}  ${health}`);
+    if (workflow.snapshotHash !== undefined) lines.push(`  hash    ${workflow.snapshotHash.slice(0, 12)}`);
+    lines.push(`  states  ${workflow.states.length}`);
+    if (workflow.taskIds.length > 0) lines.push(`  tasks   ${workflow.taskIds.join(", ")}`);
+    if (workflow.driftedTasks.length > 0) {
+      lines.push(`  drift   ${workflow.driftedTasks.join(", ")} pinned to an older snapshot`);
+    }
+    if (workflow.loadError !== undefined) lines.push(`  error   ${workflow.loadError}`);
+    for (const issue of workflow.issues) {
+      lines.push(`  ${issue.severity === "error" ? "✗" : "⚠"} ${issue.stateId} ${issue.path}: ${issue.message}`);
+    }
+  }
+  const broken = browser.files.filter((f) => f.error !== undefined);
+  if (broken.length > 0) {
+    lines.push("unreadable files:");
+    for (const file of broken) lines.push(`  ✗ ${file.file}: ${file.error}`);
+  }
+  if (browser.unreachable.length > 0) {
+    // No root reaches these: usually a reference cycle, so say so rather than
+    // leaving them invisible.
+    lines.push(`unreachable states (no workflow root reaches them): ${browser.unreachable.join(", ")}`);
+  }
+  if (lines.length === 0) lines.push("no workflows under .jaira/workflows/");
+  return lines.join("\n") + "\n";
+}
+
+/** Lint only, exiting non-zero when something would block a task start (§5.2). */
+function cmdWorkflowLint(argv: string[], io: CliIo): number {
+  const { values } = parseArgs({
+    args: argv,
+    options: { project: { type: "string" }, json: { type: "boolean" } },
+  });
+  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  try {
+    const browser = browseWorkflows(project);
+    const errors = lintErrors(browser);
+    const unreadable = browser.files.filter((f) => f.error !== undefined);
+    if (values.json) {
+      io.stdout(JSON.stringify({ errors, unreadable, unreachable: browser.unreachable }, null, 2) + "\n");
+    } else {
+      io.stdout(renderWorkflows(browser));
+    }
+    // Unreadable files count as failures: a workflow whose file won't parse cannot
+    // be started, even if no root currently references it.
+    return errors.length === 0 && unreadable.length === 0 ? 0 : 1;
+  } finally {
+    project.close();
+  }
+}
+
+/**
+ * Prune old run history (SPEC §13, DESIGN §12).
+ *
+ * Dry-run by default: deleting history is not undoable, so the destructive form
+ * takes an explicit `--apply`. The §13 safety rule is in `pruneHistory` itself —
+ * non-terminal tasks are never candidates — and the skipped list is printed so the
+ * refusal is visible rather than silent.
+ */
+function cmdPrune(argv: string[], io: CliIo): number {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      project: { type: "string" },
+      "older-than": { type: "string" },
+      "keep-runs": { type: "string" },
+      apply: { type: "boolean" },
+    },
+  });
+  const days = values["older-than"] !== undefined ? Number(values["older-than"]) : 0;
+  if (!Number.isFinite(days) || days < 0) throw new UsageError("--older-than must be a non-negative number of days");
+  const keep = values["keep-runs"] !== undefined ? Number(values["keep-runs"]) : 1;
+  if (!Number.isInteger(keep) || keep < 0) throw new UsageError("--keep-runs must be a non-negative integer");
+  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  try {
+    const before = Date.now() - days * 86_400_000;
+    const result = pruneHistory(project, { before, keepRunsPerTask: keep, dryRun: values.apply !== true });
+    io.stdout(
+      JSON.stringify(
+        {
+          ...(result.dryRun ? { dryRun: true } : {}),
+          runsPruned: result.runs.length,
+          events: result.events,
+          commands: result.commands,
+          runs: result.runs,
+          skipped: result.skippedTasks,
+          remaining: historySize(project),
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+    if (result.dryRun) io.stderr("nothing was deleted — re-run with --apply to prune\n");
+    return 0;
   } finally {
     project.close();
   }

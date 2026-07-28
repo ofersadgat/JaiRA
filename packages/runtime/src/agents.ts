@@ -110,6 +110,22 @@ function capabilitiesOf(
 }
 
 /**
+ * The function a state's operation dispatches to, from either state shape.
+ *
+ * The authored form spells it `function` and the loaded form `functionRef`, and
+ * callers naturally reach for `bundle.source` (it is what a snapshot stores).
+ * Reading only `functionRef` made this whole gate a silent no-op against authored
+ * states — a check that never fires is worse than no check, because it reads as
+ * one that passed.
+ */
+function functionRefOf(def: { operation?: { kind?: string; functionRef?: unknown; function?: unknown } }): string | undefined {
+  const op = def.operation;
+  if (op?.kind !== "function") return undefined;
+  if (typeof op.functionRef === "string") return op.functionRef;
+  return typeof op.function === "string" ? op.function : undefined;
+}
+
+/**
  * Cross-check each state's chosen runtime against what it actually supports
  * (DESIGN §8.2): "violations block the task with a clear error rather than
  * degrading silently".
@@ -120,14 +136,13 @@ function capabilitiesOf(
  */
 export function gateCapabilities(
   registry: CapabilityRegistry<WorkflowMetrics>,
-  states: Record<string, { operation?: { kind?: string; functionRef?: unknown } }>,
+  states: Record<string, { operation?: { kind?: string; functionRef?: unknown; function?: unknown } }>,
   options: GateOptions = {},
 ): GateIssue[] {
   const issues: GateIssue[] = [];
   for (const [stateId, def] of Object.entries(states)) {
-    const op = def.operation;
-    if (op?.kind !== "function" || typeof op.functionRef !== "string") continue;
-    const functionRef = op.functionRef;
+    const functionRef = functionRefOf(def);
+    if (functionRef === undefined) continue;
     const caps = capabilitiesOf(registry, functionRef);
     if (caps === undefined) continue; // a host function or an unregistered ref — not this check's business
 
