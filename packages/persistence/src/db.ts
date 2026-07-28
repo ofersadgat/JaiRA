@@ -51,6 +51,27 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_task ON events(task_id, seq);
 CREATE INDEX IF NOT EXISTS events_run ON events(run_id, seq);
+
+-- The command audit trail (DESIGN §4.2 'command_log', §10.2): every command an
+-- agent requested, what policy decided, and — when escalated — the human's answer
+-- and its scope. The first of the deferred §4.2 tables to land, because policy is
+-- the feature that needs it.
+CREATE TABLE IF NOT EXISTS command_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id     TEXT NOT NULL,
+  run_id      INTEGER NOT NULL REFERENCES runs(id),
+  tool        TEXT NOT NULL,
+  command     TEXT,
+  parsed_json TEXT,
+  decision    TEXT NOT NULL,   -- allowed | blocked | approved | denied
+  decided_by  TEXT NOT NULL,   -- policy | user
+  reason      TEXT,
+  scope       TEXT,            -- once | session | workflow-run | always
+  session_id  TEXT,
+  created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS command_log_task ON command_log(task_id, id);
+CREATE INDEX IF NOT EXISTS command_log_run ON command_log(run_id, id);
 `;
 
 export function openDb(file: string): JairaDb {

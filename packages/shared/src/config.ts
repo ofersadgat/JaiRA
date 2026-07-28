@@ -7,6 +7,7 @@
  * is the DEFAULT model a state inherits when it names none, plus the artifact
  * root. Exec environment, policy, and agent runtimes arrive in later phases.
  */
+import type { JsonValue } from "@declarative-ai/json";
 
 export interface JairaModelConfig {
   /**
@@ -29,12 +30,19 @@ export interface JairaConfig {
   /** Artifact root relative to the project dir (DESIGN §15 Q1). */
   artifactDir: string;
   execEnvironment: JairaExecEnvironment;
+  /**
+   * The project's safety policy (DESIGN §10.1). Kept as opaque JSON here and
+   * compiled by `@jaira/runtime`'s `compilePolicy`: `shared` must stay free of the
+   * permission model so the renderer's bundle does not pull it in. An empty policy
+   * means "built-in rules only" (SPEC §11.2/§11.3), which is the safe default.
+   */
+  policy: Record<string, JsonValue>;
 }
 
 export const DEFAULT_ARTIFACT_DIR = "jaira-artifacts";
 
 export function defaultConfig(): JairaConfig {
-  return { models: {}, artifactDir: DEFAULT_ARTIFACT_DIR, execEnvironment: "windows" };
+  return { models: {}, artifactDir: DEFAULT_ARTIFACT_DIR, execEnvironment: "windows", policy: {} };
 }
 
 function parseExecEnvironment(raw: unknown): JairaExecEnvironment {
@@ -76,5 +84,14 @@ export function parseConfig(raw: unknown): JairaConfig {
   if (typeof artifactDir !== "string" || artifactDir.length === 0) {
     throw new Error("config.artifactDir must be a non-empty string");
   }
-  return { models, artifactDir, execEnvironment: parseExecEnvironment(cfg["execEnvironment"]) };
+  const rawPolicy = cfg["policy"];
+  if (rawPolicy !== undefined && (rawPolicy === null || typeof rawPolicy !== "object" || Array.isArray(rawPolicy))) {
+    throw new Error("config.policy must be an object");
+  }
+  return {
+    models,
+    artifactDir,
+    execEnvironment: parseExecEnvironment(cfg["execEnvironment"]),
+    policy: (rawPolicy as Record<string, JsonValue> | undefined) ?? {},
+  };
 }

@@ -36,6 +36,35 @@ export interface StartTaskRequest {
   fake?: JsonValue;
 }
 
+/**
+ * A pending per-command approval (DESIGN §10.2).
+ *
+ * Deliberately distinct from {@link PendingInteraction}: a workflow gate is an
+ * authored UI state, while this is provider-initiated and unpredictable — policy
+ * escalated a tool call. They share the inbox, not the mechanism.
+ */
+export interface PendingApproval {
+  requestId: string;
+  tool: string;
+  /** The command line, when the tool takes one. */
+  command?: string;
+  /** Why policy escalated. */
+  reason?: string;
+  input: Record<string, JsonValue>;
+  taskId?: string;
+  at: number;
+}
+
+/** How long an approval answer applies (upstream's PermissionScope). */
+export type ApprovalScope = "once" | "session" | "workflow-run" | "always";
+
+export interface SubmitApprovalRequest {
+  requestId: string;
+  decision: "allow" | "deny";
+  /** Defaults to `once` — the narrowest answer. */
+  scope?: ApprovalScope;
+}
+
 /** Answer to a pending interactive request (DESIGN §7.1). */
 export interface SubmitInteractionRequest {
   requestId: string;
@@ -73,6 +102,8 @@ export interface IpcContract {
   "board:view": { request: { level?: string }; response: BoardView };
   "interaction:pending": { request: void; response: PendingInteraction[] };
   "interaction:submit": { request: SubmitInteractionRequest; response: { requestId: string } };
+  "approval:pending": { request: void; response: PendingApproval[] };
+  "approval:submit": { request: SubmitApprovalRequest; response: { requestId: string } };
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -90,6 +121,8 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "board:view",
   "interaction:pending",
   "interaction:submit",
+  "approval:pending",
+  "approval:submit",
 ];
 
 // --- push channels -----------------------------------------------------------
@@ -104,6 +137,8 @@ export type PushMessage =
   | { type: "store:invalidate"; scope: "tasks" | "board" | "task"; taskId?: string }
   | { type: "interaction:requested"; pending: PendingInteraction }
   | { type: "interaction:resolved"; requestId: string }
+  | { type: "approval:requested"; pending: PendingApproval }
+  | { type: "approval:resolved"; requestId: string; decision: "allow" | "deny" }
   | { type: "run:finished"; taskId: string; runId: number; status: "completed" | "failed" | "canceled" };
 
 export const PUSH_CHANNEL = "jaira:push";
