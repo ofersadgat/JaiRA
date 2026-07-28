@@ -180,6 +180,7 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
     status: row.status,
     ...(row.snapshotHash !== undefined ? { snapshotHash: row.snapshotHash } : {}),
     ...(row.branch !== undefined ? { branch: row.branch } : {}),
+    ...(row.worktreePath !== undefined ? { worktreePath: row.worktreePath } : {}),
     createdAt: meta?.createdAt ?? new Date(row.createdAt).toISOString(),
     ...(meta?.inputs !== undefined ? { inputs: meta.inputs } : {}),
     instances: run.instances,

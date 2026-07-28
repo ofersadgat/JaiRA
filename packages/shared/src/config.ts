@@ -17,16 +17,34 @@ export interface JairaModelConfig {
   default?: string;
 }
 
+/**
+ * Where this project's commands run (DESIGN §9.1). `"windows"` spawns natively;
+ * `{ "wsl": "Ubuntu" }` runs git and agents inside that distro — deliberately not
+ * Windows git against `\\wsl$`, which is slow and permission-fragile.
+ */
+export type JairaExecEnvironment = "windows" | { wsl: string };
+
 export interface JairaConfig {
   models: JairaModelConfig;
   /** Artifact root relative to the project dir (DESIGN §15 Q1). */
   artifactDir: string;
+  execEnvironment: JairaExecEnvironment;
 }
 
 export const DEFAULT_ARTIFACT_DIR = "jaira-artifacts";
 
 export function defaultConfig(): JairaConfig {
-  return { models: {}, artifactDir: DEFAULT_ARTIFACT_DIR };
+  return { models: {}, artifactDir: DEFAULT_ARTIFACT_DIR, execEnvironment: "windows" };
+}
+
+function parseExecEnvironment(raw: unknown): JairaExecEnvironment {
+  if (raw === undefined) return "windows";
+  if (raw === "windows") return "windows";
+  if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
+    const distro = (raw as Record<string, unknown>)["wsl"];
+    if (typeof distro === "string" && distro.length > 0) return { wsl: distro };
+  }
+  throw new Error('config.execEnvironment must be "windows" or { "wsl": "<distro>" }');
 }
 
 export function parseConfig(raw: unknown): JairaConfig {
@@ -58,5 +76,5 @@ export function parseConfig(raw: unknown): JairaConfig {
   if (typeof artifactDir !== "string" || artifactDir.length === 0) {
     throw new Error("config.artifactDir must be a non-empty string");
   }
-  return { models, artifactDir };
+  return { models, artifactDir, execEnvironment: parseExecEnvironment(cfg["execEnvironment"]) };
 }

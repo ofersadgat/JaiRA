@@ -7,6 +7,7 @@
  * interrupted — there is no live engine that could still be driving it.
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { defaultConfig, jairaPaths, parseConfig, readJsonFile, type JairaConfig, type JairaPaths } from "@jaira/shared";
 import { openDb, type JairaDb } from "./db";
 import { SqliteEventLog } from "./eventLog";
@@ -25,6 +26,22 @@ export interface Project {
   close(): void;
 }
 
+/**
+ * What of `.jaira/` should NOT be committed.
+ *
+ * `workflows/`, `tasks/` and `skills/` are source — hand-edited and worth
+ * versioning. The database and the snapshot cache are derived per-checkout state:
+ * committing them would put one machine's run history into everyone's tree, and
+ * (because a worktree checkout mirrors the branch) would copy a stale database
+ * into every task worktree.
+ */
+const JAIRA_GITIGNORE = `# Derived state — see DESIGN §3. Workflows, tasks and skills ARE meant to be committed.
+jaira.db
+jaira.db-wal
+jaira.db-shm
+snapshots/
+`;
+
 /** Create the `.jaira/` layout (DESIGN §3). Idempotent; keeps an existing config. */
 export function initProject(projectDir: string): JairaPaths {
   const paths = jairaPaths(projectDir);
@@ -35,6 +52,8 @@ export function initProject(projectDir: string): JairaPaths {
   if (!existsSync(paths.configFile)) {
     writeFileSync(paths.configFile, JSON.stringify(defaultConfig(), null, 2) + "\n", "utf8");
   }
+  const ignoreFile = join(paths.jairaDir, ".gitignore");
+  if (!existsSync(ignoreFile)) writeFileSync(ignoreFile, JAIRA_GITIGNORE, "utf8");
   return paths;
 }
 

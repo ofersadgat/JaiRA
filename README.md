@@ -127,6 +127,37 @@ cursor, not a barrier, so independent children park simultaneously. Ordering com
 from dataflow — wire one gate's output into the next (see
 `componentsWorkflowFiles()` for a worked example that walks all five).
 
+### Git isolation and WSL
+
+A task is created either *unbound* — it runs against the project directory — or
+bound to a branch with `--branch`. A bound task gets its own git worktree on first
+start, created **outside** the project at
+`<project-parent>/.jaira-worktrees/<projectName>/<taskId>/`, and that becomes the
+run's workspace.
+
+```bash
+npm run jaira -- task create --title "Login page" --workflow feature/plan --branch feature/login
+npm run jaira -- worktree list
+npm run jaira -- worktree remove <taskId>   # add --force to discard uncommitted work
+```
+
+Removing a worktree keeps its branch, and a dirty worktree is refused rather than
+silently discarded. Note a worktree contains whatever the branch tracks — including
+`.jaira/workflows/`, which is meant to be committed; keeping agents out of `.jaira/`
+is a policy rule (phase 6), not a side effect of the layout. `jaira init` writes
+`.jaira/.gitignore` for the derived half (`jaira.db*`, `snapshots/`).
+
+To run a project's git and agents inside WSL instead of natively, set
+`execEnvironment` in `.jaira/config.json`:
+
+```json
+{ "execEnvironment": { "wsl": "Ubuntu-22.04" } }
+```
+
+Every child process then goes through `wsl.exe -d <distro> --cd <linuxCwd> -- …`,
+with all Windows ↔ WSL path translation in one mapper. Windows git is never run
+against `\\wsl$` — that is slow and permission-fragile.
+
 ### Real providers
 
 Set a route-prefixed model — `models.default` in `.jaira/config.json`, or a

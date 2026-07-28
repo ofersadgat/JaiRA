@@ -12,6 +12,7 @@ import type { JsonValue } from "@declarative-ai/json";
 import {
   beginTaskRun,
   boardView,
+  ensureWorkspace,
   cancelTask,
   createTask,
   finishTaskRun,
@@ -237,6 +238,9 @@ export class AppService {
     // demo run never parks waiting for a human.
     scripted?.register(registry);
 
+    // Materialize the worktree before marking the task running, so a git failure
+    // leaves it startable rather than `running` with nowhere to run (DESIGN §9.2).
+    const workspace = await ensureWorkspace(project, taskId);
     const started = beginTaskRun(project, taskId, { functions: registry.functions });
     const abort = new AbortController();
     let settle!: () => void;
@@ -283,6 +287,10 @@ export class AppService {
               });
               this.publish({ type: "store:invalidate", scope: "board" });
             },
+          },
+          workspace: {
+            root: workspace.root,
+            ...(workspace.treeHash !== undefined ? { treeHash: workspace.treeHash } : {}),
           },
           abortSignal: abort.signal,
         });

@@ -103,6 +103,13 @@ function Detail({
           {detail.taskId} · {detail.workflow}
           {detail.snapshotHash ? ` · snapshot ${detail.snapshotHash.slice(0, 12)}` : ""}
         </div>
+        {detail.branch ? (
+          // Branch binding + the worktree the run executes in (DESIGN §9.2).
+          <div className="sub" title={detail.worktreePath ?? ""}>
+            ⎇ {detail.branch}
+            {detail.worktreePath ? ` · ${detail.worktreePath}` : " · worktree pending"}
+          </div>
+        ) : null}
         <div className="actions">
           <button onClick={onStart}>{detail.runs.length > 0 ? "Re-run" : "Start"}</button>
           <button onClick={onCancel} className="ghost">
