@@ -12,3 +12,4 @@ export * from "./worktrees";
 export * from "./commandLog";
 export * from "./prune";
 export * from "./workflows";
+export * from "./artifactStore";

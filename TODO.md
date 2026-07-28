@@ -66,39 +66,36 @@ pick them up either.
       op's `user` slot), so a workflow authoring one fails at run time on an
       unresolved skill rather than at lint. The work is a loader plus registration
       — the adapter machinery is already there, which is the whole point of §7.4.
-- [ ] **Artifacts are never written to disk — designed, not built.** DESIGN §7.6
-      settles how it should work (2026-07-28); this is the implementation list.
-      Today a blob-kind output travels **inline** in the journal, `config.artifactDir`
-      is parsed and unused, and §15 Q1's reserved directory is empty by construction.
-      Consequences now: large outputs bloat `events`, there is no content hash, and
-      the §11.1 detail panel has no artifacts list or conversation viewer.
-  - [ ] **Register `write_file` / `read_file` tools.** Only `bash` is registered
-        today, so JaiRA sees none of an agent's file writes. This is the whole
-        mechanism: upstream injects each registered tool as
-        `run: (input) => tool.run(input, ctx)`, so our implementation is the
-        interception point.
-  - [ ] **Logical → physical path map**, durable (the deferred §4.2 `artifacts`
-        table), applied on write and consulted on read. The invariant to test:
-        write(P) then read(P) returns the content in every mode, and the agent is
-        never told the file moved.
-  - [ ] **`config.artifacts.destination`** — a URI/path template
-        (`virtual:` or an implicit-`fs:` path over `$WORKTREE`, `$TASK_ID`,
-        `$RELPATH`, `$SLOT`, …), plus `inlineMaxBytes`; replaces the flat
-        `artifactDir` string (keep parsing the old key). Unknown variables are a
-        config error; the resolved path is asserted inside the template's root
-        (`$RELPATH` is agent-controlled); substitution happens *after* choosing the
-        host/WSL path view.
-  - [ ] **`ArtifactRef` gains `path` + `hash`**, `content` optional below a
-        threshold — the part that actually stops journal bloat.
+- [x] **Artifacts are written to disk (DESIGN §7.6).** Built 2026-07-28: the
+      destination is a configurable URI/path template, JaiRA owns the agent's write
+      tool, and both producers (tool writes and returned blob content) go through
+      one placement rule. What landed:
+  - [x] `write_file` / `read_file` registered — the interception point, since
+        upstream injects each tool as `run: (input) => tool.run(input, ctx)`.
+  - [x] Durable logical → physical map (the §4.2 `artifacts` table), so a path
+        resolves in a later state, a later run, and after a restart.
+  - [x] `config.artifacts` — `destination` / `dir` / `inlineMaxBytes`, with
+        `$DEFAULT`, `$CENTRAL`, `$CENTRAL_FLAT` aliases; the legacy `artifactDir`
+        still parses and seeds `artifacts.dir`.
+  - [x] Content hash + `inlineMaxBytes`, so a large artifact stops riding inline
+        in the journal.
+  - [x] `persistEngineArtifacts` for states that *return* blob content, so a
+        workflow with no agent in it produces files too.
   - [ ] **Native-write reconciliation** via `git status --porcelain` on the task
-        worktree when an operation ends, for agents using their own write tool.
+        worktree when an operation ends, for agents using their own write tool
+        (`nativeTools`, `injectTools: false`, `generic-cli`, `bash` redirection).
         Best-effort by construction (§7.6's stated leak) — a native re-read of a
-        moved file will miss.
+        moved file will still miss.
   - [ ] **Prune follows the destination**: `$JAIRA`-rooted artifacts are derived
-        state and prune with their run; `$WORKTREE`-rooted ones are the user's work
-        product and never do. No special case — the rule reads the resolved root.
+        state and should prune with their run; `$WORKTREE`-rooted ones are the
+        user's work product and never should. `pruneHistory` does not touch
+        `artifacts` at all yet.
   - [ ] **Detail-panel artifacts list + markdown preview, and a conversation
-        viewer** (§11.1) — both only worth building once artifacts have identity.
+        viewer** (§11.1). The data exists now; the views do not.
+  - [ ] **`jaira init` does not gitignore the artifact directory.** With the default
+        `$DEFAULT` destination artifacts land in the worktree, which is intended
+        (git versions them per SPEC §4.6) — but a project choosing `$CENTRAL` may
+        want `jaira-artifacts/` ignored, and nothing offers that.
 - [ ] **No Playwright E2E (§13, "E2E (thin)").** Board navigation, one UI-component
       round-trip and one approval flow were to be covered end to end through the
       real Electron app. What exists instead is `JAIRA_CAPTURE` screenshots (manual,

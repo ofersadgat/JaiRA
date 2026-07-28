@@ -72,6 +72,33 @@ CREATE TABLE IF NOT EXISTS command_log (
 );
 CREATE INDEX IF NOT EXISTS command_log_task ON command_log(task_id, id);
 CREATE INDEX IF NOT EXISTS command_log_run ON command_log(run_id, id);
+
+-- The artifact map (DESIGN §7.6, §4.2 'artifacts'): what a producer said it wrote
+-- (logical_path) and where the bytes actually went (physical_path). This is what
+-- makes a read of the logical path resolve in a later state or a later run — so it
+-- is a table, not a per-process map.
+--
+-- No FK to runs: an artifact outlives the run that produced it (a worktree file is
+-- the user's work product), and pruning decides separately whether to remove it.
+CREATE TABLE IF NOT EXISTS artifacts (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id       TEXT NOT NULL,
+  run_id        INTEGER,
+  logical_path  TEXT NOT NULL,
+  physical_path TEXT,             -- NULL for a virtual: destination
+  content       TEXT,             -- inline copy, for virtual and small files
+  hash          TEXT NOT NULL,    -- sha-256: identity independent of location
+  bytes         INTEGER NOT NULL,
+  format        TEXT,
+  instance_id   INTEGER,
+  state_id      TEXT,
+  slot          TEXT,
+  created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS artifacts_task ON artifacts(task_id, id);
+-- One row wins per (task, logical path): a rewrite replaces, so a read resolves to
+-- the latest without every consumer sorting.
+CREATE UNIQUE INDEX IF NOT EXISTS artifacts_logical ON artifacts(task_id, logical_path);
 `;
 
 export function openDb(file: string): JairaDb {

@@ -403,16 +403,41 @@ artifact and the slot's value becomes a reference:
 { "artifact": true, "name": "feature.plan.context#3.plan_doc", "format": "text/markdown", "content": "…" }
 ```
 
-⚠️ **Artifacts are in-memory only today.** Nothing is written to disk;
-`config.artifactDir` is parsed and unused. Content travels inline in the event
-journal, so a large artifact bloats the database, and there is no content hash and
-no artifact viewer.
+### Where the bytes go
 
-DESIGN §7.6 settles how it *should* work — placement becomes a configurable
-destination URI (`virtual:`, or an `fs:` path template like
-`$WORKTREE/jaira-artifacts/$TASK_ID/$RELPATH`), and JaiRA registers the agent's
-`write_file`/`read_file` tools so it controls where bytes land while the agent
-keeps seeing its own path. None of that is built yet; TODO.md has the list.
+Placement is configured per project, not per workflow — the same workflow produces
+files wherever the project wants them (DESIGN §7.6):
+
+```jsonc
+// .jaira/config.json
+"artifacts": {
+  "destination": "$DEFAULT",   // $CENTRAL | $CENTRAL_FLAT | virtual: | a path template
+  "dir": "jaira-artifacts",    // what $ARTIFACT_DIR expands to
+  "inlineMaxBytes": 65536      // above this, content is stored by reference
+}
+```
+
+| `destination` | Where a file lands |
+| --- | --- |
+| `$DEFAULT` | `<worktree>/<the path the producer used>` |
+| `$CENTRAL` | `<worktree>/jaira-artifacts/<taskId>/<the path the producer used>` |
+| `$CENTRAL_FLAT` | `<worktree>/jaira-artifacts/<taskId>/<instanceId>-<slot>.<ext>` |
+| `virtual:` | nowhere — content stays in memory and in the run record |
+| anything else | a template over `$WORKTREE`, `$PROJECT`, `$JAIRA`, `$ARTIFACT_DIR`, `$TASK_ID`, `$RUN_ID`, `$INSTANCE_ID`, `$STATE_ID`, `$SLOT`, `$RELPATH`, `$BASENAME`, `$EXT` |
+
+**An agent never learns where its file went.** JaiRA registers the `write_file` and
+`read_file` tools, so a write goes through the destination and a read of the same
+path comes back — whatever the configuration did with the bytes. Write `docs/plan.md`
+under `$CENTRAL` and it is stored at `jaira-artifacts/<taskId>/docs/plan.md`; read
+`docs/plan.md` and you get it. An agent that uses its *own* write tool instead
+bypasses this (see DESIGN §7.6's reconciliation note).
+
+Two containment rules apply, and both refuse rather than silently relocating: a
+producer-supplied path may not escape the destination root, and the destination
+root may not escape its anchor (unless it is an explicitly absolute path).
+
+⚠️ The §11.1 detail panel still has no artifacts list or markdown preview — the
+records exist, the view does not (TODO.md).
 
 ---
 

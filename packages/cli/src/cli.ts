@@ -33,9 +33,13 @@ import { defaultConfig, parseJsonText, type BoardCard, type BoardView, type Jair
 import {
   buildPromptExecutor,
   executeWorkflow,
+  artifactWiring,
   functionNamesOf,
   gateCapabilities,
   hostPathFor,
+  persistEngineArtifacts,
+  registerFileTools,
+  type ArtifactStore,
   modelDefaults,
   newRegistry,
   parseFakeRules,
@@ -217,10 +221,16 @@ function runWiringOf(
  * unscripted one is simply absent, and the engine fails that state if it is ever
  * reached (states that are never entered never need their function).
  */
+interface ArtifactWiringOptions {
+  artifacts: ReturnType<typeof artifactWiring>;
+  store: ArtifactStore;
+}
+
 function buildRunEnvironment(
   bundle: Parameters<typeof functionNamesOf>[0],
   config: JairaConfig,
   wiring: RunWiring,
+  files?: ArtifactWiringOptions,
 ): {
   registry: ReturnType<typeof newRegistry>;
   prompt: ReturnType<typeof buildPromptExecutor>;
@@ -230,6 +240,17 @@ function buildRunEnvironment(
   const registry = newRegistry();
   registerTools(registry, { execEnv: config.execEnvironment });
   registerCommandFunction(registry, { execEnv: config.execEnvironment });
+  // The file tools are what make JaiRA own an agent's writes (DESIGN §7.6). Only a
+  // durable run has a task to place artifacts for; an ad-hoc `jaira run` gets none,
+  // which is honest — there is no task id to key them by.
+  if (files) {
+    registerFileTools(registry, {
+      destination: files.artifacts.destination,
+      store: files.store,
+      vars: files.artifacts.vars,
+      inlineMaxBytes: files.artifacts.inlineMaxBytes,
+    });
+  }
   // Agent runtimes, so a workflow with a `claude-code` state runs the same way here
   // as in the app. Without them the CLI — the documented fastest debugging surface —
   // failed such a state as "unregistered function" while the app ran it fine.
@@ -446,12 +467,27 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
     // instead of `running` with nowhere to run (DESIGN §9.2).
     const workspace = await ensureWorkspace(project, taskId);
     const started = beginTaskRun(project, taskId, { functions: probe.functions });
+    // Artifact placement (DESIGN §7.6), assembled once and shared by the file tools
+    // and the post-run sink so both put files in the same place.
+    const artifacts = artifactWiring({
+      destination: project.config.artifacts.destination,
+      artifactDir: project.config.artifacts.dir,
+      inlineMaxBytes: project.config.artifacts.inlineMaxBytes,
+      taskId,
+      runId: started.runId,
+      workspaceRoot: workspace.root,
+      projectDir: project.paths.projectDir,
+      jairaDir: project.paths.jairaDir,
+    });
     io.stderr(
       `task ${taskId} run ${started.runId}: workflow '${started.meta.workflow}' ` +
         `snapshot ${started.snapshotHash.slice(0, 12)}${started.pinned ? " (pinned)" : ""}` +
         `${workspace.isWorktree ? ` · worktree ${workspace.root} (${workspace.branch})` : ""}\n`,
     );
-    const { registry, prompt, sessions, summaryModes } = buildRunEnvironment(started.bundle, project.config, wiring);
+    const { registry, prompt, sessions, summaryModes } = buildRunEnvironment(started.bundle, project.config, wiring, {
+      artifacts,
+      store: project.artifacts,
+    });
     warnSummaryConflicts(summaryModes, io);
     try {
       assertCapabilities(registry, started.bundle, project.config);
@@ -474,6 +510,18 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
       ...(io.abortSignal !== undefined ? { abortSignal: io.abortSignal } : {}),
     });
     const status = statusOfResult(result);
+    // A state that RETURNS blob content (a prompt writing a plan) never touched the
+    // file tools, so its artifacts are placed here — same destination, second
+    // producer. After the run, because the work is already done: a file that cannot
+    // be written must not fail a finished run.
+    const placed = persistEngineArtifacts(result.value as JsonValue | undefined, {
+      destination: artifacts.destination,
+      store: project.artifacts,
+      vars: artifacts.vars,
+      inlineMaxBytes: artifacts.inlineMaxBytes,
+      runId: started.runId,
+      onError: (name, error) => io.stderr(`warning: could not store artifact '${name}': ${error.message}\n`),
+    });
     finishTaskRun(project, taskId, started.runId, status, {
       outputs: result.value,
       ...("error" in result && result.error !== undefined ? { failure: result.error } : {}),
@@ -483,7 +531,15 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
     const causes = status === "completed" ? [] : runCauses(project, taskId, started.runId);
     io.stdout(
       JSON.stringify(
-        { taskId, runId: started.runId, ...resultReport(result), ...(causes.length > 0 ? { causes } : {}) },
+        {
+          taskId,
+          runId: started.runId,
+          ...resultReport(result),
+          ...(causes.length > 0 ? { causes } : {}),
+          ...(placed.length > 0
+            ? { artifacts: placed.map((a) => ({ path: a.logicalPath, storedAt: a.physicalPath, bytes: a.bytes })) }
+            : {}),
+        },
         null,
         2,
       ) + "\n",

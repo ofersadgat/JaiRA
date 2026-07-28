@@ -421,13 +421,12 @@ Git is responsible for artifact versioning. JaiRA records artifact references
 and workflow metadata, but artifact history is delegated to the project Git
 repository.
 
-> Status: artifacts currently live **in memory only** — the content travels inline
-> through the run and nothing is written to the filesystem, so the delegation to
-> Git described above is not yet real. **DESIGN §7.6 settles how it should work**:
-> placement is a configurable destination URI (`virtual:`, or an `fs:` path
-> template such as `$WORKTREE/jaira-artifacts/$TASK_ID/$RELPATH`), and JaiRA owns
-> the agent's write tool so it controls where the bytes actually land while the
-> agent keeps seeing its own path. TODO.md carries the implementation list.
+> Implemented per DESIGN §7.6: placement is a configurable destination URI
+> (`virtual:`, or a `file:` path template such as `$CENTRAL` or
+> `$WORKTREE/jaira-artifacts/$TASK_ID/$RELPATH`), defaulting to the task worktree
+> so git versions artifacts per branch exactly as this section describes. JaiRA
+> owns the agent's `write_file`/`read_file` tools, so it controls where the bytes
+> land while the agent keeps seeing its own path.
 
 ### 4.7 Conversations
 
