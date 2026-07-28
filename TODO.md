@@ -38,13 +38,24 @@ its assumption breaks.
 
 ## Deferred by design (later phases)
 
-- [ ] **Phase 6 — process executors + policy.** Adopt
-      `@declarative-ai/agents-api` / `agents-cli`; the policy engine and command
-      parser (§10.1) via `@declarative-ai/permissions`; per-command
-      `require_approval` decisions feeding the approvals inbox (§10.2, scaffolded
-      in §1f item 9); capability gating (§8.2). This is where the `.jaira/**` deny
-      rule becomes the real enforcement — §1g item 5 showed a worktree normally
-      *does* contain `.jaira/`.
+- [x] **Phase 6 — process executors + policy.** Done (§1i): agent runtimes
+      registered, the policy engine + command parser compiled onto
+      `@declarative-ai/permissions`, per-command approvals with the `command_log`
+      audit trail, and §8.2 capability gating. Open inside it:
+  - [ ] **No approvals dialog.** The IPC channels and service methods exist
+        (`approval:pending` / `approval:submit`, `pendingApprovals()`,
+        `submitApproval()`), and pushes fire — but the renderer's inbox lists only
+        workflow gates, so an approval currently has no UI and would be answered
+        by the unattended default (deny).
+  - [ ] **Agents unverified against a real provider.** Registration and plumbing
+        are tested through a fake `AgentQuery`; a run against the real Claude Agent
+        SDK or a `claude` binary has not happened.
+  - [ ] **Path policy is only the `.jaira/**` deny rule.** DESIGN §10.1's broader
+        idea — an allow-list of the worktree root plus authored path rules — is not
+        an authored surface yet.
+  - [ ] **`smart` mode is inferred from a fixed tool-name list**
+        (`bash`, `shell`, `run_command`, …). A tool that runs commands under an
+        unrecognized name gets the baseline mode instead of command parsing.
 - [ ] **Phase 7 — breadth.** `claude-cli` (hook loopback) and `generic-cli`
       executors; conversation `summary` mode (§1a item 3 — it currently degrades to
       `full_history`, and §1h measured why that matters: context grew
@@ -53,11 +64,11 @@ its assumption breaks.
 
 ## Environment (not code)
 
-- [ ] **Rename `C:\UbuntuCode\ai-exec` → `declarative-ai`.** Blocked by a
-      directory handle (reported *Access denied*; no process runs an executable
-      from that path — most likely an editor or indexer). A junction bridges it, so
-      builds and CI are unaffected. When the handle frees:
-      `cmd /c rmdir "C:\UbuntuCode\declarative-ai" && move "C:\UbuntuCode\ai-exec" "C:\UbuntuCode\declarative-ai"`
+- [x] **Rename `C:\UbuntuCode\ai-exec` → `declarative-ai`.** Done by hand
+      (2026-07-28), junction gone. Its fallout is worth remembering if the directory
+      ever moves again: the *library's own* workspace links still pointed at the old
+      path and were dangling, which broke `@declarative-ai/ops` resolution for every
+      JaiRA package until `npm install` was re-run **inside** declarative-ai.
 - [ ] **Consider rotating the keys in `.env.local`.** They sat untracked in the
       repo while `.gitignore` did not cover `.env*` (fixed in §1h). Verified that
       nothing ever reached a commit, but the exposure window to a careless
