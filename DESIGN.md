@@ -476,11 +476,80 @@ phase 6 settled:
     CLI" there. That run is preserved as an opt-in test (`JAIRA_LIVE_AGENT=1`) that
     skips by default because it spends money.
 
-Remaining for phase 7: the `claude-cli` hook-loopback variant, `generic-cli`,
-conversation `summary` mode, history pruning, and the workflow browser. Still
-unverified in phase 6: the SDK agent adapter (needs
+Still unverified in phase 6: the SDK agent adapter (needs
 `@anthropic-ai/claude-agent-sdk` installed) and tool injection over the MCP bridge
 (TODO.md).
+
+## 1j. Status Update — 2026-07-28 (phase 7: breadth)
+
+The last of §14. 313 tests. What phase 7 settled:
+
+1. **History pruning is enforced by the query, not by the caller** (§12, SPEC §13).
+   `pruneHistory` only ever considers runs that have *ended*, belonging to tasks in a
+   *terminal* status, and keeps each task's latest run by default. That is stricter
+   than §12's "skipping any row reachable from a non-terminal task's active
+   instances" — deliberately, because the `events` journal **is** JaiRA's resume and
+   projection source (§1b item 2), so a `running` or `interrupted` task's history is
+   load-bearing in full, at any age. Refusals are returned as data (`skippedTasks`
+   with a reason) rather than silently omitted, and every surface is **dry-run
+   first**: `jaira prune` needs `--apply`, and the app's panel previews before it
+   deletes. Deleted history does not come back.
+2. **The workflow browser is built to describe a broken directory** (§11.1). The
+   author edits state files in another window, so at any instant one may be
+   half-saved or reference a state that does not exist yet. Every failure comes back
+   as data — a per-file parse error, a per-workflow `loadError`, lint issues from
+   `validateBundle` with `strict: true` (the mode its own docs reserve for a lint
+   surface). Roots are *derived* (a state no other state names as a child), and
+   states that no root reaches are reported rather than vanishing, which is what
+   makes a reference cycle visible. `AppService` watches `.jaira/workflows/` and
+   pushes a `workflows` invalidation, so §11.1's "JaiRA watches and re-lints" is
+   real; recursive watching is unavailable on some platforms, so a watch failure
+   degrades to on-demand browsing rather than breaking the app.
+3. **Conversation `summary` mode needed no engine change.** The engine reads a
+   session's transcript from `ctx.services.sessions` and notes that "an app store
+   wins", so JaiRA supplies a `SummarizingSessionStore`: once a session's transcript
+   passes a budget, its older turns are replaced with one summary turn produced
+   through the run's *own* prompt executor (so a scripted run stays scripted). Three
+   properties are load-bearing — only sessions whose states declare `summary` are
+   compacted (a `full_history` state means it), a failed summarization keeps the full
+   transcript (an expensive run beats a run that forgot what it was doing), and the
+   most recent turns stay verbatim. This is the fix for §1h item 1's measured
+   232 → 42,828 token growth. **Compaction is per session, not per state**: one
+   session has one transcript, so a session mixing the two modes is summarized for
+   both, and the workflow browser warns about it.
+4. **`generic-cli` is registered honestly, and therefore usually refused.** A
+   non-Claude binary (opencode, codex) reaches JaiRA through the same normalized
+   `AgentQuery` seam, driven by JaiRA's own Exec layer so a WSL project runs it inside
+   the distro. Its capabilities declare `policyEnforcement: "none"`, because no
+   callback reaches `ctx.approve` and there is no flag vocabulary to translate a deny
+   list into — which means §8.2's gate refuses it under any policy that can escalate,
+   and SPEC §11.3's built-in classes all can. Running one is therefore an explicit
+   `policy.builtins: false` decision. That is §16's "generic-cli runners start
+   policy-weak by design" turned into enforcement instead of a caveat.
+5. **`claude-cli`'s hook loopback was already there.** §16 sequenced it last as "the
+   most intricate adapter plumbing", but upstream's CLI adapter routes each gated
+   tool-use back over the MCP bridge via `--permission-prompt-tool` — that *is* the
+   loopback, and it is why the entry declares `policyEnforcement: "callback"`. Phase 6
+   registered it; phase 7 only confirmed the mechanism.
+
+Three silent bugs surfaced while wiring this, all recorded in TODO.md. The one worth
+repeating here: **`gateCapabilities` matched nothing at either call site**, because it
+read the loaded `operation.functionRef` while both callers pass `bundle.source`, where
+the authored field is `function`. §8.2's capability gate had been passing every run by
+never firing. It now reads either spelling. The other two: the CLI never registered
+agent runtimes at all (so an agent workflow ran in the app and failed headlessly), and
+a capability refusal after `beginTaskRun` left the task `running`.
+
+Two authoring facts this phase pinned, both easy to get wrong and both silent:
+
+- An **operation input is a parameter with a `binding` field** (`{ kind: "text",
+  binding: { input: "x" } }`), whereas `children.<key>.inputs` values are *bare*
+  bindings. Authored the child way, an operation input resolves to empty — an agent
+  runs with no instruction and reports success.
+- A delegated agent returns **one string**, so its output slot must be `blob`-kind.
+  The engine fills exactly one produced slot from a whole-value blob output; a `json`
+  output is read as a record of named outputs, and the state fails with "did not
+  produce required output".
 
 ## 2. Architecture Overview
 
@@ -1033,6 +1102,11 @@ run-record requirements of spec §10.2.
   components; approvals inbox for §10.2 command approvals.
 - **Workflow browser** (MVP-minimal): read-only tree of state files with lint
   results; editing happens in the user's editor, JaiRA watches and re-lints.
+  Shipped in §1j: roots are derived (a state nothing declares as a child), every
+  failure is a diagnostic rather than an exception, and drifted tasks (pinned to an
+  older snapshot than disk) are surfaced because execution reads the pin (§5.3).
+- **Pruning panel** (§12, SPEC §13): stored counts, then preview → delete. Never
+  one click, because pruned history is not recoverable.
 
 ### 11.2 IPC Contract
 
@@ -1059,10 +1133,14 @@ subscribes to task/instance change events and maintains a local store
   the link + board grouping only).
 - Cancel: `task.cancel` cancels all running operations (adapter `cancel()`),
   marks instances `canceled`, terminates the root with `terminate.canceled`.
-- Pruning (spec §13): a prune job deletes `events`/`operations`/`transitions`
-  rows and conversation artifacts older than a cutoff, **skipping** any row
-  reachable from a non-terminal task's active instances (the resume-safety
-  rule, enforced by query, with FK integrity checks in tests).
+- Pruning (spec §13): a prune job deletes `events`/`command_log` rows and the
+  `runs` they belong to, older than a cutoff, **skipping** anything belonging to a
+  non-terminal task (the resume-safety rule, enforced by query, with FK integrity
+  checks in tests). Revised by §1j: the rule is *stricter* than "rows reachable
+  from active instances" because the journal is the resume source in full, and the
+  latest run of a terminal task is kept by default because the detail view is drawn
+  from it. `operations`/`transitions`/conversation artifacts are not pruned because
+  those tables do not exist yet (§4.2, TODO.md).
 
 ## 13. Testing Strategy
 
@@ -1117,9 +1195,11 @@ subscribes to task/instance change events and maintains a local store
    the `command_log` audit trail; capability gating (§8.2). *Agents are verified
    against a fake `AgentQuery`; a run against the real SDK or `claude` binary, and
    the approvals dialog, remain open (TODO.md).*
-7. **Breadth** — `claude-cli` (hook loopback) and `generic-cli` executors,
-   conversation `summary` mode (summarizer via `llm-call`), pruning UI,
-   workflow browser/lint surface.
+7. **Breadth** — ✅ done (§1j) — `generic-cli` executor (`claude-cli`'s hook
+   loopback was already upstream's MCP-bridge path), conversation `summary` mode as
+   a summarizing `SessionStore`, history pruning (§12) with `jaira prune` + a
+   pruning panel, and the workflow browser / lint surface (§11.1) with a live
+   re-lint watcher.
 
 Phases 1→3→4 each end in a demoable milestone; the phase-1 headless CLI path
 remains the fastest debugging surface permanently.
@@ -1145,12 +1225,19 @@ remains the fastest debugging surface permanently.
 
 - **Policy fidelity varies by runner.** Mitigated by capability flags +
   gating (§8.2) — the system is honest about enforcement strength rather than
-  pretending uniformity. `generic-cli` runners start policy-weak by design.
+  pretending uniformity. `generic-cli` runners start policy-weak by design; §1j made
+  that concrete by declaring `policyEnforcement: "none"`, which means the gate
+  refuses them unless the project turns the built-in approval classes off. The gate
+  itself was also found to have been matching nothing (TODO.md) — a reminder that a
+  mitigation needs a test proving it *fires*, not only that it compiles.
 - **PowerShell command parsing is heuristic.** Unparsable ⇒ require_approval
   is the safe default; WSL projects get the robust POSIX parser.
 - **Claude Code hook loopback (approval flow) is the most intricate adapter
   plumbing.** Sequenced last among the Claude adapters (phase 7); the SDK
-  adapter covers the same provider with a clean callback in phase 4.
+  adapter covers the same provider with a clean callback in phase 4. Resolved (§1j):
+  the plumbing lives upstream — the CLI adapter's MCP bridge plus
+  `--permission-prompt-tool` *is* the loopback, which is why it declares
+  `policyEnforcement: "callback"`. JaiRA writes none of it.
 - **PENDING semantics are novel.** Confined to one evaluator module with
   exhaustive tests; the spec's §10.4 example is an acceptance test.
 - **WSL path mapping edge cases.** All mapping through one `PathMapper` with

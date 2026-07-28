@@ -6,3 +6,4 @@ export * from "./paths";
 export * from "./view";
 export * from "./ipc";
 export * from "./components";
+export * from "./conversation";

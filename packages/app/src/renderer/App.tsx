@@ -8,9 +8,17 @@
 // React 19 no longer declares a global `JSX` namespace — it comes from the
 // package now.
 import { useState, type JSX } from "react";
-import type { BoardCard, InstanceNode, PendingApproval, PendingInteraction, TaskDetail } from "@jaira/shared/browser";
+import type {
+  BoardCard,
+  HistorySize,
+  InstanceNode,
+  PendingApproval,
+  PendingInteraction,
+  TaskDetail,
+  WorkflowBrowser,
+} from "@jaira/shared/browser";
 import { ApprovalDialog, InteractionDialog } from "./components";
-import { useApp } from "./store";
+import { useApp, type PruneReport } from "./store";
 
 const BADGE: Record<string, string> = {
   running: "▶",
@@ -232,6 +240,154 @@ function Inbox({
   );
 }
 
+/**
+ * The workflow browser (DESIGN §11.1), MVP-minimal on purpose: a read-only list of
+ * workflow roots with their lint results. Editing happens in the user's editor and
+ * main re-lints on change, so this list is live without an in-app editor.
+ */
+function Workflows({ browser }: { browser: WorkflowBrowser | null }): JSX.Element | null {
+  const [open, setOpen] = useState<string | null>(null);
+  if (!browser) return null;
+  const unreadable = browser.files.filter((f) => f.error !== undefined);
+  if (browser.workflows.length === 0 && unreadable.length === 0) return null;
+  return (
+    <div className="workflows">
+      <h3>Workflows</h3>
+      <ul>
+        {browser.workflows.map((workflow) => {
+          const errors = workflow.issues.filter((i) => i.severity === "error").length;
+          const warnings = workflow.issues.length - errors;
+          const broken = workflow.loadError !== undefined || errors > 0;
+          const expanded = open === workflow.rootId;
+          return (
+            <li key={workflow.rootId} className={broken ? "lint-error" : warnings > 0 ? "lint-warn" : undefined}>
+              <span
+                className="wf-row"
+                onClick={() => setOpen(expanded ? null : workflow.rootId)}
+                title={`${workflow.states.length} states${workflow.snapshotHash ? ` · ${workflow.snapshotHash.slice(0, 12)}` : ""}`}
+              >
+                <span className="badge">{broken ? "✗" : warnings > 0 ? "⚠" : "✓"}</span>
+                <span className="task-title">{workflow.label ?? workflow.rootId}</span>
+                {workflow.taskIds.length > 0 ? <span className="chip">{workflow.taskIds.length}</span> : null}
+              </span>
+              {expanded ? (
+                <div className="wf-detail">
+                  <div className="sub">{workflow.rootId}</div>
+                  {workflow.loadError ? <div className="reason">{workflow.loadError}</div> : null}
+                  {workflow.issues.map((issue, i) => (
+                    <div key={i} className={issue.severity === "error" ? "reason" : "sub"}>
+                      {issue.stateId} {issue.path}: {issue.message}
+                    </div>
+                  ))}
+                  {/* Execution reads the pinned snapshot, so a drifted task is not
+                      running what this list shows (DESIGN §5.3). */}
+                  {workflow.driftedTasks.length > 0 ? (
+                    <div className="sub">{workflow.driftedTasks.length} task(s) pinned to an older snapshot</div>
+                  ) : null}
+                  {workflow.issues.length === 0 && workflow.loadError === undefined ? (
+                    <div className="sub">{workflow.states.length} states · lints clean</div>
+                  ) : null}
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+        {unreadable.map((file) => (
+          <li key={file.file} className="lint-error">
+            <span className="wf-row" title={file.error}>
+              <span className="badge">✗</span>
+              <span className="task-title">{file.file}</span>
+            </span>
+          </li>
+        ))}
+        {browser.unreachable.length > 0 ? (
+          <li className="empty">unreachable: {browser.unreachable.join(", ")}</li>
+        ) : null}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * History pruning (SPEC §13). Deliberately two steps: "Preview" runs a dry run and
+ * shows exactly what would go, and only then can it be applied — pruned history is
+ * not recoverable. Tasks the safety rule protects are listed rather than silently
+ * skipped.
+ */
+function History({
+  size,
+  report,
+  busy,
+  onPreview,
+  onApply,
+  onDismiss,
+}: {
+  size: HistorySize | null;
+  report: PruneReport | null;
+  busy: boolean;
+  onPreview: (days: number, keep: number) => void;
+  onApply: (days: number, keep: number) => void;
+  onDismiss: () => void;
+}): JSX.Element | null {
+  const [days, setDays] = useState(30);
+  const [keep, setKeep] = useState(1);
+  if (!size) return null;
+  const planned = report?.dryRun === true ? report : null;
+  return (
+    <div className="history">
+      <h3>History</h3>
+      <div className="sub">
+        {size.runs} runs · {size.events} events · {size.commands} commands
+      </div>
+      <div className="prune-controls">
+        <label>
+          older than
+          <input type="number" min={0} value={days} onChange={(e) => setDays(Math.max(0, Number(e.target.value)))} />d
+        </label>
+        <label>
+          keep
+          <input type="number" min={0} value={keep} onChange={(e) => setKeep(Math.max(0, Number(e.target.value)))} />
+          runs
+        </label>
+        <button className="ghost" onClick={() => onPreview(days, keep)} disabled={busy}>
+          Preview
+        </button>
+      </div>
+      {report ? (
+        <div className="prune-report">
+          {planned ? (
+            planned.runs.length > 0 ? (
+              <>
+                <div className="sub">
+                  would delete {planned.runs.length} run(s), {planned.events} events, {planned.commands} commands
+                </div>
+                <button onClick={() => onApply(days, keep)} disabled={busy}>
+                  Delete permanently
+                </button>
+              </>
+            ) : (
+              <div className="sub">nothing matches — no run history is old enough</div>
+            )
+          ) : (
+            <div className="sub">
+              deleted {report.runs.length} run(s); {report.remaining.events} events remain
+            </div>
+          )}
+          {report.skippedTasks.length > 0 ? (
+            // The §13 safety rule, made visible: these are resumable.
+            <div className="sub" title={report.skippedTasks.map((s) => `${s.taskId}: ${s.reason}`).join("\n")}>
+              kept {report.skippedTasks.length} unfinished task(s)
+            </div>
+          ) : null}
+          <button className="ghost" onClick={onDismiss}>
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function NewTask({ onCreate, busy }: { onCreate: (t: string, w: string, i: string) => void; busy: boolean }): JSX.Element {
   const [title, setTitle] = useState("");
   const [workflow, setWorkflow] = useState("feature/plan");
@@ -280,6 +436,15 @@ export default function App(): JSX.Element {
           ))}
           {state.tasks.length === 0 ? <li className="empty">No tasks yet.</li> : null}
         </ul>
+        <Workflows browser={state.workflows} />
+        <History
+          size={state.history}
+          report={state.prune}
+          busy={state.busy}
+          onPreview={actions.planPrune}
+          onApply={actions.applyPrune}
+          onDismiss={actions.dismissPrune}
+        />
       </aside>
 
       <main className="board">

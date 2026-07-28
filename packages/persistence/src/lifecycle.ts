@@ -87,8 +87,20 @@ export function beginTaskRun(project: Project, taskId: string, options: BeginRun
     hash = runtime.snapshotHash;
     dir = `${project.paths.snapshotsDir}/${hash}`;
   } else {
-    const files = readWorkflowFiles(project.paths.workflowsDir);
-    bundle = loadBundle(files, meta.workflow);
+    // Unreadable files are collected rather than thrown: only the root's transitive
+    // closure matters, so one half-saved scratch file elsewhere must not block every
+    // task start. If the load then fails, they are reported with it — a missing
+    // state and a broken state file are otherwise indistinguishable.
+    const unreadable: string[] = [];
+    const files = readWorkflowFiles(project.paths.workflowsDir, {
+      onError: (relPath, message) => unreadable.push(`${relPath}: ${message}`),
+    });
+    try {
+      bundle = loadBundle(files, meta.workflow);
+    } catch (e) {
+      const note = unreadable.length > 0 ? `\n  unreadable files:\n  ${unreadable.join("\n  ")}` : "";
+      throw new Error(`${(e as Error).message}${note}`);
+    }
     const report = validateBundle(bundle, options.functions ? { functions: options.functions } : {});
     if (report.errors.length > 0) {
       const detail = report.errors.map((e) => `${e.stateId} ${e.path}: ${e.message}`).join("\n  ");

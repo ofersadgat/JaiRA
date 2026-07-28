@@ -74,6 +74,31 @@ describe("task lifecycle", () => {
     expect(() => beginTaskRun(p, meta.id)).toThrow(/completed/);
   });
 
+  it("starts despite an unrelated half-saved state file", () => {
+    // Regression: `readWorkflowFiles` threw on the first unparsable file, so one
+    // scratch file the workflow never references blocked EVERY task start. Only the
+    // root's transitive closure matters.
+    const p = open();
+    writeFileSync(join(p.paths.workflowsDir, "scratch.json"), "{ half-written", "utf8");
+    const meta = createTask(p, { title: "T", workflow: "wf", inputs: { x: "hello" } });
+
+    const started = beginTaskRun(p, meta.id);
+
+    expect(p.runtime.get(meta.id)?.status).toBe("running");
+    // The broken file is not in the snapshot either — it was never part of the bundle.
+    expect(existsSync(join(p.paths.snapshotsDir, started.snapshotHash, "scratch.json"))).toBe(false);
+  });
+
+  it("names the unreadable files when the workflow itself will not load", () => {
+    const p = open();
+    writeFileSync(join(p.paths.workflowsDir, "wf.json"), "{ broken", "utf8");
+    const meta = createTask(p, { title: "T", workflow: "wf", inputs: { x: "hello" } });
+    // "unknown state 'wf'" alone would hide the real cause, so the parse error rides
+    // along with it.
+    expect(() => beginTaskRun(p, meta.id)).toThrow(/unreadable files/);
+    expect(p.runtime.get(meta.id)?.status).toBe("queued");
+  });
+
   it("enforces validation at task start and leaves the task queued on failure", () => {
     const p = open();
     const badDir = join(p.paths.workflowsDir);

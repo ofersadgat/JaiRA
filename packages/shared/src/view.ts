@@ -159,6 +159,85 @@ export interface TaskDetail {
   timeline: TimelineEntry[];
 }
 
+// --- workflow browser (DESIGN §11.1) ----------------------------------------
+
+/** Errors block a task start (§5.2); warnings are advisory. */
+export type LintSeverity = "error" | "warning";
+
+/**
+ * One lint diagnostic. Structurally the engine's `ValidationIssue` plus a
+ * severity — restated here so the renderer's types never reach into
+ * `@declarative-ai/hw`.
+ */
+export interface LintIssue {
+  stateId: string;
+  /** Where in the state file, e.g. `transitions[2].when`. */
+  path: string;
+  message: string;
+  severity: LintSeverity;
+}
+
+/** One state file in the browser's tree. */
+export interface WorkflowFileEntry {
+  stateId: string;
+  /** Path relative to `.jaira/workflows/`, forward slashes. */
+  file: string;
+  label?: string;
+  /** Set when the file could not be read or parsed (the author is mid-edit). */
+  error?: string;
+}
+
+/** A workflow root and its lint state. */
+export interface WorkflowEntry {
+  rootId: string;
+  label?: string;
+  /** Every state in the root's transitive closure, in id order. */
+  states: string[];
+  /** Identity of the workflow as it stands on disk, comparable to a task's pin. */
+  snapshotHash?: string;
+  issues: LintIssue[];
+  /** Set when the bundle could not be loaded at all, so `issues` is empty. */
+  loadError?: string;
+  taskIds: string[];
+  /** Tasks pinned to a snapshot other than what is on disk now. */
+  driftedTasks: string[];
+}
+
+export interface WorkflowBrowser {
+  workflows: WorkflowEntry[];
+  files: WorkflowFileEntry[];
+  /** States no root reaches — a reference cycle, or a failed load above them. */
+  unreachable: string[];
+}
+
+// --- history pruning (SPEC §13) ----------------------------------------------
+
+/** One run's worth of history in a prune plan. */
+export interface PrunePlanEntry {
+  taskId: string;
+  runId: number;
+  endedAt?: number;
+  events: number;
+  commands: number;
+}
+
+/** What a prune did, or (when `dryRun`) would do. */
+export interface PruneResult {
+  runs: PrunePlanEntry[];
+  events: number;
+  commands: number;
+  /** Tasks the §13 safety rule refused to touch, with the reason. */
+  skippedTasks: Array<{ taskId: string; status: string; reason: string }>;
+  dryRun: boolean;
+}
+
+/** Rows currently stored — the "before you prune" summary. */
+export interface HistorySize {
+  runs: number;
+  events: number;
+  commands: number;
+}
+
 /** A row in the task list. */
 export interface TaskSummary {
   taskId: string;

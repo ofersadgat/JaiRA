@@ -64,11 +64,49 @@ its assumption breaks.
   - [ ] **`smart` mode is inferred from a fixed tool-name list**
         (`bash`, `shell`, `run_command`, …). A tool that runs commands under an
         unrecognized name gets the baseline mode instead of command parsing.
-- [ ] **Phase 7 — breadth.** `claude-cli` (hook loopback) and `generic-cli`
-      executors; conversation `summary` mode (§1a item 3 — it currently degrades to
-      `full_history`, and §1h measured why that matters: context grew
-      232 → 42,828 tokens across one real run); history pruning (§12) and its UI;
-      the workflow browser / lint surface (§11.1).
+- [x] **Phase 7 — breadth.** Done (§1j): history pruning (§12/SPEC §13) with
+      `jaira prune` and a pruning panel; the workflow browser + lint surface (§11.1)
+      with a live re-lint watcher; conversation `summary` mode as a summarizing
+      `SessionStore`; the `generic-cli` runtime. Open inside it:
+  - [x] **`claude-cli` hook loopback** needed no JaiRA work: upstream's adapter
+        already routes each gated tool-use back through the MCP bridge
+        (`--permission-prompt-tool`), which is why it declares
+        `policyEnforcement: "callback"`. Phase 6 registered it; phase 7 only
+        confirmed the mechanism is the loopback DESIGN §16 sequenced last.
+  - [ ] **No `generic-cli` verified against a real binary.** The runtime is tested
+        against a stand-in node script end to end, but no actual opencode/codex run
+        has happened, so their argv conventions are assumed rather than observed.
+  - [ ] **A generic agent cannot run under the default policy, by design.** Its
+        `policyEnforcement: "none"` plus SPEC §11.3's built-in approval classes means
+        §8.2 refuses it unless the project sets `policy.builtins: false`. That is the
+        honest outcome, but a middle ground (deny-by-default for the agent's own
+        tools) does not exist.
+  - [ ] **Summary mode compacts per SESSION, not per state.** One session has one
+        transcript, so a session mixing `summary` and `full_history` is summarized
+        for both; the workflow browser warns, and nothing finer is possible without
+        an engine change.
+  - [ ] **Pruning does not touch artifacts or conversations.** DESIGN §12 lists
+        "conversation artifacts"; there are no such tables yet (see the §4.2 entry
+        above), so pruning covers `runs`, `events` and `command_log` only.
+
+## Bugs found and fixed in phase 7
+
+Recorded because each was silent, and the shape of the mistake is worth
+remembering.
+
+- [x] **`gateCapabilities` was a no-op at every real call site.** It read
+      `operation.functionRef`, but both callers pass `bundle.source`, where the
+      authored field is spelled `function` — so DESIGN §8.2's capability gate matched
+      nothing and every run "passed" it. Now reads either spelling, with a regression
+      test. A check that never fires is worse than no check.
+- [x] **The CLI never registered agent runtimes.** A workflow with a `claude-code`
+      state ran in the app and failed as "unregistered function" under `jaira run` /
+      `jaira task start` — on the surface DESIGN §14 calls the permanent fastest
+      debugging path. The CLI now registers the agent runtimes and runs the §8.2 gate
+      (`unattended: true`, since it has no approvals inbox).
+- [x] **A capability refusal left the task `running`.** The gate runs after
+      `beginTaskRun`, so throwing left an open run row that the next project open
+      would call `interrupted`. It now closes the run as failed first.
 
 ## Environment (not code)
 

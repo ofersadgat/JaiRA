@@ -58,6 +58,27 @@ describe("config", () => {
     expect(() => parseConfig({ models: { default: "claude-sonnet-5" } })).toThrow(/route-prefixed/);
     expect(() => parseConfig({ models: { default: "" } })).toThrow(/non-empty/);
   });
+
+  it("parses generic-cli agents", () => {
+    const cfg = parseConfig({
+      agents: { genericCli: [{ command: "opencode", args: ["run", "{prompt}"], prompt: "argument" }] },
+    });
+    expect(cfg.agents.genericCli).toEqual([
+      { command: "opencode", args: ["run", "{prompt}"], prompt: "argument" },
+    ]);
+    expect(parseConfig({}).agents).toEqual({});
+  });
+
+  it("rejects a malformed agent entry rather than running the wrong binary", () => {
+    // A typo here means a state either fails as "unregistered function" or runs
+    // something unintended, so this is strict on purpose.
+    expect(() => parseConfig({ agents: { genericCli: {} } })).toThrow(/must be an array/);
+    expect(() => parseConfig({ agents: { genericCli: [{}] } })).toThrow(/\[0\]\.command/);
+    expect(() => parseConfig({ agents: { genericCli: [{ command: "x", args: "run" }] } })).toThrow(/args/);
+    expect(() => parseConfig({ agents: { genericCli: [{ command: "x", prompt: "pipe" }] } })).toThrow(/prompt/);
+    expect(() => parseConfig({ agents: { genericCli: [{ command: "x", env: { A: 1 } }] } })).toThrow(/env/);
+    expect(() => parseConfig({ agents: [] })).toThrow(/must be an object/);
+  });
 });
 
 describe("json", () => {
