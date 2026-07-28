@@ -36,6 +36,34 @@ its assumption breaks.
 - [ ] **Workflow migration for a running task is out of scope** (§5.3). The escape
       hatch is "restart the task on current workflows"; there is no UI for it.
 
+## Specified but never built
+
+Surfaces DESIGN describes that no phase claimed. They are not regressions — no
+status update says they landed — but §14 is complete, so nothing is scheduled to
+pick them up either.
+
+- [ ] **Skills (§7.4, §15 Q11) do not exist.** `jaira init` creates
+      `.jaira/skills/` and nothing ever reads it: no `skill.json` + `prompt.md`
+      loader, and `registry.skills` is never populated. The engine *does* support
+      the reference (`prompt: { skill: "x" }` lowers to a `skill:` marker in the
+      op's `user` slot), so a workflow authoring one fails at run time on an
+      unresolved skill rather than at lint. The work is a loader plus registration
+      — the adapter machinery is already there, which is the whole point of §7.4.
+- [ ] **Artifacts are never written to disk.** `config.artifactDir` is parsed and
+      used nowhere; §15 Q1's reserved `jaira-artifacts/` is empty by construction.
+      A blob-kind output travels **inline** in the journal today, so §7.5's
+      pre-assigned `jaira-artifacts/<taskId>/<instanceId>-<name>.<ext>` path, the
+      "write X to path P" prompt injection, and the post-run existence/format check
+      are all absent. Consequences: large outputs bloat `events`, there is no
+      content hash, and the §11.1 detail panel has no **artifacts list with
+      markdown preview** and no **conversation viewer** (the transcript exists in
+      the session store but is not a view).
+- [ ] **No Playwright E2E (§13, "E2E (thin)").** Board navigation, one UI-component
+      round-trip and one approval flow were to be covered end to end through the
+      real Electron app. What exists instead is `JAIRA_CAPTURE` screenshots (manual,
+      by eye) plus headless `AppService` tests, so nothing exercises the actual
+      preload/IPC boundary in CI.
+
 ## Deferred by design (later phases)
 
 - [x] **Phase 6 — process executors + policy.** Done (§1i): agent runtimes
