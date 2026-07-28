@@ -27,6 +27,42 @@ export function distroOf(env: ExecEnv): string | undefined {
   return isWslEnv(env) ? env.wsl : undefined;
 }
 
+/**
+ * Is native execution on this host Windows-shaped?
+ *
+ * `ExecEnv`'s `"windows"` means "not WSL — run natively" (DESIGN §9.1), and JaiRA
+ * is a Windows-first app, but the code also runs on Linux (CI, and anyone
+ * developing there). Assuming PowerShell for native execution breaks outright when
+ * the host has none, so both the command *interpreter* and the policy's parser
+ * *dialect* follow the real platform.
+ */
+export function isWindowsHost(platform: string = process.platform): boolean {
+  return platform === "win32";
+}
+
+/**
+ * The shell dialect a command runs under in `env` — what the policy must parse it
+ * as. `platform` is a parameter, not a hidden read of `process.platform`, so both
+ * host shapes are testable from either OS.
+ */
+export function dialectFor(env: ExecEnv, platform: string = process.platform): "posix" | "powershell" {
+  if (isWslEnv(env)) return "posix";
+  return isWindowsHost(platform) ? "powershell" : "posix";
+}
+
+/**
+ * The interpreter that runs a model-supplied command line in `env`, as
+ * `[command, ...prefixArgs]`. Naming it explicitly keeps it consistent with
+ * {@link dialectFor} — judging one language and executing another would be a real
+ * safety hole, not just an inconsistency.
+ */
+export function interpreterFor(env: ExecEnv, platform: string = process.platform): [string, ...string[]] {
+  if (isWslEnv(env)) return ["bash", "-lc"];
+  return isWindowsHost(platform)
+    ? ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command"]
+    : ["/bin/sh", "-c"];
+}
+
 const DRIVE = /^([A-Za-z]):[\\/](.*)$/;
 /**
  * A drive with no path after it. `C:\` is the root; bare `C:` is *drive-relative*
