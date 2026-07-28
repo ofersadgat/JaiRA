@@ -9,3 +9,4 @@ export * from "./projection";
 export * from "./shape";
 export * from "./views";
 export * from "./worktrees";
+export * from "./commandLog";

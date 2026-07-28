@@ -33,6 +33,7 @@ import { createPromptExecutor } from "@declarative-ai/promptop";
 import { createModelRouter } from "@declarative-ai/llm";
 import { SchemaValidator } from "@declarative-ai/validate";
 import { withRetry } from "@declarative-ai/exec";
+import type { Approver, ExecPolicy } from "@declarative-ai/permissions";
 import type { JairaConfig } from "@jaira/shared";
 import { ScriptedFakeExecutor, type FakeRule } from "./fakeExecutor";
 
@@ -133,6 +134,15 @@ export interface WorkflowRunConfig {
    * memoized under (declarative-ai DESIGN §3.4).
    */
   workspace?: { root: string; treeHash?: string };
+  /**
+   * The compiled safety policy and the human approver for tool calls
+   * (DESIGN §10.1/§10.2). Enforcement follows each executing entry's
+   * `policyEnforcement` capability: a composed runtime gates per tool call, a
+   * delegated adapter translates the policy into its agent's own config and routes
+   * its native prompt back through `approve`.
+   */
+  policy?: ExecPolicy;
+  approve?: Approver;
 }
 
 export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowExecResult> {
@@ -146,6 +156,8 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     validator: new SchemaValidator(),
     ...(cfg.abortSignal !== undefined ? { abortSignal: cfg.abortSignal } : {}),
     ...(cfg.workspace !== undefined ? { workspace: cfg.workspace } : {}),
+    ...(cfg.policy !== undefined ? { policy: cfg.policy } : {}),
+    ...(cfg.approve !== undefined ? { approve: cfg.approve } : {}),
   };
   return executor.start(workflowStartOp(cfg.inputs), ctx).result;
 }

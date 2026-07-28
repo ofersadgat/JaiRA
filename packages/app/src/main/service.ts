@@ -22,7 +22,9 @@ import {
   type Project,
 } from "@jaira/persistence";
 import {
+  ApprovalHub,
   buildPromptExecutor,
+  compilePolicy,
   executeWorkflow,
   functionNamesOf,
   InteractionHub,
@@ -31,14 +33,18 @@ import {
   parseFakeRules,
   ScriptedFunctions,
   statusOfResult,
+  type ApprovalRequest,
   type FakeRule,
   type HubRequest,
+  type PolicyAuditEntry,
 } from "@jaira/runtime";
 import { isComponentName, parseComponentConfig, validateComponentResult } from "@jaira/shared";
 import type {
+  ApprovalScope,
   BoardView,
   ComponentConfig,
   CreateTaskRequest,
+  PendingApproval,
   PendingInteraction,
   PushMessage,
   StartTaskRequest,
@@ -53,6 +59,20 @@ export interface AppServiceOptions {
   publish?: Publish;
   /** Deterministic request ids in tests. */
   nextInteractionId?: () => string;
+  nextApprovalId?: () => string;
+}
+
+/** An approval as the renderer sees it (the hub's request, minus internals). */
+function pendingApprovalOf(request: ApprovalRequest): PendingApproval {
+  return {
+    requestId: request.requestId,
+    tool: request.tool,
+    ...(request.command !== undefined ? { command: request.command } : {}),
+    ...(request.reason !== undefined ? { reason: request.reason } : {}),
+    input: request.input as Record<string, JsonValue>,
+    ...(request.taskId !== undefined ? { taskId: request.taskId } : {}),
+    at: request.at,
+  };
 }
 
 interface LiveRun {
@@ -84,6 +104,13 @@ export class AppService {
    * makes a parked state read `waiting_for_user` in the views.
    */
   private readonly interactive = new Set<string>();
+  /**
+   * Per-command approvals (DESIGN §10.2) — a separate channel from workflow gates:
+   * these are provider-initiated, so they cannot be authored states.
+   */
+  private readonly approvals: ApprovalHub;
+  /** requestId → the run it belongs to, so a decision can be audited against it. */
+  private readonly approvalRun = new Map<string, { taskId: string; runId: number }>();
 
   constructor(private readonly options: AppServiceOptions = {}) {
     this.hub = new InteractionHub({
@@ -94,7 +121,35 @@ export class AppService {
       },
       ...(options.nextInteractionId !== undefined ? { nextId: options.nextInteractionId } : {}),
     });
+    this.approvals = new ApprovalHub({
+      onRequest: (request) => this.publish({ type: "approval:requested", pending: pendingApprovalOf(request) }),
+      onResolved: (requestId, decision) => {
+        // The human's answer is the audit entry policy alone could not produce.
+        const run = this.approvalRun.get(requestId);
+        this.approvalRun.delete(requestId);
+        if (run && this.project) {
+          const request = this.approvalsSeen.get(requestId);
+          this.p.commands.record({
+            taskId: run.taskId,
+            runId: run.runId,
+            tool: request?.tool ?? "unknown",
+            ...(request?.command !== undefined ? { command: request.command } : {}),
+            decision: decision.decision === "allow" ? "approved" : "denied",
+            decidedBy: "user",
+            ...(request?.reason !== undefined ? { reason: request.reason } : {}),
+            scope: decision.scope,
+            ...(request?.sessionId !== undefined ? { sessionId: request.sessionId } : {}),
+          });
+        }
+        this.approvalsSeen.delete(requestId);
+        this.publish({ type: "approval:resolved", requestId, decision: decision.decision });
+      },
+      ...(options.nextApprovalId !== undefined ? { nextId: options.nextApprovalId } : {}),
+    });
   }
+
+  /** Requests seen, kept until resolved so the audit entry can name the command. */
+  private readonly approvalsSeen = new Map<string, ApprovalRequest>();
 
   // --- lifecycle -------------------------------------------------------------
 
@@ -120,6 +175,7 @@ export class AppService {
    */
   async close(): Promise<void> {
     this.hub.rejectAll("the project was closed");
+    this.approvals.denyAll();
     const inFlight = [...this.live.values()];
     for (const run of inFlight) run.abort.abort();
     await Promise.allSettled(inFlight.map((run) => run.done));
@@ -261,6 +317,30 @@ export class AppService {
       defaults: modelDefaults(project.config, started.bundle, { fake: fakeRules !== undefined }),
     });
 
+    // Policy for this run: authored project rules compiled to an ExecPolicy, with
+    // every decision audited and `require_approval` routed to the inbox (§10.2).
+    const auditPolicy = (entry: PolicyAuditEntry): void => {
+      this.approvals.noteDecision(entry);
+      project.commands.record({
+        taskId,
+        runId: started.runId,
+        tool: entry.tool,
+        ...(entry.command !== undefined ? { command: entry.command } : {}),
+        ...(entry.parsed !== undefined ? { parsed: entry.parsed as never } : {}),
+        // A policy escalation is not itself a decision — the human's answer is
+        // recorded separately when it arrives.
+        decision: entry.action === "allow" ? "allowed" : entry.action === "deny" ? "blocked" : "allowed",
+        decidedBy: "policy",
+        reason: entry.reason,
+        sessionId: entry.sessionId,
+      });
+    };
+    const policy = compilePolicy(project.config.policy, {
+      execEnv: project.config.execEnvironment,
+      onDecision: auditPolicy,
+    });
+    const approve = this.approvals.approver({ taskId });
+
     const recorder = project.events.recorder(taskId, started.runId);
     let seq = 0;
     this.publish({ type: "store:invalidate", scope: "tasks" });
@@ -288,6 +368,8 @@ export class AppService {
               this.publish({ type: "store:invalidate", scope: "board" });
             },
           },
+          policy,
+          approve,
           workspace: {
             root: workspace.root,
             ...(workspace.treeHash !== undefined ? { treeHash: workspace.treeHash } : {}),
@@ -326,6 +408,10 @@ export class AppService {
       for (const [requestId, owner] of this.requestTask) {
         if (owner === taskId) this.hub.reject(requestId, "the task was canceled");
       }
+      // A parked approval blocks the agent's tool loop just as hard as a gate.
+      for (const [requestId, run] of this.approvalRun) {
+        if (run.taskId === taskId) this.approvals.decide(requestId, "deny", "once");
+      }
       run.abort.abort();
     } else {
       cancelTask(this.p, taskId);
@@ -335,6 +421,22 @@ export class AppService {
   }
 
   // --- interaction -----------------------------------------------------------
+
+  /** Approvals awaiting a human (DESIGN §10.2). */
+  pendingApprovals(): PendingApproval[] {
+    return this.approvals.list().map(pendingApprovalOf);
+  }
+
+  /**
+   * Answer a parked approval. `scope` is how long the answer applies — the reason
+   * a user is not asked the same question on every tool call.
+   */
+  submitApproval(requestId: string, decision: "allow" | "deny", scope: ApprovalScope = "once"): { requestId: string } {
+    if (!this.approvals.decide(requestId, decision, scope)) {
+      throw new Error(`no pending approval '${requestId}'`);
+    }
+    return { requestId };
+  }
 
   pendingInteractions(): PendingInteraction[] {
     return this.hub.list().map((request) => this.pendingOf(request));

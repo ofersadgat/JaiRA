@@ -46,6 +46,9 @@ const handlers: Record<IpcChannel, Handler> = {
   "interaction:pending": (() => service.pendingInteractions()) as Handler,
   "interaction:submit": ((request: { requestId: string; value: never }) =>
     service.submitInteraction(request.requestId, request.value)) as Handler,
+  "approval:pending": (() => service.pendingApprovals()) as Handler,
+  "approval:submit": ((request: { requestId: string; decision: "allow" | "deny"; scope?: never }) =>
+    service.submitApproval(request.requestId, request.decision, request.scope)) as Handler,
 };
 
 function registerIpc(): void {

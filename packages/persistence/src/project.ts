@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { defaultConfig, jairaPaths, parseConfig, readJsonFile, type JairaConfig, type JairaPaths } from "@jaira/shared";
 import { openDb, type JairaDb } from "./db";
+import { CommandLog } from "./commandLog";
 import { SqliteEventLog } from "./eventLog";
 import { RuntimeStore } from "./runtime";
 import { TaskFileStore } from "./taskStore";
@@ -21,6 +22,8 @@ export interface Project {
   tasks: TaskFileStore;
   runtime: RuntimeStore;
   events: SqliteEventLog;
+  /** The command audit trail (DESIGN §4.2, §10.2). */
+  commands: CommandLog;
   /** Task ids marked `interrupted` by recovery during this open. */
   recovered: string[];
   close(): void;
@@ -80,6 +83,7 @@ export function openProject(projectDir: string, opts?: { now?: () => number }): 
     tasks: new TaskFileStore(paths.tasksDir),
     runtime,
     events: new SqliteEventLog(db),
+    commands: new CommandLog(db),
     recovered,
     close: () => db.close(),
   };
