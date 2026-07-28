@@ -17,6 +17,8 @@ import {
   type EditMarkdownConfig,
   type FillFormConfig,
   type FormField,
+  type ApprovalScope,
+  type PendingApproval,
   type PendingInteraction,
   type ReviewArtifactConfig,
 } from "@jaira/shared/browser";
@@ -270,6 +272,60 @@ export function InteractionDialog({
           {pending.component} · {pending.taskId}
         </div>
         {body}
+        {error ? <p className="reason">{error}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The per-command approval dialog (DESIGN §10.2).
+ *
+ * Distinct from a workflow gate: policy escalated a *tool call*, so what the user
+ * judges is a command, and the answer carries a SCOPE — the reason they are not
+ * asked the same thing on every call. The scope buttons widen left to right, with
+ * deny kept visually separate so the destructive-looking choice is not the easy
+ * mis-click.
+ */
+export function ApprovalDialog({
+  pending,
+  error,
+  onDecide,
+}: {
+  pending: PendingApproval;
+  error?: string | null;
+  onDecide: (decision: "allow" | "deny", scope: ApprovalScope) => void;
+}): JSX.Element {
+  const detail = JSON.stringify(pending.input, null, 2);
+  return (
+    <div className="modal-backdrop">
+      <div className="modal" data-testid="approval">
+        <h3>Approve this command?</h3>
+        <div className="sub">
+          {pending.tool}
+          {pending.taskId ? ` · ${pending.taskId}` : ""}
+        </div>
+
+        {pending.command !== undefined ? (
+          <pre className="artifact" data-testid="approval-command">
+            {pending.command}
+          </pre>
+        ) : (
+          <pre className="artifact">{detail}</pre>
+        )}
+
+        {pending.reason !== undefined ? <p className="reason-note">Policy: {pending.reason}</p> : null}
+
+        <div className="options">
+          <button onClick={() => onDecide("allow", "once")}>Allow once</button>
+          <button onClick={() => onDecide("allow", "workflow-run")}>Allow for this run</button>
+          <button onClick={() => onDecide("allow", "always")}>Always allow</button>
+        </div>
+        <div className="options">
+          <button className="danger" onClick={() => onDecide("deny", "once")}>
+            Deny
+          </button>
+        </div>
         {error ? <p className="reason">{error}</p> : null}
       </div>
     </div>

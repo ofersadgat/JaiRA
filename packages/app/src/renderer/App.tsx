@@ -8,8 +8,8 @@
 // React 19 no longer declares a global `JSX` namespace — it comes from the
 // package now.
 import { useState, type JSX } from "react";
-import type { BoardCard, InstanceNode, PendingInteraction, TaskDetail } from "@jaira/shared/browser";
-import { InteractionDialog } from "./components";
+import type { BoardCard, InstanceNode, PendingApproval, PendingInteraction, TaskDetail } from "@jaira/shared/browser";
+import { ApprovalDialog, InteractionDialog } from "./components";
 import { useApp } from "./store";
 
 const BADGE: Record<string, string> = {
@@ -177,29 +177,46 @@ function Detail({
 }
 
 /**
- * The approvals inbox (DESIGN §10.2, phase-4 scaffolding).
+ * The approvals inbox (DESIGN §10.2).
  *
- * Today it lists the pending human gates across every task, which is the whole
- * inbox: per-command `require_approval` decisions are provider-initiated and
- * arrive with the policy engine and process executors (phase 6), so there is
- * nothing to show for them yet rather than a placeholder pretending otherwise.
+ * Two kinds of thing wait for a human, and they are not the same mechanism:
+ * workflow gates are authored UI states, while command approvals are
+ * provider-initiated — policy escalated a tool call. They share this one list.
+ * Approvals are shown first because an agent's tool loop is blocked until one is
+ * answered, whereas a gate is a state politely waiting.
  */
 function Inbox({
   pending,
+  approvals,
   selected,
   onSelect,
 }: {
   pending: PendingInteraction[];
+  approvals: PendingApproval[];
   selected: string | null;
   onSelect: (taskId: string) => void;
 }): JSX.Element | null {
-  if (pending.length === 0) return null;
+  const total = pending.length + approvals.length;
+  if (total === 0) return null;
   return (
     <div className="inbox">
       <h3>
-        Awaiting you <span className="count">{pending.length}</span>
+        Awaiting you <span className="count">{total}</span>
       </h3>
       <ul>
+        {/* Command approvals first: an agent's tool loop is blocked until answered. */}
+        {approvals.map((item) => (
+          <li
+            key={item.requestId}
+            className={item.taskId === selected ? "selected" : undefined}
+            onClick={() => (item.taskId ? onSelect(item.taskId) : undefined)}
+          >
+            <span className="badge badge-blocked">⛔</span>
+            <span className="task-title" title={item.reason ?? ""}>
+              {item.command ?? item.tool}
+            </span>
+          </li>
+        ))}
         {pending.map((item) => (
           <li
             key={item.requestId}
@@ -249,7 +266,7 @@ export default function App(): JSX.Element {
           {state.projectDir ?? "no project open"}
         </div>
         <NewTask onCreate={actions.createTask} busy={state.busy} />
-        <Inbox pending={pending} selected={state.selected} onSelect={actions.select} />
+        <Inbox pending={pending} approvals={state.approvals} selected={state.selected} onSelect={actions.select} />
         <h3>Tasks</h3>
         <ul className="tasks">
           {state.tasks.map((task) => (
@@ -335,7 +352,13 @@ export default function App(): JSX.Element {
         )}
       </aside>
 
-      {pending.length > 0 ? (
+      {state.approvals.length > 0 ? (
+        <ApprovalDialog
+          pending={state.approvals[0]!}
+          error={state.error}
+          onDecide={(decision, scope) => actions.decideApproval(state.approvals[0]!.requestId, decision, scope)}
+        />
+      ) : pending.length > 0 ? (
         <InteractionDialog
           pending={pending[0]!}
           error={state.error}
