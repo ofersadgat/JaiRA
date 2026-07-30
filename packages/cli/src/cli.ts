@@ -27,6 +27,7 @@ import {
   removeWorktree,
   runCauses,
   RunOwner,
+  standaloneLoadOptions,
   type Project,
   type WorkflowBrowser,
 } from "@jaira/persistence";
@@ -312,10 +313,13 @@ function buildRunEnvironment(
  */
 function assertCapabilities(
   registry: ReturnType<typeof newRegistry>,
-  bundle: { source?: Record<string, unknown> },
+  // The RESOLVED states. This read `bundle.source`, which a snapshot-loaded bundle no longer
+  // carries (EXPRESSIONS.md §11) — so the gate would have fallen back to `{}` and passed every
+  // pinned run silently, which is worse than not gating at all. `functionRefOf` reads either shape.
+  bundle: { states: Record<string, unknown> },
   config: JairaConfig,
 ): void {
-  const issues = gateCapabilities(registry, (bundle.source ?? {}) as never, {
+  const issues = gateCapabilities(registry, bundle.states as never, {
     policyNeedsApproval: policyCanEscalate(config.policy),
     unattended: true,
   });
@@ -396,7 +400,7 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
 
   const files = readWorkflowFiles(workflowsDir);
   if (Object.keys(files).length === 0) throw new Error(`no workflow state files under ${workflowsDir}`);
-  const bundle = loadBundle(files, values.root);
+  const bundle = loadBundle(files, values.root, standaloneLoadOptions(workflowsDir));
   const report = validateBundle(bundle);
   if (report.errors.length > 0) {
     const detail = report.errors.map((e) => `${e.stateId} ${e.path}: ${e.message}`).join("\n  ");

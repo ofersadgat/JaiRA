@@ -27,6 +27,7 @@ import {
 import {
   createWorkflowExecutor,
   type Persistence,
+  type CallCache,
   type WorkflowBundle,
   type WorkflowMetrics,
 } from "@declarative-ai/hw";
@@ -126,6 +127,14 @@ export interface WorkflowRunConfig {
   registry: CapabilityRegistry<WorkflowMetrics>;
   prompt: Executor<ExecServices, WorkflowMetrics>;
   persistence?: Persistence;
+  /**
+   * Where the results of CALLS made from expressions are remembered (EXPRESSIONS.md §3).
+   *
+   * The question a memo answers is "would someone else making the identical call reuse this answer?"
+   * — so the key is content-addressed and the STORE decides how far the answer travels. Absent ⇒ hw's
+   * in-run default, which answers it only within one run: the same call in a later run pays again.
+   */
+  callCache?: CallCache;
   abortSignal?: AbortSignal;
   /**
    * The filesystem the run acts within — a task's git worktree, or the project
@@ -155,9 +164,13 @@ export interface WorkflowRunConfig {
 
 export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowExecResult> {
   const executor = createWorkflowExecutor({
-    definition: { rootId: cfg.bundle.rootId, states: cfg.bundle.source ?? {} },
+    // The RESOLVED bundle. This used to pass `bundle.source` — the authored states — which the
+    // executor then re-loaded on every start; a pinned snapshot no longer carries a `source` at all
+    // (EXPRESSIONS.md §11), and re-evaluating one would defeat the point of pinning it.
+    definition: cfg.bundle,
     registry: cfg.registry,
     prompt: cfg.prompt,
+    ...(cfg.callCache !== undefined ? { callCache: cfg.callCache } : {}),
     ...(cfg.persistence !== undefined ? { persistence: cfg.persistence } : {}),
   });
   const ctx: ExecServices = {

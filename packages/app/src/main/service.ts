@@ -464,7 +464,9 @@ export class AppService {
 
     // §8.2: refuse a state whose runtime cannot enforce the policy it runs under,
     // rather than letting it run unguarded.
-    const gateIssues = gateCapabilities(registry, started.bundle.source ?? {}, {
+    // The RESOLVED states: a snapshot-loaded bundle carries no `source` (EXPRESSIONS.md §11), so
+    // reading it would have gated a pinned run against `{}` — a check that always passes.
+    const gateIssues = gateCapabilities(registry, started.bundle.states, {
       policyNeedsApproval: policyCanEscalate(project.config.policy),
     });
     if (gateIssues.length > 0) {

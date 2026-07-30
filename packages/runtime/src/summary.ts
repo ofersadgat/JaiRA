@@ -173,12 +173,17 @@ class MapStore implements SessionStore<JsonValue> {
 export { DEFAULT_SESSION, type ConversationModes as SummaryModes } from "@jaira/shared";
 
 /**
- * The authored conversation modes of a bundle. The query itself lives in
+ * The effective conversation modes of a bundle. The query itself lives in
  * `@jaira/shared` because the workflow browser lints the same declaration
  * (a session mixing `summary` and `full_history`) that the runtime acts on.
+ *
+ * Reads the LOADED states rather than the authored `source`, because a mode may be inherited from
+ * an ancestor's `environment` (WORKFLOWS.md §5) and appear in no state file at all. Installing the
+ * summarizer off the authored text would then leave an inheriting state unsummarized — the exact
+ * silent-drift case the mode exists to make explicit.
  */
 export function summarySessionsOf(bundle: WorkflowBundle): ConversationModes {
-  return conversationModesOf((bundle.source ?? {}) as Record<string, unknown>);
+  return conversationModesOf(bundle.states as unknown as Record<string, unknown>);
 }
 
 /**
@@ -236,7 +241,7 @@ export function promptSummarizer(
     const op = promptOp({
       system: SUMMARY_SYSTEM,
       user: `Summarize the following conversation in at most ${target} characters.\n\n${transcript}`,
-      ...(options.model !== undefined ? { config: { model: options.model } } : {}),
+      ...(options.model !== undefined ? { model: options.model } : {}),
       output: { name: "summary", schema: { type: "string" } as const },
     });
     const handle = prompt.start(op, {

@@ -8,6 +8,7 @@ import type { Failure, FunctionCapabilities, JsonValue } from "@declarative-ai/e
 import { loadBundle, validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
 import { newTaskId, isStartableStatus, type TaskMeta, type TaskStatus } from "@jaira/shared";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "./snapshots";
+import { nodeVfs, workflowLoadOptions } from "./workflowRefs";
 import type { Project } from "./project";
 
 export interface CreateTaskInput {
@@ -83,6 +84,8 @@ export function beginTaskRun(project: Project, taskId: string, options: BeginRun
   let dir: string;
   const pinned = runtime.snapshotHash !== undefined;
   if (runtime.snapshotHash !== undefined) {
+    // No options: a snapshot stores the RESOLVED definition, so there is nothing left to resolve
+    // and no root a reference could still need (EXPRESSIONS.md §11).
     bundle = loadSnapshot(project.paths.snapshotsDir, runtime.snapshotHash);
     hash = runtime.snapshotHash;
     dir = `${project.paths.snapshotsDir}/${hash}`;
@@ -95,8 +98,12 @@ export function beginTaskRun(project: Project, taskId: string, options: BeginRun
     const files = readWorkflowFiles(project.paths.workflowsDir, {
       onError: (relPath, message) => unreadable.push(`${relPath}: ${message}`),
     });
+    // A fragment a document reference pulls in no longer has to be tracked and pinned alongside
+    // the states: the snapshot stores the resolved definition, which has it spliced in already
+    // (EXPRESSIONS.md §11).
+    const vfs = nodeVfs();
     try {
-      bundle = loadBundle(files, meta.workflow);
+      bundle = loadBundle(files, meta.workflow, workflowLoadOptions(project.paths, { vfs, path: project.config.workflows.path }));
     } catch (e) {
       const note = unreadable.length > 0 ? `\n  unreadable files:\n  ${unreadable.join("\n  ")}` : "";
       throw new Error(`${(e as Error).message}${note}`);

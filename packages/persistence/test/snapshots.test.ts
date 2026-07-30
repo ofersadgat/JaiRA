@@ -19,7 +19,7 @@ const STATES: Record<string, unknown> = {
     label: "Step",
     inputs: { x: { schema: { type: "string" } } },
     outputs: { y: { schema: { type: "string" } } },
-    operation: { kind: "prompt", prompt: { template: "do {{inputs.x}}" }, config: { model: "p" } },
+    operation: { kind: "prompt", prompt: "do {{inputs.x}}", model: "p" },
   },
 };
 

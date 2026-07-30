@@ -139,11 +139,11 @@ describe("browseWorkflows", () => {
         inputs: { issue: { kind: "blob", schema: { type: "string", contentMediaType: "markdown" } } },
         outputs: { goals: { schema: { type: "array", items: { type: "string" } } } },
         environment: { conversation: { mode: "summary" } },
-        operation: { kind: "prompt", prompt: { template: "Extract goals." }, config: { model: "planner" } },
+        operation: { kind: "prompt", prompt: "Extract goals.", model: "planner" },
       }),
     );
     const plan = browseWorkflows(project).workflows[0]!;
-    const warning = plan.issues.find((i) => i.path === "environment.conversation.mode")!;
+    const warning = plan.issues.find((i) => i.path === "operation.conversation.mode")!;
     expect(warning.severity).toBe("warning");
     expect(warning.message).toMatch(/declares both summary and full_history/);
     // Advisory only: the run still works, it just summarizes for both.

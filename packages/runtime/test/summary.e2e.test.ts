@@ -32,13 +32,13 @@ function twoStepFiles(mode: "summary" | "full_history"): Record<string, unknown>
       inputs: { topic: { schema: { type: "string" } } },
       outputs: { draft: { schema: { type: "string" } } },
       environment: { conversation: { mode: "fresh" } },
-      operation: { kind: "prompt", prompt: { template: "Draft something about {{inputs.topic}}." }, config: { model: "m" } },
+      operation: { kind: "prompt", prompt: "Draft something about {{inputs.topic}}.", model: "m" },
     },
     "chain/second": {
       inputs: { draft: { schema: { type: "string" } } },
       outputs: { answer: { schema: { type: "string" } } },
       environment: { conversation: { mode } },
-      operation: { kind: "prompt", prompt: { template: "Refine the draft." }, config: { model: "m" } },
+      operation: { kind: "prompt", prompt: "Refine the draft.", model: "m" },
     },
   };
 }

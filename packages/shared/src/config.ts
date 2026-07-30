@@ -94,7 +94,30 @@ export interface JairaConfig {
   policy: Record<string, JsonValue>;
   /** Agent runtimes beyond the built-in Claude adapters (DESIGN §8.1). */
   agents: JairaAgentConfig;
+  /** Where workflow references are looked up (EXPRESSIONS.md §4). */
+  workflows: JairaWorkflowConfig;
 }
+
+export interface JairaWorkflowConfig {
+  /**
+   * The ordered roots a BARE reference is searched along — shell `PATH` semantics, first match wins.
+   *
+   * Entries may use the `$JAIRA` / `$PROJECT` roots or be absolute; they may NOT be bare, or
+   * resolving the path would need the path. A subtree overrides or extends this through an
+   * `environment.path`, spliced with `"$INHERITED"`.
+   *
+   * The FIRST entry is special: only a file found under it keeps a bare state id. Anything found
+   * further along canonicalizes to an absolute id, which is what keeps two files at two entries from
+   * colliding on the one thing that keys the snapshot hash and the event log.
+   */
+  path: string[];
+}
+
+/**
+ * `$JAIRA/workflows` first, so today's ids are unchanged; `$JAIRA/functions` after it, as the home
+ * for built-in and project-defined operations a bare name can reach.
+ */
+export const DEFAULT_WORKFLOW_PATH = ["$JAIRA/workflows", "$JAIRA/functions"];
 
 export const DEFAULT_ARTIFACT_DIR = "jaira-artifacts";
 
@@ -110,7 +133,39 @@ export function defaultConfig(): JairaConfig {
     execEnvironment: "windows",
     policy: {},
     agents: {},
+    workflows: { path: [...DEFAULT_WORKFLOW_PATH] },
   };
+}
+
+/**
+ * Parse the workflow-reference block (EXPRESSIONS.md §4).
+ *
+ * Strict about bare entries, because the failure is otherwise circular and confusing: a bare path
+ * entry would itself need the path to resolve.
+ */
+function parseWorkflows(raw: unknown): JairaWorkflowConfig {
+  if (raw === undefined) return { path: [...DEFAULT_WORKFLOW_PATH] };
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("config.workflows must be an object");
+  }
+  const list = (raw as Record<string, unknown>)["path"];
+  if (list === undefined) return { path: [...DEFAULT_WORKFLOW_PATH] };
+  if (!Array.isArray(list) || list.length === 0) {
+    throw new Error("config.workflows.path must be a non-empty array");
+  }
+  const path = list.map((entry, i) => {
+    if (typeof entry !== "string" || entry.trim().length === 0) {
+      throw new Error(`config.workflows.path[${i}] must be a non-empty string`);
+    }
+    if (!entry.startsWith("$") && !/^([a-zA-Z]:)?[/\\]/.test(entry)) {
+      throw new Error(
+        `config.workflows.path[${i}] ('${entry}') must be rooted ($JAIRA/…, $PROJECT/…) or absolute — ` +
+          `a bare entry would need the path to resolve itself`,
+      );
+    }
+    return entry;
+  });
+  return { path };
 }
 
 /**
@@ -246,5 +301,6 @@ export function parseConfig(raw: unknown): JairaConfig {
     execEnvironment: parseExecEnvironment(cfg["execEnvironment"]),
     policy: (rawPolicy as Record<string, JsonValue> | undefined) ?? {},
     agents: parseAgents(cfg["agents"]),
+    workflows: parseWorkflows(cfg["workflows"]),
   };
 }

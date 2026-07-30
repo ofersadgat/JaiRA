@@ -54,7 +54,7 @@ export function componentsWorkflowFiles(): Record<string, unknown> {
       operation: {
         kind: "function",
         function: "choose_option",
-        config: {
+        args: {
           prompt: "Pick a direction for the plan.",
           options: ["approve", "request_changes", { value: "block", tone: "danger" }],
           comments: true,
@@ -71,7 +71,7 @@ export function componentsWorkflowFiles(): Record<string, unknown> {
       operation: {
         kind: "function",
         function: "review_artifact",
-        config: {
+        args: {
           prompt: "Review the plan document.",
           artifact: "plan_doc",
           decisions: ["approve", { value: "reject", tone: "danger" }],
@@ -86,7 +86,7 @@ export function componentsWorkflowFiles(): Record<string, unknown> {
       operation: {
         kind: "function",
         function: "edit_markdown",
-        config: { prompt: "Tidy up the plan.", source: "plan_doc" },
+        args: { prompt: "Tidy up the plan.", source: "plan_doc" },
       },
     },
     "components/form": {
@@ -102,7 +102,7 @@ export function componentsWorkflowFiles(): Record<string, unknown> {
       operation: {
         kind: "function",
         function: "fill_form",
-        config: {
+        args: {
           prompt: "Describe the follow-up.",
           fields: [
             { name: "title", label: "Title" },
@@ -121,7 +121,7 @@ export function componentsWorkflowFiles(): Record<string, unknown> {
       operation: {
         kind: "function",
         function: "confirm_action",
-        config: { prompt: "Merge the plan into main?", confirmLabel: "Merge", cancelLabel: "Not yet" },
+        args: { prompt: "Merge the plan into main?", confirmLabel: "Merge", cancelLabel: "Not yet" },
       },
     },
   };
