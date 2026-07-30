@@ -18,7 +18,7 @@ const WORKFLOW: Record<string, unknown> = {
   label: "Wf",
   inputs: { x: { schema: { type: "string" } } },
   outputs: { y: { schema: { type: "string" } } },
-  operation: { kind: "prompt", prompt: { template: "do {{inputs.x}}" }, config: { model: "p" } },
+  operation: { kind: "prompt", prompt: "do {{inputs.x}}", model: "p" },
 };
 
 let dir: string;

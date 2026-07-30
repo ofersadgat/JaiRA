@@ -12,6 +12,7 @@ export * from "./worktrees";
 export * from "./commandLog";
 export * from "./prune";
 export * from "./workflows";
+export * from "./workflowRefs";
 export * from "./artifactStore";
 export * from "./jobs";
 export * from "./jobOwner";

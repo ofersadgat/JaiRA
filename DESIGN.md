@@ -189,7 +189,16 @@ crash recovery). What changed here, and why:
    and wiring is authored binding sugar (`{ input }`, `{ child, output }`,
    `{ expr }`) that the loader lowers to base refs. A `passthrough` output is
    just an unconstrained slot bound to a producer. Session/tool/conversation/
-   permission concerns move to a sibling `environment` block.
+   permission concerns are fields of `operation` — every one of them is a
+   per-call decision, and a sibling block bought only a second place to look.
+   `environment` is then the DEFAULTS layer: an `operation` with every field
+   optional, inherited by this state and every descendant, nearest layer winning
+   (WORKFLOWS.md §5). A state id is a path reference with `$JAIRA/workflows` as
+   its default root (§2.1), and `sequence` is optional — absent means the order
+   the children were declared in (§6). [REFERENCES.md](REFERENCES.md) settles the
+   next step: one reference type covering ids, bindings, expressions and prompt
+   variables, with document references resolved as load-time transclusion.
+   Designed, not implemented.
 6. **Snapshots store the bundle's `source`.** `loadBundle` now returns desugared
    `states` *plus* the states as authored (`source`), and `snapshotHash` hashes
    the authored form. `ensureSnapshot` therefore writes `source`, so improving the
@@ -316,7 +325,9 @@ screenshot, plus 83 tests. What that phase settled:
    component tour, and worth knowing when authoring). The engine enters the next
    sequence member as soon as the previous one has a *record*, so children with no
    data dependency between them run concurrently — five independent gates all park
-   at once. Ordering is dataflow-driven (SPEC §10.4): a child whose inputs
+   at once. This is why the derived sequence needed the jump-hold: once EVERY state
+   with children has a sequence, a state whose children are alternatives would
+   otherwise start all of them the moment a transition entered one. Ordering is dataflow-driven (SPEC §10.4): a child whose inputs
    reference an unresolved sibling parks until they resolve. The components demo
    therefore threads each gate's output into the next, which is the same mechanism
    SPEC §9's planning workflow relies on (context needs goals).

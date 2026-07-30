@@ -24,10 +24,12 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import type { FunctionCapabilities } from "@declarative-ai/exec";
-import { loadBundle, snapshotHash, stateIdFromPath, validateBundle } from "@declarative-ai/hw";
+import { loadBundle, parseReferencedFile, resolveStateRef, snapshotHash, stateIdFromPath, validateBundle } from "@declarative-ai/hw";
 import { conversationModesOf, parseJsonText } from "@jaira/shared";
 import type { LintIssue, WorkflowBrowser, WorkflowEntry, WorkflowFileEntry } from "@jaira/shared";
 import type { Project } from "./project";
+import { isStateFile } from "./snapshots";
+import { workflowLoadOptions } from "./workflowRefs";
 
 // The view models live in `@jaira/shared` so the renderer can name them without
 // reaching into this Node-only package.
@@ -54,10 +56,10 @@ function readTolerantly(workflowsDir: string): {
         walk(full);
         continue;
       }
-      if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".json")) continue;
+      if (!entry.isFile() || !isStateFile(entry.name)) continue;
       const rel = relative(workflowsDir, full).split(sep).join("/");
       try {
-        files[rel] = parseJsonText(readFileSync(full, "utf8"), rel);
+        files[rel] = parseReferencedFile(rel, readFileSync(full, "utf8"));
       } catch (e) {
         // The author is mid-edit: report it against the file, don't abort the pass.
         errors.set(rel, (e as Error).message);
@@ -68,17 +70,22 @@ function readTolerantly(workflowsDir: string): {
   return { files, errors };
 }
 
-/** `children.*.state` values a raw state file references. */
+/**
+ * The states a raw state file names as children.
+ *
+ * A child that declares no `state` runs the one its KEY names (WORKFLOWS.md §6), so the default has
+ * to be applied here too — this is what root derivation subtracts, and without it every child of a
+ * state that used the shorthand would be reported as a workflow root of its own.
+ */
 function childStatesOf(raw: unknown): string[] {
   if (raw === null || typeof raw !== "object") return [];
   const children = (raw as { children?: unknown }).children;
   if (children === null || typeof children !== "object") return [];
   const out: string[] = [];
-  for (const decl of Object.values(children as Record<string, unknown>)) {
-    if (decl !== null && typeof decl === "object") {
-      const state = (decl as { state?: unknown }).state;
-      if (typeof state === "string") out.push(state);
-    }
+  for (const [key, decl] of Object.entries(children as Record<string, unknown>)) {
+    if (decl === null || typeof decl !== "object") continue;
+    const state = (decl as { state?: unknown }).state;
+    out.push(typeof state === "string" ? state : `./${key}`);
   }
   return out;
 }
@@ -116,9 +123,22 @@ export function browseWorkflows(project: Project, options: BrowseOptions = {}): 
   }
   fileEntries.sort((a, b) => a.stateId.localeCompare(b.stateId));
 
+  // A child reference is a PATH (WORKFLOWS.md §2.1), so `./critique` and `feature/plan/critique`
+  // can name the same state. Roots are derived by "no one references me", which only works if both
+  // spellings are reduced to the canonical id first.
+  const refOptions = workflowLoadOptions(project.paths, { tolerant: true, path: project.config.workflows.path });
   const referenced = new Set<string>();
-  for (const { raw } of byStateId.values()) {
-    for (const state of childStatesOf(raw)) referenced.add(state);
+  for (const [stateId, { raw }] of byStateId) {
+    for (const state of childStatesOf(raw)) {
+      try {
+        // The PRIMARY root: a state id resolves against one root, not the search path
+        // (EXPRESSIONS.md §4 — `resolveStateRef` has no filesystem to search with).
+        const defaultRoot = Array.isArray(refOptions.defaultRoot) ? refOptions.defaultRoot[0] : (refOptions.defaultRoot as string | undefined);
+        referenced.add(resolveStateRef(state, { ...refOptions, defaultRoot, from: stateId }));
+      } catch {
+        // An unresolvable reference is a load/lint diagnostic below, not a reason to lose the tree.
+      }
+    }
   }
   const roots = [...byStateId.keys()].filter((id) => !referenced.has(id)).sort();
 
@@ -152,7 +172,7 @@ export function browseWorkflows(project: Project, options: BrowseOptions = {}): 
     };
     let bundle;
     try {
-      bundle = loadBundle(files, rootId);
+      bundle = loadBundle(files, rootId, workflowLoadOptions(project.paths, { tolerant: true, path: project.config.workflows.path }));
     } catch (e) {
       // An unresolvable child reference or a malformed state: the closure is
       // unknown, so the only honest answer is the load error itself.
@@ -171,10 +191,14 @@ export function browseWorkflows(project: Project, options: BrowseOptions = {}): 
     // A session cannot carry full history and a summary at once (one session, one
     // transcript). JaiRA summarizes it for all of them, so say so at lint time
     // rather than letting a `full_history` state be quietly compacted.
-    for (const conflict of conversationModesOf((bundle.source ?? {}) as Record<string, unknown>).conflicts) {
+    //
+    // Read from the LOADED states, not `source`: a mode inherited from an ancestor's `environment`
+    // (WORKFLOWS.md §5) is nowhere in the authored file, and reading the file alone would miss
+    // exactly the conflicts inheritance makes easiest to create.
+    for (const conflict of conversationModesOf(bundle.states as unknown as Record<string, unknown>).conflicts) {
       issues.push({
         stateId: conflict.stateIds[0] ?? rootId,
-        path: "environment.conversation.mode",
+        path: "operation.conversation.mode",
         message:
           `session '${conflict.session}' declares both summary and full_history ` +
           `(${conflict.stateIds.join(", ")}); the transcript is summarized for all of them`,

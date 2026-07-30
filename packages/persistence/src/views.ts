@@ -10,6 +10,7 @@ import type { JsonValue } from "@declarative-ai/json";
 import { loadBundle, type StateDef, type WorkflowBundle } from "@declarative-ai/hw";
 import type { BoardView, TaskDetail, TaskSummary, TimelineEntry } from "@jaira/shared";
 import type { Project } from "./project";
+import { workflowLoadOptions } from "./workflowRefs";
 import {
   breadcrumbOf,
   eventsOf,
@@ -74,7 +75,11 @@ export function bundleFor(project: Project, workflow: string, snapshotHash?: str
   try {
     // Tolerant: a half-saved file the workflow does not reference must not blank the
     // board (the user is editing in another window).
-    return loadBundle(readWorkflowFiles(project.paths.workflowsDir, { onError: () => undefined }), workflow);
+    return loadBundle(
+      readWorkflowFiles(project.paths.workflowsDir, { onError: () => undefined }),
+      workflow,
+      workflowLoadOptions(project.paths, { tolerant: true, path: project.config.workflows.path }),
+    );
   } catch {
     return undefined;
   }

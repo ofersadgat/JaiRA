@@ -39,26 +39,27 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
   return {
     "feature/plan": {
       label: "Planning",
+      // The defaults every state in this subtree inherits (WORKFLOWS.md §5): these are all prompt
+      // states on one model, so the leaves say only what is different.
+      environment: { kind: "prompt", model: model("planner") },
       inputs: { issue: artifact("markdown") },
       outputs: {
         outcome: {
           schema: { type: "string", enum: ["complete", "blocked"] },
           binding: { expr: "children.critique.outputs.outcome === 'clean' ? 'complete' : 'blocked'" },
         },
-        plan_doc: { ...artifact("markdown"), binding: { child: "context", output: "plan_doc" } },
-        // A "passthrough" output is just an unconstrained slot bound to a producer.
-        critique: { binding: { child: "critique" } },
+        // `output` defaults to the slot's own name, so this is context's `plan_doc`.
+        plan_doc: { ...artifact("markdown"), binding: ".children.context.outputs.plan_doc" },
+        // A "passthrough" output: the whole child result as ONE value (`*`, WORKFLOWS.md §3.4).
+        critique: { binding: ".children.critique.outputs" },
       },
       children: {
-        goals: { state: "feature/plan/goals", inputs: { issue: { input: "issue" } } },
-        context: {
-          state: "feature/plan/context",
-          inputs: { issue: { input: "issue" }, goals: { child: "goals", output: "goals" } },
-        },
+        // No `state`: a child's key names the state it runs (WORKFLOWS.md §6).
+        goals: { inputs: { issue: ".inputs.issue" } },
+        context: { inputs: { issue: ".inputs.issue", goals: ".children.goals.outputs.goals" } },
         critique: {
-          state: "feature/plan/critique",
           inputs: {
-            plan_doc: { child: "context", output: "plan_doc" },
+            plan_doc: ".children.context.outputs.plan_doc",
             severity_threshold: { text: "significant" },
           },
         },
@@ -78,21 +79,13 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
       label: "Goals",
       inputs: { issue: artifact("markdown") },
       outputs: { goals: strArray() },
-      operation: {
-        kind: "prompt",
-        prompt: { template: "Extract goals from {{inputs.issue}}." },
-        config: { model: model("planner") },
-      },
+      operation: { prompt: "Extract goals from {{inputs.issue}}." },
     },
     "feature/plan/context": {
       label: "Context",
       inputs: { issue: artifact("markdown"), goals: strArray() },
       outputs: { plan_doc: artifact("markdown") },
-      operation: {
-        kind: "prompt",
-        prompt: { template: "Write the plan for {{inputs.issue}}." },
-        config: { model: model("planner") },
-      },
+      operation: { prompt: "Write the plan for {{inputs.issue}}." },
     },
     "feature/plan/critique": {
       label: "Critique Plan",
@@ -111,32 +104,29 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
         human_decision: {
           schema: { type: "string", enum: ["approve", "request_changes", "block"] },
           optional: true,
-          binding: { child: "human_review", output: "decision" },
+          binding: ".children.human_review.outputs.decision",
         },
       },
       environment: { conversation: { mode: "full_history" } },
       operation: {
-        kind: "prompt",
-        config: { model: model("critic") },
-        prompt: {
-          template:
-            "Review the plan document. Find significant weaknesses at or above the configured severity threshold. Return structured output matching this state's output schema.",
-        },
+        model: model("critic"),
+        prompt: "Review the plan document. Find significant weaknesses at or above the configured severity threshold. Return structured output matching this state's output schema.",
       },
       children: {
         address_weaknesses: {
-          state: "feature/plan/critique/address_weaknesses",
           inputs: {
-            plan_doc: { input: "plan_doc" },
+            plan_doc: ".inputs.plan_doc",
             weaknesses: { expr: "outputs.weaknesses" },
             critique_report: { expr: "outputs.critique_report" },
           },
         },
         human_review: {
-          state: "feature/plan/critique/human_review",
-          inputs: { plan_doc: { input: "plan_doc" }, critique_report: { expr: "outputs.critique_report" } },
+          inputs: { plan_doc: ".inputs.plan_doc", critique_report: { expr: "outputs.critique_report" } },
         },
       },
+      // These two children are ALTERNATIVES, not a spine: an absent `sequence` would run both in
+      // declaration order (WORKFLOWS.md §6), so the empty one says "only a transition enters these".
+      sequence: [],
       transitions: [
         { to: "terminate.success", when: "children.human_review.outcome === 'success'" },
         { to: "terminate.success", when: "children.address_weaknesses.outcome === 'success'" },
@@ -149,11 +139,7 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
       label: "Address Weaknesses",
       inputs: { plan_doc: artifact("markdown"), weaknesses: strArray(), critique_report: artifact("markdown") },
       outputs: { resolution: str() },
-      operation: {
-        kind: "prompt",
-        prompt: { template: "Fix the listed weaknesses." },
-        config: { model: model("fixer") },
-      },
+      operation: { prompt: "Fix the listed weaknesses.", model: model("fixer") },
     },
     "feature/plan/critique/human_review": {
       label: "Human Review",
@@ -168,7 +154,7 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
       operation: {
         kind: "function",
         function: HUMAN_REVIEW_FUNCTION,
-        config: { prompt: "Review the critique result.", options: ["approve", "request_changes", "block"] },
+        args: { prompt: "Review the critique result.", options: ["approve", "request_changes", "block"] },
       },
     },
   };

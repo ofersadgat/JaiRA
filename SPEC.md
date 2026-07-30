@@ -180,12 +180,17 @@ Transition order matters: child-completion conditions should be declared before
 child-entry conditions, so that the evaluation that runs after a child
 completes does not immediately re-enter it.
 
-Taking a transition to a child that appears in the `sequence` resets the
-sequence cursor to that child and clears the recorded results of that child and
-every later child in the sequence; default ordering then resumes from there.
+Taking a transition to a child that appears in the `sequence` is a JUMP: it
+moves the sequence cursor to that child and clears the recorded results of that
+child and every later child in the sequence; ordering then resumes from there.
 For example, with sequence `[a, b, c, d]`, a transition from `d` back to `b`
-clears `b`, `c`, and `d`; only `a` retains its results. Children outside the
-sequence keep their results.
+clears `b`, `c`, and `d`; only `a` retains its results. A FORWARD jump likewise
+leaves the members it skipped skipped — the cursor does not fall back to fill
+them in. Children outside the sequence keep their results.
+
+A jump also holds the cursor until the child it entered resolves, so the rest of
+the spine does not start alongside it. That is what lets a state whose children
+are alternatives — a fix pass or a human gate — enter exactly one of them.
 
 Starting an async child does not trigger transition evaluation; evaluation runs
 when the child completes. A transition whose `when` expression references
@@ -470,13 +475,17 @@ limits
 
 > Revised. `params`, `agent`, `skill` and `ui` are gone: configuration folded into
 > `inputs` (§4.5), and the three operation blocks collapsed into one `operation`
-> plus a sibling `environment` (§3.2). WORKFLOWS.md is the full field reference.
+> (§3.2). `environment` was then repurposed: it is an `operation` with every field
+> optional, supplying DEFAULTS to this state and every descendant. WORKFLOWS.md is
+> the full field reference.
 
 ### 5.2 Field Summary
 
 `id`
-: State ID, equal to relative path without suffix. May be omitted and derived;
-  if present it must match.
+: State ID — a PATH REFERENCE. A bare path hangs off the default workflow root
+  (`$JAIRA/workflows`); `/…`, `$VAR/…`, `file:…` and `./…` are the escape
+  hatches. Equal to the state's own location, so it may be omitted and derived;
+  if present it must resolve to the same state. WORKFLOWS.md §2.1.
 
 `label`
 : Human-readable state name.
@@ -496,16 +505,21 @@ limits
   `{ "kind": "function", … }`. Absent for a pure composite.
 
 `environment`
-: How the operation runs rather than what it is — logical `session`, the `tools`
-  it may call, the `conversation` mode, and the authored `permissions` baseline.
+: Defaults for this state's `operation` and every descendant's — the same shape
+  as `operation`, with every field optional. The effective operation is the merge
+  of each ancestor's `environment`, then this state's, then its `operation`, with
+  the nearest layer winning. Only a state that declares an `operation` gets one.
+  The session/tools/conversation/permissions fields live on `operation` itself
+  now, and are inherited by this same rule.
 
 `children`
 : Declared child states, their input wiring, and async flags.
 
 `sequence`
-: The order the engine advances its cursor through children. Not a barrier:
-  independent children run concurrently, and real ordering comes from dataflow
-  (§10.4).
+: The order the engine advances its cursor through children. Optional — absent
+  means the order the children were declared in; `[]` means no spine, so a child
+  runs only when a transition enters it. Not a barrier: independent children run
+  concurrently, and real ordering comes from dataflow (§10.4).
 
 `transitions`
 : Local transition rules.
@@ -670,11 +684,9 @@ Agents may not:
       "binding": { "child": "human_review", "output": "decision" }
     }
   },
-  "environment": {
-    "conversation": { "mode": "full_history" }
-  },
   "operation": {
     "kind": "prompt",
+    "conversation": { "mode": "full_history" },
     "prompt": {
       "template": "Review the plan document. Find significant weaknesses at or above the configured severity threshold. Return structured output matching this state's output schema."
     },

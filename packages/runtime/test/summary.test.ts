@@ -28,9 +28,12 @@ function longTranscript(turns = 6): Turn[] {
   );
 }
 
-/** A bundle whose `source` declares the given environments. */
+/**
+ * A bundle whose LOADED states carry the given environments — which is where the query reads them
+ * from, since a mode can be inherited from an ancestor's `environment` and appear in no file.
+ */
 function bundleWith(states: Record<string, unknown>): WorkflowBundle {
-  return { rootId: "wf", states: {}, source: states as WorkflowBundle["source"] };
+  return { rootId: "wf", states: states as WorkflowBundle["states"], source: states as WorkflowBundle["source"] };
 }
 
 describe("SummarizingSessionStore", () => {
