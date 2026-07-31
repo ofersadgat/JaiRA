@@ -19,6 +19,10 @@ function twoStepFiles(mode: "summary" | "full_history"): Record<string, unknown>
   return {
     chain: {
       label: "Chain",
+      // Declared, because sharing a transcript is now something an author asks for: an undeclared
+      // state gets its own private stream (SESSIONS.md §4), and there would be nothing for the
+      // second state's `full_history` to read.
+      environment: { session: "chain" },
       inputs: { topic: { schema: { type: "string" } } },
       outputs: { answer: { schema: { type: "string" }, binding: { child: "second", output: "answer" } } },
       children: {

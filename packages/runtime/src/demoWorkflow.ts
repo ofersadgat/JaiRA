@@ -41,7 +41,11 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
       label: "Planning",
       // The defaults every state in this subtree inherits (WORKFLOWS.md §5): these are all prompt
       // states on one model, so the leaves say only what is different.
-      environment: { kind: "prompt", model: model("planner") },
+      //
+      // `session` is among them because sharing a transcript is DECLARED now — an undeclared state
+      // gets its own private stream (SESSIONS.md §4), and SPEC §9's planning loop depends on the
+      // critic seeing what the planners wrote.
+      environment: { kind: "prompt", model: model("planner"), session: "planning" },
       inputs: { issue: artifact("markdown") },
       outputs: {
         outcome: {

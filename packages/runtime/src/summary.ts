@@ -19,6 +19,9 @@
  *    `environment.conversation.mode: "full_history"` means it, and silently
  *    summarizing under it would be a lie. {@link summarySessionsOf} reads the
  *    authored modes out of the bundle, so opting in is an authoring decision.
+ *    Since SESSIONS.md §4 removed the implicit shared session, that opt-in is
+ *    necessarily about a NAMED session: an undeclared state's stream is private
+ *    and holds one operation's exchange, which there is nothing to compact.
  *  - **A failed summarization never loses the transcript.** Compaction is
  *    destructive; if the summarizer throws, the full turns are stored instead. A
  *    provider hiccup must degrade to an expensive run, not a lobotomized one.
@@ -170,7 +173,7 @@ class MapStore implements SessionStore<JsonValue> {
   }
 }
 
-export { DEFAULT_SESSION, type ConversationModes as SummaryModes } from "@jaira/shared";
+export { type ConversationModes as SummaryModes } from "@jaira/shared";
 
 /**
  * The effective conversation modes of a bundle. The query itself lives in

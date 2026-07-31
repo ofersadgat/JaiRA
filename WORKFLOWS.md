@@ -364,7 +364,8 @@ Every field is optional **in the file**; what the file leaves out, the
 | `model`, `temperature`, `maxOutputTokens`, … | optional | The LLM call surface, **inline** on the op — not nested under a `config` bag. |
 | `input` | optional | Parameter map (§4.3). Absent ⇒ the state's declared `inputs` are in scope. |
 | `output` | optional | Output slot (§4.4). Absent ⇒ built from the state's produced outputs. |
-| `session` | optional | Logical session this call joins. Absent ⇒ `"default"`. |
+| `session` | optional | The conversation this call joins: a **name**, a **session ref**, or **`null`** (fresh). Absent ⇒ its own fresh stream (§5.1). |
+| `fork` | optional | Always branch rather than continuing (§5.1). |
 | `tools` | optional | Tool names the call may use mid-loop (§5.1). |
 | `conversation` | optional | How much transcript to carry (§5.1). |
 | `permissions` | optional | Authored permission baseline (§5.1). |
@@ -378,7 +379,8 @@ Every field is optional **in the file**; what the file leaves out, the
 | `args` | optional | The function's authored arguments; rides as the op's bound `config` input. The one **untyped** position in the format. |
 | `input` | optional | Parameter map (§4.3). Absent ⇒ the state's declared `inputs` are in scope. |
 | `output` | optional | Output slot (§4.4). Absent ⇒ built from the state's produced outputs. A delegated agent needs `kind: "blob"`. |
-| `session` | optional | Logical session this call joins. Absent ⇒ `"default"`. |
+| `session` | optional | The conversation this call joins: a **name**, a **session ref**, or **`null`** (fresh). Absent ⇒ its own fresh stream (§5.1). |
+| `fork` | optional | Always branch rather than continuing (§5.1). |
 | `tools` | optional | Tool names the call may use mid-loop (§5.1). |
 | `conversation` | optional | How much transcript to carry (§5.1). |
 | `permissions` | optional | Authored permission baseline (§5.1). |
@@ -549,11 +551,41 @@ fields — they say how the call runs rather than what it is, but every one of t
 is a per-call decision, so they are written in the same block and inherited by
 the same rule.
 
-- **`session`** — the logical session owning the conversation transcript,
-  workspace and permissions. Operations sharing an id share a conversation.
-  Absent ⇒ the run's default session (`"default"`). **`sessionId` is accepted as
-  a synonym**, so an `LlmConfiguration`-shaped block pastes in unchanged;
-  declaring both with different values is an error.
+- **`session`** — the conversation this call joins. Three spellings:
+
+  | Written | Means |
+  | --- | --- |
+  | `"planning"` | a **name**. States sharing it share one append-only stream. |
+  | `{"expr": "children.plan.operation.outputs.session"}` | a **session ref** — an exact position in a stream, to continue or branch from. Opaque: nothing outside the session store parses it. |
+  | `null` | start a **fresh** stream, overriding whatever the chain supplied. |
+
+  **Absent means its own fresh stream, not a shared default.** There is no
+  implicit `"default"` session: an undeclared operation gets a private
+  conversation, because a process-wide shared transcript is what drives unbounded
+  context growth. Threading across states (SPEC §4.7) is something you *ask for*,
+  by naming a session once at the root and letting §5 carry it down.
+
+  **`""` is an error, never "fresh".** A prompt template interpolating a bad
+  reference would otherwise produce an empty string and silently run an isolated
+  conversation that looks like it worked. `null` is the only explicit fresh marker,
+  and it is checked at load time.
+
+  **`sessionId` is accepted as a synonym**, so an `LlmConfiguration`-shaped block
+  pastes in unchanged; declaring both with different values is an error.
+
+  ⚠️ **`session` no longer keys the workspace or the permission ledger.** Those
+  belong to a *resource bundle*, which is inherited from the enclosing state and
+  keyed on the **name** that was declared — so a fork, a retry and a loop iteration
+  all keep one worktree and one set of approvals, none of them having changed what
+  the author declared. Declaring a *name* on a subtree is what gives that subtree
+  its own bundle; a ref and `null` change the conversation and leave the bundle
+  alone.
+- **`fork`** — always branch, rather than continuing when the position is still
+  the head of its stream. Declared where a session is *consumed*, because a
+  position marker should not encode an intent about how a later caller will use
+  it. Absent and `false` mean the same thing: continue if you can, branch if
+  someone else already appended there. `true` is for deliberate divergence — fan
+  three variants out of one point — which cannot be inferred from stream state.
 - **`tools`** — logical tool names the operation may call mid-loop, resolved
   through `registry.tools`. JaiRA registers `bash`. **Listing a tool here is what
   puts an agent's commands under the policy at all.**
@@ -562,7 +594,9 @@ the same rule.
   ⚠️ `summary` is **per session, not per state**: one session has one transcript,
   so a session mixing `summary` and `full_history` is summarized for both. The
   lint surface warns — and it reads the *effective* mode, so an inherited one is
-  caught too.
+  caught too. The warning is about **named** sessions only: a state that declares
+  none has a private stream nothing else writes to, so it has no one to conflict
+  with.
 - **`permissions`** — the definition-authored baseline, beneath the project
   policy.
 
@@ -570,7 +604,7 @@ the same rule.
 
 | Field | Merge |
 | --- | --- |
-| `kind`, `function`, `system`, `session` | nearest wins |
+| `kind`, `function`, `system`, `session`, `fork` | nearest wins |
 | `prompt` | **replaced whole** — a layer supplying a prompt supplies all of it |
 | `model`, `temperature`, … | nearest wins, per field: root sets `model`, a child adds `temperature`, both survive |
 | `args` | **deep merge** per key |
@@ -579,6 +613,12 @@ the same rule.
 | `tools`, `conversation.artifacts` | **replaced** — `"tools": []` is how you drop an inherited tool |
 | `conversation` | merged per field |
 | `permissions` | merged, with `permissions.tools` merged per tool name |
+
+`session` is the one field where **`null` is a value, not an absence**: a child
+writing `"session": null` overrides an ancestor's name and starts fresh, while a
+child that simply omits the key inherits it. (`sessionId` is normalized to
+`session` *before* merging, or a child's `sessionId: null` would sit alongside an
+ancestor's `session` instead of overriding it.)
 
 `schema` and `binding` are replaced rather than merged because merging them
 produces nonsense: `{ child: "a" }` merged with `{ input: "b" }` is not a binding

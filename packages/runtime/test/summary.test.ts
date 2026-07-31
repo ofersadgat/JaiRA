@@ -9,7 +9,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { WorkflowBundle } from "@declarative-ai/hw";
 import {
-  DEFAULT_SESSION,
   SUMMARY_TAG,
   SummarizingSessionStore,
   promptSummarizer,
@@ -18,6 +17,9 @@ import {
   type Turn,
 } from "../src/summary";
 import { ScriptedFakeExecutor } from "../src/fakeExecutor";
+
+/** An arbitrary named session. There is no implicit default one to reach for (SESSIONS.md §4). */
+const SESSION = "planning";
 
 const turn = (role: "user" | "assistant", content: string): Turn => ({ role, content });
 
@@ -41,8 +43,8 @@ describe("SummarizingSessionStore", () => {
     const summarize = vi.fn(async (turns: readonly Turn[]) => `the gist of ${turns.length} turns`);
     const store = new SummarizingSessionStore({ summarize, budgetChars: 500, keepRecentTurns: 2 });
 
-    await store.put(DEFAULT_SESSION, { messages: longTranscript(6) as never });
-    const state = await store.get(DEFAULT_SESSION);
+    await store.put(SESSION, { messages: longTranscript(6) as never });
+    const state = await store.get(SESSION);
     const messages = state!.messages as unknown as Turn[];
 
     expect(messages).toHaveLength(3);
@@ -155,28 +157,51 @@ describe("SummarizingSessionStore", () => {
 });
 
 describe("summarySessionsOf", () => {
-  it("finds the sessions whose states declare summary mode", () => {
+  it("finds the NAMED sessions whose states declare summary mode", () => {
     const modes = summarySessionsOf(
       bundleWith({
-        a: { environment: { conversation: { mode: "summary" } } },
+        a: { environment: { session: "plan", conversation: { mode: "summary" } } },
         b: { environment: { session: "review", conversation: { mode: "summary" } } },
-        c: { environment: { conversation: { mode: "fresh" } } },
+        c: { environment: { session: "plan", conversation: { mode: "fresh" } } },
       }),
     );
-    // `a` declares no session, so it belongs to the run's default one.
-    expect([...modes.sessions].sort()).toEqual(["default", "review"]);
+    expect([...modes.sessions].sort()).toEqual(["plan", "review"]);
     expect(modes.conflicts).toEqual([]);
   });
 
-  it("reports a session that declares both summary and full_history", () => {
+  it("ignores a state that declares no session — its stream is private", () => {
+    // There is no implicit shared session to bucket it under (SESSIONS.md §4), and a private stream
+    // holds one operation's exchange, which there is nothing to compact.
+    const modes = summarySessionsOf(
+      bundleWith({
+        a: { environment: { conversation: { mode: "summary" } } },
+        b: { environment: { session: null, conversation: { mode: "summary" } } },
+      }),
+    );
+    expect(modes.sessions.size).toBe(0);
+  });
+
+  it("reports a NAMED session that declares both summary and full_history", () => {
+    const modes = summarySessionsOf(
+      bundleWith({
+        plan: { environment: { session: "planning", conversation: { mode: "summary" } } },
+        critique: { environment: { session: "planning", conversation: { mode: "full_history" } } },
+      }),
+    );
+    // One session has one transcript, so the two states cannot both be honoured.
+    expect(modes.conflicts).toEqual([{ session: "planning", stateIds: ["critique", "plan"] }]);
+  });
+
+  it("does NOT report two undeclared states as conflicting", () => {
+    // The false positive the old `"default"` fallback produced: two states that share nothing were
+    // reported as fighting over one transcript.
     const modes = summarySessionsOf(
       bundleWith({
         plan: { environment: { conversation: { mode: "summary" } } },
         critique: { environment: { conversation: { mode: "full_history" } } },
       }),
     );
-    // One session has one transcript, so the two states cannot both be honoured.
-    expect(modes.conflicts).toEqual([{ session: "default", stateIds: ["critique", "plan"] }]);
+    expect(modes.conflicts).toEqual([]);
   });
 
   it("finds nothing in a workflow that never mentions conversations", () => {
