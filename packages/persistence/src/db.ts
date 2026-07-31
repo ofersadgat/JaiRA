@@ -143,6 +143,59 @@ CREATE TABLE IF NOT EXISTS call_memo (
 -- One row wins per (task, logical path): a rewrite replaces, so a read resolves to
 -- the latest without every consumer sorting.
 CREATE UNIQUE INDEX IF NOT EXISTS artifacts_logical ON artifacts(task_id, logical_path);
+
+-- Conversation streams (SESSIONS.md §9). A row is a BRANCH, not a position: a
+-- SessionRef names a branch AT a position, and only the store knows how those two
+-- are spelled into one opaque string (see sessions.ts).
+--
+-- The id is opaque outside this module. Lineage is queried from parent_id, never
+-- parsed out of the label — the label is a derived display form and is not a key.
+--
+-- Only fork edges share a prefix with their parent, which is why parent_cursor is
+-- theirs alone. Compaction and resync record a parent for PROVENANCE but their
+-- contents differ from it, so calling them forks would make [0:n] a lie.
+CREATE TABLE IF NOT EXISTS sessions (
+  id            TEXT PRIMARY KEY,
+  label         TEXT,               -- e.g. 'planning[0:14]/b', 'planning~compact1'
+  parent_id     TEXT REFERENCES sessions(id),
+  parent_cursor INTEGER,            -- fork edges ONLY: prefix length taken from the parent
+  edge          TEXT NOT NULL,      -- root | fork | compaction | resync
+  digest        TEXT,               -- rolling content commitment at this branch's head
+  task_id       TEXT,
+  run_id        INTEGER,
+  created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sessions_parent ON sessions(parent_id);
+CREATE INDEX IF NOT EXISTS sessions_task ON sessions(task_id, created_at);
+
+-- Copy-on-write message storage: a branch holds ONLY what it appended. Materializing
+-- walks the parent chain taking each ancestor's entries below the cursor its child
+-- took, so storage is proportional to divergence rather than to branch count.
+--
+-- seq CONTINUES from parent_cursor on a fork, so a position is a single integer
+-- across a whole lineage and [0:n] needs no translation at any hop.
+--
+-- message_json is a ModelMessage stored VERBATIM, providerOptions included. Anything
+-- lossier breaks replay: an Anthropic reasoning part carries a signature that must
+-- come back byte-identical.
+CREATE TABLE IF NOT EXISTS session_messages (
+  session_id   TEXT NOT NULL REFERENCES sessions(id),
+  seq          INTEGER NOT NULL,
+  message_json TEXT NOT NULL,
+  provider_ref TEXT,                -- the provider's own id for this entry, when it has one
+  operation_id TEXT,                -- which operation appended it
+  PRIMARY KEY (session_id, seq)
+);
+
+-- Provider handles, keyed by (session, PROVIDER). The same branch replayed against
+-- the Messages API and against a claude subprocess has two unrelated handles, and
+-- both are worth caching.
+CREATE TABLE IF NOT EXISTS session_providers (
+  session_id   TEXT NOT NULL REFERENCES sessions(id),
+  provider_key TEXT NOT NULL,       -- adapter identity
+  external_id  TEXT NOT NULL,       -- provider-side session handle
+  PRIMARY KEY (session_id, provider_key)
+);
 `;
 
 export function openDb(file: string): JairaDb {
