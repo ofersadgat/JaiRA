@@ -799,14 +799,59 @@ Used in transition guards and `{ "expr": … }` bindings.
 | --- | --- | --- |
 | `inputs.*` | both | this instance's resolved inputs |
 | `outputs.*` | both | outputs produced so far |
+| `operation.*` | both | this state's own call — see below |
 | `children.<key>.outputs.*` | both | a child's outputs |
 | `children.<key>.outcome` | both | `success` \| `error` \| `canceled` \| `timeout` |
+| `children.<key>.operation.*` | both | a child's call — see below |
 | `artifacts.*` | both | artifacts registered this run |
 | `conversations.*` | both | transcripts by session id |
 | `run.iteration` | guards only | transitions taken by this instance |
 | `run.cursor` | guards only | the child key the cursor is at — see below |
 | `run.position` | guards only | its index in `sequence`; `-1` before any child runs |
 | `limits.*` | guards only | this state's declared limits |
+
+### The `operation.*` namespace
+
+A state's operation is addressable in its own right — `operation.*` for this
+state's call, `children.<key>.operation.*` for a child's. It is where what the
+*engine* knows about the call lives, as opposed to what the call produced (which
+is `outputs.*`, where it always was).
+
+| Field | On | Meaning |
+| --- | --- | --- |
+| `outcome` | any op | `success` \| `error` \| `timeout` \| `canceled` |
+| `cost` | any op | USD the call spent — a **failed** call still costs money, and still reports it |
+| `usage` | any op | the measurement record (duration, token counts, child rollups) |
+| `model` | any op | the model the call was actually made with |
+| `outputs.session` | **prompt only** | the conversation position the call **ended** at, as `{ id }` |
+
+The namespace is **typed by the operation's kind**, so
+`children.gate.operation.outputs.session` written against a `ui` gate is a
+load-time authoring error rather than a binding that silently resolves to
+nothing. A state with no operation has no `operation.*` at all.
+
+`operation.outputs.session` is the **end** position, and there is deliberately no
+start marker. You append *at* a position but do not know where the call finished
+until the provider resolves, so the end is the only value that exists by the time
+an expression reads it — and it is what consumers want, since "append after me"
+and "fork after me" both mean *after*:
+
+```jsonc
+// continue the planner's conversation
+{ "session": { "expr": ".children.plan.operation.outputs.session" } }
+
+// or branch from it, leaving the planner's stream untouched
+{ "session": { "expr": ".children.plan.operation.outputs.session" }, "fork": true }
+```
+
+Recovery needs no start marker either: restart the state, and its binding
+re-resolves to the position the failed attempt started from — which has since
+been appended to, so the retry forks from exactly the right place.
+
+⚠️ Authored forking is **per operation**. If one agentic call appends forty
+entries to a transcript, a workflow cannot branch at entry twenty; the store
+addresses finer positions so a human can scrub a transcript in the UI, but the
+expression language exposes operation boundaries only.
 
 **Operators:** `===` `!==` `==` `!=` `<` `<=` `>` `>=` `&&` `||` `!` `? :`, with
 JavaScript semantics. There is **no arithmetic syntax** — no `+`, `-`, `*`, `/` — so
