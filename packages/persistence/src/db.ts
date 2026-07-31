@@ -128,6 +128,18 @@ CREATE TABLE IF NOT EXISTS artifacts (
   created_at    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS artifacts_task ON artifacts(task_id, id);
+-- Memoized model answers, keyed by memoKey (declarative-ai exec/memo.ts): the
+-- operation's content hash folded with the executor namespace. Durable on purpose --
+-- an in-process map answers "would someone else making this identical call reuse the
+-- answer?" only within one run, which is not where the cost repeats.
+--
+-- No FK to runs or tasks: the whole point is that a later run, task or process hits
+-- an entry an earlier one wrote. created_at is what pruning would sort on.
+CREATE TABLE IF NOT EXISTS call_memo (
+  key        TEXT PRIMARY KEY,
+  outcome    TEXT NOT NULL,   -- JSON: a successful ExecResult
+  created_at INTEGER NOT NULL
+);
 -- One row wins per (task, logical path): a rewrite replaces, so a read resolves to
 -- the latest without every consumer sorting.
 CREATE UNIQUE INDEX IF NOT EXISTS artifacts_logical ON artifacts(task_id, logical_path);
