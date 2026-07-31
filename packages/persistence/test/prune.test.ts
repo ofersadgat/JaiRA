@@ -10,7 +10,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { EngineEvent } from "@declarative-ai/hw";
 import { initProject, openProject, type Project } from "../src/project";
-import { historySize, pruneHistory } from "../src/prune";
+import { historySize, pruneHistory, pruneSessions } from "../src/prune";
+import { SessionStreams } from "../src/sessions";
 import { latestRun } from "../src/views";
 
 let dir: string;
@@ -165,5 +166,83 @@ describe("integrity", () => {
     ).n;
     expect({ orphanEvents, orphanCommands }).toEqual({ orphanEvents: 0, orphanCommands: 0 });
     expect(project.db.pragma("foreign_key_check")).toEqual([]);
+  });
+});
+
+/**
+ * Conversation pruning (SESSIONS.md §9, step 9).
+ *
+ * Sessions are pruned SEPARATELY from run history, because a session is not run history: it outlives
+ * the run that produced it, and a later run — or another task — can continue or branch from it, since
+ * an id is a capability. That also means this is the only thing in the system that can make a held id
+ * unresolvable, so the safety rule matters more here, not less.
+ */
+describe("pruneSessions", () => {
+  const streams = (): SessionStreams => new SessionStreams(project.db);
+
+  /** A task owning one lineage: a trunk, a fork of it, and a compaction of it. */
+  function seedSessions(taskId: string, createdBefore: boolean): string {
+    const s = streams();
+    const root = s.createRoot({ seed: `${taskId}-planning`, taskId });
+    s.append(root.id, 0, [{ message: { role: "user", content: "a" } }, { message: { role: "assistant", content: "b" } }]);
+    s.fork(root.id, 2, { seed: `${taskId}-v`, taskId });
+    s.compact(root.id, { seed: `${taskId}-c`, taskId, entries: [{ message: { role: "user", content: "<summary>" } }] });
+    // `createdAt` is stamped by the store, so age is set here rather than threaded through the API.
+    project.db.prepare(`UPDATE sessions SET created_at = ? WHERE task_id = ?`).run(createdBefore ? now - 50 * HOUR : now + HOUR, taskId);
+    return root.id;
+  }
+
+  it("takes a terminal task's whole lineage — trunk, forks and compactions together", () => {
+    seedTask("t-done", "completed", [50 * HOUR]);
+    const root = seedSessions("t-done", true);
+
+    const result = pruneSessions(project, { before: now });
+
+    expect(result.lineages).toHaveLength(1);
+    expect(result.lineages[0]).toMatchObject({ taskId: "t-done", sessionId: root, branches: 3 });
+    expect(streams().size()).toEqual({ sessions: 0, messages: 0 });
+  });
+
+  it("never touches a running or interrupted task's conversations, however old", () => {
+    // They are what a resume would continue.
+    seedTask("t-running", "running", [50 * HOUR]);
+    seedSessions("t-running", true);
+    const before = streams().size();
+
+    const result = pruneSessions(project, { before: now });
+
+    expect(result.lineages).toEqual([]);
+    expect(result.skippedTasks[0]?.reason).toMatch(/resume would continue/);
+    expect(streams().size()).toEqual(before);
+  });
+
+  it("respects the age cutoff", () => {
+    seedTask("t-done", "completed", [50 * HOUR]);
+    seedSessions("t-done", false);
+    expect(pruneSessions(project, { before: now }).lineages).toEqual([]);
+    expect(streams().size().sessions).toBe(3);
+  });
+
+  it("plans without destroying, since pruning is not undoable", () => {
+    seedTask("t-done", "completed", [50 * HOUR]);
+    seedSessions("t-done", true);
+
+    const plan = pruneSessions(project, { before: now, dryRun: true });
+
+    expect(plan.dryRun).toBe(true);
+    expect(plan.branches).toBe(3);
+    expect(plan.messages).toBeGreaterThan(0);
+    expect(streams().size().sessions).toBe(3);
+  });
+
+  it("leaves another task's lineage alone", () => {
+    seedTask("t-done", "completed", [50 * HOUR]);
+    seedTask("t-live", "running", [50 * HOUR]);
+    seedSessions("t-done", true);
+    const kept = seedSessions("t-live", true);
+
+    pruneSessions(project, { before: now });
+
+    expect(streams().branch(kept)).toBeDefined();
   });
 });

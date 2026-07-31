@@ -504,3 +504,83 @@ describe("schema", () => {
     ).toThrow(/FOREIGN KEY/i);
   });
 });
+
+/**
+ * Lineage-aware pruning (SESSIONS.md §9, step 9).
+ *
+ * The stakes are higher here than for other pruned history: a session id is a capability — hold one
+ * and you may use it — so pruning is the ONLY thing that can make a held id unresolvable.
+ */
+describe("pruning", () => {
+  it("takes a whole lineage, so no fork is left with an orphaned prefix", () => {
+    const root = streams.createRoot({ seed: "planning", taskId: "t-1" });
+    streams.append(root.id, 0, [say("user", "a"), say("assistant", "b")]);
+    const branch = streams.fork(root.id, 2, { seed: "v" });
+    streams.append(branch.id, 2, [say("user", "c")]);
+    const compacted = streams.compact(root.id, { seed: "c", entries: [say("user", "<summary>")] });
+
+    expect(streams.prune(root.id)).toEqual({ branches: 3, messages: 4 });
+    expect(streams.branch(root.id)).toBeUndefined();
+    expect(streams.branch(branch.id)).toBeUndefined();
+    expect(streams.branch(compacted.id)).toBeUndefined();
+  });
+
+  it("REFUSES to prune from the middle, which is exactly the orphaning case", () => {
+    // Deleting a fork's parent takes the first two messages of a conversation that still exists.
+    const root = streams.createRoot({ seed: "planning" });
+    streams.append(root.id, 0, [say("user", "a"), say("assistant", "b")]);
+    const branch = streams.fork(root.id, 2, { seed: "v" });
+    streams.append(branch.id, 2, [say("user", "c")]);
+
+    expect(() => streams.prune(branch.id)).toThrow(/prune from the root/);
+    expect(streams.branch(branch.id)).toBeDefined();
+  });
+
+  it("leaves unrelated lineages alone", () => {
+    const keep = streams.createRoot({ seed: "keep" });
+    streams.append(keep.id, 0, [say("user", "a")]);
+    const drop = streams.createRoot({ seed: "drop" });
+    streams.append(drop.id, 0, [say("user", "b")]);
+
+    streams.prune(drop.id);
+    expect(texts(streams.materialize(keep.id))).toEqual(["a"]);
+  });
+
+  it("takes the provider handles with it — nothing points at a stream that is gone", () => {
+    const root = streams.createRoot({ seed: "planning" });
+    streams.append(root.id, 0, [say("user", "a")]);
+    streams.setProviderHandle(root.id, "claude-cli", "sess-abc");
+    streams.prune(root.id);
+    expect(db.prepare(`SELECT COUNT(*) n FROM session_providers`).get()).toEqual({ n: 0 });
+  });
+
+  it("is all-or-nothing — a refused prune deletes nothing at all", () => {
+    // A half-pruned lineage is the worst outcome available: the trunk gone, a fork left pointing at
+    // messages that no longer exist, and no error to say so.
+    const root = streams.createRoot({ seed: "planning" });
+    streams.append(root.id, 0, [say("user", "a"), say("assistant", "b")]);
+    const branch = streams.fork(root.id, 2, { seed: "v" });
+    streams.append(branch.id, 2, [say("user", "c")]);
+    const before = streams.size();
+
+    expect(() => streams.prune(branch.id)).toThrow();
+    expect(streams.size()).toEqual(before);
+    expect(texts(streams.materialize(branch.id))).toEqual(["a", "b", "c"]);
+  });
+
+  it("refuses an unknown lineage rather than reporting a successful no-op", () => {
+    expect(() => streams.prune("ses_nope")).toThrow(UnknownSession);
+  });
+
+  it("reports a task's lineage ROOTS, which are the units prune accepts", () => {
+    const root = streams.createRoot({ seed: "planning", taskId: "t-1" });
+    streams.append(root.id, 0, [say("user", "a")]);
+    streams.fork(root.id, 1, { seed: "v" });
+    streams.createRoot({ seed: "other", taskId: "t-1" });
+    streams.createRoot({ seed: "elsewhere", taskId: "t-2" });
+
+    // The fork is NOT a root: pruning it would reach outside its own lineage.
+    expect(streams.rootsFor("t-1").map((b) => b.label).sort()).toEqual(["other", "planning"]);
+    expect(streams.rootsFor("t-2").map((b) => b.label)).toEqual(["elsewhere"]);
+  });
+});

@@ -362,6 +362,88 @@ export class SessionStreams<Msg = JsonValue> {
     return this.materialize(branch.id, position);
   }
 
+  // --- Pruning ------------------------------------------------------------------
+
+  /**
+   * Every branch reachable downward from `branchId`, itself included.
+   *
+   * The unit pruning works in. A branch with children cannot be deleted on its own without orphaning
+   * their prefixes — a fork stores only what it appended, so deleting its parent deletes the first
+   * fourteen messages of a conversation that still exists.
+   *
+   * Of the three options SESSIONS.md §9 offers — whole lineages, leaves only, or materializing a
+   * child's prefix first — this store takes WHOLE LINEAGES. Leaves-only never reclaims the trunk,
+   * which is where the bulk sits; materializing first turns a prune into a copy that makes the
+   * database temporarily larger, and it destroys the copy-on-write property that made forks cheap.
+   */
+  lineageFrom(branchId: string): SessionBranch[] {
+    // Ordered by DEPTH, shallowest first — which is what makes reversing it a safe deletion order.
+    // Ordering by `created_at` looked equivalent and was not: three branches minted in the same
+    // millisecond tie, the tiebreak falls to a hashed id, and the root lands somewhere in the middle.
+    // The parent's delete then hits the foreign key its own children still reference.
+    const rows = this.db
+      .prepare(
+        `WITH RECURSIVE descendants(id, depth) AS (
+           SELECT id, 0 FROM sessions WHERE id = ?
+           UNION
+           SELECT s.id, d.depth + 1 FROM sessions s JOIN descendants d ON s.parent_id = d.id
+         )
+         SELECT s.* FROM sessions s JOIN descendants d ON s.id = d.id ORDER BY d.depth, s.created_at, s.id`,
+      )
+      .all(branchId) as BranchRow[];
+    return rows.map(toBranch);
+  }
+
+  /**
+   * Delete a whole lineage — `branchId` and everything descended from it.
+   *
+   * Children first, then the branch itself, or the foreign keys refuse. Refuses outright if the
+   * lineage has a parent OUTSIDE it, because deleting a fork's parent is exactly the orphaning this
+   * is here to prevent; prune from the root of a lineage, not its middle.
+   *
+   * The stakes are higher here than for other pruned history. A session id is a capability — hold one
+   * and you may use it — so pruning is the ONLY thing that can make a held id unresolvable, and there
+   * is no other check standing behind it.
+   */
+  prune(branchId: string): { branches: number; messages: number } {
+    return this.db.transaction(() => {
+      const lineage = this.lineageFrom(branchId);
+      if (lineage.length === 0) throw new UnknownSession(branchId);
+      const ids = new Set(lineage.map((b) => b.id));
+      const root = lineage.find((b) => b.id === branchId)!;
+      if (root.parentId !== undefined && !ids.has(root.parentId)) {
+        throw new Error(
+          `cannot prune ${branchId}: it descends from ${root.parentId}, which is outside the lineage — prune from the root, or its prefix is orphaned`,
+        );
+      }
+      let messages = 0;
+      // Deepest first, so a child is always gone before the parent it references.
+      for (const branch of [...lineage].reverse()) {
+        messages += (this.db.prepare(`DELETE FROM session_messages WHERE session_id = ?`).run(branch.id).changes ?? 0);
+        this.db.prepare(`DELETE FROM session_providers WHERE session_id = ?`).run(branch.id);
+        this.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(branch.id);
+      }
+      return { branches: lineage.length, messages };
+    })();
+  }
+
+  /** The lineage ROOTS a task owns — the units {@link prune} accepts. */
+  rootsFor(taskId: string): SessionBranch[] {
+    const owned = (
+      this.db.prepare(`SELECT * FROM sessions WHERE task_id = ? ORDER BY created_at, id`).all(taskId) as BranchRow[]
+    ).map(toBranch);
+    const ids = new Set(owned.map((b) => b.id));
+    // A branch whose parent this task does not own is a root as far as this task is concerned —
+    // pruning it would reach outside, which `prune` refuses.
+    return owned.filter((b) => b.parentId === undefined || !ids.has(b.parentId));
+  }
+
+  /** Rows currently stored, for a "before you prune" summary. */
+  size(): { sessions: number; messages: number } {
+    const one = (sql: string): number => (this.db.prepare(sql).get() as { n: number }).n;
+    return { sessions: one(`SELECT COUNT(*) n FROM sessions`), messages: one(`SELECT COUNT(*) n FROM session_messages`) };
+  }
+
   /** Direct descendants, in creation order. What makes a branch un-prunable on its own. */
   children(branchId: string): SessionBranch[] {
     return (
