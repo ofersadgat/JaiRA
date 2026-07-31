@@ -29,8 +29,8 @@
  *    actually responds to; summarizing it away is what makes summary modes feel
  *    lossy.
  */
-import type { Executor, ExecServices, JsonValue, SessionState, SessionStore } from "@declarative-ai/exec";
-import { promptOp } from "@declarative-ai/exec";
+import type { Executor, ExecServices, JsonValue, SessionLease, SessionMessage, SessionRequest, SessionStore } from "@declarative-ai/exec";
+import { MapSessionStore, promptOp } from "@declarative-ai/exec";
 import type { WorkflowBundle, WorkflowMetrics } from "@declarative-ai/hw";
 import { SchemaValidator } from "@declarative-ai/validate";
 import { conversationModesOf, type ConversationModes } from "@jaira/shared";
@@ -54,7 +54,10 @@ const DEFAULT_BUDGET_CHARS = 8_000;
 const DEFAULT_KEEP_RECENT = 2;
 
 export interface SummaryEvent {
+  /** The stream that was compacted. */
   sessionId: string;
+  /** The NEW stream carrying the summary — the origin is untouched. */
+  session?: string;
   /** Turns folded into the summary. */
   compacted: number;
   /** Characters before → after, the saving that motivates the whole feature. */
@@ -91,86 +94,164 @@ function isTurn(value: unknown): value is Turn {
 }
 
 /**
- * A `SessionStore` that keeps a session's transcript under a size budget by
+ * A `SessionStore` decorator that keeps a conversation under a size budget by
  * summarizing its older turns.
  *
- * Compaction happens on `put` rather than on `get`, so the cost is paid once per
- * write instead of once per reader, and a `get` never blocks a state's start on a
- * model call.
+ * ## Compaction produces a NEW session
+ *
+ * It used to rewrite the transcript in place on `put`. That is the thing SESSIONS.md
+ * §1 identifies as the root problem: anything holding "the conversation as of turn 14"
+ * silently started referring to different content, and the provider's prompt cache — a
+ * strict prefix match — was invalidated on every compaction.
+ *
+ * So the compacted conversation is a new stream with a `compaction` edge to its
+ * origin, and the origin is left exactly as it was. It is deliberately **not a fork**:
+ * a fork's prefix is byte-identical to its origin's, which is precisely what a position
+ * asserts, and a compacted stream begins with a summary that appears nowhere in the
+ * origin. Calling it a fork would make the notation lie.
+ *
+ * Compaction happens on RELEASE rather than on read, so the cost is paid once per write
+ * instead of once per reader, and starting a state never blocks on a model call.
+ *
+ * Three properties are load-bearing:
+ *
+ *  - **Only sessions that asked for it are compacted.** A state declaring
+ *    `environment.conversation.mode: "full_history"` means it, and silently
+ *    summarizing under it would be a lie.
+ *  - **A failed summarization never loses the transcript.** If the summarizer throws,
+ *    the stream is left alone. A provider hiccup must degrade to an expensive run, not
+ *    a lobotomized one.
+ *  - **Recent turns stay verbatim.** The last exchange is what the next call actually
+ *    responds to; summarizing it away is what makes summary modes feel lossy.
  */
 export class SummarizingSessionStore implements SessionStore<JsonValue> {
   private readonly inner: SessionStore<JsonValue>;
   private readonly budget: number;
   private readonly keepRecent: number;
-  /** Per-session write chain: two concurrent puts must not summarize in parallel. */
-  private readonly chain = new Map<string, Promise<void>>();
+  /** Per-stream write chain: two concurrent releases must not summarize in parallel. */
+  private readonly chain = new Map<string, Promise<unknown>>();
+  /** Where a compacted stream superseded its origin, so the next caller continues the new one. */
+  private readonly superseded = new Map<string, string>();
 
   constructor(private readonly options: SummarizingSessionStoreOptions) {
-    this.inner = options.inner ?? new MapStore();
+    this.inner = options.inner ?? new MapSessionStore<JsonValue>();
     this.budget = options.budgetChars ?? DEFAULT_BUDGET_CHARS;
     this.keepRecent = Math.max(0, options.keepRecentTurns ?? DEFAULT_KEEP_RECENT);
   }
 
-  async get(logicalId: string): Promise<SessionState<JsonValue> | undefined> {
-    // Wait for a pending compaction: reading mid-write would hand the next state a
-    // transcript that is about to be replaced.
-    await this.chain.get(logicalId);
-    return this.inner.get(logicalId);
+  async read(ref: string): Promise<JsonValue[]> {
+    await this.chain.get(streamOf(ref));
+    // NOT redirected through `current`. A ref that names a POSITION is a commitment to content, and
+    // following it to a compaction would hand back a different conversation than the one asked for —
+    // which is the in-place rewrite this design exists to remove, reintroduced at the read side.
+    // A BARE id carries no such commitment: it means "this conversation now", so it follows.
+    return (await this.inner.read?.(hasPosition(ref) ? ref : this.current(ref))) ?? [];
   }
 
-  put(logicalId: string, state: SessionState<JsonValue>): Promise<void> {
-    const previous = this.chain.get(logicalId) ?? Promise.resolve();
-    const next = previous.then(() => this.write(logicalId, state));
-    this.chain.set(
-      logicalId,
-      next.catch(() => undefined),
-    );
-    return next;
+  compact(originRef: string, entries: readonly SessionMessage<JsonValue>[]): string | Promise<string> {
+    return this.inner.compact?.(originRef, entries) ?? originRef;
   }
 
-  private async write(logicalId: string, state: SessionState<JsonValue>): Promise<void> {
-    const compacted = await this.compact(logicalId, state);
-    await this.inner.put(logicalId, compacted);
+  async begin(request: SessionRequest): Promise<SessionLease<JsonValue>> {
+    const asked = request.ref;
+    // Continue whatever superseded this stream. A caller holding a pre-compaction ref would otherwise
+    // keep appending to the stream compaction was meant to retire, and grow it forever.
+    const ref = asked !== undefined ? this.current(asked) : undefined;
+    await (ref !== undefined ? this.chain.get(streamOf(ref)) : undefined);
+    const lease = await this.inner.begin(ref !== undefined ? { ...request, ref } : request);
+    return {
+      session: lease.session,
+      release: async (delta) => {
+        const end = await lease.release(delta);
+        const work = this.maybeCompact(end);
+        this.chain.set(
+          streamOf(end),
+          work.catch(() => undefined),
+        );
+        return await work;
+      },
+    };
+  }
+
+  /** The stream a ref should actually be continued on, following any compaction that replaced it. */
+  private current(ref: string): string {
+    const seen = new Set<string>();
+    let at = ref;
+    while (!seen.has(streamOf(at))) {
+      seen.add(streamOf(at));
+      const next = this.superseded.get(streamOf(at));
+      if (next === undefined) return at;
+      at = next;
+    }
+    return at;
   }
 
   /** The whole policy: which sessions, when, and what survives verbatim. */
-  private async compact(logicalId: string, state: SessionState<JsonValue>): Promise<SessionState<JsonValue>> {
-    if (this.options.sessions !== undefined && !this.options.sessions.has(logicalId)) return state;
-    const messages = state.messages;
-    if (!Array.isArray(messages) || !messages.every(isTurn)) return state;
-    const turns = messages as unknown as Turn[];
-    const before = lengthOf(turns);
-    if (before <= this.budget) return state;
+  private async maybeCompact(endRef: string): Promise<string> {
+    const stream = streamOf(endRef);
+    if (this.options.sessions !== undefined && !this.options.sessions.has(rootOf(stream))) return endRef;
+    const messages = (await this.inner.read?.(endRef)) ?? [];
+    // The `{ role, content: string }` filter is GONE. It silently dropped anything with parts, which
+    // for an agentic adapter is the entire transcript — so a session that needed compaction most was
+    // the one that never got it. What cannot be measured as text is measured by its serialized size.
+    const before = charsOf(messages);
+    if (before <= this.budget) return endRef;
 
-    const keep = this.keepRecent > 0 ? turns.slice(-this.keepRecent) : [];
-    const fold = this.keepRecent > 0 ? turns.slice(0, -this.keepRecent) : turns;
+    const keep = this.keepRecent > 0 ? messages.slice(-this.keepRecent) : [];
+    const fold = this.keepRecent > 0 ? messages.slice(0, -this.keepRecent) : messages;
     // Nothing to gain from summarizing a single turn into a turn.
-    if (fold.length <= 1) return state;
+    if (fold.length <= 1) return endRef;
 
     try {
-      const summary = await this.options.summarize(fold);
-      if (summary.trim() === "") return state;
-      const head: Turn = { role: "user", content: `${SUMMARY_TAG}\n${summary.trim()}\n</conversation-summary>` };
-      const next = [head, ...keep];
-      this.options.onSummarize?.({ sessionId: logicalId, compacted: fold.length, before, after: lengthOf(next) });
-      return { ...state, messages: next as unknown as JsonValue[] };
+      const summary = await this.options.summarize(fold.map(asTurn));
+      if (summary.trim() === "") return endRef;
+      const head = { role: "user", content: `${SUMMARY_TAG}\n${summary.trim()}\n</conversation-summary>` } as unknown as JsonValue;
+      const entries = [head, ...keep].map((message) => ({ message }));
+      const compacted = await this.compact(endRef, entries);
+      // The origin is untouched; later callers holding its ref are redirected here.
+      this.superseded.set(stream, compacted);
+      this.options.onSummarize?.({
+        sessionId: stream,
+        compacted: fold.length,
+        before,
+        after: charsOf(entries.map((e) => e.message)),
+        session: compacted,
+      });
+      return compacted;
     } catch (e) {
       // Keep everything. An expensive run beats a run that forgot what it was doing.
-      this.options.onError?.(logicalId, e as Error);
-      return state;
+      this.options.onError?.(stream, e as Error);
+      return endRef;
     }
   }
 }
 
-/** The default backing store (the engine's own `MapSessionStore` is not exported). */
-class MapStore implements SessionStore<JsonValue> {
-  private readonly map = new Map<string, SessionState<JsonValue>>();
-  get(logicalId: string): SessionState<JsonValue> | undefined {
-    return this.map.get(logicalId);
-  }
-  put(logicalId: string, state: SessionState<JsonValue>): void {
-    this.map.set(logicalId, state);
-  }
+/** The stream half of a ref — the store owns the spelling, so this only splits off a trailing position. */
+function streamOf(ref: string): string {
+  return hasPosition(ref) ? ref.slice(0, ref.lastIndexOf("@")) : ref;
+}
+
+/** Whether a ref commits to a POSITION, or merely names a conversation. */
+function hasPosition(ref: string): boolean {
+  const at = ref.lastIndexOf("@");
+  return at > 0 && Number.isInteger(Number(ref.slice(at + 1)));
+}
+
+/** The originating stream behind any chain of compactions, which is what a mode was declared against. */
+function rootOf(stream: string): string {
+  const at = stream.indexOf("~");
+  return at > 0 ? stream.slice(0, at) : stream;
+}
+
+/** Size as the provider will see it. Serialized, because a message is parts as often as it is text. */
+const charsOf = (messages: readonly JsonValue[]): number =>
+  messages.reduce<number>((n, message) => n + (typeof message === "string" ? message.length : JSON.stringify(message).length), 0);
+
+/** A stored message as the summarizer's `Turn` — text where there is text, serialized where there is not. */
+function asTurn(message: JsonValue): Turn {
+  if (isTurn(message)) return message;
+  const role = (message as { role?: unknown })?.role;
+  return { role: role === "assistant" ? "assistant" : "user", content: JSON.stringify(message) };
 }
 
 export { type ConversationModes as SummaryModes } from "@jaira/shared";

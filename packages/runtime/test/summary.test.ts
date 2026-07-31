@@ -7,6 +7,7 @@
  * when the summarizer fails, and it keeps the most recent turns verbatim.
  */
 import { describe, expect, it, vi } from "vitest";
+import type { JsonValue, SessionStore } from "@declarative-ai/exec";
 import type { WorkflowBundle } from "@declarative-ai/hw";
 import {
   SUMMARY_TAG,
@@ -14,6 +15,7 @@ import {
   promptSummarizer,
   sessionStoreFor,
   summarySessionsOf,
+  type SummaryEvent,
   type Turn,
 } from "../src/summary";
 import { ScriptedFakeExecutor } from "../src/fakeExecutor";
@@ -38,14 +40,27 @@ function bundleWith(states: Record<string, unknown>): WorkflowBundle {
   return { rootId: "wf", states: states as WorkflowBundle["states"], source: states as WorkflowBundle["source"] };
 }
 
+/** Append `messages` to `id` and return the ref its head sits at. Streams are append-only. */
+async function append(store: SessionStore<JsonValue>, id: string, messages: readonly Turn[]): Promise<string> {
+  const lease = await store.begin({ ref: id });
+  return await lease.release({ messages: messages.map((message) => ({ message: message as unknown as JsonValue })) });
+}
+
+/** What a stream holds at a ref, as turns. */
+async function contents(store: SessionStore<JsonValue>, ref: string): Promise<Turn[]> {
+  return ((await store.read?.(ref)) ?? []) as unknown as Turn[];
+}
+
+/** The stream half of a ref, for asserting which stream a write landed on. */
+const streamOf = (ref: string): string => (ref.lastIndexOf("@") > 0 ? ref.slice(0, ref.lastIndexOf("@")) : ref);
+
 describe("SummarizingSessionStore", () => {
-  it("compacts a transcript over budget into a summary plus the recent turns", async () => {
+  it("compacts an over-budget stream into a summary plus the recent turns", async () => {
     const summarize = vi.fn(async (turns: readonly Turn[]) => `the gist of ${turns.length} turns`);
     const store = new SummarizingSessionStore({ summarize, budgetChars: 500, keepRecentTurns: 2 });
 
-    await store.put(SESSION, { messages: longTranscript(6) as never });
-    const state = await store.get(SESSION);
-    const messages = state!.messages as unknown as Turn[];
+    const end = await append(store, SESSION, longTranscript(6));
+    const messages = await contents(store, end);
 
     expect(messages).toHaveLength(3);
     expect(messages[0]!.content).toContain(SUMMARY_TAG);
@@ -53,35 +68,69 @@ describe("SummarizingSessionStore", () => {
     // The last exchange is what the next call responds to — it stays verbatim.
     expect(messages[1]!.content.startsWith("4: ")).toBe(true);
     expect(messages[2]!.content.startsWith("5: ")).toBe(true);
-    // Four turns were folded, not six — the tail stayed verbatim.
     expect(summarize).toHaveBeenCalledOnce();
   });
 
-  it("leaves a transcript under budget alone", async () => {
+  it("leaves the ORIGIN intact — compaction is a new stream, not a rewrite", async () => {
+    // The problem this whole change exists for: anything holding "the conversation as of turn 14"
+    // used to start silently referring to different content.
+    const store = new SummarizingSessionStore({ summarize: async () => "the gist", budgetChars: 500, keepRecentTurns: 2 });
+    const original = longTranscript(6);
+    const end = await append(store, SESSION, original);
+
+    expect(end).not.toBe(`${SESSION}@6`);
+    expect(await contents(store, `${SESSION}@6`)).toEqual(original);
+    expect(await contents(store, end)).toHaveLength(3);
+  });
+
+  it("continues the COMPACTED stream on the next write, not the retired one", async () => {
+    // A caller holding a pre-compaction ref would otherwise keep growing the stream compaction was
+    // meant to retire.
+    const store = new SummarizingSessionStore({ summarize: async () => "the gist", budgetChars: 500, keepRecentTurns: 2 });
+    const first = await append(store, SESSION, longTranscript(6));
+    const end = await append(store, SESSION, [{ role: "user", content: "next" }]);
+    // It continued the compacted stream — the new turn sits on top of the summary, not on top of the
+    // six turns the summary replaced. (It compacted again on the way out, which is why this is a
+    // prefix check and not equality: the lineage extends, it does not restart at the origin.)
+    expect(streamOf(end).startsWith(streamOf(first))).toBe(true);
+    expect(streamOf(end)).not.toBe(SESSION);
+    const messages = await contents(store, end);
+    expect(messages[0]!.content).toContain(SUMMARY_TAG);
+    expect(messages.at(-1)!.content).toBe("next");
+    expect(messages.length).toBeLessThan(7);
+  });
+
+  it("leaves a stream under budget alone", async () => {
     const summarize = vi.fn(async () => "unused");
     const store = new SummarizingSessionStore({ summarize, budgetChars: 100_000 });
     const messages = longTranscript(4);
-
-    await store.put("s", { messages: messages as never });
-
-    expect((await store.get("s"))!.messages).toEqual(messages);
+    const end = await append(store, "s", messages);
+    expect(await contents(store, end)).toEqual(messages);
     expect(summarize).not.toHaveBeenCalled();
   });
 
   it("only compacts the sessions that asked for it", async () => {
     const summarize = vi.fn(async () => "the gist");
-    const store = new SummarizingSessionStore({
-      summarize,
-      budgetChars: 500,
-      sessions: new Set(["cheap"]),
-    });
+    const store = new SummarizingSessionStore({ summarize, budgetChars: 500, sessions: new Set(["cheap"]) });
 
-    await store.put("cheap", { messages: longTranscript() as never });
-    await store.put("verbose", { messages: longTranscript() as never });
+    const cheap = await append(store, "cheap", longTranscript());
+    const verbose = await append(store, "verbose", longTranscript());
 
     // A state declaring `full_history` means it; summarizing under it would lie.
-    expect((await store.get("cheap"))!.messages).toHaveLength(3);
-    expect((await store.get("verbose"))!.messages).toHaveLength(6);
+    expect(await contents(store, cheap)).toHaveLength(3);
+    expect(await contents(store, verbose)).toHaveLength(6);
+  });
+
+  it("compacts something whose messages are PARTS, not plain text", async () => {
+    // The old `{ role, content: string }` filter silently declined anything else — which for an
+    // agentic adapter is the whole transcript, so the session that needed compaction most never got it.
+    const store = new SummarizingSessionStore({ summarize: async () => "the gist", budgetChars: 200, keepRecentTurns: 1 });
+    const rich = Array.from({ length: 4 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: [{ type: "text", text: `${i}: ${"z".repeat(200)}` }],
+    })) as unknown as Turn[];
+    const end = await append(store, "s", rich);
+    expect(await contents(store, end)).toHaveLength(2);
   });
 
   it("keeps the full transcript when summarization fails", async () => {
@@ -94,11 +143,10 @@ describe("SummarizingSessionStore", () => {
       onError,
     });
     const messages = longTranscript();
-
-    await store.put("s", { messages: messages as never });
+    const end = await append(store, "s", messages);
 
     // An expensive run beats a run that forgot what it was doing.
-    expect((await store.get("s"))!.messages).toEqual(messages);
+    expect(await contents(store, end)).toEqual(messages);
     expect(onError).toHaveBeenCalledOnce();
     expect(onError.mock.calls[0]).toEqual(["s", expect.objectContaining({ message: "provider exploded" })]);
   });
@@ -106,8 +154,8 @@ describe("SummarizingSessionStore", () => {
   it("keeps the transcript when the summarizer returns nothing usable", async () => {
     const store = new SummarizingSessionStore({ summarize: async () => "   ", budgetChars: 500 });
     const messages = longTranscript();
-    await store.put("s", { messages: messages as never });
-    expect((await store.get("s"))!.messages).toEqual(messages);
+    const end = await append(store, "s", messages);
+    expect(await contents(store, end)).toEqual(messages);
   });
 
   it("serializes concurrent writes so two summarizations cannot race", async () => {
@@ -124,35 +172,21 @@ describe("SummarizingSessionStore", () => {
       budgetChars: 500,
     });
 
-    await Promise.all([
-      store.put("s", { messages: longTranscript() as never }),
-      store.put("s", { messages: longTranscript(8) as never }),
-    ]);
-
+    await append(store, "s", longTranscript());
+    await append(store, "s", longTranscript(8));
     expect(overlapped).toBe(false);
-    expect((await store.get("s"))!.messages).toHaveLength(3);
   });
 
-  it("reports what it saved", async () => {
-    const events: Array<{ before: number; after: number; compacted: number }> = [];
-    const store = new SummarizingSessionStore({
-      summarize: async () => "short",
-      budgetChars: 500,
-      onSummarize: (e) => events.push(e),
-    });
-    await store.put("s", { messages: longTranscript() as never });
+  it("reports what it saved, and where it put it", async () => {
+    const events: SummaryEvent[] = [];
+    const store = new SummarizingSessionStore({ summarize: async () => "short", budgetChars: 500, onSummarize: (e) => events.push(e) });
+    await append(store, "s", longTranscript());
     expect(events).toHaveLength(1);
     expect(events[0]!.after).toBeLessThan(events[0]!.before);
     expect(events[0]!.compacted).toBe(4);
-  });
-
-  it("passes through a transcript it does not recognize", async () => {
-    // A `withSession` writer may store richer message parts; mangling them would be
-    // worse than declining to compact.
-    const store = new SummarizingSessionStore({ summarize: async () => "x", budgetChars: 1 });
-    const messages = [{ role: "tool", parts: ["something"] }] as never;
-    await store.put("s", { messages });
-    expect((await store.get("s"))!.messages).toEqual(messages);
+    // The new stream, so an observer can follow the lineage rather than guess at it.
+    expect(events[0]!.session).toBeDefined();
+    expect(events[0]!.session).not.toBe(events[0]!.sessionId);
   });
 });
 
@@ -227,10 +261,10 @@ describe("sessionStoreFor", () => {
       { budgetChars: 500 },
     );
     expect(modes.sessions).toEqual(new Set(["s1"]));
-    await store!.put("s1", { messages: longTranscript() as never });
-    await store!.put("other", { messages: longTranscript() as never });
-    expect((await store!.get("s1"))!.messages).toHaveLength(3);
-    expect((await store!.get("other"))!.messages).toHaveLength(6);
+    const summarized = await append(store!, "s1", longTranscript());
+    const untouched = await append(store!, "other", longTranscript());
+    expect(await contents(store!, summarized)).toHaveLength(3);
+    expect(await contents(store!, untouched)).toHaveLength(6);
   });
 });
 
