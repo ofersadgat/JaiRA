@@ -34,7 +34,7 @@ import {
 import { createPromptExecutor } from "@declarative-ai/promptop";
 import { createModelRouter } from "@declarative-ai/llm";
 import { SchemaValidator } from "@declarative-ai/validate";
-import { withRetry } from "@declarative-ai/exec";
+import { withMemoize, withRetry, type MemoCache } from "@declarative-ai/exec";
 import type { Approver, ExecPolicy } from "@declarative-ai/permissions";
 import type { JairaConfig } from "@jaira/shared";
 import { ScriptedFakeExecutor, type FakeRule } from "./fakeExecutor";
@@ -81,6 +81,15 @@ export interface PromptExecutorOptions {
   /** Model defaults from project config (`config.models.default`). */
   defaults?: Record<string, JsonValue>;
   repairTurns?: number;
+  /**
+   * Durable memoization of model answers (`config.memo.enabled`).
+   *
+   * Composed at the PROMPT LEAF rather than over the dispatcher, because this is where the cost and
+   * the latency are, and because the key is then the RENDERED prompt operation — the identity actually
+   * worth reusing. Memoizing over the dispatcher instead would key whole composite operations, which
+   * is a legitimate but much larger claim about when two pieces of work are the same.
+   */
+  memo?: { cache: MemoCache; namespace: string };
 }
 
 /**
@@ -90,12 +99,31 @@ export interface PromptExecutorOptions {
  * runs need neither retries nor a provider.
  */
 export function buildPromptExecutor(options: PromptExecutorOptions = {}): Executor<ExecServices, WorkflowMetrics> {
-  if (options.fakeRules) return new ScriptedFakeExecutor(options.fakeRules);
-  const core = createPromptExecutor({
-    router: createModelRouter(),
-    ...(options.defaults !== undefined ? { defaults: options.defaults } : {}),
-  }) as unknown as Executor<ExecServices, WorkflowMetrics>;
-  const turns = options.repairTurns ?? DEFAULT_REPAIR_TURNS;
+  const base = options.fakeRules
+    ? (new ScriptedFakeExecutor(options.fakeRules) as Executor<ExecServices, WorkflowMetrics>)
+    : repairing(
+        createPromptExecutor({
+          router: createModelRouter(),
+          ...(options.defaults !== undefined ? { defaults: options.defaults } : {}),
+        }) as unknown as Executor<ExecServices, WorkflowMetrics>,
+        options.repairTurns ?? DEFAULT_REPAIR_TURNS,
+      );
+  if (options.memo === undefined) return base;
+  // OUTSIDE the repair loop, so the key is the op as ASKED — one entry per logical request, and a
+  // later identical request skips the whole loop rather than replaying it. Inside would key each
+  // attempt separately: a repair turn rewrites the op with the validation errors appended, so every
+  // attempt hashes differently and the entries are of a question nobody asks twice.
+  //
+  // The fake executor is wrapped too. A scripted run has little to gain from a cache, but silently
+  // dropping a configured one is how a wiring bug survives every test that uses the fake.
+  return withMemoize(
+    { cache: options.memo.cache, namespace: options.memo.namespace },
+    base as unknown as Executor,
+  ) as unknown as Executor<ExecServices, WorkflowMetrics>;
+}
+
+/** Bounded output repair (DESIGN §7.5) — off when `turns` is 0. */
+function repairing(core: Executor<ExecServices, WorkflowMetrics>, turns: number): Executor<ExecServices, WorkflowMetrics> {
   return turns > 0
     ? (withRetry({ validation: { turns, feedback: true } }, core) as unknown as Executor<ExecServices, WorkflowMetrics>)
     : core;

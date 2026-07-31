@@ -84,6 +84,8 @@ export interface JairaConfig {
   artifactDir: string;
   /** Where artifacts are stored (DESIGN §7.6). */
   artifacts: JairaArtifactConfig;
+  /** Durable memoization of model calls — off unless asked for. */
+  memo: JairaMemoConfig;
   execEnvironment: JairaExecEnvironment;
   /**
    * The project's safety policy (DESIGN §10.1). Kept as opaque JSON here and
@@ -121,9 +123,23 @@ export const DEFAULT_WORKFLOW_PATH = ["$JAIRA/workflows", "$JAIRA/functions"];
 
 export const DEFAULT_ARTIFACT_DIR = "jaira-artifacts";
 
+/**
+ * Durable memoization of model calls.
+ *
+ * OFF by default, deliberately. It saves real money — an identical prompt is otherwise paid for once
+ * per run, task and process — but it is not a pure optimization: a re-run of a task returns the
+ * answer the first run got rather than asking again, which is surprising if you re-ran precisely
+ * because you wanted a fresh one. Opting in is the honest default for something that changes what a
+ * run observes.
+ */
+export interface JairaMemoConfig {
+  enabled: boolean;
+}
+
 export function defaultConfig(): JairaConfig {
   return {
     models: {},
+    memo: { enabled: false },
     artifactDir: DEFAULT_ARTIFACT_DIR,
     artifacts: {
       destination: DEFAULT_ARTIFACT_DESTINATION,
@@ -177,6 +193,19 @@ function parseWorkflows(raw: unknown): JairaWorkflowConfig {
  * renderer's bundle does not pull it in). `parseDestination` there is the checker,
  * and it runs at project open.
  */
+/** Parse the memo block. Absent ⇒ off, which is the documented default on {@link JairaMemoConfig}. */
+function parseMemo(raw: unknown): JairaMemoConfig {
+  if (raw === undefined) return { enabled: false };
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("config.memo must be an object");
+  }
+  const enabled = (raw as Record<string, unknown>)["enabled"];
+  if (enabled !== undefined && typeof enabled !== "boolean") {
+    throw new Error("config.memo.enabled must be a boolean");
+  }
+  return { enabled: enabled ?? false };
+}
+
 function parseArtifacts(raw: unknown, artifactDir: string): JairaArtifactConfig {
   const fallback: JairaArtifactConfig = {
     destination: DEFAULT_ARTIFACT_DESTINATION,
@@ -296,6 +325,7 @@ export function parseConfig(raw: unknown): JairaConfig {
   }
   return {
     models,
+    memo: parseMemo(cfg["memo"]),
     artifactDir,
     artifacts: parseArtifacts(cfg["artifacts"], artifactDir),
     execEnvironment: parseExecEnvironment(cfg["execEnvironment"]),
