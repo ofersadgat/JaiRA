@@ -8,6 +8,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { JsonValue, SessionStore } from "@declarative-ai/exec";
+import { MapSessionStore } from "@declarative-ai/exec";
 import type { WorkflowBundle } from "@declarative-ai/hw";
 import {
   SUMMARY_TAG,
@@ -247,11 +248,33 @@ describe("summarySessionsOf", () => {
 });
 
 describe("sessionStoreFor", () => {
-  it("installs no store when nothing asked for summarization", () => {
+  it("installs no store when nothing asked for summarization and none was supplied", () => {
     const { store } = sessionStoreFor(bundleWith({ a: {} }), async () => "x");
     // A workflow that didn't ask should not have its transcripts routed through
     // code that could compact them.
     expect(store).toBeUndefined();
+  });
+
+  it("keeps a DURABLE store even when nothing asked for summarization", async () => {
+    // Durability is the caller's decision; compaction is the author's. Returning nothing here used to
+    // discard a durable store silently, so transcripts survived a run only if that run also happened
+    // to want summarization.
+    const inner = new MapSessionStore<JsonValue>();
+    const { store } = sessionStoreFor(bundleWith({ a: {} }), async () => "x", { inner });
+    expect(store).toBe(inner);
+  });
+
+  it("wraps the durable store rather than replacing it when a state DID ask", async () => {
+    const inner = new MapSessionStore<JsonValue>();
+    const { store } = sessionStoreFor(
+      bundleWith({ a: { environment: { session: "s1", conversation: { mode: "summary" } } } }),
+      async () => "the gist",
+      { inner, budgetChars: 500 },
+    );
+    const end = await append(store!, "s1", longTranscript());
+    // Compacted — and the compacted stream lives in the store that was handed in.
+    expect(await contents(store!, end)).toHaveLength(3);
+    expect(await contents(inner, end)).toHaveLength(3);
   });
 
   it("installs one scoped to the summary sessions", async () => {

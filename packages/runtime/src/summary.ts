@@ -271,12 +271,19 @@ export function summarySessionsOf(bundle: WorkflowBundle): ConversationModes {
 }
 
 /**
- * The session store a run should use, given its bundle: a summarizing store when
- * any state asked for `summary` mode, and nothing (the engine's own) otherwise.
+ * The session store a run should use, given its bundle.
  *
- * Returning `undefined` rather than an always-on decorator matters: a workflow
- * that never asked for summarization should not have its transcripts routed
- * through code that could compact them.
+ * Two independent decisions, and conflating them was a bug waiting to happen:
+ *
+ *  - **Durability** is the caller's, expressed by passing `inner`. A run with a
+ *    durable store gets it whether or not anything asked for summarization.
+ *  - **Compaction** is the author's. The summarizing decorator goes on only when a
+ *    state declared `summary` mode, because a workflow that never asked should not
+ *    have its transcripts routed through code that could compact them.
+ *
+ * This used to return `undefined` whenever no state asked for `summary`, which
+ * meant a durable store handed in as `inner` was silently discarded — transcripts
+ * would survive a run only if that run also happened to want summarization.
  */
 export function sessionStoreFor(
   bundle: WorkflowBundle,
@@ -284,7 +291,7 @@ export function sessionStoreFor(
   options: Omit<SummarizingSessionStoreOptions, "summarize" | "sessions"> = {},
 ): { store?: SessionStore<JsonValue>; modes: ConversationModes } {
   const modes = summarySessionsOf(bundle);
-  if (modes.sessions.size === 0) return { modes };
+  if (modes.sessions.size === 0) return { ...(options.inner !== undefined ? { store: options.inner } : {}), modes };
   return { store: new SummarizingSessionStore({ ...options, summarize, sessions: modes.sessions }), modes };
 }
 

@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { loadBundle, validateBundle } from "@declarative-ai/hw";
-import type { JsonValue } from "@declarative-ai/exec";
+import type { JsonValue, SessionStore } from "@declarative-ai/exec";
 import {
   beginTaskRun,
   boardView,
@@ -27,6 +27,7 @@ import {
   removeWorktree,
   runCauses,
   RunOwner,
+  SessionStreams,
   standaloneLoadOptions,
   type Project,
   type WorkflowBrowser,
@@ -239,6 +240,14 @@ interface ArtifactWiringOptions {
   store: ArtifactStore;
   /** Records child processes against the run's claim (DESIGN §4.2a). */
   observer?: ExecObserver;
+  /**
+   * The durable conversation store (SESSIONS.md §9), when this run has a project to keep one in.
+   *
+   * It rides with the artifact wiring because it answers the same question: only a DURABLE run has
+   * somewhere to put things. An ad-hoc `jaira run` gets neither, which is honest — there is no
+   * database to write a transcript into.
+   */
+  sessions?: SessionStore<JsonValue>;
 }
 
 function buildRunEnvironment(
@@ -296,10 +305,12 @@ function buildRunEnvironment(
   // Conversation `summary` mode: only installed when a state asked for it, and it
   // summarizes through the run's own prompt executor, so a scripted run stays
   // scripted (DESIGN §14 phase 7).
-  const { store: sessions, modes: summaryModes } = sessionStoreFor(
-    bundle,
-    promptSummarizer(prompt),
-  );
+  const { store: sessions, modes: summaryModes } = sessionStoreFor(bundle, promptSummarizer(prompt), {
+    // Durability and compaction are separate decisions: a durable run keeps its transcripts whether
+    // or not any state asked to summarize them, and the summarizer decorates this rather than
+    // replacing it.
+    ...(files?.sessions !== undefined ? { inner: files.sessions } : {}),
+  });
   return { registry, prompt, ...(sessions !== undefined ? { sessions } : {}), summaryModes };
 }
 
@@ -537,6 +548,10 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
       artifacts,
       store: project.artifacts,
       observer: owner.observer(),
+      // Transcripts become durable here (SESSIONS.md §9). Constructed CLI-side and injected, because
+      // `@jaira/runtime` must not import `@jaira/persistence` (DESIGN §4.2a) — the same shape the
+      // artifact store above already follows.
+      sessions: new SessionStreams(project.db).asExecStore({ taskId, runId: started.runId }),
     });
     warnSummaryConflicts(summaryModes, io);
     try {
