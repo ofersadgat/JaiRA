@@ -28,6 +28,12 @@
  */
 import type { Database } from "better-sqlite3";
 import { canonicalize, sha256Hex, type JsonValue } from "@declarative-ai/json";
+import { resolveSessionRef } from "@declarative-ai/exec";
+import type {
+  SessionLease as ExecSessionLease,
+  SessionRequest as ExecSessionRequest,
+  SessionStore as ExecSessionStore,
+} from "@declarative-ai/exec";
 
 /**
  * How a branch came into being — recorded as the edge to its parent.
@@ -548,6 +554,111 @@ export class SessionStreams<Msg = JsonValue> {
     });
     if (options.entries.length > 0) this.append(branch.id, 0, options.entries as readonly SessionEntry<Msg>[]);
     return this.branch(branch.id) ?? branch;
+  }
+
+  // --- The executor-facing contract --------------------------------------------
+
+  /**
+   * Adapt this store to the {@link ExecSessionStore} the executor stack consumes.
+   *
+   * A separate object rather than implementing the interface directly, because the two surfaces
+   * answer different questions. This class is the LINEAGE store — branches, edges, digests, what a
+   * human scrubbing a transcript in the UI needs. The exec contract is one call's view: reserve a
+   * position, read it, fold what came back. Conflating them would put pruning and lineage queries in
+   * front of every executor that only wanted to append a turn.
+   *
+   * The reservation is an in-process lock plus the conditional write underneath (SESSIONS.md §5). A
+   * run is owned by one process — the `jobs` table makes that true — so the lock is sufficient in
+   * practice, and {@link SessionStreams.append}'s position check is the durable backstop for when it
+   * is not.
+   */
+  asExecStore(origin: SessionOrigin = {}): ExecSessionStore<Msg> {
+    const held = new Set<string>();
+    const streams = this;
+    return {
+      read(ref: string): Msg[] {
+        // A bare id names the stream at its head; a ref with a position means that position.
+        const parsed = parseSessionRef(ref);
+        return parsed === undefined ? streams.materialize(ref).map((e) => e.message) : streams.messagesAt(ref).map((e) => e.message);
+      },
+
+      compact(originRef: string, entries: readonly SessionEntry<Msg>[]): string {
+        const { branch } = streams.resolveLoose(originRef);
+        const compacted = streams.compact(branch.id, {
+          ...origin,
+          seed: `${branch.id}:${streams.children(branch.id).length}`,
+          entries: entries as readonly SessionEntry[],
+        });
+        return formatSessionRef(compacted.id, streams.head(compacted.id));
+      },
+
+      begin(request: ExecSessionRequest): ExecSessionLease<Msg> {
+        const { branch, position } = streams.open(request, origin);
+        let at = position;
+        let on = branch;
+        const heldKey = `${on.id}@${at}`;
+        // FORK, rather than observe-then-hope. `fork: true` skips the check entirely — the answer is
+        // already known — and otherwise anything that is not the free head forks, because a call given
+        // a position that has moved on has no other honest answer.
+        if (request.fork === true || at !== streams.head(on.id) || held.has(heldKey)) {
+          on = streams.fork(on.id, at, { ...origin, seed: request.seed ?? `${on.id}@${at}:${streams.children(on.id).length}` });
+          at = streams.head(on.id);
+        }
+        const key = `${on.id}@${at}`;
+        held.add(key);
+        const mode = on.id === branch.id && at === position ? "append" : "fork";
+        const handle =
+          mode === "append" && request.provider !== undefined ? streams.providerHandle(on.id, request.provider) : undefined;
+        let released = false;
+        return {
+          session: resolveSessionRef<Msg>(formatSessionRef(on.id, at), {
+            mode,
+            ...(handle !== undefined ? { providerSessionId: handle } : {}),
+            messages: async () => streams.materialize(on.id, at).map((e) => e.message),
+            report: () => {
+              /* the lease folds on release; nothing to buffer for a durable store */
+            },
+          }),
+          release: (delta) => {
+            if (released) return formatSessionRef(on.id, streams.head(on.id));
+            released = true;
+            held.delete(key);
+            if (delta !== undefined && delta.messages.length > 0) {
+              streams.append(on.id, at, delta.messages as readonly SessionEntry<Msg>[]);
+            }
+            if (delta?.providerSessionId !== undefined && request.provider !== undefined) {
+              streams.setProviderHandle(on.id, request.provider, delta.providerSessionId);
+            }
+            return formatSessionRef(on.id, streams.head(on.id));
+          },
+        };
+      },
+    };
+  }
+
+  /** Resolve a ref that may be a bare branch id rather than a position. */
+  private resolveLoose(ref: string): { branch: SessionBranch; position: number } {
+    const parsed = parseSessionRef(ref);
+    if (parsed !== undefined) return this.resolve(ref);
+    const branch = this.branch(ref);
+    if (branch === undefined) throw new UnknownSession(ref);
+    return { branch, position: this.head(ref) };
+  }
+
+  /** The branch and position a request starts from, creating a root when it names none. */
+  private open(request: ExecSessionRequest, origin: SessionOrigin): { branch: SessionBranch; position: number } {
+    if (request.ref === undefined) {
+      const root = this.createRoot({ ...origin, seed: request.seed ?? `root:${Date.now()}` });
+      return { branch: root, position: this.head(root.id) };
+    }
+    const parsed = parseSessionRef(request.ref);
+    if (parsed === undefined && this.branch(request.ref) === undefined) {
+      // A bare NAME nobody has used yet is a root, seeded from the name so a replayed run lands on
+      // the same stream rather than minting a second one beside it.
+      const root = this.createRoot({ ...origin, seed: request.ref, name: request.ref });
+      return { branch: root, position: this.head(root.id) };
+    }
+    return this.resolveLoose(request.ref);
   }
 
   private insert(branch: Omit<SessionBranch, "createdAt">): SessionBranch {
