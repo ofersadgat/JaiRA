@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { JsonValue } from "@declarative-ai/json";
+import { PositionTaken as ExecPositionTaken } from "@declarative-ai/exec";
 import { openDb, type JairaDb } from "../src/db";
 import {
   SessionPositionConflict,
@@ -371,104 +372,113 @@ describe("lineage queries", () => {
   });
 });
 
+/**
+ * The two interfaces the executor stack consumes: conversation lineage, and the two-phase record
+ * write. A session is not a separate store — it IS the records sharing a session id — so these are
+ * two views of one thing, and the tests exercise them together as a caller would.
+ */
 describe("the executor-facing contract", () => {
-  /** The one call's-eye view the executor stack consumes, over the same durable lineage store. */
   const exec = () => streams.asExecStore({ taskId: "t-1", runId: 1 });
 
-  it("reserves, folds what the executor reported, and returns the END position", async () => {
+  /** One call: claim the position, then fill it with what the provider produced. */
+  const call = (store: ReturnType<typeof exec>, at: { id: string; seq: number }, ...text: string[]): void => {
+    const id = `${at.id}:${at.seq}`;
+    store.open({ id, source: undefined as never, session: at, startMs: 0 });
+    store.close(id, { result: { value: { messages: text.map((t) => say("user", t).message) } as never } });
+  };
+
+  it("resolves a position, records what the call produced, and reads it back", async () => {
     const store = exec();
-    const lease = await store.begin({ ref: "planning" });
-    expect(lease.session.mode).toBe("append");
-    const end = await lease.release({ messages: [say("user", "a"), say("assistant", "b")] });
-    // The end, not the start: "append after me" and "fork after me" both mean after.
-    expect(end).toMatch(/@2$/);
-    expect(readTexts(store.read!(end))).toEqual(["a", "b"]);
+    const at = await store.resolve({ ref: "planning" });
+    expect(at.mode).toBe("append");
+    call(store, at.at, "a", "b");
+    expect(readTexts(await store.messages(formatSessionRef(at.at.id, at.at.seq + 1)))).toEqual(["a", "b"]);
   });
 
-  it("creates a root for a bare NAME nobody has used, seeded so a replay lands on the same stream", async () => {
-    const first = await (await exec().begin({ ref: "planning" })).release({ messages: [say("user", "a")] });
-    const second = await (await exec().begin({ ref: "planning" })).release({ messages: [say("user", "b")] });
-    // One stream, two appends — not two streams that merely share a name.
-    expect(second.split("@")[0]).toBe(first.split("@")[0]);
-    expect(readTexts(exec().read!(second))).toEqual(["a", "b"]);
-  });
-
-  it("FORKS a position that has already been appended past, leaving the origin alone", async () => {
+  it("creates a root for a bare NAME nobody has used, seeded so a replay lands on the same one", async () => {
     const store = exec();
-    const start = await (await store.begin({ ref: "planning" })).release({ messages: [say("user", "a")] });
-    const [branch] = start.split("@");
-    const again = await store.begin({ ref: `${branch}@0` });
-    expect(again.session.mode).toBe("fork");
-    const end = await again.release({ messages: [say("user", "different")] });
-    expect(readTexts(store.read!(end))).toEqual(["different"]);
-    expect(readTexts(store.read!(start))).toEqual(["a"]);
+    const first = await store.resolve({ ref: "planning" });
+    call(store, first.at, "a");
+    const second = await store.resolve({ ref: "planning" });
+    // One conversation, two records — not two conversations that merely share a name.
+    expect(second.at.id).toBe(first.at.id);
+    expect(second.at.seq).toBe(1);
+    call(store, second.at, "b");
+    expect(readTexts(await store.messages(formatSessionRef(second.at.id, 2)))).toEqual(["a", "b"]);
   });
 
-  it("FORKS a position another call is holding, without either clobbering the other", async () => {
-    // The TOCTOU case: both saw the same head. Reserving rather than peeking is what makes the second
-    // one fork instead of overwriting the first.
+  it("REFUSES a position that is already claimed — which is what makes the caller fork", () => {
+    // The TOCTOU case, closed by the position rather than by a lock: both callers resolved the same
+    // slot, and only one can occupy it.
     const store = exec();
     const root = streams.createRoot({ seed: "planning" });
-    const first = await store.begin({ ref: formatSessionRef(root.id, 0) });
-    const second = await store.begin({ ref: formatSessionRef(root.id, 0) });
-    expect(first.session.mode).toBe("append");
-    expect(second.session.mode).toBe("fork");
-    await first.release({ messages: [say("assistant", "first")] });
-    const forked = await second.release({ messages: [say("assistant", "second")] });
-    expect(readTexts(store.read!(formatSessionRef(root.id, 1)))).toEqual(["first"]);
-    expect(readTexts(store.read!(forked))).toEqual(["second"]);
+    call(store, { id: root.id, seq: 0 }, "first");
+    expect(() => call(store, { id: root.id, seq: 0 }, "second")).toThrow(ExecPositionTaken);
+    // Read through the exec view, which unwraps a RECORD into the messages it carries. The lineage
+    // store below it sees one entry, because a position counts operations.
+    expect(readTexts(store.messages(formatSessionRef(root.id, 1)))).toEqual(["first"]);
+    expect(streams.materialize(root.id)).toHaveLength(1);
   });
 
-  it("`fork: true` branches even at a free head", async () => {
+  it("forks on request, leaving the origin alone", async () => {
     const store = exec();
-    const start = await (await store.begin({ ref: "planning" })).release({ messages: [say("user", "a")] });
-    const lease = await store.begin({ ref: start, fork: true });
-    expect(lease.session.mode).toBe("fork");
+    const first = await store.resolve({ ref: "planning" });
+    call(store, first.at, "a");
+    const forked = await store.resolve({ ref: formatSessionRef(first.at.id, 1), fork: true, seed: "v" });
+    expect(forked.mode).toBe("fork");
+    call(store, forked.at, "different");
+    expect(readTexts(await store.messages(formatSessionRef(forked.at.id, forked.at.seq + 1)))).toEqual(["a", "different"]);
+    expect(readTexts(await store.messages(formatSessionRef(first.at.id, 1)))).toEqual(["a"]);
   });
 
-  it("releases idempotently, so a `finally` after the happy path folds nothing twice", async () => {
+  it("forks a taken position by ref, which is the caller's answer to a refusal", async () => {
     const store = exec();
-    const lease = await store.begin({ ref: "planning" });
-    const delta = { messages: [say("user", "a")] };
-    const first = await lease.release(delta);
-    expect(await lease.release(delta)).toBe(first);
-    expect(readTexts(store.read!(first))).toEqual(["a"]);
+    const first = await store.resolve({ ref: "planning" });
+    call(store, first.at, "a");
+    const forkedRef = await store.fork(formatSessionRef(first.at.id, 0), "retry");
+    const at = await store.resolve({ ref: forkedRef });
+    call(store, at.at, "instead");
+    // Branched from BEFORE the first call, so it does not inherit the turn it is replacing.
+    expect(readTexts(await store.messages(formatSessionRef(at.at.id, at.at.seq + 1)))).toEqual(["instead"]);
+    expect(readTexts(await store.messages(formatSessionRef(first.at.id, 1)))).toEqual(["a"]);
   });
 
-  it("an EMPTY delta appends nothing and frees the reservation", async () => {
+  it("records a call that produced NOTHING, and frees its position", async () => {
     // A call that failed before the provider saw anything has a real, empty delta.
     const store = exec();
-    const lease = await store.begin({ ref: "planning" });
-    const end = await lease.release({ messages: [] });
-    expect(end).toMatch(/@0$/);
-    // ...and the position is free again, so the next call appends rather than forking.
-    expect((await store.begin({ ref: end })).session.mode).toBe("append");
+    const at = await store.resolve({ ref: "planning" });
+    call(store, at.at);
+    expect(await store.messages(formatSessionRef(at.at.id, 0))).toEqual([]);
+    // ...and the position is free, so the next call appends rather than colliding.
+    expect((await store.resolve({ ref: formatSessionRef(at.at.id, 0) })).at.seq).toBe(0);
   });
 
-  it("hands back the provider handle on an APPEND and never on a fork", async () => {
+  it("compacts into a new conversation, leaving the origin readable at its own positions", async () => {
     const store = exec();
-    const lease = await store.begin({ ref: "planning", provider: "claude-cli" });
-    const end = await lease.release({ messages: [say("user", "a")], providerSessionId: "sess-abc" });
-    expect((await store.begin({ ref: end, provider: "claude-cli" })).session.providerSessionId).toBe("sess-abc");
-    // A fork must never inherit it, or two branches write into one remote session.
-    expect((await store.begin({ ref: end, fork: true, provider: "claude-cli" })).session.providerSessionId).toBeUndefined();
-  });
-
-  it("compacts into a new stream, leaving the origin readable at its own positions", async () => {
-    const store = exec();
-    const end = await (await store.begin({ ref: "planning" })).release({
-      messages: [say("user", "a"), say("assistant", "b"), say("user", "c")],
-    });
-    const compacted = await store.compact!(end, [say("user", "<summary>"), say("user", "c")]);
-    expect(readTexts(store.read!(compacted))).toEqual(["<summary>", "c"]);
-    expect(readTexts(store.read!(end))).toEqual(["a", "b", "c"]);
+    const at = await store.resolve({ ref: "planning" });
+    call(store, at.at, "a", "b", "c");
+    const end = formatSessionRef(at.at.id, 1);
+    const compacted = await store.compact!(end, [say("user", "<summary>").message, say("user", "c").message]);
+    expect(readTexts(await store.messages(compacted))).toEqual(["<summary>", "c"]);
+    expect(readTexts(await store.messages(end))).toEqual(["a", "b", "c"]);
     expect(streams.branch(compacted.split("@")[0]!)?.edge).toBe("compaction");
   });
 
+  it("resyncs into a new conversation, and starts EMPTY when the provider offers nothing to read", async () => {
+    const store = exec();
+    const at = await store.resolve({ ref: "planning" });
+    call(store, at.at, "a");
+    const fresh = await store.resync!(formatSessionRef(at.at.id, 1), []);
+    expect(await store.messages(fresh)).toEqual([]);
+    expect(streams.branch(fresh.split("@")[0]!)?.edge).toBe("resync");
+  });
+
   it("exposes only `id` on the session it hands the executor", async () => {
-    const lease = await exec().begin({ ref: "planning" });
-    expect(Object.keys(lease.session)).toEqual(["id"]);
-    expect(lease.session.mode).toBe("append");
+    const at = await exec().resolve({ ref: "planning" });
+    expect(Object.keys(at)).toEqual(["id"]);
+    // The rest is reachable but non-enumerable, so the journal and inputs_json see `{ id }` alone.
+    expect(at.mode).toBe("append");
+    expect(at.at).toBeDefined();
   });
 });
 

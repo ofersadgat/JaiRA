@@ -28,9 +28,10 @@
  */
 import type { Database } from "better-sqlite3";
 import { canonicalize, sha256Hex, type JsonValue } from "@declarative-ai/json";
-import { resolveSessionRef } from "@declarative-ai/exec";
+import { PositionTaken as ExecPositionTaken, resolveSessionRef } from "@declarative-ai/exec";
 import type {
-  SessionLease as ExecSessionLease,
+  RecordStore as ExecRecordStore,
+  ResolvedSession as ExecResolvedSession,
   SessionRequest as ExecSessionRequest,
   SessionStore as ExecSessionStore,
 } from "@declarative-ai/exec";
@@ -637,85 +638,135 @@ export class SessionStreams<Msg = JsonValue> {
     if (options.entries.length > 0) this.append(branch.id, 0, options.entries as readonly SessionEntry<Msg>[]);
     return this.branch(branch.id) ?? branch;
   }
-
   // --- The executor-facing contract --------------------------------------------
 
   /**
-   * Adapt this store to the {@link ExecSessionStore} the executor stack consumes.
+   * Adapt this store to the pair of interfaces the executor stack consumes: conversation lineage
+   * (`SessionStore`) and the two-phase record write (`RecordStore`).
    *
-   * A separate object rather than implementing the interface directly, because the two surfaces
-   * answer different questions. This class is the LINEAGE store — branches, edges, digests, what a
-   * human scrubbing a transcript in the UI needs. The exec contract is one call's view: reserve a
-   * position, read it, fold what came back. Conflating them would put pruning and lineage queries in
-   * front of every executor that only wanted to append a turn.
+   * A separate object rather than implementing them directly, because the surfaces answer different
+   * questions. This class is the LINEAGE store — branches, edges, digests, what a human scrubbing a
+   * conversation in the UI needs. The exec contract is one call's view: where am I, claim it, fill it
+   * in. Conflating them would put pruning and lineage queries in front of every executor that only
+   * wanted to append a turn.
    *
-   * The reservation is an in-process lock plus the conditional write underneath (SESSIONS.md §5). A
-   * run is owned by one process — the `jobs` table makes that true — so the lock is sufficient in
-   * practice, and {@link SessionStreams.append}'s position check is the durable backstop for when it
-   * is not.
+   * The reservation is `append`'s position check, which is durable and holds across processes — no
+   * in-process lock, because uniqueness on the position is the only thing that can decide a race
+   * without one.
+   *
+   * NB the messages still live in `session_messages` here. Under the reworked model a conversation is
+   * the RECORDS sharing a session id, so this class's storage should become the records table and
+   * these two halves collapse into one query. That migration is deliberately separate from the
+   * contract change: the semantics below are the new ones, the rows underneath are not yet.
    */
-  asExecStore(origin: SessionOrigin = {}): ExecSessionStore<Msg> {
-    const held = new Set<string>();
+  asExecStore(origin: SessionOrigin = {}): ExecSessionStore<Msg> & ExecRecordStore {
     const streams = this;
+    /** A record stub's position, remembered between `open` and `close`. */
+    const pending = new Map<string, { branch: string; seq: number }>();
     return {
-      read(ref: string): Msg[] {
-        // A bare id names the stream at its head; a ref with a position means that position.
-        const parsed = parseSessionRef(ref);
-        return parsed === undefined ? streams.materialize(ref).map((e) => e.message) : streams.messagesAt(ref).map((e) => e.message);
+      resolve(request: ExecSessionRequest): ExecResolvedSession<Msg> {
+        const { branch, position } = streams.open(request, origin);
+        let on = branch;
+        let at = position;
+        let mode: "append" | "fork" = "append";
+        // `fork: true` is the only fork decided HERE — the answer is already known. Every other fork
+        // is decided by the write, because that is the only place that can decide it without a race.
+        if (request.fork === true) {
+          on = streams.fork(on.id, at, { ...origin, seed: request.seed ?? `${on.id}@${at}:${streams.children(on.id).length}` });
+          at = streams.head(on.id);
+          mode = "fork";
+        }
+        return resolveSessionRef<Msg>(formatSessionRef(on.id, at), {
+          mode,
+          at: { id: on.id, seq: at },
+          messages: async () => streams.materialize(on.id, at).map((e) => e.message),
+        });
       },
 
-      compact(originRef: string, entries: readonly SessionEntry<Msg>[]): string {
-        const { branch } = streams.resolveLoose(originRef);
+      fork(ref: string, seed?: string): string {
+        const { branch, position } = streams.resolveLoose(ref);
+        const forked = streams.fork(branch.id, position, {
+          ...origin,
+          seed: seed ?? `${branch.id}@${position}:${streams.children(branch.id).length}`,
+        });
+        return formatSessionRef(forked.id, streams.head(forked.id));
+      },
+
+      messages(ref: string): Msg[] {
+        // A bare NAME nobody has written to is EMPTY, not unknown — that is what an untouched
+        // conversation looks like, and the first call to it creates it. A ref carrying a POSITION is
+        // different: it commits to content, so a branch that is not there is a typo or a pruned id,
+        // and §4 is explicit that those must be errors rather than silently empty.
+        if (parseSessionRef(ref) === undefined && streams.branch(ref) === undefined) return [];
+        const { branch, position } = streams.resolveLoose(ref);
+        return streams.materialize(branch.id, position).flatMap((e) => SessionStreams.messagesOf(e.message));
+      },
+
+      compact(ref: string, messages: readonly Msg[]): string {
+        const { branch } = streams.resolveLoose(ref);
         const compacted = streams.compact(branch.id, {
           ...origin,
           seed: `${branch.id}:${streams.children(branch.id).length}`,
-          entries: entries as readonly SessionEntry[],
+          entries: [{ message: { messages } as unknown as JsonValue }],
         });
         return formatSessionRef(compacted.id, streams.head(compacted.id));
       },
 
-      begin(request: ExecSessionRequest): ExecSessionLease<Msg> {
-        const { branch, position } = streams.open(request, origin);
-        let at = position;
-        let on = branch;
-        const heldKey = `${on.id}@${at}`;
-        // FORK, rather than observe-then-hope. `fork: true` skips the check entirely — the answer is
-        // already known — and otherwise anything that is not the free head forks, because a call given
-        // a position that has moved on has no other honest answer.
-        if (request.fork === true || at !== streams.head(on.id) || held.has(heldKey)) {
-          on = streams.fork(on.id, at, { ...origin, seed: request.seed ?? `${on.id}@${at}:${streams.children(on.id).length}` });
-          at = streams.head(on.id);
+      resync(ref: string, messages: readonly Msg[]): string {
+        const { branch } = streams.resolveLoose(ref);
+        const resynced = streams.resync(branch.id, {
+          ...origin,
+          seed: `${branch.id}:${streams.children(branch.id).length}`,
+          entries: messages.length > 0 ? [{ message: { messages } as unknown as JsonValue }] : [],
+        });
+        return formatSessionRef(resynced.id, streams.head(resynced.id));
+      },
+
+      // --- The record half ----------------------------------------------------
+
+      open(stub: { id: string; session?: { id: string; seq: number } }): void {
+        const at = stub.session;
+        if (at === undefined) return; // a record outside a conversation is not this store's business
+        // Claim by APPENDING NOTHING at the position. `append` refuses a position that is not the head,
+        // which is the whole reservation — durable, and across processes, unlike any lock.
+        if (streams.head(at.id) !== at.seq) throw new ExecPositionTaken(at.id, at.seq);
+        pending.set(stub.id, { branch: at.id, seq: at.seq });
+      },
+
+      close(id: string, settled: { result?: { value?: unknown } }): void {
+        const at = pending.get(id);
+        if (at === undefined) return;
+        pending.delete(id);
+        const payload = settled.result?.value as { messages?: readonly Msg[] } | undefined;
+        const messages = payload?.messages ?? [];
+        // ONE entry per RECORD, not one per message. A position counts operations — that is what makes
+        // `[0:14]` mean "after fourteen calls" and what §8's per-operation forking rests on — so a call
+        // that produced six turns still advances the conversation by one.
+        //
+        // A call that produced nothing still occupied its position; appending zero entries is a legal
+        // no-op that frees it rather than an error.
+        if (messages.length > 0) {
+          streams.append(at.branch, at.seq, [{ message: { messages } as unknown as Msg }]);
         }
-        const key = `${on.id}@${at}`;
-        held.add(key);
-        const mode = on.id === branch.id && at === position ? "append" : "fork";
-        const handle =
-          mode === "append" && request.provider !== undefined ? streams.providerHandle(on.id, request.provider) : undefined;
-        let released = false;
-        return {
-          session: resolveSessionRef<Msg>(formatSessionRef(on.id, at), {
-            mode,
-            ...(handle !== undefined ? { providerSessionId: handle } : {}),
-            messages: async () => streams.materialize(on.id, at).map((e) => e.message),
-            report: () => {
-              /* the lease folds on release; nothing to buffer for a durable store */
-            },
-          }),
-          release: (delta) => {
-            if (released) return formatSessionRef(on.id, streams.head(on.id));
-            released = true;
-            held.delete(key);
-            if (delta !== undefined && delta.messages.length > 0) {
-              streams.append(on.id, at, delta.messages as readonly SessionEntry<Msg>[]);
-            }
-            if (delta?.providerSessionId !== undefined && request.provider !== undefined) {
-              streams.setProviderHandle(on.id, request.provider, delta.providerSessionId);
-            }
-            return formatSessionRef(on.id, streams.head(on.id));
-          },
-        };
+      },
+
+      bySession(session: string, upTo?: number): Array<{ id: string; source: never; startMs: number }> {
+        return streams.materialize(session, upTo).map((entry) => ({ id: `${session}:${entry.seq}`, source: undefined as never, startMs: 0 }));
       },
     };
+  }
+
+  /**
+   * The messages one stored entry carries.
+   *
+   * An entry written by a CALL holds a record payload — `{ messages }` — because a position counts
+   * operations. An entry written directly through {@link SessionStreams.append} is a bare message.
+   * Both shapes read back the same way, which is what lets the lineage layer stay message-agnostic
+   * while the exec-facing view speaks records.
+   */
+  private static messagesOf<T>(message: T): T[] {
+    const payload = message as { messages?: readonly T[] } | null;
+    return payload !== null && typeof payload === "object" && Array.isArray(payload.messages) ? [...payload.messages] : [message];
   }
 
   /** Resolve a ref that may be a bare branch id rather than a position. */

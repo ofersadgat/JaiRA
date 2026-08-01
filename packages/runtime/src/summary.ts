@@ -29,7 +29,7 @@
  *    actually responds to; summarizing it away is what makes summary modes feel
  *    lossy.
  */
-import type { Executor, ExecServices, JsonValue, SessionLease, SessionMessage, SessionRequest, SessionStore } from "@declarative-ai/exec";
+import type { Executor, ExecServices, JsonValue, RecordStore, RecordStub, ResolvedSession, SessionRequest, SessionStore } from "@declarative-ai/exec";
 import { MapSessionStore, promptOp } from "@declarative-ai/exec";
 import type { WorkflowBundle, WorkflowMetrics } from "@declarative-ai/hw";
 import { SchemaValidator } from "@declarative-ai/validate";
@@ -139,38 +139,76 @@ export class SummarizingSessionStore implements SessionStore<JsonValue> {
     this.keepRecent = Math.max(0, options.keepRecentTurns ?? DEFAULT_KEEP_RECENT);
   }
 
-  async read(ref: string): Promise<JsonValue[]> {
+  async messages(ref: string): Promise<JsonValue[]> {
     await this.chain.get(streamOf(ref));
     // NOT redirected through `current`. A ref that names a POSITION is a commitment to content, and
     // following it to a compaction would hand back a different conversation than the one asked for —
     // which is the in-place rewrite this design exists to remove, reintroduced at the read side.
     // A BARE id carries no such commitment: it means "this conversation now", so it follows.
-    return (await this.inner.read?.(hasPosition(ref) ? ref : this.current(ref))) ?? [];
+    return await this.inner.messages(hasPosition(ref) ? ref : this.current(ref));
   }
 
-  compact(originRef: string, entries: readonly SessionMessage<JsonValue>[]): string | Promise<string> {
-    return this.inner.compact?.(originRef, entries) ?? originRef;
+  compact(originRef: string, messages: readonly JsonValue[]): string | Promise<string> {
+    return this.inner.compact?.(originRef, messages) ?? originRef;
   }
 
-  async begin(request: SessionRequest): Promise<SessionLease<JsonValue>> {
+  resync(originRef: string, messages: readonly JsonValue[]): string | Promise<string> {
+    return this.inner.resync?.(originRef, messages) ?? originRef;
+  }
+
+  fork(ref: string, seed?: string): string | Promise<string> {
+    return this.inner.fork(this.current(ref), seed);
+  }
+
+  async resolve(request: SessionRequest): Promise<ResolvedSession<JsonValue>> {
     const asked = request.ref;
-    // Continue whatever superseded this stream. A caller holding a pre-compaction ref would otherwise
-    // keep appending to the stream compaction was meant to retire, and grow it forever.
+    // Continue whatever superseded this conversation. A caller holding a pre-compaction ref would
+    // otherwise keep appending to the one compaction was meant to retire, and grow it forever.
     const ref = asked !== undefined ? this.current(asked) : undefined;
     await (ref !== undefined ? this.chain.get(streamOf(ref)) : undefined);
-    const lease = await this.inner.begin(ref !== undefined ? { ...request, ref } : request);
-    return {
-      session: lease.session,
-      release: async (delta) => {
-        const end = await lease.release(delta);
-        const work = this.maybeCompact(end);
-        this.chain.set(
-          streamOf(end),
-          work.catch(() => undefined),
-        );
-        return await work;
-      },
-    };
+    return await this.inner.resolve(ref !== undefined ? { ...request, ref } : request);
+  }
+
+  // --- The record half, decorated so compaction follows the write -------------------
+
+  open(stub: RecordStub): void {
+    (this.inner as unknown as RecordStore).open(stub);
+  }
+
+  /**
+   * Fill the record in, then consider compacting.
+   *
+   * AFTER the write, not during it: compaction is a policy over a finished conversation, and a call
+   * should never wait on a summarization it did not ask for. The per-conversation chain is what keeps
+   * two concurrent writes from summarizing in parallel.
+   */
+  close(id: string, settled: Parameters<RecordStore["close"]>[1]): void {
+    (this.inner as unknown as RecordStore).close(id, settled);
+    // A session record's id is `<branch>:<seq>` (its POSITION — see `withRecord`), so the position it
+    // just filled is recoverable from it. A record outside any conversation has no such id and is
+    // nothing this decorator has an opinion about.
+    const at = id.lastIndexOf(":");
+    if (at <= 0) return;
+    const seq = Number(id.slice(at + 1));
+    if (!Number.isInteger(seq)) return;
+    const end = `${id.slice(0, at)}@${seq + 1}`;
+    const work = this.maybeCompact(end);
+    this.chain.set(
+      streamOf(end),
+      work.catch(() => undefined),
+    );
+  }
+
+  /**
+   * Where a conversation currently lives, once any pending compaction has settled.
+   *
+   * Public because compaction MOVES a conversation: the ref a call ended at names the pre-compaction
+   * stream, and the summary lives on a new one. Anything that wants "this conversation now" — an
+   * observer, the next caller holding only a name — needs to be able to ask rather than guess.
+   */
+  async currentRef(ref: string): Promise<string> {
+    await this.chain.get(streamOf(ref));
+    return this.current(ref);
   }
 
   /** The stream a ref should actually be continued on, following any compaction that replaced it. */
@@ -190,7 +228,7 @@ export class SummarizingSessionStore implements SessionStore<JsonValue> {
   private async maybeCompact(endRef: string): Promise<string> {
     const stream = streamOf(endRef);
     if (this.options.sessions !== undefined && !this.options.sessions.has(rootOf(stream))) return endRef;
-    const messages = (await this.inner.read?.(endRef)) ?? [];
+    const messages = await this.inner.messages(endRef);
     // The `{ role, content: string }` filter is GONE. It silently dropped anything with parts, which
     // for an agentic adapter is the entire transcript — so a session that needed compaction most was
     // the one that never got it. What cannot be measured as text is measured by its serialized size.
@@ -206,7 +244,7 @@ export class SummarizingSessionStore implements SessionStore<JsonValue> {
       const summary = await this.options.summarize(fold.map(asTurn));
       if (summary.trim() === "") return endRef;
       const head = { role: "user", content: `${SUMMARY_TAG}\n${summary.trim()}\n</conversation-summary>` } as unknown as JsonValue;
-      const entries = [head, ...keep].map((message) => ({ message }));
+      const entries = [head, ...keep];
       const compacted = await this.compact(endRef, entries);
       // The origin is untouched; later callers holding its ref are redirected here.
       this.superseded.set(stream, compacted);
@@ -214,7 +252,7 @@ export class SummarizingSessionStore implements SessionStore<JsonValue> {
         sessionId: stream,
         compacted: fold.length,
         before,
-        after: charsOf(entries.map((e) => e.message)),
+        after: charsOf(entries),
         session: compacted,
       });
       return compacted;

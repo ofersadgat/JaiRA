@@ -7,7 +7,7 @@
  * when the summarizer fails, and it keeps the most recent turns verbatim.
  */
 import { describe, expect, it, vi } from "vitest";
-import type { JsonValue, SessionStore } from "@declarative-ai/exec";
+import type { JsonValue, RecordStore, SessionStore } from "@declarative-ai/exec";
 import { MapSessionStore } from "@declarative-ai/exec";
 import type { WorkflowBundle } from "@declarative-ai/hw";
 import {
@@ -41,15 +41,28 @@ function bundleWith(states: Record<string, unknown>): WorkflowBundle {
   return { rootId: "wf", states: states as WorkflowBundle["states"], source: states as WorkflowBundle["source"] };
 }
 
-/** Append `messages` to `id` and return the ref its head sits at. Streams are append-only. */
+/**
+ * Run one call's worth of writing against `id`, and return the ref its head ends at.
+ *
+ * Resolve the position, claim it with a stub, fill it — which is what a real call does through
+ * `withSession` and `withRecord`. A conversation is the records it holds, so there is no separate
+ * "append messages" to reach for.
+ */
 async function append(store: SessionStore<JsonValue>, id: string, messages: readonly Turn[]): Promise<string> {
-  const lease = await store.begin({ ref: id });
-  return await lease.release({ messages: messages.map((message) => ({ message: message as unknown as JsonValue })) });
+  const records = store as unknown as RecordStore;
+  const at = (await store.resolve({ ref: id })).at;
+  const recordId = `${at.id}:${at.seq}`;
+  records.open({ id: recordId, source: undefined as never, session: at, startMs: 0 });
+  records.close(recordId, { result: { value: { messages } as never } });
+  const end = `${at.id}@${at.seq + 1}`;
+  // Where the conversation ended up, which is NOT where the call ended when compaction moved it.
+  const summarizing = store as Partial<SummarizingSessionStore>;
+  return summarizing.currentRef !== undefined ? await summarizing.currentRef(end) : end;
 }
 
-/** What a stream holds at a ref, as turns. */
+/** What a conversation holds at a ref, as turns. */
 async function contents(store: SessionStore<JsonValue>, ref: string): Promise<Turn[]> {
-  return ((await store.read?.(ref)) ?? []) as unknown as Turn[];
+  return (await store.messages(ref)) as unknown as Turn[];
 }
 
 /** The stream half of a ref, for asserting which stream a write landed on. */
