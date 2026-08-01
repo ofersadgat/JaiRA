@@ -34,7 +34,7 @@ import {
 import { createPromptExecutor } from "@declarative-ai/promptop";
 import { createModelRouter } from "@declarative-ai/llm";
 import { SchemaValidator } from "@declarative-ai/validate";
-import { withMemoize, withRetry, type MemoCache } from "@declarative-ai/exec";
+import { withMemoize, withRecord, withRetry, withSessionPosition, type MemoCache, type RecordStore } from "@declarative-ai/exec";
 import type { Approver, ExecPolicy } from "@declarative-ai/permissions";
 import type { JairaConfig } from "@jaira/shared";
 import { ScriptedFakeExecutor, type FakeRule } from "./fakeExecutor";
@@ -182,22 +182,44 @@ export interface WorkflowRunConfig {
   policy?: ExecPolicy;
   approve?: Approver;
   /**
-   * The session store the engine reads transcripts from. Supplying one is how
-   * conversation `summary` mode works (DESIGN §14 phase 7): the engine notes that
-   * "an app-provided store wins", so a summarizing decorator needs no engine
-   * change. Absent ⇒ the engine's own in-memory store.
+   * The conversation seams: where positions resolve, and where records are written.
+   *
+   * Both, always, or neither. The engine READS the transcript for its preamble and for
+   * `{ conversation }` bindings but no longer writes it — a composed session layer
+   * does — so a run given neither has no conversations at all rather than merely
+   * uncompacted ones. {@link sessionServicesFor} produces the pair.
+   *
+   * They are composed HERE rather than by each caller because the two halves must be
+   * one store: `records` is where a call's payload lands, `sessions` is what reads it
+   * back, and pairing a decorated session store with someone else's records would
+   * claim positions in a conversation nobody can read.
    */
-  sessions?: SessionStore<JsonValue>;
+  session?: { sessions: SessionStore<JsonValue>; records: RecordStore };
 }
 
 export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowExecResult> {
+  // `withSessionPosition` OUTSIDE `withRecord`: the session layer resolves the position a
+  // call will claim, and the record layer claims it by writing the stub. Inverted, a
+  // record would be written before anything decided where it belongs.
+  //
+  // exec's position layer rather than promptop's `withSession`, because the engine states
+  // a REQUEST on `ctx.sessionRequest` rather than putting a session id in the op's config —
+  // it cannot know where a conversation currently is, and deliberately does not. `withSession`
+  // reads the op config, so composed here it would find nothing and silently do nothing.
+  const prompt =
+    cfg.session !== undefined
+      ? (withSessionPosition(
+          { sessions: cfg.session.sessions },
+          withRecord({ records: cfg.session.records }, cfg.prompt as never),
+        ) as unknown as Executor<ExecServices, WorkflowMetrics>)
+      : cfg.prompt;
   const executor = createWorkflowExecutor({
     // The RESOLVED bundle. This used to pass `bundle.source` — the authored states — which the
     // executor then re-loaded on every start; a pinned snapshot no longer carries a `source` at all
     // (EXPRESSIONS.md §11), and re-evaluating one would defeat the point of pinning it.
     definition: cfg.bundle,
     registry: cfg.registry,
-    prompt: cfg.prompt,
+    prompt,
     ...(cfg.callCache !== undefined ? { callCache: cfg.callCache } : {}),
     ...(cfg.persistence !== undefined ? { persistence: cfg.persistence } : {}),
   });
@@ -207,7 +229,7 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     ...(cfg.workspace !== undefined ? { workspace: cfg.workspace } : {}),
     ...(cfg.policy !== undefined ? { policy: cfg.policy } : {}),
     ...(cfg.approve !== undefined ? { approve: cfg.approve } : {}),
-    ...(cfg.sessions !== undefined ? { sessions: cfg.sessions } : {}),
+    ...(cfg.session !== undefined ? { sessions: cfg.session.sessions } : {}),
   };
   return executor.start(workflowStartOp(cfg.inputs), ctx).result;
 }

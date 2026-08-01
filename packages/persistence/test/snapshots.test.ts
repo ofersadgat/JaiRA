@@ -11,8 +11,8 @@ const STATES: Record<string, unknown> = {
   wf: {
     label: "Root",
     inputs: { x: { schema: { type: "string" } } },
-    outputs: { y: { schema: { type: "string" }, binding: { child: "step", output: "y" } } },
-    children: { step: { state: "wf/step", inputs: { x: { input: "x" } } } },
+    outputs: { y: { schema: { type: "string" }, binding: ".children.step.outputs.y" } },
+    children: { step: { state: "wf/step", inputs: { x: ".inputs.x" } } },
     sequence: ["step"],
   },
   "wf/step": {

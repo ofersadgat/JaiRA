@@ -48,7 +48,7 @@ import {
   policyCanEscalate,
   promptSummarizer,
   ScriptedFunctions,
-  sessionStoreFor,
+  sessionServicesFor,
   statusOfResult,
   type ApprovalRequest,
   type ExecObserver,
@@ -509,10 +509,7 @@ export class AppService {
     // Conversation `summary` mode (DESIGN §14 phase 7): installed only for the
     // sessions whose states asked for it, and summarizing through this run's own
     // prompt executor so a scripted run needs no provider.
-    const { store: sessions } = sessionStoreFor(
-      started.bundle,
-      promptSummarizer(prompt),
-    );
+    const { modes: _summaryModes, ...session } = sessionServicesFor(started.bundle, promptSummarizer(prompt));
 
     // Policy for this run: authored project rules compiled to an ExecPolicy, with
     // every decision audited and `require_approval` routed to the inbox (§10.2).
@@ -567,7 +564,7 @@ export class AppService {
           },
           policy,
           approve,
-          ...(sessions !== undefined ? { sessions } : {}),
+          session,
           workspace: {
             root: workspace.root,
             ...(workspace.treeHash !== undefined ? { treeHash: workspace.treeHash } : {}),

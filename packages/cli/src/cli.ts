@@ -56,7 +56,7 @@ import {
   registerTools,
   samePathKey,
   ScriptedFunctions,
-  sessionStoreFor,
+  sessionServicesFor,
   statusOfResult,
   type FakeRule,
   type WorkflowExecResult,
@@ -249,8 +249,8 @@ function buildRunEnvironment(
 ): {
   registry: ReturnType<typeof newRegistry>;
   prompt: ReturnType<typeof buildPromptExecutor>;
-  sessions?: ReturnType<typeof sessionStoreFor>["store"];
-  summaryModes: ReturnType<typeof sessionStoreFor>["modes"];
+  session: Omit<ReturnType<typeof sessionServicesFor>, "modes">;
+  summaryModes: ReturnType<typeof sessionServicesFor>["modes"];
 } {
   const registry = newRegistry();
   // One Exec for the whole run, so every child it starts is recorded against the
@@ -296,11 +296,8 @@ function buildRunEnvironment(
   // Conversation `summary` mode: only installed when a state asked for it, and it
   // summarizes through the run's own prompt executor, so a scripted run stays
   // scripted (DESIGN §14 phase 7).
-  const { store: sessions, modes: summaryModes } = sessionStoreFor(
-    bundle,
-    promptSummarizer(prompt),
-  );
-  return { registry, prompt, ...(sessions !== undefined ? { sessions } : {}), summaryModes };
+  const { modes: summaryModes, ...session } = sessionServicesFor(bundle, promptSummarizer(prompt));
+  return { registry, prompt, session, summaryModes };
 }
 
 /**
@@ -340,7 +337,7 @@ function assertCapabilities(
  * and a `full_history` state cannot honour both. Reported rather than resolved:
  * summarizing under a state that asked for full history would be a quiet lie.
  */
-function warnSummaryConflicts(modes: ReturnType<typeof sessionStoreFor>["modes"], io: CliIo): void {
+function warnSummaryConflicts(modes: ReturnType<typeof sessionServicesFor>["modes"], io: CliIo): void {
   for (const conflict of modes.conflicts) {
     io.stderr(
       `warning: session '${conflict.session}' mixes summary and full_history ` +
@@ -409,7 +406,7 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
 
   const wiring = runWiringOf(values, io.cwd);
   const inputs = values.inputs !== undefined ? recordValue("inputs", jsonValue("inputs", values.inputs, io.cwd)) : {};
-  const { registry, prompt, sessions, summaryModes } = buildRunEnvironment(bundle, config, wiring);
+  const { registry, prompt, session, summaryModes } = buildRunEnvironment(bundle, config, wiring);
   warnSummaryConflicts(summaryModes, io);
   assertCapabilities(registry, bundle, config);
   const result = await executeWorkflow({
@@ -417,7 +414,7 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
     inputs,
     registry,
     prompt,
-    ...(sessions !== undefined ? { sessions } : {}),
+    session,
     ...(io.abortSignal !== undefined ? { abortSignal: io.abortSignal } : {}),
   });
   io.stdout(JSON.stringify(resultReport(result), null, 2) + "\n");
@@ -533,7 +530,7 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
       onCancelRequested: () => stop.abort(),
     });
 
-    const { registry, prompt, sessions, summaryModes } = buildRunEnvironment(started.bundle, project.config, wiring, {
+    const { registry, prompt, session, summaryModes } = buildRunEnvironment(started.bundle, project.config, wiring, {
       artifacts,
       store: project.artifacts,
       observer: owner.observer(),
@@ -554,7 +551,7 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
       inputs: started.meta.inputs ?? {},
       registry,
       prompt,
-      ...(sessions !== undefined ? { sessions } : {}),
+      session,
       persistence: project.events.recorder(taskId, started.runId),
       workspace: { root: workspace.root, ...(workspace.treeHash !== undefined ? { treeHash: workspace.treeHash } : {}) },
       // Merged: SIGINT here, or a cancel another process requested through the job.

@@ -574,7 +574,7 @@ a capability refusal after `beginTaskRun` left the task `running`.
 Two authoring facts this phase pinned, both easy to get wrong and both silent:
 
 - An **operation input is a parameter with a `binding` field** (`{ kind: "text",
-  binding: { input: "x" } }`), whereas `children.<key>.inputs` values are *bare*
+  binding: ".inputs.x" }`), whereas `children.<key>.inputs` values are *bare*
   bindings. Authored the child way, an operation input resolves to empty — an agent
   runs with no instruction and reports success.
 - A delegated agent returns **one string**, so its output slot must be `blob`-kind.
