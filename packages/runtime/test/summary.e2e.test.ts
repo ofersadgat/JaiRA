@@ -8,6 +8,7 @@
  * takes rather than sitting beside it.
  */
 import { describe, expect, it } from "vitest";
+import { MapSessionStore } from "@declarative-ai/exec";
 import { loadBundle } from "@declarative-ai/hw";
 import { ScriptedFakeExecutor } from "../src/fakeExecutor";
 import { executeWorkflow } from "../src/wiring";
@@ -59,6 +60,10 @@ async function run(mode: "summary" | "full_history"): Promise<{ prompts: string[
   const { store } = sessionStoreFor(bundle, async () => "SUMMARY-MARKER: they drafted something long.", {
     budgetChars: 500,
     keepRecentTurns: 0,
+    // A store in BOTH cases, as a durable run wires one: compaction is the author's decision, keeping
+    // the conversation at all is the caller's. Without this the `full_history` run would have no
+    // conversation to carry — which would look like the mode failing rather than nothing being wired.
+    inner: new MapSessionStore(),
   });
   const result = await executeWorkflow({
     bundle,

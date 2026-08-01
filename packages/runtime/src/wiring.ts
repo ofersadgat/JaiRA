@@ -34,7 +34,7 @@ import {
 import { createPromptExecutor } from "@declarative-ai/promptop";
 import { createModelRouter } from "@declarative-ai/llm";
 import { SchemaValidator } from "@declarative-ai/validate";
-import { withMemoize, withRetry, type MemoCache } from "@declarative-ai/exec";
+import { withMemoize, withRecord, withRetry, withSessionPosition, type MemoCache } from "@declarative-ai/exec";
 import type { Approver, ExecPolicy } from "@declarative-ai/permissions";
 import type { JairaConfig } from "@jaira/shared";
 import { ScriptedFakeExecutor, type FakeRule } from "./fakeExecutor";
@@ -197,7 +197,7 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     // (EXPRESSIONS.md §11), and re-evaluating one would defeat the point of pinning it.
     definition: cfg.bundle,
     registry: cfg.registry,
-    prompt: cfg.prompt,
+    prompt: sessionStack(cfg.prompt, cfg.sessions),
     ...(cfg.callCache !== undefined ? { callCache: cfg.callCache } : {}),
     ...(cfg.persistence !== undefined ? { persistence: cfg.persistence } : {}),
   });
@@ -207,9 +207,31 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     ...(cfg.workspace !== undefined ? { workspace: cfg.workspace } : {}),
     ...(cfg.policy !== undefined ? { policy: cfg.policy } : {}),
     ...(cfg.approve !== undefined ? { approve: cfg.approve } : {}),
-    ...(cfg.sessions !== undefined ? { sessions: cfg.sessions } : {}),
+    // One store, both roles. A conversation IS its records, so whatever holds one holds the other —
+    // and the engine states a session REQUEST that only a composed layer can resolve, so without
+    // these two wired no session is in play at all.
+    ...(cfg.sessions !== undefined ? { sessions: cfg.sessions, records: cfg.sessions as never } : {}),
   };
   return executor.start(workflowStartOp(cfg.inputs), ctx).result;
+}
+
+/**
+ * Compose the session stack around an executor: resolve the position, claim it, record what ran.
+ *
+ * The order is the whole point. `withSessionPosition` turns the engine's session REQUEST into a
+ * resolved position and answers a taken one by forking; `withRecord` claims that position by writing
+ * its stub, which is what makes the claim durable and cross-process rather than an in-process lock.
+ * Recording sits INSIDE so a call that never happens — no session wired — writes nothing.
+ *
+ * Absent a store the executor is returned untouched, so a run with no sessions configured pays for
+ * none of this.
+ */
+function sessionStack(
+  core: Executor<ExecServices, WorkflowMetrics>,
+  sessions: SessionStore<JsonValue> | undefined,
+): Executor<ExecServices, WorkflowMetrics> {
+  if (sessions === undefined) return core;
+  return withSessionPosition(withRecord(core as never)) as unknown as Executor<ExecServices, WorkflowMetrics>;
 }
 
 /** Collapse a result into the task-status vocabulary. */
