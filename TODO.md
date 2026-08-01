@@ -322,9 +322,18 @@ What remains:
       outcome, but a middle ground (deny-by-default for the agent's own tools) does not
       exist.
 - [ ] **Summary mode compacts per SESSION, not per state.** One session has one
-      transcript, so a session mixing `summary` and `full_history` is summarized for
+      conversation, so a session mixing `summary` and `full_history` is summarized for
       both; the workflow browser warns, and nothing finer is possible without an engine
       change.
+- [ ] **Summary mode never fires for a state that declares no session.** The opt-in set
+      holds authored NAMES, and `conversationModesOf` maps an undeclared session to
+      `"default"` — a name nothing produces since a session became a position. Such a
+      conversation gets an engine-minted `s_i<n>` key, is joined downstream by dataflow
+      (`.children.k.operation.outputs.session`), and so can span many calls — the case
+      that grows fastest. The opt-in has to key on the declaring STATE;
+      `sessionRequest.seed` carries `<stateId>:<session.id>`. Wrinkle: `messages(ref)`
+      carries no request, so the store must learn a lineage's opt-in at resolve and
+      apply it on later reads. See EXPRESSIONS.md §16.4.
 - [ ] **Pruning does not touch artifacts or conversations.** DESIGN §12 lists
       "conversation artifacts"; there are no such tables yet (see the §4.2 entry above),
       so pruning covers `runs`, `events` and `command_log` only.

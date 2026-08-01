@@ -61,8 +61,9 @@ Deviations from this document as originally drafted, discovered in implementatio
    §7.3's `blocked → human_review`). A port that *rejects* remains a state-level
    failure. The hw executor also offers `interactionPolicy: "eager"` to refuse
    interactive definitions up front (search contexts).
-3. **Conversation mode `summary` currently degrades to `full_history`** (no
-   summarizer wired yet); the schema accepts all four modes per SPEC §4.7.
+3. **Conversation mode `summary` degrades to `full_history` IN HW** — the engine has
+   no summarizer of its own and says so. JaiRA supplies one as a `SessionStore`
+   decorator (§1k); the schema accepts all four modes per SPEC §4.7.
 
 ## 1b. Status Update — 2026-07-17 (phases 1–2 implemented)
 
@@ -538,16 +539,16 @@ The last of §14. 313 tests. What phase 7 settled:
    degrades to on-demand browsing rather than breaking the app.
 3. **Conversation `summary` mode needed no engine change.** The engine reads a
    session's transcript from `ctx.services.sessions` and notes that "an app store
-   wins", so JaiRA supplies a `SummarizingSessionStore`: once a session's transcript
-   passes a budget, its older turns are replaced with one summary turn produced
-   through the run's *own* prompt executor (so a scripted run stays scripted). Three
-   properties are load-bearing — only sessions whose states declare `summary` are
-   compacted (a `full_history` state means it), a failed summarization keeps the full
-   transcript (an expensive run beats a run that forgot what it was doing), and the
-   most recent turns stay verbatim. This is the fix for §1h item 1's measured
-   232 → 42,828 token growth. **Compaction is per session, not per state**: one
-   session has one transcript, so a session mixing the two modes is summarized for
-   both, and the workflow browser warns about it.
+   wins", so JaiRA supplies a `SummarizingSessionStore`: once a conversation passes a
+   budget, its older turns are replaced with one summary turn produced through the
+   run's *own* prompt executor (so a scripted run stays scripted). Three properties
+   are load-bearing — only sessions whose states declare `summary` are compacted (a
+   `full_history` state means it), a failed summarization keeps the full conversation
+   (an expensive run beats a run that forgot what it was doing), and the most recent
+   turns stay verbatim. This is the fix for §1h item 1's measured 232 → 42,828 token
+   growth. **Compaction is per session, not per state**: one session has one
+   conversation, so a session mixing the two modes is summarized for both, and the
+   workflow browser warns about it. ⚠️ Rebuilt on the position model — see §1k.
 4. **`generic-cli` is registered honestly, and therefore usually refused.** A
    non-Claude binary (opencode, codex) reaches JaiRA through the same normalized
    `AgentQuery` seam, driven by JaiRA's own Exec layer so a WSL project runs it inside
@@ -581,6 +582,93 @@ Two authoring facts this phase pinned, both easy to get wrong and both silent:
   The engine fills exactly one produced slot from a whole-value blob output; a `json`
   output is read as a record of named outputs, and the state fails with "did not
   produce required output".
+
+## 1k. Status Update — 2026-08-01 (one grammar; sessions as positions; compat removed)
+
+Four changes that turned out to be one change, plus the gap the last of them exposed.
+427 tests green; declarative-ai at 1334.
+
+1. **One grammar: a leading dot is data, a bare name is a document.** An expression
+   needed an `{ expr }` wrapper to be a binding, while `".inputs.issue"` did not —
+   for no reason a reader could name. Both facts came from the same gap: a dotted
+   path is legal in either grammar and nothing said which one it was. One rule now
+   settles it at every depth, so a binding string and an expression string are the
+   same language:
+
+   ```jsonc
+   "binding": "add(.children.a.outputs.n, 1)"
+   ```
+
+   This REVERSES REFERENCES.md §5, which made the dot optional inside `{ expr }`
+   because "an expression can only ever address runtime space" — true when written,
+   untrue since a call gained a callee resolved along the `path`. See
+   EXPRESSIONS.md §14 for the design, including the false dichotomy the first two
+   attempts shared.
+
+   The cost was ~260 sites and the discipline is worth recording: `.inputs.n` lowers
+   to precisely the tree `inputs.n` used to, so **the dataflow analysis did not
+   move**. A syntax change that reaches fan-out or reachability has gone wrong.
+
+2. **Compatibility spellings removed** — nothing has released, so they were pure
+   cost. The four tagged binding forms (`{child}`, `{input}`, `{artifact}`,
+   `{conversation}`) are gone; `{expr}` stays as emphasis, not as a second
+   mechanism. `sessionId` as a synonym for `session` is REFUSED rather than
+   dropped, because it is not in `OPERATION_OWN_FIELDS`: ignoring it would ship the
+   author's session declaration to the model as a call parameter while the operation
+   quietly started a fresh conversation.
+
+3. **JaiRA never composed a session layer, so conversations did not exist.** The
+   engine stopped writing transcripts when a session became a position — "a run with
+   no session layer composed records nothing, and the transcript stays empty."
+   Nothing in JaiRA composed one, so every preamble was empty, every conversation
+   read was empty, and summary mode was inert. `executeWorkflow` now wraps the
+   prompt executor in `withSessionPosition(withRecord(...))`, and composes it THERE
+   rather than in each caller because the two halves must be one store.
+
+   `withSessionPosition` (exec) rather than `withSession` (promptop): the engine
+   states a REQUEST on `ctx.sessionRequest` rather than putting a session id in the
+   op's config, since it cannot know where a conversation currently is. `withSession`
+   reads the op config, so composed here it would find nothing and do nothing.
+
+   `ScriptedFakeExecutor` reports its delta on the declared `session` channel. A real
+   prompt executor's payload already carries the messages; a fake's does not, and
+   without it a scripted run records positions holding nothing — silent in exactly
+   the runs meant to exercise conversations.
+
+4. **Summary mode rebuilt on positions.** There is no `put` any more, so compaction
+   moved to `resolve` — not a workaround: resolve decides which conversation a call
+   will use, which is what compaction answers. It also runs on `messages`, and that
+   is what makes the feature do anything, because the engine builds its preamble
+   from `messages()` BEFORE dispatch; compacting only at resolve would inline the
+   full transcript and compact immediately after, paying the cost and missing the
+   saving. Compaction MINTS a conversation rather than rewriting one, per the
+   store's own contract.
+
+   The per-lineage chain records what each compaction went FROM as well as TO.
+   Serializing alone is not enough: two calls racing on one ref must land on a single
+   compacted conversation, while a LATER call arrives further along that lineage and
+   must compact from its own position rather than be dragged back to a stale one.
+
+5. **`.conversations.<name>` was already dead, and read as working.** The engine
+   mirrors transcripts under the session's ID — a position, `planning@3` — while the
+   namespace looked up the literal name. That matches only before any call has
+   happened, so from the first call the lookup missed and the resolver refused with
+   "conversation 'planning' is not available". A conversation is now read by REF:
+
+   ```jsonc
+   "when": "at(messages(.operation.outputs.session), -1).content === 'continue'"
+   ```
+
+   Reading a SIBLING's conversation flows as data — the parent wires
+   `.children.plan.operation.outputs.session` into a child's input — because there
+   is no name to look one up by. That is the point rather than a cost: an operation
+   that declared no session never had a name, and was unreadable.
+
+**Open.** `conversationModesOf` still maps a state that declares no session to the
+name `"default"`, which nothing produces now — an undeclared session is a fresh
+per-instance stream. Summary mode therefore never fires for one, which is the case
+that grows fastest. The opt-in has to key on something other than an authored name;
+`sessionRequest.seed` carries `<stateId>:<session.id>`, which is the available hook.
 
 ## 2. Architecture Overview
 
@@ -1047,11 +1135,13 @@ interpolate as worktree-relative paths plus an instruction to read the file —
 - `full_history` (default): reuse the provider session when the adapter
   supports resume (Agent SDK, Claude Code `--resume`); otherwise replay the
   stored transcript artifact as prompt preamble.
-- `summary`: **as built (§1j item 3)**, summarization is a `SessionStore`
-  decorator, not an artifact. Once a session's transcript passes a budget its
-  older turns are replaced by one summary turn produced through the run's own
-  prompt executor. It is scoped **per session**, so a session mixing `summary` and
-  `full_history` is summarized for both (the lint surface warns).
+- `summary`: **as built (§1j item 3, rebuilt in §1k)**, summarization is a
+  `SessionStore` decorator, not an artifact. Once a conversation passes a budget its
+  older turns are replaced by one summary turn produced through the run's own prompt
+  executor — into a NEWLY MINTED conversation, since rewriting in place would change
+  what every existing ref refers to. It is scoped **per session**, so a session
+  mixing `summary` and `full_history` is summarized for both (the lint surface
+  warns).
 - `fresh`: no context.
 - `selected_artifacts`: listed artifacts injected as preamble.
 

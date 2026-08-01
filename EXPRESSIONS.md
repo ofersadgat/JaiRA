@@ -2,7 +2,8 @@
 
 **Status: mostly built.** Expressions lower to producer trees (§1), the operator set is a registry
 (§2), an expression can CALL an operation — prompt or function — resolved along a search `path`
-(§3, §4), one grammar covers bindings and expressions alike (§14), snapshots pin the resolved
+(§3, §4), one grammar covers bindings and expressions alike (§14), there is one spelling per thing
+(§15), a conversation is read by ref (§16), snapshots pin the resolved
 definition (§11), failures travel as data (§5), and the built-in operation library ships
 (§3, `builtins.ts`). What remains is higher-order operations (§3.5) and the items in
 [TODO.md](TODO.md).
@@ -1127,3 +1128,103 @@ document that does not exist, and fails at load.
 - **`resolveDocument` is called twice for a binding path** — once inside `expandReferenced` and once
   to learn the file's extension. Correct and cheap at load time, but it is a seam where a future
   caching layer would have to keep both in step.
+
+---
+
+## 15. One spelling per thing — **built**
+
+Nothing has released, so a compatibility spelling is pure cost: a second thing to
+document, to test, and to keep meaning what the first one means.
+
+**The four tagged binding forms are gone.** `{child}`, `{input}`, `{artifact}` and
+`{conversation}` each said one thing the dotted spelling says, and were kept beside it
+while workflows migrated (REFERENCES.md §10, "available, not enforced"). Their lowerings
+moved INTO `desugarRuntimeReference`, the only caller that still needed them — `.inputs.x`
+builds its `scope.get` edge directly rather than round-tripping through an `{input}` object
+the loader then takes apart again.
+
+`{expr}` survives, and not as compatibility: §14 makes a bare string an expression too, so
+the wrapper is a choice about emphasis rather than a second mechanism.
+
+`resolve.ts`'s `NON_TREE_FORMS` shrank with them. It listed every sugar keyword so a form
+written inside a `refs` tree — where the loader does not walk — was NAMED rather than
+recursed into until the stack died. Four of the six no longer exist.
+
+**`sessionId` is refused, not accepted.** It was a synonym for `session` so an
+`LlmConfiguration`-shaped block could paste in unchanged. What that cost: an equality check
+at parse, a normalization that had to run BEFORE the merge (or a child's `sessionId` would
+sit beside an ancestor's `session` instead of overriding it), and a rule about which
+spelling wins — to save an author one rename.
+
+**Refused rather than ignored**, which is the part worth keeping. `sessionId` is not in
+`OPERATION_OWN_FIELDS`, and anything unrecognized is passed through to the LLM call
+configuration — so silently dropping it would ship the author's session declaration to the
+model as a call parameter while the operation quietly started a fresh conversation. That is
+the same hazard §4.2 records for `path`, met from the other direction.
+
+---
+
+## 16. A conversation is read by REF — **built**
+
+`messages(<session ref>)` is the only way to read a conversation:
+
+```jsonc
+"when": "at(messages(.operation.outputs.session), -1).content === 'continue'"
+"when": "len(messages(.children.plan.operation.outputs.session)) > 4"
+```
+
+### 16.1 The namespace it replaces was already dead
+
+`.conversations.<name>` looked a session up by NAME. The engine mirrors transcripts under
+the session's **id** — a position, `planning@3` — so the lookup matched only before any call
+had happened. From the first call on it missed, and the resolver refused with *"conversation
+'planning' is not available"*.
+
+Nothing had noticed, because the failure needs a workflow that reads a conversation after
+writing to it, and the tests that covered the namespace wrote nothing. This is the shape of
+bug a position model creates on the way in: a name that used to be an address quietly stops
+being one, and the code that took names keeps compiling.
+
+### 16.2 What it cost to add: almost nothing
+
+Every piece existed. `.operation.outputs.session` was already a typed, opaque `{ id }` ref
+with `additionalProperties: false`. `conversation.get` was already the resolver that reads a
+transcript **synchronously** — which is load-bearing, because `resolveRef` cannot be async
+and a guard resolves inside `firstMatchingTransition`.
+
+So `messages` is an **alias** onto `conversation.get`, applied at parse exactly as `===`
+becomes `op.strictEq`. Syntax is sugar, the operation is the meaning, and the AST carries the
+operation — so `messages(s)` and `a === b` are one kind of node by the time anything
+downstream looks, and neither needs a case of its own.
+
+It is a resolver rather than a `builtins.ts` function because it reads the run's mirrored
+transcripts, and the built-in library is pure and synchronous by construction with no scope
+to read.
+
+### 16.3 Three decisions
+
+- **The argument is a ref, never a string.** A bare string would be a second spelling, and
+  the plausible thing to write by hand is a session NAME — which addresses nothing. Refusing
+  it is what stops §16.1's bug being reintroduced by an author rather than by the code.
+- **Turns are typed** `{ role, content }`, so `at(messages(s), -1).content` is checked and
+  `.text` is a lint error. The property `run.cursor` already has, and the reason for typing a
+  closed shape at all. Both inference paths carry it — the AST one and the lowered-tree one —
+  because the differential test requires them to agree.
+- **Reading a sibling's conversation flows as DATA.** The parent wires
+  `.children.plan.operation.outputs.session` into a child's input, and the child calls
+  `messages()` on it. More verbose than a name, and correct for a reason the name never was:
+  an operation that declared no session has no name at all, and was previously unreadable.
+
+### 16.4 Open
+
+`conversationModesOf` still maps a state declaring no session to the name `"default"`, which
+nothing produces — an undeclared session is a fresh per-instance stream (`s_i<n>`,
+unauthorable). Summary mode therefore never fires for one, which is the case that grows
+fastest, since such a conversation is joined by dataflow and can span many calls.
+
+The fix is not to patch the mapping, because there is no name to map TO. The opt-in has to
+key on the DECLARING STATE, which the name was standing in for while sessions were names;
+`sessionRequest.seed` carries `<stateId>:<session.id>` and is the available hook. One
+wrinkle shapes it: `messages(ref)` carries no request, so the store must LEARN a lineage's
+opt-in at resolve time and apply it on later reads. That works — a conversation only grows
+past one call after a resolve — but it changes what `modes.conflicts` is checking.
