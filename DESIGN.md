@@ -548,6 +548,13 @@ The last of §14. 313 tests. What phase 7 settled:
    232 → 42,828 token growth. **Compaction is per session, not per state**: one
    session has one transcript, so a session mixing the two modes is summarized for
    both, and the workflow browser warns about it.
+
+   Reworked under SESSIONS.md §7: compaction now produces a **new session** with a
+   `compaction` edge to the origin, which is left intact — a summarized conversation
+   is not a fork (its prefix is a summary appearing nowhere in the original), and
+   rewriting in place made a held ref silently mean something else. The decorator
+   wraps `close`, so it sees a settled record and compacts between calls rather than
+   mid-flight; `currentRef` is what a caller reads to follow the hop.
 4. **`generic-cli` is registered honestly, and therefore usually refused.** A
    non-Claude binary (opencode, codex) reaches JaiRA through the same normalized
    `AgentQuery` seam, driven by JaiRA's own Exec layer so a WSL project runs it inside
@@ -722,8 +729,26 @@ artifacts      (id PK, task_id, run_id, logical_path, physical_path, content,
 jobs           (id PK, kind, task_id, run_id, parent_job_id, owner_token, pid,
                 command, started_at, heartbeat_at, cancel_requested_at,
                 ended_at, outcome)   -- BUILT (§4.2a): process claims + children
-conversations  (id PK, task_id, provider, provider_session_id, mode,
-                transcript_artifact_id, created_at)
+sessions       (id PK, label, parent_id, parent_cursor, edge, digest,
+                task_id, run_id, created_at)
+                -- BUILT (SESSIONS.md §9), replaces `conversations`. A row is a
+                -- BRANCH; a ref names one AT a position. edge = root | fork |
+                -- compaction | resync, and only `fork` carries parent_cursor,
+                -- because only a fork shares a byte-identical prefix. `label` is a
+                -- derived display form and is NEVER a key — lineage comes from
+                -- parent_id. The id is opaque outside the store.
+operation_records
+               (session_id, seq, id, source, inputs, result, metrics,
+                external_id, created_at, PRIMARY KEY (session_id, seq))
+                -- BUILT. What every execution DID. A session IS the records
+                -- sharing a session_id, ordered by seq — there is no message
+                -- table, because a prompt record's result is an LlmOutput already
+                -- carrying its messages. Appending a turn and recording a call are
+                -- ONE write. The PK is the position RESERVATION: written two-phase
+                -- (stub with NULL result, filled on settle), so a losing writer
+                -- collides instead of observing a stale head, and a crash leaves
+                -- evidence rather than a hole. session_id is NULL for a record
+                -- outside any conversation.
 command_log    (id PK, operation_id, raw_command, parsed_intent_json,
                 decision,                            -- allowed | blocked | approved | denied
                 decided_by, created_at)              -- policy | user
@@ -841,7 +866,12 @@ On startup, for every task with `status = running`:
    the adapter supports session resume and `provider_session_id` is recorded,
    attempt resume; otherwise mark the attempt `interrupted` and start a fresh
    attempt (same instance, `attempt + 1`, conversation per the state's
-   configured mode). UI operations are simply re-presented — they are pull-based
+   configured mode). The handle to resume from is `operation_records.external_id`
+   on the interrupted record — which is also the evidence that it was in flight,
+   since a stub with a NULL `result` is exactly a call that never settled.
+   Restarting into the same conversation FORKS it (SESSIONS.md §5): the position
+   the dead attempt reserved is taken, and a retry must not write over what a
+   crashed process may already have sent. UI operations are simply re-presented — they are pull-based
    (§7.1) and lose nothing.
 3. Re-run transition evaluation for any instance whose last event was an
    unprocessed child completion (the completion event is in the journal, so
@@ -1030,7 +1060,7 @@ interface RunSpec {
   cwd: string;                    // task worktree (or project dir if unbound)
   execEnv: ExecEnv;               // windows | { wsl: distro }
   prompt: string;                 // rendered template + injected contract text
-  conversation: ConversationRef;  // mode + provider session / transcript refs
+  conversation: ConversationRef;  // mode + session ref (branch@position) — SESSIONS.md
   outputContract: OutputContract; // §7.5
   policy: CompiledPolicy;         // §10
   env: Record<string, string>;    // provider auth etc., from project config
@@ -1042,21 +1072,35 @@ interpolation (there is no `params` namespace). Artifact-typed inputs were to
 interpolate as worktree-relative paths plus an instruction to read the file —
 **not built**: an artifact travels inline as content today (§7.5, TODO.md).
 
-### 7.3 Conversation Modes (spec §4.7)
+### 7.3 Sessions and Conversation Modes (spec §4.7)
 
-- `full_history` (default): reuse the provider session when the adapter
-  supports resume (Agent SDK, Claude Code `--resume`); otherwise replay the
-  stored transcript artifact as prompt preamble.
-- `summary`: **as built (§1j item 3)**, summarization is a `SessionStore`
-  decorator, not an artifact. Once a session's transcript passes a budget its
-  older turns are replaced by one summary turn produced through the run's own
-  prompt executor. It is scoped **per session**, so a session mixing `summary` and
-  `full_history` is summarized for both (the lint surface warns).
-- `fresh`: no context.
-- `selected_artifacts`: listed artifacts injected as preamble.
+**Superseded by [SESSIONS.md](SESSIONS.md), which is the model of record.** A session is an
+**append-only conversation**, and a session ref names one *at a position* — so "continue from here"
+and "branch from here" are the same primitive, and an id is a commitment to content rather than a
+mutable name. The four points below are the ones that change how a workflow is authored:
 
-Transcripts live in the run's session store, keyed by logical session id, and are
-readable as data through a `{ conversation }` binding. They are **not** written to
+- **There is no implicit `"default"` session.** A state that declares none gets its OWN conversation.
+  Threading across states (spec §4.7) is something an author asks for, by naming a session once at a
+  root and letting the environment chain carry it down (WORKFLOWS.md §5.1). An implicit process-wide
+  transcript was the thing driving unbounded context growth.
+- **`session` no longer keys the workspace or the permission ledger.** Those belong to a *resource
+  bundle*, keyed on the DECLARED name and inherited from the enclosing state — so a fork, a retry and
+  a loop iteration all keep one worktree and one set of approvals, none of them having changed what
+  the author declared. A conversation position moves on every call and cannot key either.
+- **Compaction produces a NEW conversation**, with a `compaction` edge to its origin, which is left
+  intact. It is not a fork: a fork's prefix is byte-identical, and a compacted conversation opens with
+  a summary appearing nowhere in the origin. Rewriting in place is what made a held ref silently mean
+  something else, and invalidated the provider prompt cache on every compaction.
+- **A conversation IS its records.** There is no message table: `operation_records` holds what each
+  call produced, `PRIMARY KEY (session_id, seq)` reserves the position, and a position counts
+  OPERATIONS — one call that produced six turns advances a conversation by one.
+
+Modes themselves are unchanged: `full_history` (default), `summary`, `fresh`, `selected_artifacts`.
+`summary` is a store decorator scoped **per session**, so a session mixing `summary` and
+`full_history` is summarized for both (the lint surface warns, for NAMED sessions — an undeclared
+state's conversation is private and has nothing to conflict with).
+
+Conversations are readable as data through a `{ conversation }` binding. They are **not** written to
 `jaira-artifacts/…` — no artifact file is written at all yet (§7.5).
 
 ### 7.4 Skill Operations

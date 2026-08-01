@@ -319,7 +319,8 @@ comes from:
 { "input": "issue" }                           this state's declared input
 { "expr": "outputs.n + 1" }                    a small computation
 { "artifact": "name" }                         a session artifact
-{ "conversation": "review", "message": 0 }     a transcript, or one message
+{ "conversation": "review", "message": 0 }     a conversation, or one message
+                                               (the name is a session ref — §4.7)
 { "text": "significant" }                      a string literal
 { "json": { "a": 1 } }                         a JSON literal
 ```
@@ -435,10 +436,18 @@ repository.
 
 ### 4.7 Conversations
 
-Conversations are artifacts. A state may choose how to use prior conversation
-context.
+> **Superseded by [SESSIONS.md](SESSIONS.md)** for everything about session identity,
+> continuation and branching. What follows is the mode vocabulary, which is unchanged.
 
-Supported conversation modes:
+A conversation is an **append-only** stream of calls, and a session ref names one *at a
+position* — `<branch>@<position>` — so "continue from here" and "branch from here" are one
+primitive. A state that declares no session gets its OWN conversation; there is no implicit
+process-wide default. Threading across states is asked for, by naming `environment.session`
+at a common ancestor. A conversation is never rewritten: a retry FORKS (the position it
+wants is already taken), and compaction produces a NEW session with an edge back to the
+intact original.
+
+`operation.session` is the ref. `operation.conversation.mode` is how much of it to send:
 
 ```text
 full_history
@@ -448,7 +457,8 @@ selected_artifacts
 ```
 
 The initial default is `full_history`, but the schema must support all modes so
-projects can move toward more controlled context selection over time.
+projects can move toward more controlled context selection over time. `summary` is scoped
+per session, so a session mixing it with `full_history` is summarized for both.
 
 ## 5. State File Format
 

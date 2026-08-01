@@ -34,8 +34,9 @@ assumption breaks.
       `TaskMeta.parentTaskId` is stored and nothing reads it: no board grouping, no
       `waiting_for_event` state, no parent/child rollup.
 - [ ] **§4.2 tables are partly deferred** (§1b item 2). `command_log` landed with
-      phase 6, `artifacts` with §7.6 and `jobs` with §4.2a; `instances`, `operations`,
-      `transitions` and `conversations` still do not exist — the board and detail views
+      phase 6, `artifacts` with §7.6, `jobs` with §4.2a and `sessions` +
+      `operation_records` with SESSIONS.md (replacing the drafted `conversations`);
+      `instances`, `operations` and `transitions` still do not exist — the board and detail views
       are projected from the `events` journal instead. They land with step-level
       resume, which needs `@declarative-ai/hw` support.
 - [ ] **Workflow migration for a running task is out of scope** (§5.3). The escape
@@ -249,7 +250,11 @@ What remains:
   - [ ] Compose the stack in JaiRA and pass it. The wrapper LEVEL is a real choice, not
         an accident: llm-aware wrappers (`withRateLimit`/`withBudget`/`withSession`, which
         live in `promptop`) belong on the prompt executor at the leaf, where `withRetry`
-        already is; op-level wrappers go above dispatch. **Memoize at the prompt leaf** —
+        already is; op-level wrappers go above dispatch. `withRecord`/`withSessionPosition`
+        are the exception and live in `exec`, not `promptop` — hw cannot depend on
+        `promptop`, and recording an execution is not llm-specific anyway. The order is
+        fixed: `withSession(withRecord(core))`, because the record has to store the
+        conversation before `withSession` projects it down to the op's output value. **Memoize at the prompt leaf** —
         that is where the cost and the latency are, and it keys on the RENDERED prompt op,
         which is the identity worth reusing. Memoizing over the dispatcher instead would
         key the whole composite; legitimate, but a bigger claim. Known gap either way: a
@@ -324,7 +329,11 @@ What remains:
 - [ ] **Summary mode compacts per SESSION, not per state.** One session has one
       transcript, so a session mixing `summary` and `full_history` is summarized for
       both; the workflow browser warns, and nothing finer is possible without an engine
-      change.
-- [ ] **Pruning does not touch artifacts or conversations.** DESIGN §12 lists
-      "conversation artifacts"; there are no such tables yet (see the §4.2 entry above),
-      so pruning covers `runs`, `events` and `command_log` only.
+      change. Only NAMED sessions can collide — a state that declares none gets its own
+      private conversation (SESSIONS.md §4).
+- [ ] **Pruning does not touch artifacts.** DESIGN §12 lists "conversation artifacts";
+      no artifact file is written for a conversation yet (§7.5), so pruning covers `runs`,
+      `events`, `command_log` and — since SESSIONS.md §11 — session lineage. Sessions
+      prune by DEPTH, deepest first, because a descendant holds a foreign key into its
+      parent and `created_at` ties within a millisecond ordered a root ahead of its own
+      children.
