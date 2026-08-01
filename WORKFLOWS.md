@@ -311,10 +311,7 @@ the common case says the name once:
 "whole":    { "binding": ".children.context.outputs" }                 // the entire outputs object
 ```
 
-Stopping at `.outputs` gives the whole object as **one value**. The tagged form
-still works and is exactly equivalent — `{ "child": "context" }` selects the
-output named by its own slot, and `{ "child": "context", "output": "*" }` is the
-whole object.
+Stopping at `.outputs` gives the whole object as **one value**.
 
 ### 3.5 Spreading a child's outputs
 
@@ -551,9 +548,12 @@ the same rule.
 
 - **`session`** — the logical session owning the conversation transcript,
   workspace and permissions. Operations sharing an id share a conversation.
-  Absent ⇒ the run's default session (`"default"`). **`sessionId` is accepted as
-  a synonym**, so an `LlmConfiguration`-shaped block pastes in unchanged;
-  declaring both with different values is an error.
+  ⚠️ Absent ⇒ a FRESH stream private to this operation — not a shared `"default"`
+  session, which is what it used to mean. An implicit process-wide transcript is
+  the thing that drives unbounded context growth, so sharing one is now something
+  you ask for by naming it. The run's shared *workspace* is unaffected, being a
+  separate concern. There is one spelling: `sessionId` is refused, not accepted
+  as a synonym.
 - **`tools`** — logical tool names the operation may call mid-loop, resolved
   through `registry.tools`. JaiRA registers `bash`. **Listing a tool here is what
   puts an agent's commands under the policy at all.**
@@ -581,7 +581,7 @@ the same rule.
 | `permissions` | merged, with `permissions.tools` merged per tool name |
 
 `schema` and `binding` are replaced rather than merged because merging them
-produces nonsense: `{ child: "a" }` merged with `{ input: "b" }` is not a binding
+produces nonsense: `".children.a.outputs.x"` merged with `".inputs.b"` is not a binding
 at all, and one JSON Schema deep-merged into another (`{ type: "string" }` under
 `{ type: "array", items }`) is not a schema.
 
@@ -592,7 +592,7 @@ gate in the subtree as if the author had written it there. The
 execution-environment fields are *not* kind-specific — a gate under a
 `session`-declaring root still joins that session.
 
-⚠️ A `{ child: … }` binding in an `environment` block names a child key that only
+⚠️ A `.children.<key>…` binding in an `environment` block names a child key that only
 exists in the declaring state. It is meaningless once inherited; use
 `{ input: … }`, which resolves in whatever state consumes it.
 
@@ -756,10 +756,11 @@ that operation, a `.md` is text, anything else is a JSON literal.
 and it is worth reaching for when a reader would otherwise have to squint to see that a
 value is computed.
 
-**The tagged forms still work.** `{ "child": "c", "output": "x" }`,
-`{ "input": … }`, `{ "artifact": … }` and `{ "conversation": … }` lower to exactly
-the same producer edge as the dotted spelling, so nothing downstream can tell
-which you wrote. See [REFERENCES.md §10](REFERENCES.md) for the mapping.
+**The tagged forms are gone.** `{ "child": … }`, `{ "input": … }`,
+`{ "artifact": … }` and `{ "conversation": … }` each said one of these separately
+and were kept alongside the dotted spelling while workflows migrated. There is one
+way to name a runtime value now, and no table mapping five spellings onto it —
+see [REFERENCES.md §10](REFERENCES.md) for what each one became.
 
 ---
 

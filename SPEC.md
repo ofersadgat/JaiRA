@@ -297,8 +297,8 @@ Good:
   "critique": {
     "state": "feature/plan/critique",
     "inputs": {
-      "plan_doc": { "child": "context", "output": "plan_doc" },
-      "goals": { "child": "goals", "output": "goals" }
+      "plan_doc": ".children.context.outputs.plan_doc",
+      "goals": ".children.goals.outputs.goals"
     }
   }
 }
@@ -314,14 +314,15 @@ Wiring values are **bindings**, not expression strings. Each names where the val
 comes from:
 
 ```text
-{ "child": "context", "output": "plan_doc" }   a declared child's output
-{ "child": "critique" }                        a child's whole output object
-{ "input": "issue" }                           this state's declared input
-{ "expr": ".outputs.n + 1" }                    a small computation
-{ "artifact": "name" }                         a session artifact
-{ "conversation": "review", "message": 0 }     a transcript, or one message
-{ "text": "significant" }                      a string literal
-{ "json": { "a": 1 } }                         a JSON literal
+".children.context.outputs.plan_doc"          a declared child's output
+".children.critique.outputs"                 a child's whole output object
+".inputs.issue"                              this state's declared input
+".artifacts.name"                            a session artifact
+".conversations.review.messages.0"           a transcript, or one message
+"add(.outputs.n, 1)"                         a small computation
+{ "expr": "add(.outputs.n, 1)" }             the same, spelled explicitly
+{ "text": "significant" }                    a string literal
+{ "json": { "a": 1 } }                       a JSON literal
 ```
 
 > Revised. Wiring was originally a bare expression string
@@ -340,7 +341,7 @@ binding must be produced by the state's operation.
 
 > Revised: an output's `from` expression is now that slot's `binding`, drawn from
 > the same vocabulary as input wiring (§4.2). `"from": "children.x.outputs.y"`
-> becomes `"binding": { "child": "x", "output": "y" }`, and a computed one becomes
+> becomes `"binding": ".children.x.outputs.y"`, and a computed one becomes
 > `"binding": { "expr": "…" }`.
 
 Outputs should be schema-validated when they are used for:
@@ -361,7 +362,7 @@ Example:
 {
   "outputs": {
     "child_outputs": {
-      "binding": { "child": "critique" }
+      "binding": ".children.critique.outputs.child_outputs"
     }
   }
 }
@@ -681,7 +682,7 @@ Agents may not:
     "human_decision": {
       "schema": { "type": "string", "enum": ["approve", "request_changes", "block"] },
       "optional": true,
-      "binding": { "child": "human_review", "output": "decision" }
+      "binding": ".children.human_review.outputs.decision"
     }
   },
   "operation": {
@@ -696,7 +697,7 @@ Agents may not:
     "address_weaknesses": {
       "state": "feature/plan/critique/address_weaknesses",
       "inputs": {
-        "plan_doc": { "input": "plan_doc" },
+        "plan_doc": ".inputs.plan_doc",
         "weaknesses": { "expr": ".outputs.weaknesses" },
         "critique_report": { "expr": ".outputs.critique_report" }
       }
@@ -704,7 +705,7 @@ Agents may not:
     "human_review": {
       "state": "feature/plan/critique/human_review",
       "inputs": {
-        "plan_doc": { "input": "plan_doc" },
+        "plan_doc": ".inputs.plan_doc",
         "critique_report": { "expr": ".outputs.critique_report" }
       }
     }
@@ -820,30 +821,30 @@ validated outputs. The parent branches on `outputs.decision`.
     },
     "plan_doc": {
       "schema": { "type": "string", "contentMediaType": "text/markdown" },
-      "binding": { "child": "context", "output": "plan_doc" }
+      "binding": ".children.context.outputs.plan_doc"
     },
     "critique": {
-      "binding": { "child": "critique" }
+      "binding": ".children.critique.outputs.critique"
     }
   },
   "children": {
     "goals": {
       "state": "feature/plan/goals",
       "inputs": {
-        "issue": { "input": "issue" }
+        "issue": ".inputs.issue"
       }
     },
     "context": {
       "state": "feature/plan/context",
       "inputs": {
-        "issue": { "input": "issue" },
-        "goals": { "child": "goals", "output": "goals" }
+        "issue": ".inputs.issue",
+        "goals": ".children.goals.outputs.goals"
       }
     },
     "critique": {
       "state": "feature/plan/critique",
       "inputs": {
-        "plan_doc": { "child": "context", "output": "plan_doc" },
+        "plan_doc": ".children.context.outputs.plan_doc",
         "severity_threshold": { "text": "significant" }
       }
     }

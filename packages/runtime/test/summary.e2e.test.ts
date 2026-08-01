@@ -12,7 +12,7 @@ import { loadBundle } from "@declarative-ai/hw";
 import { ScriptedFakeExecutor } from "../src/fakeExecutor";
 import { executeWorkflow } from "../src/wiring";
 import { newRegistry } from "../src/wiring";
-import { SUMMARY_TAG, sessionStoreFor } from "../src/summary";
+import { SUMMARY_TAG, sessionServicesFor } from "../src/summary";
 
 /** Two prompt states in one session; `second` chooses how it carries history. */
 function twoStepFiles(mode: "summary" | "full_history"): Record<string, unknown> {
@@ -20,10 +20,10 @@ function twoStepFiles(mode: "summary" | "full_history"): Record<string, unknown>
     chain: {
       label: "Chain",
       inputs: { topic: { schema: { type: "string" } } },
-      outputs: { answer: { schema: { type: "string" }, binding: { child: "second", output: "answer" } } },
+      outputs: { answer: { schema: { type: "string" }, binding: ".children.second.outputs.answer" } },
       children: {
-        first: { state: "chain/first", inputs: { topic: { input: "topic" } } },
-        second: { state: "chain/second", inputs: { draft: { child: "first", output: "draft" } } },
+        first: { state: "chain/first", inputs: { topic: ".inputs.topic" } },
+        second: { state: "chain/second", inputs: { draft: ".children.first.outputs.draft" } },
       },
       sequence: ["first", "second"],
       transitions: [{ to: "terminate.success", when: ".children.second.outcome === 'success'" }],
@@ -31,13 +31,13 @@ function twoStepFiles(mode: "summary" | "full_history"): Record<string, unknown>
     "chain/first": {
       inputs: { topic: { schema: { type: "string" } } },
       outputs: { draft: { schema: { type: "string" } } },
-      environment: { conversation: { mode: "fresh" } },
+      environment: { session: "chain", conversation: { mode: "fresh" } },
       operation: { kind: "prompt", prompt: "Draft something about {{.inputs.topic}}.", model: "m" },
     },
     "chain/second": {
       inputs: { draft: { schema: { type: "string" } } },
       outputs: { answer: { schema: { type: "string" } } },
-      environment: { conversation: { mode } },
+      environment: { session: "chain", conversation: { mode } },
       operation: { kind: "prompt", prompt: "Refine the draft.", model: "m" },
     },
   };
@@ -52,7 +52,7 @@ async function run(mode: "summary" | "full_history"): Promise<{ prompts: string[
     { promptIncludes: "Draft something", output: { draft: LONG_DRAFT } },
     { promptIncludes: "Refine the draft", output: { answer: "refined" } },
   ]);
-  const { store } = sessionStoreFor(bundle, async () => "SUMMARY-MARKER: they drafted something long.", {
+  const session = sessionServicesFor(bundle, async () => "SUMMARY-MARKER: they drafted something long.", {
     budgetChars: 500,
     keepRecentTurns: 0,
   });
@@ -61,7 +61,7 @@ async function run(mode: "summary" | "full_history"): Promise<{ prompts: string[
     inputs: { topic: "widgets" },
     registry: newRegistry(),
     prompt: fake,
-    ...(store !== undefined ? { sessions: store } : {}),
+    session,
   });
   return {
     prompts: fake.calls.map((op) => op.user ?? ""),

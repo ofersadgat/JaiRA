@@ -4,9 +4,10 @@
 snapshot closure all ship; `@declarative-ai/hw`'s `reference.ts` / `shape.ts` / `expand.ts` are this
 document in code, and [WORKFLOWS.md](WORKFLOWS.md) is the authoring reference.
 
-One thing here is NOT built: the tagged binding forms (`{"child": …}`, `{"input": …}`) still work
-alongside the new spelling rather than having been removed. Both lower to the same base ref, so
-nothing downstream can tell them apart — the migration in §10 is available, not enforced.
+Fully built, including §10: the tagged binding forms (`{"child": …}`, `{"input": …}`,
+`{"artifact": …}`, `{"conversation": …}`) were kept alongside the new spelling while workflows
+migrated and have since been REMOVED. `{"expr": …}` survives — not as compatibility, but because
+§5 makes a bare string an expression too, so the wrapper is a choice about emphasis.
 
 Today "point at a thing" has three unrelated spellings: a state id is a path
 (`feature/plan`), a binding is a tagged object (`{"child": "c", "output": "x"}`), and an
@@ -310,7 +311,7 @@ operation last round**, so the authored type is not a plain intersection:
 type AuthoredLlmConfig = Omit<LlmConfiguration, "tools" | "sessionId"> & {
   /** Logical names, resolved through `registry.tools`. */
   tools?: string[];
-  /** The logical session id. `sessionId` is accepted as a synonym. */
+  /** The logical session id. */
   session?: string;
 };
 ```
@@ -320,8 +321,13 @@ type AuthoredLlmConfig = Omit<LlmConfiguration, "tools" | "sessionId"> & {
 logical names the runner resolves through `registry.tools` before the call. The authored
 form stays `string[]`.
 
-**`session` and `sessionId` are synonyms**, with `session` canonical, so an
-`LlmConfiguration`-shaped block pastes in unchanged. Three rules make that safe:
+⚠️ **`sessionId` was a synonym for `session` and is now REFUSED.** It existed so an
+`LlmConfiguration`-shaped block could paste in unchanged, and the three rules below are what it
+cost: an equality check at parse, a normalization that had to run before the merge, and a rule
+about which spelling wins — to save an author one rename. The refusal is explicit rather than a
+silent drop, because `sessionId` is not in `OPERATION_OWN_FIELDS`: ignoring it would pass the
+author's session declaration through to the model as a call parameter while the operation quietly
+started a fresh conversation. Kept below because the reasoning is what a synonym always costs:
 
 - **Both present and different is an error.** Silently picking one would be a coin flip over
   which conversation the call joins.
@@ -425,7 +431,7 @@ One pass, not two. Every authored workflow changes.
 | `"state": "feature/plan/critique"` | omit it, or `"./critique"` |
 | prompt op `config: {model: …}` | `model` etc. directly on the operation (§7.2) |
 | function op `config` | `args` (§7.2) |
-| `operation.session` | unchanged; `sessionId` also accepted, normalized to `session` (§7.2) |
+| `operation.session` | unchanged; `sessionId` is refused (§7.2) |
 
 The `ctx_*` output spread becomes a reference to the child's outputs object, so it survives
 unchanged in meaning.

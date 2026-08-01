@@ -111,6 +111,20 @@ export class ScriptedFakeExecutor implements Executor<ExecServices, WorkflowMetr
     return {
       value: rule.output ?? null,
       metrics: { durationMs: 1, costUsd: rule.cost ?? 0.01, costSource: "table" },
-    };
+      // The conversation this call added, on the DECLARED session channel.
+      //
+      // A real prompt executor's payload is an `LlmOutput` that already carries the
+      // messages; this fake's projected value is the structured output and is not, so
+      // it reports the delta explicitly. Without it a scripted run records positions
+      // holding no messages — every transcript empty, and every conversation-dependent
+      // behaviour (the preamble, `{ conversation }` bindings, summary mode) silently
+      // inert in exactly the runs that are supposed to exercise them.
+      session: {
+        messages: [
+          { role: "user", content: op.user ?? "" },
+          { role: "assistant", content: typeof rule.output === "string" ? rule.output : JSON.stringify(rule.output ?? null) },
+        ],
+      },
+    } as ExecResult<ResolvedValue, WorkflowMetrics>;
   }
 }

@@ -30,7 +30,7 @@ let agentScript: string;
  *
  *  - An **operation input is a parameter with a `binding` field**, not a bare
  *    binding. (`children.<key>.inputs` values *are* bare bindings, which is the
- *    trap.) Authored as `{ input: "instruction" }` the slot silently resolves to
+ *    trap.) Authored as `".inputs.instruction"` the slot silently resolves to
  *    empty, and the agent runs with no instruction at all.
  *  - A delegated agent returns **one string**, so its output slot must be
  *    `blob`-kind: the engine fills exactly one produced slot from a whole-value
@@ -45,7 +45,7 @@ const AGENT_WORKFLOW = {
     operation: {
       kind: "function",
       function: "generic-cli",
-      input: { prompt: { kind: "text", binding: { input: "instruction" } } },
+      input: { prompt: { kind: "text", binding: ".inputs.instruction" } },
       output: { kind: "blob", schema: { type: "string", contentMediaType: "text/markdown" } },
     },
   },
