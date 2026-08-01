@@ -73,18 +73,69 @@ export interface SessionRef {
   readonly id: string;
 }
 
-/** One stored entry: a `ModelMessage` verbatim, plus what the provider called it. */
-export interface SessionEntry<Msg = JsonValue> {
-  message: Msg;
-  /** The provider's own id for this entry, when it has one. */
-  providerRef?: string;
-  /** Which operation appended it. */
-  operationId?: string;
+/**
+ * One record: what an execution did, at a position in a conversation.
+ *
+ * There is no message table. A conversation IS the records sharing a session id, and a record
+ * already holds what its call produced — for a prompt op an `LlmOutput`, messages verbatim. That is
+ * also why a position counts OPERATIONS: a call that produced six turns advances by one.
+ */
+export interface SessionRecord {
+  /** The record's own id — its position, for a record inside a conversation. */
+  id: string;
+  /**
+   * The OPERATION that ran, not a resolved call definition. Operations are immutable over a run — a
+   * layer that adjusts one produces a NEW op — so this names precisely what ran.
+   */
+  source?: JsonValue;
+  /** What the call produced, or why it failed. Absent while the record is PENDING. */
+  result?: JsonValue;
+  /** The provider's own handle as of this record. */
+  externalId?: string;
 }
 
-/** A stored entry read back, with the position it occupies. */
-export interface SessionEntryAt<Msg = JsonValue> extends SessionEntry<Msg> {
+/** A record read back, with the position it occupies. */
+export interface SessionRecordAt extends SessionRecord {
   seq: number;
+}
+
+/**
+ * The record a DERIVED conversation opens with — a compaction's summary, a resync's re-read log.
+ *
+ * Written in the same payload shape a call produces, so one reader serves both and nothing has to
+ * ask whether a conversation's first entry came from a provider or from us. `source` names the
+ * derivation rather than an operation, because no operation ran: this is the engine saying what it
+ * did, which is exactly the provenance a reader scrubbing the conversation wants.
+ */
+function derivedRecord(originId: string, kind: "compact" | "resync", messages: readonly unknown[]): SessionRecord {
+  return {
+    id: `${originId}~${kind}`,
+    source: { derived: kind } as unknown as JsonValue,
+    result: { value: { messages } } as unknown as JsonValue,
+  };
+}
+
+/** The provider handle a settled record reports, when it reports one. */
+function payloadHandle(settled: { result?: { value?: unknown } }): string | undefined {
+  const handle = (settled.result?.value as { providerSessionId?: unknown } | undefined)?.providerSessionId;
+  return typeof handle === "string" ? handle : undefined;
+}
+
+/**
+ * The messages a record's payload carries.
+ *
+ * `{ messages: [...] }` is a call's payload — an `LlmOutput`, or a derived conversation's opening
+ * record written in the same shape so one reader serves both. Anything else reads as a single
+ * message, which is what a caller writing a bare turn produces. An ABSENT payload — a record still
+ * pending, or one whose call failed before the provider responded — carries nothing, which is
+ * correct rather than an omission: there is no turn to replay.
+ */
+export function messagesOf<Msg = JsonValue>(result: JsonValue | undefined): Msg[] {
+  if (result === null || result === undefined || typeof result !== "object" || Array.isArray(result)) return [];
+  const value = (result as { value?: unknown }).value;
+  if (value === null || value === undefined || typeof value !== "object") return [];
+  const messages = (value as { messages?: unknown }).messages;
+  return Array.isArray(messages) ? (messages as Msg[]) : [value as Msg];
 }
 
 /**
@@ -255,7 +306,7 @@ export interface ForkOptions extends SessionOrigin {
 export interface DerivedOptions extends SessionOrigin {
   seed: string;
   /** The messages this branch starts with. Compaction supplies a summary; resync, the provider's log. */
-  entries: readonly SessionEntry[];
+  entries: readonly SessionRecord[];
 }
 
 // --- The store ------------------------------------------------------------------
@@ -304,7 +355,7 @@ export class SessionStreams<Msg = JsonValue> {
    * exactly the cursor it was cut at.
    */
   head(branchId: string): number {
-    const row = this.db.prepare(`SELECT MAX(seq) AS max FROM session_messages WHERE session_id = ?`).get(branchId) as
+    const row = this.db.prepare(`SELECT MAX(seq) AS max FROM operation_records WHERE session_id = ?`).get(branchId) as
       | { max: number | null }
       | undefined;
     if (row?.max !== null && row?.max !== undefined) return row.max + 1;
@@ -327,7 +378,7 @@ export class SessionStreams<Msg = JsonValue> {
    * ancestors' ranges tile `[0, position)` exactly — no overlap, no gap — which is why
    * a single `ORDER BY seq` is the whole of the reassembly.
    */
-  materialize(branchId: string, position?: number): SessionEntryAt<Msg>[] {
+  materialize(branchId: string, position?: number): SessionRecordAt[] {
     const upTo = position ?? this.head(branchId);
     const rows = this.db
       .prepare(
@@ -338,27 +389,40 @@ export class SessionStreams<Msg = JsonValue> {
              FROM sessions p JOIN chain c ON p.id = c.parent_id
             WHERE c.edge = 'fork' AND c.parent_cursor IS NOT NULL
          )
-         SELECT m.seq, m.message_json, m.provider_ref, m.operation_id
-           FROM chain c JOIN session_messages m ON m.session_id = c.id
+         SELECT m.seq, m.id, m.source, m.result, m.external_id
+           FROM chain c JOIN operation_records m ON m.session_id = c.id
           WHERE m.seq < c.limit_seq
           ORDER BY m.seq`,
       )
       .all({ id: branchId, upTo }) as Array<{
       seq: number;
-      message_json: string;
-      provider_ref: string | null;
-      operation_id: string | null;
+      id: string;
+      source: string | null;
+      result: string | null;
+      external_id: string | null;
     }>;
     return rows.map((row) => ({
       seq: row.seq,
-      message: JSON.parse(row.message_json) as Msg,
-      ...(row.provider_ref !== null ? { providerRef: row.provider_ref } : {}),
-      ...(row.operation_id !== null ? { operationId: row.operation_id } : {}),
+      id: row.id,
+      ...(row.source !== null ? { source: JSON.parse(row.source) as JsonValue } : {}),
+      ...(row.result !== null ? { result: JSON.parse(row.result) as JsonValue } : {}),
+      ...(row.external_id !== null ? { externalId: row.external_id } : {}),
     }));
   }
 
+  /**
+   * The messages a branch holds up to `position` — the records, unwrapped.
+   *
+   * A record's payload is what its call produced, and for a prompt op that is an
+   * `LlmOutput` carrying `messages`. Anything else reads as a single message, which is
+   * what lets a caller write a bare turn without pretending it was a model call.
+   */
+  messages(branchId: string, position?: number): Msg[] {
+    return this.materialize(branchId, position).flatMap((record) => messagesOf<Msg>(record.result));
+  }
+
   /** Materialize by ref — the position the ref commits to, not the branch's head. */
-  messagesAt(ref: string): SessionEntryAt<Msg>[] {
+  messagesAt(ref: string): SessionRecordAt[] {
     const { branch, position } = this.resolve(ref);
     return this.materialize(branch.id, position);
   }
@@ -420,8 +484,8 @@ export class SessionStreams<Msg = JsonValue> {
       let messages = 0;
       // Deepest first, so a child is always gone before the parent it references.
       for (const branch of [...lineage].reverse()) {
-        messages += (this.db.prepare(`DELETE FROM session_messages WHERE session_id = ?`).run(branch.id).changes ?? 0);
-        this.db.prepare(`DELETE FROM session_providers WHERE session_id = ?`).run(branch.id);
+        messages += (this.db.prepare(`DELETE FROM operation_records WHERE session_id = ?`).run(branch.id).changes ?? 0);
+
         this.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(branch.id);
       }
       return { branches: lineage.length, messages };
@@ -442,7 +506,7 @@ export class SessionStreams<Msg = JsonValue> {
   /** Rows currently stored, for a "before you prune" summary. */
   size(): { sessions: number; messages: number } {
     const one = (sql: string): number => (this.db.prepare(sql).get() as { n: number }).n;
-    return { sessions: one(`SELECT COUNT(*) n FROM sessions`), messages: one(`SELECT COUNT(*) n FROM session_messages`) };
+    return { sessions: one(`SELECT COUNT(*) n FROM sessions`), messages: one(`SELECT COUNT(*) n FROM operation_records`) };
   }
 
   /** Direct descendants, in creation order. What makes a branch un-prunable on its own. */
@@ -469,22 +533,24 @@ export class SessionStreams<Msg = JsonValue> {
 
   // --- Provider handles ---------------------------------------------------------
 
-  /** The provider's handle for this branch, if one has been recorded. */
-  providerHandle(branchId: string, providerKey: string): string | undefined {
-    const row = this.db
-      .prepare(`SELECT external_id FROM session_providers WHERE session_id = ? AND provider_key = ?`)
-      .get(branchId, providerKey) as { external_id: string } | undefined;
-    return row?.external_id;
-  }
-
-  /** Record (or replace) the provider's handle for this branch. */
-  setProviderHandle(branchId: string, providerKey: string, externalId: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO session_providers (session_id, provider_key, external_id) VALUES (?, ?, ?)
-         ON CONFLICT(session_id, provider_key) DO UPDATE SET external_id = excluded.external_id`,
-      )
-      .run(branchId, providerKey, externalId);
+  /**
+   * The provider handle this conversation currently sits on, read off its LATEST record.
+   *
+   * There is no handle table. A conversation is locked to the provider it was used with — using it
+   * with another is a fork, not a replay — so the handle is a property of what actually happened
+   * here, and the last record is where "what actually happened" lives. A `(session, provider)` map
+   * would be modelling a many-to-many that cannot occur.
+   *
+   * Reading it back also gives divergence detection its trigger (SESSIONS.md §11): a call returning
+   * a handle other than this one means the remote forked underneath us.
+   */
+  providerHandle(branchId: string, upTo?: number): string | undefined {
+    const records = this.materialize(branchId, upTo);
+    for (let i = records.length - 1; i >= 0; i--) {
+      const handle = records[i]!.externalId;
+      if (handle !== undefined) return handle;
+    }
+    return undefined;
   }
 
   // --- Writes -------------------------------------------------------------------
@@ -576,7 +642,7 @@ export class SessionStreams<Msg = JsonValue> {
    * Returns the new head. Appending zero entries is a legal no-op — an operation that
    * failed before the provider saw anything has a real, empty delta.
    */
-  append(branchId: string, expected: number, entries: readonly SessionEntry<Msg>[]): number {
+  append(branchId: string, expected: number, entries: readonly SessionRecord[]): number {
     return this.db.transaction(() => {
       const branch = this.branch(branchId);
       if (branch === undefined) throw new UnknownSession(branchId);
@@ -584,13 +650,25 @@ export class SessionStreams<Msg = JsonValue> {
       if (actual !== expected) throw new SessionPositionConflict(branchId, expected, actual);
       if (entries.length === 0) return actual;
       const insert = this.db.prepare(
-        `INSERT INTO session_messages (session_id, seq, message_json, provider_ref, operation_id) VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO operation_records (session_id, seq, id, source, result, external_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       );
+      const now = Date.now();
       let digest = branch.digest ?? this.digestAt(branchId, actual);
       let seq = actual;
       for (const entry of entries) {
-        insert.run(branchId, seq, JSON.stringify(entry.message), entry.providerRef ?? null, entry.operationId ?? null);
-        digest = rollDigest(digest, entry.message);
+        insert.run(
+          branchId,
+          seq,
+          entry.id,
+          entry.source !== undefined ? JSON.stringify(entry.source) : null,
+          entry.result !== undefined ? JSON.stringify(entry.result) : null,
+          entry.externalId ?? null,
+          now,
+        );
+        // The digest commits to the PAYLOAD, not to the record's own id or timing — two
+        // conversations with identical content must commit identically however their calls were
+        // labelled or when they ran.
+        digest = rollDigest(digest, entry.result ?? null);
         seq += 1;
       }
       this.db.prepare(`UPDATE sessions SET digest = ? WHERE id = ?`).run(digest, branchId);
@@ -606,7 +684,7 @@ export class SessionStreams<Msg = JsonValue> {
    */
   digestAt(branchId: string, position: number): string {
     let digest = EMPTY_DIGEST;
-    for (const entry of this.materialize(branchId, position)) digest = rollDigest(digest, entry.message);
+    for (const entry of this.materialize(branchId, position)) digest = rollDigest(digest, entry.result ?? null);
     return digest;
   }
 
@@ -635,7 +713,7 @@ export class SessionStreams<Msg = JsonValue> {
       taskId: options.taskId ?? origin.taskId,
       runId: options.runId ?? origin.runId,
     });
-    if (options.entries.length > 0) this.append(branch.id, 0, options.entries as readonly SessionEntry<Msg>[]);
+    if (options.entries.length > 0) this.append(branch.id, 0, options.entries);
     return this.branch(branch.id) ?? branch;
   }
   // --- The executor-facing contract --------------------------------------------
@@ -679,7 +757,7 @@ export class SessionStreams<Msg = JsonValue> {
         return resolveSessionRef<Msg>(formatSessionRef(on.id, at), {
           mode,
           at: { id: on.id, seq: at },
-          messages: async () => streams.materialize(on.id, at).map((e) => e.message),
+          messages: async () => streams.messages(on.id, at) as Msg[],
         });
       },
 
@@ -699,7 +777,7 @@ export class SessionStreams<Msg = JsonValue> {
         // and §4 is explicit that those must be errors rather than silently empty.
         if (parseSessionRef(ref) === undefined && streams.branch(ref) === undefined) return [];
         const { branch, position } = streams.resolveLoose(ref);
-        return streams.materialize(branch.id, position).flatMap((e) => SessionStreams.messagesOf(e.message));
+        return streams.messages(branch.id, position) as Msg[];
       },
 
       compact(ref: string, messages: readonly Msg[]): string {
@@ -707,7 +785,7 @@ export class SessionStreams<Msg = JsonValue> {
         const compacted = streams.compact(branch.id, {
           ...origin,
           seed: `${branch.id}:${streams.children(branch.id).length}`,
-          entries: [{ message: { messages } as unknown as JsonValue }],
+          entries: [derivedRecord(branch.id, "compact", messages)],
         });
         return formatSessionRef(compacted.id, streams.head(compacted.id));
       },
@@ -717,7 +795,7 @@ export class SessionStreams<Msg = JsonValue> {
         const resynced = streams.resync(branch.id, {
           ...origin,
           seed: `${branch.id}:${streams.children(branch.id).length}`,
-          entries: messages.length > 0 ? [{ message: { messages } as unknown as JsonValue }] : [],
+          entries: messages.length > 0 ? [derivedRecord(branch.id, "resync", messages)] : [],
         });
         return formatSessionRef(resynced.id, streams.head(resynced.id));
       },
@@ -746,7 +824,9 @@ export class SessionStreams<Msg = JsonValue> {
         // A call that produced nothing still occupied its position; appending zero entries is a legal
         // no-op that frees it rather than an error.
         if (messages.length > 0) {
-          streams.append(at.branch, at.seq, [{ message: { messages } as unknown as Msg }]);
+          streams.append(at.branch, at.seq, [
+            { id, result: { value: { messages } } as unknown as JsonValue, ...(payloadHandle(settled) !== undefined ? { externalId: payloadHandle(settled)! } : {}) },
+          ]);
         }
       },
 

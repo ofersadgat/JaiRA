@@ -11,7 +11,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { EngineEvent } from "@declarative-ai/hw";
 import { initProject, openProject, type Project } from "../src/project";
 import { historySize, pruneHistory, pruneSessions } from "../src/prune";
-import { SessionStreams } from "../src/sessions";
+import { SessionStreams, type SessionRecord } from "../src/sessions";
+
+/** A record whose payload is these messages — the shape a call produces. */
+let recordSeq = 0;
+const rec = (...messages: unknown[]): SessionRecord => ({ id: `p${++recordSeq}`, result: { value: { messages } } as never });
 import { latestRun } from "../src/views";
 
 let dir: string;
@@ -184,9 +188,9 @@ describe("pruneSessions", () => {
   function seedSessions(taskId: string, createdBefore: boolean): string {
     const s = streams();
     const root = s.createRoot({ seed: `${taskId}-planning`, taskId });
-    s.append(root.id, 0, [{ message: { role: "user", content: "a" } }, { message: { role: "assistant", content: "b" } }]);
+    s.append(root.id, 0, [rec({ role: "user", content: "a" }), rec({ role: "assistant", content: "b" })]);
     s.fork(root.id, 2, { seed: `${taskId}-v`, taskId });
-    s.compact(root.id, { seed: `${taskId}-c`, taskId, entries: [{ message: { role: "user", content: "<summary>" } }] });
+    s.compact(root.id, { seed: `${taskId}-c`, taskId, entries: [rec({ role: "user", content: "<summary>" })] });
     // `createdAt` is stamped by the store, so age is set here rather than threaded through the API.
     project.db.prepare(`UPDATE sessions SET created_at = ? WHERE task_id = ?`).run(createdBefore ? now - 50 * HOUR : now + HOUR, taskId);
     return root.id;

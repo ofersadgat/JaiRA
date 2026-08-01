@@ -168,34 +168,53 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS sessions_parent ON sessions(parent_id);
 CREATE INDEX IF NOT EXISTS sessions_task ON sessions(task_id, created_at);
 
--- Copy-on-write message storage: a branch holds ONLY what it appended. Materializing
--- walks the parent chain taking each ancestor's entries below the cursor its child
--- took, so storage is proportional to divergence rather than to branch count.
+-- What every execution DID — findmyprompt's generation_results, which is where the
+-- OperationRecord type came from. Written two-phase: a stub at the start so a call in
+-- flight is visible and a crashed one leaves evidence, filled in when it settles.
 --
--- seq CONTINUES from parent_cursor on a fork, so a position is a single integer
--- across a whole lineage and [0:n] needs no translation at any hop.
+-- A SESSION IS NOT A SEPARATE STORE. It is the records sharing a session_id, ordered
+-- by seq; there is no message table because a record already holds what its call
+-- produced, and for a prompt op that payload is an LlmOutput carrying the messages
+-- verbatim. Appending a turn and recording a call are ONE write.
 --
--- message_json is a ModelMessage stored VERBATIM, providerOptions included. Anything
--- lossier breaks replay: an Anthropic reasoning part carries a signature that must
--- come back byte-identical.
-CREATE TABLE IF NOT EXISTS session_messages (
-  session_id   TEXT NOT NULL REFERENCES sessions(id),
-  seq          INTEGER NOT NULL,
-  message_json TEXT NOT NULL,
-  provider_ref TEXT,                -- the provider's own id for this entry, when it has one
-  operation_id TEXT,                -- which operation appended it
+-- PRIMARY KEY (session_id, seq) is therefore also the position RESERVATION: two
+-- writers cannot claim one slot, durably and across processes, which is what neither
+-- an in-process lock nor a read-then-write conditional manages. A loser forks; it
+-- must never retry at the next slot, or it continues a conversation containing a turn
+-- it never saw.
+--
+-- seq counts OPERATIONS, not messages — one call that produced six turns advances the
+-- conversation by one — and it CONTINUES from parent_cursor on a fork, so a position
+-- is a single integer across a whole lineage.
+--
+-- Copy-on-write: a branch holds only what it appended, so storage is proportional to
+-- divergence rather than to branch count.
+--
+-- source is the OPERATION, not a resolved call definition. Operations are immutable
+-- over a run — a layer that adjusts one produces a NEW op — so the op named here is
+-- precisely what ran. Resolution that depends on the executor rather than the op
+-- (a defaults/preset/inline merge, a router picking a provider) is not in the op and
+-- belongs in a resolved-operation record written once per resolution.
+--
+-- result is NULL while pending. It holds the payload VERBATIM: an Anthropic reasoning
+-- part carries a signature that must come back byte-identical, so nothing round-trips
+-- through a lossier shape.
+--
+-- No FK to runs: a record outlives the run that produced it, which is the whole point
+-- of a session id being usable later.
+CREATE TABLE IF NOT EXISTS operation_records (
+  session_id  TEXT REFERENCES sessions(id),   -- NULL for a record outside any conversation
+  seq         INTEGER,                        -- position within that conversation
+  id          TEXT NOT NULL,                  -- the record's own id
+  source      TEXT,                           -- the operation
+  inputs      TEXT,
+  result      TEXT,                           -- NULL while PENDING
+  metrics     TEXT,
+  external_id TEXT,                           -- the provider's handle as of this record
+  created_at  INTEGER NOT NULL,
   PRIMARY KEY (session_id, seq)
 );
-
--- Provider handles, keyed by (session, PROVIDER). The same branch replayed against
--- the Messages API and against a claude subprocess has two unrelated handles, and
--- both are worth caching.
-CREATE TABLE IF NOT EXISTS session_providers (
-  session_id   TEXT NOT NULL REFERENCES sessions(id),
-  provider_key TEXT NOT NULL,       -- adapter identity
-  external_id  TEXT NOT NULL,       -- provider-side session handle
-  PRIMARY KEY (session_id, provider_key)
-);
+CREATE INDEX IF NOT EXISTS operation_records_id ON operation_records(id);
 `;
 
 export function openDb(file: string): JairaDb {

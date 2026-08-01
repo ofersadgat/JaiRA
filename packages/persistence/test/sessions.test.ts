@@ -22,7 +22,8 @@ import {
   formatSessionRef,
   parseSessionRef,
   shortSessionLabel,
-  type SessionEntry,
+  messagesOf,
+  type SessionRecord,
 } from "../src/sessions";
 
 let db: JairaDb;
@@ -37,12 +38,22 @@ afterEach(() => {
   db.close();
 });
 
-/** A message shaped like a real one — parts and providerOptions, not `content: string`. */
-const say = (role: string, text: string): SessionEntry => ({
-  message: { role, content: [{ type: "text", text }] },
-});
+/**
+ * One record carrying one message, shaped like a real one — parts and providerOptions, not
+ * `content: string`. A record IS the unit of position, so `say(...)` advances a conversation by one
+ * however many messages it carries.
+ */
+const say = (role: string, text: string): SessionRecord => rec(msg(role, text));
 
-const texts = (entries: ReadonlyArray<{ message: unknown }>): string[] => readTexts(entries.map((e) => e.message));
+/** A message shaped like a real one. */
+const msg = (role: string, text: string): JsonValue => ({ role, content: [{ type: "text", text }] });
+
+/** A record whose payload is these messages — the shape a call produces. */
+let recordSeq = 0;
+const rec = (...messages: JsonValue[]): SessionRecord => ({ id: `r${++recordSeq}`, result: { value: { messages } } });
+
+const texts = (records: ReadonlyArray<{ result?: JsonValue }>): string[] =>
+  readTexts(records.flatMap((r) => messagesOf(r.result)));
 
 /**
  * The same, for the exec-facing store, which hands back bare messages rather than stored entries.
@@ -77,12 +88,16 @@ describe("roots and appends", () => {
       ],
       providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
     };
-    streams.append(root.id, 0, [{ message, providerRef: "msg_01", operationId: "op-7" }]);
+    streams.append(root.id, 0, [
+      { id: "op-7", source: { kind: "prompt" }, result: { value: { messages: [message] } }, externalId: "sess-abc" },
+    ]);
 
     const [stored] = streams.materialize(root.id);
-    expect(stored!.message).toEqual(message);
-    expect(stored!.providerRef).toBe("msg_01");
-    expect(stored!.operationId).toBe("op-7");
+    expect(messagesOf(stored!.result)).toEqual([message]);
+    // The operation and the provider handle ride the same record — a session is what its records say.
+    expect(stored!.source).toEqual({ kind: "prompt" });
+    expect(stored!.externalId).toBe("sess-abc");
+    expect(streams.providerHandle(root.id)).toBe("sess-abc");
   });
 
   it("treats an empty delta as a legal no-op", () => {
@@ -134,7 +149,7 @@ describe("forking", () => {
     const branch = streams.fork(root.id, 2, { seed: "v" });
     streams.append(branch.id, 2, [say("user", "c")]);
 
-    const owned = db.prepare(`SELECT COUNT(*) n FROM session_messages WHERE session_id = ?`).get(branch.id) as {
+    const owned = db.prepare(`SELECT COUNT(*) n FROM operation_records WHERE session_id = ?`).get(branch.id) as {
       n: number;
     };
     expect(owned.n).toBe(1);
@@ -245,7 +260,7 @@ describe("conditional append", () => {
     // roll back rather than leave a half-appended stream.
     const circular: Record<string, unknown> = { role: "user" };
     circular.self = circular;
-    expect(() => streams.append(root.id, 0, [say("user", "a"), { message: circular as never }])).toThrow();
+    expect(() => streams.append(root.id, 0, [say("user", "a"), { id: "bad", result: circular as never }])).toThrow();
     expect(streams.head(root.id)).toBe(0);
     expect(streams.materialize(root.id)).toEqual([]);
   });
@@ -334,22 +349,43 @@ describe("refs", () => {
 });
 
 describe("provider handles", () => {
-  it("keys by (session, provider), so two adapters cache independently", () => {
+  const withHandle = (text: string, handle: string): SessionRecord => ({ ...say("assistant", text), externalId: handle });
+
+  it("is read off the LATEST record, not a separate map", () => {
+    // A conversation is LOCKED to the provider it was used with — using it with another is a fork,
+    // not a replay — so the handle is a property of what happened here, and there is no
+    // (session, provider) table because that many-to-many cannot occur.
     const root = streams.createRoot({ seed: "planning" });
-    streams.setProviderHandle(root.id, "claude-cli", "sess-abc");
-    streams.setProviderHandle(root.id, "managed-agents", "sesn_123");
-    expect(streams.providerHandle(root.id, "claude-cli")).toBe("sess-abc");
-    expect(streams.providerHandle(root.id, "managed-agents")).toBe("sesn_123");
-    expect(streams.providerHandle(root.id, "messages-api")).toBeUndefined();
+    streams.append(root.id, 0, [withHandle("a", "sess-abc")]);
+    expect(streams.providerHandle(root.id)).toBe("sess-abc");
   });
 
-  it("a fork does not inherit its parent's handle", () => {
-    // Two branches writing into one remote session is the failure this prevents.
+  it("follows the remote when it issues a new one — which is how divergence shows up", () => {
+    const root = streams.createRoot({ seed: "planning" });
+    streams.append(root.id, 0, [withHandle("a", "sess-abc")]);
+    streams.append(root.id, 1, [withHandle("b", "sess-def")]);
+    expect(streams.providerHandle(root.id)).toBe("sess-def");
+    // ...and reading at an earlier position still reports what was true THEN.
+    expect(streams.providerHandle(root.id, 1)).toBe("sess-abc");
+  });
+
+  it("reports nothing for a conversation no provider has claimed", () => {
     const root = streams.createRoot({ seed: "planning" });
     streams.append(root.id, 0, [say("user", "a")]);
-    streams.setProviderHandle(root.id, "claude-cli", "sess-abc");
+    expect(streams.providerHandle(root.id)).toBeUndefined();
+  });
+
+  it("a fork INHERITS the handle of the prefix it took, and diverges once it writes", () => {
+    // The prefix really is that conversation, handle included — that is what `[0:n]` asserts. What
+    // must not happen is two branches writing into ONE remote session, which the first append fixes:
+    // a native fork issues a new handle and records it here.
+    const root = streams.createRoot({ seed: "planning" });
+    streams.append(root.id, 0, [withHandle("a", "sess-abc")]);
     const branch = streams.fork(root.id, 1, { seed: "v" });
-    expect(streams.providerHandle(branch.id, "claude-cli")).toBeUndefined();
+    expect(streams.providerHandle(branch.id)).toBe("sess-abc");
+    streams.append(branch.id, 1, [withHandle("different", "sess-forked")]);
+    expect(streams.providerHandle(branch.id)).toBe("sess-forked");
+    expect(streams.providerHandle(root.id)).toBe("sess-abc");
   });
 });
 
@@ -384,7 +420,7 @@ describe("the executor-facing contract", () => {
   const call = (store: ReturnType<typeof exec>, at: { id: string; seq: number }, ...text: string[]): void => {
     const id = `${at.id}:${at.seq}`;
     store.open({ id, source: undefined as never, session: at, startMs: 0 });
-    store.close(id, { result: { value: { messages: text.map((t) => say("user", t).message) } as never } });
+    store.close(id, { result: { value: { messages: text.map((t) => msg("user", t)) } as never } });
   };
 
   it("resolves a position, records what the call produced, and reads it back", async () => {
@@ -458,7 +494,7 @@ describe("the executor-facing contract", () => {
     const at = await store.resolve({ ref: "planning" });
     call(store, at.at, "a", "b", "c");
     const end = formatSessionRef(at.at.id, 1);
-    const compacted = await store.compact!(end, [say("user", "<summary>").message, say("user", "c").message]);
+    const compacted = await store.compact!(end, [msg("user", "<summary>"), msg("user", "c")]);
     expect(readTexts(await store.messages(compacted))).toEqual(["<summary>", "c"]);
     expect(readTexts(await store.messages(end))).toEqual(["a", "b", "c"]);
     expect(streams.branch(compacted.split("@")[0]!)?.edge).toBe("compaction");
@@ -500,7 +536,7 @@ describe("schema", () => {
     rmSync(dirname(file), { recursive: true, force: true });
   });
 
-  it("enforces the lineage foreign keys — a message cannot outlive its branch", () => {
+  it("enforces the lineage foreign keys — a record cannot outlive its conversation", () => {
     // Step 9's problem stated as a constraint: deleting a branch that others descend
     // from is refused by the database, not left to a caller to remember.
     const root = streams.createRoot({ seed: "planning" });
@@ -509,9 +545,17 @@ describe("schema", () => {
     expect(() => db.prepare(`DELETE FROM sessions WHERE id = ?`).run(root.id)).toThrow(/FOREIGN KEY/i);
     expect(() =>
       db
-        .prepare(`INSERT INTO session_messages (session_id, seq, message_json) VALUES (?, ?, ?)`)
-        .run("ses_missing", 0, "{}"),
+        .prepare(`INSERT INTO operation_records (session_id, seq, id, created_at) VALUES (?, ?, ?, ?)`)
+        .run("ses_missing", 0, "r", 0),
     ).toThrow(/FOREIGN KEY/i);
+  });
+
+  it("admits a record with NO conversation — the table is every record, not just session ones", () => {
+    // A session is a VIEW over the records that have a session id. A plain memoized call has none,
+    // and must still be recordable.
+    expect(() =>
+      db.prepare(`INSERT INTO operation_records (session_id, seq, id, created_at) VALUES (NULL, NULL, ?, ?)`).run("r-loose", 0),
+    ).not.toThrow();
   });
 });
 
@@ -556,12 +600,11 @@ describe("pruning", () => {
     expect(texts(streams.materialize(keep.id))).toEqual(["a"]);
   });
 
-  it("takes the provider handles with it — nothing points at a stream that is gone", () => {
+  it("takes the records with it — a handle cannot outlive the conversation it named", () => {
     const root = streams.createRoot({ seed: "planning" });
-    streams.append(root.id, 0, [say("user", "a")]);
-    streams.setProviderHandle(root.id, "claude-cli", "sess-abc");
+    streams.append(root.id, 0, [{ ...say("user", "a"), externalId: "sess-abc" }]);
     streams.prune(root.id);
-    expect(db.prepare(`SELECT COUNT(*) n FROM session_providers`).get()).toEqual({ n: 0 });
+    expect(db.prepare(`SELECT COUNT(*) n FROM operation_records`).get()).toEqual({ n: 0 });
   });
 
   it("is all-or-nothing — a refused prune deletes nothing at all", () => {
