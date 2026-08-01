@@ -318,7 +318,7 @@ comes from:
 ".children.critique.outputs"                 a child's whole output object
 ".inputs.issue"                              this state's declared input
 ".artifacts.name"                            a session artifact
-".conversations.review.messages.0"           a transcript, or one message
+"messages(.operation.outputs.session)"       a conversation, by ref
 "add(.outputs.n, 1)"                         a small computation
 { "expr": "add(.outputs.n, 1)" }             the same, spelled explicitly
 { "text": "significant" }                    a string literal
@@ -607,7 +607,6 @@ outputs.*
 children.<key>.outputs.*
 children.<key>.outcome
 artifacts.*
-conversations.*
 
 run.iteration                control flow — guards only
 limits.*

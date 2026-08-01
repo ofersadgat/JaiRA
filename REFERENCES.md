@@ -211,7 +211,7 @@ unchanged; only the spelling is.
 "binding": ".children.critique.outputs.outcome"
 "binding": ".inputs.issue"
 "binding": ".artifacts.design_doc"
-"binding": ".conversations.review.messages.0"
+"binding": "at(messages(.operation.outputs.session), 0)"
 ```
 
 The leading dot is **required everywhere**, including inside an expression. ⚠️ This
@@ -424,7 +424,7 @@ One pass, not two. Every authored workflow changes.
 | `{"child": "c", "output": "*"}` | `".children.c.outputs"` |
 | `{"input": "issue"}` | `".inputs.issue"` |
 | `{"artifact": "design_doc"}` | `".artifacts.design_doc"` |
-| `{"conversation": "review", "message": 0}` | `".conversations.review.messages.0"` |
+| `{"conversation": "review", "message": 0}` | `"at(messages(<session ref>), 0)"` — by ref, since a name no longer addresses a conversation |
 | `{"text": …}`, `{"json": …}`, `{"expr": …}` | unchanged |
 | `"prompt": {"template": "…"}` | `"prompt": "…"` |
 | `"prompt": {"skill": "x"}` | `"prompt": {"$ref": "$/prompts/x.md"}` |

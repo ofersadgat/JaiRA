@@ -730,7 +730,6 @@ the preferred spelling, and the one the rest of this file uses:
 | `".children.context.outputs.plan_doc"` | One named output of a declared child |
 | `".children.context.outputs"` | A child's whole output object, as one value |
 | `".artifacts.design_doc"` | A session-owned artifact |
-| `".conversations.review.messages.0"` | A transcript, or one message of it |
 | `{ "text": "hello" }` | A literal string |
 | `{ "json": { "a": 1 } }` | A literal JSON value |
 | `"add(.children.a.outputs.n, 1)"` | A computation (§9) — no wrapper needed |
@@ -784,7 +783,8 @@ instance's data apart from a name resolved along the path:
 | `.children.<key>.outputs.*` | both | a child's outputs |
 | `.children.<key>.outcome` | both | `success` \| `error` \| `canceled` \| `timeout` |
 | `.artifacts.*` | both | artifacts registered this run |
-| `.conversations.*` | both | transcripts by session id |
+| `.operation.outputs.session` | both | the conversation position this state's call ended at |
+| `.children.<key>.operation.outputs.session` | both | a child's |
 | `.run.iteration` | guards only | transitions taken by this instance |
 | `.run.cursor` | guards only | the child key the cursor is at — see below |
 | `.run.position` | guards only | its index in `sequence`; `-1` before any child runs |
@@ -799,6 +799,28 @@ diagnostic: **a leading dot is data, a bare name is a document.**
 JavaScript semantics. There is **no arithmetic syntax** — no `+`, `-`, `*`, `/` — so
 computation is done by CALLING an operation (below). A leading `-` on a number is a
 sign, so `-1` is a literal.
+
+### Reading a conversation
+
+A conversation is addressed by **ref**, never by name — a session is a position, and
+`messages(<ref>)` is the only way to read one:
+
+```jsonc
+"when": "at(messages(.operation.outputs.session), -1).content === 'continue'"
+"when": "len(messages(.children.plan.operation.outputs.session)) > 4"
+```
+
+The ref comes from `.operation.outputs.session` — an opaque `{ id }`. To read a
+*sibling's* conversation the ref flows as data: the parent wires
+`.children.plan.operation.outputs.session` into a child's input, and the child calls
+`messages()` on it.
+
+Turns are typed `{ role, content }`, so `at(…, -1).content` is checked and `.text` is
+a lint error.
+
+⚠️ There is no `.conversations.<name>` namespace. It looked up a session by NAME, and
+a name stopped addressing anything when a session became a position — it could only
+ever reach a conversation that had had no calls.
 
 ### Calling an operation
 
