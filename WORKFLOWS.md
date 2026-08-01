@@ -291,7 +291,7 @@ output and must be absent for a produced one; there is no third case.
 ```jsonc
 "outputs": {
   "weaknesses":  { "schema": { "type": "array", "items": { "type": "string" } } },   // produced
-  "outcome":     { "binding": { "expr": "children.critique.outputs.outcome" } },     // derived
+  "outcome":     { "binding": { "expr": ".children.critique.outputs.outcome" } },     // derived
   "plan_doc":    { "binding": ".children.context.outputs.plan_doc" },                // derived
   "critique":    { "binding": ".children.critique.outputs" }                         // whole child
 }
@@ -393,7 +393,7 @@ One structured LLM call.
 ```jsonc
 "operation": {
   "kind": "prompt",
-  "prompt": "Extract goals from {{inputs.issue}}.",
+  "prompt": "Extract goals from {{.inputs.issue}}.",
   "system": "You are a careful planner.",
   "model": "anthropic/claude-sonnet-5"
 }
@@ -407,7 +407,7 @@ One structured LLM call.
   ```
 
   A referenced `.md` is still a template — interpolation applies either way.
-- `{{inputs.x}}` interpolates against the operation's **resolved inputs**. With no
+- `{{.inputs.x}}` interpolates against the operation's **resolved inputs**. With no
   `operation.input` map, the state's declared `inputs` are in scope.
 - **The operation IS the call**: `model`, `temperature`, `maxOutputTokens` and the
   rest sit directly on it, not nested under a `config` bag. **Models must be
@@ -514,7 +514,7 @@ defaults for this state's operation *and for every descendant's*.
 }
 
 // feature/plan/goals.json — says only what is different
-"operation": { "prompt": "Extract goals from {{inputs.issue}}." }
+"operation": { "prompt": "Extract goals from {{.inputs.issue}}." }
 ```
 
 The effective operation is
@@ -676,9 +676,9 @@ Entering a sequence member **moves the cursor to it**:
 
 ```jsonc
 "transitions": [
-  { "to": "terminate.success", "when": "children.critique.outputs.outcome === 'clean'" },
-  { "to": "goals",             "when": "children.critique.outputs.outcome === 'needs_changes' && run.iteration < limits.max_iterations" },
-  { "to": "terminate.success", "when": "children.critique.outcome === 'success'" }
+  { "to": "terminate.success", "when": ".children.critique.outputs.outcome === 'clean'" },
+  { "to": "goals",             "when": ".children.critique.outputs.outcome === 'needs_changes' && .run.iteration < .limits.max_iterations" },
+  { "to": "terminate.success", "when": ".children.critique.outcome === 'success'" }
 ],
 "limits": { "max_iterations": 3, "timeout": 600 }
 ```
@@ -697,7 +697,7 @@ does not fall through to a later transition permanently.
 
 ### ⚠️ Guards must infer to `boolean` — strictly
 
-There is no truthiness coercion. `"when": "outputs.goals"` is a **lint error**,
+There is no truthiness coercion. `"when": ".outputs.goals"` is a **lint error**,
 not a non-empty check. Write `"outputs.goals.length > 0"`.
 
 ### An unconditional transition fires at the first evaluation round
@@ -733,14 +733,28 @@ the preferred spelling, and the one the rest of this file uses:
 | `".conversations.review.messages.0"` | A transcript, or one message of it |
 | `{ "text": "hello" }` | A literal string |
 | `{ "json": { "a": 1 } }` | A literal JSON value |
-| `{ "expr": "add(children.a.outputs.n, 1)" }` | A computation (§9) |
+| `"add(.children.a.outputs.n, 1)"` | A computation (§9) — no wrapper needed |
+| `{ "expr": "add(.children.a.outputs.n, 1)" }` | The same computation, wrapped |
 
-The leading dot is required: a binding reads **this instance's** data, and a
-string without the dot is a *document* reference — a fragment to splice in, which
-is resolved against the filesystem and will fail if no such file exists.
+**One rule decides all of these: a leading dot is *data*, a bare name is a
+*document*.** It holds at every depth — at the top of a binding, inside an
+expression, in a guard, in a `{{…}}` template hole — so there is nothing extra to
+know about where you happen to be writing:
 
-`{"expr": …}` stays, because unifying references does not unify the expression
-*language*: `a.n + 1` is not a reference.
+```jsonc
+"binding": ".inputs.issue"                  // this instance's input
+"binding": "add(.inputs.n, 1)"              // …and the same read, inside a computation
+"binding": "$/lib/wiring.plan"              // a document: resolved and spliced in
+"when":    ".children.critique.outcome === 'success'"
+```
+
+A bare name is resolved along `config.workflows.path` (§2.1), and **what it resolves
+to decides how it reads** — a binding form is that binding, an operation document is
+that operation, a `.md` is text, anything else is a JSON literal.
+
+`{"expr": …}` stays as the explicit spelling. It says nothing the bare string does not,
+and it is worth reaching for when a reader would otherwise have to squint to see that a
+value is computed.
 
 **The tagged forms still work.** `{ "child": "c", "output": "x" }`,
 `{ "input": … }`, `{ "artifact": … }` and `{ "conversation": … }` lower to exactly
@@ -751,22 +765,34 @@ which you wrote. See [REFERENCES.md §10](REFERENCES.md) for the mapping.
 
 ## 9. Expressions
 
-Used in transition guards and `{ "expr": … }` bindings.
+Used in transition guards, in `{ "expr": … }` bindings, and — since they are the same
+thing — in a **bare string binding**:
 
-**Namespaces:**
+```jsonc
+"binding": "add(.children.a.outputs.n, 1)"          // no wrapper needed
+"binding": { "expr": "add(.children.a.outputs.n, 1)" }  // identical
+```
+
+**Namespaces** — all reached through the leading dot, which is what tells a read of this
+instance's data apart from a name resolved along the path:
 
 | Namespace | Available in | Contents |
 | --- | --- | --- |
-| `inputs.*` | both | this instance's resolved inputs |
-| `outputs.*` | both | outputs produced so far |
-| `children.<key>.outputs.*` | both | a child's outputs |
-| `children.<key>.outcome` | both | `success` \| `error` \| `canceled` \| `timeout` |
-| `artifacts.*` | both | artifacts registered this run |
-| `conversations.*` | both | transcripts by session id |
-| `run.iteration` | guards only | transitions taken by this instance |
-| `run.cursor` | guards only | the child key the cursor is at — see below |
-| `run.position` | guards only | its index in `sequence`; `-1` before any child runs |
-| `limits.*` | guards only | this state's declared limits |
+| `.inputs.*` | both | this instance's resolved inputs |
+| `.outputs.*` | both | outputs produced so far |
+| `.children.<key>.outputs.*` | both | a child's outputs |
+| `.children.<key>.outcome` | both | `success` \| `error` \| `canceled` \| `timeout` |
+| `.artifacts.*` | both | artifacts registered this run |
+| `.conversations.*` | both | transcripts by session id |
+| `.run.iteration` | guards only | transitions taken by this instance |
+| `.run.cursor` | guards only | the child key the cursor is at — see below |
+| `.run.position` | guards only | its index in `sequence`; `-1` before any child runs |
+| `.limits.*` | guards only | this state's declared limits |
+
+⚠️ **The dot is required.** `children.a.outputs.n` without it is a *reference* — a name
+searched along `config.workflows.path` — and fails to load if no document is there. The
+error names the fix, but the rule is worth learning once rather than meeting as a
+diagnostic: **a leading dot is data, a bare name is a document.**
 
 **Operators:** `===` `!==` `==` `!=` `<` `<=` `>` `>=` `&&` `||` `!` `? :`, with
 JavaScript semantics. There is **no arithmetic syntax** — no `+`, `-`, `*`, `/` — so
@@ -779,9 +805,9 @@ An expression can apply an operation, and the operation may be anything the syst
 run — a built-in, a function, or a PROMPT:
 
 ```jsonc
-{ "expr": "add(children.a.outputs.n, 1)" }
-{ "expr": "classify(inputs.issue).severity === 'high'" }
-{ "expr": "$JAIRA/prompts/review(inputs.plan)" }
+{ "expr": "add(.children.a.outputs.n, 1)" }
+{ "expr": "classify(.inputs.issue).severity === 'high'" }
+{ "expr": "$JAIRA/prompts/review(.inputs.plan)" }
 ```
 
 The callee is a **reference**, resolved the same way every other reference is (§2.1):
@@ -792,7 +818,7 @@ in where the name resolves:
 
 ```jsonc
 // .jaira/functions/classify.json
-{ "kind": "prompt", "prompt": "Classify {{inputs.text}}.", "model": "anthropic/claude-sonnet-5",
+{ "kind": "prompt", "prompt": "Classify {{.inputs.text}}.", "model": "anthropic/claude-sonnet-5",
   "input": { "text": { "kind": "text", "index": 0 } } }
 ```
 
@@ -826,8 +852,8 @@ array, which is why there is no `push`.
 `reduce` folds with one, taking the accumulator first and the element second:
 
 ```jsonc
-{ "expr": "map(inputs.issues, classify)" }
-{ "expr": "reduce(inputs.parts, joinTwo, '')" }
+{ "expr": "map(.inputs.issues, classify)" }
+{ "expr": "reduce(.inputs.parts, joinTwo, '')" }
 ```
 
 Elements run in parallel (`reduce` in sequence, since each step needs the last), and
@@ -845,8 +871,8 @@ terminates.
 
 ```jsonc
 "transitions": [
-  { "to": "escalate", "when": "run.cursor === 'review' && outputs.severity === 'high'" },
-  { "to": "terminate.success", "when": "run.cursor === 'publish'" }
+  { "to": "escalate", "when": ".run.cursor === 'review' && .outputs.severity === 'high'" },
+  { "to": "terminate.success", "when": ".run.cursor === 'publish'" }
 ]
 ```
 
@@ -994,7 +1020,7 @@ the jump against.
   "outputs": {
     "outcome": {
       "schema": { "type": "string", "enum": ["complete", "blocked"] },
-      "binding": { "expr": "children.critique.outputs.outcome === 'clean' ? 'complete' : 'blocked'" }
+      "binding": { "expr": ".children.critique.outputs.outcome === 'clean' ? 'complete' : 'blocked'" }
     },
     "plan_doc": { "binding": ".children.context.outputs.plan_doc" },
     // A "passthrough" output: the whole child result as one value.
@@ -1009,9 +1035,9 @@ the jump against.
   },
   "sequence": ["goals", "context", "critique"],
   "transitions": [
-    { "to": "terminate.success", "when": "children.critique.outputs.outcome === 'clean'" },
-    { "to": "goals", "when": "children.critique.outputs.outcome === 'needs_changes' && run.iteration < limits.max_iterations" },
-    { "to": "terminate.success", "when": "children.critique.outcome === 'success'" }
+    { "to": "terminate.success", "when": ".children.critique.outputs.outcome === 'clean'" },
+    { "to": "goals", "when": ".children.critique.outputs.outcome === 'needs_changes' && .run.iteration < .limits.max_iterations" },
+    { "to": "terminate.success", "when": ".children.critique.outcome === 'success'" }
   ],
   "limits": { "max_iterations": 3 }
 }
@@ -1025,7 +1051,7 @@ both come from the root's `environment`.
   "label": "Goals",
   "inputs":  { "issue": { "kind": "blob", "schema": { "type": "string", "contentMediaType": "markdown" } } },
   "outputs": { "goals": { "schema": { "type": "array", "items": { "type": "string" } } } },
-  "operation": { "prompt": "Extract goals from {{inputs.issue}}." }
+  "operation": { "prompt": "Extract goals from {{.inputs.issue}}." }
 }
 ```
 
@@ -1043,11 +1069,11 @@ than a spine. Without that, both would run in declaration order.
   },
   "sequence": [],
   "transitions": [
-    { "to": "terminate.success", "when": "children.human_review.outcome === 'success'" },
-    { "to": "terminate.success", "when": "children.address_weaknesses.outcome === 'success'" },
-    { "to": "terminate.success", "when": "outputs.outcome === 'clean'" },
-    { "to": "human_review",      "when": "outputs.outcome === 'blocked'" },
-    { "to": "address_weaknesses","when": "outputs.outcome === 'needs_changes'" }
+    { "to": "terminate.success", "when": ".children.human_review.outcome === 'success'" },
+    { "to": "terminate.success", "when": ".children.address_weaknesses.outcome === 'success'" },
+    { "to": "terminate.success", "when": ".outputs.outcome === 'clean'" },
+    { "to": "human_review",      "when": ".outputs.outcome === 'blocked'" },
+    { "to": "address_weaknesses","when": ".outputs.outcome === 'needs_changes'" }
   ]
 }
 ```
@@ -1081,7 +1107,7 @@ Every one of these fails **silently or misleadingly**:
    do not. Getting it backwards resolves the slot to empty and reports success.
 2. A delegated agent's output slot must be `blob`-kind, or the state fails with
    "did not produce required output".
-3. A guard must infer to boolean — `"when": "outputs.x"` is an error, not a
+3. A guard must infer to boolean — `"when": ".outputs.x"` is an error, not a
    truthiness test.
 4. Omitting `sequence` runs **every** child, in declaration order. A state that
    means "these are alternatives" needs `"sequence": []` plus transitions.

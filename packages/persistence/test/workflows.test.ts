@@ -68,7 +68,7 @@ describe("browseWorkflows", () => {
         label: "Goals",
         outputs: { goals: { kind: "text" } },
         operation: { kind: "prompt", template: "list goals" },
-        transitions: [{ to: "terminate.success", when: "outputs.goals" }],
+        transitions: [{ to: "terminate.success", when: ".outputs.goals" }],
       }),
     );
     const browser = browseWorkflows(project);

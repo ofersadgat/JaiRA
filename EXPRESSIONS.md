@@ -2,9 +2,10 @@
 
 **Status: mostly built.** Expressions lower to producer trees (§1), the operator set is a registry
 (§2), an expression can CALL an operation — prompt or function — resolved along a search `path`
-(§3, §4), snapshots pin the resolved definition (§11), failures travel as data (§5), and the built-in
-operation library ships (§3, `builtins.ts`). What remains is higher-order operations (§3.5) and the
-items in [TODO.md](TODO.md).
+(§3, §4), one grammar covers bindings and expressions alike (§14), snapshots pin the resolved
+definition (§11), failures travel as data (§5), and the built-in operation library ships
+(§3, `builtins.ts`). What remains is higher-order operations (§3.5) and the items in
+[TODO.md](TODO.md).
 
 Sections marked ⚠️ or "superseded" record where building contradicted the design — they are kept
 because the reasoning that was wrong is usually the reasoning someone would repeat.
@@ -31,7 +32,7 @@ checker has to re-implement:
 
 ## 1. Expressions lower to producer trees
 
-`{"expr": "children.review.outputs.severity === 'high'"}` currently lowers to **one** edge carrying
+`{"expr": ".children.review.outputs.severity === 'high'"}` currently lowers to **one** edge carrying
 the source text, which the engine re-parses and interprets at resolution time:
 
 ```jsonc
@@ -402,7 +403,7 @@ An expression gains call syntax, and the callee is an ordinary reference — the
 that names a state to run or transcludes a document node ([REFERENCES.md](REFERENCES.md)).
 
 ```jsonc
-"when": "classify(inputs.issue).severity === 'high'"
+"when": "classify(.inputs.issue).severity === 'high'"
 ```
 
 `exec` already decided the layering here. A `{op}` binding on a `prompt`/`function`-kind parameter
@@ -738,7 +739,7 @@ binding checks are unchanged.
   so a guard now yields `true` / `false` / `PENDING` / **error**, and the transition loop needs a
   terminate path it does not have today.
 - **The handler spelling falls out.** A state whose output slot admits errors, plus
-  `when: "outputs.result.error.classification === 'policy-denied'"`. Because `ErrorClass` is a closed
+  `when: ".outputs.result.error.classification === 'policy-denied'"`. Because `ErrorClass` is a closed
   seven-member union, giving it an `enum` schema makes strict expression typing catch a misspelled
   classification as a lint error rather than a comparison that is quietly always false — the property
   `run.cursor` already has.
@@ -963,7 +964,7 @@ standard route out of a sandbox — so this had to be settled first.
 
 | Site | What leaked |
 | --- | --- |
-| `expr.ts` member access | `{"expr": "inputs.o.constructor"}` → a function as a slot value |
+| `expr.ts` member access | `{"expr": ".inputs.o.constructor"}` → a function as a slot value |
 | `inferExpr.ts` `projectProperty` | typed a prototype name as `ANY` instead of reporting a bad reference |
 | `resolve.ts` `select` | `{"child":"c","output":"constructor"}` → a function, not "no such output" |
 | `reference.ts` `selectProperty` | `$/types/user.constructor` → a function spliced in by transclusion |
@@ -1007,3 +1008,122 @@ bytes rather than meaning. That framing generates a chain of problems that all l
 
 None of these are worth solving. They are artifacts of hashing the wrong stage's output — §11 removes
 all four by hashing the resolved definition instead.
+
+---
+
+## 14. One grammar: a dot is data, a bare name is a document — **built**
+
+**Status: built.** A binding may be written as an expression with no wrapper, the leading dot is
+required in every position, and a bare name anywhere resolves along the search `path`.
+
+The starting complaint was small: `{"expr": "add(children.a.outputs.n, 1)"}` needed a wrapper that
+`".inputs.issue"` did not, for no reason a reader could name. Fixing it turned out to need a rule
+rather than a special case, because a binding string and an expression string overlap: both can be
+a dotted path, and something has to decide what one means.
+
+### 14.1 The rule, and why it is not a classifier
+
+The first two designs were both wrong in the same way. Both asked *"is this string a reference or an
+expression?"* and answered with a test on the string — a lexical one (does it contain parens or
+operators?) or a positional one (is it the whole binding, or nested inside a call?). Both produce a
+grammar with a seam in it, and a seam is a thing to maintain and eventually get wrong.
+
+There is no seam, because there is nothing to classify:
+
+> **A leading dot names a property of the current state. A bare name names a document, resolved
+> along the search `path`.**
+
+That is one rule, applied at every depth, and it makes a binding string and an expression string the
+same language. `"binding": "add(.inputs.n, 1)"`, `"when": ".run.cursor === 'plan'"` and
+`"binding": ".inputs.issue"` differ in what they compute, not in how they are read.
+
+**The consequence is a migration, and it is the right way round.** It was the BARE spelling that used
+to read runtime data inside an expression — `children.a.outputs.n` — so every guard, every `{expr}`
+and every `{{…}}` template hole gained a dot. Roughly 260 sites across two repositories. What is
+bought is that the rule now needs no exceptions section.
+
+### 14.2 What made the reversal necessary
+
+REFERENCES.md §5 originally made the dot *optional* inside an expression, on solid-looking reasoning:
+
+> an expression can only ever address runtime space — there is no file-path alternative in that
+> position
+
+That premise was true when written and stopped being true at §3, which gave an expression call
+syntax whose callee is a reference along the `path`. From then on an expression addressed both
+spaces, and "bare means runtime" was a second rule competing with the one every other position used.
+The doc kept asserting the old rule after the code had outgrown it — including claiming the dot was
+*accepted* inside an expression when the parser in fact rejected it.
+
+### 14.3 What a bare name resolves TO decides how it reads
+
+The design mistake worth recording is a false dichotomy: is the target a binding *declaration* to
+splice, or a *value*? Neither. It is whatever is there, and its own shape says how it reads —
+REFERENCES.md §3's mismatch principle applied to the target rather than to the position.
+
+| Resolved node | Reads as |
+| --- | --- |
+| a binding form (`{child}`, `{expr}`, `.inputs.x`) | that binding, re-entering the desugarer |
+| an operation document | the operation — §3.1's higher-order value |
+| text (a `.md`) | a text literal |
+| anything else | a JSON literal |
+
+`bindingForDocument` is that dispatch, and it is deliberately ONE function with two callers reaching
+it from opposite directions: expansion, splicing a path written as a whole binding, and lowering,
+resolving a bare name inside an expression. `"binding": "lib/x"` and `"binding": "id(lib/x)"` have to
+agree about what `lib/x` is.
+
+**The `.md` case needs the file type, and only expansion has it.** A prompt fragment's text and a
+JSON string are both strings by the time anything downstream sees them; without the extension, a
+transcluded prompt would be parsed as an expression.
+
+**Wrapping data happens in expansion, not in the desugarer, and that is what keeps typo detection.**
+Only expansion knows a value arrived from a *file*, which is what licenses reading an unrecognized
+object as data. An unrecognized object typed inline is a misspelled binding tag and still errors, as
+it always has.
+
+### 14.4 What the change did NOT touch, and why that was the design
+
+`.inputs.n` lowers to precisely the tree `inputs.n` used to lower to — `context.get` at the root,
+`op.member` above it. Only the surface syntax moved. So `fanout.ts`, `pathOfRef`,
+`referencePathsOf`, `resolve.ts` and the validator's reachability walk all needed **no change at
+all**: they read the lowered form, which is unchanged. A change to a language's syntax that reaches
+its dataflow analysis is a change that has gone wrong somewhere.
+
+Three things fell out rather than being built:
+
+- **The callee sandbox closes structurally.** `pathOf` returns `undefined` for a self-rooted chain,
+  so runtime data can reach neither callee position nor a `/` path segment. §10's open question about
+  keeping a callee from being an arbitrary value is now a property of the AST rather than a rule to
+  remember.
+- **`selfPathOf` and `pathOf` are exactly disjoint** — one of them answers for any given chain, and
+  which one is decided by the dot. That is the rule as a pair of functions.
+- **`inferExpr`'s duplicate `pathOf` went away.** It had drifted into being a private copy of
+  `expr.ts`'s; unifying them is the same discipline §2 applied to `applyBinary` and `memberOf`.
+
+### 14.5 The diagnostics, which are load-bearing here
+
+A migration this wide is only safe if the failure is loud and names the fix. Two do:
+
+- an unresolvable bare name whose head is a runtime namespace says *"'children.a.outputs.n' resolves
+  to no document on the search path — did you mean '.children.a.outputs.n', which reads this state's
+  data?"* A resolver message about the filesystem would send the reader hunting for a missing file.
+- **a template hole is recognized WITHOUT the dot and then fails to lower.** A regex demanding the
+  dot would leave `{{inputs.x}}` unrecognized and render it as literal text into the prompt — the
+  same mistake, silently. Relatedly, `renderTemplate` now lowers *outside* its `catch`: a hole that
+  cannot be lowered is an authoring error, while a hole that lowers and does not resolve is
+  legitimately empty, and swallowing both made the first look like the second.
+
+Two failure modes also separate cleanly, which is the rule paying rent: `.bogusroot.x` is a runtime
+read of a namespace that does not exist — a validator error — while `bogusroot.x` is a reference to a
+document that does not exist, and fails at load.
+
+### 14.6 Open
+
+- **A call in a guard still cannot resolve its callee.** `engine.ts`'s `exprRef` lowers with no
+  options, so `resolveOperation` is absent — pre-existing, and unrelated to the dot, but §3's claim
+  that a call works "in operation inputs, output bindings and guards" overstates the third. Guards
+  would have to be lowered at load, like every other expression, rather than at first evaluation.
+- **`resolveDocument` is called twice for a binding path** — once inside `expandReferenced` and once
+  to learn the file's extension. Correct and cheap at load time, but it is a seam where a future
+  caching layer would have to keep both in step.

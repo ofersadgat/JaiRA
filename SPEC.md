@@ -317,7 +317,7 @@ comes from:
 { "child": "context", "output": "plan_doc" }   a declared child's output
 { "child": "critique" }                        a child's whole output object
 { "input": "issue" }                           this state's declared input
-{ "expr": "outputs.n + 1" }                    a small computation
+{ "expr": ".outputs.n + 1" }                    a small computation
 { "artifact": "name" }                         a session artifact
 { "conversation": "review", "message": 0 }     a transcript, or one message
 { "text": "significant" }                      a string literal
@@ -544,12 +544,12 @@ The same language is used for transition conditions and for `{ "expr": … }`
 bindings — the one binding form that computes rather than references (§4.2).
 
 **Guards are strictly boolean.** A transition condition must *infer* to boolean;
-there is no truthiness coercion, so `"when": "outputs.goals"` is a validation
+there is no truthiness coercion, so `"when": ".outputs.goals"` is a validation
 error rather than a non-empty test. Write `"outputs.goals.length > 0"`.
 
 > Revised: the paragraph above says equality and truthiness "behave exactly as in
 > JavaScript". They do inside an expression, but a guard's *result* is checked at
-> load time, which catches `when: "outputs.x"` before a run rather than silently
+> load time, which catches `when: ".outputs.x"` before a run rather than silently
 > branching on a non-empty string.
 
 The expression language should support:
@@ -697,38 +697,38 @@ Agents may not:
       "state": "feature/plan/critique/address_weaknesses",
       "inputs": {
         "plan_doc": { "input": "plan_doc" },
-        "weaknesses": { "expr": "outputs.weaknesses" },
-        "critique_report": { "expr": "outputs.critique_report" }
+        "weaknesses": { "expr": ".outputs.weaknesses" },
+        "critique_report": { "expr": ".outputs.critique_report" }
       }
     },
     "human_review": {
       "state": "feature/plan/critique/human_review",
       "inputs": {
         "plan_doc": { "input": "plan_doc" },
-        "critique_report": { "expr": "outputs.critique_report" }
+        "critique_report": { "expr": ".outputs.critique_report" }
       }
     }
   },
   "transitions": [
     {
       "to": "terminate.success",
-      "when": "children.human_review.outcome === 'success'"
+      "when": ".children.human_review.outcome === 'success'"
     },
     {
       "to": "terminate.success",
-      "when": "children.address_weaknesses.outcome === 'success'"
+      "when": ".children.address_weaknesses.outcome === 'success'"
     },
     {
       "to": "terminate.success",
-      "when": "outputs.outcome === 'clean'"
+      "when": ".outputs.outcome === 'clean'"
     },
     {
       "to": "human_review",
-      "when": "outputs.outcome === 'blocked'"
+      "when": ".outputs.outcome === 'blocked'"
     },
     {
       "to": "address_weaknesses",
-      "when": "outputs.outcome === 'needs_changes'"
+      "when": ".outputs.outcome === 'needs_changes'"
     }
   ]
 }
@@ -816,7 +816,7 @@ validated outputs. The parent branches on `outputs.decision`.
   "outputs": {
     "outcome": {
       "schema": { "type": "string", "enum": ["complete", "blocked"] },
-      "binding": { "expr": "children.critique.outputs.outcome === 'clean' ? 'complete' : 'blocked'" }
+      "binding": { "expr": ".children.critique.outputs.outcome === 'clean' ? 'complete' : 'blocked'" }
     },
     "plan_doc": {
       "schema": { "type": "string", "contentMediaType": "text/markdown" },
@@ -852,15 +852,15 @@ validated outputs. The parent branches on `outputs.decision`.
   "transitions": [
     {
       "to": "terminate.success",
-      "when": "children.critique.outputs.outcome === 'clean'"
+      "when": ".children.critique.outputs.outcome === 'clean'"
     },
     {
       "to": "goals",
-      "when": "children.critique.outputs.outcome === 'needs_changes' && run.iteration < limits.max_iterations"
+      "when": ".children.critique.outputs.outcome === 'needs_changes' && .run.iteration < .limits.max_iterations"
     },
     {
       "to": "terminate.success",
-      "when": "children.critique.outcome === 'success'"
+      "when": ".children.critique.outcome === 'success'"
     }
   ],
   "limits": {
