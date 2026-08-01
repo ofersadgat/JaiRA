@@ -26,13 +26,13 @@ function twoStepFiles(mode: "summary" | "full_history"): Record<string, unknown>
         second: { state: "chain/second", inputs: { draft: { child: "first", output: "draft" } } },
       },
       sequence: ["first", "second"],
-      transitions: [{ to: "terminate.success", when: "children.second.outcome === 'success'" }],
+      transitions: [{ to: "terminate.success", when: ".children.second.outcome === 'success'" }],
     },
     "chain/first": {
       inputs: { topic: { schema: { type: "string" } } },
       outputs: { draft: { schema: { type: "string" } } },
       environment: { conversation: { mode: "fresh" } },
-      operation: { kind: "prompt", prompt: "Draft something about {{inputs.topic}}.", model: "m" },
+      operation: { kind: "prompt", prompt: "Draft something about {{.inputs.topic}}.", model: "m" },
     },
     "chain/second": {
       inputs: { draft: { schema: { type: "string" } } },

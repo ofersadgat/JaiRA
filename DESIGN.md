@@ -1037,7 +1037,7 @@ interface RunSpec {
 }
 ```
 
-Prompt templates come from `operation.prompt.template` with `{{inputs.*}}`
+Prompt templates come from `operation.prompt.template` with `{{.inputs.*}}`
 interpolation (there is no `params` namespace). Artifact-typed inputs were to
 interpolate as worktree-relative paths plus an instruction to read the file —
 **not built**: an artifact travels inline as content today (§7.5, TODO.md).

@@ -54,7 +54,7 @@ describe("jaira workflow", () => {
         outputs: { goals: { kind: "text" } },
         operation: { kind: "prompt", template: "list goals" },
         // A guard that infers to text, not boolean (§7.2 is strict here).
-        transitions: [{ to: "terminate.success", when: "outputs.goals" }],
+        transitions: [{ to: "terminate.success", when: ".outputs.goals" }],
       }),
     );
     const res = await cli(["workflow", "lint", "--json"]);
