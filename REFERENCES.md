@@ -296,8 +296,8 @@ type AuthoredLlmConfig = Omit<LlmConfiguration, "tools" | "sessionId"> & {
   session?: SessionDecl;
 };
 
-/** DESIGN §7.3 — a ref, an explicit "start fresh", or the object form. */
-type SessionDecl = string | null | { readonly id: string };
+/** DESIGN §7.3 — a name, a computed ref, an explicit "start fresh", or a literal ref. */
+type SessionDecl = string | null | { readonly id: string } | { readonly expr: string };
 ```
 
 **As built (DESIGN §7.3):** the value is no longer just a name. A string is a **session

@@ -1088,7 +1088,11 @@ do, and where the model does not fit.
 - **There is no implicit `"default"` session.** A state that declares none gets its OWN conversation.
   Threading across states (spec §4.7) is something an author asks for, by naming a session once at a
   root and letting the environment chain carry it down (WORKFLOWS.md §5.1). An implicit process-wide
-  transcript was the thing driving unbounded context growth. `null` is the explicit "start fresh"
+  transcript was the thing driving unbounded context growth. Two states that are *not* in one subtree
+  thread by passing a ref through data flow instead — `operation.outputs.session` into an input, and
+  `"session": {"expr": …}` on the consumer (WORKFLOWS.md §5.3). That spelling is evaluated per
+  instance rather than read off the document, because a ref does not exist until its producer has
+  run. `null` is the explicit "start fresh"
   marker and `""` is an error, so a template interpolating a bad reference fails instead of quietly
   running an isolated conversation that looks like it worked.
 - **A repair appends; a retry forks.** Neither is a setting. Resolution RESERVES the next position

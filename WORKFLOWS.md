@@ -556,7 +556,7 @@ the same rule.
   | Written | Means |
   | --- | --- |
   | `"planning"` | a **name**. States sharing it share one append-only stream. |
-  | `{"expr": "children.plan.operation.outputs.session"}` | a **session ref** — an exact position in a stream, to continue or branch from. Opaque: nothing outside the session store parses it. |
+  | `{"expr": "inputs.thread"}` | a **session ref**, computed — an exact position in a stream, to continue or branch from. Opaque: nothing outside the session store parses it. The one spelling *evaluated* rather than read; see §5.3 for the two-hop wiring it needs. |
   | `null` | start a **fresh** stream, overriding whatever the chain supplied. |
 
   **Absent means its own fresh stream, not a shared default.** There is no
@@ -635,6 +635,107 @@ execution-environment fields are *not* kind-specific — a gate under a
 ⚠️ A `{ child: … }` binding in an `environment` block names a child key that only
 exists in the declaring state. It is meaningless once inherited; use
 `{ input: … }`, which resolves in whatever state consumes it.
+
+### 5.3 Worked: sharing, continuing and starting a conversation
+
+Four things you will actually want, in order of how often you want them.
+
+**Share one conversation across a subtree — declare a name once.** This is the
+common case, and the only one that needs no data flow: the `environment` chain
+carries the name down, every descendant joins the same append-only stream, and
+they run in one workspace with one set of approvals.
+
+```jsonc
+// feature/plan.json — the root of the subtree that should share a thread
+{
+  "environment": { "kind": "prompt", "model": "anthropic/claude-sonnet-5", "session": "planning" },
+  "children": { "goals": {}, "context": {}, "critique": {} },
+  "sequence": ["goals", "context", "critique"]
+}
+
+// feature/plan/goals.json — says nothing about sessions, and joins "planning"
+{ "operation": { "prompt": "Extract goals from {{inputs.issue}}." } }
+
+// feature/plan/critique.json — same, and sees what goals and context said
+{ "operation": { "prompt": "Name the three weakest assumptions so far." } }
+```
+
+**Continue one exact conversation from elsewhere — pass a ref.** Use this when
+the states are not in one subtree, or when you want to continue from a specific
+point rather than "wherever that name is now". `operation.outputs.session` is the
+position a call **ended** at (§9), so it is exactly "after me".
+
+It takes two hops, because two different scopes are involved. The **parent**
+wires the ref into the consumer's input — only the parent can see both children —
+and the **consumer** names that input in its `session`:
+
+```jsonc
+// review.json — the parent, which can see both children
+{
+  "children": {
+    "plan":   { "state": "planner" },
+    "critique": {
+      "state": "critic",
+      "inputs": { "thread": { "expr": "children.plan.operation.outputs.session" } }
+    }
+  },
+  "sequence": ["plan", "critique"]
+}
+
+// critic.json — joins the planner's conversation, without sharing its name
+{
+  "inputs": { "thread": { "schema": {} } },
+  "operation": {
+    "kind": "prompt",
+    "session": { "expr": "inputs.thread" },
+    "prompt": "Critique the plan you just produced."
+  }
+}
+```
+
+`{"expr": …}` is the one `session` spelling **evaluated** rather than read, and it
+has to be: a ref does not exist until the operation that produced it has run, so a
+static value could never carry one. An expression that resolves to nothing is a
+**failure**, not a fresh conversation — the author asked to continue something
+specific, and quietly starting a different one yields a run that looks successful
+and remembers nothing.
+
+**Branch instead of continuing — the same ref plus `fork`.** A fork sees the
+prefix and writes somewhere else, so the trunk is untouched. Fan three variants
+out of one planning conversation:
+
+```jsonc
+// critic.json — same wiring, one extra field
+"operation": {
+  "kind": "prompt",
+  "session": { "expr": "inputs.thread" },
+  "fork": true,
+  "prompt": "Argue the opposite case."
+}
+```
+
+`fork` goes on the state that **consumes** the ref, never on the one that produced
+it: a position marker should not encode what a later caller intends to do with it.
+
+**Start a fresh conversation — omit `session`, or write `null`.**
+
+```jsonc
+// nothing declared, and no ancestor declared one: this state's own private stream
+"operation": { "kind": "prompt", "prompt": "Summarize this file." }
+
+// under a root that declared "planning", but this one should not see it
+"operation": { "kind": "prompt", "session": null, "prompt": "Summarize this file." }
+```
+
+The two differ only in intent — both give the state a stream nothing else writes
+to. Write `null` when an ancestor declared a name and you mean to opt out, since
+that reads as a decision rather than an omission. `""` is an error, never "fresh":
+a template interpolating a bad reference would otherwise produce an empty string
+and run in silent isolation.
+
+⚠️ `session: null` opts out of the **conversation**, not the workspace. The
+worktree and the approvals come from the declared name and are inherited, so a
+fresh conversation still runs where its parent runs.
 
 ---
 
@@ -837,12 +938,18 @@ an expression reads it — and it is what consumers want, since "append after me
 and "fork after me" both mean *after*:
 
 ```jsonc
-// continue the planner's conversation
-{ "session": { "expr": ".children.plan.operation.outputs.session" } }
+// the PARENT wires the position into the consumer's input...
+"children": { "critique": { "state": "critic",
+  "inputs": { "thread": { "expr": "children.plan.operation.outputs.session" } } } }
 
-// or branch from it, leaving the planner's stream untouched
-{ "session": { "expr": ".children.plan.operation.outputs.session" }, "fork": true }
+// ...and the consumer continues that conversation, or branches from it
+{ "session": { "expr": "inputs.thread" } }
+{ "session": { "expr": "inputs.thread" }, "fork": true }
 ```
+
+Two hops, because two scopes: `children.plan.*` is visible only to the parent,
+and `session` is resolved against the state that declares it. §5.3 works this
+through end to end.
 
 Recovery needs no start marker either: restart the state, and its binding
 re-resolves to the position the failed attempt started from — which has since
