@@ -811,12 +811,17 @@ export class SessionStreams<Msg = JsonValue> {
         pending.set(stub.id, { branch: at.id, seq: at.seq });
       },
 
-      close(id: string, settled: { result?: { value?: unknown } }): void {
+      close(id: string, settled: Parameters<ExecRecordStore["close"]>[1]): void {
         const at = pending.get(id);
         if (at === undefined) return;
         pending.delete(id);
+        // Two shapes reach here. A PROMPT op's payload is already a conversation, so its messages are
+        // read straight off it. A DELEGATED agent answers with text and keeps its transcript
+        // server-side, so it reports what it added — and, critically, the session id the run ended in.
+        const reported = settled.sessionOutcome;
         const payload = settled.result?.value as { messages?: readonly Msg[] } | undefined;
-        const messages = payload?.messages ?? [];
+        const messages = (reported?.messages as readonly Msg[] | undefined) ?? payload?.messages ?? [];
+        const handle = reported?.providerSessionId ?? payloadHandle(settled);
         // ONE entry per RECORD, not one per message. A position counts operations — that is what makes
         // `[0:14]` mean "after fourteen calls" and what §8's per-operation forking rests on — so a call
         // that produced six turns still advances the conversation by one.
@@ -825,7 +830,13 @@ export class SessionStreams<Msg = JsonValue> {
         // no-op that frees it rather than an error.
         if (messages.length > 0) {
           streams.append(at.branch, at.seq, [
-            { id, result: { value: { messages } } as unknown as JsonValue, ...(payloadHandle(settled) !== undefined ? { externalId: payloadHandle(settled)! } : {}) },
+            {
+              id,
+              result: { value: { messages } } as unknown as JsonValue,
+              // The handle the run ENDED in. A native fork returns a new one, and losing it would put
+              // two branches into a single remote session.
+              ...(handle !== undefined ? { externalId: handle } : {}),
+            },
           ]);
         }
       },

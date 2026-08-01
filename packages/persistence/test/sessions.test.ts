@@ -509,6 +509,23 @@ describe("the executor-facing contract", () => {
     expect(streams.branch(fresh.split("@")[0]!)?.edge).toBe("resync");
   });
 
+  it("records what a DELEGATED agent reported — its turns AND the handle it ended in", async () => {
+    // An agent answers with text and keeps its transcript server-side, so it cannot report a payload
+    // that is already a conversation. What it must report is the session id the run ended in: a
+    // native fork returns a NEW one, and losing it puts two branches into a single remote session.
+    const store = exec();
+    const at = await store.resolve({ ref: "planning" });
+    const id = `${at.at.id}:${at.at.seq}`;
+    store.open({ id, source: undefined as never, session: at.at, startMs: 0 });
+    store.close(id, {
+      result: { value: "the agent's answer" as never },
+      sessionOutcome: { providerSessionId: "sess-forked", messages: [msg("assistant", "the agent's answer")] },
+    });
+
+    expect(readTexts(await store.messages(formatSessionRef(at.at.id, 1)))).toEqual(["the agent's answer"]);
+    expect(streams.providerHandle(at.at.id)).toBe("sess-forked");
+  });
+
   it("exposes only `id` on the session it hands the executor", async () => {
     const at = await exec().resolve({ ref: "planning" });
     expect(Object.keys(at)).toEqual(["id"]);
