@@ -1,5 +1,5 @@
 /**
- * Durable conversation streams (SESSIONS.md §2, §9).
+ * Durable conversation streams (DESIGN.md §7.3).
  *
  * The properties under test are the ones the whole model rests on, not the CRUD:
  *
@@ -577,7 +577,7 @@ describe("schema", () => {
 });
 
 /**
- * Lineage-aware pruning (SESSIONS.md §9, step 9).
+ * Lineage-aware pruning (DESIGN §7.3).
  *
  * The stakes are higher here than for other pruned history: a session id is a capability — hold one
  * and you may use it — so pruning is the ONLY thing that can make a held id unresolvable.

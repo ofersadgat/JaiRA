@@ -35,7 +35,7 @@ assumption breaks.
       `waiting_for_event` state, no parent/child rollup.
 - [ ] **§4.2 tables are partly deferred** (§1b item 2). `command_log` landed with
       phase 6, `artifacts` with §7.6, `jobs` with §4.2a and `sessions` +
-      `operation_records` with SESSIONS.md (replacing the drafted `conversations`);
+      `operation_records` with the session model (DESIGN §7.3, replacing the drafted `conversations`);
       `instances`, `operations` and `transitions` still do not exist — the board and detail views
       are projected from the `events` journal instead. They land with step-level
       resume, which needs `@declarative-ai/hw` support.
@@ -330,10 +330,10 @@ What remains:
       transcript, so a session mixing `summary` and `full_history` is summarized for
       both; the workflow browser warns, and nothing finer is possible without an engine
       change. Only NAMED sessions can collide — a state that declares none gets its own
-      private conversation (SESSIONS.md §4).
+      private conversation (DESIGN §7.3).
 - [ ] **Pruning does not touch artifacts.** DESIGN §12 lists "conversation artifacts";
       no artifact file is written for a conversation yet (§7.5), so pruning covers `runs`,
-      `events`, `command_log` and — since SESSIONS.md §11 — session lineage. Sessions
+      `events`, `command_log` and — since the session rework (DESIGN §7.3) — session lineage. Sessions
       prune by DEPTH, deepest first, because a descendant holds a foreign key into its
       parent and `created_at` ties within a millisecond ordered a root ahead of its own
       children.

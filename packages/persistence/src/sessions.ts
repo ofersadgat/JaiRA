@@ -1,5 +1,5 @@
 /**
- * Durable conversation streams (SESSIONS.md §2, §9).
+ * Durable conversation streams (DESIGN.md §7.3).
  *
  * A **session** is an append-only sequence of messages. A **session ref** names one
  * AT a position, which is what makes "continue from here" and "branch from here" the
@@ -22,7 +22,7 @@
  * `parent_id`, not parsed out of a string.
  *
  * This module is storage only. Deciding whether a call appends or forks is the
- * wrapper's job (SESSIONS.md §5/§6); what lives here is the durable backstop that
+ * wrapper's job (DESIGN.md §7.3); what lives here is the durable backstop that
  * decision rests on — {@link SessionStreams.append} is CONDITIONAL on the expected
  * position, so two writers racing the same position cannot both win.
  */
@@ -67,7 +67,7 @@ export interface SessionBranch {
  *
  * `id` is the only enumerable property, so the events journal, `inputs_json` and
  * `outputs_json` all see `{ id }` and nothing else. Richer resolved forms attach
- * their extras NON-enumerably (SESSIONS.md §3).
+ * their extras NON-enumerably (DESIGN.md §7.3).
  */
 export interface SessionRef {
   readonly id: string;
@@ -141,7 +141,7 @@ export function messagesOf<Msg = JsonValue>(result: JsonValue | undefined): Msg[
 /**
  * Raised when an append targets a position that is no longer the head.
  *
- * The wrapper turns this into a fork (SESSIONS.md §5). It is a distinct class rather
+ * The wrapper turns this into a fork (DESIGN.md §7.3). It is a distinct class rather
  * than a bare `Error` precisely so that "someone else got there first" is never
  * mistaken for "the database is broken" — the first is routine and has a correct
  * answer, the second does not.
@@ -189,7 +189,7 @@ export function parseSessionRef(id: string): { branchId: string; position: numbe
 /**
  * Branch ids are DERIVED FROM STABLE INPUTS, never random.
  *
- * SESSIONS.md §13: a fan-out that mints random ids produces different lineage labels
+ * A fan-out that mints random ids produces different lineage labels
  * on every run, which degrades exactly the observability this table exists for. So a
  * branch id is a hash of (edge, parent, cursor, seed) and the caller supplies a seed
  * that is stable across runs — a child key plus iteration index, a state id, a
@@ -333,7 +333,7 @@ export class SessionStreams<Msg = JsonValue> {
    * The branch and position a ref names.
    *
    * Throws {@link UnknownSession} rather than returning `undefined` for a ref whose
-   * branch is gone: SESSIONS.md §4 is explicit that an unresolvable id is an error
+   * branch is gone: DESIGN.md §7.3 is explicit that an unresolvable id is an error
    * and must never silently create, because that turns a typo into a plausible-looking
    * result. A ref pointing PAST the branch's head is equally unresolvable — it commits
    * to content that does not exist.
@@ -436,7 +436,7 @@ export class SessionStreams<Msg = JsonValue> {
    * their prefixes — a fork stores only what it appended, so deleting its parent deletes the first
    * fourteen messages of a conversation that still exists.
    *
-   * Of the three options SESSIONS.md §9 offers — whole lineages, leaves only, or materializing a
+   * Of the three options on the table — whole lineages, leaves only, or materializing a
    * child's prefix first — this store takes WHOLE LINEAGES. Leaves-only never reclaims the trunk,
    * which is where the bulk sits; materializing first turns a prune into a copy that makes the
    * database temporarily larger, and it destroys the copy-on-write property that made forks cheap.
@@ -541,7 +541,7 @@ export class SessionStreams<Msg = JsonValue> {
    * here, and the last record is where "what actually happened" lives. A `(session, provider)` map
    * would be modelling a many-to-many that cannot occur.
    *
-   * Reading it back also gives divergence detection its trigger (SESSIONS.md §11): a call returning
+   * Reading it back also gives divergence detection its trigger (DESIGN.md §7.3): a call returning
    * a handle other than this one means the remote forked underneath us.
    */
   providerHandle(branchId: string, upTo?: number): string | undefined {
@@ -620,7 +620,7 @@ export class SessionStreams<Msg = JsonValue> {
 
   /**
    * A new stream whose contents were re-read from the provider after the remote
-   * diverged from our mirror (SESSIONS.md §11).
+   * diverged from our mirror (DESIGN.md §7.3).
    *
    * Where the adapter has no read API the caller passes NO entries and the branch
    * starts empty — visible on the edge rather than silent, which is the whole point of
@@ -634,7 +634,7 @@ export class SessionStreams<Msg = JsonValue> {
    * Append entries at `expected`, or refuse.
    *
    * CONDITIONAL on purpose. The wrapper reserves a position before calling a provider
-   * (SESSIONS.md §5) and an in-process lock is enough while a run is owned by one
+   * (DESIGN.md §7.3) and an in-process lock is enough while a run is owned by one
    * process — but a lock is not durable and does not span processes, so the write
    * itself re-checks. A loser gets {@link SessionPositionConflict} and forks; nobody
    * silently clobbers.

@@ -549,7 +549,7 @@ The last of §14. 313 tests. What phase 7 settled:
    session has one transcript, so a session mixing the two modes is summarized for
    both, and the workflow browser warns about it.
 
-   Reworked under SESSIONS.md §7: compaction now produces a **new session** with a
+   Reworked under the session model (§7.3): compaction now produces a **new session** with a
    `compaction` edge to the origin, which is left intact — a summarized conversation
    is not a fork (its prefix is a summary appearing nowhere in the original), and
    rewriting in place made a held ref silently mean something else. The decorator
@@ -731,7 +731,7 @@ jobs           (id PK, kind, task_id, run_id, parent_job_id, owner_token, pid,
                 ended_at, outcome)   -- BUILT (§4.2a): process claims + children
 sessions       (id PK, label, parent_id, parent_cursor, edge, digest,
                 task_id, run_id, created_at)
-                -- BUILT (SESSIONS.md §9), replaces `conversations`. A row is a
+                -- BUILT (§7.3), replaces `conversations`. A row is a
                 -- BRANCH; a ref names one AT a position. edge = root | fork |
                 -- compaction | resync, and only `fork` carries parent_cursor,
                 -- because only a fork shares a byte-identical prefix. `label` is a
@@ -869,7 +869,7 @@ On startup, for every task with `status = running`:
    configured mode). The handle to resume from is `operation_records.external_id`
    on the interrupted record — which is also the evidence that it was in flight,
    since a stub with a NULL `result` is exactly a call that never settled.
-   Restarting into the same conversation FORKS it (SESSIONS.md §5): the position
+   Restarting into the same conversation FORKS it (§7.3): the position
    the dead attempt reserved is taken, and a retry must not write over what a
    crashed process may already have sent. UI operations are simply re-presented — they are pull-based
    (§7.1) and lose nothing.
@@ -1060,7 +1060,7 @@ interface RunSpec {
   cwd: string;                    // task worktree (or project dir if unbound)
   execEnv: ExecEnv;               // windows | { wsl: distro }
   prompt: string;                 // rendered template + injected contract text
-  conversation: ConversationRef;  // mode + session ref (branch@position) — SESSIONS.md
+  conversation: ConversationRef;  // mode + session ref (branch@position) — §7.3
   outputContract: OutputContract; // §7.5
   policy: CompiledPolicy;         // §10
   env: Record<string, string>;    // provider auth etc., from project config
@@ -1074,15 +1074,29 @@ interpolate as worktree-relative paths plus an instruction to read the file —
 
 ### 7.3 Sessions and Conversation Modes (spec §4.7)
 
-**Superseded by [SESSIONS.md](SESSIONS.md), which is the model of record.** A session is an
-**append-only conversation**, and a session ref names one *at a position* — so "continue from here"
-and "branch from here" are the same primitive, and an id is a commitment to content rather than a
-mutable name. The four points below are the ones that change how a workflow is authored:
+A session is an **append-only conversation**, and a session ref names one *at a position* — so
+"continue from here" and "branch from here" are the same primitive, and an id is a commitment to
+content rather than a mutable name. The governing rule is that **a session mirrors what the remote
+provider's session does**; everything below is derived from that rather than configured.
+
+The engine-side seam (refs, reservation, the wrapper stack) is `@declarative-ai` DESIGN §1.6/§3.6.
+This section is JaiRA's half: what an author sees, what is persisted, what each provider can actually
+do, and where the model does not fit.
+
+#### What changes for an author
 
 - **There is no implicit `"default"` session.** A state that declares none gets its OWN conversation.
   Threading across states (spec §4.7) is something an author asks for, by naming a session once at a
   root and letting the environment chain carry it down (WORKFLOWS.md §5.1). An implicit process-wide
-  transcript was the thing driving unbounded context growth.
+  transcript was the thing driving unbounded context growth. `null` is the explicit "start fresh"
+  marker and `""` is an error, so a template interpolating a bad reference fails instead of quietly
+  running an isolated conversation that looks like it worked.
+- **A repair appends; a retry forks.** Neither is a setting. Resolution RESERVES the next position
+  before the call goes out rather than observing the head, so the rule falls out of whether the
+  position was still free: a repair attempt continues the same conversation, and a retry — which
+  wants a position a previous attempt already claimed — branches instead of writing over it. The
+  loser of a genuine race forks for the same reason. It must never retry at the next slot: the
+  winner may already have appended remotely.
 - **`session` no longer keys the workspace or the permission ledger.** Those belong to a *resource
   bundle*, keyed on the DECLARED name and inherited from the enclosing state — so a fork, a retry and
   a loop iteration all keep one worktree and one set of approvals, none of them having changed what
@@ -1102,6 +1116,101 @@ state's conversation is private and has nothing to conflict with).
 
 Conversations are readable as data through a `{ conversation }` binding. They are **not** written to
 `jaira-artifacts/…` — no artifact file is written at all yet (§7.5).
+
+#### Lineage and persistence
+
+`sessions` + `operation_records` (§4.2). A `sessions` row is a **branch**, not a position; a ref names
+a branch AT a position, and only the store knows how the two are spelled into one opaque string —
+neither the engine nor any executor parses a ref. Lineage is read from `parent_id`, never from the
+label: `planning[0:14]/b` is a derived display form and is **not a key**.
+
+Four edge kinds, and only one of them shares content with its parent:
+
+| edge | parent | shares a prefix | why |
+| --- | --- | --- | --- |
+| `root` | — | — | a conversation nobody branched from |
+| `fork` | yes | **byte-identical `[0:cursor]`** | the only edge carrying `parent_cursor` |
+| `compaction` | provenance only | no | opens with a summary appearing nowhere in the origin |
+| `resync` | provenance only | no | contents were re-read from the provider |
+
+Calling compaction or resync a fork would make `[0:n]` a lie, which is why `parent_cursor` belongs to
+`fork` alone. Materialization walks the chain with a recursive CTE and is copy-on-write, so a fork
+costs a row rather than a copy of the transcript. A rolling `digest` commits to the content at each
+branch's head, which is what makes an id a claim about content and not just a name.
+
+Pruning is **lineage-aware** (§12) and deletes by DEPTH, deepest first — a descendant holds a foreign
+key into its parent, and ordering by `created_at` puts a root ahead of its own children whenever two
+rows land in the same millisecond.
+
+#### What the providers actually do
+
+The strategies above are only as good as the backend, and the backends differ more than the API
+surface suggests:
+
+- **Anthropic Messages API** — fully stateless. No session id, no resume, no fork; `messages[]` goes
+  out every call. The only server-side state is the prompt cache, a strict prefix match — which
+  *rewards* this design, since two forks sharing messages 0–13 share cache reads and an in-place
+  rewrite would invalidate everything after the edit point. Being stateless, it cannot diverge.
+- **Claude Agent SDK / `claude` CLI** — has exactly the primitive we want: `resume: <sessionId>` plus
+  `forkSession: true` starts a new session seeded with a copy of the original's history, leaving the
+  original untouched, so a fork costs no replay. Transcripts are JSONL under
+  `~/.claude/projects/<encoded-cwd>/`, where `<encoded-cwd>` is the absolute working directory with
+  every non-alphanumeric character replaced by `-` — so **a resume from a different cwd silently
+  starts a fresh session**, which is a trap worth knowing about when worktrees move.
+  `getSessionMessages()` is the read path resync needs.
+- **Anthropic Managed Agents** — real server-side sessions with an append-only event stream and
+  `events.list` for history, but **no fork**, and `initial_events` accepts only user events, so a
+  mid-conversation branch cannot be reconstructed. It also compacts server-side on its own, which is
+  a live source of divergence.
+- **Vercel AI SDK** — no server state by design; `chatId` is an application-level routing token and
+  `resumeStream` resumes an in-flight *stream*, not a conversation.
+
+An adapter that can resume natively gets the handle recorded at the resolved position
+(`operation_records.external_id`); one that cannot replays the materialized messages. A fork does not
+carry the handle across its first append — two branches must never write into one remote session.
+
+#### Divergence
+
+The remote can move without us: Managed Agents compacts server-side, and a Claude Code session can be
+resumed outside JaiRA entirely. Then our mirror is stale and the digest no longer describes what the
+provider will send.
+
+Detection is **exact, not heuristic**: we resumed a handle, the call reports the one it actually ran
+in, and on an APPEND those must agree. That comparison only became possible once the handle moved
+onto the record — a `(session, provider)` map cannot express "what was true at position 14" and so
+could not notice a change at all. **A fork is exempt**, because a new handle is precisely what a
+native fork returns.
+
+On divergence: log an error, then start a new session with a `resync` edge and contents re-read from
+the provider. Not silently continue — an id is a content commitment, and the same reasoning that
+makes an unresolvable ref an error applies here. Where an adapter has no read API the new session
+starts **empty**, and that is visible on the edge rather than silent. A read that throws still
+resyncs, emptily: losing the conversation is bad, carrying on against a mirror known to be wrong is
+worse.
+
+#### Known limits
+
+State these; do not engineer around them.
+
+- **Managed Agents cannot mirror a fork.** The remote is append-only with no fork, and
+  `initial_events` refuses assistant and tool events, so the new remote session starts thinner than
+  ours. This is the one place the governing rule cannot be satisfied, and it is inherent to the
+  provider.
+- **Forks share a worktree.** Forking branches the conversation, not the filesystem — the same
+  constraint Anthropic documents for `forkSession`. **JaiRA does not fork worktrees.** Forks are for
+  replay, observability and provider portability, *not* for speculative "try two approaches and
+  compare". Worth writing down because upstream leaves a per-branch workspace isolation hook open
+  (`Workspace` is a Session-owned resource a fan-out *may* isolate) and someone will otherwise wire
+  it up by accident.
+- **Fan-out determinism.** Structural fan-out is deterministic because the engine controls dispatch
+  order, but two states in unrelated subtrees receiving the same ref through data flow are ordered by
+  arrival — so which one keeps the trunk depends on completion order. Derive fork ids from stable
+  inputs (child key + iteration, or a content hash) rather than random UUIDs, or lineage labels change
+  between runs and the observability this exists for gets worse.
+- **Cross-provider replay is best-effort.** `providerOptions` being namespaced and ignored elsewhere
+  is what makes replay work at all, but provider-specific reasoning content does not transfer and
+  thinking blocks are dropped outright by other models. Moving a conversation to a new provider is
+  therefore a fork, not a continuation.
 
 ### 7.4 Skill Operations
 

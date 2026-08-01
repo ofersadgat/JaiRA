@@ -120,7 +120,7 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
 }
 
 /**
- * Prune the conversation streams a set of terminal tasks owns (SESSIONS.md §9).
+ * Prune the conversation streams a set of terminal tasks owns (DESIGN.md §7.3).
  *
  * SEPARATE from {@link pruneHistory}, and deliberately not folded into it, because a session is not
  * run history. A session outlives the run that produced it — a later run of the same task, or another

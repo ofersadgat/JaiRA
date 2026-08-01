@@ -296,11 +296,11 @@ type AuthoredLlmConfig = Omit<LlmConfiguration, "tools" | "sessionId"> & {
   session?: SessionDecl;
 };
 
-/** SESSIONS.md §3/§4 — a ref, an explicit "start fresh", or the object form. */
+/** DESIGN §7.3 — a ref, an explicit "start fresh", or the object form. */
 type SessionDecl = string | null | { readonly id: string };
 ```
 
-**As built (SESSIONS.md):** the value is no longer just a name. A string is a **session
+**As built (DESIGN §7.3):** the value is no longer just a name. A string is a **session
 ref** naming a conversation *at a position* (`<branch>@<position>`, or a bare branch
 meaning its head), and it is **opaque** — hw never parses it and neither does any
 executor; only the session store reads structure, which is what lets the spelling change

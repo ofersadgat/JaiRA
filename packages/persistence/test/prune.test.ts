@@ -174,7 +174,7 @@ describe("integrity", () => {
 });
 
 /**
- * Conversation pruning (SESSIONS.md §9, step 9).
+ * Conversation pruning (DESIGN §7.3).
  *
  * Sessions are pruned SEPARATELY from run history, because a session is not run history: it outlives
  * the run that produced it, and a later run — or another task — can continue or branch from it, since

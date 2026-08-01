@@ -1196,3 +1196,18 @@ Every one of these fails **silently or misleadingly**:
     the JSON wins. Two files whose names differ only past a dot
     (`user.json`, `user.address.json`) make `$/types/user.address` ambiguous —
     also a warning, longest match wins.
+19. **Omitting `session` gives that state its own private conversation.** It is
+    not a shared default, and nothing warns: the state simply does not see what
+    the previous one said, and reads as a model that forgot rather than a workflow
+    that never threaded. Name a session at the root if you want threading.
+20. **A `session` ref does not give a subtree its own worktree or approvals.**
+    Those follow the declared *name* and are inherited; only naming a session on a
+    subtree gives it its own bundle. Two branches of one conversation share a
+    checkout — a fork branches the conversation, not the filesystem.
+21. **`fork` goes on the state that consumes a ref, not on the one that produced
+    it.** Written on the producer it does nothing, because a position marker does
+    not encode how a later caller intends to use it.
+22. **`summary` is per session, not per state.** One state asking for it summarizes
+    the conversation for every state sharing that session, including the ones that
+    asked for `full_history`. The lint warns for named sessions; it cannot warn
+    for a private one, because a private one has nothing to conflict with.

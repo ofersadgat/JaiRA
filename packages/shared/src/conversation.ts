@@ -7,7 +7,7 @@
  * lives here rather than in either. It reads authored state files as plain JSON
  * and depends on no engine types.
  *
- * ## Only DECLARED sessions are grouped (SESSIONS.md §4)
+ * ## Only DECLARED sessions are grouped (DESIGN.md §7.3)
  *
  * There is no implicit `"default"` session any more. A state that declares none gets
  * its own stream, which nothing else writes to — so it has no one to conflict with,
@@ -46,7 +46,7 @@ interface EnvironmentShape {
  *
  * A session supplied as a REF rather than a name is invisible here, and has to be —
  * it is a runtime value, so which states share it cannot be told from the document.
- * SESSIONS.md §12 records the direction that resolves it: make conversation mode a
+ * DESIGN §7.3 records the direction that resolves it: make conversation mode a
  * property of the session rather than of the state, and the conflict stops being a
  * static question at all.
  */

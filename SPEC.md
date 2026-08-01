@@ -436,8 +436,8 @@ repository.
 
 ### 4.7 Conversations
 
-> **Superseded by [SESSIONS.md](SESSIONS.md)** for everything about session identity,
-> continuation and branching. What follows is the mode vocabulary, which is unchanged.
+> The session model — identity, continuation and branching — is specified in
+> [DESIGN.md](DESIGN.md) §7.3. What follows is the mode vocabulary, which is unchanged.
 
 A conversation is an **append-only** stream of calls, and a session ref names one *at a
 position* — `<branch>@<position>` — so "continue from here" and "branch from here" are one

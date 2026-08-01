@@ -241,7 +241,7 @@ interface ArtifactWiringOptions {
   /** Records child processes against the run's claim (DESIGN §4.2a). */
   observer?: ExecObserver;
   /**
-   * The durable conversation store (SESSIONS.md §9), when this run has a project to keep one in.
+   * The durable conversation store (DESIGN.md §7.3), when this run has a project to keep one in.
    *
    * It rides with the artifact wiring because it answers the same question: only a DURABLE run has
    * somewhere to put things. An ad-hoc `jaira run` gets neither, which is honest — there is no
@@ -548,7 +548,7 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
       artifacts,
       store: project.artifacts,
       observer: owner.observer(),
-      // Transcripts become durable here (SESSIONS.md §9). Constructed CLI-side and injected, because
+      // Transcripts become durable here (DESIGN.md §7.3). Constructed CLI-side and injected, because
       // `@jaira/runtime` must not import `@jaira/persistence` (DESIGN §4.2a) — the same shape the
       // artifact store above already follows.
       sessions: new SessionStreams(project.db).asExecStore({ taskId, runId: started.runId }),

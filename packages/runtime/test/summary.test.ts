@@ -21,7 +21,7 @@ import {
 } from "../src/summary";
 import { ScriptedFakeExecutor } from "../src/fakeExecutor";
 
-/** An arbitrary named session. There is no implicit default one to reach for (SESSIONS.md §4). */
+/** An arbitrary named session. There is no implicit default one to reach for (DESIGN.md §7.3). */
 const SESSION = "planning";
 
 const turn = (role: "user" | "assistant", content: string): Turn => ({ role, content });
@@ -218,7 +218,7 @@ describe("summarySessionsOf", () => {
   });
 
   it("ignores a state that declares no session — its stream is private", () => {
-    // There is no implicit shared session to bucket it under (SESSIONS.md §4), and a private stream
+    // There is no implicit shared session to bucket it under (DESIGN.md §7.3), and a private stream
     // holds one operation's exchange, which there is nothing to compact.
     const modes = summarySessionsOf(
       bundleWith({

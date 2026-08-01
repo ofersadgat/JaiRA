@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS call_memo (
 -- the latest without every consumer sorting.
 CREATE UNIQUE INDEX IF NOT EXISTS artifacts_logical ON artifacts(task_id, logical_path);
 
--- Conversation streams (SESSIONS.md §9). A row is a BRANCH, not a position: a
+-- Conversation streams (DESIGN.md §7.3). A row is a BRANCH, not a position: a
 -- SessionRef names a branch AT a position, and only the store knows how those two
 -- are spelled into one opaque string (see sessions.ts).
 --
