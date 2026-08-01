@@ -11,7 +11,7 @@ nothing downstream can tell them apart — the migration in §10 is available, n
 Today "point at a thing" has three unrelated spellings: a state id is a path
 (`feature/plan`), a binding is a tagged object (`{"child": "c", "output": "x"}`), and an
 expression or prompt variable is a dotted string (`children.c.outputs.x`,
-`{{inputs.issue}}`). The last two address the same namespace in two syntaxes, and none of
+`{{.inputs.issue}}`). The last two address the same namespace in two syntaxes, and none of
 them can name something in another file. This collapses all of it into one reference type.
 
 ---
@@ -104,7 +104,7 @@ is rare.
 
 ```jsonc
 "operation": "$/lib/review.operation",          // object position, string  → reference
-"prompt": "Extract goals from {{inputs.issue}}", // string position, string  → literal
+"prompt": "Extract goals from {{.inputs.issue}}", // string position, string  → literal
 "prompt": { "$ref": "$/prompts/goals.md" },      // string position, object  → reference
 "when": { "$ref": "$/lib/guards.clean" }         // string position, object  → reference
 ```
@@ -213,12 +213,30 @@ unchanged; only the spelling is.
 "binding": ".conversations.review.messages.0"
 ```
 
-Inside an `{"expr": …}` the leading dot is **optional**, because an expression can only ever
-address runtime space — there is no file-path alternative in that position, and `a + .b`
-reads badly. In a binding it is required, because a bare path there is a document reference.
+The leading dot is **required everywhere**, including inside an expression. ⚠️ This
+reverses an earlier rule — the dot used to be optional in an `{"expr": …}`, on the
+reasoning that an expression "can only ever address runtime space, so there is no
+file-path alternative in that position."
 
-`{"expr": …}` stays. Unifying references does not unify the expression *language*:
-`a.n + 1` and `x === 'clean'` are not references.
+That premise stopped being true when an expression gained call syntax (EXPRESSIONS.md §3).
+A callee is a reference resolved along the `path`, so an expression addresses *both*
+spaces, and a bare name has to mean one of them. Making it mean a document — the same
+thing a bare name means in every other position — is what lets one rule cover the whole
+format:
+
+**A leading dot is a property of the current state. A bare name is a document on the
+search path.**
+
+The rule pays for itself immediately. An expression needs no wrapper to be a binding,
+because a binding string and an expression are now the same grammar:
+
+```jsonc
+"binding": ".inputs.issue"
+"binding": "add(.inputs.n, 1)"
+"binding": { "expr": "add(.inputs.n, 1)" }   // identical; the wrapper is emphasis
+```
+
+`{"expr": …}` therefore stays as a spelling rather than as a necessity.
 
 Literal bindings — `{"text": …}`, `{"json": …}` — stay as they are.
 
@@ -254,11 +272,11 @@ possible or necessary.
 ### 7.1 `prompt` becomes a string; skills are deleted
 
 ```jsonc
-"prompt": "Extract goals from {{inputs.issue}}."
+"prompt": "Extract goals from {{.inputs.issue}}."
 "prompt": { "$ref": "$/prompts/extract_goals.md" }
 ```
 
-A referenced `.md` is still a template — `{{inputs.x}}` interpolation applies either way.
+A referenced `.md` is still a template — `{{.inputs.x}}` interpolation applies either way.
 
 This removes the `template` xor `skill` rule, `SKILL_PREFIX`/`skillRef`/`skillNameOf`, the
 skill branch in `runPromptOp`, `registry.skills` and `SkillTemplate` from the exec contract,

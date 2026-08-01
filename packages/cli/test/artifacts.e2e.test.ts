@@ -25,7 +25,7 @@ const WORKFLOW = {
     outputs: { summary: { kind: "blob", schema: { type: "string", contentMediaType: "text/markdown" } } },
     operation: {
       kind: "prompt",
-      prompt: "Summarize {{inputs.topic}}.",
+      prompt: "Summarize {{.inputs.topic}}.",
       model: "writer",
       output: { kind: "blob", schema: { type: "string", contentMediaType: "text/markdown" } },
     },

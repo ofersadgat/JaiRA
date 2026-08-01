@@ -46,7 +46,7 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
       outputs: {
         outcome: {
           schema: { type: "string", enum: ["complete", "blocked"] },
-          binding: { expr: "children.critique.outputs.outcome === 'clean' ? 'complete' : 'blocked'" },
+          binding: { expr: ".children.critique.outputs.outcome === 'clean' ? 'complete' : 'blocked'" },
         },
         // `output` defaults to the slot's own name, so this is context's `plan_doc`.
         plan_doc: { ...artifact("markdown"), binding: ".children.context.outputs.plan_doc" },
@@ -66,12 +66,12 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
       },
       sequence: ["goals", "context", "critique"],
       transitions: [
-        { to: "terminate.success", when: "children.critique.outputs.outcome === 'clean'" },
+        { to: "terminate.success", when: ".children.critique.outputs.outcome === 'clean'" },
         {
           to: "goals",
-          when: "children.critique.outputs.outcome === 'needs_changes' && run.iteration < limits.max_iterations",
+          when: ".children.critique.outputs.outcome === 'needs_changes' && .run.iteration < .limits.max_iterations",
         },
-        { to: "terminate.success", when: "children.critique.outcome === 'success'" },
+        { to: "terminate.success", when: ".children.critique.outcome === 'success'" },
       ],
       limits: { max_iterations: 3 },
     },
@@ -79,13 +79,13 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
       label: "Goals",
       inputs: { issue: artifact("markdown") },
       outputs: { goals: strArray() },
-      operation: { prompt: "Extract goals from {{inputs.issue}}." },
+      operation: { prompt: "Extract goals from {{.inputs.issue}}." },
     },
     "feature/plan/context": {
       label: "Context",
       inputs: { issue: artifact("markdown"), goals: strArray() },
       outputs: { plan_doc: artifact("markdown") },
-      operation: { prompt: "Write the plan for {{inputs.issue}}." },
+      operation: { prompt: "Write the plan for {{.inputs.issue}}." },
     },
     "feature/plan/critique": {
       label: "Critique Plan",
@@ -116,23 +116,23 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
         address_weaknesses: {
           inputs: {
             plan_doc: ".inputs.plan_doc",
-            weaknesses: { expr: "outputs.weaknesses" },
-            critique_report: { expr: "outputs.critique_report" },
+            weaknesses: { expr: ".outputs.weaknesses" },
+            critique_report: { expr: ".outputs.critique_report" },
           },
         },
         human_review: {
-          inputs: { plan_doc: ".inputs.plan_doc", critique_report: { expr: "outputs.critique_report" } },
+          inputs: { plan_doc: ".inputs.plan_doc", critique_report: { expr: ".outputs.critique_report" } },
         },
       },
       // These two children are ALTERNATIVES, not a spine: an absent `sequence` would run both in
       // declaration order (WORKFLOWS.md §6), so the empty one says "only a transition enters these".
       sequence: [],
       transitions: [
-        { to: "terminate.success", when: "children.human_review.outcome === 'success'" },
-        { to: "terminate.success", when: "children.address_weaknesses.outcome === 'success'" },
-        { to: "terminate.success", when: "outputs.outcome === 'clean'" },
-        { to: "human_review", when: "outputs.outcome === 'blocked'" },
-        { to: "address_weaknesses", when: "outputs.outcome === 'needs_changes'" },
+        { to: "terminate.success", when: ".children.human_review.outcome === 'success'" },
+        { to: "terminate.success", when: ".children.address_weaknesses.outcome === 'success'" },
+        { to: "terminate.success", when: ".outputs.outcome === 'clean'" },
+        { to: "human_review", when: ".outputs.outcome === 'blocked'" },
+        { to: "address_weaknesses", when: ".outputs.outcome === 'needs_changes'" },
       ],
     },
     "feature/plan/critique/address_weaknesses": {
