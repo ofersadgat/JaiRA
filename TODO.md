@@ -311,6 +311,69 @@ What remains:
       `run_command`, …). A tool that runs commands under an unrecognized name gets the
       baseline mode instead of command parsing.
 
+## Open inside the codex adapter (`codex-cli`)
+
+The adapter lives upstream in `@declarative-ai/agents-cli` (`codexQuery.ts`,
+`codexRuntime.ts`); JaiRA only registers it. Verified against **codex-cli 0.145.0** by
+live runs — argv, event schema, and native resume all confirmed, and the opt-in
+`packages/runtime/test/codex.live.test.ts` keeps them confirmed
+(`JAIRA_LIVE_AGENT=1`). What follows is what is still open.
+
+- [ ] **Injected tools are REFUSED, on evidence.** The bridge is reached — codex connects,
+      sees the tool and asks to call it — and the call is then auto-denied, arriving back as
+      the literal text `user cancelled MCP tool call` which the agent reports as its answer.
+      Ruled out: `approval_policy` (`never`, and unset), both sandbox modes, and
+      `mcp_servers.<server>.tools.<tool>.approval_mode = "auto"` under every tool-name
+      spelling. The config field and its variants (`auto|prompt|writes|approve`) are real —
+      `--strict-config` accepts them — so what is missing is the key codex matches a
+      streamable-HTTP server's tools on. Until then a codex state must declare no `tools`,
+      and one that does fails with that reason. **This is what keeps `policyEnforcement:
+      "config"` narrow**: codex works from its own built-ins under the sandbox, and JaiRA's
+      own policy-gated tools are not in its reach.
+- [ ] **A user's `~/.codex/config.toml` MCP servers load into our runs.** Observed: an
+      unrelated GitLab MCP server tried to authenticate during a workflow run. So a codex
+      state's tool surface is not only what JaiRA sanctioned. `--ignore-user-config` would
+      close it and would also discard the user's model and provider settings, which is why
+      it is not on by default — a deliberate decision to revisit, not an oversight.
+- [ ] **No cost, only tokens.** `turn.completed` carries `input_tokens` /
+      `cached_input_tokens` / `output_tokens`; the adapter reports `costSource: "unknown"`
+      rather than pricing them. Pricing through `@declarative-ai/llm`'s catalog is possible
+      and would have to say the number is derived, not provider-reported.
+- [ ] **A deny list refuses the run.** Codex has no per-tool deny flag, so a policy baseline
+      carrying one is refused rather than dropped. Codex's `execpolicy` `.rules` files (the
+      `--ignore-rules` flag implies them) are the real channel to compile a command policy
+      into; that is its own project.
+- [ ] **`codex exec review` is unused.** Codex has a first-class review mode
+      (`--base <branch>`, `--uncommitted`, `--commit <sha>`) and `--output-schema`, so a
+      reviewer could return structured findings instead of prose — which would make a
+      synthesize state's job much easier. The adapter drives plain `exec` today.
+- [ ] **The WSL path is fixed but unexercised.** Agent argv now goes through
+      `resolveInvocation` like every other child process (it used to be built as
+      `command: "wsl.exe"` + `args`, which handed wsl.exe the agent's flags first and never
+      passed `--cd`). No agent has actually been run inside a distro.
+
+Two things the live runs settled that are worth not re-deriving:
+
+- **`codex exec resume` takes a strict SUBSET of `codex exec`'s options** — no `--sandbox`,
+  no `-C/--cd`, no `--color`. Any of them on a resumed run is an argument-parse failure
+  (exit 2) before a model is reached, which reads like a broken adapter. The sandbox
+  therefore travels as `-c sandbox_mode="…"`, which both forms accept.
+- **The answer item is `agent_message`, not `assistant_message`**, and it arrives as
+  `item.completed`. The first guess would have made every codex run report "produced no
+  assistant message".
+
+## Open inside delegated sessions
+
+- [ ] **A delegated op cannot publish its END POSITION.** `operation.outputs.session` is
+      prompt-only in `operationNodeSchema`, because the loader has no registry and cannot
+      tell a delegated adapter from a host helper. So one agent's conversation is handed to
+      a later state by NAME (`session: "review"`), never by wiring
+      `.children.first.operation.outputs.session`. Widening it for every function op would
+      trade a load-time error for a value that is usually undefined.
+- [ ] **Nothing warns a host that composed the session layer in the wrong place.** It must
+      wrap the operation DISPATCHER, not just the prompt executor, or agents silently get no
+      conversation. JaiRA does both; `hw` cannot detect that a host did not.
+
 ## Open inside phase 7 (breadth)
 
 - [ ] **No `generic-cli` verified against a real binary.** The runtime is tested

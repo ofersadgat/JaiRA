@@ -289,10 +289,43 @@ Selected by adapter capability:
 | --- | --- | --- | --- |
 | **Replay** | Anthropic Messages API, anything via the AI SDK | Send full history | Free — a different key on the way out |
 | **Native fork** | Claude Code / Claude Agent SDK | Resume by handle | `resume` + `forkSession`; record the **new** handle it returns. No replay cost |
+| **Resume, replay-to-fork** | codex CLI | `codex exec resume <id>` | **Replay.** There is no fork primitive; the branch is seeded from a rendered transcript |
 | **Append-only remote** | Anthropic Managed Agents | Append by handle | **Cannot.** Abandon the handle; see §13 |
 
 A fork must **never** inherit the parent's provider handle unless the adapter declares native fork —
 otherwise two branches write into one remote session.
+
+> **Resume and fork are separate capabilities.** They were one boolean (`sessionResume`) while every
+> adapter had both or neither. Codex splits them: it appends server-side and cannot branch at all. So
+> `RuntimeCapabilities.sessionFork` exists, absent meaning "the same as `sessionResume`" — which is
+> what every earlier adapter meant — and the adapter reads its own record to choose, per call, between
+> passing `resume` and materializing `session.messages()`.
+>
+> ⚠️ **Replay against a delegated agent is lossy**, and differently lossy from replay against a
+> message-based provider. There is no message array on the wire — a delegated CLI takes one prompt — so
+> the transcript is RENDERED into text; and what a delegated agent contributes to a transcript is
+> already an outline, one assistant turn per call, because it keeps its real log server-side. A branch
+> seeded that way is not equivalent to a native fork and should not be recorded as one.
+
+### Two gaps this uncovered (both fixed, both silent)
+
+Neither produced an error; both made a delegated agent quietly forget everything.
+
+1. **A delegated op never reached the session layer.** `hw`'s `runFunctionOp` stated no session request
+   at all, so `ctx.session` was undefined for every agent call and the adapters' `resume` path was
+   unreachable. The request is now stated for a function op whose registry entry declares
+   `sessionResume` — the entry's own claim to have a transcript worth placing, which is what keeps
+   pure host helpers from minting conversations.
+2. **The dispatcher dropped the session outcome.** `FunctionResult` is a union, so the `session` field
+   an agent adapter reported typechecked by leniency and was then discarded by the operation
+   executor, which REBUILDS the result. No outcome stored ⇒ no handle to resume ⇒ a new remote
+   conversation on every call. It is a declared field now (`ReportedSession`), carried on the failure
+   path too.
+
+There is a third, still open: a host must compose the session layer around the **dispatcher**, not
+around the prompt executor alone, because a state's prompt op and a state's function op reach the
+executor by two different routes. JaiRA does both (`runtime/wiring.ts`); the layering is a host's to
+get right, and nothing warns a host that gets it wrong.
 
 ### Memoization
 
