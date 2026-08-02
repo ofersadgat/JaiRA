@@ -34,7 +34,15 @@ import {
 import { createPromptExecutor } from "@declarative-ai/promptop";
 import { createModelRouter } from "@declarative-ai/llm";
 import { SchemaValidator } from "@declarative-ai/validate";
-import { withMemoize, withRecord, withRetry, withSessionPosition, type MemoCache, type RecordStore } from "@declarative-ai/exec";
+import {
+  createOperationExecutor,
+  withMemoize,
+  withRecord,
+  withRetry,
+  withSessionPosition,
+  type MemoCache,
+  type RecordStore,
+} from "@declarative-ai/exec";
 import type { Approver, ExecPolicy } from "@declarative-ai/permissions";
 import type { JairaConfig } from "@jaira/shared";
 import { ScriptedFakeExecutor, type FakeRule } from "./fakeExecutor";
@@ -206,6 +214,7 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
   // a REQUEST on `ctx.sessionRequest` rather than putting a session id in the op's config —
   // it cannot know where a conversation currently is, and deliberately does not. `withSession`
   // reads the op config, so composed here it would find nothing and silently do nothing.
+  //
   const prompt =
     cfg.session !== undefined
       ? (withSessionPosition(
@@ -213,6 +222,22 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
           withRecord({ records: cfg.session.records }, cfg.prompt as never),
         ) as unknown as Executor<ExecServices, WorkflowMetrics>)
       : cfg.prompt;
+  // …and the SAME stack around the DISPATCHER, because a state's prompt op and a state's function op
+  // reach the executor by two different routes: a prompt op goes straight to `config.prompt`, while a
+  // function op — every DELEGATED AGENT — goes through the dispatcher. With the layer on the prompt
+  // side only, the engine stated an agent's session request and nothing answered it: each agent call
+  // silently started a new provider conversation while the workflow read as though `session: "review"`
+  // had joined them up. Nothing failed; the agent just never remembered.
+  //
+  // The dispatcher gets the RAW prompt executor, so an embedded prompt CALL passes through exactly one
+  // session layer rather than two — two would claim one position twice and fork on every call.
+  const operations =
+    cfg.session !== undefined
+      ? sessionedDispatcher(
+          createOperationExecutor({ functions: cfg.registry.functions as never, prompt: cfg.prompt as never }),
+          cfg.session,
+        )
+      : undefined;
   const executor = createWorkflowExecutor({
     // The RESOLVED bundle. This used to pass `bundle.source` — the authored states — which the
     // executor then re-loaded on every start; a pinned snapshot no longer carries a `source` at all
@@ -220,6 +245,7 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     definition: cfg.bundle,
     registry: cfg.registry,
     prompt,
+    ...(operations !== undefined ? { operations } : {}),
     ...(cfg.callCache !== undefined ? { callCache: cfg.callCache } : {}),
     ...(cfg.persistence !== undefined ? { persistence: cfg.persistence } : {}),
   });
@@ -232,6 +258,38 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     ...(cfg.session !== undefined ? { sessions: cfg.session.sessions } : {}),
   };
   return executor.start(workflowStartOp(cfg.inputs), ctx).result;
+}
+
+/**
+ * The dispatcher with a session layer that engages only for a call the engine PLACED in a
+ * conversation.
+ *
+ * `ctx.sessionRequest` is exactly that signal: hw states one for a prompt op and for a runtime that
+ * declares `sessionResume`, and for nothing else. Wrapping unconditionally would be wrong in a way
+ * that is easy to miss — `withRecord` records every call it sees, keyed by content hash when there is
+ * no position, so every pure helper and every embedded call would start writing rows into the store
+ * that holds the run's transcripts.
+ *
+ * `withSessionPosition` already no-ops without a request; this branch is what keeps `withRecord`
+ * from doing the opposite.
+ */
+function sessionedDispatcher(
+  dispatcher: Executor,
+  session: { sessions: SessionStore<JsonValue>; records: RecordStore },
+): Executor<ExecServices, WorkflowMetrics> {
+  const sessioned = withSessionPosition(
+    { sessions: session.sessions },
+    withRecord({ records: session.records }, dispatcher),
+  ) as unknown as Executor;
+  return {
+    capabilities: dispatcher.capabilities,
+    metrics: dispatcher.metrics,
+    ...(dispatcher.capabilitiesFor !== undefined
+      ? { capabilitiesFor: (op: Operation<InlineFamily>) => dispatcher.capabilitiesFor!(op) }
+      : {}),
+    start: (op: Operation<InlineFamily>, ctx: ExecServices) =>
+      (ctx.sessionRequest !== undefined ? sessioned : dispatcher).start(op, ctx),
+  } as unknown as Executor<ExecServices, WorkflowMetrics>;
 }
 
 /** Collapse a result into the task-status vocabulary. */
