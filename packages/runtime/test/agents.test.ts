@@ -8,8 +8,9 @@
  */
 import { describe, expect, it } from "vitest";
 import type { AgentQueryOptions, AgentStreamMessage } from "@declarative-ai/agents-api";
-import type { ExecServices } from "@declarative-ai/exec";
-import { AGENT_CLI, AGENT_SDK, gateCapabilities, registerAgentRuntimes } from "../src/agents";
+import type { ExecServices, RuntimeCapabilities } from "@declarative-ai/exec";
+import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, agentSpawn, gateCapabilities, registerAgentRuntimes } from "../src/agents";
+import { resolveInvocation } from "../src/exec";
 import { newRegistry } from "../src/wiring";
 
 /**
@@ -30,19 +31,94 @@ function fakeQuery(reply = "done", record: AgentQueryOptions[] = []) {
 const ctx = (over: Partial<ExecServices> = {}): ExecServices => ({ ...over }) as ExecServices;
 
 describe("registerAgentRuntimes", () => {
-  it("registers both adapters as runtime entries", () => {
+  it("registers all three adapters as runtime entries", () => {
     const registry = registerAgentRuntimes(newRegistry(), { query: fakeQuery().query });
-    for (const name of [AGENT_SDK, AGENT_CLI]) {
+    for (const name of [AGENT_SDK, AGENT_CLI, AGENT_CODEX]) {
       const entry = registry.functions.get(name);
       expect(entry, name).toBeDefined();
       expect(entry!.kind).toBe("runtime");
     }
   });
 
+  it("registers codex with the capabilities that let it run under a real policy", () => {
+    const registry = registerAgentRuntimes(newRegistry(), { adapters: ["codex"] });
+    const caps = (registry.functions.get(AGENT_CODEX) as { capabilities: RuntimeCapabilities }).capabilities;
+    // NOT `generic-cli`: that declares `none` and §8.2 refuses it under any policy that can ask a
+    // human. Codex has a real up-front channel — its sandbox — so `config` is both true and usable.
+    expect(caps.policyEnforcement).toBe("config");
+    expect(caps.sessionResume).toBe(true);
+    expect(caps.sessionFork).toBe(false);
+  });
+
   it("registers only what was asked for", () => {
     const registry = registerAgentRuntimes(newRegistry(), { adapters: ["sdk"], query: fakeQuery().query });
     expect(registry.functions.has(AGENT_SDK)).toBe(true);
     expect(registry.functions.has(AGENT_CLI)).toBe(false);
+    expect(registry.functions.has(AGENT_CODEX)).toBe(false);
+  });
+
+  it("passes the codex binary and sandbox from project config down to the argv", async () => {
+    // Driven through a fake PROCESS rather than a fake query, so the real argv building is what runs
+    // — that is the half of a CLI adapter worth testing.
+    const spawned: string[][] = [];
+    const registry = registerAgentRuntimes(newRegistry(), {
+      adapters: ["codex"],
+      codexCommand: "/opt/codex",
+      codexSandbox: "read-only",
+      spawn: (argv) => {
+        spawned.push(argv);
+        return {
+          lines: (async function* () {
+            yield JSON.stringify({ type: "item.completed", item: { item_type: "assistant_message", text: "ok" } });
+          })(),
+          kill: () => {},
+          exit: Promise.resolve(0),
+        };
+      },
+    });
+    const entry = registry.functions.get(AGENT_CODEX)! as { impl: (i: unknown, c: unknown) => Promise<{ value?: unknown }> };
+    const result = await entry.impl({ prompt: "review", config: {} }, ctx());
+    expect(result.value).toBe("ok");
+    expect(spawned[0]![0]).toBe("/opt/codex");
+    // As a config override: `codex exec resume` accepts no `--sandbox` flag, so one argv shape has
+    // to serve both forms.
+    expect(spawned[0]!).toContain('sandbox_mode="read-only"');
+  });
+});
+
+describe("agentSpawn — an agent is a child process like any other (DESIGN §9.1)", () => {
+  /**
+   * REGRESSION. The WSL invocation used to be expressed on the adapter as
+   * `command: "wsl.exe"` + `args: ["-d", distro, "--", "claude"]`. An adapter builds
+   * `[command, ...its own flags, ...args]`, so `wsl.exe` was handed the AGENT's flags before its own
+   * arguments — and `--cd` was never passed, so the agent ran in whatever directory the app was
+   * started from. Mapping the finished argv through the one Exec mapper is what fixes it.
+   */
+  it("maps a WSL project's agent command through the one Exec mapper", () => {
+    // `agentSpawn` launches a real process, so the mapping it delegates to is what is assertable —
+    // and the mapping is where the bug was.
+    const { file, argv, cwd } = resolveInvocation("codex", ["exec", "--json"], {
+      execEnv: { wsl: "Ubuntu-22.04" },
+      cwd: "C:\\repo\\work",
+    });
+    expect(file).toBe("wsl.exe");
+    // The distro's own options come FIRST; the agent's command follows the separator.
+    expect(argv.slice(0, 2)).toEqual(["-d", "Ubuntu-22.04"]);
+    expect(argv).toContain("--cd");
+    expect(argv.slice(-3)).toEqual(["--", "codex", "exec", "--json"].slice(1));
+    // wsl.exe runs on Windows and gets no Windows cwd of its own.
+    expect(cwd).toBeUndefined();
+  });
+
+  it("writes a prompt to the agent's stdin and streams its stdout back", async () => {
+    // The codex adapter passes its prompt on stdin — a replayed conversation is far too big for argv
+    // on Windows — so a spawn that ignored stdin would leave the agent waiting with no instruction.
+    const spawn = agentSpawn();
+    const child = spawn([process.execPath, "-e", "process.stdin.pipe(process.stdout)"], { stdin: "line one\nline two\n" });
+    const lines: string[] = [];
+    for await (const line of child.lines) lines.push(line);
+    expect(await child.exit).toBe(0);
+    expect(lines).toEqual(["line one", "line two"]);
   });
 
   it("runs an agent, passing the workspace through as its cwd", async () => {

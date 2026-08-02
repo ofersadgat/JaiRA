@@ -50,9 +50,31 @@ export interface JairaGenericCliAgent {
   env?: Record<string, string>;
 }
 
+/**
+ * The codex adapter's project settings (DESIGN §8.1).
+ *
+ * Codex is NOT a `generic-cli` entry: that runtime enforces nothing and §8.2 refuses
+ * it under any policy that can ask a human, where codex has a real up-front channel
+ * — its sandbox — and so declares `policyEnforcement: "config"`.
+ */
+export interface JairaCodexAgentConfig {
+  /** The executable. Default: `codex` on PATH. */
+  command?: string;
+  /**
+   * The sandbox a codex state gets when it names no permission mode.
+   *
+   * This is the whole of codex's up-front enforcement, so it is what the `config`
+   * claim rests on. `read-only` is the right setting for a project whose codex
+   * states only review — an agent that cannot write cannot be talked into writing.
+   */
+  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+}
+
 export interface JairaAgentConfig {
   /** Non-Claude CLIs available to this project. */
   genericCli?: JairaGenericCliAgent[];
+  /** Settings for the built-in `codex-cli` runtime. */
+  codex?: JairaCodexAgentConfig;
 }
 
 /**
@@ -245,8 +267,9 @@ function parseAgents(raw: unknown): JairaAgentConfig {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error("config.agents must be an object");
   }
+  const codex = parseCodexAgent((raw as Record<string, unknown>)["codex"]);
   const list = (raw as Record<string, unknown>)["genericCli"];
-  if (list === undefined) return {};
+  if (list === undefined) return codex !== undefined ? { codex } : {};
   if (!Array.isArray(list)) throw new Error("config.agents.genericCli must be an array");
   const genericCli = list.map((entry, i) => {
     const where = `config.agents.genericCli[${i}]`;
@@ -277,7 +300,26 @@ function parseAgents(raw: unknown): JairaAgentConfig {
     }
     return spec as unknown as JairaGenericCliAgent;
   });
-  return { genericCli };
+  return { genericCli, ...(codex !== undefined ? { codex } : {}) };
+}
+
+/** The sandbox names codex accepts. Spelled out here so a typo is a config error rather than a
+ *  silently-ignored flag value the agent then runs without. */
+const CODEX_SANDBOXES = ["read-only", "workspace-write", "danger-full-access"];
+
+function parseCodexAgent(raw: unknown): JairaCodexAgentConfig | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("config.agents.codex must be an object");
+  }
+  const spec = raw as Record<string, unknown>;
+  if (spec["command"] !== undefined && (typeof spec["command"] !== "string" || spec["command"].length === 0)) {
+    throw new Error("config.agents.codex.command must be a non-empty string");
+  }
+  if (spec["sandbox"] !== undefined && !CODEX_SANDBOXES.includes(spec["sandbox"] as string)) {
+    throw new Error(`config.agents.codex.sandbox must be one of ${CODEX_SANDBOXES.join(", ")}`);
+  }
+  return spec as JairaCodexAgentConfig;
 }
 
 function parseExecEnvironment(raw: unknown): JairaExecEnvironment {

@@ -278,6 +278,8 @@ function buildRunEnvironment(
   registerAgentRuntimes(registry, {
     execEnv: config.execEnvironment,
     ...(files?.observer !== undefined ? { observer: files.observer } : {}),
+    ...(config.agents.codex?.command !== undefined ? { codexCommand: config.agents.codex.command } : {}),
+    ...(config.agents.codex?.sandbox !== undefined ? { codexSandbox: config.agents.codex.sandbox } : {}),
   });
   registerGenericAgents(registry, {
     execEnv: config.execEnvironment,

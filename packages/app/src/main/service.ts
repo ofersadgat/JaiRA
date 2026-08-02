@@ -423,7 +423,12 @@ export class AppService {
 
     // Delegated agent runtimes are available to every run (DESIGN §8.1); a state
     // reaches one with a `claude-code` function op.
-    registerAgentRuntimes(registry, { execEnv: project.config.execEnvironment, observer });
+    registerAgentRuntimes(registry, {
+      execEnv: project.config.execEnvironment,
+      observer,
+      ...(project.config.agents.codex?.command !== undefined ? { codexCommand: project.config.agents.codex.command } : {}),
+      ...(project.config.agents.codex?.sandbox !== undefined ? { codexSandbox: project.config.agents.codex.sandbox } : {}),
+    });
     // Non-Claude CLIs the project configured (DESIGN §8.1). Nothing is registered
     // when none are, so a state naming one fails honestly instead of running some
     // default binary.

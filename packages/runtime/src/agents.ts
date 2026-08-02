@@ -15,39 +15,69 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { runtimeFunction, type CapabilityRegistry, type RuntimeCapabilities } from "@declarative-ai/exec";
 import { createClaudeCodeFunction, type AgentQuery, type ClaudeCodeFunctionOptions } from "@declarative-ai/agents-api";
-import { createCliAgentFunction, type SpawnProcess } from "@declarative-ai/agents-cli";
+import { createCliAgentFunction, createCodexAgentFunction, CODEX_CAPS, type CodexSandbox, type SpawnProcess } from "@declarative-ai/agents-cli";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
-import type { ExecObserver } from "./exec";
-import { isWslEnv, type ExecEnv } from "./paths";
+import { resolveInvocation, type ExecObserver } from "./exec";
+import type { ExecEnv } from "./paths";
 
 /** The registry names JaiRA registers its agents under. */
 export const AGENT_SDK = "claude-code";
 export const AGENT_CLI = "claude-cli";
+/**
+ * Codex (DESIGN §8.1). A separate NAME rather than a `generic-cli` entry because it
+ * is a separate adapter: `generic-cli` enforces nothing and §8.2 refuses it under
+ * any policy that can ask a human, where codex has a real up-front channel (its
+ * sandbox) and therefore declares `policyEnforcement: "config"` — which passes.
+ */
+export const AGENT_CODEX = "codex-cli";
 
 /**
- * Spawn the CLI agent through a seam JaiRA can watch (DESIGN §4.2a).
+ * Spawn a CLI agent through a seam JaiRA can watch, in the project's execution
+ * environment (DESIGN §4.2a, §9.1).
  *
- * Upstream's default spawn is module-private, so tracking the `claude` process —
- * the orphan that most matters, since an abandoned one keeps billing — means
- * supplying our own. Two details are copied deliberately from upstream's version
- * and must not be "tidied":
+ * Two jobs upstream's default spawn cannot do:
+ *
+ *  - **Track the process.** An abandoned agent keeps billing, and it was recorded
+ *    nowhere; the observer is what makes an orphan findable.
+ *  - **Reach into WSL.** Every other child JaiRA starts is mapped by
+ *    {@link resolveInvocation}, and an agent must be too. It used to be expressed
+ *    as `command: "wsl.exe"` plus `args: ["-d", distro, "--", "claude"]` on the
+ *    adapter — which is WRONG, and silently: an adapter builds
+ *    `[command, ...its own flags, ...args]`, so `wsl.exe` was handed the agent's
+ *    flags before its own arguments and `--cd` was never passed at all. Mapping the
+ *    whole argv HERE is the same thing Exec does, in the one place that sees the
+ *    finished command line.
+ *
+ * Three details are copied deliberately from upstream's version and must not be
+ * "tidied":
  *
  *  - **stderr is ignored, not piped.** An unread pipe fills at ~64 KB and the child
  *    then blocks forever on write, so stdout stops and `exit` never settles.
  *  - **an `error` listener is attached.** A `ChildProcess` `'error'` with no
  *    listener throws and would take the host process down — and ENOENT on a missing
  *    `claude` binary is the likeliest first-run outcome.
+ *  - **stdin errors are swallowed.** An agent that answers before reading its whole
+ *    prompt leaves an EPIPE on the pipe, which arrives as an unhandled `'error'`.
  */
-function observedSpawn(observer: ExecObserver): SpawnProcess {
+export function agentSpawn(options: { execEnv?: ExecEnv; observer?: ExecObserver } = {}): SpawnProcess {
   return (argv, opts) => {
-    const [command, ...args] = argv;
-    const child = spawn(command!, args, { cwd: opts.cwd, stdio: ["ignore", "pipe", "ignore"] });
+    const [agentCommand, ...agentArgs] = argv;
+    const { file: command, argv: args, cwd } = resolveInvocation(agentCommand!, agentArgs, {
+      ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
+      ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+    });
+    const child = spawn(command, args, {
+      ...(cwd !== undefined ? { cwd } : {}),
+      stdio: [opts.stdin === undefined ? "ignore" : "pipe", "pipe", "ignore"],
+      windowsHide: true,
+    });
     const lines = createInterface({ input: child.stdout!, crlfDelay: Infinity });
+    const observer = options.observer;
 
     let token: unknown;
     try {
-      token = observer.onSpawn({
-        command: command!,
+      token = observer?.onSpawn({
+        command,
         argv: args,
         ...(child.pid !== undefined ? { pid: child.pid } : {}),
         ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
@@ -57,7 +87,7 @@ function observedSpawn(observer: ExecObserver): SpawnProcess {
     }
     const observeExit = (code: number | null): void => {
       try {
-        observer.onExit(token, { code, signal: null });
+        observer?.onExit(token, { code, signal: null });
       } catch {
         // Bookkeeping must not change the agent's outcome.
       }
@@ -68,6 +98,11 @@ function observedSpawn(observer: ExecObserver): SpawnProcess {
       spawnError = e;
       lines.close();
     });
+
+    if (opts.stdin !== undefined) {
+      child.stdin?.on("error", () => {});
+      child.stdin?.end(opts.stdin);
+    }
 
     return {
       lines,
@@ -88,7 +123,7 @@ function observedSpawn(observer: ExecObserver): SpawnProcess {
 }
 
 export interface AgentRuntimeOptions {
-  /** Where the agent runs. A WSL project drives the CLI adapter inside the distro. */
+  /** Where the agent runs. A WSL project drives the CLI adapters inside the distro. */
   execEnv?: ExecEnv;
   /** Records the agent subprocess as a job, so an abandoned one is findable. */
   observer?: ExecObserver;
@@ -97,12 +132,31 @@ export interface AgentRuntimeOptions {
    * SDK, a `claude` binary, or a network: a fake query drives the same adapter.
    */
   query?: AgentQuery;
-  /** Which adapters to register. Default: both. */
-  adapters?: Array<"sdk" | "cli">;
+  /** Which adapters to register. Default: all three. */
+  adapters?: Array<"sdk" | "cli" | "codex">;
   /** Extra options forwarded to the SDK adapter (tool injection, native renames). */
   sdk?: Omit<ClaudeCodeFunctionOptions, "query">;
   /** Path to the CLI binary (default: `claude` on PATH). */
   cliCommand?: string;
+  /**
+   * Replace the process seam the CLI adapters spawn through.
+   *
+   * The counterpart of {@link AgentRuntimeOptions.query} one level down: a fake query replaces the
+   * whole transport, where a fake spawn keeps the real argv-building and stream-parsing and only
+   * stands in for the binary — which is the half worth testing for a CLI agent.
+   */
+  spawn?: SpawnProcess;
+  /** Path to the codex binary (default: `codex` on PATH). */
+  codexCommand?: string;
+  /**
+   * The sandbox a codex run gets when the state names no permission mode
+   * (default `workspace-write`).
+   *
+   * Worth setting to `read-only` for a project whose codex states only review:
+   * it is codex's ONLY up-front enforcement channel, so it is what the honest
+   * `policyEnforcement: "config"` rests on.
+   */
+  codexSandbox?: CodexSandbox;
 }
 
 /**
@@ -116,7 +170,7 @@ export function registerAgentRuntimes(
   registry: CapabilityRegistry<WorkflowMetrics>,
   options: AgentRuntimeOptions = {},
 ): CapabilityRegistry<WorkflowMetrics> {
-  const adapters = options.adapters ?? ["sdk", "cli"];
+  const adapters = options.adapters ?? ["sdk", "cli", "codex"];
 
   if (adapters.includes("sdk")) {
     const sdk = createClaudeCodeFunction({
@@ -129,8 +183,19 @@ export function registerAgentRuntimes(
     );
   }
 
+  // Both CLI adapters get JaiRA's spawn: it is what maps the argv into the project's
+  // execution environment (a WSL project runs its agent in the distro) and what
+  // records the process as a job. Supplied ALWAYS, not just when an observer is
+  // wired — upstream's default cannot reach WSL, and a silently-native agent in a
+  // WSL project is the kind of wrong that looks like it works until paths differ.
+  const spawn =
+    options.spawn ??
+    agentSpawn({
+      ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
+      ...(options.observer !== undefined ? { observer: options.observer } : {}),
+    });
+
   if (adapters.includes("cli")) {
-    const env = options.execEnv ?? "windows";
     const cli =
       options.query !== undefined
         ? // A supplied query replaces the subprocess entirely, so the CLI adapter
@@ -140,16 +205,30 @@ export function registerAgentRuntimes(
         : createCliAgentFunction({
             ...options.sdk,
             ...(options.cliCommand !== undefined ? { command: options.cliCommand } : {}),
-            // A WSL project's agent must run in the distro, not on Windows.
-            ...(isWslEnv(env) ? { args: ["-d", env.wsl, "--", options.cliCommand ?? "claude"] } : {}),
-            ...(isWslEnv(env) ? { command: "wsl.exe" } : {}),
-            // Only when someone is watching: upstream's own spawn is the better
-            // default, and this one exists solely to report the process.
-            ...(options.observer !== undefined ? { spawn: observedSpawn(options.observer) } : {}),
+            spawn,
           });
     registry.functions.set(
       AGENT_CLI,
       runtimeFunction(cli.run as never, cli.capabilities) as never,
+    );
+  }
+
+  if (adapters.includes("codex")) {
+    // Registered whether or not the binary is present, exactly as `claude-cli` is: a
+    // state that names it fails with codex's own "could not be started", which says
+    // more than "unregistered function" would.
+    const codex =
+      options.query !== undefined
+        ? createClaudeCodeFunction({ ...options.sdk, capabilities: CODEX_CAPS, approvalCallback: false, query: options.query })
+        : createCodexAgentFunction({
+            ...options.sdk,
+            ...(options.codexCommand !== undefined ? { command: options.codexCommand } : {}),
+            ...(options.codexSandbox !== undefined ? { sandbox: options.codexSandbox } : {}),
+            spawn,
+          });
+    registry.functions.set(
+      AGENT_CODEX,
+      runtimeFunction(codex.run as never, codex.capabilities) as never,
     );
   }
 
