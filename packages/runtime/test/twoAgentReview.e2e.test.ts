@@ -25,8 +25,8 @@ import { executeWorkflow, newRegistry } from "../src/wiring";
 const files: Record<string, unknown> = {
   review: {
     label: "Review the change",
-    inputs: { change: { schema: { type: "string" } } },
-    outputs: { report: { schema: { type: "string" }, binding: ".children.synthesize.outputs.report" } },
+    inputs: { change: { kind: "blob", schema: { type: "string", contentMediaType: "text/x-diff" } } },
+    outputs: { report: { binding: ".children.synthesize.outputs.report" } },
     children: {
       // The SAME state, twice, under two agents. Two near-duplicate state files before this existed.
       claude_review: {
@@ -41,8 +41,8 @@ const files: Record<string, unknown> = {
         environment: { kind: "function", function: "codex-cli" },
         inputs: { change: ".inputs.change" },
       },
+        // No `state`: the key already names it (`./synthesize`).
       synthesize: {
-        state: "review/synthesize",
         inputs: {
           review_a: ".children.claude_review.outputs.report",
           review_b: ".children.codex_review.outputs.report",
@@ -50,17 +50,21 @@ const files: Record<string, unknown> = {
       },
     },
     sequence: ["claude_review", "codex_review", "synthesize"],
-    transitions: [{ to: "terminate.success", when: ".children.synthesize.outcome === 'success'" }],
   },
   "review/agent_review": {
-    inputs: { change: { schema: { type: "string" } } },
+    inputs: { change: { kind: "blob", schema: { type: "string", contentMediaType: "text/x-diff" } } },
     // A delegated agent answers with ONE string, so the slot it fills is blob-kind. A json output
     // would be read as a record of named outputs and fail as "did not produce required output".
     outputs: { report: { kind: "blob", schema: { type: "string", contentMediaType: "text/markdown" } } },
     operation: {
       // No `function`: the mount supplies it. THIS is what makes the state reusable across agents.
       kind: "function",
-      input: { prompt: { kind: "text", binding: ".inputs.change" } },
+      // `operation.input` values are PARAMETERS, so the wiring goes under `binding`. The instruction
+      // is built with `concat` — the expression language has no `+`, and a function op gets no
+      // `{{…}}` rendering (that is a prompt op's own template).
+      input: {
+        prompt: { kind: "text", binding: { expr: "concat('Review this change and list what is wrong: ', .inputs.change)" } },
+      },
       output: { name: "report", kind: "blob" },
     },
   },
@@ -131,13 +135,13 @@ describe("a code review by two different agents", () => {
 
     // Claude: the prompt is a positional after `--`, and the run is `-p --output-format stream-json`.
     expect(claude.argv).toContain("--output-format");
-    expect(claude.argv.at(-1)).toBe("diff --git a/x b/x");
+    expect(claude.argv.at(-1)).toBe("Review this change and list what is wrong: diff --git a/x b/x");
     expect(claude.stdin).toBeUndefined();
 
     // Codex: `exec --json`, an explicit sandbox, and the prompt on STDIN.
     expect(codex.argv.slice(0, 3)).toEqual(["codex", "exec", "--json"]);
     expect(codex.argv).toContain('sandbox_mode="workspace-write"');
-    expect(codex.stdin).toBe("diff --git a/x b/x");
+    expect(codex.stdin).toBe("Review this change and list what is wrong: diff --git a/x b/x");
     expect(codex.argv.slice(-2)).toEqual(["--", "-"]);
   });
 

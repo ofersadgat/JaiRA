@@ -441,7 +441,7 @@ string.
 | `claude-code` | Delegated agent, in-process SDK | `policyEnforcement: "callback"` |
 | `claude-cli` | Delegated agent, `claude` subprocess | `policyEnforcement: "callback"` via the MCP bridge |
 | `codex-cli` | Delegated agent, `codex exec` subprocess | `policyEnforcement: "config"` — see below |
-| `generic-cli` | Non-Claude agent CLI | Configured in `config.agents.genericCli`; **`policyEnforcement: "none"`**, so §5.1 refuses it unless `policy.builtins` is `false` |
+| `generic-cli` | Non-Claude agent CLI | Registered only for what `config.agents.genericCli` declares, under the name it declares; **`policyEnforcement: "none"`**, so §5.1 refuses it whenever the policy can escalate to a human — which `policy.builtins: false` alone does not settle |
 | `run_command` | Run one command, no agent | Takes `config.command`; gates itself against the project policy |
 
 A UI gate's answer is validated twice — in the main process against the
@@ -668,19 +668,19 @@ differ in it. Declaring it **on the child** is how they differ:
 ```jsonc
 "children": {
   "claude_review": {
-    "state": "$/review/agent_review",
+    "state": "review/agent_review",
     "async": true,
     "environment": { "kind": "function", "function": "claude-cli" },
     "inputs": { "change": ".inputs.change" }
   },
   "codex_review": {
-    "state": "$/review/agent_review",
+    "state": "review/agent_review",
     "async": true,
     "environment": { "kind": "function", "function": "codex-cli" },
     "inputs": { "change": ".inputs.change" }
   },
   "synthesize": {
-    "state": "$/review/synthesize",
+    "state": "review/synthesize",
     "inputs": {
       "review_a": ".children.claude_review.outputs.report",
       "review_b": ".children.codex_review.outputs.report"
@@ -787,7 +787,7 @@ Entering a sequence member **moves the cursor to it**:
 | --- | --- | --- |
 | `transitions[].to` | **required** | A declared child key, or one of `terminate.success` / `terminate.error` / `terminate.canceled` / `terminate.timeout`. |
 | `transitions[].when` | optional | Guard expression. Absent ⇒ unconditional. |
-| `limits.max_iterations` | optional | Exposed to guards as `limits.max_iterations`. |
+| `limits.max_iterations` | optional | Exposed to guards as `.limits.max_iterations`. |
 | `limits.timeout` | optional | **Seconds**; exceeding it terminates the state `terminate.timeout`. |
 
 Transitions are evaluated **in order, first match wins**, when an operation
@@ -798,7 +798,7 @@ does not fall through to a later transition permanently.
 ### ⚠️ Guards must infer to `boolean` — strictly
 
 There is no truthiness coercion. `"when": ".outputs.goals"` is a **lint error**,
-not a non-empty check. Write `"outputs.goals.length > 0"`.
+not a non-empty check. Write `".outputs.goals.length > 0"` — with the leading dot, like every other read.
 
 ### An unconditional transition fires at the first evaluation round
 
@@ -1220,6 +1220,115 @@ so the gate does not silently receive the root's `model` (§5.2).
 }
 ```
 
+### 12.1 A second example: one change, two agents
+
+Reviewing with **both** Claude Code and codex, then merging what they found. It is
+short because the pieces do the work: one review state mounted twice (§6.1), two
+async children so the reviews overlap, and a dataflow join that needs no join
+construct (§6).
+
+> These three states are the fixture in `packages/runtime/test/twoAgentReview.e2e.test.ts`.
+> That test runs them through both adapters' real argv builders and real stream
+> parsers, with a fake process standing in for the two binaries — so the shapes below
+> are ones that load and run, not ones that ought to.
+
+**`review.json`** — the composite. The two mounts differ only in the agent they
+run under.
+
+```jsonc
+{
+  "label": "Review the change",
+  "inputs": { "change": { "kind": "blob", "schema": { "type": "string", "contentMediaType": "text/x-diff" } } },
+  "outputs": { "report": { "binding": ".children.synthesize.outputs.report" } },
+  "children": {
+    "claude_review": {
+      "state": "review/agent_review",
+      "async": true,
+      "environment": { "kind": "function", "function": "claude-cli" },
+      "inputs": { "change": ".inputs.change" }
+    },
+    "codex_review": {
+      "state": "review/agent_review",
+      "async": true,
+      "environment": { "kind": "function", "function": "codex-cli" },
+      "inputs": { "change": ".inputs.change" }
+    },
+    "synthesize": {
+      "inputs": {
+        "review_a": ".children.claude_review.outputs.report",
+        "review_b": ".children.codex_review.outputs.report"
+      }
+    }
+  },
+  "sequence": ["claude_review", "codex_review", "synthesize"]
+}
+```
+
+Both reviews start without blocking. The cursor reaches `synthesize` immediately,
+but its inputs read outputs of two unresolved children, so it waits for both —
+that is the whole join. With no transitions declared, the state terminates
+successfully once all three children finish.
+
+**`review/agent_review.json`** — the state that runs *twice*. It names **no
+`function`**: that is what makes it mountable under either agent, and the two
+mounts load as two variants (§5).
+
+```jsonc
+{
+  "label": "Agent review",
+  "inputs": { "change": { "kind": "blob", "schema": { "type": "string", "contentMediaType": "text/x-diff" } } },
+  // A delegated agent answers with ONE string, so the slot it fills is blob-kind (§4.4).
+  "outputs": { "report": { "kind": "blob", "schema": { "type": "string", "contentMediaType": "text/markdown" } } },
+  "operation": {
+    "kind": "function",
+    // `operation.input` values are PARAMETERS, so the wiring goes under `binding` (§4.3).
+    // The instruction is built with `concat`: the expression language has no `+` (§9), and a
+    // function op gets no `{{…}}` rendering — that is a prompt op's own template.
+    "input": {
+      "prompt": {
+        "kind": "text",
+        "binding": { "expr": "concat('Review this change and list what is wrong: ', .inputs.change)" }
+      }
+    },
+    "output": { "name": "report", "kind": "blob" }
+  }
+}
+```
+
+**`review/synthesize.json`** — an ordinary prompt state; nothing about it knows
+two agents were involved.
+
+```jsonc
+{
+  "label": "Synthesize",
+  "inputs": {
+    "review_a": { "schema": { "type": "string" } },
+    "review_b": { "schema": { "type": "string" } }
+  },
+  "outputs": { "report": { "schema": { "type": "string" } } },
+  "operation": {
+    "kind": "prompt",
+    "model": "anthropic/claude-sonnet-5",
+    "prompt": "Two reviewers looked at one change. Merge their findings, drop duplicates, and flag anything they disagree on.\n\nReviewer A:\n{{.inputs.review_a}}\n\nReviewer B:\n{{.inputs.review_b}}"
+  }
+}
+```
+
+Three things worth knowing before running it:
+
+- **Declare no `tools` on the codex mount.** Codex reaches JaiRA's tool bridge and
+  auto-denies the call, so the adapter refuses rather than let the agent answer
+  "user cancelled MCP tool call" and report success (§4.2). It reviews with its own
+  built-ins under its sandbox.
+- **Give the reviewers separate conversations, which is the default.** Naming one
+  `session` for both would put two agents in one transcript; here each mount gets
+  its own, and only `synthesize` sees both reports.
+- **`codex-cli` needs `codex` on PATH**, and `claude-cli` needs `claude`. Both are
+  registered whether or not the binary exists, so a missing one fails that state
+  with a spawn failure naming the command (`codex exited with code -1`) rather than
+  "unregistered function" — which would have pointed at the workflow instead of at
+  the machine.
+
 ---
 
 ## 13. The traps, in one list
@@ -1250,7 +1359,9 @@ Every one of these fails **silently or misleadingly**:
 13. `contentMediaType` is what makes a slot an artifact; there is no
     `"type": "artifact"`.
 14. `tools` is what subjects an agent's commands to the policy.
-15. A `generic-cli` state is refused outright unless `policy.builtins` is `false`.
+15. A `generic-cli` state is refused outright while the policy can escalate to a
+    human — which `policy.builtins: false` alone does not settle: a `default` or a
+    rule of `require_approval` keeps it escalating.
 16. Inside a `schema`, `$ref` is always **JSON Schema's** — ours is the bare-string
     form. Inside `args`, only `{"$ref": …}` works, because nothing types that
     position.

@@ -562,12 +562,17 @@ The last of §14. 313 tests. What phase 7 settled:
    **Codex is the exception, and it is why the honest record pays off.** `codex-cli`
    is its own adapter upstream (`@declarative-ai/agents-cli`), not a `generic-cli`
    configuration, because it can do something a generic binary cannot: pin a sandbox
-   (`--sandbox read-only|workspace-write|danger-full-access`) on every run, and serve
-   our own tools over the same streamable-HTTP MCP bridge the `claude` adapter uses.
-   So it declares `policyEnforcement: "config"` — weaker than `callback`, real all the
-   same — and §8.2 lets it run. What it cannot honour it REFUSES: a per-tool deny list
-   and a native allow-list have no expression in `codex exec`, and dropping either
-   would leave a workflow believing in a floor that is not there. It also splits
+   (`sandbox_mode = read-only | workspace-write | danger-full-access`) on every run,
+   whatever `~/.codex/config.toml` says. So it declares `policyEnforcement: "config"`
+   — weaker than `callback`, real all the same — and §8.2 lets it run. What it cannot
+   honour it REFUSES: a per-tool deny list and a native allow-list have no expression
+   in `codex exec`, and dropping either would leave a workflow believing in a floor
+   that is not there. **Injected tools are refused too**, on evidence rather than
+   caution: codex reaches the same MCP bridge the `claude` adapter uses, is offered
+   the tool, and then auto-denies the call, handing the agent the string `user
+   cancelled MCP tool call` — which it would report as its answer, successfully. That
+   is what keeps the `config` claim narrow: codex works from its own built-ins under
+   the sandbox, and JaiRA's policy-gated tools are not in its reach. It also splits
    `sessionResume` from `sessionFork`: `codex exec resume <id>` appends server-side and
    there is no fork primitive, so a branch is replayed. See SESSIONS.md §6.
 5. **`claude-cli`'s hook loopback was already there.** §16 sequenced it last as "the
