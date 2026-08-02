@@ -20,6 +20,12 @@ assumption breaks.
       seam to hook.
 - [ ] **The app has no "what is running" view.** `jobs.live()` answers it and nothing
       renders it.
+- [ ] **`workflow check` is CLI-only, and its findings are not kept.** The conformance
+      check (WORKFLOWS.md §11.1) runs the workflows against `workflow.md` and prints;
+      nothing stores the report, so "which requirements regressed since last time" has
+      no answer, and the workflow browser in the app does not offer it. It is also one
+      model's judgement, so it complements `lint` and never replaces it: a `conforms`
+      verdict is evidence, not proof.
 - [ ] **Parked requests are process-local.** The interaction hub and the approval hub
       live in the process driving the run, so a gate the CLI parked on cannot be
       answered from the app. Answering means routing a *value* back, so unlike cancel

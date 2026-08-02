@@ -1121,6 +1121,73 @@ runs in `strict` mode, where an unregistered `functionRef` is an error — the
 pre-run gate deliberately does not, because a state a run never enters never needs
 its function.
 
+### 11.1 Checking against a description
+
+Lint answers *will this run?*. It cannot answer *is this the workflow I asked
+for?* — nothing in the files knows what you wanted. So write that down, in
+English, and check the files against it:
+
+```bash
+npm run jaira -- workflow check workflow.md --project <dir>
+```
+
+With no file named, it reads `workflow.md` in the project directory. The command
+extracts the individual requirements your document makes — the steps, their
+order, the branches and loops, where a **human** must decide, what is delegated
+to a coding agent rather than a model, and the artifacts each step produces —
+then judges each one against the workflows as they will run, and **exits non-zero
+unless every requirement is satisfied**. That is the point: a pre-commit hook or
+CI job can gate on the document and the workflows staying in step.
+
+What the judge is shown, per state, is the file **verbatim** plus a `resolved:`
+line — the operation after `environment` inheritance, the child order the cursor
+follows, per-mount environments, and how many transitions guard control flow.
+Both halves are needed: a state that inherits `function: "claude-cli"` from its
+mount says nothing about agents in its own file (§5), and a judge reading only
+the file would call it empty.
+
+Findings that matter are reported per requirement, with the state ids that are
+the evidence:
+
+```text
+conformance: gaps
+  description  workflow.md
+  workflows    feature/plan
+
+  ⚠ R2  a human approves the plan  — partial
+      the gate exists but only a blocked critique routes into it, so an approved
+      plan never reaches a person
+      states: feature/plan/critique/human_review
+  ✓ R1  the issue becomes goals
+      states: feature/plan/goals
+
+  not described by the document:
+  · an automatic fix pass the document does not mention
+    (feature/plan/critique/address_weaknesses)
+```
+
+Three things it deliberately does **not** do:
+
+- **Guess when the evidence is incomplete.** A file that will not parse, or a
+  root that will not load, refuses the check rather than judging what remains —
+  a conformance answer over partial evidence reads as a clean bill of health.
+  A state too long for the digest is named on stderr, never clipped silently.
+- **Take its own verdict on trust.** The findings are the evidence; a run that
+  lists a missing requirement and then says `conforms` is reported and overruled.
+- **Treat a naming difference as a divergence.** A state called `critique` can
+  satisfy "review the plan". A missing human gate, a missing loop, work in the
+  wrong order, or work delegated to a different kind of runtime than described,
+  are all real differences.
+
+Extras — behaviour the workflow has that the document does not mention — are
+listed but never fail the check. They are how you notice that the *document* is
+the thing that is out of date.
+
+Options: `--workflow <rootStateId>` (repeatable) narrows the check to named
+roots, `--model <id>` overrides the model, `--json` prints the requirements and
+findings for a tool to consume, and `--fake` scripts the check itself — it is an
+ordinary workflow run, so everything that works for a run works here.
+
 ---
 
 ## 12. A complete example

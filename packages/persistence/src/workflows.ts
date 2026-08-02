@@ -35,8 +35,14 @@ import { workflowLoadOptions } from "./workflowRefs";
 // reaching into this Node-only package.
 export type { LintIssue, LintSeverity, WorkflowBrowser, WorkflowEntry, WorkflowFileEntry } from "@jaira/shared";
 
-/** Read every `*.json` under a workflows dir, keeping parse failures as data. */
-function readTolerantly(workflowsDir: string): {
+/**
+ * Read every state file under a workflows dir, keeping parse failures as data.
+ *
+ * Exported because the conformance digest needs the same tolerant read: both
+ * surfaces look at a directory the user is editing, and both would rather report
+ * one bad file than lose the other twenty.
+ */
+export function readWorkflowsTolerantly(workflowsDir: string): {
   files: Record<string, unknown>;
   errors: Map<string, string>;
 } {
@@ -108,7 +114,7 @@ export interface BrowseOptions {
  * file-watch event.
  */
 export function browseWorkflows(project: Project, options: BrowseOptions = {}): WorkflowBrowser {
-  const { files, errors } = readTolerantly(project.paths.workflowsDir);
+  const { files, errors } = readWorkflowsTolerantly(project.paths.workflowsDir);
 
   const byStateId = new Map<string, { file: string; raw: unknown }>();
   const fileEntries: WorkflowFileEntry[] = [];

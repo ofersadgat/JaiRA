@@ -5,7 +5,7 @@
  * the same @jaira/persistence primitives in phase 3.
  */
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { loadBundle, validateBundle } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/exec";
@@ -28,13 +28,18 @@ import {
   runCauses,
   RunOwner,
   standaloneLoadOptions,
+  workflowDigest,
   type Project,
   type WorkflowBrowser,
 } from "@jaira/persistence";
 import { defaultConfig, parseJsonText, type BoardCard, type BoardView, type JairaConfig } from "@jaira/shared";
 import {
   buildPromptExecutor,
+  conformanceReportOf,
+  conformanceWorkflowFiles,
+  CONFORMANCE_ID,
   executeWorkflow,
+  verdictOfFindings,
   artifactWiring,
   functionNamesOf,
   gateCapabilities,
@@ -58,6 +63,8 @@ import {
   ScriptedFunctions,
   sessionServicesFor,
   statusOfResult,
+  type ConformanceFinding,
+  type ConformanceReport,
   type FakeRule,
   type WorkflowExecResult,
 } from "@jaira/runtime";
@@ -89,6 +96,8 @@ const USAGE = `usage:
   jaira prune [--older-than <days>] [--keep-runs <n>] [--apply] [--project <dir>]
   jaira workflow list [--json] [--project <dir>]
   jaira workflow lint [--json] [--project <dir>]
+  jaira workflow check [<description.md>] [--workflow <rootStateId>]... [--model <id>]
+            [--json] [--fake <json|@file>] [--repair-turns <n>] [--project <dir>]
 `;
 
 export async function runCli(argv: string[], io: CliIo): Promise<number> {
@@ -122,6 +131,8 @@ async function dispatch(argv: string[], io: CliIo): Promise<number> {
           return cmdWorkflowList(wfRest, io);
         case "lint":
           return cmdWorkflowLint(wfRest, io);
+        case "check":
+          return cmdWorkflowCheck(wfRest, io);
         default:
           throw new UsageError(`unknown workflow subcommand '${sub ?? ""}'`);
       }
@@ -809,6 +820,158 @@ function cmdWorkflowLint(argv: string[], io: CliIo): number {
   } finally {
     project.close();
   }
+}
+
+/** The description `workflow check` reads when the command names no file. */
+const DEFAULT_DESCRIPTION_FILE = "workflow.md";
+
+/**
+ * Check the project's workflows against an English description of the flow the
+ * user wants (`workflow.md`).
+ *
+ * `lint` answers "will this run?"; this answers "is this the workflow I asked
+ * for?" — a question with no mechanical answer, so it is a workflow run like any
+ * other (`conformanceWorkflowFiles`), against the project's configured model and
+ * scriptable with `--fake`.
+ *
+ * The exit code is the point: 0 only when every requirement in the description is
+ * satisfied, so a pre-commit hook or CI job can gate on the document and the
+ * workflows staying in step.
+ */
+async function cmdWorkflowCheck(argv: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    allowPositionals: true,
+    options: {
+      project: { type: "string" },
+      workflow: { type: "string", multiple: true },
+      model: { type: "string" },
+      json: { type: "boolean" },
+      fake: { type: "string" },
+      "repair-turns": { type: "string" },
+    },
+  });
+  const projectDir = projectDirOf(values, io);
+  const specPath =
+    positionals[0] !== undefined ? resolve(io.cwd, positionals[0]) : join(projectDir, DEFAULT_DESCRIPTION_FILE);
+  let spec: string;
+  try {
+    spec = readFileSync(specPath, "utf8");
+  } catch {
+    throw new Error(
+      `no workflow description at ${specPath} — write one, or name it: jaira workflow check <description.md>`,
+    );
+  }
+  if (spec.trim() === "") throw new Error(`${specPath} is empty; there is nothing to check the workflows against`);
+
+  const project = openWithRecoveryNote(projectDir, io);
+  try {
+    const digest = workflowDigest(project, values.workflow !== undefined ? { roots: values.workflow } : {});
+    // A file that will not parse or a root that will not load means the digest is
+    // missing states — and a conformance answer over partial evidence is worse than
+    // no answer, because it reads as a clean bill of health.
+    if (digest.unreadable.length > 0 || digest.loadErrors.length > 0) {
+      const detail = [
+        ...digest.unreadable.map((f) => `${f.file}: ${f.error}`),
+        ...digest.loadErrors.map((e) => `${e.rootId}: ${e.error}`),
+      ].join("\n  ");
+      throw new Error(
+        `cannot check conformance while a workflow does not load:\n  ${detail}\n` +
+          "  fix these first — `jaira workflow lint` reports the same set",
+      );
+    }
+    if (digest.roots.length === 0) throw new Error("no workflows under .jaira/workflows/ to check");
+    // Never silent: a clipped state is evidence the judge did not see in full.
+    for (const stateId of digest.truncated) {
+      io.stderr(`warning: state '${stateId}' is too long for the digest and was clipped before the check saw it\n`);
+    }
+
+    const wiring = runWiringOf(values, io.cwd);
+    const bundle = loadBundle(
+      conformanceWorkflowFiles(values.model !== undefined ? { model: values.model } : {}),
+      CONFORMANCE_ID,
+    );
+    const { registry, prompt, session, summaryModes } = buildRunEnvironment(bundle, project.config, wiring);
+    warnSummaryConflicts(summaryModes, io);
+    assertCapabilities(registry, bundle, project.config);
+    io.stderr(`checking ${digest.roots.join(", ")} (${digest.states} states) against ${specPath}\n`);
+    const result = await executeWorkflow({
+      bundle,
+      inputs: { spec, implementation: digest.markdown },
+      registry,
+      prompt,
+      session,
+      ...(io.abortSignal !== undefined ? { abortSignal: io.abortSignal } : {}),
+    });
+    if (statusOfResult(result) !== "completed") {
+      io.stdout(JSON.stringify(resultReport(result), null, 2) + "\n");
+      return 1;
+    }
+
+    const report = conformanceReportOf(result.value);
+    // The findings are the evidence; a verdict that contradicts them is reported
+    // rather than believed (see `verdictOfFindings`).
+    const verdict = verdictOfFindings(report.findings);
+    if (verdict !== report.verdict) {
+      io.stderr(
+        `warning: the check reported '${report.verdict}' but its own findings say '${verdict}'; ` +
+          "going with the findings\n",
+      );
+    }
+    if (values.json) {
+      io.stdout(
+        JSON.stringify(
+          { description: specPath, workflows: digest.roots, ...report, verdict, cost: result.metrics.costUsd },
+          null,
+          2,
+        ) + "\n",
+      );
+    } else {
+      io.stdout(renderConformance(specPath, digest.roots, { ...report, verdict }));
+    }
+    return verdict === "conforms" ? 0 : 1;
+  } finally {
+    project.close();
+  }
+}
+
+const CONFORMANCE_BADGE: Record<string, string> = {
+  satisfied: "✓",
+  partial: "⚠",
+  missing: "✗",
+  contradicted: "✗",
+};
+
+function renderFinding(finding: ConformanceFinding): string[] {
+  const badge = CONFORMANCE_BADGE[finding.status] ?? "·";
+  const lines = [
+    `  ${badge} ${finding.id}  ${finding.requirement}${finding.status === "satisfied" ? "" : `  — ${finding.status}`}`,
+  ];
+  if (finding.detail !== "") lines.push(`      ${finding.detail}`);
+  if (finding.states.length > 0) lines.push(`      states: ${finding.states.join(", ")}`);
+  return lines;
+}
+
+function renderConformance(specPath: string, roots: string[], report: ConformanceReport): string {
+  const lines = [
+    `conformance: ${report.verdict}`,
+    `  description  ${specPath}`,
+    `  workflows    ${roots.join(", ")}`,
+    "",
+  ];
+  // Unsatisfied first: the reason the command was run is at the top, not buried
+  // under the requirements that already pass.
+  const order = ["contradicted", "missing", "partial", "satisfied"];
+  const sorted = [...report.findings].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
+  for (const finding of sorted) lines.push(...renderFinding(finding));
+  if (report.findings.length === 0) lines.push("  (the check returned no findings)");
+  if (report.extras.length > 0) {
+    lines.push("", "  not described by the document:");
+    for (const extra of report.extras) {
+      lines.push(`  · ${extra.detail}${extra.states.length > 0 ? ` (${extra.states.join(", ")})` : ""}`);
+    }
+  }
+  return lines.join("\n") + "\n";
 }
 
 /**

@@ -67,6 +67,8 @@ npm run jaira -- run --root feature/plan --inputs @inputs.json \
 npm run jaira -- task create --title "..." --workflow feature/plan --inputs @inputs.json
 npm run jaira -- task start <taskId> [--fake ...] [--interactions ...]
 npm run jaira -- task list | status <taskId> [--events N] | cancel <taskId>
+npm run jaira -- workflow list | lint            # what the project has, and will it run
+npm run jaira -- workflow check workflow.md      # …and is it the workflow you asked for
 ```
 
 Workflow state files live in `.jaira/workflows/` (state id = path, e.g.
@@ -85,6 +87,13 @@ matched against the operation's configured model and rendered prompt.
 name** (not state id): `{"choose_option": [{"decision": "approve"}, ...]}`, with
 `"*"` as a catch-all. A function that is never registered fails only if its
 state is actually reached.
+
+`workflow check` reads a plain-English description of the flow you want
+(`workflow.md` by default) and judges the project's workflows against it,
+requirement by requirement — exiting non-zero unless every one is satisfied, so
+CI can gate on the document and the workflows staying in step. It is itself an
+ordinary workflow run, so it needs a configured model (or `--fake`). See
+[WORKFLOWS.md §11.1](WORKFLOWS.md).
 
 Real runs read `.jaira/config.json`: `models.default` supplies the model for
 states that name none, and must be route-prefixed
