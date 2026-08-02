@@ -440,11 +440,49 @@ string.
 | `confirm_action` | UI gate | |
 | `claude-code` | Delegated agent, in-process SDK | `policyEnforcement: "callback"` |
 | `claude-cli` | Delegated agent, `claude` subprocess | `policyEnforcement: "callback"` via the MCP bridge |
+| `codex-cli` | Delegated agent, `codex exec` subprocess | `policyEnforcement: "config"` — see below |
 | `generic-cli` | Non-Claude agent CLI | Configured in `config.agents.genericCli`; **`policyEnforcement: "none"`**, so §5.1 refuses it unless `policy.builtins` is `false` |
 | `run_command` | Run one command, no agent | Takes `config.command`; gates itself against the project policy |
 
 A UI gate's answer is validated twice — in the main process against the
 component's contract, then by the engine against the state's output schema.
+
+#### `codex-cli` is not `generic-cli`, and the difference is the policy
+
+`codex exec` has no mid-run permission callback — nothing like Claude's
+`--permission-prompt-tool` — so no tool call it makes reaches the approval UI.
+What it *does* have is a real up-front channel: `--sandbox`
+(`read-only` / `workspace-write` / `danger-full-access`), pinned on every run so
+the blast radius never depends on the contents of `~/.codex/config.toml`. That is
+`policyEnforcement: "config"`, which **passes** the §5.1 gate where `generic-cli`'s
+`"none"` does not.
+
+The gate does not disappear, it moves: an adapter declaring `config` gets its
+injected tools **policy-wrapped by the engine**, so JaiRA's own `bash`/`write_file`
+are still approved per call. Only codex's own built-ins answer to the sandbox alone.
+
+`plan` maps to `read-only`, `bypassPermissions` to `danger-full-access`, and
+everything else to `workspace-write`. Project settings:
+
+```jsonc
+"agents": { "codex": { "command": "codex", "sandbox": "read-only" } }
+```
+
+**A codex state must declare no `tools`.** Codex reaches JaiRA's tool bridge and then
+auto-denies the call — the denial comes back as the text `user cancelled MCP tool
+call`, which the agent would report as its answer, so a state would "succeed" having
+done nothing. Until that is solved the adapter refuses instead, naming the tools.
+Codex works from its own built-ins under the sandbox; a state that needs JaiRA's
+tools belongs on `claude-code`/`claude-cli`.
+
+Two more things codex **refuses rather than silently drops**: a per-tool deny list (it
+has no such flag) and a native tool allow-list. It reports no cost either — codex
+counts tokens, not money — so its runs land in the roll-up with `costSource:
+"unknown"` rather than a made-up number.
+
+Sessions: `codex exec resume` continues a conversation natively, so two states sharing
+a `session` name share one codex thread. There is no fork primitive, so a *branch* is
+replayed as a rendered transcript — lossy, and recorded as such (SESSIONS.md §6).
 
 ### 4.3 ⚠️ `operation.input` is a **parameter map**, not a binding map
 
@@ -517,11 +555,15 @@ defaults for this state's operation *and for every descendant's*.
 The effective operation is
 
 ```text
-merge(root.environment, …, parent.environment, own.environment, own.operation)
+merge(root.environment, …, parent.environment, mount.environment, own.environment, own.operation)
 ```
 
 with the **nearest layer winning**. One vocabulary covers both "the default for
 this subtree" and "the operation here", so there is nothing extra to learn.
+
+`mount.environment` is `children.<key>.environment` — the layer a PARENT applies to
+one child rather than to all of them (§6.1). It is what lets one review state be
+mounted twice, under two different agents.
 
 **Two rules keep it predictable:**
 
@@ -615,6 +657,64 @@ exists in the declaring state. It is meaningless once inherited; use
 | `children.<key>.state` | optional | The child's state reference (§2.1). **Absent ⇒ `./<key>`**, so a child whose key names it says nothing. |
 | `children.<key>.inputs` | optional | Wiring into the child's declared inputs, as **bare bindings** (§8) — no `binding:` wrapper. Every required input of the child must be wired. |
 | `children.<key>.async` | optional | `true` ⇒ the cursor does not wait for this child (see below). |
+| `children.<key>.environment` | optional | Defaults for **this mount** of the child and its subtree (§6.1). |
+
+### 6.1 `environment` on a child: one state, mounted twice
+
+`environment` on a state applies to it and everything below it, so every child of
+one parent inherits the same layer — and two children of one parent could not
+differ in it. Declaring it **on the child** is how they differ:
+
+```jsonc
+"children": {
+  "claude_review": {
+    "state": "$/review/agent_review",
+    "async": true,
+    "environment": { "kind": "function", "function": "claude-cli" },
+    "inputs": { "change": ".inputs.change" }
+  },
+  "codex_review": {
+    "state": "$/review/agent_review",
+    "async": true,
+    "environment": { "kind": "function", "function": "codex-cli" },
+    "inputs": { "change": ".inputs.change" }
+  },
+  "synthesize": {
+    "state": "$/review/synthesize",
+    "inputs": {
+      "review_a": ".children.claude_review.outputs.report",
+      "review_b": ".children.codex_review.outputs.report"
+    }
+  }
+}
+```
+
+One `agent_review.json`, reviewed by two agents, merged by a third state that waits
+for both by dataflow (§6, async children). The reviewed state leaves `function` to
+the chain:
+
+```jsonc
+// review/agent_review.json
+"operation": {
+  "kind": "function",
+  "input": { "prompt": { "kind": "text", "binding": ".inputs.change" } },
+  "output": { "name": "report", "kind": "blob" }
+}
+```
+
+Three rules worth knowing:
+
+- **It is a DEFAULTS layer, not an override.** The order is
+  parent's `environment` → the mount's → the child's own → the child's `operation`,
+  nearest wins. So a state that names its own `operation.function` cannot be varied
+  this way, which is right: a state that says what it runs means it. A state meant to
+  be mounted under several runtimes leaves that field out.
+- **Two mounts under different environments become two entries** internally (a state
+  id with a `#`-suffixed variant), so validation, snapshots, the board and the events
+  journal still see one id running one operation. Two mounts declaring the *same*
+  thing collapse back to one.
+- It works for any environment field, not just `function` — `model`, `tools`,
+  `permissions`, `session`.
 
 ### `children` is optional — omit it and the directory decides
 

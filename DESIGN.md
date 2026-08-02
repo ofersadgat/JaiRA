@@ -550,7 +550,7 @@ The last of §14. 313 tests. What phase 7 settled:
    conversation, so a session mixing the two modes is summarized for both, and the
    workflow browser warns about it. ⚠️ Rebuilt on the position model — see §1k.
 4. **`generic-cli` is registered honestly, and therefore usually refused.** A
-   non-Claude binary (opencode, codex) reaches JaiRA through the same normalized
+   non-Claude binary (opencode, others) reaches JaiRA through the same normalized
    `AgentQuery` seam, driven by JaiRA's own Exec layer so a WSL project runs it inside
    the distro. Its capabilities declare `policyEnforcement: "none"`, because no
    callback reaches `ctx.approve` and there is no flag vocabulary to translate a deny
@@ -558,6 +558,18 @@ The last of §14. 313 tests. What phase 7 settled:
    and SPEC §11.3's built-in classes all can. Running one is therefore an explicit
    `policy.builtins: false` decision. That is §16's "generic-cli runners start
    policy-weak by design" turned into enforcement instead of a caveat.
+
+   **Codex is the exception, and it is why the honest record pays off.** `codex-cli`
+   is its own adapter upstream (`@declarative-ai/agents-cli`), not a `generic-cli`
+   configuration, because it can do something a generic binary cannot: pin a sandbox
+   (`--sandbox read-only|workspace-write|danger-full-access`) on every run, and serve
+   our own tools over the same streamable-HTTP MCP bridge the `claude` adapter uses.
+   So it declares `policyEnforcement: "config"` — weaker than `callback`, real all the
+   same — and §8.2 lets it run. What it cannot honour it REFUSES: a per-tool deny list
+   and a native allow-list have no expression in `codex exec`, and dropping either
+   would leave a workflow believing in a floor that is not there. It also splits
+   `sessionResume` from `sessionFork`: `codex exec resume <id>` appends server-side and
+   there is no fork primitive, so a branch is replayed. See SESSIONS.md §6.
 5. **`claude-cli`'s hook loopback was already there.** §16 sequenced it last as "the
    most intricate adapter plumbing", but upstream's CLI adapter routes each gated
    tool-use back over the MCP bridge via `--permission-prompt-tool` — that *is* the
