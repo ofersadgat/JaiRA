@@ -13,6 +13,9 @@
  * title or branch name can turn into shell syntax.
  */
 import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { delimiter } from "node:path";
+import { resolveProgram, type ProgramDeps } from "@declarative-ai/agents-cli";
 import { isWslEnv, toWslPath, type ExecEnv } from "./paths";
 
 export interface ExecOptions {
@@ -26,6 +29,8 @@ export interface ExecOptions {
   timeoutMs?: number;
   /** Text piped to stdin, then closed. */
   stdin?: string;
+  /** Overrides for Windows program resolution — injected by tests, never set in production. */
+  program?: ProgramDeps;
 }
 
 export interface ExecResult {
@@ -64,6 +69,28 @@ export interface ExecObserver<T = unknown> {
   onExit(token: T | undefined, event: { code: number | null; signal: NodeJS.Signals | null }): void;
 }
 
+/**
+ * Windows program resolution, as this process sees it.
+ *
+ * The rule and its reasoning live upstream ({@link resolveProgram}), because the agent adapters need
+ * it in their own default spawn and one copy of "how do you launch a CLI on Windows without a shell"
+ * is enough. What belongs HERE is only the environment it is asked about.
+ *
+ * Why it exists at all: Node cannot spawn a `.cmd` with `shell: false`, this layer never passes
+ * `shell: true` (see the module note — no shell means nothing in a task title can become shell
+ * syntax), and an npm-installed CLI on Windows *is* a `.cmd` shim. `codex` is one.
+ */
+function programDeps(overrides: Partial<ProgramDeps> = {}): ProgramDeps {
+  return {
+    platform: process.platform,
+    pathDirs: (process.env["PATH"] ?? "").split(delimiter).filter((d) => d.length > 0),
+    node: process.execPath,
+    exists: existsSync,
+    readText: (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : undefined),
+    ...overrides,
+  };
+}
+
 /** How a command is actually invoked for an environment (also what tests assert). */
 export function resolveInvocation(
   command: string,
@@ -72,7 +99,9 @@ export function resolveInvocation(
 ): { file: string; argv: string[]; cwd?: string } {
   const execEnv: ExecEnv = options.execEnv ?? "windows";
   if (!isWslEnv(execEnv)) {
-    return { file: command, argv: [...args], ...(options.cwd !== undefined ? { cwd: options.cwd } : {}) };
+    // A WSL command is a LINUX command; only a native one goes through Windows program resolution.
+    const { file, prefix } = resolveProgram(command, programDeps(options.program));
+    return { file, argv: [...prefix, ...args], ...(options.cwd !== undefined ? { cwd: options.cwd } : {}) };
   }
   // `--cd` sets the working directory inside the distro, so the Windows cwd is
   // never handed to a Linux process. `--` ends wsl.exe's own option parsing, which
