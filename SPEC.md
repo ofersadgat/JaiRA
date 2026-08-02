@@ -633,6 +633,12 @@ Example providers:
 Agent providers should be modeled as runtime adapters with capabilities, not as
 interchangeable strings.
 
+> As built, the registry names a state writes are `claude-code` (SDK), `claude-cli`,
+> `codex-cli` and `generic-cli` — hyphens, not the underscores sketched above. Their
+> capabilities differ in the one field that decides whether a policy can hold:
+> `callback` for the Claude adapters, `config` for codex (a pinned sandbox), `none`
+> for a generic binary. See WORKFLOWS.md §4.2.
+
 ### 7.2 Agent Responsibilities
 
 Agents may:
@@ -956,17 +962,19 @@ Example — fan-out reviews with a dataflow join:
   "children": {
     "claude_review": {
       "state": "review/agent_review",
-      "async": true
+      "async": true,
+      "environment": { "kind": "function", "function": "claude-cli" }
     },
     "codex_review": {
       "state": "review/agent_review",
-      "async": true
+      "async": true,
+      "environment": { "kind": "function", "function": "codex-cli" }
     },
     "synthesize": {
       "state": "review/synthesize",
       "inputs": {
-        "review_a": "children.claude_review.outputs.report",
-        "review_b": "children.codex_review.outputs.report"
+        "review_a": ".children.claude_review.outputs.report",
+        "review_b": ".children.codex_review.outputs.report"
       }
     }
   },
@@ -978,6 +986,13 @@ Both reviews start without blocking. The sequence cursor reaches `synthesize`
 immediately, but its inputs reference both review outputs, so it waits for
 both to resolve before starting. With no transitions declared, the state
 terminates with `terminate.success` once all three children finish.
+
+> Revised twice. Bindings carry the required leading dot (`.children.…`), as
+> everywhere else since the grammar change. And the two reviews now say what makes
+> them different: a per-mount `environment` (WORKFLOWS.md §6.1), so ONE
+> `review/agent_review` state runs under two agents rather than two near-identical
+> files doing it. Without those lines the example's names were aspirational — both
+> children ran the same runtime. A complete, tested version is WORKFLOWS.md §12.1.
 
 ### 10.5 Branch Isolation and Concurrent Tasks
 

@@ -175,6 +175,29 @@ from the journal, rather than only the parent's "child X terminated with error".
 > milliseconds. Lower `limits.max_iterations` or use a narrower conversation mode
 > for routine use.
 
+### Delegated agents
+
+A state can hand its work to a coding agent instead of running a model call
+itself. Three runtimes are registered for every run, plus one per configured
+generic CLI:
+
+| `operation.function` | Needs | Policy |
+| --- | --- | --- |
+| `claude-code` | `@anthropic-ai/claude-agent-sdk` | `callback` — each tool call reaches the approval UI |
+| `claude-cli` | `claude` on PATH | `callback`, over an MCP bridge |
+| `codex-cli` | `codex` on PATH | `config` — a sandbox pinned per run (`agents.codex.sandbox`) |
+| *(as named)* | whatever `agents.genericCli` configures — nothing is registered when it is unset | `none`, so it is refused whenever the policy can escalate to a human |
+
+Because a runtime is just a name on an operation, **one review state can be
+mounted under two of them** — that is the two-agent review in
+[WORKFLOWS.md §12.1](WORKFLOWS.md), where `claude-cli` and `codex-cli` review the
+same change concurrently and a third state merges what they found.
+
+Codex is metered by whatever `codex login` is signed into, reports tokens rather
+than money (so its runs record `costSource: "unknown"`), and must declare no
+`tools` — it works from its own built-ins under its sandbox. The opt-in live tests
+against both binaries are `JAIRA_LIVE_AGENT=1 npx vitest run packages/runtime/test/codex.live.test.ts`.
+
 > **Native-module ABI.** `better-sqlite3` is a V8-ABI addon, so one build cannot
 > serve both Node and Electron (Node 22 wants `NODE_MODULE_VERSION` 127, Electron
 > 33 wants 130). `npm run app` switches it automatically; switch back with
