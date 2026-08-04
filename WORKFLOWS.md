@@ -1277,6 +1277,52 @@ roots, `--model <id>` overrides the model, `--json` prints the requirements and
 findings for a tool to consume, and `--fake` scripts the check itself — it is an
 ordinary workflow run, so everything that works for a run works here.
 
+With no file named the command reads `workflow.md` at the top of the project,
+and failing that `.jaira/workflows/workflow.md` — the copy the app can show,
+since the Files view only reaches what is under a layer root.
+
+### 11.2 Syncing the two
+
+The check reports and stops, which is the right shape for a CI gate and the
+wrong one for someone sitting in front of both documents. In the app, opening
+`.jaira/workflows/workflow.md` gives it a viewer of its own: a line saying which
+side has drifted, and two buttons.
+
+- **Rewrite the description** — from the workflows as they are. Used when the
+  workflows are what changed.
+- **Propose workflow changes** — from what the description asks for. Used when
+  the description is what changed.
+
+Both run the check first and act on its findings, so an edit is traceable to the
+requirement that motivated it, and the report is shown beside the proposal.
+
+**Nothing is written.** The rewritten description arrives as an unsaved draft in
+the editor below the panel; proposed state files arrive as drafts against their
+own rows in the tree, marked like any other unsaved edit. You read them, then
+Save or Revert, per file. One side of this pair is prose somebody wrote and the
+other is code that will run, and a model rewriting either straight to disk would
+be a model with commit rights. The document a sync *reads* is the draft too —
+what the editor is showing, not what the file says.
+
+**Which side moved** is answered from `.jaira/sync.json`: the content hash of the
+description and of every state file, as of the last sync that was **accepted**.
+Accepted, not run — a proposal produced and discarded left both sides exactly
+where they were, and recording it would claim they agree when nobody made them.
+Saving what a sync proposed is what advances the baseline; when a sync finds
+nothing to change, that *is* the agreement and the baseline moves immediately.
+
+Both sides can have changed, and that case is not resolved for you: neither
+button is recommended, and the line says so. There is no mechanical answer to
+which of two edited documents is now the truth, and picking one would silently
+overwrite the other.
+
+A proposed state file is refused rather than offered when its id points outside
+`workflows/`, and when the state is authored as YAML (the proposal is JSON, and
+writing it would leave one file in two syntaxes). Both are reported in the panel
+with the file they would have touched. Anything the run could not express as a
+state file at all — a human gate needing a function this project has not
+registered — comes back as a note instead of an invented state.
+
 ---
 
 ## 12. A complete example

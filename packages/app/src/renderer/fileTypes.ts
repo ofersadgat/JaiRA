@@ -31,13 +31,50 @@ import type {
   FileTree,
   StateSlots,
   StateView,
+  SyncDirection,
   ValidateSchemaResult,
+  WorkflowLayer,
+  WorkflowSyncEdit,
+  WorkflowSyncResult,
+  WorkflowSyncStatus,
 } from "@jaira/shared/browser";
 import { mimeFallbacks } from "@jaira/shared/browser";
 import type { Drafts, SetDraft } from "./drafts";
 
 /** What a surface does with the file. The two halves of the panel, top to bottom. */
 export type FileAction = "view" | "edit";
+
+/**
+ * Keeping `workflows/workflow.md` and the state files in step — what the description's viewer needs.
+ *
+ * Its own bag rather than five more fields on the context, because it is the whole surface of one
+ * feature and exactly one surface uses it. Optional for the same reason the draft store is: a panel
+ * rendered without it degrades to a markdown preview, which is what the file was before.
+ *
+ * Nothing here writes to disk. {@link SyncSurface.run} produces a proposal, and the store turns it
+ * into drafts — see `syncPanel.tsx`.
+ */
+export interface SyncSurface {
+  /** Which side has moved since the two last agreed. Null until the first answer arrives. */
+  status: WorkflowSyncStatus | null;
+  /** The last proposal, with the findings behind it. Cleared when another file is opened. */
+  result: WorkflowSyncResult | null;
+  running: boolean;
+  error: string | null;
+  /**
+   * Ask for the status of one document.
+   *
+   * Takes the document's address rather than reading the open file, so the panel can ask on mount
+   * without the store having to guess which file the question is about. Unsaved edits are added by
+   * the panel (`syncState.driftOf`) rather than sent here — otherwise this would fire per keystroke.
+   */
+  refresh: (layer: WorkflowLayer, path: string) => void;
+  /** Run the sync. The draft, not the saved file, is what gets synced. */
+  run: (direction: SyncDirection) => void;
+  cancel: () => void;
+  /** Open a proposed state file, so a listed edit is one click from being read. */
+  openEdit?: (edit: WorkflowSyncEdit) => void;
+}
 
 /**
  * Everything a surface may need beyond the file itself.
@@ -110,6 +147,13 @@ export interface FileSurfaceContext {
    */
   editorTab?: Record<string, "form" | "json"> | undefined;
   onEditorTab?: ((key: string, tab: "form" | "json") => void) | undefined;
+  /**
+   * The description-vs-workflows machinery, for the one surface that shows it.
+   *
+   * Absent ⇒ no host for it (a panel rendered outside the shell), and the viewer falls back to the
+   * markdown preview rather than offering buttons that would do nothing.
+   */
+  sync?: SyncSurface | undefined;
   /** Which registered schema a document already satisfies. Null when nothing could be asked. */
   detectSchema: (text: string) => Promise<DetectSchemaResult | null>;
   /** Word wrap in the JSON editor — a saved preference, not per-document. */

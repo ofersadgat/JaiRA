@@ -32,8 +32,12 @@ import type {
   SecretCapabilities,
   SecretTarget,
   StateView,
+  SyncDirection,
   TaskDetail,
   WorkflowMutationResult,
+  WorkflowSyncEdit,
+  WorkflowSyncResult,
+  WorkflowSyncStatus,
   TaskSummary,
   WorkflowLayer,
 } from "@jaira/shared/browser";
@@ -134,6 +138,17 @@ export interface AppState {
   editorTab: Record<string, "form" | "json">;
 
   /**
+   * Where `workflows/workflow.md` and the state files stand, and the last proposal.
+   *
+   * Beside the drafts rather than inside the panel showing it, for the reason every other piece of
+   * this view state is: a sync is a model call that takes a while, and a result held by a component
+   * would be discarded by clicking anything during the wait. `result` is cleared when another file
+   * is opened — a proposal is about one document, and showing it over another would be a lie about
+   * which one it read.
+   */
+  sync: SyncState;
+
+  /**
    * The file open in the middle panel — any file, not just a state.
    *
    * One document rather than one per type, because the panel's two halves must be looking at the
@@ -169,6 +184,27 @@ export interface AppState {
   section: SettingsSection;
 }
 
+/** The sync surface's state: the last answer, the last proposal, and whether one is in flight. */
+export interface SyncState {
+  status: WorkflowSyncStatus | null;
+  result: WorkflowSyncResult | null;
+  running: boolean;
+  error: string | null;
+}
+
+/**
+ * What is left of a sync when another file is opened.
+ *
+ * The proposal and the status are about ONE document, so both go. `running` does not: a sync in
+ * flight is still in flight, and clearing the flag would offer a second Run while the first is
+ * still going — which main refuses, so the only thing it would produce is an error.
+ */
+function clearedSync(sync: SyncState): SyncState {
+  return sync.result === null && sync.status === null && sync.error === null
+    ? sync
+    : { status: null, result: null, running: sync.running, error: null };
+}
+
 /** The three destinations on the activity rail. */
 export type View = "files" | "tasks" | "settings";
 
@@ -198,6 +234,7 @@ const EMPTY: AppState = {
   probing: [],
   secrets: { keychain: false },
   schemaChoice: {},
+  sync: { status: null, result: null, running: false, error: null },
   drafts: {},
   editorTab: {},
   doc: null,
@@ -728,7 +765,7 @@ export function useApp() {
        * that task has nothing to do with the new file.
        */
       selectFile: (node: FileNode) => {
-        patch({ stateId: node.stateId ?? null, inspect: "state", doc: null });
+        patch({ stateId: node.stateId ?? null, inspect: "state", doc: null, sync: clearedSync(ref.current.sync) });
         void refreshState(node.stateId ?? null);
         if (isTextMime(node.mime)) return void refreshDoc(node.layer, node.path);
         // A PNG or the database: `file:read` would refuse it, and a refusal here would leave the
@@ -747,11 +784,101 @@ export function useApp() {
        * the file this resolves to, so it always says where you are.
        */
       selectState: (stateId: string | null) => {
-        patch({ stateId, inspect: "state", doc: null });
+        patch({ stateId, inspect: "state", doc: null, sync: clearedSync(ref.current.sync) });
         void refreshState(stateId);
         if (stateId === null) return void refreshDoc(null, null);
         void locateState(stateId).then((at) => refreshDoc(at?.layer ?? null, at?.path ?? null));
       },
+
+      /**
+       * Open a file by its path, for callers that have one and no tree node.
+       *
+       * `selectState` cannot serve this: it resolves an id through `state:view`, which fails for a
+       * state that does not exist yet — and a state file a sync has just PROPOSED is exactly that.
+       * Opening by path shows the file as "not created yet" with the proposal in its editor, which
+       * is the correct picture of what saving would do.
+       */
+      openPath: (layer: WorkflowLayer, path: string) => {
+        patch({ inspect: "state", doc: null, sync: clearedSync(ref.current.sync) });
+        // One read, not two: the document that arrives is what says whether this path defines a
+        // state, and asking twice is how the panel and the inspector end up a revision apart.
+        void refreshDoc(layer, path).then(() => {
+          const stateId = ref.current.doc?.stateId ?? null;
+          patch({ stateId });
+          return refreshState(stateId);
+        });
+      },
+
+      // --- the description and the workflows --------------------------------
+
+      /**
+       * Which of the description and the state files has moved since they were last in step.
+       *
+       * Quiet on failure like the other panel-side reads: this fires when a file is opened, and a
+       * project that is not open yet is not something to raise a toast about. A null status is a
+       * "checking…" line rather than an error.
+       */
+      syncStatus: async (layer: WorkflowLayer, path: string) => {
+        try {
+          patch({ sync: { ...ref.current.sync, status: await invoke("workflow:syncStatus", { layer, path }) } });
+        } catch {
+          patch({ sync: { ...ref.current.sync, status: null } });
+        }
+      },
+
+      /**
+       * Run a sync, and turn what it proposes into unsaved drafts.
+       *
+       * The two halves of the promise this feature makes are both here. The document sent is the
+       * DRAFT — what the editor is showing, not what the file says — so a sync answers about the
+       * description in front of you. And what comes back is written to `drafts`, never to disk: the
+       * rewritten description lands in the editor below the panel, proposed state files land against
+       * their own rows in the tree, and every one of them is saved, or not, by the person reading it.
+       *
+       * A proposal identical to the file on disk is recorded as no draft at all — `drafts` holds
+       * differences (see `drafts.ts`), and an entry equal to the file would mark a row as edited
+       * when nothing about it would change.
+       */
+      runSync: async (direction: SyncDirection) => {
+        const doc = ref.current.doc;
+        if (doc === null) return;
+        const key = docKey(doc.layer, doc.path);
+        const text = ref.current.drafts[key] ?? doc.text;
+        patch({ sync: { ...ref.current.sync, running: true, error: null } });
+        try {
+          const result = await invoke("workflow:sync", {
+            layer: doc.layer,
+            path: doc.path,
+            direction,
+            text,
+          });
+          let drafts = ref.current.drafts;
+          if (result.document !== undefined) {
+            drafts = withDraft(drafts, key, result.document.text === doc.text ? null : result.document.text);
+          }
+          for (const edit of result.edits ?? []) {
+            if (edit.applicable) drafts = withDraft(drafts, docKey(edit.layer, edit.path), edit.text);
+          }
+          patch({ drafts, sync: { status: ref.current.sync.status, result, running: false, error: null } });
+          // The status moves with the proposal: a sync that found nothing to do has just recorded
+          // that the two agree, and the panel should say so without being reopened.
+          await actionsRef.current.syncStatus(doc.layer, doc.path);
+        } catch (e) {
+          patch({ sync: { ...ref.current.sync, running: false, error: (e as Error).message } });
+        }
+      },
+
+      /** Abort a sync in flight. The proposal it would have produced is simply never delivered. */
+      cancelSync: async () => {
+        try {
+          await invoke("workflow:syncCancel", undefined);
+        } catch (e) {
+          fail(e);
+        }
+      },
+
+      /** Open the file one proposed edit would change, so a listed edit is one click from readable. */
+      openSyncEdit: (edit: WorkflowSyncEdit) => actionsRef.current.openPath(edit.layer, edit.path),
 
       // --- configuration ----------------------------------------------------
 

@@ -16,6 +16,7 @@ export * from "./prune";
 export * from "./workflows";
 export * from "./digest";
 export * from "./workflowRefs";
+export * from "./workflowSync";
 export * from "./artifactStore";
 export * from "./memoCache";
 export * from "./jobs";

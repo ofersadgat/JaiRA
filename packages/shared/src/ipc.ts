@@ -355,6 +355,128 @@ export interface WorkflowMutationResult {
   referencedBy: string[];
 }
 
+// --- keeping the description and the state files in step -----------------------
+
+/**
+ * Which of the two accounts a sync REWRITES.
+ *
+ * `document` rewrites `workflows/workflow.md` from the workflows; `states` proposes state files from
+ * the document. Named after the target rather than the source because that is what the button does
+ * and what ends up with unsaved changes in it — "sync from the workflows" and "sync the document"
+ * are the same operation, and only one of those phrasings says where the edit lands.
+ */
+export type SyncDirection = "document" | "states";
+
+/** One state file that differs from the last agreed sync. */
+export interface SyncStateChange {
+  /** Relative to the layer's `workflows/` directory. */
+  path: string;
+  change: "added" | "edited" | "removed";
+}
+
+/**
+ * Which side has moved since the two were last agreed.
+ *
+ * Both flags can be true, and that case is deliberately not resolved here: when the document and the
+ * workflows have both changed, there is no mechanical answer to which one is now right, and picking
+ * one would silently overwrite somebody's work. {@link suggested} is null there, and the UI asks.
+ */
+export interface WorkflowSyncStatus {
+  layer: WorkflowLayer;
+  /** The description, relative to the layer root. */
+  path: string;
+  exists: boolean;
+  /** False when the two have never been synced — there is no baseline, so nothing has "changed". */
+  synced: boolean;
+  /** When the last sync was accepted. */
+  at?: number;
+  /** Which way the last sync went, for the "last synced" line. */
+  lastDirection?: SyncDirection;
+  documentChanged: boolean;
+  statesChanged: boolean;
+  changedStates: SyncStateChange[];
+  /** The direction the drift implies. Null when neither side moved, or when both did. */
+  suggested: SyncDirection | null;
+  /** Why a sync cannot run right now — no project, no workflows, a state file that will not parse. */
+  blocked?: string;
+  /** A proposal produced in this session and not yet saved everywhere it applies. */
+  pending?: SyncDirection;
+}
+
+export interface WorkflowSyncRequest {
+  layer: WorkflowLayer;
+  path: string;
+  direction: SyncDirection;
+  /**
+   * The description as the EDITOR has it, unsaved edits included.
+   *
+   * Absent ⇒ read from disk. Passed in the ordinary case, because a sync run against the saved file
+   * while the author is looking at a changed one would answer a question nobody asked.
+   */
+  text?: string;
+  /** Scripted prompt rules (the `--fake` surface), for demos and tests. */
+  fake?: JsonValue;
+}
+
+/**
+ * One proposed state file, whole.
+ *
+ * Whole rather than a patch: the file is what gets written, a partial edit would have to be applied
+ * by something that understood the document, and a draft is text. `applicable` is false for a
+ * proposal that cannot be handed over as-is — see {@link WorkflowSyncEdit.blocked}.
+ */
+export interface WorkflowSyncEdit {
+  stateId: string;
+  layer: WorkflowLayer;
+  /** Relative to the layer root — where the draft is keyed and where a save would land. */
+  path: string;
+  action: "create" | "update";
+  /** The complete file. */
+  text: string;
+  /** Why this state has to change, in the words of the check that found it. */
+  reason: string;
+  /** The requirement ids this edit answers. */
+  requirements: string[];
+  /** False when it is reported but not offered as a draft. */
+  applicable: boolean;
+  /** Why not — "this state is authored as YAML and the proposal is JSON". */
+  blocked?: string;
+}
+
+/**
+ * The report a sync run produces, plus what it proposes.
+ *
+ * The findings are the same ones `jaira workflow check` prints — structurally the runtime's
+ * `ConformanceReport`, restated here because the wire contract cannot import the runtime. A sync is
+ * a check that then acts, and showing the check is what makes the proposal reviewable rather than
+ * something that appeared in the editor for reasons of its own.
+ */
+export interface WorkflowSyncReport {
+  verdict: "conforms" | "gaps" | "diverges";
+  requirements: Array<{ id: string; requirement: string; category: string; quote: string }>;
+  findings: Array<{
+    id: string;
+    requirement: string;
+    status: "satisfied" | "partial" | "missing" | "contradicted";
+    states: string[];
+    detail: string;
+  }>;
+  extras: Array<{ states: string[]; detail: string }>;
+}
+
+export interface WorkflowSyncResult extends WorkflowSyncReport {
+  direction: SyncDirection;
+  /** The workflow roots the run judged, so the report can say what it read. */
+  workflows: string[];
+  /** The rewritten description. Present for `direction: "document"`. */
+  document?: { text: string; changes: Array<{ summary: string; requirements: string[] }> };
+  /** The proposed state files. Present for `direction: "states"`. */
+  edits?: WorkflowSyncEdit[];
+  /** Anything the run wants said that is not an edit — a gap it could not close on its own. */
+  notes: string[];
+  costUsd?: number;
+}
+
 /** Store a credential. The value goes to the main process and is never read back out. */
 export interface SetSecretRequest {
   name: string;
@@ -416,6 +538,15 @@ export interface IpcContract {
   "workflow:write": { request: WriteWorkflowRequest; response: WorkflowSource };
   /** Rename, duplicate, or copy a state into the other layer. */
   "workflow:move": { request: MoveWorkflowRequest; response: WorkflowMutationResult };
+  /** Which of the description and the state files has moved since they were last in step. */
+  "workflow:syncStatus": { request: { layer: WorkflowLayer; path: string; text?: string }; response: WorkflowSyncStatus };
+  /**
+   * Run the sync. Nothing is written: the result is a proposal the renderer holds as drafts, which
+   * is what makes a model's rewrite of someone's document something they read before it lands.
+   */
+  "workflow:sync": { request: WorkflowSyncRequest; response: WorkflowSyncResult };
+  /** Abort a sync in flight. A model call is long enough that a UI without this is a UI that hangs. */
+  "workflow:syncCancel": { request: void; response: { canceled: boolean } };
   /** Check a document against a registered schema — see {@link ValidateSchemaRequest}. */
   "schema:validate": { request: ValidateSchemaRequest; response: ValidateSchemaResult };
   /** Which registered schema a document already satisfies — see {@link DetectSchemaResult}. */
@@ -484,6 +615,9 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "workflow:write",
   "workflow:move",
   "workflow:delete",
+  "workflow:syncStatus",
+  "workflow:sync",
+  "workflow:syncCancel",
   "schema:validate",
   "schema:detect",
   "file:read",

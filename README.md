@@ -89,11 +89,18 @@ name** (not state id): `{"choose_option": [{"decision": "approve"}, ...]}`, with
 state is actually reached.
 
 `workflow check` reads a plain-English description of the flow you want
-(`workflow.md` by default) and judges the project's workflows against it,
-requirement by requirement — exiting non-zero unless every one is satisfied, so
-CI can gate on the document and the workflows staying in step. It is itself an
-ordinary workflow run, so it needs a configured model (or `--fake`). See
-[WORKFLOWS.md §11.1](WORKFLOWS.md).
+(`workflow.md`, or `.jaira/workflows/workflow.md`, by default) and judges the
+project's workflows against it, requirement by requirement — exiting non-zero
+unless every one is satisfied, so CI can gate on the document and the workflows
+staying in step. It is itself an ordinary workflow run, so it needs a configured
+model (or `--fake`). See [WORKFLOWS.md §11.1](WORKFLOWS.md).
+
+In the app, `.jaira/workflows/workflow.md` opens with that check attached to two
+buttons: rewrite the description from the workflows, or propose the workflow
+changes the description asks for. It says which of the two has drifted since they
+last agreed, and nothing it produces is written — the rewrite lands as an unsaved
+edit in the editor, the proposed state files as unsaved edits against their own
+rows in the tree ([WORKFLOWS.md §11.2](WORKFLOWS.md)).
 
 Real runs read `.jaira/config.json`: `models.default` supplies the model for
 states that name none, and must be route-prefixed

@@ -20,12 +20,22 @@ assumption breaks.
       seam to hook.
 - [ ] **The app has no "what is running" view.** `jobs.live()` answers it and nothing
       renders it.
-- [ ] **`workflow check` is CLI-only, and its findings are not kept.** The conformance
-      check (WORKFLOWS.md §11.1) runs the workflows against `workflow.md` and prints;
-      nothing stores the report, so "which requirements regressed since last time" has
-      no answer, and the workflow browser in the app does not offer it. It is also one
-      model's judgement, so it complements `lint` and never replaces it: a `conforms`
-      verdict is evidence, not proof.
+- [ ] **A sync's findings are not kept.** The check and the sync it drives
+      (WORKFLOWS.md §11.1–11.2) print and propose; nothing stores the report, so "which
+      requirements regressed since last time" still has no answer — `.jaira/sync.json`
+      records only the content hashes the two sides last agreed on, not what was found.
+      It is also one model's judgement, so it complements `lint` and never replaces it:
+      a `conforms` verdict is evidence, not proof.
+- [ ] **The sync baseline covers only the project's own `workflows/`.** A description is
+      checked against the workflows as they RESOLVE, base-root states included, but drift
+      is measured over this project's files alone — a shared state edited on the machine
+      would otherwise report as drift in every project on it, with no way for any of them
+      to settle it. A base-layer `workflow.md` is refused for the same reason.
+- [ ] **Accepting a sync is "the file was saved", not "the proposal was saved".** Saving a
+      proposed file advances the baseline even if it was reworded on the way, which is
+      what someone who edited the rewrite before saving means — but it also means saving
+      something else entirely into a pending target records an agreement that was never
+      reached. The pending set is in memory, so this is bounded by one session.
 - [ ] **Parked requests are process-local.** The interaction hub and the approval hub
       live in the process driving the run, so a gate the CLI parked on cannot be
       answered from the app. Answering means routing a *value* back, so unlike cancel

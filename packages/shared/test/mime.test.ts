@@ -12,8 +12,10 @@ import {
   CONFIG_JSON,
   DIRECTORY,
   isTextMime,
+  isWorkflowDescription,
   mimeFallbacks,
   mimeOfPath,
+  WORKFLOW_DESCRIPTION,
   WORKFLOW_JSON,
   WORKFLOW_YAML,
 } from "@jaira/shared";
@@ -30,6 +32,30 @@ describe("mimeOfPath", () => {
     expect(mimeOfPath("workflows/plan.yaml")).toBe(WORKFLOW_YAML);
     expect(mimeOfPath("workflows/plan.yml")).toBe(WORKFLOW_YAML);
     expect(mimeOfPath("workflows/plan.yaml")).not.toBe(mimeOfPath("workflows/plan.json"));
+  });
+
+  it("names the workflow description, whatever case it was typed in", () => {
+    // The sync controls hang off this type, so the answer decides whether a file that IS the
+    // description gets them. `WORKFLOW.md` is what most people type.
+    expect(mimeOfPath("workflows/workflow.md")).toBe(WORKFLOW_DESCRIPTION);
+    expect(mimeOfPath("workflows/WORKFLOW.md")).toBe(WORKFLOW_DESCRIPTION);
+    expect(isWorkflowDescription("workflows/Workflow.MD")).toBe(true);
+  });
+
+  it("leaves every other markdown file alone", () => {
+    // One description per project, directly under `workflows/`. A per-directory one would raise
+    // "which of these am I being checked against?" with no answer.
+    expect(mimeOfPath("workflows/feature/workflow.md")).toBe("text/markdown");
+    expect(mimeOfPath("workflow.md")).toBe("text/markdown");
+    expect(mimeOfPath("workflows/notes.md")).toBe("text/markdown");
+  });
+
+  it("sends the description back to markdown for anything it does not register itself", () => {
+    // It registers a viewer (the sync panel) and no editor, so the chain is what gives it one — and
+    // `application/markdown`, which the generic suffix rule would have produced, is a type nothing
+    // has ever registered.
+    expect(isTextMime(WORKFLOW_DESCRIPTION)).toBe(true);
+    expect(mimeFallbacks(WORKFLOW_DESCRIPTION)).toEqual([WORKFLOW_DESCRIPTION, "text/markdown", "text/plain"]);
   });
 
   it("only calls the root config.json config — a nested one is just JSON", () => {

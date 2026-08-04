@@ -34,6 +34,30 @@ export const WORKFLOW_YAML = "application/vnd.jaira.workflow+yaml";
 /** A layer's `config.json`. Its viewer is the *effective* configuration, which is not a file at all. */
 export const CONFIG_JSON = "application/vnd.jaira.config+json";
 
+/**
+ * The English description of what the workflows are supposed to do — `workflows/workflow.md`.
+ *
+ * Still markdown, and it falls back to markdown for both surfaces, so nothing is lost by naming it.
+ * What the name buys is the one thing a prompt or a README has no use for: this file and the state
+ * files beside it are two accounts of the same flow, and either can fall behind the other. The type
+ * is what puts the sync controls on it (WORKFLOWS.md §11.2) instead of on every `.md` in the tree.
+ */
+export const WORKFLOW_DESCRIPTION = "text/vnd.jaira.workflow-description+markdown";
+
+/**
+ * Where that description lives, relative to a layer root.
+ *
+ * One per layer, directly under `workflows/`, because the check it drives is about a whole set of
+ * workflows: a description per subdirectory would raise "which of these am I being judged against?"
+ * with no answer. The name is matched case-insensitively — `WORKFLOW.md` is what most people type.
+ */
+export const WORKFLOW_DESCRIPTION_PATH = "workflows/workflow.md";
+
+/** True for the one path in a layer root that is the workflow description. */
+export function isWorkflowDescription(relPath: string): boolean {
+  return relPath.toLowerCase() === WORKFLOW_DESCRIPTION_PATH;
+}
+
 /** Directories, by the freedesktop convention. Present so every node in the tree has a type. */
 export const DIRECTORY = "inode/directory";
 
@@ -111,6 +135,7 @@ export function mimeOfPath(relPath: string, isDirectory = false): string {
   const ext = extensionOf(name);
 
   if (relPath === "config.json") return CONFIG_JSON;
+  if (isWorkflowDescription(relPath)) return WORKFLOW_DESCRIPTION;
   if (relPath.startsWith("workflows/")) {
     if (ext === "json") return WORKFLOW_JSON;
     if (ext === "yaml" || ext === "yml") return WORKFLOW_YAML;
@@ -133,6 +158,16 @@ export function isTextMime(mime: string): boolean {
 }
 
 /**
+ * The registered type each structured-syntax suffix means.
+ *
+ * `application/<suffix>` is right for the syntaxes that are registered under it, and wrong for
+ * markdown, which the world spells `text/markdown`. Without this entry a `+markdown` vendor type
+ * would fall back to a type nothing has ever registered and land on the plain-text editor — losing
+ * the preview that is the whole reason markdown has a viewer.
+ */
+const SUFFIX_TYPES: Record<string, string> = { markdown: "text/markdown" };
+
+/**
  * The chain of types to try when resolving a component, most specific first.
  *
  * A vendor type falls back to the syntax it is written in — a `+json` document is still JSON, so a
@@ -142,7 +177,10 @@ export function isTextMime(mime: string): boolean {
 export function mimeFallbacks(mime: string): string[] {
   const chain = [mime];
   const plus = mime.lastIndexOf("+");
-  if (plus > 0) chain.push(`application/${mime.slice(plus + 1)}`);
+  if (plus > 0) {
+    const suffix = mime.slice(plus + 1);
+    chain.push(SUFFIX_TYPES[suffix] ?? `application/${suffix}`);
+  }
   if (isTextMime(mime) && !chain.includes("text/plain")) chain.push("text/plain");
   return chain;
 }

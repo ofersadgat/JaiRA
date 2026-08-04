@@ -174,6 +174,7 @@ function basePathsAsLayer(baseDir: string): JairaPaths {
     snapshotsDir: join(base.baseDir, "snapshots"),
     tasksDir: join(base.baseDir, "tasks"),
     dbFile: join(base.baseDir, "jaira.db"),
+    syncFile: join(base.baseDir, "sync.json"),
     worktreesDir: join(base.baseDir, "worktrees"),
     base,
     roots: [base.baseDir],

@@ -4,7 +4,7 @@
  * fastest debugging path (DESIGN §14 closing note); the Electron app layers on
  * the same @jaira/persistence primitives in phase 3.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { loadBundle, validateBundle } from "@declarative-ai/hw";
@@ -32,7 +32,15 @@ import {
   type Project,
   type WorkflowBrowser,
 } from "@jaira/persistence";
-import { defaultConfig, parseJsonText, type BoardCard, type BoardView, type JairaConfig } from "@jaira/shared";
+import {
+  defaultConfig,
+  jairaPaths,
+  parseJsonText,
+  WORKFLOW_DESCRIPTION_PATH,
+  type BoardCard,
+  type BoardView,
+  type JairaConfig,
+} from "@jaira/shared";
 import {
   buildPromptExecutor,
   conformanceReportOf,
@@ -828,8 +836,18 @@ function cmdWorkflowLint(argv: string[], io: CliIo): number {
   }
 }
 
-/** The description `workflow check` reads when the command names no file. */
-const DEFAULT_DESCRIPTION_FILE = "workflow.md";
+/**
+ * Where `workflow check` looks when the command names no file.
+ *
+ * Two places, in order, because two surfaces grew a use for the same document. The CLI has always
+ * read `workflow.md` at the top of the project, where a person writing one would put it; the app's
+ * Files view can only show what is under a layer root, so its description lives at
+ * `.jaira/workflows/workflow.md` beside the states it describes. Checking both is what stops the
+ * command and the app's sync button from silently judging different documents.
+ */
+function descriptionCandidates(projectDir: string): string[] {
+  return [join(projectDir, "workflow.md"), join(jairaPaths(projectDir).jairaDir, ...WORKFLOW_DESCRIPTION_PATH.split("/"))];
+}
 
 /**
  * Check the project's workflows against an English description of the flow the
@@ -858,14 +876,16 @@ async function cmdWorkflowCheck(argv: string[], io: CliIo): Promise<number> {
     },
   });
   const projectDir = projectDirOf(values, io);
-  const specPath =
-    positionals[0] !== undefined ? resolve(io.cwd, positionals[0]) : join(projectDir, DEFAULT_DESCRIPTION_FILE);
+  const candidates =
+    positionals[0] !== undefined ? [resolve(io.cwd, positionals[0])] : descriptionCandidates(projectDir);
+  const specPath = candidates.find((file) => existsSync(file)) ?? candidates[0]!;
   let spec: string;
   try {
     spec = readFileSync(specPath, "utf8");
   } catch {
     throw new Error(
-      `no workflow description at ${specPath} — write one, or name it: jaira workflow check <description.md>`,
+      `no workflow description at ${candidates.join(" or ")} — write one, or name it: ` +
+        "jaira workflow check <description.md>",
     );
   }
   if (spec.trim() === "") throw new Error(`${specPath} is empty; there is nothing to check the workflows against`);

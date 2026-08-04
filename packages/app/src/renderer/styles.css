@@ -1090,6 +1090,90 @@ code {
   max-width: 100%;
 }
 
+/* --- the workflow description's sync panel ---
+   A status line, two buttons and the report they produce. The bar is pinned and the report scrolls
+   under it: the sentence saying which side has drifted is what the panel is FOR, and a report long
+   enough to scroll would otherwise push it out of sight exactly when there is something to act on. */
+.sync-panel {
+  display: flex;
+  flex-direction: column;
+  /* Fills the half rather than growing past it, so `.sync-body` is what scrolls and the bar above
+     it stays put. `min-height: 0` is what lets a flex child be smaller than its content at all. */
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 10px 15px 0;
+}
+.sync-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 2px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.sync-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+.sync-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.sync-toggle {
+  margin-left: auto;
+}
+.sync-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-top: 8px;
+}
+.sync-section {
+  margin-bottom: 14px;
+}
+.sync-section h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+.sync-verdict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+/* One block per requirement, separated by a rule rather than a card: at a dozen findings, boxes
+   become a wall of borders and the text stops being the thing you see. */
+.sync-finding,
+.sync-edit,
+.sync-change {
+  padding: 5px 2px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.sync-finding-head,
+.sync-edit-head,
+.sync-change {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.sync-edit.blocked {
+  opacity: 0.75;
+}
+.sync-states {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+}
+
 /* --- a structured document, read rather than edited ---
    Indentation carries the nesting, and the guide line is what keeps a deep object legible when the
    keys are short enough that the indent alone is easy to lose. */

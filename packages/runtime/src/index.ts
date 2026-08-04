@@ -13,6 +13,7 @@ export * from "./interaction";
 export * from "./demoWorkflow";
 export * from "./componentsWorkflow";
 export * from "./conformanceWorkflow";
+export * from "./syncWorkflow";
 export * from "./paths";
 export * from "./exec";
 export * from "./git";

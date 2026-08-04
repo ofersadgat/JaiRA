@@ -117,6 +117,9 @@ const handlers: Record<IpcChannel, Handler> = {
   "workflow:read": ((request: Parameters<typeof service.readWorkflow>[0]) => service.readWorkflow(request)) as Handler,
   "workflow:write": ((request: Parameters<typeof service.writeWorkflow>[0]) => service.writeWorkflow(request)) as Handler,
   "workflow:move": ((request: Parameters<typeof service.moveWorkflow>[0]) => service.moveWorkflow(request)) as Handler,
+  "workflow:syncStatus": ((request: Parameters<typeof service.syncStatus>[0]) => service.syncStatus(request)) as Handler,
+  "workflow:sync": ((request: Parameters<typeof service.runSync>[0]) => service.runSync(request)) as Handler,
+  "workflow:syncCancel": (() => service.cancelSync()) as Handler,
   "workflow:delete": ((request: Parameters<typeof service.deleteWorkflow>[0]) =>
     service.deleteWorkflow(request)) as Handler,
   "schema:validate": ((request: Parameters<typeof service.validateSchema>[0]) =>

@@ -175,6 +175,18 @@ export default function App(): JSX.Element {
     onSchemaChoice: actions.setSchemaChoice,
     drafts: state.drafts,
     onDraft: actions.setDraft,
+    // The description's viewer, and the one surface that can write to files other than the open one
+    // — a proposed state file becomes a draft against its own row in the tree.
+    sync: {
+      status: state.sync.status,
+      result: state.sync.result,
+      running: state.sync.running,
+      error: state.sync.error,
+      refresh: actions.syncStatus,
+      run: actions.runSync,
+      cancel: actions.cancelSync,
+      openEdit: actions.openSyncEdit,
+    },
     editorTab: state.editorTab,
     onEditorTab: actions.setEditorTab,
     detectSchema: actions.detectSchema,

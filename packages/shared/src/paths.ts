@@ -21,6 +21,15 @@ export interface JairaPaths {
   skillsDir: string;
   dbFile: string;
   /**
+   * Where the last agreed state of `workflows/workflow.md` and the state files is recorded.
+   *
+   * A plain JSON file rather than a table in the database, and committed with the project on
+   * purpose: "the document and the workflows were last in step at this revision" is a fact about the
+   * checkout, not about this machine's run history, and a teammate pulling the branch should inherit
+   * it rather than be told, on their first sync, that everything has drifted.
+   */
+  syncFile: string;
+  /**
    * The shared base root behind this project (`$BASE`). Its workflows and
    * functions are the LAST entries on the search path, so a project file with the
    * same bare id shadows the base one — which is what "the project overrides the
@@ -116,6 +125,7 @@ export function jairaPaths(projectDir: string, baseDir?: string): JairaPaths {
     tasksDir: join(jairaDir, "tasks"),
     skillsDir: join(jairaDir, "skills"),
     dbFile: join(jairaDir, "jaira.db"),
+    syncFile: join(jairaDir, "sync.json"),
     worktreesDir: join(dirname(root), WORKTREES_DIR_NAME, basename(root)),
     base,
     // A project's own `.jaira/` always leads: a layer that could be pushed behind another would

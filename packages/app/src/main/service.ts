@@ -23,6 +23,7 @@ import {
 } from "node:fs";
 import { dirname, join, relative, resolve as resolvePath, sep } from "node:path";
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
+import { loadBundle } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
 import {
   baseFileTree,
@@ -32,9 +33,11 @@ import {
   boardView,
   browseBaseWorkflows,
   browseWorkflows,
+  commitSync,
   conversationView,
   ensureWorkspace,
   fileTree,
+  hashText,
   initBase,
   RunOwner,
   cancelTask,
@@ -44,10 +47,14 @@ import {
   openProject,
   pruneHistory,
   rootsBoard,
+  stateHashes,
   stateSlots,
   stateView,
   taskDetailView,
+  readSyncRecord,
+  syncDrift,
   taskSummaries,
+  workflowDigest,
   workflowRoots,
   type Project,
 } from "@jaira/persistence";
@@ -80,11 +87,16 @@ import {
   ScriptedFunctions,
   sessionServicesFor,
   statusOfResult,
+  syncOutcomeOf,
+  syncRootId,
+  syncWorkflowFiles,
+  verdictOfFindings,
   type ApprovalRequest,
   type ExecObserver,
   type FakeRule,
   type HubRequest,
   type PolicyAuditEntry,
+  type StateEdit,
 } from "@jaira/runtime";
 import {
   defaultSettings,
@@ -142,6 +154,11 @@ import type {
   WorkflowLayer,
   WorkflowMutationResult,
   WorkflowSource,
+  WorkflowSyncEdit,
+  WorkflowSyncRequest,
+  WorkflowSyncResult,
+  WorkflowSyncStatus,
+  SyncDirection,
   WriteConfigRequest,
   WriteFileRequest,
   WriteWorkflowRequest,
@@ -309,6 +326,17 @@ function messageFor(error: ErrorObject): { message: string } {
   return { message: error.message ?? "is not valid" };
 }
 
+/**
+ * How a file is addressed while a sync proposal is outstanding.
+ *
+ * The same `layer:path` spelling the renderer keys its drafts by (`renderer/drafts.ts`), and that is
+ * the point: the set of files a sync is waiting on and the set of files with unsaved edits are the
+ * same set, and two spellings of one key is how they would come to disagree about which file.
+ */
+function docKey(layer: WorkflowLayer, path: string): string {
+  return `${layer}:${path}`;
+}
+
 /** An approval as the renderer sees it (the hub's request, minus internals). */
 function pendingApprovalOf(request: ApprovalRequest): PendingApproval {
   return {
@@ -434,6 +462,18 @@ export class AppService {
    */
   private readonly baseDir: string;
 
+  /** The sync in flight, if any — one at a time, so the abort has an unambiguous target. */
+  private syncRun?: AbortController;
+
+  /**
+   * What the last sync proposed and which of its files are still unsaved.
+   *
+   * The baseline advances when a proposal is ACCEPTED, not when it is produced (see
+   * `persistence/workflowSync.ts`), so something has to remember what was on offer between the run
+   * and the save. Session-scoped, like the drafts it corresponds to.
+   */
+  private pendingSync?: { direction: SyncDirection; document: string; remaining: Set<string> };
+
   // --- lifecycle -------------------------------------------------------------
 
   async open(dir: string): Promise<{ dir: string; recovered: string[] }> {
@@ -502,6 +542,11 @@ export class AppService {
     this.watchers = [];
     this.hub.rejectAll("the project was closed");
     this.approvals.denyAll();
+    // A sync holds no run record and nothing to settle, but it does hold a model call — and the
+    // proposal it was about to produce belongs to a project that is going away.
+    this.syncRun?.abort();
+    this.syncRun = undefined;
+    this.pendingSync = undefined;
     const inFlight = [...this.live.values()];
     for (const run of inFlight) run.abort.abort();
     await Promise.allSettled(inFlight.map((run) => run.done));
@@ -1226,6 +1271,7 @@ export class AppService {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, request.text.endsWith("\n") ? request.text : `${request.text}\n`, "utf8");
     this.publish({ type: "store:invalidate", scope: "workflows" });
+    this.noteSyncWrite(request.layer, `workflows/${request.stateId}.json`);
     return { stateId: request.stateId, layer: request.layer, file, text: request.text, exists: true };
   }
 
@@ -1417,6 +1463,9 @@ export class AppService {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, request.text, "utf8");
     this.publish({ type: "store:invalidate", scope: "workflows" });
+    // Saving what a sync proposed is what accepts it — the description goes through here, and so
+    // does a `.jsonc` state file.
+    this.noteSyncWrite(request.layer, request.path);
     return {
       layer: request.layer,
       path: request.path,
@@ -1521,6 +1570,327 @@ export class AppService {
   revealFile(request: { file: string }): { file: string } {
     this.options.reveal?.(request.file);
     return request;
+  }
+
+  // --- keeping the description and the workflows in step ---------------------
+
+  /**
+   * Which of `workflows/workflow.md` and the state files has moved since they were last agreed.
+   *
+   * Answered from the recorded baseline (`persistence/workflowSync.ts`) and from `text`, which is
+   * the document as the EDITOR has it. Passing the unsaved draft in is the whole reason this takes a
+   * text at all: a status line computed from the saved file, next to a panel showing a rewritten
+   * one, would say "in sync" about a document nobody has on screen.
+   *
+   * Never throws. Every way this can fail to have an answer — no project, no workflows, a base-layer
+   * description — is a `blocked` string instead, because the panel is rendered by opening a file and
+   * an exception there is a blank surface with no explanation on it.
+   */
+  syncStatus(request: { layer: WorkflowLayer; path: string; text?: string }): WorkflowSyncStatus {
+    const base = {
+      layer: request.layer,
+      path: request.path,
+      exists: false,
+      synced: false,
+      documentChanged: false,
+      statesChanged: false,
+      changedStates: [],
+      suggested: null,
+      ...(this.pendingSync !== undefined ? { pending: this.pendingSync.direction } : {}),
+    } satisfies WorkflowSyncStatus;
+
+    if (this.project === undefined) return { ...base, blocked: "open a project to sync its workflows" };
+    // A shared-root description would be checked against whichever project happens to be open, and
+    // recorded in that project's baseline — an answer that changes meaning per window. The honest
+    // move is to say so rather than to produce it.
+    if (request.layer !== "project") {
+      return { ...base, blocked: "the shared root's description is not checked against one project's workflows" };
+    }
+
+    const project = this.p;
+    let file: string;
+    try {
+      file = this.layerFile(request.path, request.layer);
+    } catch (e) {
+      return { ...base, blocked: (e as Error).message };
+    }
+    const exists = existsSync(file);
+    const text = request.text ?? (exists ? readFileSync(file, "utf8") : "");
+    const states = stateHashes(project.paths.workflowsDir);
+    const record = readSyncRecord(project.paths.syncFile, request.path);
+    const drift = syncDrift(record, { documentHash: hashText(text), states });
+    const blocked =
+      text.trim() === ""
+        ? "this description is empty — write what the workflows should do, then sync"
+        : Object.keys(states).length === 0
+          ? "this project has no workflows to sync against"
+          : undefined;
+    return {
+      ...base,
+      exists,
+      synced: record !== undefined,
+      ...(record !== undefined ? { at: record.at, lastDirection: record.direction } : {}),
+      ...drift,
+      ...(blocked !== undefined ? { blocked } : {}),
+    };
+  }
+
+  /**
+   * Run a sync, and write nothing.
+   *
+   * The result is a PROPOSAL: rewritten markdown, or whole state files. The renderer holds it as
+   * unsaved drafts, so the person who wrote the document is the one who decides it now says
+   * something else. That is not a nicety — one direction rewrites prose somebody authored and the
+   * other rewrites code that will run, and a model doing either straight to disk is a model
+   * with commit rights.
+   *
+   * The run is the ordinary engine (`syncWorkflowFiles`), so it obeys the project's model defaults,
+   * costs are rolled up, `fake` scripts it with no provider, and it can be canceled.
+   */
+  async runSync(request: WorkflowSyncRequest): Promise<WorkflowSyncResult> {
+    const project = this.p;
+    if (request.layer !== "project") throw new Error("only this project's description can be synced");
+    if (this.syncRun !== undefined) throw new Error("a sync is already running");
+
+    const file = this.layerFile(request.path, request.layer);
+    const spec = request.text ?? (existsSync(file) ? readFileSync(file, "utf8") : "");
+    if (spec.trim() === "") throw new Error(`${request.path} is empty; there is nothing to sync`);
+
+    const digest = workflowDigest(project);
+    // The same refusal `jaira workflow check` makes, for the same reason: a sync over partial
+    // evidence would rewrite the document to describe workflows it could not read, or propose state
+    // files against a graph it only half loaded.
+    if (digest.unreadable.length > 0 || digest.loadErrors.length > 0) {
+      const detail = [
+        ...digest.unreadable.map((f) => `${f.file}: ${f.error}`),
+        ...digest.loadErrors.map((e) => `${e.rootId}: ${e.error}`),
+      ].join("; ");
+      throw new Error(`cannot sync while a workflow does not load: ${detail}`);
+    }
+    if (digest.roots.length === 0) throw new Error("this project has no workflows to sync against");
+
+    const bundle = loadBundle(syncWorkflowFiles(), syncRootId(request.direction));
+    const fakeRules = request.fake !== undefined ? parseFakeRules(request.fake) : undefined;
+    // Every state here is a prompt state, so the registry stays empty: a sync has no tools, runs no
+    // commands and delegates to no agent, and giving it a registry that could would be a capability
+    // nothing in it asks for.
+    const registry = newRegistry();
+    const prompt = buildPromptExecutor({
+      ...(fakeRules !== undefined ? { fakeRules } : {}),
+      defaults: modelDefaults(project.config, bundle, { fake: fakeRules !== undefined }),
+    });
+    const { modes: _modes, ...session } = sessionServicesFor(bundle, promptSummarizer(prompt));
+
+    const abort = new AbortController();
+    this.syncRun = abort;
+    let result;
+    try {
+      result = await executeWorkflow({
+        bundle,
+        inputs: { spec, implementation: digest.markdown },
+        registry,
+        prompt,
+        session,
+        abortSignal: abort.signal,
+      });
+    } finally {
+      this.syncRun = undefined;
+    }
+    if (statusOfResult(result) !== "completed") {
+      const failure = "error" in result ? result.error : undefined;
+      throw new Error(failure?.reason ?? "the sync did not finish");
+    }
+
+    const outcome = syncOutcomeOf(result.value, request.direction);
+    // A clipped state is evidence the run did not see in full, and the caller must be told rather
+    // than shown a proposal that quietly ignored half a workflow.
+    const notes = [
+      ...outcome.notes,
+      ...digest.truncated.map((id) => `state '${id}' is too long for the digest and was clipped before the sync saw it`),
+    ];
+    // The findings are the evidence; a verdict that contradicts them is not believed here either.
+    const verdict = verdictOfFindings(outcome.findings);
+
+    const common = {
+      direction: request.direction,
+      workflows: digest.roots,
+      requirements: outcome.requirements,
+      findings: outcome.findings,
+      extras: outcome.extras,
+      verdict,
+      ...(result.metrics.costUsd !== undefined ? { costUsd: result.metrics.costUsd } : {}),
+    };
+
+    if (request.direction === "document") {
+      const text = outcome.document?.text ?? "";
+      const changed = hashText(text) !== hashText(spec);
+      // Nothing to accept means the two already agree — which is a sync that succeeded, so the
+      // baseline moves. The alternative would leave a project that IS in step reporting drift
+      // forever, with no button that could ever clear it.
+      if (changed) this.beginPendingSync("document", request.path, [docKey(request.layer, request.path)]);
+      else this.commitSyncRecord("document", request.path);
+      return {
+        ...common,
+        document: { text, changes: outcome.document?.changes ?? [] },
+        notes: changed ? notes : ["the description already describes what the workflows do", ...notes],
+      };
+    }
+
+    const edits = this.placeEdits(outcome.edits ?? []);
+    const applicable = edits.filter((e) => e.applicable);
+    const identical = (outcome.edits ?? []).length - edits.length;
+    if (applicable.length > 0) {
+      this.beginPendingSync(
+        "states",
+        request.path,
+        applicable.map((e) => docKey(e.layer, e.path)),
+      );
+    } else if (edits.length === 0) {
+      this.commitSyncRecord("states", request.path);
+    }
+    return {
+      ...common,
+      edits,
+      notes: [
+        ...notes,
+        ...(identical > 0 ? [`${identical} proposed file(s) were already identical to what is on disk`] : []),
+        ...(edits.length === 0 ? ["the workflows already run what the description asks for"] : []),
+      ],
+    };
+  }
+
+  /** Abort a sync in flight. False when there was nothing running. */
+  cancelSync(): { canceled: boolean } {
+    if (this.syncRun === undefined) return { canceled: false };
+    this.syncRun.abort();
+    return { canceled: true };
+  }
+
+  /**
+   * Where each proposed state file goes, and whether it can be handed over as a draft.
+   *
+   * Three things are decided here rather than by the model, because all three are questions about
+   * this project rather than about the workflow:
+   *
+   *  - **Containment.** A state id arrives from a language model by way of the renderer, and
+   *    `../../.ssh/config` is a perfectly good relative path. {@link workflowFile} is the same check
+   *    every other write rests on.
+   *  - **The existing file.** A state authored as `.jsonc` keeps its suffix; one authored as YAML is
+   *    reported and NOT offered, because handing JSON to a `.yaml` file would silently produce a
+   *    state file in two syntaxes at once.
+   *  - **Whether it changes anything.** A proposal identical to the file is dropped, so the tree
+   *    marks only the files a person actually has to look at.
+   */
+  private placeEdits(edits: readonly StateEdit[]): WorkflowSyncEdit[] {
+    const out: WorkflowSyncEdit[] = [];
+    for (const edit of edits) {
+      // A blocked edit still names the file it would have touched, so the panel can say WHICH file
+      // it declined to write rather than only that something was refused.
+      const blocked = (path: string, reason: string): WorkflowSyncEdit => ({
+        stateId: edit.stateId,
+        layer: "project",
+        path,
+        action: edit.action,
+        text: edit.text,
+        reason: edit.reason,
+        requirements: edit.requirements,
+        applicable: false,
+        blocked: reason,
+      });
+      try {
+        this.workflowFile(edit.stateId, "project");
+      } catch (e) {
+        out.push(blocked(`workflows/${edit.stateId}.json`, (e as Error).message));
+        continue;
+      }
+      const existing = this.existingStateFile(edit.stateId);
+      if (existing !== undefined && /\.ya?ml$/i.test(existing)) {
+        out.push(blocked(existing, "this state is authored as YAML, and the proposal is JSON"));
+        continue;
+      }
+      const path = existing ?? `workflows/${edit.stateId}.json`;
+      const file = this.layerFile(path, "project");
+      const exists = existsSync(file);
+      if (exists && hashText(readFileSync(file, "utf8")) === hashText(edit.text)) continue;
+      out.push({
+        stateId: edit.stateId,
+        layer: "project",
+        path,
+        // What the model called it is a claim about the project, and the project is right here.
+        action: exists ? "update" : "create",
+        text: edit.text,
+        reason: edit.reason,
+        requirements: edit.requirements,
+        applicable: true,
+      });
+    }
+    return out;
+  }
+
+  /** The layer-relative path of a state's file, when the project already has one. */
+  private existingStateFile(stateId: string): string | undefined {
+    for (const suffix of [".json", ".jsonc", ".yaml", ".yml"]) {
+      const path = `workflows/${stateId}${suffix}`;
+      try {
+        if (existsSync(this.layerFile(path, "project"))) return path;
+      } catch {
+        return undefined; // outside the root — the caller has already refused it
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Remember what a sync proposed, so saving it can be recognised as accepting it.
+   *
+   * In memory, and deliberately: this is about a proposal someone is looking at right now, and one
+   * that outlived the window would credit a save made a week later to a sync nobody remembers
+   * running. Losing it costs nothing but a stale baseline, which the next sync corrects.
+   */
+  private beginPendingSync(direction: SyncDirection, document: string, targets: string[]): void {
+    this.pendingSync = { direction, document, remaining: new Set(targets) };
+  }
+
+  /**
+   * A file was written; if it was the last thing a pending sync proposed, the two are now in step.
+   *
+   * Saving a target counts as accepting it even when the text was edited on the way — someone who
+   * reworded the rewritten document still took the sync, and refusing to record that would leave
+   * them with a baseline that can never be reached except by accepting a proposal verbatim.
+   */
+  private noteSyncWrite(layer: WorkflowLayer, path: string): void {
+    const pending = this.pendingSync;
+    if (pending === undefined) return;
+    if (!pending.remaining.delete(docKey(layer, path))) return;
+    if (pending.remaining.size > 0) return;
+    this.pendingSync = undefined;
+    this.commitSyncRecord(pending.direction, pending.document);
+  }
+
+  /**
+   * Record that the description and the state files agree, as of what is on disk right now.
+   *
+   * Both sides are re-read here rather than reused from the run: the point of the baseline is that
+   * the pair agreed at one instant, and half of it taken before the save would describe a state of
+   * the project that never existed.
+   */
+  private commitSyncRecord(direction: SyncDirection, document: string): void {
+    const project = this.project;
+    if (project === undefined) return;
+    let text = "";
+    try {
+      const file = this.layerFile(document, "project");
+      if (existsSync(file)) text = readFileSync(file, "utf8");
+    } catch {
+      return;
+    }
+    commitSync(project.paths.syncFile, {
+      document,
+      documentHash: hashText(text),
+      states: stateHashes(project.paths.workflowsDir),
+      direction,
+      at: Date.now(),
+    });
   }
 
   // --- internals -------------------------------------------------------------
