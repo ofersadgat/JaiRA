@@ -9,6 +9,7 @@
  * without migration of what exists.
  */
 import Database from "better-sqlite3";
+import { abiAdvice, sqliteBinding } from "./nativeBinding";
 
 export type JairaDb = Database.Database;
 
@@ -145,10 +146,36 @@ CREATE TABLE IF NOT EXISTS call_memo (
 CREATE UNIQUE INDEX IF NOT EXISTS artifacts_logical ON artifacts(task_id, logical_path);
 `;
 
+/**
+ * Open the store.
+ *
+ * The addon is named explicitly when a build for this runtime's ABI is cached — see
+ * `nativeBinding.ts`. That is what lets the same `node_modules` serve the tests (Node) and the app
+ * (Electron) without either of them swapping a file the other is using. With nothing cached, the
+ * package finds its own, which is the ordinary case for an installed copy.
+ */
 export function openDb(file: string): JairaDb {
-  const db = new Database(file);
+  const binding = sqliteBinding();
+  const db = openWithAdvice(file, binding);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
   return db;
+}
+
+/**
+ * `new Database`, with the one failure worth translating.
+ *
+ * An ABI mismatch is the single error here that is about the developer's machine rather than about
+ * the database, and Node reports it as two version numbers with no remedy attached. Rethrown with
+ * the command that fixes it — and rethrown, not swallowed: there is no opening this file without it.
+ */
+function openWithAdvice(file: string, binding: string | undefined): JairaDb {
+  try {
+    return binding !== undefined ? new Database(file, { nativeBinding: binding }) : new Database(file);
+  } catch (e) {
+    const advice = abiAdvice(e);
+    if (advice === undefined) throw e;
+    throw new Error(advice, { cause: e });
+  }
 }

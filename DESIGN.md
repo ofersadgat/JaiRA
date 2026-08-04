@@ -286,12 +286,17 @@ a real run's window, not only by typecheck.
    store refetches only the affected view. Plain React state rather than Zustand,
    and no dnd-kit: cards move because the *engine* advances, so dragging one would
    mean forcing a transition — out of scope here (Δ to §2.1 tooling).
-4. **Native-module ABI is a two-runtime problem** (a real trap, now scripted).
+4. **Native-module ABI is a two-runtime problem** (a real trap, now removed).
    `better-sqlite3` is a V8-ABI addon, so a single build cannot serve Node 22
-   (`NODE_MODULE_VERSION` 127) and Electron 33 (130); `scripts/nativeAbi.mjs`
-   swaps the prebuilt binary and `npm run app` calls it, with `npm run abi:node`
-   to go back for tests and the CLI. (Prebuilds are downloaded, so no compiler is
-   needed.)
+   (`NODE_MODULE_VERSION` 127) and Electron 33 (130). It was swapped per runtime,
+   which meant remembering to swap before every switch between the tests and the
+   app — and finding out you had not from a stack trace. Both builds are now kept
+   at once (`scripts/nativeAbi.mjs` caches them under the package's own
+   `build/abi/<abi>/`, prebuilt, so no compiler is needed) and `openDb` names the
+   one matching `process.versions.modules` through better-sqlite3's
+   `nativeBinding` option. Nothing is swapped, so the two runtimes stop contending
+   for one file and can run concurrently. A miss falls back to the package's own
+   binary, which is what an installed copy of the CLI has and all it needs.
 5. **`JAIRA_CAPTURE` screenshots the window and exits** — a debug affordance that
    makes the UI verifiable from a script and, later, in CI.
 6. **CI now also builds the app** (esbuild main/preload + Vite renderer) so a

@@ -105,7 +105,7 @@ environment.
 ## The app
 
 ```bash
-npm run app        # build main + renderer, switch the native ABI, launch Electron
+npm run app        # build main + renderer, cache the Electron addon if needed, launch Electron
 ```
 
 The window opens on the project named by `JAIRA_PROJECT`, the first CLI argument,
@@ -209,9 +209,11 @@ against both binaries are `JAIRA_LIVE_AGENT=1 npx vitest run packages/runtime/te
 
 > **Native-module ABI.** `better-sqlite3` is a V8-ABI addon, so one build cannot
 > serve both Node and Electron (Node 22 wants `NODE_MODULE_VERSION` 127, Electron
-> 33 wants 130). `npm run app` switches it automatically; switch back with
-> `npm run abi:node` before running the tests or the CLI. Getting it wrong throws
-> a loud "compiled against a different Node.js version" on the first DB open.
+> 33 wants 130). Both are cached side by side under the package's own
+> `build/abi/<abi>/`, and each runtime loads its own — so nothing has to be
+> switched, and the app and the tests can run at the same time. `npm install`
+> fetches both (`npm run abi` to redo it by hand). If one is missing, the first DB
+> open says so and names that command.
 
 ## License
 
