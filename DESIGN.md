@@ -673,11 +673,11 @@ Four changes that turned out to be one change, plus the gap the last of them exp
    "conversation 'planning' is not available". A conversation is now read by REF:
 
    ```jsonc
-   "when": "at(messages(.operation.outputs.session), -1).content === 'continue'"
+   "when": "at(messages(.operation.output.session), -1).content === 'continue'"
    ```
 
    Reading a SIBLING's conversation flows as data — the parent wires
-   `.children.plan.operation.outputs.session` into a child's input — because there
+   `.children.plan.operation.output.session` into a child's input — because there
    is no name to look one up by. That is the point rather than a cost: an operation
    that declared no session never had a name, and was unreadable.
 
@@ -786,6 +786,53 @@ across branches are ordinary Git merges.
 
 State files use plain `.json` extension; the state ID is derived from the path
 (§15, Q2/Q3).
+
+### 3.1 The shared base root
+
+Behind every project on a machine sits one **base root**, `~/.jaira` by default
+(`JAIRA_HOME` relocates it, and the app can save a different location in its
+settings):
+
+```text
+~/.jaira/                     the shared layer; the same shape as a project's
+  config.json                 defaults every project inherits
+  settings.json               user preferences (theme) — NOT project config
+  workflows/                  state files every project can reach
+  functions/                  operation documents every project can reach
+  skills/                     shared skill library
+  .env / .env.local           machine-local credentials (see §8.1)
+```
+
+It holds **authored** things only. There is no database and no snapshot cache
+here: runs belong to a project, and putting one machine's history behind every
+project would be a shared mutable pile with no owner.
+
+Everything derives from one list — the **layer roots**,
+`[<project>/.jaira, ~/.jaira]` (`jairaPaths().roots`):
+
+- **`$` searches the layers.** `$/lib/review` resolves to `<root>/lib/review`
+  for each root in turn, first match wins. This is what makes the *fragments* a
+  state is assembled from — prompts, types, guards, operation documents — layer
+  exactly as whole states do; without it an override model would cover state
+  files and nothing inside them. A *named* root still pins one place:
+  `$JAIRA/lib/review` is this project's, `$BASE/lib/review` is the shared one.
+- **Bare state ids search the generated path.** `<root>/workflows` then
+  `<root>/functions`, per root, in root order — so `config.workflows.path` is
+  absent by default and adding a layer is one entry in `roots` and nothing else.
+  A match at *any* entry keeps its bare spelling, so the project's
+  `feature/plan` and the base's are one id, the project's shadowing the base's.
+  That is what makes a project file an **override** rather than a
+  differently-named second state. See EXPRESSIONS.md §4.1 for the identity rule
+  this replaced and why.
+Configuration layers separately, by **document merge**: `~/.jaira/config.json` is
+merged *under* `.jaira/config.json` before parsing, so validation sees exactly
+what a run will use. Objects merge key by key (a project setting only
+`models.default` keeps the base's `agents` and `policy`); arrays replace
+(concatenating `workflows.path` would leave a project no way to remove an entry);
+and `agents.genericCli` merges by name, since it is really a keyed map.
+
+An absent base root is an empty layer, so a machine that has never had one
+behaves exactly as it did before this existed.
 
 ## 4. Persistence (Hybrid Model)
 
@@ -1430,6 +1477,47 @@ stdout) into this one event vocabulary.
    native policy hooks are worth wiring (`policyEnforcement: "config"` or
    `"none"` until then).
 
+#### Turning an executor off, and checking it works
+
+Every executor — the three built-ins and each configured `generic-cli` — carries
+two settings in common (`config.agents.*`):
+
+- **`enabled`.** Defaults to true, so a project that configures nothing gets
+  everything. `false` leaves the runtime **out of the registry entirely**, which
+  is deliberately louder than registering a stub that refuses when called: a
+  workflow that cannot run here fails at start as an unregistered function
+  rather than halfway through a run.
+- **`credential`.** *Names* a secret; it never holds one. `config.json` is
+  committed source, so a key written there is a key in everyone's checkout and
+  in the history forever. The parser refuses a value containing whitespace with
+  that reason spelled out, because it is the single easiest way to leak one.
+
+The value is resolved when it is needed, first hit wins:
+
+```text
+  1. the OS keychain          Electron safeStorage, encrypted at rest — app only
+  2. <project>/.env.local     this checkout, not committed
+  3. <project>/.env           this checkout, possibly committed
+  4. <base>/.env.local        the machine, for every project
+  5. <base>/.env              the machine, for every project
+  6. the process environment  CI, a shell that exported it, a wrapper script
+```
+
+Narrowest to widest, which is the only order that lets a project-specific key
+beat a machine-wide default. The keychain leads because it is the one link that
+is not plaintext on disk; the environment trails because it is the one JaiRA
+cannot see the provenance of. **The CLI has no keychain** — `safeStorage` is
+Electron's — and that is why links 2–6 exist: the app must never be the only
+place a credential can live, or a workflow would run in the app and fail on the
+command line for reasons nothing reports.
+
+`probeExecutor` health-checks one without running it: `--version` (the one
+invocation these binaries all support, that exits immediately, and that cannot
+be talked into doing work) plus a credential lookup. It reports `not-checked` as
+a distinct outcome from `ok`, because calling an unverified executor healthy is
+the failure the check exists to prevent. Only the credential's **origin** ever
+leaves the main process; the value does not cross IPC.
+
 ### 8.2 Capability Gating
 
 A state may declare requirements (e.g. its policy includes approval-required
@@ -1533,6 +1621,101 @@ run-record requirements of spec §10.2.
   Shipped in §1j: roots are derived (a state nothing declares as a child), every
   failure is a diagnostic rather than an exception, and drifted tasks (pinned to an
   older snapshot than disk) are surfaced because execution reads the pin (§5.3).
+  Lint results are joined onto the **file tree** as well, not only the inspector:
+  a state file is coloured by its worst diagnostic and a directory carries the
+  totals below it, so a fault is visible with the branch collapsed. A state no
+  root reaches is marked `unchecked` rather than left looking clean — nothing
+  validated it, and zero errors there means nobody looked.
+  **The shared root is linted with no project open.** It is browsable and
+  authorable on its own, so it has to be validated on its own; the browse runs
+  over synthesized paths in which the base root is the single layer, and a
+  workflow written there is checked before any project has ever referenced it.
+  Skipping this left the one mode people author shared workflows in as the one
+  mode that never reported anything wrong.
+- **Operation input checks**: the engine asks whether a state passes its
+  operation what the operation's registered implementation requires — the same
+  question `children.<key>.inputs` has always been asked ("required child input
+  is not wired"). It ran only over embedded calls inside bindings, so the
+  operation a state exists to run was the one call nobody checked. JaiRA's
+  built-in components declare no signature — their contract is a shape inside
+  `config`, not a parameter list — so the same question is asked from
+  `parseComponentConfig`, and a `choose_option` with no options is an ERROR on
+  the file rather than a gate nobody can answer.
+- **Schema detection**: opening a `.json` file selects the schema it already
+  satisfies. Validating is not sufficient on its own — `prompt-operation` must
+  admit unknown fields, because hw passes anything it does not own into the call
+  config — so a match also requires every top-level key to be one the schema
+  declares. Ties go to the schema whose `expected` keys the document carries, so
+  a prompt state resolves to `state-prompt` rather than `state`. It is a
+  suggestion: an explicit choice, including "none", wins from then on.
+- **Resizable panes**: every side pane is a grid track driven by a variable that
+  a divider writes, with keyboard nudges and double-click-to-reset. Widths are
+  per view and session-scoped — a pane width is a preference about this window,
+  and persisting it would mean deciding which configuration layer owned it. The
+  same control divides the Files view's two ROWS, the viewer over the editor: a
+  board with nine columns and a form with three fields want opposite splits, so
+  the 46/54 the stylesheet used to impose was right for neither. Only that one
+  is a height, and it may still shrink — the editor below claims a floor first,
+  so a split dragged while maximised survives the window being restored.
+- **One chrome for every editor**: a bar of standing facts on top, the document
+  in the middle, Save and Revert underneath. Each editing surface scrolls
+  INSIDE itself so the actions never move — the authoring form used to put a
+  lone Save at the bottom of a page-long document, where it was reachable only
+  by scrolling past everything you had just filled in, and it offered no Revert
+  at all. The bar is also sticky, which covers the surfaces that sit inside
+  something else that scrolls, such as the settings body.
+- **Unsaved edits belong to the file, not to the editor**: every editing surface
+  used to keep its draft in component state, so clicking another file in the tree
+  — or glancing at the board, which unmounts the whole view — discarded it
+  without a word. Drafts now live in the store, keyed by `layer:path`, and the
+  surfaces derive their text from that rather than holding any. A draft is a
+  DIFFERENCE from disk: an entry equal to the file is dropped, which is what
+  makes `dirty` one fact rather than a flag to march in step, and what lets the
+  tree mark the rows with something pending — an invisible unsaved edit is one
+  that leaves with the window. Renames and deletes take their subtree's drafts
+  with them, so a path recreated later does not open showing someone's abandoned
+  edit to the file it replaced. Session-scoped, like pane widths and the schema
+  choice: writing them to disk would mean deciding which configuration layer owned
+  a change nobody has committed to yet. The state form's tab is remembered the
+  same way, per file, so returning to a state you were hand-editing does not put
+  you back on the form.
+- **Authoring form**: covers WORKFLOWS.md §2–§7 over the parsed document, with a
+  JSON tab beside it. Two rules shape what it will and will not touch.
+  *A plain reference is editable.* `prompt`/`system` (string position ⇒
+  `{"$ref": …}`), the `operation` block and a slot's `schema` (object position ⇒
+  bare string) each carry a link control; linking and unlinking are
+  non-destructive, because the literal and the reference are held side by side.
+  Anything richer — a reference with sibling overrides, a computed binding — is
+  still shown read-only and left exactly as written.
+  *A child's required inputs are shown as rows.* Mounting a child seeds one blank
+  binding row per non-optional, non-defaulted input it declares. The row is a
+  PLACEHOLDER and goes into the form model only — never into the document — so
+  the file stays byte-identical until a binding is typed. That is what keeps
+  validation running off the saved file: seeding through the document would mark
+  a state modified the moment it was opened and hand the JSON tab a draft nobody
+  authored. The state still fails to lint with "required child input is not
+  wired"; what changes is that the sentence is met beside a named empty box in
+  the form rather than in the lint panel after a save.
+  *A binding is picked, not recalled.* Every binding box completes against the
+  paths that exist in this state's scope: `.inputs.<slot>`, `.outputs.<slot>` for
+  the outputs the operation PRODUCES, and `.children.<key>.outputs.<slot>` /
+  `.children.<key>.outcome` — the latter keyed by the MOUNT key rather than the
+  child's state id. A slot name misremembered by one character is not a syntax
+  error, it is a binding that resolves to nothing, so the list is the cheapest
+  place to catch it.
+  *Bindings and guards complete from DIFFERENT lists.* A binding receives what
+  the call RETURNED; a guard branches on how it WENT. So `.operation.output.*`
+  is offered on bindings, while `.operation.outcome`/`cost`/`model`/`usage` and
+  the guard-only `.run.*` and `.limits.*` are offered on transitions and nowhere
+  else.
+  *The operation's result is bindable* (upstream change, `hw`): `.operation.*`
+  became a binding namespace, and `operation.output` became the call's own
+  returned value — what the call returned, under the names it returned them, with
+  `session` sitting among them as one of a prompt op's outputs rather than an
+  envelope beside them. That is what lets an output rename or transform the
+  result instead of only receiving it. The implicit fill still works: an output
+  with no binding is PRODUCED (§3.3), and the Outputs table says so where the box
+  is rather than leaving an empty field that reads as an omission.
 - **Pruning panel** (§12, SPEC §13): stored counts, then preview → delete. Never
   one click, because pruned history is not recoverable.
 

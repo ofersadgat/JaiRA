@@ -9,9 +9,12 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p packages/shared && tsc --noEmit -p packages/persistence && tsc --noEmit -p packages/runtime && tsc --noEmit -p packages/cli && tsc --noEmit -p packages/app",
+    "pretest": "npm run cli:build",
     "test": "vitest run",
+    "pretest:watch": "npm run cli:build",
     "test:watch": "vitest",
     "jaira": "tsx packages/cli/src/main.ts",
+    "cli:build": "npm --workspace @jaira/cli run build",
     "app": "npm --workspace @jaira/app run start",
     "app:build": "npm --workspace @jaira/app run build",
     "abi:node": "node scripts/nativeAbi.mjs node",

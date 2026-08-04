@@ -47,6 +47,51 @@ state declares as a child as a root.
 The tree convention (a child's id should be a descendant path of its parent's) is
 a **warning**, not a rule, so a shared library state can be mounted anywhere.
 
+### Two places a state file can live
+
+`.jaira/workflows/` is the project's own. Behind it sits a **shared base root**,
+`~/.jaira/workflows/`, that every project on the machine can reach (DESIGN §3.1).
+A bare state id is looked up in the project first and the shared root second —
+shell `PATH` semantics, first match wins:
+
+```text
+~/.jaira/workflows/review.json          → state id  review     (shared)
+~/.jaira/workflows/review/step.json     → state id  review/step
+.jaira/workflows/review/step.json       → state id  review/step  ← wins here
+```
+
+Two consequences, and they are the point of the whole arrangement:
+
+- **A project can run a workflow it does not contain.** Put `review` in the
+  shared root once and every project can `--workflow review`.
+- **A project can replace one state of it.** Write `review/step.json` in the
+  project and it shadows the shared copy *under the same id* — so `review` still
+  comes from the shared root, and only `step` is yours. That is an override, not
+  a fork: later edits to the shared `review` still reach you.
+
+An id is the same string whichever layer supplies it, so nothing about a state
+file changes when you move it between the two.
+
+**`$` layers too, and that is what you'll type most.** A `$/…` reference is
+resolved against the same two roots, project first:
+
+```jsonc
+"prompt":    { "$ref": "$/prompts/critique.md" },   // yours if you have one,
+"operation": "$/lib/review.operation",              // the shared one otherwise
+"when":      { "$ref": "$/lib/guards.clean" }
+```
+
+So a shared *fragment* — a prompt, a type, a guard, an operation document — works
+exactly like a shared state, and you override one the same way: drop a file at
+the same path under your project's `.jaira/`.
+
+When you mean one layer specifically, name it: `$JAIRA/lib/review` is always this
+project's, `$BASE/lib/review` is always the shared one.
+
+The app's **Workflows** pane lists both layers, marks a shared file the project
+overrides, and has an "Override here" button that creates the project copy for
+you.
+
 ### A state does exactly one thing
 
 A state has **at most one `operation`**, and children. That is the whole model:
@@ -284,18 +329,26 @@ also the explicit opt-out from the reachability rule (§11).
 ### 3.3 Outputs: produced vs. derived
 
 An output with a **`binding`** is *derived* — computed when the state terminates,
-from a child, an expression, or a literal. An output **without** a binding is
-*produced* — the operation must return it. So `binding` is required for a derived
-output and must be absent for a produced one; there is no third case.
+from the operation, a child, an expression, or a literal. An output **without** a
+binding is *produced*: the operation must return it, and it is filled directly.
 
 ```jsonc
 "outputs": {
   "weaknesses":  { "schema": { "type": "array", "items": { "type": "string" } } },   // produced
+  "summary":     { "binding": ".operation.output.report" },                          // from the call
+  "features":    { "binding": ".operation.output" },                                 // the whole return
   "outcome":     { "binding": { "expr": ".children.critique.outputs.outcome" } },     // derived
   "plan_doc":    { "binding": ".children.context.outputs.plan_doc" },                // derived
   "critique":    { "binding": ".children.critique.outputs" }                         // whole child
 }
 ```
+
+**Binding from the operation is the more explicit form, and it can do things
+producing cannot.** A produced output receives the call's result under a name it
+must share with it; a bound one names its source, so it can RENAME (`summary`
+from `report`), reshape it through an expression, or take a return that has no
+names at all — a list, a blob — with `.operation.output`. Producing stays as the
+shorthand for the common case where the two names are the same.
 
 This is what SPEC's old `"from": "children.x.outputs.y"` became: an output's
 `from` is now that slot's `binding`.
@@ -360,7 +413,8 @@ Every field is optional **in the file**; what the file leaves out, the
 | `system` | optional | System prompt. |
 | `model`, `temperature`, `maxOutputTokens`, … | optional | The LLM call surface, **inline** on the op — not nested under a `config` bag. |
 | `input` | optional | Parameter map (§4.3). Absent ⇒ the state's declared `inputs` are in scope. |
-| `output` | optional | Output slot (§4.4). Absent ⇒ built from the state's produced outputs. |
+| `outputs` | optional | What the call RETURNS, by name (§4.4) — and the structured-output contract the model is held to. |
+| `output` | optional | The single lowered slot (§4.4). Say it directly when the whole return is one value — a list, a blob. Absent ⇒ built from `outputs`, or from the state's produced outputs. |
 | `session` | optional | Logical session this call joins. Absent ⇒ `"default"`. |
 | `tools` | optional | Tool names the call may use mid-loop (§5.1). |
 | `conversation` | optional | How much transcript to carry (§5.1). |
@@ -374,7 +428,8 @@ Every field is optional **in the file**; what the file leaves out, the
 | `function` | **required** | Registry name (§4.2 lists what JaiRA registers). |
 | `args` | optional | The function's authored arguments; rides as the op's bound `config` input. The one **untyped** position in the format. |
 | `input` | optional | Parameter map (§4.3). Absent ⇒ the state's declared `inputs` are in scope. |
-| `output` | optional | Output slot (§4.4). Absent ⇒ built from the state's produced outputs. A delegated agent needs `kind: "blob"`. |
+| `outputs` | optional | What the call RETURNS, by name (§4.4). |
+| `output` | optional | The single lowered slot (§4.4). A delegated agent needs `kind: "blob"`. Absent ⇒ built from `outputs`, or from the state's produced outputs. |
 | `session` | optional | Logical session this call joins. Absent ⇒ `"default"`. |
 | `tools` | optional | Tool names the call may use mid-loop (§5.1). |
 | `conversation` | optional | How much transcript to carry (§5.1). |
@@ -506,10 +561,41 @@ Write `"input": { "prompt": ".inputs.instruction" }` and the loader sees a
 parameter with **no binding**: the slot resolves to empty, the agent runs with no
 instruction, and the state reports **success**. Nothing warns you.
 
-### 4.4 `operation.output` and the blob rule
+### 4.4 `operation.outputs`, `operation.output`, and the blob rule
 
-Omit `output` and the loader builds one object slot from the state's *produced*
-outputs — so the operation must return `{ "<name>": …, … }`.
+**`operation.outputs` says what the call returns**, by name — a map, exactly as
+`operation.input` is one. For a prompt op it is also the **structured-output
+contract** the model is held to:
+
+```jsonc
+"outputs": {
+  "summary": { "schema": { "type": "string" }, "binding": ".operation.output.report" }
+},
+"operation": {
+  "kind": "prompt",
+  "prompt": "…",
+  "outputs": { "report": { "schema": { "type": "string" } } }
+}
+```
+
+The model is asked for `report`; the state publishes `summary`. Those are two
+names with a binding between them, which is the point: the call owns its own
+signature instead of borrowing it from whatever the state around it declares.
+
+**`operation.output` is the single lowered slot** the executor seam actually
+takes — one object for a prompt call, one value for an agent. `outputs` is
+lowered into it, so you rarely write it. Write it directly to say the thing the
+map cannot: that the whole return is ONE value with no field names.
+
+```jsonc
+"output": { "schema": { "items": { "type": "string" } } }   // returns a list
+```
+
+`.operation.output` then IS that list, and a slot binds it whole.
+
+Declare neither and the loader falls back to the older rule: one object slot
+built from the state's *produced* outputs, so the operation must return
+`{ "<name>": …, … }`.
 
 A **delegated agent returns one string**, not a record. Its output slot must
 therefore be `blob`-kind, which is the engine's "this value *is* the whole
@@ -883,8 +969,11 @@ instance's data apart from a name resolved along the path:
 | `.children.<key>.outputs.*` | both | a child's outputs |
 | `.children.<key>.outcome` | both | `success` \| `error` \| `canceled` \| `timeout` |
 | `.artifacts.*` | both | artifacts registered this run |
-| `.operation.outputs.session` | both | the conversation position this state's call ended at |
-| `.children.<key>.operation.outputs.session` | both | a child's |
+| `.operation.output` | both | **what this state's call returned** — the value itself: an object exposes its properties, a list *is* the list |
+| `.operation.output.<name>` | both | one named value off an object return |
+| `.operation.output.session` | both | the position a prompt call ended at — one of its outputs, not an envelope beside them |
+| `.operation.outcome` \| `.cost` \| `.model` \| `.usage` | **guards only** | how the call went. Not a binding — a slot receives what a call returned, not how it went |
+| `.children.<key>.operation.output.*` | both | a child's |
 | `.run.iteration` | guards only | transitions taken by this instance |
 | `.run.cursor` | guards only | the child key the cursor is at — see below |
 | `.run.position` | guards only | its index in `sequence`; `-1` before any child runs |
@@ -906,13 +995,13 @@ A conversation is addressed by **ref**, never by name — a session is a positio
 `messages(<ref>)` is the only way to read one:
 
 ```jsonc
-"when": "at(messages(.operation.outputs.session), -1).content === 'continue'"
-"when": "len(messages(.children.plan.operation.outputs.session)) > 4"
+"when": "at(messages(.operation.output.session), -1).content === 'continue'"
+"when": "len(messages(.children.plan.operation.output.session)) > 4"
 ```
 
-The ref comes from `.operation.outputs.session` — an opaque `{ id }`. To read a
+The ref comes from `.operation.output.session` — an opaque `{ id }`. To read a
 *sibling's* conversation the ref flows as data: the parent wires
-`.children.plan.operation.outputs.session` into a child's input, and the child calls
+`.children.plan.operation.output.session` into a child's input, and the child calls
 `messages()` on it.
 
 Turns are typed `{ role, content }`, so `at(…, -1).content` is checked and `.text` is

@@ -1,0 +1,759 @@
+/**
+ * The Files view's read models (DESIGN §11.1): the two-root file tree, the board of any state, and
+ * everything the inspector says about the one state selected.
+ *
+ * Three things here are not in `views.ts`, and each is a deliberate departure from how the board
+ * used to work:
+ *
+ *  - **A board can be asked for any state.** `boardView` resolves its shape from the most recently
+ *    updated task's workflow, which is right for "open the app and see something" and wrong for
+ *    "show me the state I just clicked in the tree". {@link boardForState} finds the workflow whose
+ *    closure actually contains the state and projects that one.
+ *  - **The root listing is a board too.** {@link rootsBoard} gives one column per workflow root, so
+ *    the top of the Tasks view is the whole project rather than one workflow chosen for you. Its
+ *    columns are the only ones with no run order — roots do not run relative to each other.
+ *  - **A state knows whether its executor exists.** The executors enabled in settings *are* the
+ *    default environment, so a state naming one that is off is an authoring error reported here,
+ *    beside the file, rather than a failure discovered part-way through a run.
+ */
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+import { parseReferencedFile, stateFilePath } from "@declarative-ai/hw";
+import { mimeOfPath } from "@jaira/shared";
+import type {
+  BoardCard,
+  BoardView,
+  FileKind,
+  FileLint,
+  FileNode,
+  FileTree,
+  LintIssue,
+  StateChild,
+  StateReference,
+  StateSlotInfo,
+  StateSlots,
+  StateTransition,
+  StateView,
+  WorkflowBrowser,
+  WorkflowEntry,
+  WorkflowLayer,
+} from "@jaira/shared";
+import type { Project } from "./project";
+import { breadcrumbOf, projectBoard, type TaskProjection, type WorkflowShape } from "./projection";
+import { isStateFile } from "./snapshots";
+import { workflowShape } from "./shape";
+import { bundleFor, latestRun, taskSummaries, type ViewOptions } from "./views";
+
+/** What the Files view needs to know about the machine, on top of the project itself. */
+export interface StateViewOptions extends ViewOptions {
+  /**
+   * Executors that would actually run — enabled *and* reachable. A state naming a function outside
+   * this set gets an error, but only if the name is one JaiRA recognises as an executor at all:
+   * `review_artifact` is a UI component, not a missing runtime.
+   */
+  availableExecutors?: ReadonlySet<string>;
+  /** Every executor name JaiRA knows about, available or not. Absent ⇒ nothing is judged. */
+  knownExecutors?: ReadonlySet<string>;
+}
+
+// --- the file tree -----------------------------------------------------------
+
+/** Classify a path under a layer root by the directory it sits in. */
+function kindOf(relPath: string, name: string): FileKind {
+  const top = relPath.split("/")[0];
+  if (top === "workflows") return isStateFile(name) ? "workflow" : "other";
+  if (top === "prompts") return "prompt";
+  if (top === "skills") return "skill";
+  if (relPath === "config.json") return "config";
+  return "other";
+}
+
+/**
+ * Directories that hold run state rather than authored source.
+ *
+ * They are excluded because the tree is an authoring surface: a snapshot directory with one folder
+ * per pinned hash would bury `prompts/` under machine output, and nothing in it is editable.
+ */
+const HIDDEN_DIRS: ReadonlySet<string> = new Set(["snapshots", "tasks", "worktrees", "artifacts", "node_modules"]);
+
+/**
+ * Run state that sits at the root rather than in a directory of its own.
+ *
+ * The SQLite database and its write-ahead companions are not editable, not readable, and change on
+ * every run — three rows of noise in a tree whose whole job is to show you what you can author.
+ */
+const isHiddenFile = (name: string): boolean => name === "jaira.db" || name.startsWith("jaira.db-");
+
+function walkDir(root: string, dir: string, layer: WorkflowLayer): FileNode[] {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const nodes: FileNode[] = [];
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
+    const full = join(dir, entry.name);
+    const rel = relative(root, full).split(sep).join("/");
+    if (entry.isDirectory()) {
+      if (HIDDEN_DIRS.has(rel)) continue;
+      nodes.push({
+        path: rel,
+        name: entry.name,
+        kind: "directory",
+        mime: mimeOfPath(rel, true),
+        layer,
+        children: walkDir(root, full, layer),
+      });
+      continue;
+    }
+    if (!entry.isFile() || isHiddenFile(entry.name)) continue;
+    const kind = kindOf(rel, entry.name);
+    const node: FileNode = { path: rel, name: entry.name, kind, mime: mimeOfPath(rel), layer };
+    if (kind === "workflow") {
+      // The state id is the path under `workflows/`, minus the suffix — the same derivation the
+      // loader uses, so the tree and a `--workflow` argument name the same thing.
+      node.stateId = rel.replace(/^workflows\//, "").replace(/\.(json|ya?ml)$/i, "");
+    }
+    nodes.push(node);
+  }
+  // Directories first, then files, each alphabetical: a listing you can predict is a listing you can
+  // navigate without reading it.
+  nodes.sort((a, b) => {
+    if ((a.kind === "directory") !== (b.kind === "directory")) return a.kind === "directory" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return nodes;
+}
+
+/**
+ * Both layer roots as trees, in search-path order.
+ *
+ * A base file the project overrides is marked `shadowed` wherever it appears, which is what lets the
+ * tree replace the layer picker: which copy you are about to edit is its position on screen.
+ *
+ * Every root is listed even when its directory is absent — see {@link FileTree}. `walkDir` already
+ * treats an unreadable directory as empty rather than an error, so an absent root costs one
+ * `existsSync` and yields an empty, still-usable branch: writing a state into it creates the
+ * directory chain on the way.
+ */
+export function fileTree(project: Project, browser?: WorkflowBrowser): FileTree {
+  const shadowed = new Set(
+    (browser?.files ?? []).filter((f) => f.shadowed === true).map((f) => `${f.layer}:${f.stateId}`),
+  );
+  const errors = new Map(
+    (browser?.files ?? []).filter((f) => f.error !== undefined).map((f) => [`${f.layer}:${f.stateId}`, f.error!]),
+  );
+  const lint = lintByStateId(browser);
+  const roots = project.paths.roots.map((dir, index) => {
+    const layer: WorkflowLayer = index === 0 ? "project" : "base";
+    const nodes = walkDir(dir, dir, layer);
+    const mark = (list: FileNode[]): void => {
+      for (const node of list) {
+        if (node.stateId !== undefined) {
+          const key = `${layer}:${node.stateId}`;
+          if (shadowed.has(key)) node.shadowed = true;
+          const error = errors.get(key);
+          if (error !== undefined) node.error = error;
+          // A shadowed base copy is INERT in this project — the loader never reads it, so the issues
+          // reported against that state id belong to the file that overrode it, not to this one.
+          // Marking it would put a red row beside a file that has nothing to do with the failure.
+          if (!node.shadowed) {
+            const found = lint?.get(node.stateId);
+            if (found !== undefined) node.lint = found;
+          }
+        }
+        if (node.children) mark(node.children);
+      }
+    };
+    mark(nodes);
+    rollUpLint(nodes);
+    return { layer, dir, exists: existsSync(dir), nodes };
+  });
+  return { roots };
+}
+
+/**
+ * Every state id the browser has an opinion about, and what that opinion is.
+ *
+ * `undefined` when there is no browser at all — no project is open, so nothing has been linted and
+ * the tree must say nothing rather than mark every file clean. That is the same distinction
+ * `StateView.fileOnly` draws, for the same reason.
+ *
+ * A state reachable from more than one root is linted once per root, so the same issue can arrive
+ * twice; they are counted per (path, message) to keep a shared subroutine from reading as N times
+ * more broken than it is. A root that failed to LOAD reports no issues at all — every state under it
+ * is `unchecked`, not clean, because the loader never got far enough to look at them.
+ */
+function lintByStateId(browser: WorkflowBrowser | undefined): Map<string, FileLint> | undefined {
+  if (browser === undefined) return undefined;
+  const out = new Map<string, FileLint>();
+  const seen = new Map<string, Set<string>>();
+  const checked = new Set<string>();
+  for (const workflow of browser.workflows) {
+    if (workflow.loadError !== undefined) continue;
+    for (const stateId of workflow.states) checked.add(stateId);
+  }
+  for (const workflow of browser.workflows) {
+    for (const issue of workflow.issues) {
+      const keys = seen.get(issue.stateId) ?? new Set<string>();
+      seen.set(issue.stateId, keys);
+      const key = `${issue.severity}\u0000${issue.path}\u0000${issue.message}`;
+      if (keys.has(key)) continue;
+      keys.add(key);
+      const entry = out.get(issue.stateId) ?? { errors: 0, warnings: 0 };
+      if (issue.severity === "error") entry.errors += 1;
+      else entry.warnings += 1;
+      out.set(issue.stateId, entry);
+    }
+  }
+  // Everything the browser listed as a file but no loaded root reached. `unreachable` is the
+  // browser's own name for the cycle/failed-load case; a file simply not referenced by any root is
+  // just as unvalidated, so both are derived from `checked` rather than read off one list.
+  for (const file of browser.files) {
+    if (checked.has(file.stateId) || out.has(file.stateId)) continue;
+    out.set(file.stateId, { errors: 0, warnings: 0, unchecked: true });
+  }
+  return out;
+}
+
+/**
+ * Give every directory the totals of what is beneath it, so a collapsed branch still shows a fault.
+ *
+ * Counts only. `unchecked` deliberately does not roll up: it is a claim that nothing validated THIS
+ * file, and an aggregate one would say that about a directory where a single state happens to be
+ * unreferenced — which reads as "none of this was checked" and would be false.
+ */
+function rollUpLint(nodes: FileNode[]): FileLint {
+  const total: FileLint = { errors: 0, warnings: 0 };
+  for (const node of nodes) {
+    const below = node.children === undefined ? undefined : rollUpLint(node.children);
+    if (below !== undefined && (below.errors > 0 || below.warnings > 0)) node.lint = below;
+    const own = node.lint;
+    if (own === undefined) continue;
+    total.errors += own.errors;
+    total.warnings += own.warnings;
+  }
+  return total;
+}
+
+/**
+ * One state in the shared root, read from its file alone.
+ *
+ * The projectless twin of {@link stateView}, for the case the Files view now allows: browsing and
+ * authoring `~/.jaira` with nothing open. Everything structural comes from the document — label,
+ * operation, children in run order, transitions — and everything that needs the project's reference
+ * graph is reported as UNKNOWN via `fileOnly` rather than as an empty list.
+ *
+ * Deliberately does not load a bundle. Resolution needs a search path, a search path needs the
+ * project's configuration, and inventing one would make this view disagree with the real one about
+ * which file a reference names.
+ */
+export function baseStateView(
+  baseDir: string,
+  stateId: string,
+  options: StateViewOptions = {},
+  browser?: WorkflowBrowser,
+): StateView {
+  const workflowsDir = join(baseDir, "workflows");
+  const file = `${stateFilePath(stateId, workflowsDir)}.json`;
+  let def: unknown;
+  let parseError: string | undefined;
+  try {
+    def = JSON.parse(readFileSync(file, "utf8"));
+  } catch (e) {
+    parseError = (e as NodeJS.ErrnoException).code === "ENOENT" ? undefined : (e as Error).message;
+  }
+  const exists = existsSync(file);
+
+  const doc = record(def);
+  const declared = Object.keys(record(doc?.["children"]) ?? {});
+  const sequence = (Array.isArray(doc?.["sequence"]) ? (doc["sequence"] as unknown[]) : [])
+    .filter((k): k is string => typeof k === "string" && declared.includes(k));
+  const order = [...sequence, ...declared.filter((k) => !sequence.includes(k))];
+
+  const children: StateChild[] = order.map((key) => {
+    const decl = record(record(doc?.["children"])?.[key]);
+    const named = stringOf(decl?.["state"]);
+    // A child with no `state` runs the one its KEY names, relative to this state (WORKFLOWS.md §6).
+    const childId = named === undefined || named.startsWith("./") ? `${stateId}/${named?.slice(2) ?? key}` : named;
+    let hasChildren = false;
+    try {
+      const childDoc = record(JSON.parse(readFileSync(`${stateFilePath(childId, workflowsDir)}.json`, "utf8")));
+      hasChildren = Object.keys(record(childDoc?.["children"]) ?? {}).length > 0;
+    } catch {
+      // A child that cannot be read here is a lint problem, not a reason to lose the column.
+    }
+    return { key, stateId: childId, hasChildren };
+  });
+
+  const op = record(doc?.["operation"]);
+  const kind = stringOf(op?.["kind"]);
+  // The AUTHORED spelling is `function`; `functionRef` is what the loader produces. Both are read,
+  // because this view is the only one that sees the document before the loader touches it.
+  const functionRef = stringOf(op?.["function"]) ?? stringOf(op?.["functionRef"]);
+  const model = stringOf(record(op?.["config"])?.["model"]) ?? stringOf(op?.["model"]);
+  const executor = kind === "function" ? functionRef : undefined;
+  const judged = executor !== undefined && options.knownExecutors?.has(executor) === true;
+  const available = !judged || options.availableExecutors?.has(executor!) === true;
+
+  // The browser's own diagnostics for this state, so the inspector and the tree agree. Without a
+  // browser they are UNKNOWN rather than empty — which is what `fileOnly` already says.
+  const issues: LintIssue[] = (browser?.workflows ?? []).flatMap((w) => w.issues.filter((i) => i.stateId === stateId));
+  if (parseError !== undefined) {
+    issues.push({ stateId, path: "", message: `not valid JSON: ${parseError}`, severity: "error" });
+  }
+  if (judged && !available) {
+    issues.push({
+      stateId,
+      path: "operation.function",
+      message: `executor '${executor}' is not available — a task reaching this state is refused at start`,
+      severity: "error",
+    });
+  }
+
+  return {
+    stateId,
+    ...(stringOf(doc?.["label"]) !== undefined ? { label: stringOf(doc?.["label"])! } : {}),
+    layer: "base",
+    file,
+    exists,
+    ...(kind === "prompt" || kind === "function"
+      ? { operation: { kind, ...(functionRef !== undefined ? { functionRef } : {}), ...(model !== undefined ? { model } : {}) } }
+      : {}),
+    children,
+    // Columns still, even with no runs to put in them: they are the state's STRUCTURE, and the
+    // structure is most of what you open a composite state to look at. Empty columns say "nothing is
+    // here", which is true; a leaf rendering would say "this state has no children", which is not.
+    board:
+      children.length === 0
+        ? null
+        : {
+            level: stateId,
+            ...(stringOf(doc?.["label"]) !== undefined ? { label: stringOf(doc?.["label"])! } : {}),
+            breadcrumb: [stateId],
+            columns: children.map((child) => ({ key: child.key, stateId: child.stateId, cards: [] })),
+            atLevel: [],
+            finished: [],
+          },
+    tasksHere: [],
+    tasksRecent: [],
+    // No ancestor chain without a bundle, so only a self-reference is knowably a loop.
+    transitions: transitionsOf(def, stateId, new Set()),
+    environment: { ...(executor !== undefined ? { executor } : {}), available },
+    issues,
+    references: [...refsIn(def)].map((ref) => ({ ref, resolved: true, layer: "base" as const })),
+    referencedBy: [],
+    driftedTasks: [],
+    fileOnly: true,
+  };
+}
+
+/**
+ * The shared root alone, for when no project is open.
+ *
+ * `~/.jaira` belongs to the machine, not to a checkout, so it stays browsable with nothing else
+ * loaded. Shadowing cannot apply — there is no project layer to override anything — so nothing here
+ * needs the browser.
+ */
+export function baseFileTree(baseDir: string, browser?: WorkflowBrowser): FileTree {
+  const nodes = walkDir(baseDir, baseDir, "base");
+  // Linted exactly as a project's tree is. Skipping it here was the whole of "validation is not
+  // working": the shared root is browsable with nothing open, and that was the one surface in JaiRA
+  // that listed state files and never said a word about them.
+  const lint = lintByStateId(browser);
+  const errors = new Map((browser?.files ?? []).filter((f) => f.error !== undefined).map((f) => [f.stateId, f.error!]));
+  const mark = (list: FileNode[]): void => {
+    for (const node of list) {
+      if (node.stateId !== undefined) {
+        const error = errors.get(node.stateId);
+        if (error !== undefined) node.error = error;
+        const found = lint?.get(node.stateId);
+        if (found !== undefined) node.lint = found;
+      }
+      if (node.children) mark(node.children);
+    }
+  };
+  mark(nodes);
+  rollUpLint(nodes);
+  return { roots: [{ layer: "base", dir: baseDir, exists: existsSync(baseDir), nodes }] };
+}
+
+// --- declared inputs ---------------------------------------------------------
+
+/** The extensions a state file may carry, in the order a reference probes them. */
+const STATE_EXTENSIONS: readonly string[] = ["json", "yaml", "yml"];
+
+/**
+ * Read one state's document by id, searching the layer roots in order.
+ *
+ * First match wins, which is the rule reference resolution uses — the project's copy shadows the
+ * base's. Failure of any sort yields `undefined`: the caller is answering "what does this child
+ * declare" for a form where the id is being TYPED, so most calls are expected to miss.
+ */
+function readStateDoc(roots: readonly string[], stateId: string): Record<string, unknown> | undefined {
+  for (const root of roots) {
+    const base = stateFilePath(stateId, root);
+    for (const ext of STATE_EXTENSIONS) {
+      const file = `${base}.${ext}`;
+      try {
+        return record(parseReferencedFile(file, readFileSync(file, "utf8")));
+      } catch {
+        // Absent, or mid-edit and unparsable. Either way there is nothing to declare from it.
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Read one `inputs`/`outputs` map into slot info.
+ *
+ * A slot is REQUIRED unless it says otherwise, and there are two ways to say otherwise: `optional`,
+ * and a `default`. Both are read, because a form that seeded a blank row for a defaulted slot would
+ * be inviting an edit that overrode a default nobody wanted overridden.
+ *
+ * `undefined` — rather than an empty list — when the block is present but is not a map, i.e. a
+ * TRANSCLUDED block. Expanding it needs the loader's search path, and a form that showed half a
+ * transclusion would be worse than one that showed none of it: the author would take the short list
+ * for the whole surface.
+ */
+function slotsOf(raw: unknown): StateSlotInfo[] | undefined {
+  const map = record(raw);
+  if (raw !== undefined && map === undefined) return undefined;
+  return Object.entries(map ?? {}).map(([name, decl]) => {
+    const slot = record(decl);
+    const description = stringOf(slot?.["description"]);
+    return {
+      name,
+      optional: slot?.["optional"] === true || slot?.["default"] !== undefined,
+      ...(description !== undefined ? { description } : {}),
+    };
+  });
+}
+
+/**
+ * The slots a set of states declare (SPEC §4.1) — see {@link StateSlots}.
+ *
+ * Ids that name nothing are simply absent from the result: the caller is a form where the reference
+ * is being typed, so a miss is the normal case and not an error. So is a state whose `inputs` is a
+ * transclusion — see {@link slotsOf} for why that is not the same as declaring none.
+ */
+export function stateSlots(roots: readonly string[], stateIds: readonly string[]): Record<string, StateSlots> {
+  const out: Record<string, StateSlots> = {};
+  for (const stateId of new Set(stateIds)) {
+    if (stateId.length === 0) continue;
+    const doc = readStateDoc(roots, stateId);
+    if (doc === undefined) continue;
+    const inputs = slotsOf(doc["inputs"]);
+    if (inputs === undefined) continue;
+    // A transcluded `outputs` costs only the completion list, not the wiring rows, so it degrades to
+    // an empty list rather than dropping the state's inputs with it.
+    out[stateId] = { inputs, outputs: slotsOf(doc["outputs"]) ?? [] };
+  }
+  return out;
+}
+
+/** The workflows directory of every layer, in search order — what {@link stateInputs} resolves against. */
+export function workflowRoots(project: Project): string[] {
+  return [project.paths.workflowsDir, project.paths.base.workflowsDir];
+}
+
+// --- boards ------------------------------------------------------------------
+
+/** Task projections for one workflow, ready for {@link projectBoard}. */
+function projectionsFor(project: Project, shape: WorkflowShape | undefined, workflow?: string): TaskProjection[] {
+  return taskSummaries(project)
+    .filter((summary) => workflow === undefined || summary.workflow === workflow)
+    .map((summary) => ({
+      taskId: summary.taskId,
+      title: summary.title,
+      status: summary.status,
+      workflow: summary.workflow,
+      ...(summary.labels !== undefined ? { labels: summary.labels } : {}),
+      updatedAt: summary.updatedAt,
+      run: latestRun(project, summary.taskId, shape),
+    }));
+}
+
+/**
+ * The workflow root whose closure contains `stateId`.
+ *
+ * A shared library state can be mounted under several roots, so this is genuinely ambiguous. A root
+ * with tasks in it wins, because the reason to ask is almost always "where is the work" — and a tie
+ * falls back to id order so the answer is at least stable between calls.
+ */
+export function rootContaining(browser: WorkflowBrowser, stateId: string): WorkflowEntry | undefined {
+  const candidates = browser.workflows.filter((w) => w.rootId === stateId || w.states.includes(stateId));
+  return candidates.find((w) => w.taskIds.length > 0) ?? candidates[0];
+}
+
+/**
+ * The board of an arbitrary state: its children as columns, the tasks inside them as cards.
+ *
+ * Returns `null` when nothing can be projected — the state belongs to no loadable workflow — so the
+ * caller can say "no board" rather than render an empty one that looks like "no tasks".
+ */
+export function boardForState(
+  project: Project,
+  stateId: string,
+  browser: WorkflowBrowser,
+  options?: StateViewOptions,
+): BoardView | null {
+  const root = rootContaining(browser, stateId);
+  if (!root) return null;
+  const bundle = bundleFor(project, root.rootId);
+  if (!bundle) return null;
+  const interactive = options?.interactiveFunctions;
+  const shape = workflowShape(bundle, interactive !== undefined ? { interactiveFunctions: interactive } : {});
+  if (shape[stateId] === undefined) return null;
+  return projectBoard(shape, stateId, projectionsFor(project, shape, root.rootId), {
+    breadcrumb: breadcrumbOf(shape, root.rootId, stateId),
+  });
+}
+
+/**
+ * The root listing: one column per workflow root, every task in the column of the workflow it runs.
+ *
+ * Not a `projectBoard` call, because there is no state above these — the roots are siblings with no
+ * parent and no order. `atLevel` stays empty for the same reason: there is no level for a task to be
+ * at.
+ */
+export function rootsBoard(project: Project, browser: WorkflowBrowser, options?: StateViewOptions): BoardView {
+  const summaries = taskSummaries(project);
+  const finished: BoardCard[] = [];
+  const columns = browser.workflows.map((workflow) => ({
+    key: workflow.rootId,
+    stateId: workflow.rootId,
+    ...(workflow.label !== undefined ? { label: workflow.label } : {}),
+    cards: [] as BoardCard[],
+  }));
+  const byRoot = new Map(columns.map((c) => [c.key, c]));
+
+  for (const summary of summaries) {
+    // One bundle per workflow would be cheaper, but a card at this level only needs the task's own
+    // active path, and `latestRun` without a shape still yields one.
+    const bundle = bundleFor(project, summary.workflow, summary.snapshotHash);
+    const interactive = options?.interactiveFunctions;
+    const shape = bundle
+      ? workflowShape(bundle, interactive !== undefined ? { interactiveFunctions: interactive } : {})
+      : undefined;
+    const run = latestRun(project, summary.taskId, shape);
+    const path = run.activePath;
+    const deepest = path[path.length - 1];
+    const card: BoardCard = {
+      taskId: summary.taskId,
+      title: summary.title,
+      status: summary.status,
+      workflow: summary.workflow,
+      ...(deepest !== undefined ? { activeStateId: deepest.stateId } : {}),
+      activePath: path,
+      // Every root has children worth walking into, so a card here is always a drill.
+      hasSubBoard: path.length > 0,
+      ...(summary.labels !== undefined ? { labels: summary.labels } : {}),
+      updatedAt: summary.updatedAt,
+    };
+    const terminal = summary.status === "completed" || summary.status === "failed" || summary.status === "canceled";
+    const column = byRoot.get(summary.workflow);
+    if (terminal || path.length === 0) {
+      // A terminal task still belongs to its workflow — it is listed in the column so the root
+      // listing stays a complete census, and `finished` carries it for the tray.
+      finished.push(card);
+      continue;
+    }
+    if (column) column.cards.push(card);
+    else finished.push(card);
+  }
+
+  return { level: "", label: "All workflows", breadcrumb: [], columns, atLevel: [], finished };
+}
+
+// --- one state ---------------------------------------------------------------
+
+/** Read a field off a raw/loaded state without depending on the engine's exact types. */
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function stringOf(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * Every `$ref` string anywhere in a document.
+ *
+ * Walked rather than read from known fields because references are a general mechanism — a prompt, an
+ * operation block, a type, a guard — and listing only the places we happen to remember would make
+ * the inspector quietly incomplete.
+ */
+function refsIn(value: unknown, out: Set<string> = new Set()): Set<string> {
+  if (Array.isArray(value)) {
+    for (const item of value) refsIn(item, out);
+    return out;
+  }
+  const obj = record(value);
+  if (!obj) return out;
+  for (const [key, child] of Object.entries(obj)) {
+    if (key === "$ref" && typeof child === "string") out.add(child);
+    else refsIn(child, out);
+  }
+  return out;
+}
+
+function transitionsOf(def: unknown, stateId: string, ancestors: ReadonlySet<string>): StateTransition[] {
+  const raw = record(def)?.["transitions"];
+  if (!Array.isArray(raw)) return [];
+  const out: StateTransition[] = [];
+  for (const entry of raw) {
+    const t = record(entry);
+    if (!t) continue;
+    const to = stringOf(t["to"]);
+    if (to === undefined) continue;
+    // `when` is authored as an expression string or lowered to a ref; show whichever is there rather
+    // than an empty guard, which would read as unconditional.
+    const when = stringOf(t["when"]) ?? (t["when"] !== undefined ? JSON.stringify(t["when"]) : "always");
+    out.push({ when, to, loops: to === stateId || ancestors.has(to) });
+  }
+  return out;
+}
+
+/** The ancestors of a state within one workflow, for deciding whether a transition loops. */
+function ancestorsOf(shape: WorkflowShape, rootId: string, stateId: string): Set<string> {
+  const trail = breadcrumbOf(shape, rootId, stateId);
+  return new Set(trail.slice(0, -1));
+}
+
+/**
+ * Everything the Files view shows about one state.
+ *
+ * One call rather than several, because the middle panel and the inspector are two renderings of the
+ * same subject and fetching them separately is how they end up disagreeing about which state is open.
+ */
+export function stateView(
+  project: Project,
+  stateId: string,
+  browser: WorkflowBrowser,
+  options: StateViewOptions = {},
+): StateView {
+  const entry = browser.files.find((f) => f.stateId === stateId && f.shadowed !== true)
+    ?? browser.files.find((f) => f.stateId === stateId);
+  const layer: WorkflowLayer = entry?.layer ?? "project";
+  const root = layer === "base" ? project.paths.base.workflowsDir : project.paths.workflowsDir;
+  const file = entry !== undefined ? join(entry.root, entry.file) : `${stateFilePath(stateId, root)}.json`;
+
+  const owning = rootContaining(browser, stateId);
+  const bundle = owning ? bundleFor(project, owning.rootId) : undefined;
+  const interactive = options.interactiveFunctions;
+  const shape = bundle ? workflowShape(bundle, interactive !== undefined ? { interactiveFunctions: interactive } : {}) : {};
+  const def = bundle?.states[stateId] as unknown;
+
+  const children: StateChild[] = (shape[stateId]?.children ?? []).map((child) => ({
+    key: child.key,
+    stateId: child.stateId,
+    ...(child.label !== undefined ? { label: child.label } : {}),
+    hasChildren: (shape[child.stateId]?.children?.length ?? 0) > 0,
+  }));
+
+  const op = record(record(def)?.["operation"]);
+  const kind = stringOf(op?.["kind"]);
+  const functionRef = stringOf(op?.["functionRef"]) ?? stringOf(op?.["function"]);
+  const model = stringOf(record(op?.["config"])?.["model"]) ?? stringOf(op?.["model"]);
+
+  // The environment the loader already merged (`LoadedState.environment` is the resolved chain), so
+  // an executor inherited from an ancestor is reported without walking the tree again here.
+  const env = record(record(def)?.["environment"]);
+  const envExecutor = stringOf(env?.["executor"]) ?? stringOf(record(env?.["operation"])?.["functionRef"]);
+  const executor = envExecutor ?? (kind === "function" ? functionRef : undefined);
+  const known = options.knownExecutors;
+  const available = options.availableExecutors;
+  // Only a name JaiRA recognises as an executor is judged. `review_artifact` is a UI component, and
+  // calling it "unavailable" would be both wrong and unfixable.
+  const judged = executor !== undefined && known !== undefined && known.has(executor);
+  const isAvailable = !judged || available?.has(executor!) === true;
+
+  const issues: LintIssue[] = (owning?.issues ?? []).filter((issue) => issue.stateId === stateId);
+  // The loader carries a failure to lower an operation as DATA rather than throwing, so a state can
+  // arrive here with no `operation` at all and no explanation of why. Surfacing it is the difference
+  // between an inspector that says "no operation" and one that says what is wrong with it.
+  const operationError = stringOf(record(def)?.["operationError"]);
+  if (operationError !== undefined) {
+    issues.push({ stateId, path: "operation", message: operationError, severity: "error" });
+  }
+  if (judged && !isAvailable) {
+    issues.push({
+      stateId,
+      path: "operation.functionRef",
+      message:
+        `executor '${executor}' is not available — it is not in the default environment, ` +
+        `so a task reaching this state is refused at start`,
+      severity: "error",
+    });
+  }
+
+  const board = owning && shape[stateId] !== undefined
+    ? projectBoard(shape, stateId, projectionsFor(project, shape, owning.rootId), {
+        breadcrumb: breadcrumbOf(shape, owning.rootId, stateId),
+      })
+    : null;
+
+  // A leaf has no columns to hold its tasks, so they are listed directly. Taken from the same
+  // projection the board uses, which is what keeps the two renderings from disagreeing.
+  const hasChildren = children.length > 0;
+  const tasksHere = board ? [...board.atLevel, ...board.columns.flatMap((c) => c.cards)] : [];
+  const tasksRecent = board ? [...board.finished].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8) : [];
+
+  const refs = new Set<string>();
+  if (entry !== undefined) {
+    // Read from the AUTHORED document: the loaded state has its references resolved away, and the
+    // inspector's job is to show what the file says before resolution, plus whether it worked.
+    const authored = browser.files.find((f) => f.stateId === stateId && f.layer === layer);
+    if (authored !== undefined) refsIn(def, refs);
+  }
+  const references: StateReference[] = [...refs].map((ref) => ({
+    ref,
+    // A reference that survived into the loaded bundle resolved by definition — the loader would
+    // have reported it otherwise, and that report is already in `issues`.
+    resolved: true,
+    layer,
+  }));
+
+  const referencedBy = Object.entries(shape)
+    .filter(([, s]) => s.children.some((c) => c.stateId === stateId))
+    .map(([id]) => id)
+    .sort();
+
+  const drifted = (owning?.driftedTasks ?? []).filter((taskId) => tasksHere.some((c) => c.taskId === taskId));
+
+  return {
+    stateId,
+    ...(shape[stateId]?.label !== undefined ? { label: shape[stateId]!.label } : {}),
+    layer,
+    file,
+    exists: entry !== undefined,
+    ...(owning !== undefined ? { rootId: owning.rootId } : {}),
+    ...(kind === "prompt" || kind === "function"
+      ? {
+          operation: {
+            kind,
+            ...(functionRef !== undefined ? { functionRef } : {}),
+            ...(model !== undefined ? { model } : {}),
+          },
+        }
+      : {}),
+    children,
+    board: hasChildren ? board : null,
+    tasksHere,
+    tasksRecent,
+    transitions: owning ? transitionsOf(def, stateId, ancestorsOf(shape, owning.rootId, stateId)) : [],
+    environment: {
+      ...(executor !== undefined ? { executor } : {}),
+      available: isAvailable,
+      ...(envExecutor !== undefined && kind !== "function" ? { from: "environment" } : {}),
+    },
+    issues,
+    references,
+    referencedBy,
+    driftedTasks: drifted,
+  };
+}

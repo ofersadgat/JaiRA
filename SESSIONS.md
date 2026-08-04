@@ -144,7 +144,7 @@ attached accessor only if present. Losing it must cost a store read, never corre
 marker should not encode an intent about how a later caller will use it.
 
 ```jsonc
-{ "session": { "expr": ".children.plan.operation.outputs.session" }, "fork": true }
+{ "session": { "expr": ".children.plan.operation.output.session" }, "fork": true }
 ```
 
 | `fork` | Meaning |
@@ -397,7 +397,7 @@ Add to the expression namespace table (WORKFLOWS.md §9): `operation.*` and
 `children.<key>.operation.*`.
 
 Shape is a **typed union** — common core on every kind, llm-only extras — so that
-`operation.outputs.session` on a `ui` op is a load-time authoring error, not a runtime `undefined`:
+`operation.output.session` on a `ui` op is a load-time authoring error, not a runtime `undefined`:
 
 | Field | Kinds | Notes |
 | --- | --- | --- |
@@ -406,7 +406,7 @@ Shape is a **typed union** — common core on every kind, llm-only extras — so
 | `provider`, `model`, `attempts` | all | resolved values, post-repair |
 | `session` | llm only | a `SessionRef` |
 
-**`operation.outputs.session` is the END position.** You append *at* a position but do not know the
+**`operation.output.session` is the END position.** You append *at* a position but do not know the
 end until the provider resolves, so the end marker is the only value that can exist when hw reads it —
 and it is what consumers want ("append after me", "fork after me").
 
@@ -417,7 +417,7 @@ Note the granularity: **authored forking is per-operation.** If one agentic op a
 workflow cannot branch at entry 20. The store should still address finer positions so a human can
 scrub a transcript in the UI, but the expression language exposes only operation boundaries.
 
-State outputs may be `binding`s over `operation.outputs.*`; derived outputs already resolve
+State outputs may be `binding`s over `operation.output.*`; derived outputs already resolve
 engine-side on termination (DESIGN §7.5), so much of that path exists.
 
 ---

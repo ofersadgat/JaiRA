@@ -55,6 +55,8 @@ import {
   parseInteractionScript,
   policyCanEscalate,
   promptSummarizer,
+  enabledAdapters,
+  enabledGenericAgents,
   registerAgentRuntimes,
   registerCommandFunction,
   registerGenericAgents,
@@ -286,16 +288,20 @@ function buildRunEnvironment(
   // Agent runtimes, so a workflow with a `claude-code` state runs the same way here
   // as in the app. Without them the CLI — the documented fastest debugging surface —
   // failed such a state as "unregistered function" while the app ran it fine.
+  // Only the executors this project has turned on. A disabled one is not registered at all, so a
+  // state naming it fails at start as an unregistered function rather than partway through a run.
   registerAgentRuntimes(registry, {
     execEnv: config.execEnvironment,
+    adapters: enabledAdapters(config.agents),
     ...(files?.observer !== undefined ? { observer: files.observer } : {}),
+    ...(config.agents.claudeCli?.command !== undefined ? { cliCommand: config.agents.claudeCli.command } : {}),
     ...(config.agents.codex?.command !== undefined ? { codexCommand: config.agents.codex.command } : {}),
     ...(config.agents.codex?.sandbox !== undefined ? { codexSandbox: config.agents.codex.sandbox } : {}),
   });
   registerGenericAgents(registry, {
     execEnv: config.execEnvironment,
     exec,
-    ...(config.agents.genericCli !== undefined ? { agents: config.agents.genericCli } : {}),
+    agents: enabledGenericAgents(config.agents),
   });
   if (wiring.interactions) {
     wiring.interactions.register(registry);

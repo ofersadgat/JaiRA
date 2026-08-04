@@ -14,7 +14,22 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import type { ComponentConfig } from "./components";
-import type { BoardView, HistorySize, PruneResult, TaskDetail, TaskSummary, WorkflowBrowser } from "./view";
+import type { ExecutorInfo, ProbeResult, SecretTarget } from "./executors";
+import type { JairaSettings } from "./settings";
+import type { SchemaViolation } from "./schemas";
+import type {
+  BoardView,
+  ConversationView,
+  FileTree,
+  HistorySize,
+  PruneResult,
+  StateSlots,
+  StateView,
+  TaskDetail,
+  TaskSummary,
+  WorkflowBrowser,
+  WorkflowLayer,
+} from "./view";
 
 // --- invoke channels ---------------------------------------------------------
 
@@ -99,6 +114,262 @@ export interface PruneRequest {
   apply?: boolean;
 }
 
+// --- configuration, executors and workflow authoring -------------------------
+
+/**
+ * The two configuration layers, as the settings UI addresses them.
+ *
+ * `base` is the shared root behind every project on this machine; `project` is this checkout's own
+ * `.jaira/config.json`, laid over it. Every write names its layer explicitly — there is no "current"
+ * layer — because "did I just change this project or every project?" is precisely the question a
+ * settings screen must never leave ambiguous.
+ */
+export type ConfigLayer = "base" | "project";
+
+/** Both layers as authored, plus what they add up to. */
+export interface ConfigView {
+  /** The raw document of each layer, or null when that layer has no `config.json`. */
+  base: JsonValue | null;
+  project: JsonValue | null;
+  /** Base merged under project, parsed and defaulted — what a run would actually use. */
+  effective: JsonValue;
+  /** Where each layer's file lives, so the UI can show the path it is editing. */
+  baseFile: string;
+  projectFile: string;
+  /** The shared root itself, for the "where does this come from" line. */
+  baseDir: string;
+}
+
+export interface WriteConfigRequest {
+  layer: ConfigLayer;
+  /** The whole document for that layer. Parsed and validated before it is written. */
+  config: JsonValue;
+}
+
+/** Read one workflow state file, as text, from a named layer. */
+export interface ReadWorkflowRequest {
+  stateId: string;
+  layer: WorkflowLayer;
+}
+
+export interface WorkflowSource {
+  stateId: string;
+  layer: WorkflowLayer;
+  /** Absolute path of the file, for display. */
+  file: string;
+  /** The file as it stands, or an empty string when it does not exist yet. */
+  text: string;
+  /** False when nothing is at this path yet — a write would create it. */
+  exists: boolean;
+}
+
+export interface WriteWorkflowRequest {
+  stateId: string;
+  layer: WorkflowLayer;
+  /** The full file contents. Must parse as JSON; the workflow is re-linted after the write. */
+  text: string;
+}
+
+/**
+ * Put a state at a new id, a new layer, or both.
+ *
+ * One request rather than three, because rename, duplicate and "override here" are the same file
+ * operation with different arguments — and writing them separately is how the containment check
+ * ends up implemented three times and wrong in one of them.
+ */
+export interface MoveWorkflowRequest {
+  stateId: string;
+  layer: WorkflowLayer;
+  /** The id it ends up at. Equal to `stateId` when only the layer changes — that is an override. */
+  to: string;
+  /** The layer it lands in. Equal to `layer` for a plain rename. */
+  toLayer: WorkflowLayer;
+  /** Leave the original in place: duplicate and override, rather than rename. */
+  copy?: boolean;
+  /**
+   * Proceed even though other states reference this one.
+   *
+   * A rename changes the id every referrer names, so it breaks them. The default refuses and
+   * reports who, which is the only point at which that is cheap to fix.
+   */
+  force?: boolean;
+}
+
+/**
+ * Create a plain file or a directory anywhere under a layer root.
+ *
+ * Separate from {@link WriteWorkflowRequest} because it is addressed by PATH, not by state id — a
+ * prompt, a skill's `prompt.md`, an empty folder. That means its own containment check: the root here
+ * is the whole layer (`.jaira/`), not just `workflows/`.
+ */
+export interface CreateFileRequest {
+  layer: WorkflowLayer;
+  /** Relative to the layer root, forward slashes. */
+  path: string;
+  kind: "file" | "directory";
+  /** Initial contents for a file. Ignored for a directory. */
+  text?: string;
+}
+
+/**
+ * Rename or move a file or a directory within a layer root.
+ *
+ * The path-addressed twin of {@link MoveWorkflowRequest}, for everything in the tree that is not a
+ * state: a prompt, a skill directory, a folder full of states. It is not folded into that request
+ * because the two address different things — a state id is not a path, and a directory has no id at
+ * all — but it carries the same `force`, because renaming a directory under `workflows/` changes the
+ * id of every state inside it and breaks the same referrers a state rename would.
+ */
+export interface RenameFileRequest {
+  layer: WorkflowLayer;
+  /** Relative to the layer root, forward slashes. */
+  path: string;
+  /** Where it ends up, relative to the same layer root. Directories on the way are created. */
+  to: string;
+  /** Proceed even though states outside the moved set name states inside it. */
+  force?: boolean;
+}
+
+/**
+ * Check a hand-edited document against one of the registered schemas.
+ *
+ * Validation is a main-process job because ajv is: `@declarative-ai/validate` is the only package in
+ * the workspace carrying it, and nothing the renderer imports is allowed to pull it in. Sending the
+ * text rather than the parsed value is deliberate too — the parse error and the schema errors are
+ * one answer to one question ("is what I have typed acceptable yet?"), and splitting them across two
+ * round-trips is how they end up disagreeing about which revision they describe.
+ */
+export interface ValidateSchemaRequest {
+  /** A {@link SchemaEntry} id. Unknown ids are an error rather than a silent pass. */
+  schemaId: string;
+  text: string;
+}
+
+export interface ValidateSchemaResult {
+  schemaId: string;
+  /** Set when the text is not JSON at all — no schema errors are reported in that case. */
+  parseError?: string;
+  violations: SchemaViolation[];
+}
+
+/**
+ * Which schema a document already satisfies, so opening a file selects it (DESIGN §11.1).
+ *
+ * The picker was a menu you had to know the answer to. Every schema in it is `additionalProperties:
+ * false`, so satisfying one is a real signal and not a coincidence — an arbitrary JSON file matches
+ * nothing, and the answer is `null`.
+ *
+ * Only ever a SUGGESTION: it fills the picker when the file is first opened, and any explicit choice
+ * (including "none") wins from then on. A guess that silently overrode what someone picked would be
+ * worse than no guess.
+ */
+export interface DetectSchemaResult {
+  /** The best match, or null when the document satisfies none of them. */
+  schemaId: string | null;
+  /** Every schema the document satisfies, best first — for a caller that wants to say "or…". */
+  candidates: string[];
+}
+
+/** Read any file under a layer root as text, addressed by path. */
+export interface ReadFileRequest {
+  layer: WorkflowLayer;
+  /** Relative to the layer root, forward slashes. */
+  path: string;
+}
+
+/**
+ * One file, as the Files view's two surfaces receive it.
+ *
+ * The path-addressed generalisation of {@link WorkflowSource}, and it carries the same fields for
+ * the same reasons — plus the `mime`, which is what the surface registry resolves on, and the
+ * `stateId` when the file happens to define one. A state file arrives through here like everything
+ * else: the panel should not have two ways of holding an open document, because that is how the
+ * viewer and the editor end up looking at different revisions of it.
+ */
+export interface FileSource {
+  layer: WorkflowLayer;
+  /** Relative to the layer root, forward slashes. */
+  path: string;
+  /** Absolute path of the file, for display. */
+  file: string;
+  /** The MIME type, from `mimeOfPath`. */
+  mime: string;
+  /** The file as it stands, or an empty string when it does not exist yet. */
+  text: string;
+  /** False when nothing is at this path yet — a write would create it. */
+  exists: boolean;
+  /** The state this file defines, when it is under `workflows/` and named like one. */
+  stateId?: string;
+}
+
+/**
+ * Write any file under a layer root, addressed by path.
+ *
+ * Deliberately does NOT parse what it is given. `workflow:write` exists precisely because a state
+ * file must be checked before it lands, and folding the two together would either impose JSON on a
+ * markdown prompt or drop the check that keeps the workflow browser loadable. Two channels, two
+ * contracts — the renderer picks by what it has open.
+ */
+export interface WriteFileRequest {
+  layer: WorkflowLayer;
+  /** Relative to the layer root, forward slashes. */
+  path: string;
+  /** The full file contents. Directories on the way are created. */
+  text: string;
+}
+
+/** Delete a file or a directory under a layer root. A directory takes everything in it. */
+export interface DeleteFileRequest {
+  layer: WorkflowLayer;
+  /** Relative to the layer root, forward slashes. */
+  path: string;
+  /** Proceed even though states outside the deleted set reference states inside it. */
+  force?: boolean;
+}
+
+/**
+ * What a refused path-addressed rename or delete was protecting.
+ *
+ * The twin of {@link WorkflowMutationResult}, keyed by path rather than by state id. `referencedBy`
+ * counts only referrers OUTSIDE the affected set: a directory whose states point at each other is
+ * internally consistent after the move, and naming those would refuse every rename of a workflow
+ * folder for a breakage that does not happen.
+ */
+export interface FileMutationResult {
+  path: string;
+  layer: WorkflowLayer;
+  /** False when the operation was refused because {@link referencedBy} is non-empty. */
+  applied: boolean;
+  referencedBy: string[];
+  /** The state ids the path covered, so the UI can tell whether what it had selected is still there. */
+  states: string[];
+}
+
+/** What a refused move or delete was protecting, so the UI can name it and offer to go ahead. */
+export interface WorkflowMutationResult {
+  stateId: string;
+  layer: WorkflowLayer;
+  /** False when the operation was refused because {@link referencedBy} is non-empty. */
+  applied: boolean;
+  /** States that declare this one as a child. Empty when nothing points at it. */
+  referencedBy: string[];
+}
+
+/** Store a credential. The value goes to the main process and is never read back out. */
+export interface SetSecretRequest {
+  name: string;
+  /** An empty value REMOVES the secret from the target, which is how a key is revoked. */
+  value: string;
+  target: SecretTarget;
+}
+
+/** What the secret store can actually do here — the keychain needs Electron and an OS that has one. */
+export interface SecretCapabilities {
+  keychain: boolean;
+  /** Why the keychain is unavailable, when it is. */
+  keychainReason?: string;
+}
+
 /**
  * Request/response map for invoke channels. Keys are channel names; each entry
  * declares its argument and result.
@@ -111,14 +382,79 @@ export interface IpcContract {
   "task:create": { request: CreateTaskRequest; response: TaskSummary };
   "task:start": { request: StartTaskRequest; response: { taskId: string; runId: number } };
   "task:cancel": { request: { taskId: string }; response: { taskId: string } };
+  /**
+   * One board level. `level` is any state id — not only one on the newest task's workflow — so the
+   * Files view can open the board of whatever the tree has selected.
+   */
   "board:view": { request: { level?: string }; response: BoardView };
+  /**
+   * The top of the board: one column per workflow root, project and shared together. This is the
+   * root listing of the file-explorer metaphor, and the only level whose columns have no run order.
+   */
+  "board:roots": { request: void; response: BoardView };
+  /** Every file under both roots, as a tree — the Files view's left panel. */
+  "files:tree": { request: void; response: FileTree };
+  /** Everything the Files view shows about one state: its board or its tasks, plus the inspector. */
+  "state:view": { request: { stateId: string }; response: StateView };
+  /**
+   * The slots a set of states declare — what the authoring form needs to open a child's wiring table
+   * already showing what must be filled, and to complete a binding against what can be read.
+   *
+   * A batch rather than one call per child: a state's children are edited together, and N round
+   * trips would make the table appear a row at a time. An id that names no state is simply absent
+   * from the response, which is how a half-typed reference is reported.
+   */
+  "state:slots": { request: { stateIds: string[] }; response: Record<string, StateSlots> };
+  /** A task's run, read back out of the journal as turns. */
+  "task:conversation": { request: { taskId: string }; response: ConversationView };
   "interaction:pending": { request: void; response: PendingInteraction[] };
   "interaction:submit": { request: SubmitInteractionRequest; response: { requestId: string } };
   "approval:pending": { request: void; response: PendingApproval[] };
   "approval:submit": { request: SubmitApprovalRequest; response: { requestId: string } };
   "workflow:browse": { request: void; response: WorkflowBrowser };
+  "workflow:read": { request: ReadWorkflowRequest; response: WorkflowSource };
+  "workflow:write": { request: WriteWorkflowRequest; response: WorkflowSource };
+  /** Rename, duplicate, or copy a state into the other layer. */
+  "workflow:move": { request: MoveWorkflowRequest; response: WorkflowMutationResult };
+  /** Check a document against a registered schema — see {@link ValidateSchemaRequest}. */
+  "schema:validate": { request: ValidateSchemaRequest; response: ValidateSchemaResult };
+  /** Which registered schema a document already satisfies — see {@link DetectSchemaResult}. */
+  "schema:detect": { request: { text: string }; response: DetectSchemaResult };
+  /** Read any file under a layer root as text. Refuses types that are not text. */
+  "file:read": { request: ReadFileRequest; response: FileSource };
+  /** Write any file under a layer root. Unparsed — see {@link WriteFileRequest}. */
+  "file:write": { request: WriteFileRequest; response: FileSource };
+  /** Create a plain file or a directory under a layer root, addressed by path. */
+  "file:create": { request: CreateFileRequest; response: { file: string } };
+  /** Rename or move a file or directory within a layer root. Refuses when it would break referrers. */
+  "file:rename": { request: RenameFileRequest; response: FileMutationResult };
+  /** Delete a file or directory under a layer root. Refuses when it would break referrers. */
+  "file:delete": { request: DeleteFileRequest; response: FileMutationResult };
+  /** Delete a state file. Refuses while other states reference it, unless `force`. */
+  "workflow:delete": {
+    request: { stateId: string; layer: WorkflowLayer; force?: boolean };
+    response: WorkflowMutationResult;
+  };
+  /**
+   * Show a file in the OS file manager.
+   *
+   * Here rather than in the renderer because opening a file manager is Electron's `shell`, and the
+   * renderer has no Node integration — which is the property that makes the IPC boundary a security
+   * boundary rather than a convention.
+   */
+  "shell:reveal": { request: { file: string }; response: { file: string } };
   "history:size": { request: void; response: HistorySize };
   "history:prune": { request: PruneRequest; response: PruneResult & { remaining: HistorySize } };
+  /** User preferences (theme). Readable with no project open — they belong to the person. */
+  "settings:read": { request: void; response: JairaSettings };
+  "settings:write": { request: Partial<JairaSettings>; response: JairaSettings };
+  "config:read": { request: void; response: ConfigView };
+  "config:write": { request: WriteConfigRequest; response: ConfigView };
+  "executor:list": { request: void; response: ExecutorInfo[] };
+  /** Health-check executors. Without `name`, every one of them. */
+  "executor:probe": { request: { name?: string } | void; response: ProbeResult[] };
+  "secret:capabilities": { request: void; response: SecretCapabilities };
+  "secret:set": { request: SetSecretRequest; response: { name: string; target: SecretTarget } };
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -134,13 +470,38 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "task:start",
   "task:cancel",
   "board:view",
+  "board:roots",
+  "files:tree",
+  "state:view",
+  "state:slots",
+  "task:conversation",
   "interaction:pending",
   "interaction:submit",
   "approval:pending",
   "approval:submit",
   "workflow:browse",
+  "workflow:read",
+  "workflow:write",
+  "workflow:move",
+  "workflow:delete",
+  "schema:validate",
+  "schema:detect",
+  "file:read",
+  "file:write",
+  "file:create",
+  "file:rename",
+  "file:delete",
+  "shell:reveal",
   "history:size",
   "history:prune",
+  "settings:read",
+  "settings:write",
+  "config:read",
+  "config:write",
+  "executor:list",
+  "executor:probe",
+  "secret:capabilities",
+  "secret:set",
 ];
 
 // --- push channels -----------------------------------------------------------
@@ -152,8 +513,12 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
  */
 export type PushMessage =
   | { type: "engine:event"; taskId: string; runId: number; seq: number; at: number; event: JsonValue }
-  /** `workflows` fires when `.jaira/workflows/` changes on disk (§11.1's re-lint). */
-  | { type: "store:invalidate"; scope: "tasks" | "board" | "task" | "workflows"; taskId?: string }
+  /**
+   * `workflows` fires when a watched workflows directory changes on disk (§11.1's re-lint) — the
+   * project's and the shared base root's alike, since a base edit changes what this project runs.
+   * `config` fires when either configuration layer is rewritten.
+   */
+  | { type: "store:invalidate"; scope: "tasks" | "board" | "task" | "workflows" | "config"; taskId?: string }
   | { type: "interaction:requested"; pending: PendingInteraction }
   | { type: "interaction:resolved"; requestId: string }
   | { type: "approval:requested"; pending: PendingApproval }

@@ -8,7 +8,17 @@
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { defaultConfig, jairaPaths, parseConfig, readJsonFile, type JairaConfig, type JairaPaths } from "@jaira/shared";
+import {
+  defaultConfig,
+  jairaBasePaths,
+  jairaPaths,
+  mergeConfigDocuments,
+  parseConfig,
+  readJsonFile,
+  type JairaBasePaths,
+  type JairaConfig,
+  type JairaPaths,
+} from "@jaira/shared";
 import { openDb, type JairaDb } from "./db";
 import { SqliteArtifactStore } from "./artifactStore";
 import { CommandLog } from "./commandLog";
@@ -75,15 +85,46 @@ export function isProject(projectDir: string): boolean {
   return existsSync(jairaPaths(projectDir).jairaDir);
 }
 
-export function openProject(projectDir: string, opts?: { now?: () => number; staleMs?: number }): Project {
-  const paths = jairaPaths(projectDir);
+/**
+ * Create the shared base root's layout. Idempotent, and called on every open.
+ *
+ * Created eagerly rather than on first use so the directory a user is told to put shared workflows
+ * in actually exists — an empty `~/.jaira/workflows` is a working answer to "where do these go?",
+ * where a missing one is a question. No `config.json` is written: an absent base config means "no
+ * base layer", which is a different and better default than one full of defaults that then silently
+ * override nothing.
+ */
+export function initBase(baseDir?: string): JairaBasePaths {
+  const base = jairaBasePaths(baseDir);
+  mkdirSync(base.workflowsDir, { recursive: true });
+  mkdirSync(base.functionsDir, { recursive: true });
+  mkdirSync(base.skillsDir, { recursive: true });
+  return base;
+}
+
+/**
+ * The effective configuration: the shared base root's `config.json` with the project's laid over it
+ * (DESIGN §3). Absent files are empty layers, so a machine with no base root behaves exactly as
+ * before one existed.
+ */
+export function loadLayeredConfig(paths: JairaPaths): JairaConfig {
+  const base = existsSync(paths.base.configFile) ? readJsonFile(paths.base.configFile) : undefined;
+  const project = existsSync(paths.configFile) ? readJsonFile(paths.configFile) : undefined;
+  if (base === undefined && project === undefined) return defaultConfig();
+  return parseConfig(mergeConfigDocuments(base, project));
+}
+
+export function openProject(
+  projectDir: string,
+  opts?: { now?: () => number; staleMs?: number; baseDir?: string },
+): Project {
+  const paths = jairaPaths(projectDir, opts?.baseDir);
   if (!existsSync(paths.jairaDir)) {
     throw new Error(`${paths.projectDir} is not a JaiRA project (no .jaira/ — run 'jaira init')`);
   }
   const now = opts?.now ?? Date.now;
-  const config = existsSync(paths.configFile)
-    ? parseConfig(readJsonFile(paths.configFile))
-    : defaultConfig();
+  initBase(paths.base.baseDir);
+  const config = loadLayeredConfig(paths);
   const db = openDb(paths.dbFile);
   const runtime = new RuntimeStore(db);
   const jobs = new JobStore(db, opts?.staleMs);

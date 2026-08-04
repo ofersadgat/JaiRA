@@ -1,9 +1,22 @@
 {
   "name": "@jaira/runtime",
   "version": "0.1.0",
+  "description": "JaiRA runtime: workflow execution, agent sessions, policy, and artifacts.",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ofersadgat/JaiRA.git",
+    "directory": "packages/runtime"
+  },
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@declarative-ai/exec": "file:../../../declarative-ai/packages/exec",

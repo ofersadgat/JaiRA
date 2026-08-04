@@ -11,7 +11,14 @@
  * component contracts, and BOM-tolerant JSON parsing.
  */
 export * from "./task";
+export * from "./mime";
+export * from "./operationVocabulary";
+export * from "./schemas";
 export * from "./view";
 export * from "./ipc";
 export * from "./components";
 export * from "./json";
+export * from "./settings";
+export * from "./executors";
+export * from "./slotTypes";
+export * from "./references";

@@ -1,18 +1,47 @@
 {
   "name": "@jaira/cli",
   "version": "0.1.0",
+  "description": "JaiRA command line: run workflows, drive agents, inspect sessions.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ofersadgat/JaiRA.git",
+    "directory": "packages/cli"
+  },
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    "./bin/jaira.js": "./bin/jaira.js"
   },
   "bin": {
-    "jaira": "./bin/jaira.js"
+    "jaira": "bin/jaira.js"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "prepack": "npm run build"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.81",
+    "@noble/hashes": "^2.2.0",
+    "@openrouter/ai-sdk-provider": "^2.9.0",
+    "ai": "^6.0.195",
+    "ajv": "^8.20.0",
+    "better-sqlite3": "^12.2.0",
+    "canonicalize": "^2.1.0",
+    "undici": "^7.27.0",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
     "@declarative-ai/exec": "file:../../../declarative-ai/packages/exec",
     "@declarative-ai/hw": "file:../../../declarative-ai/packages/hw",
     "@jaira/persistence": "*",
     "@jaira/runtime": "*",
-    "@jaira/shared": "*"
+    "@jaira/shared": "*",
+    "esbuild": "^0.28.1"
   }
 }

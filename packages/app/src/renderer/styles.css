@@ -1,4 +1,37 @@
+/*
+ * Two palettes behind one set of variable names, so every rule below is written once and neither
+ * theme is the special case.
+ *
+ * LIGHT IS THE DEFAULT, and it is the bare `:root` rather than a `[data-theme="light"]` selector on
+ * purpose: the very first paint happens before any script has read the saved preference, so
+ * whatever `:root` says is what a cold start flashes. Making the default theme the default styling
+ * is what removes that flash. `main/index.ts` sets the window's own background colour to match, for
+ * the frame Chromium paints before the document exists at all.
+ */
 :root {
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --panel-2: #eceff4;
+  --line: #d4dae3;
+  --text: #1b2130;
+  --dim: #5c6779;
+  --accent: #2563c7;
+  --ok: #0f7a45;
+  --warn: #8a6100;
+  --bad: #c02c1f;
+  /* A modal's scrim and lift. Separate variables because a shadow tuned for a dark surface reads as
+     a smudge on a light one, and one that reads on light is invisible on dark. */
+  --scrim: rgba(24, 30, 42, 0.38);
+  --lift: 0 12px 32px rgba(24, 30, 42, 0.18);
+  /* Syntax colours for the JSON editor. Three, not a full palette: keys already use --accent, so
+     what remains is telling a string from a number, and marking the schema hints as not-content. */
+  --tok-string: #0f7a45;
+  --tok-number: #8a4a00;
+  --tok-hint: #949cad;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
   --bg: #0f1115;
   --panel: #161922;
   --panel-2: #1c2029;
@@ -9,6 +42,12 @@
   --ok: #57d38c;
   --warn: #ffc857;
   --bad: #ff6b6b;
+  --scrim: rgba(0, 0, 0, 0.55);
+  --lift: 0 18px 50px rgba(0, 0, 0, 0.5);
+  --tok-string: #7ad39c;
+  --tok-number: #e0b070;
+  /* Dimmer than --dim: a hint sits ON a line of code and must lose to it at a glance. */
+  --tok-hint: #5a6274;
   color-scheme: dark;
 }
 
@@ -31,6 +70,7 @@ button {
   border-radius: 6px;
   padding: 5px 10px;
   cursor: pointer;
+  white-space: nowrap;
 }
 button:hover:not(:disabled) {
   border-color: var(--accent);
@@ -42,8 +82,26 @@ button:disabled {
 button.ghost {
   background: transparent;
 }
+button.danger {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+button.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 
-input {
+input,
+textarea,
+select {
   font: inherit;
   color: var(--text);
   background: var(--bg);
@@ -51,6 +109,22 @@ input {
   border-radius: 6px;
   padding: 5px 8px;
   width: 100%;
+  resize: vertical;
+}
+textarea {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+}
+/* A disabled field must LOOK disabled. The rule above sets `color` and `background` outright, which
+   overrides the browser's own greying — so a read-only reference (a `$ref` prompt, a computed
+   binding) rendered exactly like a box you could type into, which is the one impression it must not
+   give: the whole reason those controls are disabled is that typing would destroy the reference. */
+input:disabled,
+textarea:disabled,
+select:disabled {
+  color: var(--dim);
+  background: var(--panel-2);
+  cursor: not-allowed;
 }
 
 h2,
@@ -63,111 +137,1388 @@ h3 {
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--dim);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
+code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+}
+
+.empty {
+  color: var(--dim);
+  padding: 8px 0;
+}
+.sub {
+  color: var(--dim);
+  font-size: 11px;
+}
+.count {
+  color: var(--dim);
+  font-weight: 400;
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+.spacer {
+  flex: 1;
+}
+.ellip,
+.task-title,
+.card-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- the shell -------------------------------------------------------------
+   One rail, three views, and a strip that spans all of them. The views are
+   siblings rather than nested panes so that switching one cannot resize
+   another — the layout of Files has nothing to say about the layout of Tasks. */
 
 .app {
   display: grid;
-  grid-template-columns: 240px 1fr 380px;
+  grid-template-columns: 46px 1fr;
   height: 100vh;
+  overflow: hidden;
+}
+.body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.viewport {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.view {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+/* Each side pane is a variable the splitter beside it writes; the middle always takes the rest, so
+   dragging one edge never starves the other. The fallbacks are the widths these were before, so a
+   view still lays out if a `--pane-*` never arrives. */
+.files-view {
+  grid-template-columns: var(--pane-left, 250px) auto minmax(0, 1fr) auto var(--pane-right, 300px);
+}
+.tasks-view {
+  grid-template-columns: minmax(0, 1fr) auto var(--pane-right, 360px);
+}
+.settings-view {
+  grid-template-columns: var(--pane-left, 214px) auto minmax(0, 1fr);
 }
 
-/* --- sidebar --- */
-.sidebar {
+/* The divider itself. Six pixels of hit area over a one-pixel line — a 1px target is a target you
+   chase, and the line is what should be visible, not the grab zone. */
+.splitter {
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  flex: none;
+  /* The pointer can outrun the drag; without this the browser starts a text selection in whichever
+     pane it lands over. */
+  user-select: none;
+  touch-action: none;
+}
+.splitter::before {
+  content: "";
+  position: absolute;
+  inset: 0 2px;
+  background: var(--line);
+}
+.splitter:hover::before,
+.splitter:focus-visible::before {
+  background: var(--accent);
+}
+.splitter:focus-visible {
+  outline: none;
+}
+/* The same divider turned through ninety degrees: it separates a viewer from an editor rather than
+   two columns, so it is a wide short bar and it drags up and down. `width: auto` because a flex
+   COLUMN stretches its children across instead of down, and the 6px would otherwise be its width. */
+.splitter.horizontal {
+  width: auto;
+  height: 6px;
+  cursor: row-resize;
+}
+.splitter.horizontal::before {
+  inset: 2px 0;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.side {
   background: var(--panel);
   border-right: 1px solid var(--line);
-  padding: 14px;
-  overflow: auto;
+  padding: 12px;
+  gap: 10px;
 }
-.brand {
-  font-weight: 700;
-  font-size: 16px;
-  letter-spacing: 0.14em;
+.panel {
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  padding: 13px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
-.project {
-  color: var(--dim);
-  font-size: 11px;
-  margin: 4px 0 14px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.mid {
+  background: var(--bg);
 }
-.new-task {
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* --- activity rail --- */
+.rail {
+  background: var(--panel-2);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  gap: 3px;
+}
+.rail button {
+  width: 34px;
+  height: 34px;
   display: grid;
-  gap: 6px;
-  margin-bottom: 18px;
-}
-.tasks {
-  list-style: none;
-  margin: 0;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font-size: 15px;
+  border-radius: 6px;
   padding: 0;
 }
-.tasks li {
+.rail button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--panel);
+}
+.rail button.on {
+  color: var(--accent);
+  background: var(--panel);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.rail-brand {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+  writing-mode: vertical-rl;
+  margin-bottom: 8px;
+}
+
+/* --- the approvals strip ---
+   Never scrolls away: an agent's tool loop is blocked until one of these is answered. */
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  height: 40px;
+  flex: none;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.strip-label {
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--warn);
+  font-weight: 600;
+}
+.strip-item {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
-  border-radius: 6px;
+  cursor: pointer;
+  min-width: 0;
+  max-width: 320px;
+}
+.strip-item:hover {
+  color: var(--accent);
+}
+.strip .sep {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+  flex: none;
+}
+.strip .more {
+  margin-left: auto;
+}
+
+/* --- the file tree ---
+   Both layer roots, one after the other. Which copy of a state you are about to edit is its
+   position here, which is what replaced the layer picker. */
+.file-tree {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  font-size: 12.5px;
+}
+.tree-root {
+  color: var(--dim);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 8px 6px 4px;
+}
+.tree-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  border-radius: 5px;
   cursor: pointer;
 }
-.tasks li:hover {
+.tree-item:hover {
   background: var(--panel-2);
 }
-.tasks li.selected {
+.tree-item.sel {
   background: var(--panel-2);
   box-shadow: inset 2px 0 0 var(--accent);
 }
-.task-title {
+.tree-item.inert {
+  cursor: default;
+  color: var(--dim);
+}
+/* A base file the project overrides is inert here — struck through so that is visible rather than
+   implied by a badge alone. */
+.tree-item.shadowed {
+  opacity: 0.55;
+}
+.tree-item.shadowed .name {
+  text-decoration: line-through;
+}
+/* Lint state, worst first. The colour is on the NAME rather than the row background: a whole row
+   tinted red competes with the selection highlight, and the tree has to keep saying which file is
+   open while it says which files are broken. A directory gets the same treatment from the totals
+   below it, so a fault is visible with the branch collapsed. */
+.tree-item.has-error > .name {
+  color: var(--bad);
+}
+.tree-item.has-warning > .name {
+  color: var(--warn);
+}
+/* Not "clean" — nobody looked. Dimmed rather than coloured, because it is the absence of a
+   judgement and not a judgement. */
+.tree-item.unchecked > .name {
+  opacity: 0.6;
+  font-style: italic;
+}
+/* The redundant channel: shape as well as colour, so the marker survives a colourblind eye and a
+   row that is already highlighted by the selection. */
+.lint-dot {
+  flex: none;
+  font-size: 8px;
+  line-height: 1;
+}
+.tree-item.has-error > .lint-dot {
+  color: var(--bad);
+}
+/* Unsaved edits. The accent rather than a warning colour: a draft is work in progress, not a fault,
+   and it has to stay distinguishable from the lint dot sitting beside it on the same row. */
+.dirty-dot {
+  flex: none;
+  font-size: 8px;
+  line-height: 1;
+  color: var(--accent);
+}
+.tree-item.has-warning > .lint-dot {
+  color: var(--warn);
+}
+.tree-item .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px;
+}
+.glyph {
+  width: 13px;
+  flex: none;
+  text-align: center;
+  color: var(--dim);
+  font-size: 10px;
+}
+/* --- context menu ---
+   Fixed rather than absolute: it is anchored to a pointer position in viewport coordinates, and an
+   absolutely-positioned menu inside a scrolling panel would drift the moment the panel scrolled. */
+.context-menu {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  padding: 5px 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--lift);
+}
+.menu-item {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.menu-item:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--panel);
+}
+.menu-item:disabled {
+  color: var(--dim);
+  opacity: 1;
+}
+.menu-item.danger {
+  color: var(--bad);
+}
+.menu-item.danger:hover:not(:disabled) {
+  background: var(--bad);
+  color: var(--panel);
+}
+/* The only structure a flat menu has, so it is a real rule rather than extra padding. */
+.menu-item.sep {
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  padding-top: 8px;
+}
+
+.root-empty {
+  padding: 2px 6px 6px 19px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.new-state {
+  display: grid;
+  gap: 5px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+/* --- the middle panel's head --- */
+.doc-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 15px;
+  flex: none;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.doc-title {
+  flex: 1;
+  min-width: 0;
+}
+.state-id {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.doc-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 13px 15px;
+}
 
-/* --- board --- */
-.board {
-  padding: 14px 16px;
+/* --- the two halves of the middle panel ---
+   What the state is DOING above, what it IS below — both at once, because those are the two things
+   you look at while authoring one and a mode toggle made every glance at the config cost sight of
+   the runs.
+
+   The top half is a HEIGHT the divider between them writes, not a percentage: a board with nine
+   columns and a form with three fields want opposite splits, and no fraction is right for both.
+
+   It may still SHRINK (`0 1 auto`, not `none`), and that is the safety net the drag itself cannot
+   provide: the height outlives the window it was dragged in, so a split chosen while maximised has
+   to survive being restored. The editor below claims its 140px first — `flex-basis: 0` leaves it
+   nothing to give up — and the overflow comes out of the viewer, down to a floor. */
+.run-half {
+  flex: 0 1 auto;
+  height: var(--viewer-height, 320px);
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  /* Several viewers — a rendered prompt, a JSON tree, the effective config — are plain content with
+     no scroller of their own, and this half is now something you can deliberately make small. */
   overflow: auto;
 }
-.board-head {
+.config-half {
+  flex: 1 1 0;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 15px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  overflow: hidden;
+}
+.half-label {
+  margin: 0;
+  flex: none;
+}
+/* The editing surface fills this half and scrolls INSIDE itself, rather than the half scrolling the
+   whole surface past its own action bar. That is what puts Save and Revert in the same place on
+   every file type — see `editorChrome` — and it is why `.form` below is the scroller. */
+.config-half > .pane {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.config-half .tabs {
+  max-width: 260px;
+}
+/* A file type with no registered viewer gets no top half at all, so the editor takes the column and
+   loses the border that was separating it from something. See `FilePanel`. */
+.config-half.whole {
+  border-top: none;
+}
+
+/* --- a file's editing surface ---
+   The editor fills whatever half it was given and lets its actions sit at the bottom, rather than
+   the fixed-height box the workflow form uses: a markdown prompt is the whole point of the panel it
+   is in, and scrolling a 220px window through it is not editing. */
+.file-edit {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.file-edit > .code-editor {
+  flex: 1 1 auto;
+  min-height: 120px;
+  resize: none;
+}
+.file-edit > .pane-actions {
+  flex: none;
+}
+
+/* --- the chrome every editing surface shares ---
+   A quiet line of chrome on top, the document in the middle, the same two buttons underneath. Four
+   editors used to answer "how do I save this?" four ways, and the state form answered it worst: a
+   lone Save at the bottom of a page-long form, reachable only by scrolling past everything you had
+   just filled in. See `editorChrome.tsx`. */
+.edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  min-width: 0;
+}
+/* Sticky rather than merely last. A surface that fits its pane is unaffected — stuck and natural are
+   the same position — and one inside something that scrolls (the settings body, a form taller than
+   the panel) keeps its actions against the bottom edge instead of below the fold. The background is
+   what the text scrolls UNDER; without it the buttons sit on top of the document. */
+.pane-actions.pinned {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  flex: none;
+  margin-top: auto;
+  padding: 8px 0 0;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+/* The form is the scroller, so the bar below it never moves. Without this the whole editor grows to
+   the height of the document and the half it sits in scrolls instead — which is where the Save
+   button went. */
+.pane.editor {
+  gap: 8px;
+}
+.pane.editor > .form {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Room for the focus ring on the last control, which a scroller would otherwise clip. */
+  padding: 1px 1px 2px;
+}
+.pane.editor > .reason {
+  flex: none;
+}
+
+/* --- the schema-aware JSON editor ---
+   The bar, the suggestions and the violation list are all optional rows around the same textarea, so
+   each is `flex: none` and the editor keeps whatever is left. Without that the textarea shrinks every
+   time a violation appears, which moves the text under the cursor while you are typing. */
+/* The completion menu is positioned against this box rather than against the scrolling editor, so
+   the editor's own `overflow: hidden` cannot clip the list. */
+.schema-edit {
+  position: relative;
+}
+.schema-edit > .schema-bar,
+.schema-edit > .schema-hint,
+.schema-edit > .suggestions {
+  flex: none;
+}
+/* The editor and the field reference, side by side. A row rather than two stacked blocks: the
+   reference answers "what else belongs here?" about the line you are on, and putting it below the
+   editor meant scrolling away from that line to read the answer. */
+.schema-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+.schema-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.schema-main > .violation,
+.schema-main > .reason {
+  flex: none;
+}
+/* The width the splitter beside it writes. `flex: none` so the editor absorbs the remainder — a
+   reference that grew with its own content would push the editor narrower as you expanded a field. */
+.schema-body.with-reference > .schema-reference {
+  flex: none;
+  width: var(--reference-width, 300px);
+}
+/* `.edit-bar` supplies the row; this adds the one thing the state form's bar does not want — the
+   picker, two buttons, a verdict and a toggle do not fit a narrow panel on one line. */
+.schema-bar {
+  flex-wrap: wrap;
+}
+.schema-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.schema-pick select {
+  max-width: 200px;
+}
+.schema-hint {
+  margin-top: -4px;
+}
+
+/* --- the coloured layer, and the textarea on top of it ---
+   Every metric below is shared between `pre` and `textarea` deliberately. Any difference in font,
+   padding, border, line-height or tab-size shifts the colour out from under the characters, and the
+   drift grows with distance from the top-left corner — so it looks fine until you scroll. The one
+   metric that cannot be written once is the scrollbar gutter, which only the textarea takes: see
+   `--gutter` below. */
+.editor-stack {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 140px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.code-layer {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 8px;
+  border: 0;
+  font: 12px/1.55 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  tab-size: 2;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.code-layer.highlight {
+  /* The layer is scrolled programmatically to follow the textarea; it must never scroll itself, or
+     a stray wheel event over it would desynchronise the two. */
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--text);
+  /* The scrollbar the textarea has and this layer does not — measured there, reserved here.
+     `overflow: hidden` never takes a gutter and `overflow: auto` does, so the textarea lays its text
+     out in a box a scrollbar narrower than this one the moment the document is tall enough to
+     scroll. Under word wrap that is the whole bug: the textarea breaks two characters earlier per
+     row than the layer, the caret (which is the textarea's) stops landing on the character the layer
+     drew there, and the gap grows with every wrapped row. Padding rather than width because this
+     layer is `inset: 0` like the other, and because end-side padding counts in `scrollWidth` too —
+     which is what keeps the two in step at the right-hand end of a long line with wrap OFF. */
+  padding-right: calc(8px + var(--gutter, 0px));
+}
+.code-layer.code-input {
+  overflow: auto;
+  resize: none;
+  background: transparent;
+  /* The text is drawn by the layer below; only the caret and the selection come from here. */
+  color: transparent;
+  caret-color: var(--text);
+}
+.code-layer.code-input:focus {
+  outline: none;
+}
+.editor-stack:focus-within {
+  border-color: var(--accent);
+}
+.code-input::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.tok-key {
+  color: var(--accent);
+}
+.tok-string {
+  color: var(--tok-string);
+}
+.tok-number,
+.tok-literal {
+  color: var(--tok-number);
+}
+.tok-punct {
+  color: var(--dim);
+}
+
+/* The schema's own words for a key, at the end of its line. Dimmed and italic so it reads as
+   annotation rather than as content — and it is inside the non-interactive layer, so it can never
+   be selected, copied, or mistaken for something the file contains.
+
+   The slot is what makes the hint safe: a zero-width inline-block whose content overflows to the
+   right. Because it occupies NO width in the flow, it cannot influence where the line breaks — so
+   the coloured layer wraps exactly where the textarea does, with or without word wrap on. An
+   ordinary inline span would extend the line and wrap it one word early, and every line below it
+   would then sit one row off. Height is deliberately left natural: a zero-height box would put its
+   overflowing text below the baseline instead of on it. */
+.line-hint-slot {
+  display: inline-block;
+  width: 0;
+  overflow: visible;
+  /* `pre`, not `nowrap`: both refuse to wrap, but `nowrap` COLLAPSES whitespace, which ate the gap
+     between the code and its hint and left them touching. */
+  white-space: pre;
+}
+.line-hint {
+  color: var(--tok-hint);
+  font-style: italic;
+  /* The gap, as padding rather than literal spaces — immune to whatever the surrounding
+     `white-space` does with them. */
+  padding-left: 1.6em;
+}
+
+/* --- what sits at the caret ---
+   Same zero-width trick as the hint, and load-bearing for the same reason: anything with width here
+   would shift every character after it in the coloured layer while leaving the textarea alone. */
+.caret-slot {
+  display: inline-block;
+  width: 0;
+  overflow: visible;
+  white-space: pre;
+}
+/* Measured, never seen. Zero on both axes so it cannot disturb the line box it sits in. */
+.caret-anchor {
+  display: inline-block;
+  width: 0;
+  height: 0;
+}
+/* What Tab would write, drawn where it would land. Same grey as the schema hints, because it is the
+   same kind of thing: text the editor is offering rather than text the file contains.
+
+   NOT `.ghost` — that class is already every ghost BUTTON in the app, and a bare `.ghost` rule beats
+   the `button` selector that gives them their colour, so naming it that quietly dimmed every one of
+   them. */
+.completion-ghost {
+  color: var(--tok-hint);
+}
+
+/* --- the completion menu ---
+   Positioned from the caret marker's own measured rect, so it needs no font metrics of its own. */
+.completions {
+  position: absolute;
+  z-index: 4;
+  width: 260px;
+  max-height: 184px;
+  overflow-y: auto;
+  margin-top: 2px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: var(--lift);
+  font-size: 12px;
+}
+/* Flipped above the caret when the editor has no room below it. */
+.completions.above {
+  transform: translateY(-100%);
+  margin-top: -4px;
+}
+.completions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}
+.completions ul {
+  list-style: none;
+  margin: 0;
+  padding: 2px;
+}
+.completions li {
   display: flex;
   align-items: baseline;
-  gap: 10px;
-  margin-bottom: 12px;
+  gap: 7px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
 }
-.crumbs {
+.completions li.on {
+  background: var(--panel-2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.completion-key {
+  font-size: 12px;
+  color: var(--accent);
+  flex: none;
+}
+.completion-key .star {
+  color: var(--warn);
+  padding-right: 3px;
+}
+.completion-type {
+  flex: none;
+  opacity: 0.8;
+}
+.completions-more {
+  padding: 3px 8px 5px;
+  border-top: 1px solid var(--line);
+}
+
+/* Word wrap, applied to both layers at once so they can never disagree about it. */
+.editor-stack.wrap .code-layer {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.editor-stack.wrap .code-layer.code-input {
+  overflow-x: hidden;
+}
+
+/* Suggestions read left-to-right as one sentence: where you are, then what may go there. */
+.suggestions {
   display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 2px 0;
+}
+.chip-key {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+}
+.chip-key:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* Required after the environment merge — see SchemaEntry.expected. Marked, not enforced. */
+.chip-expected {
+  border-color: var(--accent);
+}
+.violation b {
+  font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+.schema-reference {
+  padding-left: 10px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.schema-reference h4 {
+  margin: 0 0 4px;
+}
+/* Wider term column than the default `.kv`: these are field NAMES, and `contentMediaType` does not
+   fit in 72px. */
+.schema-fields {
+  grid-template-columns: minmax(118px, auto) minmax(0, 1fr);
+}
+.schema-fields dt {
+  padding-top: 3px;
+  /* Field names must not break mid-word — `contentMediaType` split across two lines reads as two
+     fields. Keeping them whole is also what lets the `auto` track size itself to the longest one. */
+  white-space: nowrap;
+}
+.schema-fields dd {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+/* The disclosure sits in the term column and must read as the field name, not as a control bolted
+   beside it — so it borrows `.link`'s bare styling and keeps the monospace name inside. */
+.disclose {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+}
+/* A nested block spans both columns and indents under the field that opened it. */
+.schema-fields > dd.nested {
+  grid-column: 1 / -1;
+  display: block;
+  margin: 2px 0 6px 10px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+.schema-fields > dd.nested > .kv {
+  margin: 2px 0 0;
+}
+
+/* --- rendered markdown ---
+   A prompt, as the model will be shown it. Sized down from the document defaults because this is a
+   preview inside a panel, not a page: full-size h1s would push the first paragraph off screen. */
+.markdown {
+  padding: 2px 2px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+.markdown > :first-child {
+  margin-top: 0;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 16px 0 6px;
+  line-height: 1.3;
+}
+.markdown h1 {
+  font-size: 18px;
+}
+.markdown h2 {
+  font-size: 15px;
+}
+.markdown h3,
+.markdown h4 {
+  font-size: 13px;
+}
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown table {
+  margin: 0 0 10px;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: 20px;
+}
+.markdown li {
+  margin: 2px 0;
+}
+.markdown code {
+  font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 3px;
+}
+.markdown pre {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  margin: 0 0 10px;
+}
+.markdown pre code {
+  border: none;
+  background: none;
+  padding: 0;
+}
+.markdown blockquote {
+  border-left: 3px solid var(--line);
+  padding-left: 10px;
+  color: var(--dim);
+}
+.markdown table {
+  border-collapse: collapse;
+}
+.markdown th,
+.markdown td {
+  border: 1px solid var(--line);
+  padding: 3px 7px;
+  text-align: left;
+}
+.markdown hr {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 14px 0;
+}
+.markdown a {
+  color: var(--accent);
+}
+.markdown img {
+  max-width: 100%;
+}
+
+/* --- a structured document, read rather than edited ---
+   Indentation carries the nesting, and the guide line is what keeps a deep object legible when the
+   keys are short enough that the indent alone is easy to lose. */
+.doc-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 13px;
+  font: 12px/1.7 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  border-left: 1px solid var(--line);
+}
+.doc-tree.doc-root {
+  padding-left: 0;
+  border-left: none;
+}
+.doc-tree li {
+  white-space: nowrap;
+}
+.doc-key {
+  color: var(--dim);
+}
+.doc-key::after {
+  content: ":";
+  padding-right: 5px;
+}
+.doc-value {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.doc-string {
+  color: var(--accent);
+}
+.doc-number,
+.doc-boolean {
+  color: var(--text);
+}
+.doc-null {
+  color: var(--dim);
+}
+.config-effective {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 2px 10px;
+}
+
+/* --- input/output slot tables --- */
+.slots {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+/* A block's CONTENTS, set in from the heading that names them. A form of a dozen tables with every
+   row flush to one left edge gives no clue where one block ends and the next begins — the rule and
+   the heading say "new block" and the indent says "and this is still inside it". */
+.slots > :not(.slots-head) {
+  margin-left: 11px;
+}
+.slots-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 600;
+}
+/* The block's NAME, at full contrast. The heading line also carries a hint and a button, and when
+   all three were the same dim grey the one word that says what you are looking at had no more
+   weight than the aside beside it.
+   Direct children only: the same heading is reused one level down for a child's wiring, and a
+   nested block whose title shouts as loudly as the block containing it is the flat hierarchy this
+   is trying to undo. */
+.slots > .slots-head > span:first-child {
+  color: var(--text);
+}
+/* The type column is no longer a fixed 76px: it held a bare `kind` select, and now holds a type, a
+   `list of` toggle, and an artifact's media type. It gets a share of the row rather than a width. */
+.slot-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1.4fr) auto;
+  gap: 5px;
+  align-items: center;
+}
+.slot-row.with-optional {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1.4fr) auto auto;
+}
+/* Column headers. Three text boxes in a row look interchangeable, and the one that decides where a
+   value COMES FROM was the one with nothing but a placeholder to say so. */
+.slot-row.slot-head {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  padding-bottom: 1px;
+}
+.slot-row.slot-head > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.slot-type {
+  display: flex;
+  align-items: center;
   gap: 4px;
+  min-width: 0;
+}
+.slot-type select {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.slot-type .media-type {
+  flex: 1 1 60px;
+  min-width: 0;
+}
+/* A slot or child and the disclosure beneath it, kept together so the pair reads as one entry. */
+.slot-group {
+  display: grid;
+  gap: 3px;
+  padding-bottom: 4px;
+}
+.slot-group + .slot-group {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+/* Anything nested under a row BELONGS to that row: a slot's default and description, a child's
+   wiring and its per-mount environment. Indented past the row's first control and tied to it by a
+   rule down the left, because the content was previously flush with the row above it and read as
+   the next thing in the table rather than as part of the entry it configures. */
+.slot-group > .slot-more,
+.slot-group > .bindings {
+  margin-left: 8px;
+  padding-left: 9px;
+  /* --line is the colour of a divider between blocks; this rule has to be readable ON one of those
+     blocks, including the filled card a child sits in, so it is the dim TEXT colour held back
+     rather than the hairline again. */
+  border-left: 2px solid color-mix(in srgb, var(--dim) 30%, transparent);
+}
+/* One CHILD is a card. The children table is a list whose entries are three lines tall — a row, its
+   wiring, its environment — and a hairline between them is not enough to say where one stops. */
+.slots.children > .slot-group {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 7px;
+  background: var(--panel-2);
+}
+.slots.children > .slot-group + .slot-group {
+  margin-top: 6px;
+  padding-top: 6px;
+}
+/* Inside a card the padding already supplies most of the step in, so the indent is smaller — the
+   rule down the left is doing the work of saying what belongs to what. */
+.slots.children > .slot-group > .bindings,
+.slots.children > .slot-group > .slot-more {
+  margin-left: 4px;
+}
+/* The second rank of a row: a slot's default and description, a child's environment. Closed by
+   default so a slot that needs none of it costs one line, open when it has any. */
+.slot-more > summary {
+  font-size: 10.5px;
+  color: var(--dim);
+  cursor: pointer;
+  list-style: none;
+  padding: 1px 0 1px 12px;
+  position: relative;
+}
+.slot-more > summary::before {
+  content: "▸";
+  position: absolute;
+  left: 2px;
+  font-size: 8px;
+  top: 4px;
+}
+.slot-more[open] > summary::before {
+  content: "▾";
+}
+.slot-more > *:not(summary) {
+  margin-top: 4px;
+}
+/* A disclosure holds what is OPTIONAL. Its summary says so in the same dim voice as the hint beside
+   it, rather than competing with the block headings for attention. */
+.slot-more > summary .sub {
+  font-size: inherit;
+}
+/* Several controls sharing one line — a session mode and its name, limits side by side. */
+.row-controls {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  min-width: 0;
+}
+.row-controls > * {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.row-controls .field {
+  flex: 1 1 0;
+}
+.bindings {
+  display: grid;
+  gap: 3px;
+}
+.slot-row.binding-row {
+  grid-template-columns: minmax(0, 1fr) 14px minmax(0, 1.4fr) auto;
+}
+.slot-row.permission-row {
+  grid-template-columns: minmax(0, 1fr) 92px auto;
+}
+/* A checkbox on its own line, where the label is a sentence rather than a column heading. */
+.slot-opt.wide {
+  font-size: 11px;
+}
+/* The call's own knobs, folded away: they are many, they are rarely touched, and they are not what
+   the operation IS. */
+.model-knobs > summary {
+  font-size: 11px;
+  color: var(--dim);
+  cursor: pointer;
+  padding: 4px 0;
+}
+.model-knobs[open] {
+  border-left: 2px solid var(--line);
+  padding-left: 8px;
+  margin-left: 2px;
+}
+/* --- links (WORKFLOWS.md §2.2) ---------------------------------------------
+   A value held in a file rather than inline. The toggle sits beside the field's own label, so the
+   choice reads as a property of the field rather than as another control competing with it. */
+.link-toggle {
+  font-size: 10px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  opacity: 0.7;
+}
+.link-toggle:hover {
+  opacity: 1;
+}
+.link-toggle.on {
+  opacity: 1;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.link-input {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px;
+}
+/* Advisory only — the linter probes the search path and has the final word. Bordered rather than
+   filled, so a path being typed is not shouted at one character at a time. */
+.link-input.unresolved {
+  border-color: var(--warn);
+}
+.sub.warn {
+  color: var(--warn);
+}
+.slot-type.linked {
+  gap: 3px;
+}
+.slot-type.linked .link-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* An output whose empty binding MEANS something (§3.3: no binding ⇒ the operation produces it).
+   Dimmed and italic rather than left looking like a box someone forgot to fill in — the state of
+   affairs it describes is correct, so it must not read as an omission. */
+.binding-produced::placeholder {
+  font-style: italic;
+  opacity: 0.85;
+}
+/* A required child input with nothing bound to it. The state does not lint, and this is where that
+   is decided — so the row says so here rather than only in the lint panel after a save. */
+.slot-row.binding-row.unwired input {
+  border-color: var(--warn);
+}
+/* A schema the type picker does not model, shown as a summary. Monospace because it is a fragment of
+   the document, and truncated rather than wrapped so one rich slot cannot double the row height. */
+.slot-type-custom {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
+}
+/* Children carry a run-order number and a reorder pair; transitions carry the arrow instead. */
+.slot-row.child-row {
+  grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1.3fr) auto auto auto auto;
+}
+.slot-row.transition-row {
+  grid-template-columns: minmax(0, 1.4fr) 14px minmax(0, 1fr) auto auto;
+}
+.slot-row .seq {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10px;
+  color: var(--dim);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.slot-row .arrow {
+  color: var(--dim);
+  text-align: center;
+}
+.reorder {
+  display: flex;
+  gap: 2px;
+}
+.reorder button {
+  padding: 2px 5px;
+  line-height: 1;
+}
+/* The hint sits beside "+ Add" rather than centred, which is where space-between would put it. */
+.slots-head .sub {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+.slot-row input,
+.slot-row select {
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.slot-opt {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.slot-opt input {
+  width: auto;
+  margin: 0;
+}
+button.sm {
+  padding: 2px 7px;
+  font-size: 11px;
+}
+
+/* --- board --- */
+.path-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px;
+  flex: none;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
 }
 .crumb {
   background: none;
   border: none;
-  padding: 2px 4px;
+  padding: 2px 5px;
   color: var(--accent);
+  border-radius: 5px;
 }
-.level-label {
+.crumb.last {
+  color: var(--text);
+  font-weight: 600;
+  cursor: default;
+}
+.crumb-part {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.crumb-sep {
   color: var(--dim);
+}
+
+.board-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: auto;
+  padding: 13px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 .columns {
   display: flex;
-  gap: 12px;
+  gap: 11px;
   align-items: flex-start;
 }
 .column {
   flex: 1 1 0;
-  min-width: 180px;
+  min-width: 170px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 10px;
+  cursor: pointer;
+}
+.column:hover {
+  border-color: var(--accent);
 }
 .column h4 {
   font-size: 12px;
   color: var(--dim);
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
 }
-.count {
-  color: var(--dim);
+/* The sequence number is the order the children RUN in. Absent at the root listing, where the
+   columns are workflow roots and have no order relative to each other. */
+.column h4 .seq {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 4px;
+  flex: none;
+  font-variant-numeric: tabular-nums;
 }
+.col-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-weight: 600;
+}
+
 .card {
   background: var(--panel-2);
   border: 1px solid var(--line);
@@ -176,11 +1527,15 @@ h3 {
   margin-bottom: 8px;
   cursor: pointer;
 }
+.card:last-child {
+  margin-bottom: 0;
+}
 .card:hover {
   border-color: var(--accent);
 }
 .card-selected {
   border-color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .card-head {
   display: flex;
@@ -189,9 +1544,6 @@ h3 {
 }
 .card-title {
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .card-meta {
   color: var(--dim);
@@ -205,9 +1557,6 @@ h3 {
   margin-left: auto;
   color: var(--accent);
 }
-.tray {
-  margin-top: 16px;
-}
 .tray h4 {
   font-size: 11px;
   color: var(--dim);
@@ -220,28 +1569,238 @@ h3 {
   flex-wrap: wrap;
 }
 .tray-cards .card {
-  width: 220px;
+  width: 210px;
   margin: 0;
 }
 
-/* --- detail panel --- */
-.panel {
-  background: var(--panel);
-  border-left: 1px solid var(--line);
-  padding: 14px;
-  overflow: auto;
+/* --- a leaf state: its tasks, and the conversation inside one --- */
+.leaf {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
 }
+.leaf-list {
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  padding: 11px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.leaf-list h3 {
+  margin: 6px 0 4px;
+}
+.leaf-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.leaf-row:hover {
+  background: var(--panel-2);
+}
+.leaf-row.sel {
+  background: var(--panel-2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.leaf-convo {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.convo {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  padding: 12px 14px;
+  gap: 8px;
+}
+.turns {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.turn {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 0 10px;
+  align-items: start;
+}
+.turn .role {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  text-align: right;
+  padding-top: 2px;
+}
+.turn-body {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12.5px;
+}
+.turn-state,
+.turn-tool {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  color: var(--accent);
+}
+.turn-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.turn-data {
+  color: var(--dim);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+.turn-tool .turn-text,
+.turn-tool {
+  color: var(--dim);
+}
+.turn-policy .turn-text {
+  color: var(--bad);
+}
+.turn-bad .turn-text {
+  color: var(--bad);
+}
+.turn-output .turn-body {
+  color: var(--ok);
+}
+/* Pinned rather than in the flow: it is the one turn that is not history, and scrolling away from
+   the thing blocking the run is exactly the wrong behaviour. */
+.waiting-on {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--warn);
+  flex: none;
+}
+
+/* --- the inspector --- */
+.inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.inspector section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.insp-crumb {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+.kv {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+.kv dt {
+  color: var(--dim);
+}
+.kv dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.transitions {
+  display: flex;
+  flex-direction: column;
+}
+.trans-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 14px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10.5px;
+}
+.trans-row:first-child {
+  border-top: 1px solid var(--line);
+}
+.trans-row .when,
+.trans-row .to {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trans-row .arrow {
+  color: var(--dim);
+}
+.trans-row .to {
+  color: var(--accent);
+}
+.children {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 12px;
+  display: grid;
+  gap: 3px;
+}
+.children li::marker {
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.refs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+}
+.refs li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+/* --- task detail --- */
 .detail header .sub {
   color: var(--dim);
   font-size: 11px;
 }
 .detail h2 {
   font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .actions {
   display: flex;
   gap: 6px;
   margin: 10px 0 4px;
+  flex-wrap: wrap;
 }
 .detail section {
   margin-top: 16px;
@@ -249,15 +1808,12 @@ h3 {
 .path {
   font-family: ui-monospace, Consolas, monospace;
   font-size: 11px;
-  color: var(--text);
+  overflow-wrap: anywhere;
 }
-.tree,
-.runs {
+.tree {
   list-style: none;
   margin: 0;
   padding-left: 12px;
-}
-.tree {
   border-left: 1px solid var(--line);
 }
 .tree-row {
@@ -265,6 +1821,7 @@ h3 {
   align-items: center;
   gap: 5px;
   padding: 2px 0;
+  flex-wrap: wrap;
 }
 .tree-label {
   font-family: ui-monospace, Consolas, monospace;
@@ -273,17 +1830,6 @@ h3 {
 .superseded > .tree-row {
   opacity: 0.45;
   text-decoration: line-through;
-}
-.chip {
-  font-size: 10px;
-  color: var(--dim);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 0 6px;
-}
-.reason {
-  color: var(--bad);
-  font-size: 11px;
 }
 .stream,
 .outputs {
@@ -298,11 +1844,33 @@ h3 {
   white-space: pre-wrap;
   margin: 0;
 }
-.empty {
-  color: var(--dim);
-}
 
-/* --- badges --- */
+/* --- chips, badges, notices --- */
+.chip {
+  font-size: 10px;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 6px;
+  white-space: nowrap;
+  flex: none;
+}
+.chip-ok {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.chip-bad {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+.chip-warn {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.reason {
+  color: var(--bad);
+  font-size: 11px;
+}
 .badge {
   display: inline-flex;
   width: 16px;
@@ -329,13 +1897,381 @@ h3 {
   color: var(--dim);
 }
 
+/* Standing context, not an error: says what a surface reaches, or what is wrong with it. */
+.notice {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-size: 11px;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.notice.warn {
+  border-left-color: var(--warn);
+  color: var(--warn);
+}
+.notice.bad {
+  border-left-color: var(--bad);
+  color: var(--bad);
+}
+/* An issue you can follow to the control it is about. A button, not a div, so it is reachable by
+   keyboard — but it keeps the notice's shape, because it is still the same sentence. */
+button.notice.clickable {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  /* `button` sets nowrap, and a diagnostic is a sentence: without this the message runs off the
+     panel and the half that says what is wrong is the half that leaves. */
+  white-space: normal;
+}
+button.notice.clickable:hover {
+  background: var(--panel);
+  border-color: currentColor;
+}
+.warn-text {
+  color: var(--warn);
+}
+
+/* --- what failed validation ---
+   The BOX holding the bad value, not the row or the table around it: a container outline says one
+   of these is wrong without saying which, and `has-error` already belongs to the file tree.
+   Border-colour is what `.unwired` and `.link-input.unresolved` already use for the same statement,
+   so a lint error and the form's own warnings read as one language rather than two. */
+/* Two pixels rather than one. A box that is merely focused or merely hovered already moves its
+   border colour, so a 1px red read as one more state of an ordinary box; doubled, it is the only
+   thing on the row with weight. `box-sizing: border-box` is global, so the extra pixel comes out of
+   the padding and nothing reflows as an error appears or clears under the cursor. */
+.issue-bad {
+  border-color: var(--bad);
+  border-width: 2px;
+}
+.issue-warn {
+  border-color: var(--warn);
+  border-width: 2px;
+}
+/* A type the picker shows READ-ONLY — a link, a spread, a schema beyond the vocabulary — has no
+   border to thicken, so it takes the weight in the text itself. */
+span.issue-bad {
+  color: var(--bad);
+  font-weight: 600;
+}
+span.issue-warn {
+  color: var(--warn);
+  font-weight: 600;
+}
+/* A box already saying something in the form's own voice — an unresolved link, a required wire with
+   nothing in it — that the linter has now called an ERROR. The lint wins: it is the same complaint
+   one stage later, with the loader behind it rather than a guess from the tree. */
+.slot-row.binding-row.unwired input.issue-bad,
+.link-input.unresolved.issue-bad {
+  border-color: var(--bad);
+}
+/* Where you just arrived from the inspector. One second, then gone: it answers "which one?" and has
+   nothing to say after that — the outline is what remains, because that is the standing fact. */
+@keyframes issue-flash {
+  0%,
+  55% {
+    background: color-mix(in srgb, var(--accent) 26%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+.issue-flash {
+  animation: issue-flash 1s ease-out;
+  border-radius: 4px;
+}
+/* One `operation`/`environment` block. It exists so the block has an element of its own to be
+   marked and scrolled to; it repeats the form's own column and gap so wrapping its fields in it
+   changes nothing about how they sit. `display: contents` would have been the smaller change and is
+   wrong here: an element with no box cannot be outlined or scrolled into view. */
+.op-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* --- new task popover ---
+   Creating a task is an act, not a state; three inputs parked in the chrome are three inputs in the
+   way of everything else. */
+.new-task-wrap {
+  position: relative;
+}
+.new-task-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  width: 320px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--lift);
+}
+
+/* --- settings --- */
+.sections {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.sections li {
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.sections li:hover {
+  background: var(--panel-2);
+}
+.sections li.sel {
+  background: var(--panel-2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.settings-body {
+  padding: 14px 16px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.pane-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.project {
+  color: var(--dim);
+  font-size: 11px;
+  margin-top: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prune-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--dim);
+}
+.prune-controls label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.prune-controls input {
+  width: 56px;
+}
+.prune-report {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  padding: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+.pane-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.field {
+  display: grid;
+  gap: 4px;
+}
+.field > span {
+  font-size: 11px;
+  color: var(--dim);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+/* A label beside its box rather than above it. Worth a rule of its own because a stacked label costs
+   a whole line for two words, and a form of them is mostly labels. Kept for the SHORT ones — a slot
+   table's column headings still sit above, where they name four boxes at once. */
+.field.inline {
+  grid-template-columns: 78px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.field.inline > span {
+  text-align: right;
+}
+.identity {
+  display: grid;
+  gap: 5px;
+}
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tabs,
+.layer-picker {
+  display: flex;
+  gap: 4px;
+}
+.tabs button,
+.layer-picker button {
+  flex: 1;
+}
+/* The editor's one line of chrome: the path, whether this is the shared copy, and the view switch.
+   See the comment on it in `stateEditor` — three standing facts, one row. The row itself is
+   `.edit-bar`, shared with the JSON editor's schema bar. */
+.editor-top {
+  min-width: 0;
+}
+.editor-top > .file-path {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* A segmented switch rather than two buttons the width of the pane. Form/JSON is a two-way choice
+   between two views of one file, and a pane-wide pair claimed the emphasis of a primary action. */
+.tabs.seg {
+  flex: none;
+  gap: 0;
+}
+.tabs.seg button {
+  flex: none;
+  padding: 2px 11px;
+  font-size: 11px;
+  border-radius: 0;
+}
+.tabs.seg button:first-child {
+  border-radius: 5px 0 0 5px;
+}
+.tabs.seg button:last-child {
+  border-radius: 0 5px 5px 0;
+  margin-left: -1px;
+}
+/* A layer switch. The selected side is filled, because "which file am I about to write?" must be
+   readable at a glance rather than inferred from a subtle border. */
+button.layer-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--panel);
+  font-weight: 600;
+}
+/* A long absolute path in a narrow column. `direction: rtl` puts the ellipsis at the START, so the
+   filename — the part that identifies it — stays visible instead of the drive letter. */
+.file-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.code-editor {
+  font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  tab-size: 2;
+}
+.code-editor.tall {
+  min-height: 340px;
+}
+
+/* --- executors --- */
+.executors {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.executors > li {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px;
+  background: var(--panel-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* A disabled executor stays fully legible — it is dimmed, not hidden, or there would be no way to
+   turn it back on. */
+.executors > li.off {
+  opacity: 0.62;
+}
+.exec-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.exec-head .task-title {
+  flex: 1;
+}
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  cursor: pointer;
+}
+.toggle input {
+  width: auto;
+  margin: 0;
+}
+.chip-dim {
+  color: var(--dim);
+}
+.credential {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-start;
+}
+.key-entry {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px;
+  width: 100%;
+}
+.key-entry input {
+  grid-column: 1 / -1;
+}
+.editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+/* A flex item will not shrink below its content's intrinsic width without this, so an absolute
+   path — which has no break opportunities — pushes the whole column wide. */
+.editor-head > div {
+  min-width: 0;
+}
+
 /* --- interaction modal + toast --- */
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--scrim);
   display: grid;
   place-items: center;
+  z-index: 50;
 }
 .modal {
   background: var(--panel);
@@ -343,29 +2279,24 @@ h3 {
   border-radius: 12px;
   padding: 18px;
   min-width: 380px;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  max-width: min(720px, 90vw);
+  box-shadow: var(--lift);
 }
 .modal h3 {
   font-size: 14px;
   text-transform: none;
   letter-spacing: 0;
   color: var(--text);
+  display: block;
 }
 .options {
   display: flex;
   gap: 8px;
   margin-top: 14px;
+  flex-wrap: wrap;
 }
 .modal .field {
-  display: grid;
-  gap: 4px;
   margin-top: 12px;
-}
-.modal .field > span {
-  font-size: 11px;
-  color: var(--dim);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 .modal .field small {
   color: var(--dim);
@@ -374,29 +2305,6 @@ h3 {
   width: auto;
   justify-self: start;
 }
-textarea,
-select {
-  font: inherit;
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 6px 8px;
-  width: 100%;
-  resize: vertical;
-}
-textarea {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12px;
-}
-button.danger {
-  border-color: #5c2b2b;
-  color: #ffb4b4;
-}
-button.danger:hover {
-  border-color: var(--bad);
-}
-
 /* The artifact preview inside review_artifact. */
 .artifact {
   background: var(--bg);
@@ -410,7 +2318,6 @@ button.danger:hover {
   font-family: ui-monospace, Consolas, monospace;
   font-size: 12px;
 }
-
 /* The policy explanation on an approval dialog — informational, not an error. */
 .reason-note {
   color: var(--warn);
@@ -418,113 +2325,17 @@ button.danger:hover {
   margin: 10px 0 0;
 }
 
-/* --- approvals inbox --- */
-.inbox {
-  margin-bottom: 16px;
-  padding: 8px;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-}
-.inbox h3 {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 6px;
-  color: var(--warn);
-}
-.inbox ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.inbox li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.inbox li:hover,
-.inbox li.selected {
-  background: var(--panel);
-}
-
-/* --- workflow browser + history (DESIGN §11.1, SPEC §13) --- */
-.workflows,
-.history {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-}
-.workflows h3,
-.history h3 {
-  margin-bottom: 6px;
-}
-.workflows ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.wf-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.wf-row:hover {
-  background: var(--panel-2);
-}
-.workflows li.lint-error .badge {
-  color: var(--bad);
-}
-.workflows li.lint-warn .badge {
-  color: var(--warn);
-}
-.wf-detail {
-  padding: 4px 6px 8px 24px;
-  display: grid;
-  gap: 3px;
-}
-.prune-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 8px 0;
-  font-size: 11px;
-  color: var(--dim);
-}
-.prune-controls label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.prune-controls input {
-  width: 48px;
-}
-.prune-report {
-  display: grid;
-  gap: 6px;
-  justify-items: start;
-  padding: 8px;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-}
-
 .toast {
   position: fixed;
-  bottom: 16px;
+  bottom: 52px;
   left: 50%;
   transform: translateX(-50%);
   background: var(--bad);
-  color: #1b0f0f;
+  color: #fff;
   font-weight: 600;
   padding: 8px 14px;
   border-radius: 8px;
   cursor: pointer;
   max-width: 70vw;
+  z-index: 60;
 }

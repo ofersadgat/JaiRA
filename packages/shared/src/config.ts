@@ -26,6 +26,34 @@ export interface JairaModelConfig {
 export type JairaExecEnvironment = "windows" | { wsl: string };
 
 /**
+ * What every executor has in common, whatever adapter drives it.
+ *
+ * `enabled: false` takes the runtime out of the registry entirely, so a state naming it fails as an
+ * unregistered function. That is deliberately louder than registering a disabled stub that refuses
+ * at call time: a workflow which cannot run in this project should say so before it starts, not
+ * halfway through.
+ *
+ * `credential` names a SECRET, never holds one. The value is resolved at run time through the
+ * lookup chain (OS keychain, then `.env.local`/`.env` beside the project, then the same two in the
+ * base root, then the process environment), because `config.json` is committed source and a key in
+ * it is a key in everyone's checkout.
+ */
+export interface JairaExecutorConfig {
+  enabled?: boolean;
+  credential?: string;
+}
+
+/** The built-in executors, by the registry name a state's `functionRef` uses. */
+export const BUILTIN_EXECUTORS = ["claude-code", "claude-cli", "codex-cli"] as const;
+export type BuiltinExecutor = (typeof BUILTIN_EXECUTORS)[number];
+
+/** Settings for the two built-in Claude adapters (SDK and CLI). */
+export interface JairaClaudeAgentConfig extends JairaExecutorConfig {
+  /** Path to the binary. CLI adapter only; default `claude` on PATH. */
+  command?: string;
+}
+
+/**
  * A non-Claude coding-agent CLI (DESIGN §8.1's `generic-cli`, §16).
  *
  * Registered by `@jaira/runtime`'s `registerGenericAgents` and driven through
@@ -34,7 +62,7 @@ export type JairaExecEnvironment = "windows" | { wsl: string };
  * capability gate refuses it under a policy that can require approval rather than
  * letting it run unguarded.
  */
-export interface JairaGenericCliAgent {
+export interface JairaGenericCliAgent extends JairaExecutorConfig {
   /** Registry name a state's `functionRef` uses. Default `generic-cli`. */
   name?: string;
   /** The executable. */
@@ -57,7 +85,7 @@ export interface JairaGenericCliAgent {
  * it under any policy that can ask a human, where codex has a real up-front channel
  * — its sandbox — and so declares `policyEnforcement: "config"`.
  */
-export interface JairaCodexAgentConfig {
+export interface JairaCodexAgentConfig extends JairaExecutorConfig {
   /** The executable. Default: `codex` on PATH. */
   command?: string;
   /**
@@ -75,6 +103,10 @@ export interface JairaAgentConfig {
   genericCli?: JairaGenericCliAgent[];
   /** Settings for the built-in `codex-cli` runtime. */
   codex?: JairaCodexAgentConfig;
+  /** Settings for the built-in `claude-code` runtime (the in-process SDK adapter). */
+  claudeCode?: JairaClaudeAgentConfig;
+  /** Settings for the built-in `claude-cli` runtime (the subprocess adapter). */
+  claudeCli?: JairaClaudeAgentConfig;
 }
 
 /**
@@ -126,22 +158,39 @@ export interface JairaWorkflowConfig {
   /**
    * The ordered roots a BARE reference is searched along — shell `PATH` semantics, first match wins.
    *
-   * Entries may use the `$JAIRA` / `$PROJECT` roots or be absolute; they may NOT be bare, or
-   * resolving the path would need the path. A subtree overrides or extends this through an
+   * Entries may use the `$JAIRA` / `$PROJECT` / `$BASE` roots or be absolute; they may NOT be bare,
+   * or resolving the path would need the path. A subtree overrides or extends this through an
    * `environment.path`, spliced with `"$INHERITED"`.
    *
-   * The FIRST entry is special: only a file found under it keeps a bare state id. Anything found
-   * further along canonicalizes to an absolute id, which is what keeps two files at two entries from
-   * colliding on the one thing that keys the snapshot hash and the event log.
+   * A file found at ANY entry keeps its bare state id, so an earlier entry OVERRIDES a later one
+   * rather than sitting beside it: that is how a project customizes a workflow it gets from the
+   * shared base root. A state id is a RELATIVE PATH resolved against this list, exactly as a bare
+   * command name resolves against a shell's `PATH` — it has always needed a project to mean
+   * anything, and within one resolution it still names exactly one file.
+   *
+   * **Absent is the normal case**, and it means "the layers, in order": the path is generated from
+   * `jairaPaths().roots` by `workflowSearchPath`. Setting it is an override for a project that
+   * needs something the layer model does not express — and it replaces the generated list rather
+   * than extending it, so a project that sets it takes on naming every root it wants.
    */
-  path: string[];
+  path?: string[];
 }
 
 /**
- * `$JAIRA/workflows` first, so today's ids are unchanged; `$JAIRA/functions` after it, as the home
- * for built-in and project-defined operations a bare name can reach.
+ * The default search path is **generated**, not written down: `jairaPaths().roots` is the one list,
+ * and `workflowSearchPath` derives `<root>/workflows` + `<root>/functions` from it. An absent
+ * `config.workflows.path` therefore means "the layers, in order", and adding a layer cannot leave a
+ * hand-maintained constant behind.
+ *
+ * This constant remains only as the SPELLING of that default, for a UI that wants to show a user
+ * what they are overriding. Nothing resolves against it.
  */
-export const DEFAULT_WORKFLOW_PATH = ["$JAIRA/workflows", "$JAIRA/functions"];
+export const DEFAULT_WORKFLOW_PATH_SPELLING = [
+  "$JAIRA/workflows",
+  "$JAIRA/functions",
+  "$BASE/workflows",
+  "$BASE/functions",
+];
 
 export const DEFAULT_ARTIFACT_DIR = "jaira-artifacts";
 
@@ -171,7 +220,7 @@ export function defaultConfig(): JairaConfig {
     execEnvironment: "windows",
     policy: {},
     agents: {},
-    workflows: { path: [...DEFAULT_WORKFLOW_PATH] },
+    workflows: {},
   };
 }
 
@@ -182,12 +231,12 @@ export function defaultConfig(): JairaConfig {
  * entry would itself need the path to resolve.
  */
 function parseWorkflows(raw: unknown): JairaWorkflowConfig {
-  if (raw === undefined) return { path: [...DEFAULT_WORKFLOW_PATH] };
+  if (raw === undefined) return {};
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error("config.workflows must be an object");
   }
   const list = (raw as Record<string, unknown>)["path"];
-  if (list === undefined) return { path: [...DEFAULT_WORKFLOW_PATH] };
+  if (list === undefined) return {};
   if (!Array.isArray(list) || list.length === 0) {
     throw new Error("config.workflows.path must be a non-empty array");
   }
@@ -197,8 +246,8 @@ function parseWorkflows(raw: unknown): JairaWorkflowConfig {
     }
     if (!entry.startsWith("$") && !/^([a-zA-Z]:)?[/\\]/.test(entry)) {
       throw new Error(
-        `config.workflows.path[${i}] ('${entry}') must be rooted ($JAIRA/…, $PROJECT/…) or absolute — ` +
-          `a bare entry would need the path to resolve itself`,
+        `config.workflows.path[${i}] ('${entry}') must be rooted ($JAIRA/…, $PROJECT/…, $BASE/…) or ` +
+          `absolute — a bare entry would need the path to resolve itself`,
       );
     }
     return entry;
@@ -262,14 +311,56 @@ function parseArtifacts(raw: unknown, artifactDir: string): JairaArtifactConfig 
  * "unregistered function" or runs the wrong binary, and both are worse than a
  * config error naming the field.
  */
+/**
+ * Validate the `enabled` / `credential` pair every executor shares.
+ *
+ * `credential` is checked to be a plain name because it is looked up as one. Accepting a value that
+ * *looks* like a key here would be the single easiest way to end up with a secret committed in
+ * `config.json`, so a string containing whitespace is refused with the reason spelled out.
+ */
+function checkExecutorFields(spec: Record<string, unknown>, where: string): void {
+  if (spec["enabled"] !== undefined && typeof spec["enabled"] !== "boolean") {
+    throw new Error(`${where}.enabled must be a boolean`);
+  }
+  const credential = spec["credential"];
+  if (credential === undefined) return;
+  if (typeof credential !== "string" || credential.length === 0) {
+    throw new Error(`${where}.credential must be a non-empty string`);
+  }
+  if (/\s/.test(credential)) {
+    throw new Error(
+      `${where}.credential ('${credential}') must NAME a secret, not hold one — the value is looked up ` +
+        `at run time from the keychain, a .env file, or the environment`,
+    );
+  }
+}
+
+function parseClaudeAgent(raw: unknown, where: string): JairaClaudeAgentConfig | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${where} must be an object`);
+  const spec = raw as Record<string, unknown>;
+  checkExecutorFields(spec, where);
+  if (spec["command"] !== undefined && (typeof spec["command"] !== "string" || spec["command"].length === 0)) {
+    throw new Error(`${where}.command must be a non-empty string`);
+  }
+  return spec as JairaClaudeAgentConfig;
+}
+
 function parseAgents(raw: unknown): JairaAgentConfig {
   if (raw === undefined) return {};
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error("config.agents must be an object");
   }
   const codex = parseCodexAgent((raw as Record<string, unknown>)["codex"]);
+  const claudeCode = parseClaudeAgent((raw as Record<string, unknown>)["claudeCode"], "config.agents.claudeCode");
+  const claudeCli = parseClaudeAgent((raw as Record<string, unknown>)["claudeCli"], "config.agents.claudeCli");
+  const builtins = {
+    ...(codex !== undefined ? { codex } : {}),
+    ...(claudeCode !== undefined ? { claudeCode } : {}),
+    ...(claudeCli !== undefined ? { claudeCli } : {}),
+  };
   const list = (raw as Record<string, unknown>)["genericCli"];
-  if (list === undefined) return codex !== undefined ? { codex } : {};
+  if (list === undefined) return builtins;
   if (!Array.isArray(list)) throw new Error("config.agents.genericCli must be an array");
   const genericCli = list.map((entry, i) => {
     const where = `config.agents.genericCli[${i}]`;
@@ -298,9 +389,10 @@ function parseAgents(raw: unknown): JairaAgentConfig {
     ) {
       throw new Error(`${where}.env must be an object of strings`);
     }
+    checkExecutorFields(spec, where);
     return spec as unknown as JairaGenericCliAgent;
   });
-  return { genericCli, ...(codex !== undefined ? { codex } : {}) };
+  return { genericCli, ...builtins };
 }
 
 /** The sandbox names codex accepts. Spelled out here so a typo is a config error rather than a
@@ -313,6 +405,7 @@ function parseCodexAgent(raw: unknown): JairaCodexAgentConfig | undefined {
     throw new Error("config.agents.codex must be an object");
   }
   const spec = raw as Record<string, unknown>;
+  checkExecutorFields(spec, "config.agents.codex");
   if (spec["command"] !== undefined && (typeof spec["command"] !== "string" || spec["command"].length === 0)) {
     throw new Error("config.agents.codex.command must be a non-empty string");
   }
@@ -330,6 +423,69 @@ function parseExecEnvironment(raw: unknown): JairaExecEnvironment {
     if (typeof distro === "string" && distro.length > 0) return { wsl: distro };
   }
   throw new Error('config.execEnvironment must be "windows" or { "wsl": "<distro>" }');
+}
+
+/** True for a plain JSON object — the only thing worth merging key by key. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** The registry name a generic-CLI entry is reached by, which is also its identity when layering. */
+function genericCliName(entry: unknown): string {
+  const name = isPlainObject(entry) ? entry["name"] : undefined;
+  return typeof name === "string" && name.length > 0 ? name : "generic-cli";
+}
+
+/**
+ * Lay a project's `config.json` over the shared base root's (DESIGN §3).
+ *
+ * Merged as raw DOCUMENTS, before parsing, so validation sees exactly the configuration that will be
+ * used and an error names a field rather than an internal merge artefact.
+ *
+ * Three rules, each chosen because the other reading is worse:
+ *
+ *  - **Objects merge key by key.** A project that sets only `models.default` must not lose the base's
+ *    `agents` and `policy`, which is what a wholesale replace would do — and the reason to keep a
+ *    shared root at all is that most projects override one or two things.
+ *  - **Arrays replace.** Concatenating `workflows.path` would make the effective search order depend
+ *    on a file the author is not reading, and a project could then never REMOVE a base entry.
+ *  - **`agents.genericCli` merges by name.** It is the one array that is really a keyed map: the
+ *    base defines the shared executors, and a project expects to add one or retune one, not to
+ *    redeclare the set. An entry with a base name overrides it in place, keeping the base's order.
+ */
+export function mergeConfigDocuments(base: unknown, project: unknown): unknown {
+  if (!isPlainObject(base)) return project;
+  if (!isPlainObject(project)) return base;
+  const merged: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(project)) {
+    const under = base[key];
+    if (isPlainObject(under) && isPlainObject(value)) {
+      merged[key] = mergeAgentBlock(key, under, value);
+      continue;
+    }
+    merged[key] = value;
+  }
+  return merged;
+}
+
+/** `agents` is a plain object merge except for its one keyed array. */
+function mergeAgentBlock(
+  key: string,
+  base: Record<string, unknown>,
+  project: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = mergeConfigDocuments(base, project) as Record<string, unknown>;
+  if (key !== "agents") return merged;
+  const baseList = base["genericCli"];
+  const projectList = project["genericCli"];
+  if (!Array.isArray(baseList) || !Array.isArray(projectList)) return merged;
+  const byName = new Map<string, unknown>(baseList.map((entry) => [genericCliName(entry), entry]));
+  for (const entry of projectList) {
+    const name = genericCliName(entry);
+    const under = byName.get(name);
+    byName.set(name, isPlainObject(under) && isPlainObject(entry) ? mergeConfigDocuments(under, entry) : entry);
+  }
+  return { ...merged, genericCli: [...byName.values()] };
 }
 
 export function parseConfig(raw: unknown): JairaConfig {

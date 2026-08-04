@@ -1,521 +1,423 @@
 /**
- * The board and task-detail views (DESIGN §11.1).
+ * The shell (DESIGN §11.1).
  *
- * Everything rendered here arrives pre-projected from the main process: columns,
- * card placement, statuses, the instance tree. The renderer's job is layout and
- * intent — it never re-derives engine semantics.
+ * One rail, three views. The app has exactly two activities — designing the states and operating the
+ * runs — and they used to compete for the same three columns, so opening any settings pane evicted
+ * the task you were watching. They are separate rooms now:
+ *
+ *  - **Files** designs. The tree opens any file; the middle shows it as a viewer over an editor,
+ *    both chosen by file type in the surface registry; the inspector describes what you last clicked.
+ *  - **Tasks** operates. The same board, reached by drilling a path instead of by clicking a file,
+ *    with the selected task's detail beside it.
+ *  - **Settings** holds everything that was never one of the two: configuration, executors,
+ *    credentials, history.
+ *
+ * The approvals strip spans all three. A blocked tool loop is the one thing that must never scroll
+ * away, and it stays visible while you are deep in the Files tree.
  */
-// React 19 no longer declares a global `JSX` namespace — it comes from the
-// package now.
-import { useState, type JSX } from "react";
-import type {
-  BoardCard,
-  HistorySize,
-  InstanceNode,
-  PendingApproval,
-  PendingInteraction,
-  TaskDetail,
-  WorkflowBrowser,
-} from "@jaira/shared/browser";
+import { useMemo, useState, type CSSProperties, type JSX } from "react";
+import type { PendingApproval, PendingInteraction } from "@jaira/shared/browser";
+import { Board, PathBar } from "./board";
 import { ApprovalDialog, InteractionDialog } from "./components";
-import { useApp, type PruneReport } from "./store";
+import { TaskPanel } from "./detail";
+import { FileInspector, FilePanel, FileTreePanel, TaskInspector, VIEWER_HEIGHT } from "./files";
+// Imported for its registrations: this is what puts markdown, JSON, YAML, states and config into the
+// surface registry. Nothing else in the shell references the built-in surfaces by name.
+import "./fileSurfaces";
+import type { FileSurfaceContext } from "./fileTypes";
+import { ExecutorsPane, SettingsPane } from "./panes";
+import { Splitter } from "./splitter";
+import { History, NewTask } from "./widgets";
+import { useApp, type SettingsSection, type View } from "./store";
 
-const BADGE: Record<string, string> = {
-  running: "▶",
-  waiting_for_user: "⏸",
-  blocked: "⛔",
-  completed: "✓",
-  failed: "✗",
-  canceled: "∅",
-  timeout: "⏱",
-  queued: "·",
-  interrupted: "⚠",
-};
+const RAIL: Array<[View, string, string]> = [
+  ["files", "❏", "Files"],
+  ["tasks", "▶", "Tasks"],
+];
 
-function Badge({ status }: { status?: string }): JSX.Element {
-  const key = status ?? "queued";
-  return (
-    <span className={`badge badge-${key}`} title={key}>
-      {BADGE[key] ?? "·"}
-    </span>
-  );
-}
-
-function Card({
-  card,
-  selected,
-  onSelect,
-  onDrill,
-}: {
-  card: BoardCard;
-  selected: boolean;
-  onSelect: () => void;
-  onDrill: () => void;
-}): JSX.Element {
-  return (
-    <div
-      className={`card${selected ? " card-selected" : ""}`}
-      onClick={onSelect}
-      onDoubleClick={card.hasSubBoard ? onDrill : undefined}
-      title={card.hasSubBoard ? "double-click to open the sub-board" : card.activeStateId ?? card.status}
-    >
-      <div className="card-head">
-        <Badge status={card.activeStatus ?? card.status} />
-        <span className="card-title">{card.title}</span>
-        {card.hasSubBoard ? <span className="drill">↳</span> : null}
-      </div>
-      <div className="card-meta">{card.activeStateId ?? card.status}</div>
-    </div>
-  );
-}
-
-function Tree({ nodes, depth = 0 }: { nodes: InstanceNode[]; depth?: number }): JSX.Element {
-  return (
-    <ul className="tree">
-      {nodes.map((node) => (
-        <li key={node.instanceId} className={node.superseded ? "superseded" : undefined}>
-          <span className="tree-row">
-            <Badge status={node.status} />
-            <span className="tree-label">{node.childKey ?? node.stateId}</span>
-            {node.iteration > 0 ? <span className="chip">iter {node.iteration}</span> : null}
-            {node.operation ? <span className="chip">{node.operation.kind}</span> : null}
-            {node.superseded ? <span className="chip">superseded</span> : null}
-            {node.operation?.reason ? <span className="reason">{node.operation.reason}</span> : null}
-          </span>
-          {node.children.length > 0 ? <Tree nodes={node.children} depth={depth + 1} /> : null}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function Detail({
-  detail,
-  stream,
-  onStart,
-  onCancel,
-}: {
-  detail: TaskDetail;
-  stream: string[];
-  onStart: () => void;
-  onCancel: () => void;
-}): JSX.Element {
-  const latest = detail.runs[detail.runs.length - 1];
-  return (
-    <div className="detail">
-      <header>
-        <h2>
-          <Badge status={detail.status} /> {detail.title}
-        </h2>
-        <div className="sub">
-          {detail.taskId} · {detail.workflow}
-          {detail.snapshotHash ? ` · snapshot ${detail.snapshotHash.slice(0, 12)}` : ""}
-        </div>
-        {detail.branch ? (
-          // Branch binding + the worktree the run executes in (DESIGN §9.2).
-          <div className="sub" title={detail.worktreePath ?? ""}>
-            ⎇ {detail.branch}
-            {detail.worktreePath ? ` · ${detail.worktreePath}` : " · worktree pending"}
-          </div>
-        ) : null}
-        <div className="actions">
-          <button onClick={onStart}>{detail.runs.length > 0 ? "Re-run" : "Start"}</button>
-          <button onClick={onCancel} className="ghost">
-            Cancel
-          </button>
-        </div>
-      </header>
-
-      {detail.activePath.length > 0 ? (
-        <section>
-          <h3>Active path</h3>
-          <div className="path">{detail.activePath.map((s) => s.childKey ?? s.stateId).join(" › ")}</div>
-        </section>
-      ) : null}
-
-      {detail.blocked.length > 0 ? (
-        <section>
-          <h3>Blocked</h3>
-          {detail.blocked.map((b) => (
-            <div key={b.stateId} className="reason">
-              {b.stateId}: {b.reason}
-            </div>
-          ))}
-        </section>
-      ) : null}
-
-      <section>
-        <h3>Instances</h3>
-        {detail.instances.length > 0 ? <Tree nodes={detail.instances} /> : <p className="empty">No run yet.</p>}
-      </section>
-
-      <section>
-        <h3>Runs</h3>
-        <ul className="runs">
-          {detail.runs.map((run) => (
-            <li key={run.runId}>
-              <span className="chip">#{run.runId}</span> {run.outcome}
-              {run.failure ? <span className="reason"> {JSON.stringify(run.failure)}</span> : null}
-            </li>
-          ))}
-          {detail.runs.length === 0 ? <li className="empty">—</li> : null}
-        </ul>
-      </section>
-
-      <section>
-        <h3>Live events</h3>
-        <pre className="stream">
-          {stream.length > 0
-            ? stream.join("\n")
-            : detail.timeline
-                .slice(-12)
-                .map((t) => `${t.type}  ${t.stateId ?? ""}`)
-                .join("\n") || "—"}
-        </pre>
-      </section>
-
-      {latest?.outputs ? (
-        <section>
-          <h3>Outputs</h3>
-          <pre className="outputs">{JSON.stringify(latest.outputs, null, 2)}</pre>
-        </section>
-      ) : null}
-    </div>
-  );
-}
+const SECTIONS: Array<[SettingsSection, string]> = [
+  ["project", "This project"],
+  ["base", "Shared"],
+  ["executors", "Executors"],
+  ["history", "History"],
+];
 
 /**
- * The approvals inbox (DESIGN §10.2).
+ * The side-pane widths, and what a double-click on a divider restores.
  *
- * Two kinds of thing wait for a human, and they are not the same mechanism:
- * workflow gates are authored UI states, while command approvals are
- * provider-initiated — policy escalated a tool call. They share this one list.
- * Approvals are shown first because an agent's tool loop is blocked until one is
- * answered, whereas a gate is a state politely waiting.
+ * These are the numbers the stylesheet used to hard-code. They moved here because a splitter needs a
+ * value to write and a default to go back to, and having the two in different files is how a "reset"
+ * ends up restoring a width that was changed months ago in the other one.
+ *
+ * Held per VIEW rather than shared, for the reason the views are siblings in the first place: the
+ * layout of Files has nothing to say about the layout of Tasks, and one tree width dragged narrow
+ * should not follow you into a board.
+ *
+ * `filesTop` is the odd one: a HEIGHT, and the only horizontal divider in the app. It lives here
+ * anyway, because what it is really about is the same thing the others are — this window's layout
+ * surviving a click on another file.
  */
-function Inbox({
+const PANE_DEFAULTS = {
+  filesLeft: 250,
+  filesRight: 300,
+  filesTop: VIEWER_HEIGHT,
+  tasksRight: 360,
+  settingsLeft: 214,
+};
+
+type PaneWidths = typeof PANE_DEFAULTS;
+
+/**
+ * The approvals strip.
+ *
+ * Command approvals come first: an agent's tool loop is blocked until one is answered, whereas a
+ * workflow gate is a state politely waiting. Both live here rather than in a sidebar, because this
+ * is the only surface in the app that is genuinely interrupt-driven.
+ */
+function InboxStrip({
   pending,
   approvals,
-  selected,
   onSelect,
 }: {
   pending: PendingInteraction[];
   approvals: PendingApproval[];
-  selected: string | null;
   onSelect: (taskId: string) => void;
 }): JSX.Element | null {
   const total = pending.length + approvals.length;
   if (total === 0) return null;
+  const shown = [
+    ...approvals.slice(0, 2).map((item) => ({
+      key: item.requestId,
+      badge: "badge-blocked",
+      glyph: "⛔",
+      text: item.command ?? item.tool,
+      title: item.reason ?? "",
+      taskId: item.taskId,
+    })),
+    ...pending.slice(0, 2).map((item) => ({
+      key: item.requestId,
+      badge: "badge-waiting_for_user",
+      glyph: "⏸",
+      text: item.config?.prompt ?? item.component,
+      title: item.component,
+      taskId: item.taskId as string | undefined,
+    })),
+  ].slice(0, 3);
   return (
-    <div className="inbox">
-      <h3>
-        Awaiting you <span className="count">{total}</span>
-      </h3>
-      <ul>
-        {/* Command approvals first: an agent's tool loop is blocked until answered. */}
-        {approvals.map((item) => (
-          <li
-            key={item.requestId}
-            className={item.taskId === selected ? "selected" : undefined}
-            onClick={() => (item.taskId ? onSelect(item.taskId) : undefined)}
-          >
-            <span className="badge badge-blocked">⛔</span>
-            <span className="task-title" title={item.reason ?? ""}>
-              {item.command ?? item.tool}
-            </span>
-          </li>
-        ))}
-        {pending.map((item) => (
-          <li
-            key={item.requestId}
-            className={item.taskId === selected ? "selected" : undefined}
-            onClick={() => onSelect(item.taskId)}
-          >
-            <span className="badge badge-waiting_for_user">⏸</span>
-            <span className="task-title">{item.config?.prompt ?? item.component}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-/**
- * The workflow browser (DESIGN §11.1), MVP-minimal on purpose: a read-only list of
- * workflow roots with their lint results. Editing happens in the user's editor and
- * main re-lints on change, so this list is live without an in-app editor.
- */
-function Workflows({ browser }: { browser: WorkflowBrowser | null }): JSX.Element | null {
-  const [open, setOpen] = useState<string | null>(null);
-  if (!browser) return null;
-  const unreadable = browser.files.filter((f) => f.error !== undefined);
-  if (browser.workflows.length === 0 && unreadable.length === 0) return null;
-  return (
-    <div className="workflows">
-      <h3>Workflows</h3>
-      <ul>
-        {browser.workflows.map((workflow) => {
-          const errors = workflow.issues.filter((i) => i.severity === "error").length;
-          const warnings = workflow.issues.length - errors;
-          const broken = workflow.loadError !== undefined || errors > 0;
-          const expanded = open === workflow.rootId;
-          return (
-            <li key={workflow.rootId} className={broken ? "lint-error" : warnings > 0 ? "lint-warn" : undefined}>
-              <span
-                className="wf-row"
-                onClick={() => setOpen(expanded ? null : workflow.rootId)}
-                title={`${workflow.states.length} states${workflow.snapshotHash ? ` · ${workflow.snapshotHash.slice(0, 12)}` : ""}`}
-              >
-                <span className="badge">{broken ? "✗" : warnings > 0 ? "⚠" : "✓"}</span>
-                <span className="task-title">{workflow.label ?? workflow.rootId}</span>
-                {workflow.taskIds.length > 0 ? <span className="chip">{workflow.taskIds.length}</span> : null}
-              </span>
-              {expanded ? (
-                <div className="wf-detail">
-                  <div className="sub">{workflow.rootId}</div>
-                  {workflow.loadError ? <div className="reason">{workflow.loadError}</div> : null}
-                  {workflow.issues.map((issue, i) => (
-                    <div key={i} className={issue.severity === "error" ? "reason" : "sub"}>
-                      {issue.stateId} {issue.path}: {issue.message}
-                    </div>
-                  ))}
-                  {/* Execution reads the pinned snapshot, so a drifted task is not
-                      running what this list shows (DESIGN §5.3). */}
-                  {workflow.driftedTasks.length > 0 ? (
-                    <div className="sub">{workflow.driftedTasks.length} task(s) pinned to an older snapshot</div>
-                  ) : null}
-                  {workflow.issues.length === 0 && workflow.loadError === undefined ? (
-                    <div className="sub">{workflow.states.length} states · lints clean</div>
-                  ) : null}
-                </div>
-              ) : null}
-            </li>
-          );
-        })}
-        {unreadable.map((file) => (
-          <li key={file.file} className="lint-error">
-            <span className="wf-row" title={file.error}>
-              <span className="badge">✗</span>
-              <span className="task-title">{file.file}</span>
-            </span>
-          </li>
-        ))}
-        {browser.unreachable.length > 0 ? (
-          <li className="empty">unreachable: {browser.unreachable.join(", ")}</li>
-        ) : null}
-      </ul>
-    </div>
-  );
-}
-
-/**
- * History pruning (SPEC §13). Deliberately two steps: "Preview" runs a dry run and
- * shows exactly what would go, and only then can it be applied — pruned history is
- * not recoverable. Tasks the safety rule protects are listed rather than silently
- * skipped.
- */
-function History({
-  size,
-  report,
-  busy,
-  onPreview,
-  onApply,
-  onDismiss,
-}: {
-  size: HistorySize | null;
-  report: PruneReport | null;
-  busy: boolean;
-  onPreview: (days: number, keep: number) => void;
-  onApply: (days: number, keep: number) => void;
-  onDismiss: () => void;
-}): JSX.Element | null {
-  const [days, setDays] = useState(30);
-  const [keep, setKeep] = useState(1);
-  if (!size) return null;
-  const planned = report?.dryRun === true ? report : null;
-  return (
-    <div className="history">
-      <h3>History</h3>
-      <div className="sub">
-        {size.runs} runs · {size.events} events · {size.commands} commands
-      </div>
-      <div className="prune-controls">
-        <label>
-          older than
-          <input type="number" min={0} value={days} onChange={(e) => setDays(Math.max(0, Number(e.target.value)))} />d
-        </label>
-        <label>
-          keep
-          <input type="number" min={0} value={keep} onChange={(e) => setKeep(Math.max(0, Number(e.target.value)))} />
-          runs
-        </label>
-        <button className="ghost" onClick={() => onPreview(days, keep)} disabled={busy}>
-          Preview
-        </button>
-      </div>
-      {report ? (
-        <div className="prune-report">
-          {planned ? (
-            planned.runs.length > 0 ? (
-              <>
-                <div className="sub">
-                  would delete {planned.runs.length} run(s), {planned.events} events, {planned.commands} commands
-                </div>
-                <button onClick={() => onApply(days, keep)} disabled={busy}>
-                  Delete permanently
-                </button>
-              </>
-            ) : (
-              <div className="sub">nothing matches — no run history is old enough</div>
-            )
-          ) : (
-            <div className="sub">
-              deleted {report.runs.length} run(s); {report.remaining.events} events remain
-            </div>
-          )}
-          {report.skippedTasks.length > 0 ? (
-            // The §13 safety rule, made visible: these are resumable.
-            <div className="sub" title={report.skippedTasks.map((s) => `${s.taskId}: ${s.reason}`).join("\n")}>
-              kept {report.skippedTasks.length} unfinished task(s)
-            </div>
-          ) : null}
-          <button className="ghost" onClick={onDismiss}>
-            Dismiss
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function NewTask({ onCreate, busy }: { onCreate: (t: string, w: string, i: string) => void; busy: boolean }): JSX.Element {
-  const [title, setTitle] = useState("");
-  const [workflow, setWorkflow] = useState("feature/plan");
-  const [issue, setIssue] = useState("");
-  return (
-    <form
-      className="new-task"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (title.trim()) onCreate(title.trim(), workflow.trim(), issue.trim());
-      }}
-    >
-      <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Task title" />
-      <input value={workflow} onChange={(e) => setWorkflow(e.target.value)} placeholder="workflow root state" />
-      <input value={issue} onChange={(e) => setIssue(e.target.value)} placeholder="issue / input" />
-      <button type="submit" disabled={busy || !title.trim()}>
-        Create
-      </button>
-    </form>
+    <footer className="strip">
+      <span className="strip-label">Awaiting you</span>
+      <span className="chip chip-warn">{total}</span>
+      {shown.map((item) => (
+        <span
+          key={item.key}
+          className="strip-item"
+          title={item.title}
+          onClick={() => (item.taskId ? onSelect(item.taskId) : undefined)}
+        >
+          <span className="sep" />
+          <span className={`badge ${item.badge}`}>{item.glyph}</span>
+          <span className="ellip">{item.text}</span>
+        </span>
+      ))}
+      {total > shown.length ? <span className="sub more">+{total - shown.length} more</span> : null}
+    </footer>
   );
 }
 
 export default function App(): JSX.Element {
   const { state, actions } = useApp();
-  const { board, detail, pending } = state;
+  // Session-scoped, like the schema choice: a pane width is a view preference about this window, and
+  // writing it to disk would mean deciding which configuration layer it belonged to.
+  const [panes, setPanes] = useState<PaneWidths>(PANE_DEFAULTS);
+  /**
+   * Which diagnostic the inspector last asked the editor to show.
+   *
+   * Held here because the two are siblings: the inspector is the right column and the editor is the
+   * middle one, and neither is inside the other. The nonce is what makes clicking the same issue
+   * twice mean "show me again" rather than nothing — see `FileSurfaceContext.revealIssue`.
+   */
+  const [reveal, setReveal] = useState<{ path: string; nonce: number } | null>(null);
+  const { board, detail, pending, view } = state;
+
+  /**
+   * The files with unsaved edits, as the `layer:path` keys the tree rows are identified by.
+   *
+   * The map holds differences from disk only (see `drafts.ts`), so its keys ARE the dirty set — no
+   * second flag to keep in step with it.
+   */
+  const dirtyFiles = useMemo(() => new Set(Object.keys(state.drafts)), [state.drafts]);
+
+  // The interaction the selected task is parked on, if any — what the leaf conversation pins.
+  const waiting = pending.find((p) => p.taskId === state.selected);
+
+  /**
+   * Everything a file surface may need beyond the file itself.
+   *
+   * Assembled here, once, rather than threaded through {@link FilePanel}: the panel decides geometry
+   * and nothing else, so it has no business knowing that a workflow viewer wants the board and a
+   * config editor wants both configuration layers. Each surface reads the fields it actually uses.
+   */
+  const surfaces: FileSurfaceContext = {
+    state: state.state,
+    config: state.config,
+    tree: state.tree,
+    executors: state.executors,
+    selected: state.selected,
+    conversation: state.conversation,
+    waiting: waiting ? { component: waiting.config?.prompt ?? waiting.component } : undefined,
+    onSelectTask: actions.select,
+    onDrill: actions.selectState,
+    onAnswer: waiting ? () => actions.select(waiting.taskId) : undefined,
+    onSaveConfig: actions.saveConfig,
+    validateSchema: actions.validateSchema,
+    stateSlots: actions.stateSlots,
+    schemaChoice: state.schemaChoice,
+    onSchemaChoice: actions.setSchemaChoice,
+    drafts: state.drafts,
+    onDraft: actions.setDraft,
+    editorTab: state.editorTab,
+    onEditorTab: actions.setEditorTab,
+    detectSchema: actions.detectSchema,
+    wrapJson: state.settings.wrapJson,
+    onWrapJson: actions.setWrapJson,
+    revealIssue: reveal,
+  };
 
   return (
     <div className="app">
-      <aside className="sidebar">
-        <div className="brand">JaiRA</div>
-        <div className="project" title={state.projectDir ?? ""}>
-          {state.projectDir ?? "no project open"}
-        </div>
-        <NewTask onCreate={actions.createTask} busy={state.busy} />
-        <Inbox pending={pending} approvals={state.approvals} selected={state.selected} onSelect={actions.select} />
-        <h3>Tasks</h3>
-        <ul className="tasks">
-          {state.tasks.map((task) => (
-            <li
-              key={task.taskId}
-              className={task.taskId === state.selected ? "selected" : undefined}
-              onClick={() => actions.select(task.taskId)}
+      <nav className="rail">
+        <div className="rail-brand">JAIRA</div>
+        {RAIL.map(([id, glyph, label]) => (
+          <button
+            key={id}
+            className={view === id ? "on" : undefined}
+            title={label}
+            aria-label={label}
+            aria-current={view === id ? "page" : undefined}
+            onClick={() => actions.setView(id)}
+          >
+            {glyph}
+          </button>
+        ))}
+        <span className="spacer" />
+        {/* Theme sits on the rail, not inside Settings: it is a per-person display preference, and
+            burying it behind a view that needs an open project would make it unreachable on an empty
+            window. */}
+        <button
+          title={state.settings.theme === "dark" ? "switch to light" : "switch to dark"}
+          aria-label="Toggle theme"
+          onClick={() => actions.setTheme(state.settings.theme === "dark" ? "light" : "dark")}
+        >
+          {state.settings.theme === "dark" ? "☀" : "☾"}
+        </button>
+        <button
+          className={view === "settings" ? "on" : undefined}
+          title="Settings"
+          aria-label="Settings"
+          aria-current={view === "settings" ? "page" : undefined}
+          onClick={() => actions.setView("settings")}
+        >
+          ⚙
+        </button>
+      </nav>
+
+      <div className="body">
+        <div className="viewport">
+          {view === "files" ? (
+            <div
+              className="view files-view"
+              style={{ "--pane-left": `${panes.filesLeft}px`, "--pane-right": `${panes.filesRight}px` } as CSSProperties}
             >
-              <Badge status={task.status} /> <span className="task-title">{task.title}</span>
-            </li>
-          ))}
-          {state.tasks.length === 0 ? <li className="empty">No tasks yet.</li> : null}
-        </ul>
-        <Workflows browser={state.workflows} />
-        <History
-          size={state.history}
-          report={state.prune}
-          busy={state.busy}
-          onPreview={actions.planPrune}
-          onApply={actions.applyPrune}
-          onDismiss={actions.dismissPrune}
-        />
-      </aside>
+              <FileTreePanel
+                tree={state.tree}
+                selected={state.doc ? { layer: state.doc.layer, path: state.doc.path } : null}
+                // Which rows have edits that are not on disk. Now that a draft outlives the editor
+                // showing it, this is the only thing that says so about a file you are not looking
+                // at — and an unsaved change nobody can see is one that gets closed with the window.
+                dirty={dirtyFiles}
+                busy={state.busy}
+                hasProject={state.projectDir !== null}
+                onSelect={actions.selectFile}
+                onOpen={actions.openWorkflow}
+                onCreate={actions.createWorkflow}
+                onCreateFile={actions.createFile}
+                onMove={actions.moveWorkflow}
+                onDelete={actions.deleteWorkflow}
+                onRenameFile={actions.renameFile}
+                onDeleteFile={actions.deleteFile}
+                onReveal={actions.revealFile}
+              />
 
-      <main className="board">
-        <header className="board-head">
-          <div className="crumbs">
-            {(board?.breadcrumb ?? []).map((crumb, i) => (
-              <button key={crumb} className="crumb" onClick={() => actions.drillTo(i === 0 ? undefined : crumb)}>
-                {crumb}
-                {i < (board?.breadcrumb.length ?? 0) - 1 ? " ›" : ""}
-              </button>
-            ))}
-          </div>
-          {board?.label ? <span className="level-label">{board.label}</span> : null}
-        </header>
+              <Splitter
+                label="Resize the file tree"
+                value={panes.filesLeft}
+                reset={PANE_DEFAULTS.filesLeft}
+                min={170}
+                max={560}
+                onChange={(filesLeft) => setPanes((p) => ({ ...p, filesLeft }))}
+              />
 
-        <div className="columns">
-          {(board?.columns ?? []).map((column) => (
-            <section key={column.key} className="column">
-              <h4>
-                {column.label ?? column.stateId} <span className="count">{column.cards.length}</span>
-              </h4>
-              {column.cards.map((card) => (
-                <Card
-                  key={card.taskId}
-                  card={card}
-                  selected={card.taskId === state.selected}
-                  onSelect={() => actions.select(card.taskId)}
-                  onDrill={() => actions.drillTo(card.activePath[card.activePath.indexOf(card.activePath.find((s) => s.stateId === board?.level) ?? card.activePath[0]!) + 1]?.stateId)}
-                />
-              ))}
-              {column.cards.length === 0 ? <div className="empty">—</div> : null}
-            </section>
-          ))}
-          {board && board.columns.length === 0 ? <p className="empty">This level has no child states.</p> : null}
+              <FilePanel
+                doc={state.doc}
+                busy={state.busy}
+                context={surfaces}
+                viewerHeight={panes.filesTop}
+                onViewerHeight={(filesTop) => setPanes((p) => ({ ...p, filesTop }))}
+                onSave={actions.saveDoc}
+                onInspect={actions.inspectState}
+              />
+
+              <Splitter
+                label="Resize the inspector"
+                value={panes.filesRight}
+                reset={PANE_DEFAULTS.filesRight}
+                invert
+                min={220}
+                max={680}
+                onChange={(filesRight) => setPanes((p) => ({ ...p, filesRight }))}
+              />
+
+              <aside className="col panel">
+                {state.inspect === "task" ? (
+                  <TaskInspector
+                    stateId={state.stateId}
+                    detail={detail}
+                    stream={state.stream}
+                    onBack={actions.inspectState}
+                    onStart={() => (detail ? actions.startTask(detail.taskId) : undefined)}
+                    onCancel={() => (detail ? actions.cancelTask(detail.taskId) : undefined)}
+                  />
+                ) : (
+                  <FileInspector
+                    doc={state.doc}
+                    state={state.state}
+                    onRevealIssue={(path) => setReveal((last) => ({ path, nonce: (last?.nonce ?? 0) + 1 }))}
+                  />
+                )}
+              </aside>
+            </div>
+          ) : null}
+
+          {view === "tasks" ? (
+            <div className="view tasks-view" style={{ "--pane-right": `${panes.tasksRight}px` } as CSSProperties}>
+              <div className="col mid">
+                <PathBar breadcrumb={board?.breadcrumb ?? []} onGo={actions.drillTo}>
+                  <span className="sub">
+                    {state.tasks.length} tasks · {state.tasks.filter((t) => t.status === "running").length} running
+                  </span>
+                  <NewTask onCreate={actions.createTask} busy={state.busy} />
+                </PathBar>
+                {board ? (
+                  <Board
+                    board={board}
+                    selected={state.selected}
+                    numbered={board.level !== ""}
+                    onSelectTask={actions.select}
+                    onDrill={actions.drillTo}
+                  />
+                ) : (
+                  <p className="empty">Open a project to see its board.</p>
+                )}
+              </div>
+
+              <Splitter
+                label="Resize the task panel"
+                value={panes.tasksRight}
+                reset={PANE_DEFAULTS.tasksRight}
+                invert
+                min={260}
+                max={760}
+                onChange={(tasksRight) => setPanes((p) => ({ ...p, tasksRight }))}
+              />
+
+              <aside className="col panel">
+                {detail ? (
+                  <TaskPanel
+                    detail={detail}
+                    stream={state.stream}
+                    onStart={() => actions.startTask(detail.taskId)}
+                    onCancel={() => actions.cancelTask(detail.taskId)}
+                    onOpenState={(stateId) => {
+                      actions.setView("files");
+                      actions.selectState(stateId);
+                    }}
+                  />
+                ) : (
+                  <p className="empty">Select a task.</p>
+                )}
+              </aside>
+            </div>
+          ) : null}
+
+          {view === "settings" ? (
+            <div className="view settings-view" style={{ "--pane-left": `${panes.settingsLeft}px` } as CSSProperties}>
+              <aside className="col side">
+                <h3>Settings</h3>
+                <ul className="sections">
+                  {SECTIONS.map(([id, label]) => (
+                    <li
+                      key={id}
+                      className={state.section === id ? "sel" : undefined}
+                      onClick={() => actions.setSection(id)}
+                    >
+                      {label}
+                    </li>
+                  ))}
+                </ul>
+                <div className="project" title={state.projectDir ?? ""}>
+                  {state.projectDir ?? "no project open"}
+                </div>
+              </aside>
+
+              <Splitter
+                label="Resize the settings sections"
+                value={panes.settingsLeft}
+                reset={PANE_DEFAULTS.settingsLeft}
+                min={150}
+                max={420}
+                onChange={(settingsLeft) => setPanes((p) => ({ ...p, settingsLeft }))}
+              />
+
+              <div className="col mid settings-body">
+                {state.section === "project" || state.section === "base" ? (
+                  <SettingsPane
+                    config={state.config}
+                    layer={state.section === "base" ? "base" : "project"}
+                    busy={state.busy}
+                    drafts={state.drafts}
+                    onDraft={actions.setDraft}
+                    onSave={actions.saveConfig}
+                  />
+                ) : null}
+                {state.section === "executors" ? (
+                  <ExecutorsPane
+                    executors={state.executors}
+                    probes={state.probes}
+                    probing={state.probing}
+                    secrets={state.secrets}
+                    busy={state.busy}
+                    onProbe={actions.probeExecutors}
+                    onToggle={actions.setExecutorEnabled}
+                    onSaveSecret={actions.saveSecret}
+                  />
+                ) : null}
+                {state.section === "history" ? (
+                  <History
+                    size={state.history}
+                    report={state.prune}
+                    busy={state.busy}
+                    onPreview={actions.planPrune}
+                    onApply={actions.applyPrune}
+                    onDismiss={actions.dismissPrune}
+                  />
+                ) : null}
+              </div>
+            </div>
+          ) : null}
         </div>
 
-        {(board?.atLevel.length ?? 0) > 0 ? (
-          <div className="tray">
-            <h4>At this level</h4>
-            <div className="tray-cards">
-              {board!.atLevel.map((card) => (
-                <Card key={card.taskId} card={card} selected={card.taskId === state.selected} onSelect={() => actions.select(card.taskId)} onDrill={() => undefined} />
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {(board?.finished.length ?? 0) > 0 ? (
-          <div className="tray">
-            <h4>Finished / not started</h4>
-            <div className="tray-cards">
-              {board!.finished.map((card) => (
-                <Card key={card.taskId} card={card} selected={card.taskId === state.selected} onSelect={() => actions.select(card.taskId)} onDrill={() => undefined} />
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </main>
-
-      <aside className="panel">
-        {detail ? (
-          <Detail
-            detail={detail}
-            stream={state.stream}
-            onStart={() => actions.startTask(detail.taskId)}
-            onCancel={() => actions.cancelTask(detail.taskId)}
-          />
-        ) : (
-          <p className="empty">Select a task.</p>
-        )}
-      </aside>
+        <InboxStrip pending={pending} approvals={state.approvals} onSelect={actions.select} />
+      </div>
 
       {state.approvals.length > 0 ? (
         <ApprovalDialog

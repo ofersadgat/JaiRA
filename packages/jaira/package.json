@@ -1,0 +1,27 @@
+{
+  "name": "jaira",
+  "version": "0.1.0",
+  "description": "JaiRA command line: run workflows, drive agents, inspect sessions. Unscoped alias for @jaira/cli.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ofersadgat/JaiRA.git",
+    "directory": "packages/jaira"
+  },
+  "homepage": "https://github.com/ofersadgat/JaiRA",
+  "keywords": [
+    "agents",
+    "workflows",
+    "orchestration",
+    "cli"
+  ],
+  "type": "module",
+  "bin": {
+    "jaira": "bin/jaira.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "dependencies": {
+    "@jaira/cli": "0.1.0"
+  }
+}

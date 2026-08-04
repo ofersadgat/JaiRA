@@ -211,7 +211,7 @@ unchanged; only the spelling is.
 "binding": ".children.critique.outputs.outcome"
 "binding": ".inputs.issue"
 "binding": ".artifacts.design_doc"
-"binding": "at(messages(.operation.outputs.session), 0)"
+"binding": "at(messages(.operation.output.session), 0)"
 ```
 
 The leading dot is **required everywhere**, including inside an expression. ⚠️ This

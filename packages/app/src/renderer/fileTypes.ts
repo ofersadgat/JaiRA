@@ -1,0 +1,179 @@
+/**
+ * The surface registry: `(MIME type, action) → component`.
+ *
+ * The Files view shows an open file as two halves — what it *is* on top, what it *says* below — and
+ * until now both halves were hardwired to one file type. The middle panel rendered a board and a
+ * workflow form because the only thing it could open was a state; a prompt was a row in the tree
+ * that did nothing when you clicked it.
+ *
+ * This is the indirection that fixes that. A type registers what should render it, the panel looks
+ * the pair up, and adding markdown preview means adding a registration rather than another branch in
+ * a component that already knows about workflows. The three concepts stay separate on purpose:
+ *
+ *  - **type** — a MIME string from `mimeOfPath`, carried on every tree node.
+ *  - **action** — `view` (read it) or `edit` (change it).
+ *  - **component** — a {@link FileSurface}, which is a plain React component over one props shape.
+ *
+ * Two rules make the table small. Resolution walks `mimeFallbacks`, so a vendor type inherits the
+ * surfaces of the syntax it is written in and every text type ends at `text/plain` — which is why an
+ * unregistered file still opens in an editor instead of showing an error. And `view` is genuinely
+ * optional: a type with no viewer gives its editor the whole panel, because a plain text file has
+ * nothing to render that its own contents do not already show.
+ */
+import type { JSX } from "react";
+import type {
+  ConfigLayer,
+  DetectSchemaResult,
+  ConfigView,
+  ConversationView,
+  ExecutorInfo,
+  FileSource,
+  FileTree,
+  StateSlots,
+  StateView,
+  ValidateSchemaResult,
+} from "@jaira/shared/browser";
+import { mimeFallbacks } from "@jaira/shared/browser";
+import type { Drafts, SetDraft } from "./drafts";
+
+/** What a surface does with the file. The two halves of the panel, top to bottom. */
+export type FileAction = "view" | "edit";
+
+/**
+ * Everything a surface may need beyond the file itself.
+ *
+ * One bag rather than per-type props, and that is a deliberate trade. A workflow's viewer needs the
+ * board, the running tasks and the conversation; its editor needs the tree and the executor list to
+ * complete names against; the config editor needs both layers merged. None of that can be expressed
+ * in a props shape the registry knows, so the registry passes the union and each surface takes the
+ * two or three fields it actually reads. The alternative — a generic parameter threaded through the
+ * table — buys type safety the caller cannot use, because the panel does not know at compile time
+ * which component it is about to render.
+ */
+export interface FileSurfaceContext {
+  /** The state this file defines, when it defines one. Null for everything else. */
+  state: StateView | null;
+  /** Both configuration layers plus the merged result — what the config surfaces read. */
+  config: ConfigView | null;
+  /** Both layer roots, for name completion in the workflow editor. */
+  tree: FileTree | null;
+  executors: ExecutorInfo[];
+  /** The selected task, and its conversation — what a leaf state's viewer shows. */
+  selected: string | null;
+  conversation: ConversationView | null;
+  waiting?: { component: string } | undefined;
+  onSelectTask: (taskId: string) => void;
+  onDrill: (stateId: string) => void;
+  onAnswer?: (() => void) | undefined;
+  /** Write a configuration layer as a parsed document — validated in main, unlike a raw file write. */
+  onSaveConfig: (layer: ConfigLayer, doc: unknown) => void;
+  /** Check a draft against a registered schema — what the JSON editor's picker turns on. */
+  validateSchema: (schemaId: string, text: string) => Promise<ValidateSchemaResult | null>;
+  /**
+   * What a set of states declare — how the children table knows which slots a mount has to fill,
+   * and what a binding may point at (WORKFLOWS.md §6.1).
+   *
+   * Asked for rather than carried on the tree: the tree is every file under both roots, and reading
+   * each of them to answer a question about the four children of one state would be most of a
+   * project's disk for none of its benefit.
+   */
+  stateSlots: (stateIds: string[]) => Promise<Record<string, StateSlots> | null>;
+  /**
+   * The schema chosen per document, keyed by `layer:path`, and how to change one.
+   *
+   * An ABSENT key means nobody has decided; `""` means "plain JSON" was chosen. The distinction is
+   * what lets {@link FileSurfaceContext.detectSchema} fill the picker on open without overruling
+   * someone who deliberately turned it off.
+   */
+  schemaChoice: Record<string, string>;
+  onSchemaChoice: (key: string, schemaId: string | null) => void;
+  /**
+   * Unsaved text per document, keyed the same way, and how to change one — see `drafts.ts`.
+   *
+   * Passed in rather than held by each surface, and that is the point: an editor is unmounted every
+   * time another file is clicked or another view is opened, so a draft it owned would be a draft it
+   * silently discarded. `null` clears, which is what Revert and "typed it back" both mean.
+   *
+   * Optional, and `useDraftBox` is what makes that safe: a surface rendered without a store keeps
+   * its draft locally instead of refusing to accept typing. Absent means "no store here", never
+   * "this file has no draft" — those are the same value only because an inert store is the same
+   * thing as no store.
+   */
+  drafts?: Drafts | undefined;
+  onDraft?: SetDraft | undefined;
+  /**
+   * Which tab a state file's editor was left on, keyed the same way, and how to change it.
+   *
+   * The one piece of per-file editor chrome worth remembering: coming back to a state you were
+   * hand-editing should not put you on the form. Optional for the same reason as the draft store —
+   * the editor falls back to its own state.
+   */
+  editorTab?: Record<string, "form" | "json"> | undefined;
+  onEditorTab?: ((key: string, tab: "form" | "json") => void) | undefined;
+  /** Which registered schema a document already satisfies. Null when nothing could be asked. */
+  detectSchema: (text: string) => Promise<DetectSchemaResult | null>;
+  /** Word wrap in the JSON editor — a saved preference, not per-document. */
+  wrapJson: boolean;
+  onWrapJson: (wrap: boolean) => void;
+  /**
+   * The diagnostic the inspector last asked to be SHOWN, as a lint path (`outputs.report`).
+   *
+   * The inspector lists the issues and the editor holds the controls, and they are two columns
+   * apart; this is the one thing they have to agree on. `nonce` rises on every click so that asking
+   * for the same path twice flashes it twice — without it, clicking an issue you have already
+   * visited would do nothing at all, which reads as a broken link rather than as "you are here".
+   */
+  revealIssue?: { path: string; nonce: number } | null;
+}
+
+export interface FileSurfaceProps {
+  doc: FileSource;
+  busy: boolean;
+  /**
+   * Save this file's text.
+   *
+   * The store picks the channel by what is open — a state file goes through `workflow:write`, which
+   * parses and re-lints, everything else through `file:write`. A surface never chooses, which is
+   * what stops a new editor from quietly acquiring the power to write an unlinted workflow.
+   */
+  onSave: (text: string) => void;
+  context: FileSurfaceContext;
+}
+
+export type FileSurface = (props: FileSurfaceProps) => JSX.Element;
+
+/** `mime` → action → component. Populated by `fileSurfaces.tsx` at import time. */
+const REGISTRY = new Map<string, Partial<Record<FileAction, FileSurface>>>();
+
+/**
+ * Connect a type and an action to a component.
+ *
+ * Last registration wins, so a project-specific surface can replace a built-in one by registering
+ * after it. That is the only override mechanism there is, and it is enough: the table is small, and
+ * a priority number would be a second thing to reason about for a case that has not come up.
+ */
+export function registerFileSurface(mime: string, action: FileAction, surface: FileSurface): void {
+  const entry = REGISTRY.get(mime) ?? {};
+  entry[action] = surface;
+  REGISTRY.set(mime, entry);
+}
+
+/**
+ * The component for a pair, or null when nothing handles it.
+ *
+ * Walks the fallback chain, so `application/vnd.jaira.workflow+yaml` with no editor of its own gets
+ * the YAML one, and an unknown text type gets the plain editor. Null is a real answer for `view` —
+ * see the module comment — and for `edit` it means the file is not text at all.
+ */
+export function resolveFileSurface(mime: string, action: FileAction): FileSurface | null {
+  for (const candidate of mimeFallbacks(mime)) {
+    const surface = REGISTRY.get(candidate)?.[action];
+    if (surface) return surface;
+  }
+  return null;
+}
+
+/** Every type with at least one registered surface. Exported for the tests that guard the table. */
+export function registeredMimes(): string[] {
+  return [...REGISTRY.keys()].sort();
+}

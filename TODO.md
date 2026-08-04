@@ -370,11 +370,11 @@ Two things the live runs settled that are worth not re-deriving:
 
 ## Open inside delegated sessions
 
-- [ ] **A delegated op cannot publish its END POSITION.** `operation.outputs.session` is
+- [ ] **A delegated op cannot publish its END POSITION.** `operation.output.session` is
       prompt-only in `operationNodeSchema`, because the loader has no registry and cannot
       tell a delegated adapter from a host helper. So one agent's conversation is handed to
       a later state by NAME (`session: "review"`), never by wiring
-      `.children.first.operation.outputs.session`. Widening it for every function op would
+      `.children.first.operation.output.session`. Widening it for every function op would
       trade a load-time error for a value that is usually undefined.
 - [ ] **Nothing warns a host that composed the session layer in the wrong place.** It must
       wrap the operation DISPATCHER, not just the prompt executor, or agents silently get no
@@ -398,7 +398,7 @@ Two things the live runs settled that are worth not re-deriving:
       holds authored NAMES, and `conversationModesOf` maps an undeclared session to
       `"default"` — a name nothing produces since a session became a position. Such a
       conversation gets an engine-minted `s_i<n>` key, is joined downstream by dataflow
-      (`.children.k.operation.outputs.session`), and so can span many calls — the case
+      (`.children.k.operation.output.session`), and so can span many calls — the case
       that grows fastest. The opt-in has to key on the declaring STATE;
       `sessionRequest.seed` carries `<stateId>:<session.id>`. Wrinkle: `messages(ref)`
       carries no request, so the store must learn a lineage's opt-in at resolve and

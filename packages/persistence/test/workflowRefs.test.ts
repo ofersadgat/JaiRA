@@ -188,11 +188,12 @@ describe("YAML state files", () => {
 });
 
 /**
- * The project's configured search path (EXPRESSIONS.md §4, JaiRA half).
+ * The project's search path (EXPRESSIONS.md §4, JaiRA half).
  *
- * `config.workflows.path` decides what comes AFTER the workflows directory — never what comes
- * first. Only the first entry produces bare state ids, and a bare id keys the snapshot hash, the
- * event log and task rows, so letting configuration reorder it would re-identify every state.
+ * Absent configuration, it is GENERATED from the layer roots — `<root>/workflows` then
+ * `<root>/functions`, for the project's `.jaira/` and then the shared one. `config.workflows.path`
+ * replaces that list, and whatever it says the workflows directory still leads: a layer that
+ * configuration could push behind another would stop being an override.
  */
 describe("the project search path", () => {
   it("finds a fragment under a configured root that is not the workflows dir", () => {
@@ -210,8 +211,9 @@ describe("the project search path", () => {
     expect(op.config).toEqual({ model: "from-path" });
   });
 
-  it("does not find it without the configured entry", () => {
-    write(join(project.paths.jairaDir, "functions"), "review.json", { kind: "prompt", prompt: "x", model: "m" });
+  it("does not find a fragment that sits off the path entirely", () => {
+    // `lib/` is on no layer's path — unlike `functions/`, which the generated default now includes.
+    write(join(project.paths.jairaDir, "lib"), "review.json", { kind: "prompt", prompt: "x", model: "m" });
     write(project.paths.workflowsDir, "plan.json", {
       outputs: { v: { schema: { type: "string" } } },
       operation: "review",
@@ -221,6 +223,24 @@ describe("the project search path", () => {
     ).toThrow(/matches no file/);
   });
 
+  it("finds a project fragment under functions/ with NO configuration at all", () => {
+    // The generated default carries `<root>/functions`, so a project need not configure a path to
+    // put shared operations somewhere other than `workflows/`.
+    write(join(project.paths.jairaDir, "functions"), "review.json", {
+      kind: "prompt",
+      prompt: "Review it.",
+      model: "from-default-path",
+    });
+    write(project.paths.workflowsDir, "plan.json", {
+      outputs: { v: { schema: { type: "string" } } },
+      operation: "review",
+    });
+
+    const op = loadBundle(readWorkflowFiles(project.paths.workflowsDir), "plan", workflowLoadOptions(project.paths))
+      .states.plan!.operation as { config?: unknown };
+    expect(op.config).toEqual({ model: "from-default-path" });
+  });
+
   it("keeps the workflows dir first, whatever the config asks for", () => {
     // Even asked to put another root first, the workflows dir leads — otherwise every bare state id
     // in the project would re-identify.
@@ -228,7 +248,21 @@ describe("the project search path", () => {
     expect((options.defaultRoot as string[])[0]).toBe(project.paths.workflowsDir);
   });
 
-  it("defaults to the workflows dir alone when nothing is configured", () => {
-    expect(workflowLoadOptions(project.paths).defaultRoot).toEqual([project.paths.workflowsDir]);
+  it("generates the layer path when nothing is configured", () => {
+    // One source of truth: `paths.roots` in, `<root>/workflows` + `<root>/functions` out. Nothing
+    // is written down twice, so adding a layer later cannot leave a stale constant behind.
+    expect(workflowLoadOptions(project.paths).defaultRoot).toEqual([
+      project.paths.workflowsDir,
+      join(project.paths.jairaDir, "functions"),
+      project.paths.base.workflowsDir,
+      project.paths.base.functionsDir,
+    ]);
+  });
+
+  it("exposes the layer roots a bare `$` searches", () => {
+    expect(workflowLoadOptions(project.paths).rootPath).toEqual([
+      project.paths.jairaDir,
+      project.paths.base.baseDir,
+    ]);
   });
 });

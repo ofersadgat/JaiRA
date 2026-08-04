@@ -22,10 +22,10 @@
  * run never enters never needs its function.
  */
 import { readFileSync, readdirSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import type { FunctionCapabilities } from "@declarative-ai/exec";
 import { loadBundle, parseReferencedFile, resolveStateRef, snapshotHash, stateIdFromPath, validateBundle } from "@declarative-ai/hw";
-import { conversationModesOf, parseJsonText } from "@jaira/shared";
+import { componentConfigIssues, conversationModesOf, jairaBasePaths, parseJsonText, type JairaPaths } from "@jaira/shared";
 import type { LintIssue, WorkflowBrowser, WorkflowEntry, WorkflowFileEntry } from "@jaira/shared";
 import type { Project } from "./project";
 import { isStateFile } from "./snapshots";
@@ -114,33 +114,154 @@ export interface BrowseOptions {
  * file-watch event.
  */
 export function browseWorkflows(project: Project, options: BrowseOptions = {}): WorkflowBrowser {
-  const { files, errors } = readWorkflowsTolerantly(project.paths.workflowsDir);
+  // Every LAYER, in search order. The base root is browsed too, or the states a project inherits
+  // would be invisible in exactly the surface meant to show what it can run — and a lint error in a
+  // shared workflow would only ever surface as a load failure in whichever project first used it.
+  return browseLayers(
+    project.paths,
+    [
+      { dir: project.paths.workflowsDir, layer: "project" },
+      { dir: project.paths.base.workflowsDir, layer: "base" },
+    ],
+    project.config.workflows.path,
+    tasksOf(project),
+    options,
+  );
+}
 
-  const byStateId = new Map<string, { file: string; raw: unknown }>();
+/**
+ * Browse and lint the SHARED root with no project open.
+ *
+ * The app browses `~/.jaira` on its own — it is machine-global, it exists before any checkout, and
+ * it is where a workflow meant to outlive one project is authored. Until this existed that surface
+ * was the only one in JaiRA that showed state files and never linted them, so a shared workflow was
+ * unvalidated in exactly the mode people write shared workflows in: nothing was red because nothing
+ * had looked.
+ *
+ * The paths are synthesized so that the base root is the ONE layer — `$`, `$JAIRA` and `$BASE` all
+ * name it, which is the truth when it is the only root there is. `$PROJECT` resolves to the base's
+ * parent and means nothing; there is no project for it to mean.
+ *
+ * No tasks, and that is not a gap: a task belongs to a project, so with none open there is nothing
+ * to be running or drifted.
+ */
+export function browseBaseWorkflows(baseDir: string, options: BrowseOptions = {}): WorkflowBrowser {
+  const paths = basePathsAsLayer(baseDir);
+  return browseLayers(paths, [{ dir: paths.workflowsDir, layer: "base" }], undefined, EMPTY_TASKS, options);
+}
+
+/**
+ * A `JairaPaths` whose single layer root is the shared root.
+ *
+ * Built explicitly rather than by pointing `jairaPaths` at the base's parent. That trick appears to
+ * work — `jairaPaths` collapses `roots` to one when the base and the project's `.jaira/` are the
+ * same directory — but it only holds when the base is literally named `.jaira`. Relocate it with
+ * `JAIRA_HOME` and the two stop coinciding, `workflowsDir` points at a sibling that does not exist,
+ * and the browse silently finds no states at all.
+ *
+ * The run-state fields are filled in for the type's sake and are never read: browsing is a pure read
+ * of `workflows/`, and there is no database, no snapshot and no worktree without a project.
+ */
+function basePathsAsLayer(baseDir: string): JairaPaths {
+  const base = jairaBasePaths(resolve(baseDir));
+  return {
+    // Both anchors name the shared root, because with no project open it is the only root there is.
+    projectDir: base.baseDir,
+    jairaDir: base.baseDir,
+    configFile: base.configFile,
+    workflowsDir: base.workflowsDir,
+    skillsDir: base.skillsDir,
+    snapshotsDir: join(base.baseDir, "snapshots"),
+    tasksDir: join(base.baseDir, "tasks"),
+    dbFile: join(base.baseDir, "jaira.db"),
+    worktreesDir: join(base.baseDir, "worktrees"),
+    base,
+    roots: [base.baseDir],
+  };
+}
+
+/** What a task lookup answers. Empty with no project — see {@link browseBaseWorkflows}. */
+interface TaskIndex {
+  byWorkflow: Map<string, string[]>;
+  pins: Map<string, Array<{ taskId: string; snapshotHash: string }>>;
+}
+
+const EMPTY_TASKS: TaskIndex = { byWorkflow: new Map(), pins: new Map() };
+
+/** Tasks per workflow root, so the browser answers "is anything using this?". */
+function tasksOf(project: Project): TaskIndex {
+  const byWorkflow = new Map<string, string[]>();
+  const pins = new Map<string, Array<{ taskId: string; snapshotHash: string }>>();
+  for (const row of project.runtime.list()) {
+    const meta = project.tasks.tryRead(row.taskId);
+    if (!meta) continue;
+    const list = byWorkflow.get(meta.workflow) ?? [];
+    list.push(row.taskId);
+    byWorkflow.set(meta.workflow, list);
+    if (row.snapshotHash !== undefined) {
+      const list = pins.get(meta.workflow) ?? [];
+      list.push({ taskId: row.taskId, snapshotHash: row.snapshotHash });
+      pins.set(meta.workflow, list);
+    }
+  }
+  return { byWorkflow, pins };
+}
+
+/**
+ * The browse itself, over whatever layers it is handed.
+ *
+ * Extracted so the projectless case is the SAME code rather than a second, thinner reader that would
+ * quietly disagree with this one about what a root is or which issues count.
+ */
+function browseLayers(
+  paths: JairaPaths,
+  layers: ReadonlyArray<{ dir: string; layer: "project" | "base" }>,
+  searchPath: readonly string[] | undefined,
+  tasks: TaskIndex,
+  options: BrowseOptions,
+): WorkflowBrowser {
+  const byStateId = new Map<string, { file: string; raw: unknown; layer: "project" | "base"; root: string }>();
   const fileEntries: WorkflowFileEntry[] = [];
-  for (const [file, message] of errors) {
-    fileEntries.push({ stateId: stateIdFromPath(file), file, error: message });
+  for (const { dir, layer } of layers) {
+    const { files, errors } = readWorkflowsTolerantly(dir);
+    for (const [file, message] of errors) {
+      fileEntries.push({ stateId: stateIdFromPath(file), file, error: message, layer, root: dir });
+    }
+    for (const [file, raw] of Object.entries(files)) {
+      const stateId = stateIdFromPath(file);
+      const label = labelOf(raw);
+      // First layer wins, exactly as reference resolution does — the later copy is kept in the list
+      // and flagged, because "your base workflow is being overridden here" is worth seeing.
+      const shadowed = byStateId.has(stateId);
+      if (!shadowed) byStateId.set(stateId, { file, raw, layer, root: dir });
+      fileEntries.push({
+        stateId,
+        file,
+        ...(label !== undefined ? { label } : {}),
+        layer,
+        root: dir,
+        ...(shadowed ? { shadowed: true } : {}),
+      });
+    }
   }
-  for (const [file, raw] of Object.entries(files)) {
-    const stateId = stateIdFromPath(file);
-    byStateId.set(stateId, { file, raw });
-    const label = labelOf(raw);
-    fileEntries.push({ stateId, file, ...(label !== undefined ? { label } : {}) });
-  }
-  fileEntries.sort((a, b) => a.stateId.localeCompare(b.stateId));
+  fileEntries.sort((a, b) => a.stateId.localeCompare(b.stateId) || a.layer.localeCompare(b.layer));
 
   // A child reference is a PATH (WORKFLOWS.md §2.1), so `./critique` and `feature/plan/critique`
   // can name the same state. Roots are derived by "no one references me", which only works if both
   // spellings are reduced to the canonical id first.
-  const refOptions = workflowLoadOptions(project.paths, { tolerant: true, path: project.config.workflows.path });
+  const refOptions = workflowLoadOptions(paths, { tolerant: true, ...(searchPath !== undefined ? { path: searchPath } : {}) });
+  // The winning file per state id, keyed BY id — which is what makes the project's copy of a state
+  // the one a bundle loads while the base copy sits inert beside it in the listing.
+  const effective: Record<string, unknown> = {};
+  for (const [stateId, { raw }] of byStateId) effective[stateId] = raw;
   const referenced = new Set<string>();
   for (const [stateId, { raw }] of byStateId) {
     for (const state of childStatesOf(raw)) {
       try {
-        // The PRIMARY root: a state id resolves against one root, not the search path
-        // (EXPRESSIONS.md §4 — `resolveStateRef` has no filesystem to search with).
-        const defaultRoot = Array.isArray(refOptions.defaultRoot) ? refOptions.defaultRoot[0] : (refOptions.defaultRoot as string | undefined);
-        referenced.add(resolveStateRef(state, { ...refOptions, defaultRoot, from: stateId }));
+        // The whole search path: `resolveStateRef` still cannot SEARCH it (no filesystem in hand),
+        // but it folds a `$BASE/…` or absolute spelling back to the bare id the file is listed
+        // under, so a root is not "referenced" under one name and listed under another.
+        referenced.add(resolveStateRef(state, { ...refOptions, from: stateId }));
       } catch {
         // An unresolvable reference is a load/lint diagnostic below, not a reason to lose the tree.
       }
@@ -148,26 +269,11 @@ export function browseWorkflows(project: Project, options: BrowseOptions = {}): 
   }
   const roots = [...byStateId.keys()].filter((id) => !referenced.has(id)).sort();
 
-  // Tasks per workflow root, so the browser answers "is anything using this?".
-  const tasksByWorkflow = new Map<string, string[]>();
-  const pinsByWorkflow = new Map<string, Array<{ taskId: string; snapshotHash: string }>>();
-  for (const row of project.runtime.list()) {
-    const meta = project.tasks.tryRead(row.taskId);
-    if (!meta) continue;
-    const list = tasksByWorkflow.get(meta.workflow) ?? [];
-    list.push(row.taskId);
-    tasksByWorkflow.set(meta.workflow, list);
-    if (row.snapshotHash !== undefined) {
-      const pins = pinsByWorkflow.get(meta.workflow) ?? [];
-      pins.push({ taskId: row.taskId, snapshotHash: row.snapshotHash });
-      pinsByWorkflow.set(meta.workflow, pins);
-    }
-  }
-
   const covered = new Set<string>();
   const workflows: WorkflowEntry[] = roots.map((rootId) => {
-    const label = labelOf(byStateId.get(rootId)?.raw);
-    const taskIds = tasksByWorkflow.get(rootId) ?? [];
+    const source = byStateId.get(rootId);
+    const label = labelOf(source?.raw);
+    const taskIds = tasks.byWorkflow.get(rootId) ?? [];
     const base: WorkflowEntry = {
       rootId,
       ...(label !== undefined ? { label } : {}),
@@ -175,10 +281,11 @@ export function browseWorkflows(project: Project, options: BrowseOptions = {}): 
       issues: [],
       taskIds,
       driftedTasks: [],
+      layer: source?.layer ?? "project",
     };
     let bundle;
     try {
-      bundle = loadBundle(files, rootId, workflowLoadOptions(project.paths, { tolerant: true, path: project.config.workflows.path }));
+      bundle = loadBundle(effective, rootId, refOptions);
     } catch (e) {
       // An unresolvable child reference or a malformed state: the closure is
       // unknown, so the only honest answer is the load error itself.
@@ -201,6 +308,18 @@ export function browseWorkflows(project: Project, options: BrowseOptions = {}): 
     // Read from the LOADED states, not `source`: a mode inherited from an ancestor's `environment`
     // (WORKFLOWS.md §5) is nowhere in the authored file, and reading the file alone would miss
     // exactly the conflicts inheritance makes easiest to create.
+    // Does each state pass its component what the component needs? The engine asks this of any
+    // function whose registered entry declares a signature; JaiRA's components have none to declare
+    // — their contract lives inside `config` — so the same question is asked from the contract
+    // itself. Reported as an ERROR because a `choose_option` with no options is a gate nobody can
+    // answer, which is a run that parks forever rather than one that reads oddly.
+    // Scoped to THIS root's closure, not to every state on disk: `effective` is the whole layer, and
+    // reporting a state outside this workflow against it would attribute the fault to a root that
+    // never mounts it.
+    const inClosure = Object.fromEntries(states.map((id) => [id, effective[id]]));
+    for (const issue of componentConfigIssues(inClosure)) {
+      issues.push({ ...issue, severity: "error" });
+    }
     for (const conflict of conversationModesOf(bundle.states as unknown as Record<string, unknown>).conflicts) {
       issues.push({
         stateId: conflict.stateIds[0] ?? rootId,
@@ -214,7 +333,7 @@ export function browseWorkflows(project: Project, options: BrowseOptions = {}): 
     const hash = snapshotHash(bundle);
     // A task pinned to a different hash is running older source — worth showing,
     // since execution reads the snapshot and never live `workflows/` (§5.3).
-    const drifted = (pinsByWorkflow.get(rootId) ?? []).filter((pin) => pin.snapshotHash !== hash).map((p) => p.taskId);
+    const drifted = (tasks.pins.get(rootId) ?? []).filter((pin) => pin.snapshotHash !== hash).map((p) => p.taskId);
     return { ...base, states, snapshotHash: hash, issues, driftedTasks: drifted };
   });
 

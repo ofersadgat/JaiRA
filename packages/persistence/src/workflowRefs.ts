@@ -19,7 +19,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { LoadBundleOptions, Vfs } from "@declarative-ai/hw";
 import { stateFilePath } from "@declarative-ai/hw";
-import { parseJsonText, type JairaPaths } from "@jaira/shared";
+import { parseJsonText, workflowSearchPath, type JairaPaths } from "@jaira/shared";
 
 /**
  * The filesystem references resolve against (REFERENCES.md §1.1).
@@ -65,7 +65,7 @@ export interface WorkflowRefOptions {
    * The project's configured search path (`config.workflows.path`, EXPRESSIONS.md §4), as authored —
    * `$JAIRA`/`$PROJECT` entries are expanded here against the same roots a reference uses.
    *
-   * Absent ⇒ the workflows directory alone, which is what every load did before the path existed.
+   * Absent ⇒ generated from the project's layer roots (`<root>/workflows`, `<root>/functions`).
    * The first entry always ends up being `workflowsDir`, whatever the config says: it is the root a
    * bare state id folds back against, and moving it would change every id in the project.
    */
@@ -90,27 +90,38 @@ export interface WorkflowRefOptions {
  */
 export function workflowLoadOptions(paths: JairaPaths, options: WorkflowRefOptions = {}): LoadBundleOptions {
   const workflowsDir = options.workflowsDir ?? paths.workflowsDir;
-  const roots = { JAIRA: paths.jairaDir, PROJECT: paths.projectDir };
+  const roots = { JAIRA: paths.jairaDir, PROJECT: paths.projectDir, BASE: paths.base.baseDir };
+  const searchPath = searchPathFor(workflowsDir, roots, options.path ?? workflowSearchPath(paths.roots));
   return {
-    defaultRoot: searchPathFor(workflowsDir, roots, options.path),
+    defaultRoot: searchPath,
     roots,
+    // The LAYER roots, which a bare `$` is searched along. This is what makes the fragments a state
+    // is assembled from — prompts, types, guards, operation documents — layer exactly as whole
+    // states do; `$JAIRA` and `$BASE` still name one root each, for an author who means one.
+    rootPath: paths.roots,
     vfs: options.vfs ?? nodeVfs(),
-    loadState: (id) => readStateFile(id, workflowsDir, options.tolerant === true),
+    // Searched along the WHOLE path, not just the workflows directory: a bare id may be supplied by
+    // any layer, and reading only the first would make a base-root state unloadable at exactly the
+    // moment it is needed — when nothing in the project defines it.
+    loadState: (id) => readStateFile(id, searchPath, options.tolerant === true),
+    // Shadowing is this project's override mechanism, so it is not news. Without this the lint
+    // surface would carry one warning per overridden state, which is how a warning stops being read.
+    shadowing: "override",
     ...(options.onWarn !== undefined ? { onWarn: options.onWarn } : {}),
     ...(options.onReferencedFile !== undefined ? { onReferencedFile: options.onReferencedFile } : {}),
   };
 }
 
 /**
- * The ordered roots a bare reference is searched along, with `$JAIRA`/`$PROJECT` expanded.
+ * The ordered roots a bare reference is searched along, with `$JAIRA`/`$PROJECT`/`$BASE` expanded.
  *
- * `workflowsDir` is forced FIRST, whatever the config lists. Only the first entry produces bare
- * state ids (hw's `primaryRoot`), and a bare id keys the snapshot hash, the event log and task rows
- * — so letting configuration reorder it would silently re-identify every state in the project. What
- * configuration decides is what comes AFTER.
+ * `workflowsDir` is forced FIRST, whatever the config lists — it is the root this project's own
+ * states are authored under, and a layer that configuration could push behind another would stop
+ * being an override. What configuration decides is what comes AFTER, which is where `$BASE` sits.
  *
  * An entry naming a directory that does not exist is harmless: the vfs lists it as empty, and the
- * search moves on. That is what makes `$JAIRA/functions` a safe default before anything is in it.
+ * search moves on. That is what makes `$BASE/workflows` a safe default on a machine with no shared
+ * root yet, and `$JAIRA/functions` a safe one before anything is in it.
  */
 function searchPathFor(workflowsDir: string, roots: Readonly<Record<string, string>>, configured: readonly string[] | undefined): string[] {
   const out = [workflowsDir];
@@ -131,18 +142,37 @@ export function standaloneLoadOptions(workflowsDir: string, tolerant = false): L
 }
 
 /**
- * Read one state file by canonical id. Only reached for a state the caller's `files` map does not
- * already hold — i.e. an out-of-tree reference — so the in-tree path never touches the disk twice.
+ * Read one state file by canonical id, searching the roots in order. Only reached for a state the
+ * caller's `files` map does not already hold — a base-root state, or an out-of-tree reference — so
+ * the in-tree path never touches the disk twice.
+ *
+ * First match wins, which is the same rule reference resolution uses; the two have to agree or a
+ * bundle would lint against the project's copy of a state and load the base's.
+ *
+ * A read that fails for a reason OTHER than absence is reported straight away rather than falling
+ * through to the next root. An unreadable file is not the same as a missing one, and quietly
+ * resolving to the base copy because the project's is malformed would hide the actual fault.
  */
-function readStateFile(id: string, workflowsDir: string, tolerant: boolean): unknown | undefined {
-  const file = `${stateFilePath(id, workflowsDir)}.json`;
-  try {
-    return parseJsonText(readFileSync(file, "utf8"), file);
-  } catch (e) {
-    // A missing file is an unknown-state VALIDATION error with the referring field attached, which
-    // is a better message than a raw ENOENT; anything else is reported unless the caller is linting
-    // a directory the user is actively editing.
-    if (tolerant || (e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw e;
+function readStateFile(id: string, roots: string | readonly string[], tolerant: boolean): unknown | undefined {
+  const search = typeof roots === "string" ? [roots] : roots;
+  for (const root of search) {
+    const file = `${stateFilePath(id, root)}.json`;
+    let text: string;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") continue; // not at this root — try the next
+      if (tolerant) return undefined;
+      throw e;
+    }
+    try {
+      return parseJsonText(text, file);
+    } catch (e) {
+      if (tolerant) return undefined;
+      throw e;
+    }
   }
+  // Absent everywhere. Left to the caller as an unknown-state VALIDATION error, which carries the
+  // referring field and reads far better than a raw ENOENT would.
+  return undefined;
 }

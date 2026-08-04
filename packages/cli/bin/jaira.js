@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Dev-mode bin: packages are consumed as TypeScript source (ai-exec convention),
-// so the CLI runs through tsx. A bundled (esbuild) bin replaces this later.
-import { register } from "tsx/esm/api";
+// The CLI ships as one bundled ESM file (see build.mjs) — no TypeScript to
+// register at runtime. `main` is called explicitly rather than leaning on the
+// entry-point guard in src/main.ts, because this file is also imported by the
+// `jaira` wrapper package, where it is not the process entry point.
+import { main } from "../dist/cli.mjs";
 
-register();
-const { main } = await import("../src/main.ts");
 process.exitCode = await main(process.argv.slice(2));

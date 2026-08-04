@@ -318,3 +318,54 @@ export function displayText(value: unknown): string {
   }
   return JSON.stringify(value, null, 2);
 }
+
+// --- lint: does the state pass the component what it needs? ------------------
+
+/** One thing wrong with a component operation's authored `args`. */
+export interface ComponentConfigIssue {
+  stateId: string;
+  /** Where in the state file — always `operation.args`, which is what `config` is authored as. */
+  path: string;
+  message: string;
+}
+
+/**
+ * Check every state that calls a built-in component against that component's contract.
+ *
+ * The engine already asks "does this operation pass what its function expects?" — but only where the
+ * registered function declares a `signature`, and JaiRA registers its components without one
+ * (`InteractionHub.register`). It cannot usefully declare one either: the contract is not a fixed
+ * parameter list but a shape inside `config`, which is exactly what {@link parseComponentConfig}
+ * already knows how to read.
+ *
+ * So the check is made HERE, from the same function the renderer and the main process both use to
+ * interpret a component's config. That is the property worth having: a state whose `choose_option`
+ * declares no options is reported by the linter using the same words the dialog would have failed
+ * with, rather than running and producing an empty gate nobody can answer.
+ *
+ * Read off the AUTHORED document rather than the loaded bundle. `args` is what an author writes and
+ * what they will fix, and a message about `operation.args` should name the thing in the file.
+ */
+export function componentConfigIssues(states: Record<string, unknown>): ComponentConfigIssue[] {
+  const issues: ComponentConfigIssue[] = [];
+  for (const [stateId, def] of Object.entries(states)) {
+    if (def === null || typeof def !== "object" || Array.isArray(def)) continue;
+    const operation = (def as { operation?: unknown }).operation;
+    if (operation === null || typeof operation !== "object" || Array.isArray(operation)) continue;
+    const op = operation as { kind?: unknown; function?: unknown; functionRef?: unknown; args?: unknown };
+    // A transcluded or inherited operation is not this file's to judge: the block it resolves to may
+    // supply the args, and reporting the state that mounts it would name the wrong file.
+    if (op.kind !== "function") continue;
+    const name = typeof op.function === "string" ? op.function : typeof op.functionRef === "string" ? op.functionRef : undefined;
+    if (name === undefined || !isComponentName(name)) continue;
+    // A referenced `args` block resolves to something this pass cannot see. Judging it from here
+    // would report a missing option against a file that never claimed to declare one.
+    if (op.args !== undefined && (typeof op.args !== "object" || op.args === null || Array.isArray(op.args))) continue;
+    try {
+      parseComponentConfig(name, op.args);
+    } catch (e) {
+      issues.push({ stateId, path: "operation.args", message: (e as Error).message });
+    }
+  }
+  return issues;
+}

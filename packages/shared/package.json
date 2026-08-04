@@ -1,10 +1,23 @@
 {
   "name": "@jaira/shared",
   "version": "0.1.0",
+  "description": "JaiRA shared types and config: the vocabulary every other package speaks.",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ofersadgat/JaiRA.git",
+    "directory": "packages/shared"
+  },
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./browser": "./src/browser.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@declarative-ai/json": "file:../../../declarative-ai/packages/json"

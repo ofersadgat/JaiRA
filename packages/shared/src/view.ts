@@ -177,14 +177,32 @@ export interface LintIssue {
   severity: LintSeverity;
 }
 
+/**
+ * Which layer of the search path supplied a state file.
+ *
+ * `project` is the project's own `.jaira/`; `base` is the shared root behind every project on the
+ * machine. The distinction is not cosmetic — editing a `base` file changes every project that has
+ * not overridden it, so the UI has to be able to say so before someone types.
+ */
+export type WorkflowLayer = "project" | "base";
+
 /** One state file in the browser's tree. */
 export interface WorkflowFileEntry {
   stateId: string;
-  /** Path relative to `.jaira/workflows/`, forward slashes. */
+  /** Path relative to the root that supplied it, forward slashes. */
   file: string;
   label?: string;
   /** Set when the file could not be read or parsed (the author is mid-edit). */
   error?: string;
+  /** Which layer this file came from. */
+  layer: WorkflowLayer;
+  /** The root it is relative to, absolute — what an editor needs to open it. */
+  root: string;
+  /**
+   * Set on a BASE file that a project file of the same state id shadows. The base copy is inert in
+   * this project: it is listed so the override is visible rather than looking like a missing file.
+   */
+  shadowed?: boolean;
 }
 
 /** A workflow root and its lint state. */
@@ -201,6 +219,8 @@ export interface WorkflowEntry {
   taskIds: string[];
   /** Tasks pinned to a snapshot other than what is on disk now. */
   driftedTasks: string[];
+  /** Which layer supplied this root's own state file. */
+  layer: WorkflowLayer;
 }
 
 export interface WorkflowBrowser {
@@ -208,6 +228,238 @@ export interface WorkflowBrowser {
   files: WorkflowFileEntry[];
   /** States no root reaches — a reference cycle, or a failed load above them. */
   unreachable: string[];
+}
+
+// --- the file tree (DESIGN §11.1, the Files view) ----------------------------
+
+/**
+ * What a file in `.jaira/` is, as far as the tree cares.
+ *
+ * `workflow` is the only kind that maps to a state id and therefore opens a board; the rest exist so
+ * prompts and skills stop being `$ref` strings typed from memory and become things you can find.
+ */
+export type FileKind = "directory" | "workflow" | "prompt" | "skill" | "config" | "other";
+
+/**
+ * What linting knows about one node of the tree.
+ *
+ * The tree used to say only whether a file PARSED, which is the smallest of the things that can be
+ * wrong with it. A state that parses perfectly and forgets to wire a child's required input is a
+ * state that cannot run, and until this existed you had to click every file to find out.
+ *
+ * `unchecked` is the third state and the reason this is not just two numbers. A state no workflow
+ * root reaches is never validated at all, so zero errors on it means "nobody looked", not "clean" —
+ * and those are opposite things to believe before starting a task.
+ */
+export interface FileLint {
+  /** Errors on this file; on a directory, the total below it. */
+  errors: number;
+  /** Warnings, counted the same way. */
+  warnings: number;
+  /**
+   * Set on a state file nothing validated: no root's closure reaches it, or the root that would
+   * have failed to load. Never set on a directory — an aggregate "some of this was not checked"
+   * reads as a claim about the whole subtree.
+   */
+  unchecked?: boolean;
+}
+
+/** One entry in the two-root file tree. Directories carry `children`. */
+export interface FileNode {
+  /** Path relative to the root that supplied it, forward slashes. */
+  path: string;
+  name: string;
+  kind: FileKind;
+  /**
+   * The MIME type, from {@link mimeOfPath} — what the Files view resolves its surfaces on.
+   *
+   * Carried on the node rather than re-derived in the renderer so the tree and the panel can never
+   * disagree about what a file is, and so the classification lives on one side of the IPC boundary.
+   */
+  mime: string;
+  layer: WorkflowLayer;
+  /** The state this file defines, when `kind` is `workflow`. */
+  stateId?: string;
+  /** Set on a BASE file that a project file of the same state id shadows (see {@link WorkflowFileEntry}). */
+  shadowed?: boolean;
+  /** Set when the file could not be read or parsed. */
+  error?: string;
+  /** Lint state, joined from the workflow browser. Absent on a node nothing is known about. */
+  lint?: FileLint;
+  children?: FileNode[];
+}
+
+/**
+ * Both roots, in search-path order: the project's `.jaira/` first, the shared root second.
+ *
+ * Showing them as two trees rather than one merged list is what removes the layer picker — which
+ * copy of a state you are editing is its position on screen, not a mode you have to remember.
+ *
+ * A root is listed whether or not it exists on disk. The shared root is a place you can put things
+ * before it is a directory, and hiding it until someone has already used it would mean the one
+ * affordance for "share this across projects" only appears once you have found another way to do
+ * it. `exists` is false in that case, so the tree can say so rather than showing a bare "empty".
+ */
+export interface FileTree {
+  roots: Array<{ layer: WorkflowLayer; dir: string; exists: boolean; nodes: FileNode[] }>;
+}
+
+// --- one state, as the Files view shows it -----------------------------------
+
+/** A declared child of a state — one column of its board. */
+export interface StateChild {
+  /** Key in the parent's `children` map; the column's identity. */
+  key: string;
+  stateId: string;
+  label?: string;
+  /** True when this child has children of its own, so its column can be walked into. */
+  hasChildren: boolean;
+}
+
+/**
+ * One slot a state declares, as a PARENT needs it — enough to wire it and nothing more.
+ *
+ * Deliberately not the whole `ParameterDecl`: the parent authors a BINDING, and a binding needs the
+ * slot's name, whether it has to be there, and something to hover over. The schema is the child's
+ * business.
+ */
+export interface StateSlotInfo {
+  name: string;
+  /** True when the slot need not be wired: `optional`, or carrying a `default` (SPEC §4.1). */
+  optional: boolean;
+  description?: string;
+}
+
+/**
+ * Both halves of a child's surface — what it takes, and what it hands back.
+ *
+ * The authoring form needs both and for different reasons, which is why they travel together rather
+ * than as two lookups. `inputs` is what a mount must FILL: the wiring table opens showing the slots
+ * that have to be bound, instead of an empty list the author fills from memory — which is what made
+ * "required child input 'x' is not wired" a lint error people met after saving rather than a blank
+ * they were looking straight at. `outputs` is what a binding may POINT AT: every
+ * `.children.<key>.outputs.<name>` a sibling or the parent could read, so a binding is picked from a
+ * list rather than typed from memory and got subtly wrong.
+ */
+export interface StateSlots {
+  inputs: StateSlotInfo[];
+  outputs: StateSlotInfo[];
+}
+
+/**
+ * The environment a state's operation would run in.
+ *
+ * `available` is the executor-availability rule made visible: the executors enabled in settings
+ * *are* the default environment, so naming one that is off is an authoring error the state view
+ * reports rather than a surprise 40 seconds into a run.
+ */
+export interface StateEnvironment {
+  /** The function the operation names, when it is a function op. */
+  executor?: string;
+  /** False when `executor` is named but not enabled/reachable here. */
+  available: boolean;
+  /** Set when the executor came from an ancestor rather than this state. */
+  from?: string;
+}
+
+/** One transition off a state. Deliberately not what orders the board's columns. */
+export interface StateTransition {
+  when: string;
+  to: string;
+  /** True when `to` re-enters this state or an ancestor of it — a loop, worth marking. */
+  loops: boolean;
+}
+
+/** A reference a state makes, and whether it resolved. */
+export interface StateReference {
+  ref: string;
+  resolved: boolean;
+  /** Which layer supplied it, when it resolved. */
+  layer?: WorkflowLayer;
+}
+
+/**
+ * Everything the Files view needs about the one state selected in the tree.
+ *
+ * Deliberately one round trip: the middle panel and the inspector are two renderings of the same
+ * subject, and fetching them separately is how they end up disagreeing about which state is open.
+ */
+export interface StateView {
+  stateId: string;
+  label?: string;
+  layer: WorkflowLayer;
+  /** Absolute path of the file that defines it. */
+  file: string;
+  exists: boolean;
+  /** The workflow root whose closure contains this state, when one does. */
+  rootId?: string;
+  operation?: {
+    kind: "prompt" | "function";
+    functionRef?: string;
+    model?: string;
+  };
+  children: StateChild[];
+  /**
+   * The board of this state's children, already projected — null when the state is a leaf, which is
+   * what makes the Files view render a task list instead.
+   */
+  board: BoardView | null;
+  /** Tasks whose active path is inside this state right now (what a leaf shows). */
+  tasksHere: BoardCard[];
+  /** Tasks that have passed through and finished, newest first — so an idle leaf still says something. */
+  tasksRecent: BoardCard[];
+  transitions: StateTransition[];
+  environment: StateEnvironment;
+  issues: LintIssue[];
+  references: StateReference[];
+  /** States that declare this one as a child. */
+  referencedBy: string[];
+  /** Tasks in this state pinned to a snapshot older than what is on disk (DESIGN §5.3). */
+  driftedTasks: string[];
+  /**
+   * True when this was read from the file alone, with no project open.
+   *
+   * The shared root is browsable without a project, but the things that need a project's reference
+   * graph — lint issues, `referencedBy`, drift, and every task list — are then UNKNOWN rather than
+   * empty. The distinction matters: an empty `referencedBy` would otherwise read as "nothing depends
+   * on this", which is exactly the wrong thing to believe before renaming it.
+   */
+  fileOnly?: boolean;
+}
+
+// --- the conversation inside one task ----------------------------------------
+
+/**
+ * One turn of a run, read back out of the event journal.
+ *
+ * The journal is the only record there is, so this is a projection of it rather than a separate
+ * transcript: what the operation did, what it called, whether its output validated, and every point
+ * a human was asked something.
+ */
+export type TurnKind = "operation" | "tool" | "output" | "policy" | "interaction" | "failure" | "transition";
+
+export interface ConversationTurn {
+  seq: number;
+  at: number;
+  kind: TurnKind;
+  stateId?: string;
+  /** The message, command, or reason — whatever this kind's one line is. */
+  text?: string;
+  /** Tool name, for `tool` turns. */
+  tool?: string;
+  /** Whether the thing succeeded, where that is meaningful. */
+  ok?: boolean;
+  /** Structured payload, for `output` turns. */
+  data?: JsonValue;
+}
+
+export interface ConversationView {
+  taskId: string;
+  title: string;
+  runId?: number;
+  turns: ConversationTurn[];
+  /** The interaction this task is parked on, when it is one. */
+  waitingOn?: { requestId: string; component: string };
 }
 
 // --- history pruning (SPEC §13) ----------------------------------------------

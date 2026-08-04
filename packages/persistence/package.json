@@ -1,9 +1,22 @@
 {
   "name": "@jaira/persistence",
   "version": "0.1.0",
+  "description": "JaiRA persistence: the append-only session log, its projections, and the SQLite store behind them.",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ofersadgat/JaiRA.git",
+    "directory": "packages/persistence"
+  },
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@declarative-ai/exec": "file:../../../declarative-ai/packages/exec",

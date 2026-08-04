@@ -1,0 +1,510 @@
+/**
+ * The editor for one `operation` or `environment` block.
+ *
+ * Rendered twice per state and identical both times, because the two blocks are one shape (see
+ * `operationForm`). What differs is the framing sentence above it, which the caller supplies.
+ *
+ * Every control here obeys the same rule: a value the document holds as a REFERENCE is shown
+ * disabled, never as an empty box. An empty box invites typing and typing replaces the reference
+ * with a literal — silently, and with nothing in the form to say what was lost.
+ */
+import type { JSX } from "react";
+import {
+  CONVERSATION_MODES,
+  JSON_FIELDS,
+  PERMISSION_MODES,
+  PERMISSION_PROFILES,
+  SIMPLE_FIELDS,
+  type ConversationForm,
+  type OperationFieldsForm,
+  type PermissionsForm,
+  type PermissionToolRow,
+  type SessionForm,
+  type JsonField,
+  type SimpleField,
+} from "./operationForm";
+import { NO_ISSUES, fieldClass, markFor, type FormIssues } from "./issues";
+import { LinkInput, LinkToggle } from "./links";
+import { emptySlotRow } from "./slotForm";
+import { SlotTable, SlotTypePicker } from "./slotTable";
+
+export const REF_HINT = "a referenced value — edit it on the JSON tab";
+
+/**
+ * Every lint path a control inside an `operation` block marks for itself.
+ *
+ * Exported because the KIND picker sits outside the block and takes what is left: a diagnostic
+ * against `operation` that none of these claims — the block failing to resolve at all, or a lowered
+ * spelling this form does not render, like `operation.config.model` — is about what kind of
+ * operation this is, and the picker is the box that says so.
+ */
+export function operationFieldPaths(path: string): string[] {
+  return [...SIMPLE_FIELDS.map((spec) => `${path}.${spec.key}`), `${path}.session`, `${path}.input`, `${path}.output`];
+}
+
+/**
+ * The completion lists this editor's controls reference, rendered ONCE per form.
+ *
+ * `OperationFieldsEditor` appears twice on a state — the operation and the environment — and a
+ * datalist id has to be unique, so the lists cannot live inside the controls that use them.
+ */
+export function OperationDataLists({ functions }: { functions: Array<{ name: string; note: string }> }): JSX.Element {
+  return (
+    <>
+      <datalist id="operation-functions">
+        {functions.map((fn) => (
+          <option key={fn.name} value={fn.name} label={fn.note} />
+        ))}
+      </datalist>
+      <datalist id="permission-profiles">
+        {PERMISSION_PROFILES.map((profile) => (
+          <option key={profile} value={profile} />
+        ))}
+      </datalist>
+    </>
+  );
+}
+
+/** One simple field, chosen by the table in `operationForm` rather than spelled out here. */
+function SimpleFieldControl({
+  spec,
+  form,
+  targets,
+  path,
+  issues,
+  onChange,
+  onLink,
+}: {
+  spec: SimpleField;
+  form: OperationFieldsForm;
+  /** Link completions, for a {@link SimpleField.linkable} field. */
+  targets: readonly string[];
+  /** This block's lint path (`operation`), or absent when nothing lints it. */
+  path?: string | undefined;
+  issues: FormIssues;
+  onChange: (name: string, value: string) => void;
+  /** Set or clear this field's reference. `null` unlinks. */
+  onLink: (name: string, ref: string | null) => void;
+}): JSX.Element {
+  const structured = form.structured[spec.name] === true;
+  const ref = form.refs[spec.name];
+  const linked = ref !== undefined;
+  const value = form.fields[spec.name] ?? "";
+  // The linter names a field by its AUTHORED key — `operation.function`, not `operation.functionRef`
+  // — which is the whole reason `SimpleField` carries both spellings.
+  const mark = path === undefined ? "" : fieldClass(issues, `${path}.${spec.key}`);
+  const shared = {
+    value,
+    className: mark.trim(),
+    disabled: structured,
+    spellCheck: false,
+    title: structured ? REF_HINT : spec.hint,
+    onChange: (e: { target: { value: string } }) => onChange(spec.name, e.target.value),
+  };
+  return (
+    <label {...(path === undefined ? { className: "field" } : markFor(issues, `${path}.${spec.key}`, "field"))}>
+      <span>
+        {spec.label}
+        {spec.linkable === true ? (
+          <LinkToggle
+            linked={linked}
+            disabled={structured}
+            // Linking starts EMPTY rather than seeded from the box: the two spellings are kept side
+            // by side, so the literal is not lost and guessing a path from prose would only produce
+            // a reference to nothing.
+            onToggle={(next) => onLink(spec.name, next ? (ref ?? "") : null)}
+          />
+        ) : null}
+      </span>
+      {linked ? (
+        <LinkInput value={ref} targets={targets} mark={mark} onChange={(next) => onLink(spec.name, next)} />
+      ) : spec.multiline ? (
+        <textarea rows={spec.name === "prompt" ? 6 : 3} placeholder={structured ? "" : spec.placeholder} {...shared} />
+      ) : (
+        // The datalists themselves are rendered ONCE by the editor: this component appears twice per
+        // state (the operation and the environment) and a datalist id has to be unique.
+        <input
+          inputMode={spec.type === "number" ? "decimal" : undefined}
+          placeholder={structured ? "" : spec.placeholder}
+          {...(spec.name === "functionRef" ? { list: "operation-functions" } : {})}
+          {...shared}
+        />
+      )}
+      {structured ? <span className="sub">{REF_HINT}</span> : null}
+      {linked ? <span className="sub">spliced in where it is referenced — a copy, not a live link</span> : null}
+    </label>
+  );
+}
+
+/** One arbitrary-JSON field. No generated form beats a JSON box for a value nothing has a schema for. */
+function JsonFieldControl({
+  spec,
+  form,
+  onChange,
+}: {
+  spec: JsonField;
+  form: OperationFieldsForm;
+  onChange: (name: string, value: string) => void;
+}): JSX.Element {
+  return (
+    <label className="field">
+      <span>{spec.label}</span>
+      <textarea
+        className="code-editor"
+        rows={3}
+        spellCheck={false}
+        value={form.json[spec.name] ?? ""}
+        placeholder={spec.placeholder}
+        title={spec.hint}
+        onChange={(e) => onChange(spec.name, e.target.value)}
+      />
+    </label>
+  );
+}
+
+/**
+ * The session control (DESIGN §1.6).
+ *
+ * Four states, and "not declared" is separated from "fresh" deliberately: absent means the operation
+ * gets its own stream, `null` is an explicit override of whatever the chain supplied. One control
+ * that collapsed them would silently discard the override.
+ */
+function SessionControl({
+  value,
+  path,
+  issues,
+  onChange,
+}: {
+  value: SessionForm;
+  /** This block's lint path. A session complaint is reported at `<block>.session`. */
+  path?: string | undefined;
+  issues: FormIssues;
+  onChange: (session: SessionForm) => void;
+}): JSX.Element {
+  return (
+    <label {...(path === undefined ? { className: "field" } : markFor(issues, `${path}.session`, "field"))}>
+      <span>Session</span>
+      <div className="row-controls">
+        <select
+          className={path === undefined ? undefined : fieldClass(issues, `${path}.session`).trim()}
+          value={value.mode}
+          disabled={value.mode === "structured"}
+          title={value.mode === "structured" ? REF_HINT : "which conversation stream this call joins"}
+          onChange={(e) => onChange({ ...value, mode: e.target.value as SessionForm["mode"] })}
+        >
+          <option value="absent">not declared — its own stream</option>
+          <option value="named">named — shared by every state using the name</option>
+          <option value="fresh">fresh — override the chain and start new</option>
+          {value.mode === "structured" ? <option value="structured">a computed position</option> : null}
+        </select>
+        {value.mode === "named" ? (
+          <input
+            value={value.name}
+            placeholder="review"
+            spellCheck={false}
+            title="also the resource-bundle key — workspace and permissions"
+            onChange={(e) => onChange({ ...value, name: e.target.value })}
+          />
+        ) : null}
+        {value.mode === "structured" ? <input value={value.text} readOnly disabled title={REF_HINT} /> : null}
+      </div>
+    </label>
+  );
+}
+
+function ConversationControl({
+  value,
+  onChange,
+}: {
+  value: ConversationForm;
+  onChange: (conversation: ConversationForm) => void;
+}): JSX.Element {
+  return (
+    <label className="field">
+      <span>Conversation</span>
+      <div className="row-controls">
+        <select
+          value={value.mode}
+          title="the transcript preamble injected into THIS call (SPEC §4.7)"
+          onChange={(e) => onChange({ ...value, mode: e.target.value as ConversationForm["mode"] })}
+        >
+          <option value="">not declared</option>
+          {CONVERSATION_MODES.map((mode) => (
+            <option key={mode} value={mode}>
+              {mode}
+            </option>
+          ))}
+        </select>
+        {/* Only `selected_artifacts` reads the list, so it is the only mode that offers one. */}
+        {value.mode === "selected_artifacts" ? (
+          <input
+            value={value.artifacts}
+            placeholder="plan_doc, critique"
+            spellCheck={false}
+            onChange={(e) => onChange({ ...value, artifacts: e.target.value })}
+          />
+        ) : null}
+      </div>
+    </label>
+  );
+}
+
+/** The authored permission baseline (DESIGN §5.1) — profile, default mode, and per-tool overrides. */
+function PermissionsControl({
+  value,
+  onChange,
+}: {
+  value: PermissionsForm;
+  onChange: (permissions: PermissionsForm) => void;
+}): JSX.Element {
+  const editTool = (index: number, patch: Partial<PermissionToolRow>): void =>
+    onChange({ ...value, tools: value.tools.map((row, i) => (i === index ? { ...row, ...patch } : row)) });
+  return (
+    <div className="slots">
+      <div className="slots-head">
+        <span>Permissions</span>
+        <button
+          type="button"
+          className="ghost sm"
+          onClick={() => onChange({ ...value, tools: [...value.tools, { tool: "", mode: "ask" }] })}
+        >
+          + Tool
+        </button>
+      </div>
+      <div className="row-controls">
+        <input
+          value={value.profile}
+          list="permission-profiles"
+          placeholder="profile — which effects are in scope"
+          spellCheck={false}
+          title="read-only, plan, full — or a custom profile this host registers"
+          onChange={(e) => onChange({ ...value, profile: e.target.value })}
+        />
+        <select
+          value={value.default}
+          title="how a tool in scope is authorized when the map below does not name it"
+          onChange={(e) => onChange({ ...value, default: e.target.value })}
+        >
+          <option value="">default mode…</option>
+          {PERMISSION_MODES.map((mode) => (
+            <option key={mode} value={mode}>
+              {mode}
+            </option>
+          ))}
+        </select>
+      </div>
+      {value.tools.map((row, i) => (
+        <div className="slot-row permission-row" key={i}>
+          <input
+            value={row.tool}
+            placeholder="tool name"
+            spellCheck={false}
+            onChange={(e) => editTool(i, { tool: e.target.value })}
+          />
+          <select value={row.mode} onChange={(e) => editTool(i, { mode: e.target.value })}>
+            {PERMISSION_MODES.map((mode) => (
+              <option key={mode} value={mode}>
+                {mode}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="ghost sm"
+            title="remove"
+            onClick={() => onChange({ ...value, tools: value.tools.filter((_, j) => j !== i) })}
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * One `operation` or `environment` block, in full.
+ *
+ * `kinds` says which of the operation-shaped fields are worth showing: a prompt operation has no
+ * `function`, a function operation has no `prompt`. An `environment` block shows both, because it is
+ * a defaults layer and may legitimately supply either.
+ */
+export function OperationFieldsEditor({
+  form,
+  show,
+  targets,
+  bindingListId,
+  path,
+  issues = NO_ISSUES,
+  onChange,
+}: {
+  form: OperationFieldsForm;
+  /** Which of `prompt` / `function` this block should offer. */
+  show: { prompt: boolean; function: boolean };
+  /** Every reference the link controls can offer, from the file tree. */
+  targets: readonly string[];
+  /** The datalist of runtime paths a binding may name. Absent ⇒ the boxes stay free text. */
+  bindingListId?: string;
+  /**
+   * What this block is called in a lint path — `operation` for the state's own, absent for the
+   * `environment` layer, which the linter reports against the operation it ends up merged into
+   * rather than against the defaults that supplied it.
+   */
+  path?: string | undefined;
+  /** This state's diagnostics, for the controls to mark themselves with. */
+  issues?: FormIssues;
+  onChange: (form: OperationFieldsForm) => void;
+}): JSX.Element {
+  const setField = (name: string, value: string): void =>
+    onChange({ ...form, fields: { ...form.fields, [name]: value } });
+  const setJson = (name: string, value: string): void =>
+    onChange({ ...form, json: { ...form.json, [name]: value } });
+  const setRef = (name: string, ref: string | null): void => {
+    const refs = { ...form.refs };
+    // Deleting the key is what "not linked" IS — an empty string there means a link whose target has
+    // not been typed yet, and the two must stay distinguishable or unlinking would write a literal
+    // empty prompt.
+    if (ref === null) delete refs[name];
+    else refs[name] = ref;
+    onChange({ ...form, refs });
+  };
+
+  const visible = (spec: SimpleField): boolean =>
+    (spec.name !== "prompt" || show.prompt) && (spec.name !== "functionRef" || show.function);
+
+  // The block's OWN anchor, so a diagnostic against `operation` has somewhere to scroll to and
+  // something to say in a tooltip. It is not marked in colour — the boxes below are.
+  return (
+    <div {...(path === undefined ? { className: "op-block" } : markFor(issues, path, "op-block"))}>
+      {SIMPLE_FIELDS.filter((spec) => spec.group === "operation")
+        .filter(visible)
+        .map((spec) => (
+          <SimpleFieldControl
+            key={spec.name}
+            spec={spec}
+            form={form}
+            targets={targets}
+            path={path}
+            issues={issues}
+            onChange={setField}
+            onLink={setRef}
+          />
+        ))}
+
+      {/* Untyped by nature — only the function knows what it takes — so a JSON box rather than a
+          generated form, and the one position where a reference must be written {"$ref": …}. */}
+      {show.function ? <JsonFieldControl spec={JSON_FIELDS[0]!} form={form} onChange={setJson} /> : null}
+
+      {/* §4.3, the single most common silent failure: these are PARAMETERS, so the wiring goes in
+          the binding column. `"input": { "prompt": ".inputs.x" }` loads as a slot with no binding at
+          all — the call runs with nothing in it and the state reports success. */}
+      <SlotTable
+        title="Operation inputs"
+        rows={form.input}
+        optional
+        bindingHint=".inputs.instruction"
+        targets={targets}
+        bindingListId={bindingListId}
+        {...(path === undefined ? {} : { path: `${path}.input`, issues })}
+        onChange={(input) => onChange({ ...form, input })}
+      />
+
+      {/* §4.4: absent, the loader builds one object slot from the state's produced outputs. A
+          delegated agent returns ONE STRING, so its output must be an artifact or the string is read
+          as a record of named outputs, finds nothing, and the state fails. */}
+      <div {...(path === undefined ? { className: "slots" } : markFor(issues, `${path}.output`, "slots"))}>
+        <div className="slots-head">
+          <span>Operation output</span>
+          <button
+            type="button"
+            className="ghost sm"
+            onClick={() => onChange({ ...form, output: form.output === null ? emptySlotRow() : null })}
+          >
+            {form.output === null ? "+ Declare" : "Remove"}
+          </button>
+        </div>
+        {form.output === null ? (
+          <div className="sub">built from this state&apos;s produced outputs — the operation returns a record</div>
+        ) : (
+          <div className="slot-row">
+            <input
+              value={form.output.name}
+              placeholder="name (defaults to 'output')"
+              spellCheck={false}
+              onChange={(e) => onChange({ ...form, output: { ...form.output!, name: e.target.value } })}
+            />
+            {/* The link control belongs here as much as on a state's slots — the position is the
+                same one, and `"output": {"schema": "$/types/plan"}` is the ordinary way to give a
+                delegated agent's result a named type. Without it the picker had a linked schema it
+                could neither show nor change. */}
+            <SlotTypePicker
+              row={form.output}
+              targets={targets}
+              mark={path === undefined ? "" : fieldClass(issues, `${path}.output`)}
+              onChange={(type) => onChange({ ...form, output: { ...form.output!, type } })}
+              onLink={(ref) => {
+                const { typeRef: _dropped, ...rest } = form.output!;
+                onChange({ ...form, output: ref === null ? rest : { ...rest, typeRef: ref } });
+              }}
+            />
+            <span className="sub">an agent returning one string needs `artifact`</span>
+          </div>
+        )}
+      </div>
+
+      <SessionControl
+        value={form.session}
+        path={path}
+        issues={issues}
+        onChange={(session) => onChange({ ...form, session })}
+      />
+      <label className="slot-opt wide" title="always branch, rather than appending when the position is still the head">
+        <input type="checkbox" checked={form.fork} onChange={(e) => onChange({ ...form, fork: e.target.checked })} />
+        fork the session rather than appending
+      </label>
+
+      <ConversationControl value={form.conversation} onChange={(conversation) => onChange({ ...form, conversation })} />
+      <PermissionsControl value={form.permissions} onChange={(permissions) => onChange({ ...form, permissions })} />
+
+      <details className="model-knobs">
+        <summary>Model settings</summary>
+        {SIMPLE_FIELDS.filter((spec) => spec.group === "model").map((spec) => (
+          <SimpleFieldControl
+            key={spec.name}
+            spec={spec}
+            form={form}
+            targets={targets}
+            path={path}
+            issues={issues}
+            onChange={setField}
+            onLink={setRef}
+          />
+        ))}
+        {JSON_FIELDS.filter((spec) => spec.group === "model").map((spec) => (
+          <JsonFieldControl key={spec.name} spec={spec} form={form} onChange={setJson} />
+        ))}
+        <label className="field">
+          <span>Reasoning</span>
+          <div className="row-controls">
+            <select
+              value={form.reasoning.effort}
+              onChange={(e) => onChange({ ...form, reasoning: { ...form.reasoning, effort: e.target.value } })}
+            >
+              <option value="">effort…</option>
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+            </select>
+            <input
+              value={form.reasoning.budgetTokens}
+              inputMode="decimal"
+              placeholder="budget tokens"
+              spellCheck={false}
+              onChange={(e) => onChange({ ...form, reasoning: { ...form.reasoning, budgetTokens: e.target.value } })}
+            />
+          </div>
+        </label>
+      </details>
+    </div>
+  );
+}

@@ -5,8 +5,8 @@
 (§3, §4), one grammar covers bindings and expressions alike (§14), there is one spelling per thing
 (§15), a conversation is read by ref (§16), snapshots pin the resolved
 definition (§11), failures travel as data (§5), and the built-in operation library ships
-(§3, `builtins.ts`). What remains is higher-order operations (§3.5) and the items in
-[TODO.md](TODO.md).
+(§3, `builtins.ts`). What remains is higher-order operations (§3.5), `.each` — which subsumes them
+(§17) — and the items in [TODO.md](TODO.md).
 
 Sections marked ⚠️ or "superseded" record where building contradicted the design — they are kept
 because the reasoning that was wrong is usually the reasoning someone would repeat.
@@ -489,21 +489,24 @@ shadowing diagnostic §4.4 asked for is implemented, not deferred.
 - **`children[].state` does not search.** It resolves through `ref.ts`'s `resolveStateRef`, which
   does path arithmetic with no filesystem in hand — so it has nothing to test a candidate's
   existence against and would always take the first entry. Searching there needs an existence
-  oracle (the bundle's own file map, or the vfs), which is a separate decision.
+  oracle (the bundle's own file map, or the vfs), which is a separate decision. It *does* fold a
+  rooted or absolute spelling back against every entry, so `$BASE/lib/review` and a project's own
+  `lib/review` name one state rather than two.
 - **JaiRA's half is now built too**: `config.workflows.path` (default
-  `["$JAIRA/workflows", "$JAIRA/functions"]`), expanded against the same `$JAIRA`/`$PROJECT` roots a
-  reference uses, and passed at every load site. The parser refuses a **bare** entry outright,
-  because that failure is otherwise circular and baffling — a bare path entry would need the path to
-  resolve itself.
+  `["$JAIRA/workflows", "$JAIRA/functions", "$BASE/workflows", "$BASE/functions"]`), expanded
+  against the same `$JAIRA`/`$PROJECT`/`$BASE` roots a reference uses, and passed at every load
+  site. The parser refuses a **bare** entry outright, because that failure is otherwise circular and
+  baffling — a bare path entry would need the path to resolve itself.
 
-  The workflows directory is forced **first**, whatever the config lists. Configuration decides what
-  comes *after*: only the first entry produces bare state ids, and a bare id keys the snapshot hash,
-  the event log and task rows, so letting configuration reorder it would silently re-identify every
-  state in the project.
+  The workflows directory is forced **first**, whatever the config lists. It is the root this
+  project's own states are authored under, and a layer that configuration could push behind another
+  would stop being an override. Configuration decides what comes *after*, which is where `$BASE`
+  sits.
 
-  `$JAIRA/functions` is in the default path before anything is in it. That is safe — an entry naming
-  a directory that does not exist lists as empty and the search moves on — and it means §3's callee
-  documents have a home the day they are written. The `Vfs` overlay serving *built-in* documents
+  `$JAIRA/functions` and `$BASE/*` are in the default path before anything is in them. That is safe
+  — an entry naming a directory that does not exist lists as empty and the search moves on — and it
+  means §3's callee documents have a home the day they are written, and a machine with no shared
+  root behaves exactly as it did before one existed. The `Vfs` overlay serving *built-in* documents
   (§4.3) is still to come; a project can already put its own there.
 
 The cycle §9 flagged breaks where predicted, and the rule is sharper than "path entries may not be
@@ -520,12 +523,13 @@ A bare reference today hangs off a single default root, so `eq` would mean
 `<workflowRoot>/eq`. Rather than special-casing the callee position, **`path` replaces the single
 default root with an ordered list**, with the semantics of a shell `PATH`.
 
-| Form | Consults `path`? |
+| Form | Searches? |
 | --- | --- |
 | `/opt/x`, `file:/opt/x` | no — itself |
-| `$JAIRA/lib/x`, `$/functions/eq` | no — that root |
-| `./goals`, `../shared/lint` | **no** — anchored to the referring state's own id |
-| `eq`, `feature/plan` | **yes** — first match wins |
+| `$JAIRA/lib/x`, `$BASE/lib/x` | no — a NAMED root is exactly one place |
+| `$/functions/eq`, `$/prompts/goals.md` | **yes** — the LAYER ROOTS, first match wins |
+| `./goals`, `../shared/lint` | anchored to the referring state's id, then searched (§4.1) |
+| `eq`, `feature/plan` | **yes** — the state path, first match wins |
 | `.inputs.issue` | n/a — a property of this file, not a file reference |
 
 `./x` never consulting the path is what a shell does, and it is also what the existing rule requires:
@@ -537,22 +541,78 @@ hangs off a per-field DEFAULT ROOT" — so `ReferenceOptions.defaultRoot` become
 `string | readonly string[]`, tried in order. Everything else — `$VAR` roots, `./`, absolute,
 `file:`, and longest-match `splitAtFile` — is untouched.
 
-### 4.1 Identity stays anchored to the primary root
+### 4.1 Identity is bare under *every* entry — which is what makes the path a layering mechanism
 
-This is the rule that keeps the change safe. Both `ref.ts` and `reference.ts` say why:
+**Revised.** This section previously said the opposite, and the reasoning it gave was sound for the
+model it assumed. That model changed when the shared base root landed (DESIGN §3), so the rule
+changed with it. Both versions are recorded here because the discarded one is the obvious design and
+the reason it was discarded is not.
+
+The original rule: only the FIRST path entry produces bare ids, because
 
 > The canonical id keeps the BARE spelling whenever it lands under the default root. The id is an
 > identity — it keys the snapshot hash, the event log, task rows, and `$STATE_ID`. If `feature/plan`
 > canonicalized to an absolute host path, every stored snapshot would drift the day this shipped,
 > and one workflow would carry different ids on two machines.
 
-If `identityOf` folded a match back to a bare id against *whichever* path entry matched, two
-different files at two entries would both produce the bare id `foo` — a collision in the thing that
-keys the snapshot hash and the event log.
+and if a match at any entry folded back to a bare id, two different files at two entries would both
+produce the id `foo` — a collision in the very thing meant to tell them apart.
 
-**So: `path` decides lookup; only the first (project) entry produces bare ids.** Anything found
-further along canonicalizes to an absolute POSIX path, which is what out-of-tree references already
-do. `eq` gets an absolute id, correctly — it *is* out of tree.
+**That collision is now the feature.** The shared base root exists so a project can take a workflow
+it does not contain and replace one state of it. That override only works if the project's
+`feature/plan` and the base's `feature/plan` are the *same id*, one shadowing the other. Under the
+old rule the base copy canonicalized to an absolute host path, so the project's file was not an
+override at all — it was a second, differently-named state, and nothing shadowed anything.
+
+**So: a match under ANY path entry keeps its bare spelling** (longest matching root wins, so nested
+entries do not lengthen an id). A target under no entry at all — a genuinely out-of-tree reference —
+still gets an absolute POSIX id, because it has no bare spelling to fold back to.
+
+**And the "collision" was never one.** An id is a RELATIVE PATH resolved against a search path —
+the same arrangement `PATH`, `NODE_PATH` and a classpath have always had. Three facts, which are
+worth stating together because the original argument reads as though they were in doubt:
+
+- **An id has always needed a project to mean anything.** `feature/plan` already named a different
+  file in two different projects, long before a second entry existed. Adding one changes nothing
+  about that.
+- **Within one resolution it is still exactly one file.** First match wins, deterministically; the
+  shadowed copy is inert and never a second participant in the same bundle. Nothing collides.
+- **Portability is satisfied, not traded away.** `feature/plan` is spelled `feature/plan` on every
+  machine, whichever layer supplies it — which is precisely what the original rule was protecting
+  and what an absolute host id would have destroyed.
+
+### 4.1a `$` is the sigil for "resolve against the layers"
+
+One list underpins both searches: the **layer roots**, `[<project>/.jaira, ~/.jaira]`
+(`jairaPaths().roots`). Everything else is derived from it.
+
+| Spelling | Resolves against |
+| --- | --- |
+| `$/lib/review` | each layer root in turn — `<root>/lib/review` |
+| `feature/plan` | `<root>/workflows`, `<root>/functions` per root (`workflowSearchPath`) |
+| `$JAIRA/…`, `$BASE/…` | one named root, never searched |
+
+This is what makes the *fragments* a state is assembled from layer as whole states do — prompts,
+types, guards, operation documents. Without it an override model covers state files and nothing
+inside them, which is half a feature: a project could inherit a shared workflow but not the shared
+prompt that workflow transcludes.
+
+Naming a root still pins it, and that distinction is the useful one: `$/lib/review` means "the
+project's if there is one, the shared one otherwise", `$BASE/lib/review` means "the shared one, and
+I mean it".
+
+`config.workflows.path` is therefore **absent by default** — the generated list is the answer, and
+setting it is an override that replaces rather than extends. Nothing is written down twice, so
+adding a third layer is one entry in `roots` and nothing else.
+
+Two supporting details:
+
+- **The first entry is not configurable.** The project's own `workflows/` always leads, so a state
+  the project defines always wins over one it inherits.
+- **Shadowing stops being a warning.** With layering as the intent, `ReferenceOptions.shadowing:
+  "override"` silences the §4.4 diagnostic; JaiRA passes it at every load site, because one warning
+  per overridden state is how a warning stops being read. The diagnostic still fires by default for
+  callers that layer roots *without* meaning to.
 
 ### 4.2 Inheritance, and the sentinel
 
@@ -1169,8 +1229,8 @@ the same hazard §4.2 records for `path`, met from the other direction.
 `messages(<session ref>)` is the only way to read a conversation:
 
 ```jsonc
-"when": "at(messages(.operation.outputs.session), -1).content === 'continue'"
-"when": "len(messages(.children.plan.operation.outputs.session)) > 4"
+"when": "at(messages(.operation.output.session), -1).content === 'continue'"
+"when": "len(messages(.children.plan.operation.output.session)) > 4"
 ```
 
 ### 16.1 The namespace it replaces was already dead
@@ -1187,7 +1247,7 @@ being one, and the code that took names keeps compiling.
 
 ### 16.2 What it cost to add: almost nothing
 
-Every piece existed. `.operation.outputs.session` was already a typed, opaque `{ id }` ref
+Every piece existed. `.operation.output.session` was already a typed, opaque `{ id }` ref
 with `additionalProperties: false`. `conversation.get` was already the resolver that reads a
 transcript **synchronously** — which is load-bearing, because `resolveRef` cannot be async
 and a guard resolves inside `firstMatchingTransition`.
@@ -1211,7 +1271,7 @@ to read.
   closed shape at all. Both inference paths carry it — the AST one and the lowered-tree one —
   because the differential test requires them to agree.
 - **Reading a sibling's conversation flows as DATA.** The parent wires
-  `.children.plan.operation.outputs.session` into a child's input, and the child calls
+  `.children.plan.operation.output.session` into a child's input, and the child calls
   `messages()` on it. More verbose than a name, and correct for a reason the name never was:
   an operation that declared no session has no name at all, and was previously unreadable.
 
@@ -1228,3 +1288,211 @@ key on the DECLARING STATE, which the name was standing in for while sessions we
 wrinkle shapes it: `messages(ref)` carries no request, so the store must LEARN a lineage's
 opt-in at resolve time and apply it on later reads. That works — a conversation only grows
 past one call after a resolve — but it changes what `modes.conflicts` is checking.
+
+---
+
+## 17. `.each` — fan-out is an expression, designed
+
+**Status: designed, not built.** This is the successor to §3.5: `map(xs, f)` runs an *operation* per
+element, and what authors keep reaching for is a *state* per element — a child with its own subtree,
+its own approvals, its own session. `.each` is one operator covering both, with the operation-level
+case falling out as the degenerate one.
+
+The motivating shape: a prompt op returns an array of items, and each item should be handled by a
+child state.
+
+```jsonc
+"children": {
+  "review": {
+    "state":  "./review_item",
+    "async":  true,
+    "inputs": { "item": ".children.extract.outputs.items.each", "ctx": ".inputs.context" }
+  }
+}
+```
+
+### 17.1 One rule: distribute over the axis, collect at the enclosing binding
+
+`.each` marks an **axis**. The expression it appears in is evaluated once per element of that axis,
+and the results are re-collected at the edge of the enclosing **binding**. That is the whole
+definition, and it is jq's `.[]` — a stream the enclosing construct collects — rather than a new kind
+of node.
+
+Everything else follows from where that boundary falls:
+
+| Position | Boundary | Effect |
+| --- | --- | --- |
+| `children.<key>.inputs.*` | the child mount | N child **instances** — a scatter |
+| an output slot's `binding` | the slot | one value, an **array** |
+| `operation.input.*` | the parameter | one value, an array — this is `map` |
+| a transition `when` | the guard | an array where boolean is required ⇒ **lint error**, free |
+
+⚠️ **The same text scatters in one position and maps in another.** `.children.review.each.outputs.report`
+is N instances when it wires a mount and a `T[]` when it fills a slot. The rule is uniform — only the
+boundary differs — but this belongs in [WORKFLOWS.md](WORKFLOWS.md) §13 as its own line, because
+nothing about the text says which one is meant.
+
+This subsumes §3.5 rather than sitting beside it: `classify(.inputs.issues.each)` **is**
+`map(.inputs.issues, classify)`. `map`/`filter`/`flatMap` stay as the named spellings; `.each` is the
+primitive, and it is strictly more expressive (§17.2).
+
+### 17.2 Axis identity is SYNTACTIC, and distinct axes multiply
+
+Two `.each` occurrences name the same axis **iff they are applied to the same source expression**
+after lowering. Distinct axes take the **cartesian product**; a repeated axis is correlated.
+
+This is Einstein index notation, and saying so is the cheapest way to teach it: a repeated index
+correlates, distinct indices multiply. Correlation is therefore written by naming an axis and using
+it twice:
+
+```jsonc
+// the parent state
+"inputs": {
+  "items":   { "schema": { "type": "array" } },
+  "indexes": { "binding": "range(0, len(.inputs.items))" }
+},
+"children": {
+  "review": {
+    "inputs": {
+      "item":      "at(.inputs.items,      .inputs.indexes.each)",
+      "otheritem": "at(.inputs.otheritems, .inputs.indexes.each)"
+    }
+  }
+}
+```
+
+**Why identity cannot be the resolved value.** That was the first proposal, and cartesian kills it: if
+`.items` and `.otheritems` happen to hold equal arrays at run time, value-identity collapses them to
+one axis and dispatches 2 instances rather than 4. The number of child instances would depend on the
+data. The shape of a run has to be a property of the document.
+
+A near-miss worth stating: `.inputs.indexes.each` and `range(0, len(.inputs.items)).each` are two axes
+and multiply, even when `indexes` is bound to exactly that expression. Which is *why* the idiom names
+the axis first — `indexes` reads as a loop-variable declaration, because that is what it is.
+
+**Where the loop variable lives.** As a bound input slot on the state that owns the loop. Not as a
+sibling entry in the mount's own `inputs` block: every binding there resolves against the PARENT
+instance's scope, whose roots are fixed (`inputs`, `outputs`, `operation`, `children`, `artifacts`),
+so one sibling wire is not addressable from another — and a wire naming an input the child does not
+declare is a lint error today, and would never be resolved even if it were not. A parent input with a
+`binding` is resolved at instance entry, before any child is entered, so it is in scope exactly when a
+mount needs it. Repeating the axis expression at both use sites works identically and needs no slot;
+the slot is the de-duplicated spelling, and it is typed and lint-visible besides.
+
+This is also where `.each` exceeds `map`: `concat(.a.each, .b.each)` is an outer product, and no
+composition of `map`/`flatMap` expresses it. `.each` is the primitive and the named forms are the
+special cases, not the reverse.
+
+### 17.3 The gather half: `.children.<key>` becomes an array of records
+
+The transformation is a pair — scatter on the way in, gather on the way out — which is WDL's
+`scatter` (a scattered call's outputs become arrays of that output's type).
+
+**The array lives at `.children.<key>`, not at `.children.<key>.outputs`.** What a fanned mount
+produces is N child *records*, each `{outcome, outputs, operation}`, and the elements of one record are
+connected — which output came from which outcome is information, and struct-of-arrays discards it. So
+every read is uniform:
+
+```jsonc
+".children.review.each.outputs.report"          // T[]
+".children.review.each.outcome"                 // Outcome[]
+".children.review.each.operation.output.session"
+```
+
+Reorganizing is the author's job, in an output binding, with the same operator — `.each` is the
+projection tool as well as the scatter marker, so there is no `pluck`, no lambda, and no
+struct-of-arrays alias.
+
+**What this costs, and why it is acceptable.** `.children.k.outcome === 'success'` is the most common
+guard in the language and it stops typechecking. The objection mostly dissolves: an element
+terminating `error` with no transition handling it is *already* fatal to the parent, and extending
+that elementwise means the author who wants "all of them must succeed" writes no guard at all. What is
+left is deliberate branching on PARTIAL failure, which has no cheap spelling — guards infer to boolean
+strictly, and `filter` takes a predicate by NAME, so today it needs a project-level operation document.
+Two `any`/`all` built-ins over boolean arrays would close it (§17.8).
+
+⚠️ The validator must special-case `.children.k.outputs.report` on a fanned mount with "this mount fans
+out — write `.each.outputs.report`". Without it the arity change surfaces as an opaque type error at a
+read site far from the mount that caused it.
+
+### 17.4 Results are flat, and only single-axis order is promised
+
+A multi-axis mount yields **N×M instances, flat** — `Record[]`, not nested — so the read type does not
+vary with the number of axes. An instance that needs to know which combination produced it echoes its
+inputs into its own outputs; under the index idiom the author who cares already holds the index.
+
+- **Single axis: source-array order**, which is what `map` already promises implicitly. The common case
+  must not inherit the rare case's caveat.
+- **Cartesian: unspecified.** But unspecified ≠ nondeterministic — the enumeration stays a pure
+  function of the inputs, or a resumed run reassembles results in a different order than the original
+  once durable mid-run resume lands.
+
+⚠️ For WORKFLOWS §13: **never correlate a fanned result back to a source array by index.** Echo the
+input into the child's outputs instead.
+
+### 17.5 `.each` is surface syntax; it lowers to an explicit fan-out node
+
+The cost of an inline marker is that `children.review` becomes one instance or forty based on a marker
+buried in the fourth of six bindings, while the consumer twenty lines away silently changes type. That
+is the trap class WORKFLOWS §13 exists to enumerate.
+
+So `.each` lowers to a **fan-out node on the mount**, exactly as the tagged binding forms lowered to
+`select` and as `{child, output}` did before them. The loader is where it happens, and everything
+downstream reads the lowered form: one declared key carrying an axis. Which means
+
+- the blob fan-out tally, the validator's `childrenProps` typing, reachability, the board and
+  `jaira workflow lint` need no knowledge of `.each` at all;
+- `keyBy` and any per-mount cap live on the node, writable directly by the rare author who needs them
+  and absent from everyone else's file;
+- lint and the board can DISPLAY the axis even though nobody typed a `forEach:` field.
+
+The upstream prerequisite for this has landed: `consumptionOf` (hw `format.ts`) is now the single owner
+of "what does this path shape consume", replacing the positional `path[2]` tests in the fan-out tally,
+so a namespace that grows an `each` segment is one edit rather than a hunt through three places that
+each fail silently. See §1.3 — a miscounted consumer is a wrong number, not an error.
+
+### 17.6 Limits declare what they meter
+
+Cartesian makes a stray second axis a valid workflow costing N×M rather than a lint error, and for a
+*state* fan-out each instance may carry a worktree, a session and an approval gate. Max-parallelism
+bounds resource pressure; it does not bound COUNT — 8-at-a-time over a 50×40 mount is still 2000 agent
+runs. So:
+
+- **A lint warning when a mount has more than one axis**, naming them and the product. It is the only
+  thing that catches the typo.
+- **A limit declares its scope**, `"scope": "subtree" | "operation"`, rather than a `leafOnly` flag.
+  "Leaf" mis-describes precisely the state a fan-out creates: one with both an operation and children
+  is not a leaf, but it does have a unit of work. With the scope named on the limit,
+  `environment.limits` merges nearest-wins like every other environment field and §5.2 needs no
+  exception.
+
+The scope flag earns its place on the third combination: an inherited `max_children` is subtree-scoped
+and not per-operation, which the declaring block alone cannot express.
+
+⚠️ The fourth combination is the trap — an inherited `timeout` with `scope: subtree` gives every
+descendant its own full budget, so a "2 hour" bound permits arbitrarily more than two hours in total.
+Lint it, or name it in §13.
+
+### 17.7 Settled edges
+
+| Case | Behaviour |
+| --- | --- |
+| Empty axis | Zero instances, `[]`, immediate success. A sync mount must **not** park. |
+| Axis is `PENDING` | The mount parks — the existing dataflow join, unchanged. |
+| Nested `.each` (array of arrays) | Refused in v1; `flatMap` covers it. |
+| Per-element blob outputs | An array of live streams is not readable in order, so a fanned mount drains each element. `materializeFanOut`'s single-stream assumption breaks. |
+| Element identity | Positional, with a content-key opt-in on the lowered node. Deliberately **not** inherited from `map`'s content-hash memo: collapsing two equal elements into one execution is right for a pure call and a different proposition when the instance owns a worktree and an approval. |
+
+### 17.8 Open
+
+- **`any`/`all` over boolean arrays** — needed only for deliberate partial-failure branching, so
+  deferring is defensible. But then the elementwise-fatal rule is the *entire* failure story for a
+  fanned mount, and that should be a stated decision rather than an omission.
+- **Is `max_iterations` enforced?** It is a value exposed to guards and nothing more. With `timeout`
+  enforced and `max_children` proposed as enforced, one advisory entry in a block of bounds is a trap
+  of the same species as the ones this document keeps cataloguing.
+- **Does `.each` collect at anything narrower than the binding edge?** Keeping the binding as the sole
+  boundary is predictable, and it is what makes the guard case a free lint error. The cost is that
+  `all(.children.k.each.outcome === 'success')` cannot work as written — the array materializes before
+  `all` sees it — so the aggregate spelling has to take an `Outcome[]` rather than rely on
+  distribution inside a call.

@@ -8,6 +8,8 @@ export * from "./lifecycle";
 export * from "./projection";
 export * from "./shape";
 export * from "./views";
+export * from "./stateViews";
+export * from "./conversation";
 export * from "./worktrees";
 export * from "./commandLog";
 export * from "./prune";
