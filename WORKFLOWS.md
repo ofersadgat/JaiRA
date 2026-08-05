@@ -1284,9 +1284,9 @@ since the Files view only reaches what is under a layer root.
 ### 11.2 Syncing the two
 
 The check reports and stops, which is the right shape for a CI gate and the
-wrong one for someone sitting in front of both documents. In the app, opening
-`.jaira/workflows/workflow.md` gives it a viewer of its own: a line saying which
-side has drifted, and two buttons.
+wrong one for someone sitting in front of both documents. In the app, opening a
+description gives it a viewer of its own: a line saying which side has drifted,
+and two buttons.
 
 - **Rewrite the description** — from the workflows as they are. Used when the
   workflows are what changed.
@@ -1317,11 +1317,54 @@ which of two edited documents is now the truth, and picking one would silently
 overwrite the other.
 
 A proposed state file is refused rather than offered when its id points outside
-`workflows/`, and when the state is authored as YAML (the proposal is JSON, and
-writing it would leave one file in two syntaxes). Both are reported in the panel
-with the file they would have touched. Anything the run could not express as a
-state file at all — a human gate needing a function this project has not
-registered — comes back as a note instead of an invented state.
+`workflows/`, when the state is authored as YAML (the proposal is JSON, and
+writing it would leave one file in two syntaxes), and when another description
+owns it (§11.3). All three are reported in the panel with the file they would
+have touched. Anything the run could not express as a state file at all — a
+human gate needing a function this project has not registered — comes back as a
+note instead of an invented state.
+
+### 11.3 A description per workflow, and how they nest
+
+Any `.md` under `workflows/` is a description, and it is about the state file
+beside it: `workflows/feature.md` describes the root `feature`,
+`workflows/feature/plan.md` describes `feature/plan`. `workflows/workflow.md`
+names no state and sits at the top.
+
+Because the state tree is already hierarchical — `feature` *contains*
+`feature/plan` — descriptions written at two levels would otherwise cover the
+same states twice. One rule resolves it:
+
+> **The nearest description owns a state.**
+
+The same resolution `.gitignore` and CODEOWNERS use. `feature.md` owns `feature`
+and everything below it *except* subtrees that have a description of their own;
+`workflow.md` owns whatever nothing nearer claims. Every state file is
+answerable to exactly one document, which is what makes both the baseline and a
+proposal well-defined. A layer with a single `workflow.md` therefore behaves
+exactly as it did before descriptions could nest.
+
+Three things follow, and they are what make the rule real rather than stated:
+
+- **The digest stops at a boundary.** A delegated subtree is rendered as its
+  *contract* — label, resolved operation, declared slots — plus the prose of the
+  document that owns it, and its states are not shown at all. Prose delegates to
+  prose: the best account of a subtree is the description somebody wrote of it,
+  not a rendering of its state files, and a parent stays a document about
+  contracts rather than a second copy of its children.
+- **A sync will not write past a boundary.** An edit naming a state another
+  description owns is reported and not offered, because it was written blind and
+  would overwrite what a more specific document is the authority on. Changing how
+  such a state is *mounted* — its inputs, its place in `sequence`, a transition
+  into it — is fair game, since the mount lives in a state you do own.
+- **The panel says what it delegated.** Under the status line: which subtrees
+  belong to which document, and how many states are in each. Without it you edit
+  a delegated state, the panel says "in step", and the honest answer is nowhere
+  on screen.
+
+`.jaira/sync.json` holds one record per description, keyed by document path, and
+each record covers only the states that document owns. Settling one workflow
+neither disturbs another's baseline nor makes an unrelated edit read as drift.
 
 ---
 

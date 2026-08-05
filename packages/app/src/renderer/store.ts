@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ApprovalScope,
   BoardView,
+  ConfigLayer,
   ConfigView,
   ConversationView,
   ExecutorInfo,
@@ -138,7 +139,7 @@ export interface AppState {
   editorTab: Record<string, "form" | "json">;
 
   /**
-   * Where `workflows/workflow.md` and the state files stand, and the last proposal.
+   * Where the open description and the state files stand, and the last proposal.
    *
    * Beside the drafts rather than inside the panel showing it, for the reason every other piece of
    * this view state is: a sync is a model call that takes a while, and a result held by a component
@@ -182,6 +183,15 @@ export interface AppState {
   conversation: ConversationView | null;
   /** Which section the Settings view is showing. */
   section: SettingsSection;
+  /**
+   * Which configuration layer the Settings view is editing.
+   *
+   * An axis rather than a section, because it crosses two of them: Config and Executors are both
+   * per-layer, and listing "This project" and "Shared" as siblings of "Executors" made the layer a
+   * place you navigated to for one and a picker you operated for the other — two mechanisms for one
+   * question, which is how the two ended up able to disagree.
+   */
+  configLayer: ConfigLayer;
 }
 
 /** The sync surface's state: the last answer, the last proposal, and whether one is in flight. */
@@ -208,8 +218,13 @@ function clearedSync(sync: SyncState): SyncState {
 /** The three destinations on the activity rail. */
 export type View = "files" | "tasks" | "settings";
 
-/** Sections of the Settings view — everything that was never one of the two activities. */
-export type SettingsSection = "project" | "base" | "executors" | "history";
+/**
+ * Sections of the Settings view — everything that was never one of the two activities.
+ *
+ * `config` and `executors` are read at the layer {@link AppState.configLayer} names; `history` is a
+ * project's run journal and has no layer to pick.
+ */
+export type SettingsSection = "config" | "executors" | "history";
 
 const EMPTY: AppState = {
   projectDir: null,
@@ -244,7 +259,8 @@ const EMPTY: AppState = {
   state: null,
   inspect: "state",
   conversation: null,
-  section: "project",
+  section: "config",
+  configLayer: "project",
 };
 
 /** Keep the live log bounded — a long run would otherwise grow without limit. */
@@ -477,9 +493,12 @@ export function useApp() {
   /**
    * Settings, config, executors and secret capabilities.
    *
-   * Settings are fetched even with no project open — they belong to the person, not the checkout,
-   * so the theme must apply on an empty window too. The other three need a project and are allowed
-   * to fail quietly here for that reason; the panes that use them show their own emptiness.
+   * None of the four needs a project. Settings belong to the person, so the theme applies on an
+   * empty window; the other three are answered from the SHARED root when nothing is open —
+   * `readConfig` never touches a project, `effectiveConfig` falls back to the base document, and
+   * secret capabilities are the machine's keychain. They used to sit behind the no-project return in
+   * {@link refreshAll}, which left `config` null and made both settings layers — including Shared,
+   * which is always editable — render "open a project to edit its configuration".
    */
   const refreshSettings = useCallback(async () => {
     try {
@@ -498,7 +517,8 @@ export function useApp() {
       ]);
       patch({ config, executors, secrets });
     } catch {
-      // No project open yet, most likely. The panes render an empty state rather than an error.
+      // Nothing here needs a project, so a failure is a real one — but the panes render their own
+      // emptiness and an error banner over a settings screen helps nobody.
     }
   }, [patch]);
 
@@ -506,8 +526,9 @@ export function useApp() {
     const current = await invoke("project:current", undefined).catch(() => null);
     patch({ projectDir: current?.dir ?? null });
     // Before the early return: preferences are the person's, and the shared root is the machine's.
-    // Both mean something with no project open, and the Files view is reachable on an empty window.
-    await Promise.all([refreshSettings(), refreshTree()]);
+    // Both mean something with no project open, and the Files view and Settings are reachable on an
+    // empty window — which is where someone goes to set the shared layer up in the first place.
+    await Promise.all([refreshSettings(), refreshTree(), refreshConfig()]);
     if (!current) return;
     await Promise.all([
       refreshTasks(),
@@ -515,6 +536,7 @@ export function useApp() {
       refreshPending(),
       refreshApprovals(),
       refreshHistory(),
+      // Again, now that a project layer exists to lay over the base one.
       refreshConfig(),
       // Again, now that a project supplies a second root to walk.
       refreshTree(),
@@ -720,6 +742,29 @@ export function useApp() {
           fail(e);
         }
       },
+      /**
+       * Pick a directory, then open or set up whatever was picked.
+       *
+       * Two round trips rather than one channel that does both, so the failure has a path in it: a
+       * folder chosen for "open" that turns out not to be a project fails with its own name in the
+       * message, and the offer to set it up instead is a second click rather than a silent write
+       * into a directory somebody only meant to look at.
+       */
+      chooseProject: async (mode: "open" | "init") => {
+        patch({ busy: true, error: null });
+        try {
+          const picked = await invoke("project:choose", { mode });
+          if (picked === null) {
+            patch({ busy: false });
+            return;
+          }
+          await invoke(mode === "init" ? "project:init" : "project:open", { dir: picked.dir });
+          patch({ busy: false, selected: null, detail: null });
+          await refreshAll();
+        } catch (e) {
+          fail(e);
+        }
+      },
 
       // --- appearance -------------------------------------------------------
 
@@ -755,6 +800,7 @@ export function useApp() {
         if (view === "files") void refreshTree();
       },
       setSection: (section: SettingsSection) => patch({ section }),
+      setConfigLayer: (configLayer: ConfigLayer) => patch({ configLayer }),
 
       /**
        * Open a file in the Files tree.

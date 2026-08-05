@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { app, BrowserWindow, ipcMain, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
 import { isProject } from "@jaira/persistence";
 import { IPC_CHANNELS, PUSH_CHANNEL, type IpcChannel, type PushMessage } from "@jaira/shared";
 import { AppService, type KeychainPort } from "./service";
@@ -81,9 +81,16 @@ const service = new AppService({
     if (window && !window.isDestroyed()) window.webContents.send(PUSH_CHANNEL, message);
   },
   keychain: electronKeychain(),
-  // The one capability the service cannot have itself: opening a file manager is Electron's, and
-  // the service stays Electron-free so it remains testable headlessly.
+  // The two capabilities the service cannot have itself: a file manager and a directory dialog are
+  // both Electron's, and the service stays Electron-free so it remains testable headlessly.
   reveal: (file: string) => shell.showItemInFolder(file),
+  chooseDirectory: async ({ title, buttonLabel }) => {
+    // Modal to the window when there is one, so the dialog cannot end up behind it.
+    const result = await (window && !window.isDestroyed()
+      ? dialog.showOpenDialog(window, { title, buttonLabel, properties: ["openDirectory", "createDirectory"] })
+      : dialog.showOpenDialog({ title, buttonLabel, properties: ["openDirectory", "createDirectory"] }));
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  },
 });
 
 /**
@@ -95,6 +102,9 @@ type Handler = (request: never) => unknown;
 
 const handlers: Record<IpcChannel, Handler> = {
   "project:open": ((request: { dir: string }) => service.open(resolve(request.dir))) as Handler,
+  "project:init": ((request: { dir: string }) => service.init(resolve(request.dir))) as Handler,
+  "project:choose": ((request: { mode?: "open" | "init" } | undefined) =>
+    service.chooseProject(request?.mode ?? "open")) as Handler,
   "project:current": (() => service.current()) as Handler,
   "task:list": (() => service.listTasks()) as Handler,
   "task:detail": ((request: { taskId: string }) => service.taskDetail(request.taskId)) as Handler,

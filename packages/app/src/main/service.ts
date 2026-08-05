@@ -44,7 +44,13 @@ import {
   createTask,
   finishTaskRun,
   historySize,
+  initProject,
+  // Aliased: this module has its own `isUnder` for dot-separated JSON-schema paths, which is a
+  // different question with a different answer for the same two strings.
+  isUnder as isUnderState,
+  listDescriptions,
   openProject,
+  ownershipOf,
   pruneHistory,
   rootsBoard,
   stateHashes,
@@ -56,7 +62,10 @@ import {
   taskSummaries,
   workflowDigest,
   workflowRoots,
+  type DescriptionBoundary,
+  type DescriptionOwnership,
   type Project,
+  type WorkflowDigestOptions,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -100,6 +109,7 @@ import {
 } from "@jaira/runtime";
 import {
   defaultSettings,
+  descriptionRootOf,
   isComponentName,
   isTextMime,
   jairaBasePaths,
@@ -197,6 +207,15 @@ export interface AppServiceOptions {
    * headless run, where "reveal" has no meaning and quietly doing nothing is the right answer.
    */
   reveal?: (file: string) => void;
+  /**
+   * Ask the OS for a directory, injected by the Electron main process.
+   *
+   * The last capability this class cannot have itself, for the same reason as {@link reveal}:
+   * `dialog.showOpenDialog` is Electron's. Absent in a headless run, where {@link chooseProject}
+   * answers null — a test drives {@link open} and {@link init} with a path directly, which is the
+   * part worth testing anyway.
+   */
+  chooseDirectory?: (options: { title: string; buttonLabel: string }) => Promise<string | null>;
 }
 
 /**
@@ -522,6 +541,38 @@ export class AppService {
       });
       this.watchers.push(watcher);
     }
+  }
+
+  /**
+   * Create `.jaira/` and open it — `jaira init` without a terminal.
+   *
+   * Until this existed the app could only ever open a project some other tool had made: the startup
+   * path resolves a directory and calls {@link open}, which refuses one with no `.jaira/`. So a new
+   * checkout was a dead end in the UI, and the shared root — the place a workflow meant to outlive
+   * one project is authored — could not be synced from an app that had no way to give it a project
+   * to be synced against.
+   *
+   * `initProject` is idempotent and keeps an existing `config.json`, so pointing this at a directory
+   * that is already a project is an open, not an overwrite.
+   */
+  async init(dir: string): Promise<{ dir: string; recovered: string[] }> {
+    initProject(dir);
+    return this.open(dir);
+  }
+
+  /**
+   * Ask the OS for a directory to open or initialize. Null when the dialog was dismissed, or when
+   * this process has no dialog to show.
+   *
+   * The wording differs per mode because the two answers differ: "open" wants a folder that already
+   * is a project, and "init" wants one that is about to become one.
+   */
+  async chooseProject(mode: "open" | "init" = "open"): Promise<{ dir: string } | null> {
+    const dir = await this.options.chooseDirectory?.({
+      title: mode === "init" ? "Choose a folder to set up as a JaiRA project" : "Open a JaiRA project",
+      buttonLabel: mode === "init" ? "Set up here" : "Open",
+    });
+    return dir === undefined || dir === null ? null : { dir };
   }
 
   current(): { dir: string } | null {
@@ -1127,7 +1178,14 @@ export class AppService {
       project: projectDoc,
       // Parsed, so the UI shows defaults filled in rather than the sparse document — "what will
       // actually happen" is the question this pane exists to answer.
-      effective: parseConfig(mergeConfigDocuments(baseDoc ?? undefined, projectDoc ?? undefined)) as unknown as JsonValue,
+      //
+      // `?? {}` is load-bearing: with NEITHER layer holding a `config.json` the merge is undefined,
+      // and parsing that threw "config must be a JSON object" — so the one state where a person has
+      // configured nothing yet was the state where the settings screen could not be read at all.
+      // Two absent layers mean the built-in defaults, which is what an empty document parses to.
+      effective: parseConfig(
+        mergeConfigDocuments(baseDoc ?? undefined, projectDoc ?? undefined) ?? {},
+      ) as unknown as JsonValue,
       baseFile: base.configFile,
       projectFile: projectFile ?? "",
       baseDir: base.baseDir,
@@ -1144,19 +1202,24 @@ export class AppService {
    */
   writeConfig(request: WriteConfigRequest): ConfigView {
     const base = jairaBasePaths(this.baseDir);
+    // Before validating, not after: a document reported field by field and THEN refused for having
+    // nowhere to go tells the author to fix the wrong thing. The base layer is always writable —
+    // it is the machine's, and `initBase` creates it — so only the project layer can fail here.
+    if (request.layer !== "base" && !this.project) {
+      throw new Error("no project is open, so there is no project config to write");
+    }
     const current = this.readConfig();
     const merged =
       request.layer === "base"
         ? mergeConfigDocuments(request.config, current.project ?? undefined)
         : mergeConfigDocuments(current.base ?? undefined, request.config);
-    parseConfig(merged); // throws with the offending field named
+    parseConfig(merged ?? {}); // throws with the offending field named
     let file: string;
     if (request.layer === "base") {
       initBase(base.baseDir);
       file = base.configFile;
     } else {
-      if (!this.project) throw new Error("no project is open, so there is no project config to write");
-      file = this.project.paths.configFile;
+      file = this.p.paths.configFile;
     }
     writeFileSync(file, `${JSON.stringify(request.config, null, 2)}\n`, "utf8");
     // The open project holds a parsed copy, so it has to be reopened for the change to take effect.
@@ -1616,14 +1679,44 @@ export class AppService {
     }
     const exists = existsSync(file);
     const text = request.text ?? (exists ? readFileSync(file, "utf8") : "");
-    const states = stateHashes(project.paths.workflowsDir);
+
+    // Which workflow this description is about — the file beside it, or every root when it is the
+    // layer-wide `workflow.md`. A root named by a description that does not exist is reported here
+    // rather than at run time, because it is a typo in a filename and the panel is where it shows.
+    const root = descriptionRootOf(request.path);
+    const known = new Set(browseWorkflows(project).workflows.map((w) => w.rootId));
+    if (root !== null && !known.has(root)) {
+      return {
+        ...base,
+        exists,
+        blocked:
+          known.size === 0
+            ? `'${root}' names no workflow — this project has none yet`
+            : `'${root}' names no workflow here. This project has: ${[...known].sort().join(", ")}`,
+      };
+    }
+
+    // The state files this description is answerable for: its subtree, minus every subtree a nearer
+    // description owns. Without the subtraction, editing a state would report drift on this
+    // document AND on the one that actually describes it, with no way to say which is now stale.
+    const scope = this.scopeOf(project, request.path);
+    const covered = new Set(this.ownedFiles(project, request.path));
+    const states = stateHashes(project.paths.workflowsDir, covered);
     const record = readSyncRecord(project.paths.syncFile, request.path);
     const drift = syncDrift(record, { documentHash: hashText(text), states });
+    // Delegation is not an error, so it is reported beside the status rather than as a block — but
+    // it has to be reported. Otherwise you edit a delegated state, this panel says "in step", and
+    // the honest answer ("that belongs to another document") is nowhere on screen.
+    const delegated = scope.ownership.delegates;
     const blocked =
       text.trim() === ""
         ? "this description is empty — write what the workflows should do, then sync"
         : Object.keys(states).length === 0
-          ? "this project has no workflows to sync against"
+          ? delegated.length > 0
+            ? `every state here is described by ${delegated.map((d) => d.document).join(", ")}`
+            : root === null
+              ? "this project has no workflows to sync against"
+              : `'${root}' resolves entirely from the shared root, so this project has no files to sync`
           : undefined;
     return {
       ...base,
@@ -1631,6 +1724,7 @@ export class AppService {
       synced: record !== undefined,
       ...(record !== undefined ? { at: record.at, lastDirection: record.direction } : {}),
       ...drift,
+      ...(delegated.length > 0 ? { delegated } : {}),
       ...(blocked !== undefined ? { blocked } : {}),
     };
   }
@@ -1656,7 +1750,11 @@ export class AppService {
     const spec = request.text ?? (existsSync(file) ? readFileSync(file, "utf8") : "");
     if (spec.trim() === "") throw new Error(`${request.path} is empty; there is nothing to sync`);
 
-    const digest = workflowDigest(project);
+    // Scoped to what this description OWNS: the root it names, minus every subtree a nearer
+    // description covers. The delegated subtrees are still in the digest, as contracts — a parent
+    // has to be able to say what it handed off — but not as states this run may rewrite.
+    const scope = this.scopeOf(project, request.path);
+    const digest = workflowDigest(project, scope.digestOptions);
     // The same refusal `jaira workflow check` makes, for the same reason: a sync over partial
     // evidence would rewrite the document to describe workflows it could not read, or propose state
     // files against a graph it only half loaded.
@@ -1736,7 +1834,7 @@ export class AppService {
       };
     }
 
-    const edits = this.placeEdits(outcome.edits ?? []);
+    const edits = this.placeEdits(outcome.edits ?? [], scope.ownership);
     const applicable = edits.filter((e) => e.applicable);
     const identical = (outcome.edits ?? []).length - edits.length;
     if (applicable.length > 0) {
@@ -1780,9 +1878,16 @@ export class AppService {
    *    state file in two syntaxes at once.
    *  - **Whether it changes anything.** A proposal identical to the file is dropped, so the tree
    *    marks only the files a person actually has to look at.
+   *  - **Ownership.** A state another description owns is reported and NOT offered. The digest
+   *    already renders such a subtree as a contract rather than as states, so a proposal reaching
+   *    past the boundary is a model that inferred what it could not see — and applying it would let
+   *    a parent document silently rewrite what a more specific one is the authority on. Reported
+   *    rather than dropped, because it usually means the OTHER description is what needs changing.
    */
-  private placeEdits(edits: readonly StateEdit[]): WorkflowSyncEdit[] {
+  private placeEdits(edits: readonly StateEdit[], ownership: DescriptionOwnership): WorkflowSyncEdit[] {
     const out: WorkflowSyncEdit[] = [];
+    const ownerOf = (stateId: string): DescriptionBoundary | undefined =>
+      ownership.delegates.find((delegate) => isUnderState(stateId, delegate.root));
     for (const edit of edits) {
       // A blocked edit still names the file it would have touched, so the panel can say WHICH file
       // it declined to write rather than only that something was refused.
@@ -1801,6 +1906,16 @@ export class AppService {
         this.workflowFile(edit.stateId, "project");
       } catch (e) {
         out.push(blocked(`workflows/${edit.stateId}.json`, (e as Error).message));
+        continue;
+      }
+      const owner = ownerOf(edit.stateId);
+      if (owner !== undefined) {
+        out.push(
+          blocked(
+            this.existingStateFile(edit.stateId) ?? `workflows/${edit.stateId}.json`,
+            `\`${owner.document}\` describes this state — change that document instead`,
+          ),
+        );
         continue;
       }
       const existing = this.existingStateFile(edit.stateId);
@@ -1884,13 +1999,77 @@ export class AppService {
     } catch {
       return;
     }
+    // The same scope the status reads back, or the baseline would be taken over files this
+    // description was never answerable for and every unrelated edit would read as drift.
+    const covered = new Set(this.ownedFiles(project, document));
     commitSync(project.paths.syncFile, {
       document,
       documentHash: hashText(text),
-      states: stateHashes(project.paths.workflowsDir),
+      states: stateHashes(project.paths.workflowsDir, covered),
       direction,
       at: Date.now(),
     });
+  }
+
+  /**
+   * The project-layer state files ONE description is answerable for, relative to `.jaira/workflows/`.
+   *
+   * Its subtree minus everything a nearer description owns — see `persistence/descriptions.ts`. That
+   * subtraction is what keeps a baseline honest once descriptions nest: `feature.md` must not claim
+   * agreement about files `feature/plan.md` is the authority on, or accepting one sync would settle
+   * a document nobody looked at.
+   *
+   * Empty when the root does not load — a half-written state file must not silently narrow the
+   * baseline to the states that still parse, and the sync itself refuses over the same condition.
+   */
+  private ownedFiles(project: Project, document: string): string[] {
+    try {
+      const scope = this.scopeOf(project, document);
+      return workflowDigest(project, scope.digestOptions).files;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * What one description covers: the roots it is judged against, and the subtrees it stops at.
+   *
+   * The single place ownership is turned into digest options, so the status line, the baseline and
+   * the run cannot disagree about where a description's responsibility ends. They did not have to
+   * agree before there was more than one description per layer; now a mismatch between them would
+   * show as a sync that reports drift it can never clear.
+   */
+  private scopeOf(
+    project: Project,
+    document: string,
+  ): { root: string | null; ownership: DescriptionOwnership; digestOptions: WorkflowDigestOptions } {
+    const browser = browseWorkflows(project);
+    const descriptions = listDescriptions(project.paths.workflowsDir);
+    const states = [...new Set(browser.workflows.flatMap((w) => w.states))];
+    const ownership = ownershipOf(document, descriptions, states);
+    const boundaries = ownership.delegates.map((delegate) => ({
+      stateId: delegate.root,
+      document: delegate.document,
+      ...this.descriptionText(project, delegate.document),
+    }));
+    return {
+      root: ownership.root,
+      ownership,
+      digestOptions: {
+        ...(ownership.root === null ? {} : { roots: [ownership.root] }),
+        ...(boundaries.length > 0 ? { boundaries } : {}),
+      },
+    };
+  }
+
+  /** A description's prose, for the digest to hand a parent. Absent when it cannot be read. */
+  private descriptionText(project: Project, document: string): { text?: string } {
+    try {
+      const file = join(project.paths.jairaDir, ...document.split("/"));
+      return existsSync(file) ? { text: readFileSync(file, "utf8") } : {};
+    } catch {
+      return {};
+    }
   }
 
   // --- internals -------------------------------------------------------------

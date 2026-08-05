@@ -396,7 +396,8 @@ registerFileSurface("text/plain", "edit", TextEdit);
 registerFileSurface("text/markdown", "view", MarkdownView);
 registerFileSurface("text/markdown", "edit", TextEdit);
 
-// `workflows/workflow.md`. The viewer is the sync panel, which keeps the markdown preview behind a
+// Any markdown under `workflows/` — each describes the workflow it is named for, and `workflow.md`
+// describes the whole layer. The viewer is the sync panel, which keeps the markdown preview behind a
 // toggle; the editor comes from `text/markdown` through the fallback chain, because the description
 // is edited exactly like any other document — which is what makes a proposed rewrite something you
 // can retype before saving.

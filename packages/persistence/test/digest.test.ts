@@ -85,3 +85,54 @@ describe("workflowDigest", () => {
     expect(() => workflowDigest(project, { roots: ["feature/nope"] })).toThrow(/unknown workflow 'feature\/nope'/);
   });
 });
+
+describe("boundaries — a subtree another description owns", () => {
+  const boundary = {
+    stateId: "feature/plan/critique",
+    document: "workflows/feature/plan/critique.md",
+    text: "# Critique\n\nA model finds weaknesses, then a person approves.\n",
+  };
+
+  it("renders the boundary state as a contract and drops everything below it", () => {
+    const digest = workflowDigest(project, { boundaries: [boundary] });
+
+    expect(digest.bounded).toEqual(["feature/plan/critique"]);
+    expect(digest.markdown).toContain("### State `feature/plan/critique` — Critique Plan — described elsewhere");
+    // The interface a sibling needs is still there: what it runs, and what it takes and returns.
+    expect(digest.markdown).toMatch(/described elsewhere[\s\S]*?resolved: composite \(no operation of its own\)/);
+    expect(digest.markdown).toMatch(/described elsewhere[\s\S]*?inputs: plan_doc, severity_threshold/);
+    // The authored file is not — showing it is exactly what invites an edit past the boundary.
+    expect(digest.markdown).not.toContain("authored (feature/plan/critique.json)");
+    // Nor is anything beneath it.
+    expect(digest.markdown).not.toContain("feature/plan/critique/human_review`");
+    // States outside the boundary are untouched.
+    expect(digest.markdown).toContain("### State `feature/plan/goals`");
+  });
+
+  it("quotes the owning document, so a parent is judged against prose rather than states", () => {
+    // The point of the whole split: the best account of a subtree is the description somebody wrote
+    // of it, not a rendering of its state files.
+    const digest = workflowDigest(project, { boundaries: [boundary] });
+    expect(digest.markdown).toContain("What `workflows/feature/plan/critique.md` says it does:");
+    expect(digest.markdown).toContain("A model finds weaknesses, then a person approves.");
+  });
+
+  it("leaves a bounded state out of the files a baseline would cover", () => {
+    // The baseline has to cover exactly what was judged. A boundary state was seen from the
+    // outside only, so claiming agreement about its file would be claiming something unverified.
+    const digest = workflowDigest(project, { boundaries: [boundary] });
+    expect(digest.files).toContain("feature/plan/goals.json");
+    expect(digest.files).not.toContain("feature/plan/critique.json");
+    expect(digest.files.some((f) => f.startsWith("feature/plan/critique/"))).toBe(false);
+  });
+
+  it("still works when the owning document could not be read", () => {
+    // Absent text is not a reason to render the subtree in full — the boundary is about ownership,
+    // not about how much prose happens to be available.
+    const digest = workflowDigest(project, {
+      boundaries: [{ stateId: "feature/plan/critique", document: "workflows/feature/plan/critique.md" }],
+    });
+    expect(digest.markdown).toContain("described elsewhere");
+    expect(digest.markdown).not.toContain("What `workflows/feature/plan/critique.md` says it does:");
+  });
+});

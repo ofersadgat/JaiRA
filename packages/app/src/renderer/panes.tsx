@@ -38,7 +38,7 @@ const LAYER_LABELS: Record<ConfigLayer, string> = {
 };
 
 /** A two-way layer switch, used wherever a write has to name where it lands. */
-function LayerPicker({
+export function LayerPicker({
   value,
   onChange,
   disabled,
@@ -114,10 +114,21 @@ export function SettingsPane({
   const [showEffective, setShowEffective] = useState(false);
 
   if (config === null) {
-    return <p className="empty">Open a project to edit its configuration.</p>;
+    return <p className="empty">Configuration is unavailable — the app could not read it.</p>;
   }
 
   const file = layer === "base" ? config.baseFile : config.projectFile;
+  // Only the PROJECT layer needs a project. The shared root is machine-global and exists before any
+  // checkout, so an empty window is exactly when someone sets it up — which is what this pane used
+  // to refuse, having been given no config to render at all.
+  if (layer === "project" && file.length === 0) {
+    return (
+      <p className="empty">
+        No project is open, so there is no project configuration to edit. Open one, or switch to the
+        shared layer — it applies to every project on this machine.
+      </p>
+    );
+  }
   // The document as the registry's surfaces take it. `text` is empty because both config surfaces
   // read the parsed layer out of the context — the raw bytes are `config:read`'s business, and this
   // pane has never had them.
@@ -127,7 +138,9 @@ export function SettingsPane({
     file,
     mime: CONFIG_JSON,
     text: "",
-    exists: file.length > 0,
+    // Whether the layer has a `config.json` on disk, not whether it has a path — the shared root
+    // always has one, and normally no file behind it until somebody saves here for the first time.
+    exists: (layer === "base" ? config.base : config.project) !== null,
   };
   const surface: FileSurfaceProps = {
     doc,
@@ -138,9 +151,8 @@ export function SettingsPane({
 
   return (
     <div className="pane">
-      <div className="pane-title">{LAYER_LABELS[layer]}</div>
       <div className="sub file-path" title={file}>
-        {file || "(no project open)"}
+        {file}
       </div>
       {layer === "base" ? (
         <div className="notice">
@@ -221,6 +233,7 @@ export function ExecutorsPane({
   probing,
   secrets,
   busy,
+  layer,
   onProbe,
   onToggle,
   onSaveSecret,
@@ -230,17 +243,26 @@ export function ExecutorsPane({
   probing: string[];
   secrets: SecretCapabilities;
   busy: boolean;
+  /**
+   * The layer an enable/disable is written to.
+   *
+   * Passed in rather than held here, now that the Settings view owns the layer for every section
+   * under it. Two controls for one question is how the config editor and this pane ended up able to
+   * be pointed at different layers at the same time.
+   */
+  layer: ConfigLayer;
   onProbe: (name?: string) => void;
   onToggle: (name: string, enabled: boolean, layer: ConfigLayer) => void;
   onSaveSecret: (name: string, value: string, target: SecretTarget) => void;
 }): JSX.Element {
-  const [layer, setLayer] = useState<ConfigLayer>("project");
   const [keyFor, setKeyFor] = useState<string | null>(null);
   const [keyValue, setKeyValue] = useState("");
   const [keyTarget, setKeyTarget] = useState<SecretTarget>(secrets.keychain ? "keychain" : "base-env-local");
 
+  // The built-in adapters are always listed, project or not, so an empty list means the read itself
+  // failed rather than that nothing is configured.
   if (executors.length === 0) {
-    return <p className="empty">Open a project to see its executors.</p>;
+    return <p className="empty">No executors — the app could not read the configuration.</p>;
   }
 
   const targets: SecretTarget[] = [
@@ -251,14 +273,11 @@ export function ExecutorsPane({
 
   return (
     <div className="pane">
-      {/* Two separate controls, on two rows. Side by side they read as one group, and "Test all"
-          has nothing to do with which layer a toggle is written to. */}
       <div className="pane-actions">
         <button onClick={() => onProbe()} disabled={busy || probing.length > 0}>
           Test all
         </button>
       </div>
-      <LayerPicker value={layer} onChange={setLayer} disabled={busy} />
       <div className="sub">enabling and disabling writes to: {LAYER_LABELS[layer].toLowerCase()}</div>
       {!secrets.keychain && secrets.keychainReason ? (
         <div className="notice">{secrets.keychainReason}</div>

@@ -40,22 +40,55 @@ export const CONFIG_JSON = "application/vnd.jaira.config+json";
  * Still markdown, and it falls back to markdown for both surfaces, so nothing is lost by naming it.
  * What the name buys is the one thing a prompt or a README has no use for: this file and the state
  * files beside it are two accounts of the same flow, and either can fall behind the other. The type
- * is what puts the sync controls on it (WORKFLOWS.md §11.2) instead of on every `.md` in the tree.
+ * is what puts the sync controls on it (WORKFLOWS.md §11.2–11.3) instead of on every `.md` in the
+ * tree.
  */
 export const WORKFLOW_DESCRIPTION = "text/vnd.jaira.workflow-description+markdown";
 
 /**
- * Where that description lives, relative to a layer root.
+ * The description that covers a layer's workflows ALL AT ONCE, relative to a layer root.
  *
- * One per layer, directly under `workflows/`, because the check it drives is about a whole set of
- * workflows: a description per subdirectory would raise "which of these am I being judged against?"
- * with no answer. The name is matched case-insensitively — `WORKFLOW.md` is what most people type.
+ * Kept as a special name beside the per-root descriptions below, because it is the only one whose
+ * subject is a set rather than a single flow — and because it is what every existing project's
+ * description is called. The name is matched case-insensitively: `WORKFLOW.md` is what most people
+ * type.
  */
 export const WORKFLOW_DESCRIPTION_PATH = "workflows/workflow.md";
 
-/** True for the one path in a layer root that is the workflow description. */
+/**
+ * True for any markdown file under `workflows/` — each one describes a workflow.
+ *
+ * This used to be the single path above, on the reasoning that a description per subdirectory would
+ * raise "which of these am I being judged against?" with no answer. Naming the file after the state
+ * it describes IS that answer: `workflows/feature.md` is about the root `feature` and its closure,
+ * and it sits directly beside `workflows/feature.json`. `workflow.md` keeps its older, wider
+ * meaning — every root in the layer — so nothing already written changes what it says.
+ *
+ * The rule is decidable from the path alone, which it has to be: this classifies tree rows and has
+ * no filesystem to consult. A `.md` under `workflows/` naming no state is therefore possible, and
+ * is reported by the sync panel as a description of a workflow that does not exist — which is more
+ * useful than silently rendering it as a plain document.
+ */
 export function isWorkflowDescription(relPath: string): boolean {
-  return relPath.toLowerCase() === WORKFLOW_DESCRIPTION_PATH;
+  const lower = relPath.toLowerCase();
+  return lower.startsWith("workflows/") && lower.endsWith(".md");
+}
+
+/**
+ * Which workflow root a description is about, or null when it covers every root in its layer.
+ *
+ * The stem of the path below `workflows/`, which is exactly the state id of the file beside it:
+ * `workflows/feature.md` → `feature`, `workflows/feature/plan.md` → `feature/plan`. Null for
+ * `workflows/workflow.md`, whose subject is the whole layer.
+ *
+ * Returns null for anything that is not a description at all, so a caller that already knows it has
+ * one cannot tell those two apart — check {@link isWorkflowDescription} first when the difference
+ * matters.
+ */
+export function descriptionRootOf(relPath: string): string | null {
+  if (!isWorkflowDescription(relPath)) return null;
+  if (relPath.toLowerCase() === WORKFLOW_DESCRIPTION_PATH) return null;
+  return relPath.slice("workflows/".length, relPath.length - ".md".length);
 }
 
 /** Directories, by the freedesktop convention. Present so every node in the tree has a type. */

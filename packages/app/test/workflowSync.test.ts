@@ -17,7 +17,7 @@ import { mkdirSync, readFileSync, rmSync, mkdtempSync, writeFileSync, existsSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { initProject } from "@jaira/persistence";
+import { hashText, initProject, stateHashes } from "@jaira/persistence";
 import { specPlanningFiles, syncRules, writeWorkflowFiles, type ConformanceFinding } from "@jaira/runtime";
 import { WORKFLOW_DESCRIPTION, WORKFLOW_DESCRIPTION_PATH } from "@jaira/shared";
 import { AppService } from "../src/main/service";
@@ -107,6 +107,29 @@ describe("syncStatus", () => {
   it("refuses to judge a shared-root description against one project", () => {
     const status = service.syncStatus({ layer: "base", path: WORKFLOW_DESCRIPTION_PATH });
     expect(status.blocked).toMatch(/shared root/);
+  });
+
+  it("reads a baseline written in the older single-record shape", () => {
+    // A project that synced before descriptions could nest must not be told, on its first open,
+    // that everything has drifted.
+    const text = readFileSync(descriptionFile(), "utf8");
+    writeFileSync(
+      syncFile(),
+      JSON.stringify({
+        document: WORKFLOW_DESCRIPTION_PATH,
+        documentHash: hashText(text),
+        states: stateHashes(join(dir, ".jaira", "workflows")),
+        at: 1,
+        direction: "document",
+      }),
+      "utf8",
+    );
+
+    expect(service.syncStatus({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH })).toMatchObject({
+      synced: true,
+      documentChanged: false,
+      statesChanged: false,
+    });
   });
 
   it("says which side moved once there is a baseline", async () => {
@@ -271,6 +294,178 @@ describe("runSync towards the states", () => {
       documentChanged: false,
       statesChanged: false,
     });
+  });
+});
+
+describe("a description per workflow", () => {
+  /** A second, unrelated root, so "did the OTHER workflow move?" is a question that can be asked. */
+  const addRelease = (): void => {
+    writeFileSync(join(dir, ".jaira", "workflows", "release.json"), '{"label":"Release"}', "utf8");
+  };
+  const planDescription = (): string => join(dir, ".jaira", "workflows", "feature", "plan.md");
+
+  beforeEach(() => {
+    writeFileSync(planDescription(), "# Planning\n\nGoals, a plan, a critique.\n", "utf8");
+  });
+
+  const planPath = "workflows/feature/plan.md";
+
+  it("opens as a description, and is judged against the root it is named for", async () => {
+    addRelease();
+    expect(service.readFile({ layer: "project", path: planPath }).mime).toBe(WORKFLOW_DESCRIPTION);
+
+    const result = await service.runSync({
+      layer: "project",
+      path: planPath,
+      direction: "document",
+      fake: fake({ document: { text: REWRITTEN, changes: [] } }) as never,
+    });
+
+    // `release` exists and is deliberately absent: the file is about `feature/plan`, so judging it
+    // against every workflow in the layer would be judging it against documents it never mentions.
+    expect(result.workflows).toEqual(["feature/plan"]);
+  });
+
+  it("does not report drift when a workflow it is not about changes", async () => {
+    addRelease();
+    await service.runSync({
+      layer: "project",
+      path: planPath,
+      direction: "document",
+      fake: fake({ document: { text: REWRITTEN, changes: [] } }) as never,
+    });
+    service.writeFile({ layer: "project", path: planPath, text: REWRITTEN });
+    expect(service.syncStatus({ layer: "project", path: planPath })).toMatchObject({ synced: true, statesChanged: false });
+
+    service.writeWorkflow({ stateId: "release", layer: "project", text: '{"label":"Release, revised"}' });
+
+    // The whole point of scoping the baseline: an unrelated edit that shows as drift here is noise
+    // of the kind that teaches people to ignore the marker.
+    expect(service.syncStatus({ layer: "project", path: planPath }).statesChanged).toBe(false);
+
+    // But an edit inside its own closure does move it.
+    service.writeWorkflow({ stateId: "feature/plan/goals", layer: "project", text: '{"label":"Goals, revised"}' });
+    expect(service.syncStatus({ layer: "project", path: planPath })).toMatchObject({
+      statesChanged: true,
+      suggested: "document",
+    });
+  });
+
+  it("keeps a baseline per description, so settling one does not erase another's", async () => {
+    await syncDocument();
+    service.writeFile({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH, text: REWRITTEN });
+    expect(service.syncStatus({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH }).synced).toBe(true);
+
+    await service.runSync({
+      layer: "project",
+      path: planPath,
+      direction: "document",
+      fake: fake({ document: { text: REWRITTEN, changes: [] } }) as never,
+    });
+    service.writeFile({ layer: "project", path: planPath, text: REWRITTEN });
+
+    // Both, at once. The old file held ONE record and rejected it when the document did not match,
+    // so accepting the second sync silently dropped the first one's baseline.
+    expect(service.syncStatus({ layer: "project", path: planPath }).synced).toBe(true);
+    expect(service.syncStatus({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH }).synced).toBe(true);
+    expect(Object.keys(JSON.parse(readFileSync(syncFile(), "utf8")).documents).sort()).toEqual([
+      planPath,
+      WORKFLOW_DESCRIPTION_PATH,
+    ]);
+  });
+
+  it("says so when a description names a workflow that does not exist", () => {
+    writeFileSync(join(dir, ".jaira", "workflows", "typo.md"), "# Typo\n\nSomething.\n", "utf8");
+
+    const status = service.syncStatus({ layer: "project", path: "workflows/typo.md" });
+
+    // A filename typo, reported where the file is open rather than as a failure at run time.
+    expect(status.blocked).toMatch(/names no workflow here/);
+    expect(status.blocked).toMatch(/feature\/plan/);
+  });
+
+  it("refuses to run a sync for a description that names no workflow", async () => {
+    writeFileSync(join(dir, ".jaira", "workflows", "typo.md"), "# Typo\n\nSomething.\n", "utf8");
+    await expect(
+      service.runSync({ layer: "project", path: "workflows/typo.md", direction: "document", fake: fake() as never }),
+    ).rejects.toThrow(/unknown workflow 'typo'/);
+  });
+});
+
+describe("nested descriptions", () => {
+  // `feature/plan` is the root; `feature/plan/critique` is a subtree of it with three states. Two
+  // descriptions, one inside the other — the case the ownership rule exists for.
+  const planMd = "workflows/feature/plan.md";
+  const critiqueMd = "workflows/feature/plan/critique.md";
+  const write = (rel: string, text: string): void =>
+    writeFileSync(join(dir, ".jaira", ...rel.split("/")), text, "utf8");
+
+  beforeEach(() => {
+    write(planMd, "# Planning\n\nGoals, a plan, then a critique.\n");
+    write(critiqueMd, "# Critique\n\nA model finds weaknesses, then a person approves.\n");
+  });
+
+  it("gives each state to the nearest description, and says what it delegated", () => {
+    const status = service.syncStatus({ layer: "project", path: planMd });
+
+    expect(status.delegated).toEqual([
+      { document: critiqueMd, root: "feature/plan/critique", states: 3 },
+    ]);
+    // The parent still owns its own states — delegation takes a subtree, not the document.
+    expect(status.blocked).toBeUndefined();
+  });
+
+  it("does not move the parent's baseline when a delegated state changes", async () => {
+    await service.runSync({
+      layer: "project",
+      path: planMd,
+      direction: "document",
+      fake: fake({ document: { text: REWRITTEN, changes: [] } }) as never,
+    });
+    service.writeFile({ layer: "project", path: planMd, text: REWRITTEN });
+    expect(service.syncStatus({ layer: "project", path: planMd }).synced).toBe(true);
+
+    // Inside `critique`, which `critique.md` owns.
+    service.writeWorkflow({
+      stateId: "feature/plan/critique/human_review",
+      layer: "project",
+      text: '{"label":"Approve, revised"}',
+    });
+    expect(service.syncStatus({ layer: "project", path: planMd }).statesChanged).toBe(false);
+
+    // Outside it, which `plan.md` owns.
+    service.writeWorkflow({ stateId: "feature/plan/goals", layer: "project", text: '{"label":"Goals, revised"}' });
+    expect(service.syncStatus({ layer: "project", path: planMd }).statesChanged).toBe(true);
+  });
+
+  it("refuses a proposed edit to a state another description owns", async () => {
+    const result = await service.runSync({
+      layer: "project",
+      path: planMd,
+      direction: "states",
+      fake: fake({
+        edits: [
+          {
+            stateId: "feature/plan/critique/human_review",
+            action: "update",
+            text: '{"label":"Approve the plan"}',
+            reason: "R2 asks for a human gate",
+            requirements: ["R2"],
+          },
+        ],
+      }) as never,
+    });
+
+    // Reported rather than dropped: it usually means `critique.md` is the document to change.
+    expect(result.edits?.[0]).toMatchObject({ applicable: false });
+    expect(result.edits?.[0]?.blocked).toContain(critiqueMd);
+  });
+
+  it("leaves a description that delegated everything with nothing to sync, and says so", () => {
+    // `workflow.md` is the top of the hierarchy; with `plan.md` below it there is nothing left.
+    const status = service.syncStatus({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH });
+    expect(status.blocked).toContain(planMd);
+    expect(status.delegated?.[0]).toMatchObject({ root: "feature/plan" });
   });
 });
 

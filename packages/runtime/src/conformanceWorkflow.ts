@@ -178,9 +178,22 @@ work delegated to a different kind of runtime than described, as a real differen
 Cite the state ids that are your evidence. For anything not satisfied, say specifically what the
 workflow would have to add or change — name the state and the field.
 
+Some states are marked **described elsewhere**. Another document is the account of how they work
+inside, and you have been given their contract instead of their states — deliberately, because this
+description is not responsible for them. For such a state:
+
+- judge only what the description claims ABOUT it: what it is for, what it takes and returns, where
+  it sits in the order, whether a human is involved at its boundary;
+- treat the contract and the quoted prose of the owning document as sufficient evidence. A
+  requirement met inside that subtree is \`satisfied\`, not \`missing\` — you cannot see the states,
+  and "I was not shown it" is not a finding;
+- if a requirement is genuinely about that subtree's internals, it belongs to the other document.
+  Say so in the detail, naming that document, and mark it \`satisfied\`.
+
 Also list, as extras, behaviour the implementation has that the description does not mention. Extras
 are not failures: they are what the reader should look at to decide whether the document or the
-workflow is the thing that is out of date.
+workflow is the thing that is out of date. Do not raise an extra about the inside of a state
+described elsewhere.
 
 The verdict is \`conforms\` only when every requirement is satisfied; \`gaps\` when any is partial or
 missing; \`diverges\` when any is contradicted.

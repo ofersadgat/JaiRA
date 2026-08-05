@@ -401,6 +401,24 @@ export interface WorkflowSyncStatus {
   blocked?: string;
   /** A proposal produced in this session and not yet saved everywhere it applies. */
   pending?: SyncDirection;
+  /**
+   * Subtrees this description does NOT cover, because a nearer one does.
+   *
+   * Present so the panel can say what it is not counting. Without it, editing a state that belongs
+   * to a child description leaves this document reporting "in step" — true, and completely
+   * misleading, because the answer "that belongs to `feature/plan.md`" appears nowhere.
+   */
+  delegated?: SyncDelegation[];
+}
+
+/** One subtree another description owns. */
+export interface SyncDelegation {
+  /** The owning description, relative to the layer root — what the panel names and links to. */
+  document: string;
+  /** The state it takes over at. */
+  root: string;
+  /** How many states sit under it. */
+  states: number;
 }
 
 export interface WorkflowSyncRequest {
@@ -498,6 +516,22 @@ export interface SecretCapabilities {
  */
 export interface IpcContract {
   "project:open": { request: { dir: string }; response: { dir: string; recovered: string[] } };
+  /**
+   * Create `.jaira/` in a directory and open it — `jaira init`, reachable from the app.
+   *
+   * Separate from `project:open` rather than a flag on it, because the two differ in what they may
+   * do to a directory somebody picked in a file dialog. Opening reads; this one writes a layout into
+   * a folder chosen a moment ago, and a channel whose name says so is one a reviewer can find.
+   * Idempotent, and it keeps an existing `config.json`.
+   */
+  "project:init": { request: { dir: string }; response: { dir: string; recovered: string[] } };
+  /**
+   * Ask the OS for a directory. Null when the dialog was dismissed.
+   *
+   * A picker and nothing else: it neither opens nor initializes what it returns, so the renderer
+   * stays the one deciding which of those happens and can report the failure with the path in hand.
+   */
+  "project:choose": { request: { mode: "open" | "init" } | void; response: { dir: string } | null };
   "project:current": { request: void; response: { dir: string } | null };
   "task:list": { request: void; response: TaskSummary[] };
   "task:detail": { request: { taskId: string }; response: TaskDetail };
@@ -594,6 +628,8 @@ export type IpcResponse<C extends IpcChannel> = IpcContract[C]["response"];
 
 export const IPC_CHANNELS: readonly IpcChannel[] = [
   "project:open",
+  "project:init",
+  "project:choose",
   "project:current",
   "task:list",
   "task:detail",

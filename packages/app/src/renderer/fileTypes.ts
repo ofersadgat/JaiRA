@@ -45,7 +45,7 @@ import type { Drafts, SetDraft } from "./drafts";
 export type FileAction = "view" | "edit";
 
 /**
- * Keeping `workflows/workflow.md` and the state files in step — what the description's viewer needs.
+ * Keeping a description and the state files in step — what the description's viewer needs.
  *
  * Its own bag rather than five more fields on the context, because it is the whole surface of one
  * feature and exactly one surface uses it. Optional for the same reason the draft store is: a panel
@@ -74,6 +74,13 @@ export interface SyncSurface {
   cancel: () => void;
   /** Open a proposed state file, so a listed edit is one click from being read. */
   openEdit?: (edit: WorkflowSyncEdit) => void;
+  /**
+   * Open another description — the one that owns a delegated subtree.
+   *
+   * The whole point of naming the owner is that it tells you where to go next, and a name you then
+   * have to find in the tree is a name that mostly does not get followed.
+   */
+  openDocument?: (layer: WorkflowLayer, path: string) => void;
 }
 
 /**

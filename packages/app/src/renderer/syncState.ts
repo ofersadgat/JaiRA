@@ -43,7 +43,7 @@ export function driftOf(status: WorkflowSyncStatus | null, dirty: boolean): Sync
   };
 }
 
-const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+export const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
 /**
  * The status line, in one sentence.

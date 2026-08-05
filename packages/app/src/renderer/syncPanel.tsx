@@ -1,5 +1,5 @@
 /**
- * The viewer for `workflows/workflow.md`: what the description and the workflows say about each
+ * The viewer for a workflow description: what the description and the workflows say about each
  * other, and the two buttons that bring them back together.
  *
  * A description is the one file in the tree whose preview is not the interesting thing about it.
@@ -28,7 +28,7 @@ import type { SyncDirection, WorkflowSyncEdit, WorkflowSyncResult } from "@jaira
 import { docKey } from "./drafts";
 import type { FileSurfaceProps } from "./fileTypes";
 import { MarkdownView } from "./markdown";
-import { agoOf, driftOf, syncSentence, SYNC_HINT, SYNC_LABEL } from "./syncState";
+import { agoOf, driftOf, plural, syncSentence, SYNC_HINT, SYNC_LABEL } from "./syncState";
 
 const DIRECTIONS: SyncDirection[] = ["document", "states"];
 
@@ -261,6 +261,29 @@ export function WorkflowSyncPanel(props: FileSurfaceProps): JSX.Element {
             </button>
           ) : null}
         </div>
+
+        {/* What this document is NOT answerable for. Above the buttons rather than in the report,
+            because it changes what the buttons mean: a sync here will not touch these states, and
+            someone who just edited one needs to know that before pressing anything — not after
+            reading a proposal that does not mention the file they changed. */}
+        {status?.delegated?.length ? (
+          <div className="sub sync-delegated">
+            Described elsewhere:{" "}
+            {status.delegated.map((d, i) => (
+              <span key={d.document}>
+                {i > 0 ? " · " : ""}
+                <b>{d.root}</b> ({plural(d.states, "state")}) by{" "}
+                {sync?.openDocument ? (
+                  <button className="link" onClick={() => sync.openDocument?.(doc.layer, d.document)}>
+                    {d.document}
+                  </button>
+                ) : (
+                  d.document
+                )}
+              </span>
+            ))}
+          </div>
+        ) : null}
 
         {running ? <div className="sub">Reading the workflows and the description…</div> : null}
         {sync?.error ? <div className="notice bad">{sync.error}</div> : null}

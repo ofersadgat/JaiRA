@@ -10,6 +10,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CONFIG_JSON,
+  descriptionRootOf,
   DIRECTORY,
   isTextMime,
   isWorkflowDescription,
@@ -42,12 +43,26 @@ describe("mimeOfPath", () => {
     expect(isWorkflowDescription("workflows/Workflow.MD")).toBe(true);
   });
 
-  it("leaves every other markdown file alone", () => {
-    // One description per project, directly under `workflows/`. A per-directory one would raise
-    // "which of these am I being checked against?" with no answer.
-    expect(mimeOfPath("workflows/feature/workflow.md")).toBe("text/markdown");
+  it("names every markdown file under workflows/, because each describes one", () => {
+    // A description per subdirectory used to raise "which of these am I being checked against?"
+    // with no answer. Naming the file after the state beside it IS the answer.
+    expect(mimeOfPath("workflows/feature.md")).toBe(WORKFLOW_DESCRIPTION);
+    expect(mimeOfPath("workflows/feature/plan.md")).toBe(WORKFLOW_DESCRIPTION);
+  });
+
+  it("leaves markdown outside workflows/ alone", () => {
     expect(mimeOfPath("workflow.md")).toBe("text/markdown");
-    expect(mimeOfPath("workflows/notes.md")).toBe("text/markdown");
+    expect(mimeOfPath("prompts/goals.md")).toBe("text/markdown");
+  });
+
+  it("reads the root a description is about out of its path", () => {
+    expect(descriptionRootOf("workflows/feature.md")).toBe("feature");
+    expect(descriptionRootOf("workflows/feature/plan.md")).toBe("feature/plan");
+    // The layer-wide description is about every root, so it names none.
+    expect(descriptionRootOf("workflows/workflow.md")).toBeNull();
+    expect(descriptionRootOf("workflows/WORKFLOW.MD")).toBeNull();
+    // Not a description at all.
+    expect(descriptionRootOf("prompts/goals.md")).toBeNull();
   });
 
   it("sends the description back to markdown for anything it does not register itself", () => {

@@ -1,5 +1,5 @@
 /**
- * The conformance check, made to act: bring `workflow.md` and the state files back into step.
+ * The conformance check, made to act: bring a description and the state files back into step.
  *
  * `workflow check` answers "do these two agree?" and stops there, which is the right shape for a CI
  * gate and the wrong shape for someone sitting in front of both documents. What they want next is
@@ -175,6 +175,14 @@ Rewrite the document so that a reader of it would predict what the workflows act
   you were given, say what it does in plain terms rather than guessing why.
 - Keep it a document a person would want to read. No tables of state ids, no dump of the digest.
 
+Where a state is marked **described elsewhere**, another document is the account of how it works
+inside. Describe its CONTRACT here — what it is for, what it takes and produces, where it sits in the
+order, what a reader needs to know to use it from outside — and stop there. Do not import that
+document's detail into this one: the two would then have to be kept in step with each other as well
+as with the code, which is the problem this split exists to avoid. If the passage you are correcting
+is really about that subtree's internals, shorten it to the contract and leave the detail where it
+lives.
+
 Return the COMPLETE document, ready to replace the file. Then list what you changed, one line each,
 naming the requirement ids behind it.
 
@@ -223,6 +231,14 @@ How to work:
   invent a state that pretends to do them.
 - Requirements already \`satisfied\` need no edit. Extras are not failures: leave behaviour the
   document does not mention alone unless it CONTRADICTS the document.
+
+Some states are marked **described elsewhere**, and neither they nor anything beneath them is yours
+to change. You have their contract and not their states, so any file you wrote for one would be
+written blind — and it would overwrite work that another document is the authority on. Do not return
+an edit whose \`stateId\` is such a state or sits under one; it will be refused. If closing a
+requirement genuinely needs a change in there, put it in \`notes\`, name the owning document, and say
+what that document would have to ask for. Changing how such a state is MOUNTED — its inputs, its
+place in \`sequence\`, a transition into it — is yours, because the mount lives in a state you own.
 
 The description, which is what the workflows must end up matching:
 

@@ -1125,6 +1125,16 @@ code {
 .sync-toggle {
   margin-left: auto;
 }
+/* The subtrees this description does not cover. A rule down its left edge, because it is a boundary
+   rather than another status line — what follows it is somebody else's document. */
+.sync-delegated {
+  border-left: 2px solid var(--line);
+  padding-left: 8px;
+  line-height: 1.5;
+}
+.sync-delegated b {
+  font-weight: 600;
+}
 .sync-body {
   flex: 1;
   min-height: 0;

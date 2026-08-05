@@ -25,7 +25,7 @@ import { FileInspector, FilePanel, FileTreePanel, TaskInspector, VIEWER_HEIGHT }
 // surface registry. Nothing else in the shell references the built-in surfaces by name.
 import "./fileSurfaces";
 import type { FileSurfaceContext } from "./fileTypes";
-import { ExecutorsPane, SettingsPane } from "./panes";
+import { ExecutorsPane, LayerPicker, SettingsPane } from "./panes";
 import { Splitter } from "./splitter";
 import { History, NewTask } from "./widgets";
 import { useApp, type SettingsSection, type View } from "./store";
@@ -35,11 +35,17 @@ const RAIL: Array<[View, string, string]> = [
   ["tasks", "▶", "Tasks"],
 ];
 
-const SECTIONS: Array<[SettingsSection, string]> = [
-  ["project", "This project"],
-  ["base", "Shared"],
-  ["executors", "Executors"],
-  ["history", "History"],
+/**
+ * The Settings sections.
+ *
+ * `layered` marks the two the layer switch applies to. History is a project's run journal — there is
+ * no shared version of it to edit — so showing the switch above it would offer a choice that changes
+ * nothing.
+ */
+const SECTIONS: Array<{ id: SettingsSection; label: string; layered: boolean }> = [
+  { id: "config", label: "Configuration", layered: true },
+  { id: "executors", label: "Executors", layered: true },
+  { id: "history", label: "History", layered: false },
 ];
 
 /**
@@ -186,6 +192,7 @@ export default function App(): JSX.Element {
       run: actions.runSync,
       cancel: actions.cancelSync,
       openEdit: actions.openSyncEdit,
+      openDocument: actions.openPath,
     },
     editorTab: state.editorTab,
     onEditorTab: actions.setEditorTab,
@@ -366,7 +373,7 @@ export default function App(): JSX.Element {
               <aside className="col side">
                 <h3>Settings</h3>
                 <ul className="sections">
-                  {SECTIONS.map(([id, label]) => (
+                  {SECTIONS.map(({ id, label }) => (
                     <li
                       key={id}
                       className={state.section === id ? "sel" : undefined}
@@ -378,6 +385,17 @@ export default function App(): JSX.Element {
                 </ul>
                 <div className="project" title={state.projectDir ?? ""}>
                   {state.projectDir ?? "no project open"}
+                </div>
+                {/* The only way into a project from inside the app. Everything else — the startup
+                    env var, the CLI argument, the current directory — decides before the window
+                    exists, which left a running app with no project permanently stuck as one. */}
+                <div className="pane-actions">
+                  <button className="ghost" disabled={state.busy} onClick={() => actions.chooseProject("open")}>
+                    Open…
+                  </button>
+                  <button className="ghost" disabled={state.busy} onClick={() => actions.chooseProject("init")}>
+                    New…
+                  </button>
                 </div>
               </aside>
 
@@ -391,10 +409,16 @@ export default function App(): JSX.Element {
               />
 
               <div className="col mid settings-body">
-                {state.section === "project" || state.section === "base" ? (
+                {/* One switch for every section under it. The layer is an axis across Configuration
+                    and Executors, not a place you navigate to — which is what it used to be for one
+                    of them and a picker for the other. */}
+                {SECTIONS.find((s) => s.id === state.section)?.layered ? (
+                  <LayerPicker value={state.configLayer} onChange={actions.setConfigLayer} disabled={state.busy} />
+                ) : null}
+                {state.section === "config" ? (
                   <SettingsPane
                     config={state.config}
-                    layer={state.section === "base" ? "base" : "project"}
+                    layer={state.configLayer}
                     busy={state.busy}
                     drafts={state.drafts}
                     onDraft={actions.setDraft}
@@ -408,6 +432,7 @@ export default function App(): JSX.Element {
                     probing={state.probing}
                     secrets={state.secrets}
                     busy={state.busy}
+                    layer={state.configLayer}
                     onProbe={actions.probeExecutors}
                     onToggle={actions.setExecutorEnabled}
                     onSaveSecret={actions.saveSecret}

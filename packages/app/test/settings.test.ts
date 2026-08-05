@@ -87,7 +87,93 @@ describe("user settings", () => {
   });
 });
 
+describe("opening and creating projects", () => {
+  it("sets up a directory that is not yet a project, and opens it", async () => {
+    const fresh = mkdtempSync(join(tmpdir(), "jaira-app-fresh-"));
+    try {
+      // The gap this closes: `open` refuses a directory with no `.jaira/`, and until `init` existed
+      // the only ways to make one were the CLI and a startup argument — so a running app pointed at
+      // a new checkout was stuck there.
+      await expect(service.open(fresh)).rejects.toThrow(/not a JaiRA project/);
+
+      await service.init(fresh);
+
+      expect(existsSync(join(fresh, ".jaira", "workflows"))).toBe(true);
+      expect(service.current()?.dir).toBe(fresh);
+    } finally {
+      await service.close();
+      rmSync(fresh, { recursive: true, force: true });
+    }
+  });
+
+  it("treats init on an existing project as an open, keeping its config", async () => {
+    writeFileSync(join(dir, ".jaira", "config.json"), JSON.stringify({ memo: { enabled: true } }), "utf8");
+
+    await service.init(dir);
+
+    expect(JSON.parse(readFileSync(join(dir, ".jaira", "config.json"), "utf8"))).toEqual({ memo: { enabled: true } });
+  });
+
+  it("answers null from the directory picker when there is no dialog to show", async () => {
+    // The headless case. A service with no `chooseDirectory` port must not throw here: the renderer
+    // treats null as "the user dismissed it", which is the right thing to do either way.
+    expect(await service.chooseProject("open")).toBeNull();
+  });
+
+  it("passes the picker wording that matches what is about to happen", async () => {
+    const seen: Array<{ title: string; buttonLabel: string }> = [];
+    const picking = new AppService({
+      baseDir,
+      watchWorkflows: false,
+      chooseDirectory: async (options) => {
+        seen.push(options);
+        return dir;
+      },
+    });
+
+    expect(await picking.chooseProject("open")).toEqual({ dir });
+    expect(await picking.chooseProject("init")).toEqual({ dir });
+
+    // "Open" must not be the label on a dialog whose OK button writes a layout into the folder.
+    expect(seen[0]?.buttonLabel).toBe("Open");
+    expect(seen[1]?.buttonLabel).toBe("Set up here");
+    await picking.close();
+  });
+});
+
 describe("configuration", () => {
+  it("reads both layers with NO project open, so the shared one is editable on an empty window", () => {
+    // The shared root is machine-global and exists before any checkout — it is what somebody
+    // configures FIRST. A read that needed a project made the Settings view claim there was nothing
+    // to edit, for both layers.
+    writeFileSync(join(baseDir, "config.json"), JSON.stringify({ memo: { enabled: true } }), "utf8");
+
+    const view = service.readConfig();
+
+    expect(service.current()).toBeNull();
+    expect(view.base).toEqual({ memo: { enabled: true } });
+    expect(view.project).toBeNull();
+    // Empty, and that is how the UI knows to say "no project" for this layer rather than "no config".
+    expect(view.projectFile).toBe("");
+    expect(view.effective).toMatchObject({ memo: { enabled: true } });
+  });
+
+  it("writes and lists the shared layer with no project open", () => {
+    service.writeConfig({ layer: "base", config: { agents: { claudeCli: { enabled: false } } } });
+
+    expect(JSON.parse(readFileSync(join(baseDir, "config.json"), "utf8"))).toMatchObject({
+      agents: { claudeCli: { enabled: false } },
+    });
+    // Executors are answered from the base document too, so the pane is not empty either.
+    expect(service.listExecutors().find((e) => e.name === "claude-cli")?.enabled).toBe(false);
+  });
+
+  it("still refuses to write the project layer with no project open", () => {
+    expect(() => service.writeConfig({ layer: "project", config: {} })).toThrow(/no project is open/);
+  });
+});
+
+describe("configuration with a project", () => {
   beforeEach(async () => {
     await service.open(dir);
   });

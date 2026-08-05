@@ -1,12 +1,19 @@
 /**
  * What the description and the state files last agreed on, and which of them has moved since.
  *
- * `workflows/workflow.md` says, in English, what the workflows are supposed to do; the state files
- * say what they will actually run. `jaira workflow check` compares them and reports. The thing it
- * cannot report — because the files carry no memory — is which of the two is the one that changed.
- * That is the question a person actually has when the two disagree: "did I rewrite the plan and not
- * the workflows, or the other way round?" Answering it needs a baseline, and a baseline needs a
- * file.
+ * A markdown file under `workflows/` says, in English, what a workflow is supposed to do; the state
+ * files say what it will actually run. `jaira workflow check` compares them and reports. The thing
+ * it cannot report — because the files carry no memory — is which of the two is the one that
+ * changed. That is the question a person actually has when the two disagree: "did I rewrite the plan
+ * and not the workflows, or the other way round?" Answering it needs a baseline, and a baseline
+ * needs a file.
+ *
+ * ## One baseline per description
+ *
+ * `workflows/feature.md` describes the root `feature`; `workflows/workflow.md` describes every root
+ * in its layer. Each keeps its own record, keyed by document path, and a per-root record covers only
+ * that root's closure — so settling one workflow neither disturbs another's baseline nor makes an
+ * unrelated edit look like drift.
  *
  * ## What is recorded
  *
@@ -39,12 +46,31 @@ export interface WorkflowSyncRecord {
   /** The description this is about, relative to the layer root. */
   document: string;
   documentHash: string;
-  /** Hash per state file, keyed by path relative to the project's `workflows/`. */
+  /**
+   * Hash per state file, keyed by path relative to the project's `workflows/`.
+   *
+   * For a per-root description this covers only that root's closure, not the whole directory. A
+   * description of `feature` must not report drift because someone edited an unrelated workflow —
+   * that is noise of exactly the kind that teaches people to ignore the marker.
+   */
   states: Record<string, string>;
   /** When it was accepted, in epoch milliseconds. */
   at: number;
   /** Which side that sync rewrote. */
   direction: SyncDirection;
+}
+
+/**
+ * The file's shape: one record per description.
+ *
+ * A map rather than a single record, because there is now more than one description per layer —
+ * `workflows/feature.md` and `workflows/release.md` are each in step, or not, with their own root.
+ * The previous shape stored ONE record and rejected it when its `document` did not match the one
+ * being asked about, so a second description did not merely lack a baseline: accepting a sync for
+ * it erased the first one's.
+ */
+interface WorkflowSyncFile {
+  documents: Record<string, WorkflowSyncRecord>;
 }
 
 /** Which side has moved, and what moved on it. */
@@ -84,8 +110,12 @@ export function hashText(text: string): string {
  * and a file that cannot be read right now is the sync's problem to report, not this function's to
  * fail on. An absent directory hashes to nothing, which is the honest answer for a project with no
  * workflows yet.
+ *
+ * `only` narrows the walk to a named set of relative paths — one root's closure, for a description
+ * that is about that root and should not move when a different workflow does. Absent means the
+ * whole directory, which is what `workflow.md` is about.
  */
-export function stateHashes(workflowsDir: string): Record<string, string> {
+export function stateHashes(workflowsDir: string, only?: ReadonlySet<string>): Record<string, string> {
   const out: Record<string, string> = {};
   const walk = (dir: string, prefix: string): void => {
     let entries: Array<{ name: string; isDirectory(): boolean }>;
@@ -98,7 +128,7 @@ export function stateHashes(workflowsDir: string): Record<string, string> {
       const rel = prefix.length > 0 ? `${prefix}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
         walk(join(dir, entry.name), rel);
-      } else if (STATE_FILE.test(entry.name)) {
+      } else if (STATE_FILE.test(entry.name) && (only === undefined || only.has(rel))) {
         try {
           out[rel] = hashText(readFileSync(join(dir, entry.name), "utf8"));
         } catch {
@@ -156,28 +186,71 @@ export function syncDrift(
  * file got corrupted would be a poor trade. The next accepted sync rewrites it.
  */
 export function readSyncRecord(file: string, document: string): WorkflowSyncRecord | undefined {
-  try {
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as Partial<WorkflowSyncRecord>;
-    if (typeof parsed.documentHash !== "string" || typeof parsed.document !== "string") return undefined;
-    // Recorded per document. A record about another file says nothing about this one, and reading it
-    // as if it did would report drift against a baseline that was never taken here.
-    if (parsed.document.toLowerCase() !== document.toLowerCase()) return undefined;
-    return {
-      document: parsed.document,
-      documentHash: parsed.documentHash,
-      states: typeof parsed.states === "object" && parsed.states !== null ? parsed.states : {},
-      at: typeof parsed.at === "number" ? parsed.at : 0,
-      direction: parsed.direction === "states" ? "states" : "document",
-    };
-  } catch {
-    return undefined;
-  }
+  const record = readSyncFile(file).documents[document.toLowerCase()];
+  // Recorded per document. A record about another file says nothing about this one, and reading it
+  // as if it did would report drift against a baseline that was never taken here.
+  return record;
 }
 
-/** Write the record. Called when a proposal is accepted, never when one is produced. */
+/** One record, checked field by field — the file is derived, so anything malformed is "no record". */
+function recordOf(raw: unknown): WorkflowSyncRecord | undefined {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const parsed = raw as Partial<WorkflowSyncRecord>;
+  if (typeof parsed.documentHash !== "string" || typeof parsed.document !== "string") return undefined;
+  return {
+    document: parsed.document,
+    documentHash: parsed.documentHash,
+    states: typeof parsed.states === "object" && parsed.states !== null ? parsed.states : {},
+    at: typeof parsed.at === "number" ? parsed.at : 0,
+    direction: parsed.direction === "states" ? "states" : "document",
+  };
+}
+
+/**
+ * The whole file, keyed by lower-cased document path.
+ *
+ * Reads the older single-record shape as a one-entry map, so a project that synced before
+ * per-workflow descriptions existed keeps its baseline instead of being told, on its next open,
+ * that everything has drifted. Nothing migrates it eagerly — the next accepted sync writes the new
+ * shape, and until then the old one is read exactly as it was meant.
+ */
+function readSyncFile(file: string): WorkflowSyncFile {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    // Absent, or corrupted. Both mean "no baseline": the record is a convenience that decides which
+    // of two buttons is highlighted, and refusing to open the panel over it would be a poor trade.
+    return { documents: {} };
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return { documents: {} };
+  const documents = (parsed as Partial<WorkflowSyncFile>).documents;
+  if (documents !== undefined) {
+    if (documents === null || typeof documents !== "object" || Array.isArray(documents)) return { documents: {} };
+    const out: Record<string, WorkflowSyncRecord> = {};
+    for (const [key, value] of Object.entries(documents)) {
+      const record = recordOf(value);
+      if (record !== undefined) out[key.toLowerCase()] = record;
+    }
+    return { documents: out };
+  }
+  const legacy = recordOf(parsed);
+  return { documents: legacy === undefined ? {} : { [legacy.document.toLowerCase()]: legacy } };
+}
+
+/**
+ * Write one document's record, leaving every other document's alone.
+ *
+ * Read-modify-write rather than a replace: the file holds one entry per description now, and a
+ * whole-file write would settle one workflow by forgetting when the others were last agreed.
+ */
 export function writeSyncRecord(file: string, record: WorkflowSyncRecord): void {
+  const current = readSyncFile(file);
+  const next: WorkflowSyncFile = {
+    documents: { ...current.documents, [record.document.toLowerCase()]: record },
+  };
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, "utf8");
 }
 
 /**

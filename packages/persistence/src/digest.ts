@@ -24,6 +24,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadBundle, type LoadedState, type WorkflowBundle } from "@declarative-ai/hw";
+import { isUnder } from "./descriptions";
 import type { Project } from "./project";
 import { browseWorkflows, readWorkflowsTolerantly } from "./workflows";
 import { workflowLoadOptions } from "./workflowRefs";
@@ -33,6 +34,27 @@ export interface WorkflowDigestOptions {
   roots?: readonly string[];
   /** Per-state cap on authored text, in characters. Default 6000. */
   maxStateChars?: number;
+  /**
+   * State ids to render as a CONTRACT rather than in full — the subtrees another description owns.
+   *
+   * Without this the digest for `feature.md` still contains every line of `feature/plan`'s states,
+   * and a model reading it will propose edits inside them however the prompt is worded: what it can
+   * see, it will act on. A bounded state is rendered as its interface — label, operation kind,
+   * slots, children — plus, where one exists, the prose of the document that DOES describe it.
+   *
+   * Only the boundary state itself is named here; everything below it follows.
+   */
+  boundaries?: readonly DigestBoundary[];
+}
+
+/** A subtree the digest stops at, and the description that continues it. */
+export interface DigestBoundary {
+  /** The state id the boundary sits on. */
+  stateId: string;
+  /** The owning description's path, relative to the layer root — named so the model can cite it. */
+  document: string;
+  /** That document's text, when it could be read. The best available account of what it delegates. */
+  text?: string;
 }
 
 export interface WorkflowDigest {
@@ -42,12 +64,22 @@ export interface WorkflowDigest {
   roots: string[];
   /** How many distinct states it describes. */
   states: number;
+  /**
+   * The PROJECT-layer state files behind those roots, relative to `.jaira/workflows/`.
+   *
+   * The same keys {@link stateHashes} produces, so a caller can take a baseline over exactly what
+   * the digest was built from. Base-layer states are excluded for the reason the baseline excludes
+   * them: a machine-wide edit must not read as drift in every project on the machine.
+   */
+  files: string[];
   /** Files that would not parse — the digest is incomplete while these exist. */
   unreadable: Array<{ file: string; error: string }>;
   /** Roots whose closure could not be loaded (a dangling child reference, usually). */
   loadErrors: Array<{ rootId: string; error: string }>;
   /** States whose authored text was clipped by `maxStateChars`. */
   truncated: string[];
+  /** The boundaries actually reached, so the caller can say which subtrees it did not judge. */
+  bounded: string[];
 }
 
 const DEFAULT_MAX_STATE_CHARS = 6000;
@@ -80,6 +112,16 @@ How to read a state:
   \`limits.max_iterations\` caps a loop.
 - \`inputs\` / \`outputs\` — the state's declared slots. A binding like
   \`.children.critique.outputs.outcome\` is where a value comes from.
+
+Some states are marked **described elsewhere**. Another document is the account of
+how those work inside, and you are not reading it. For such a state you are given
+its CONTRACT — what it is called, what it runs, what it takes and returns, and the
+prose of the document that owns it — and nothing below it. Judge the description
+in front of you against that contract only: whether it says the right thing about
+what this state is FOR and how it fits with its siblings. Do not report a gap
+inside one, and do not propose a change to one or to anything beneath it. If the
+gap you find is genuinely inside such a subtree, say so as a note naming the
+document that owns it.
 `;
 
 /**
@@ -107,6 +149,13 @@ export function workflowDigest(project: Project, options: WorkflowDigestOptions 
   const fileOf = new Map(
     browser.files.filter((f) => f.error === undefined).map((f) => [f.stateId, f.file] as const),
   );
+  // Project-layer only, and keyed by state id: which FILE a state resolved from decides what the
+  // baseline covers, and a state the base root supplied has no project file to hash.
+  const projectFileOf = new Map(
+    browser.files
+      .filter((f) => f.error === undefined && f.layer === "project")
+      .map((f) => [f.stateId, f.file] as const),
+  );
   const maxChars = options.maxStateChars ?? DEFAULT_MAX_STATE_CHARS;
 
   const roots: string[] = [];
@@ -114,6 +163,22 @@ export function workflowDigest(project: Project, options: WorkflowDigestOptions 
   const truncated: string[] = [];
   const covered = new Set<string>();
   const sections: string[] = [];
+
+  const boundaryOf = new Map((options.boundaries ?? []).map((b) => [b.stateId, b] as const));
+  const bounded = new Set<string>();
+  /**
+   * True for a state BELOW a boundary — rendered not at all.
+   *
+   * The boundary state itself is still rendered, as its contract: a parent has to be able to say
+   * what it delegated to, and a subtree that vanished entirely would read as a workflow with a
+   * missing step rather than one described elsewhere.
+   */
+  const isBelowBoundary = (id: string): boolean => {
+    for (const stateId of boundaryOf.keys()) {
+      if (id !== stateId && isUnder(id, stateId)) return true;
+    }
+    return false;
+  };
 
   for (const entry of wanted) {
     if (entry.loadError !== undefined) {
@@ -132,7 +197,9 @@ export function workflowDigest(project: Project, options: WorkflowDigestOptions 
       continue;
     }
     roots.push(entry.rootId);
-    const stateIds = Object.keys(bundle.states).sort();
+    const stateIds = Object.keys(bundle.states)
+      .filter((id) => !isBelowBoundary(id))
+      .sort();
     for (const id of stateIds) covered.add(id);
     const lines: string[] = [
       `## Workflow \`${entry.rootId}\`${entry.label !== undefined ? ` — ${entry.label}` : ""}`,
@@ -142,6 +209,12 @@ export function workflowDigest(project: Project, options: WorkflowDigestOptions 
     ];
     for (const id of stateIds) {
       const state = bundle.states[id]!;
+      const boundary = boundaryOf.get(id);
+      if (boundary !== undefined) {
+        bounded.add(id);
+        lines.push(...contractLines(id, state, boundary, maxChars));
+        continue;
+      }
       const file = fileOf.get(id);
       const authored = authoredText(project.paths.workflowsDir, file, bundle.source?.[id]);
       const clipped = authored.text.length > maxChars;
@@ -166,6 +239,17 @@ export function workflowDigest(project: Project, options: WorkflowDigestOptions 
     markdown: [HEADER, ...sections].join("\n"),
     roots,
     states: covered.size,
+    files: [...covered]
+      // A boundary state is described elsewhere, so it is not this digest's to hash either: the
+      // baseline has to cover exactly what was judged, or accepting a sync would claim agreement
+      // about a file this run only saw the outside of.
+      .filter((id) => !bounded.has(id))
+      .flatMap((id) => {
+        const file = projectFileOf.get(id);
+        return file === undefined ? [] : [file];
+      })
+      .sort(),
+    bounded: [...bounded].sort(),
     unreadable: browser.files
       .filter((f) => f.error !== undefined)
       .map((f) => ({ file: f.file, error: f.error! })),
@@ -176,6 +260,55 @@ export function workflowDigest(project: Project, options: WorkflowDigestOptions 
 
 function labelOfState(state: LoadedState): string | undefined {
   return typeof state.label === "string" ? state.label : undefined;
+}
+
+/**
+ * A delegated state, as its CONTRACT.
+ *
+ * Deliberately not the authored file. The authored file is the account of how the state works
+ * inside, and the whole point of a boundary is that another document is responsible for that — a
+ * digest that showed it anyway would be inviting exactly the edits the boundary exists to prevent.
+ *
+ * What is shown instead is what a sibling actually needs: the resolved line (is this a prompt, an
+ * agent, a gate?), the declared slots (what it takes and returns), and the owning document's PROSE.
+ * That last one is the interesting choice — the best available statement of what a subtree is for
+ * is the description somebody wrote of it, not a rendering of its states. Prose delegates to prose,
+ * and a parent stays a document about contracts rather than a second copy of its children.
+ */
+function contractLines(id: string, state: LoadedState, boundary: DigestBoundary, maxChars: number): string[] {
+  const label = labelOfState(state);
+  const slots = (which: "inputs" | "outputs"): string => {
+    const declared = state[which];
+    if (declared === undefined || declared === null || typeof declared !== "object") return "none declared";
+    const names = Object.keys(declared as Record<string, unknown>);
+    return names.length === 0 ? "none declared" : names.join(", ");
+  };
+  const lines = [
+    `### State \`${id}\`${label !== undefined ? ` — ${label}` : ""} — described elsewhere`,
+    "",
+    `resolved: ${resolvedLine(state)}`,
+    "",
+    `inputs: ${slots("inputs")}`,
+    `outputs: ${slots("outputs")}`,
+    "",
+    `How this state works inside is described by \`${boundary.document}\`, not here. Its states are` +
+      ` not shown, and neither this state nor anything below it is yours to change.`,
+    "",
+  ];
+  if (boundary.text !== undefined && boundary.text.trim() !== "") {
+    const clipped = boundary.text.length > maxChars;
+    lines.push(
+      `What \`${boundary.document}\` says it does:`,
+      "",
+      "```markdown",
+      clipped
+        ? `${boundary.text.slice(0, maxChars)}\n… clipped: that document is longer than this digest shows`
+        : boundary.text.trimEnd(),
+      "```",
+      "",
+    );
+  }
+  return lines;
 }
 
 /**
