@@ -379,7 +379,8 @@ describe("binding and guard scopes", () => {
 
   it("binds a state output to the operation's result through `.outputs.<produced>`", () => {
     // The capability itself: `report` has no binding, so the operation fills it; `summary` reads it
-    // back. This is the only route — see the next test for why.
+    // back. The operation declares nothing about what it returns, and does not need to — this route
+    // goes through the state's own slots. The next test is the other one.
     expect(
       problems({
         s: {
@@ -396,27 +397,32 @@ describe("binding and guard scopes", () => {
   it("binds an output to what the call RETURNED, through `.operation.output.<name>`", () => {
     // The capability the produced-output mechanism could not express: the returned value and the
     // published slot are two names with a binding between them, so this renames on the way through.
+    //
+    // The CALL says what it returns and the state says what it publishes — `.operation.output.*` is
+    // typed from `operation.outputs` and from nothing else. Borrowing the signature from whatever the
+    // state around it happened to publish is the older rule this namespace replaced, so a state that
+    // declares only its own slots leaves the namespace empty and the binding unresolved.
     expect(
       problems({
         s: {
           outputs: {
-            report: { schema: { type: "string" } },
             summary: { schema: { type: "string" }, binding: ".operation.output.report" },
           },
-          operation: { kind: "prompt", prompt: "go" },
+          operation: { kind: "prompt", prompt: "go", outputs: { report: { schema: { type: "string" } } } },
         },
       }),
     ).toEqual([]);
   });
 
   it("reports a returned name the operation never produces", () => {
+    // Against an operation that DOES declare its returns, so this catches a wrong name among them
+    // rather than an empty namespace.
     const [message] = problems({
       s: {
         outputs: {
-          report: { schema: { type: "string" } },
           summary: { schema: { type: "string" }, binding: ".operation.output.nope" },
         },
-        operation: { kind: "prompt", prompt: "go" },
+        operation: { kind: "prompt", prompt: "go", outputs: { report: { schema: { type: "string" } } } },
       },
     });
     expect(message).toMatch(/nope/);
