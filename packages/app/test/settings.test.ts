@@ -237,22 +237,54 @@ describe("executors", () => {
     expect(service.listExecutors().map((e) => e.name)).toEqual(["claude-code", "claude-cli", "codex-cli"]);
   });
 
-  it("reflects a disabled executor once config says so", () => {
+  it("reflects a disabled executor as soon as config says so", () => {
     service.writeConfig({ layer: "project", config: { agents: { claudeCli: { enabled: false } } } });
-    // The service holds a parsed copy from open time, so the project is reopened the way the app does.
-    return service.open(dir).then(() => {
-      expect(service.listExecutors().find((e) => e.name === "claude-cli")?.enabled).toBe(false);
+
+    // Without a reopen: the settings screen writes and immediately re-reads this list, and a save
+    // answered with the OLD inventory reads as a write that did not happen.
+    expect(service.listExecutors().find((e) => e.name === "claude-cli")?.enabled).toBe(false);
+  });
+
+  it("lists an executor added from the settings screen, and its configured fields", () => {
+    service.writeConfig({
+      layer: "project",
+      config: {
+        agents: {
+          codex: { command: "/opt/codex", sandbox: "read-only", credential: "OPENAI_API_KEY" },
+          genericCli: [{ name: "opencode", command: "opencode" }],
+        },
+      },
+    });
+
+    const executors = service.listExecutors();
+
+    expect(executors.map((e) => e.name)).toEqual(["claude-code", "claude-cli", "codex-cli", "opencode"]);
+    expect(executors.find((e) => e.name === "codex-cli")).toMatchObject({
+      command: "/opt/codex",
+      sandbox: "read-only",
+      credential: "OPENAI_API_KEY",
     });
   });
 
   it("probes without running an agent, and reports a disabled one as disabled", async () => {
     service.writeConfig({ layer: "project", config: { agents: { claudeCli: { enabled: false } } } });
-    await service.open(dir);
 
     const results = await service.probeExecutors("claude-cli");
 
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ name: "claude-cli", status: "disabled" });
+  });
+
+  it("finds a credential named by a config write, without a reopen", async () => {
+    // The two halves of "add a key" — naming the secret in config and storing its value — land in
+    // one action in the UI, so a probe between them must see both.
+    service.setSecret({ name: "ANTHROPIC_API_KEY", value: "sk-test", target: "keychain" });
+    service.writeConfig({ layer: "project", config: { agents: { claudeCode: { credential: "ANTHROPIC_API_KEY" } } } });
+
+    const [result] = await service.probeExecutors("claude-code");
+
+    expect(result?.credential).toEqual({ source: "keychain" });
+    expect(result?.credentialMissing).toBeUndefined();
   });
 
   it("refuses to probe an executor that does not exist", async () => {

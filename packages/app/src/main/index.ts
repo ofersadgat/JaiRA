@@ -150,6 +150,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "config:write": ((request: Parameters<typeof service.writeConfig>[0]) => service.writeConfig(request)) as Handler,
   "executor:list": (() => service.listExecutors()) as Handler,
   "executor:probe": ((request: { name?: string } | undefined) => service.probeExecutors(request?.name)) as Handler,
+  "model:probe": (() => service.probeModelRoutes()) as Handler,
   "secret:capabilities": (() => service.secretCapabilities()) as Handler,
   "secret:set": ((request: Parameters<typeof service.setSecret>[0]) => service.setSecret(request)) as Handler,
 };

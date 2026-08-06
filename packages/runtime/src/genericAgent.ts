@@ -52,6 +52,15 @@ export const GENERIC_CLI_CAPS: RuntimeCapabilities = {
 /** Where the prompt is substituted when the argv template does not name it. */
 export const PROMPT_PLACEHOLDER = "{prompt}";
 
+/**
+ * Where a requested MODEL is substituted, for a binary that takes one.
+ *
+ * A placeholder rather than a generated `--model` flag, because there is no generic spelling: one CLI
+ * wants `--model`, another `-m`, another an environment variable. The template already carries the
+ * binary's own vocabulary for everything else, so it carries this too — `["-m", "{model}", "--json"]`.
+ */
+export const MODEL_PLACEHOLDER = "{model}";
+
 export interface GenericCliQueryOptions {
   /** Where to run (a WSL project runs its agent in the distro). */
   execEnv?: ExecEnv;
@@ -73,14 +82,29 @@ export function createGenericCliQuery(spec: JairaGenericCliAgent, options: Gener
   const exec = options.exec ?? new NodeExec();
   return async function* genericCliQuery(opts): AsyncIterable<AgentStreamMessage> {
     const template = spec.args ?? [];
+    // A model this template has nowhere to put is REFUSED, not dropped. Running whatever the binary
+    // defaults to while the workflow believes it asked for something else is silent and expensive —
+    // the same rule the deny-list follows, and for the same reason (`seam.ts`: "an adapter that cannot
+    // honour it must refuse, not drop it").
+    if (opts.model !== undefined && !template.includes(MODEL_PLACEHOLDER)) {
+      yield {
+        type: "other",
+        error:
+          `'${spec.command}' was asked for the model '${opts.model}', but its configured arguments have no ` +
+          `${MODEL_PLACEHOLDER} placeholder to put it in — add one (e.g. ["-m", "${MODEL_PLACEHOLDER}"]), or ` +
+          `name the executor without a model suffix so it uses its own default`,
+      };
+      return;
+    }
     const usesPlaceholder = template.includes(PROMPT_PLACEHOLDER);
     const viaStdin = spec.prompt === "stdin";
+    const filled = template.map((arg) => (arg === MODEL_PLACEHOLDER ? opts.model! : arg));
     const args = usesPlaceholder
-      ? template.map((arg) => (arg === PROMPT_PLACEHOLDER ? opts.prompt : arg))
+      ? filled.map((arg) => (arg === PROMPT_PLACEHOLDER ? opts.prompt : arg))
       : viaStdin
-        ? [...template]
+        ? [...filled]
         : // `--` first: an instruction beginning with `-` must not be read as a flag.
-          [...template, "--", opts.prompt];
+          [...filled, "--", opts.prompt];
 
     let result;
     try {

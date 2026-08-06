@@ -34,6 +34,7 @@ import {
 } from "@jaira/persistence";
 import {
   defaultConfig,
+  jairaBasePaths,
   jairaPaths,
   parseJsonText,
   WORKFLOW_DESCRIPTION_PATH,
@@ -57,6 +58,9 @@ import {
   type ArtifactStore,
   type ExecObserver,
   modelDefaults,
+  modelRouterOptions,
+  agentPromptRoutes,
+  SecretResolver,
   newRegistry,
   NodeExec,
   parseFakeRules,
@@ -267,6 +271,10 @@ function buildRunEnvironment(
   config: JairaConfig,
   wiring: RunWiring,
   files?: ArtifactWiringOptions,
+  /** Where project-local secrets are looked up — a `.env.local` beside this project. Absent ⇒ the
+   *  shared base root and the process environment only, which is all an ad-hoc run outside a project
+   *  can honestly consult. */
+  projectDir?: string,
 ): {
   registry: ReturnType<typeof newRegistry>;
   prompt: ReturnType<typeof buildPromptExecutor>;
@@ -315,10 +323,30 @@ function buildRunEnvironment(
     wiring.interactions.register(registry);
     for (const name of functionNamesOf(bundle)) wiring.interactions.registerWildcard(registry, name);
   }
+  // How prompt states reach whatever answers them — the provider routes with their credentials
+  // resolved, the named presets a state selects with `configRef`, and the agent executors a model
+  // prefix can name. A scripted run gets none of it: the fake answers everything.
+  const secrets = new SecretResolver({
+    ...(projectDir !== undefined ? { projectDir } : {}),
+    baseDir: jairaBasePaths().baseDir,
+  });
+  const scripted = wiring.fakeRules !== undefined;
+  const presets = config.models.presets;
   const prompt = buildPromptExecutor({
     ...(wiring.fakeRules !== undefined ? { fakeRules: wiring.fakeRules } : {}),
     ...(wiring.repairTurns !== undefined ? { repairTurns: wiring.repairTurns } : {}),
-    defaults: modelDefaults(config, bundle, { fake: wiring.fakeRules !== undefined }),
+    ...(scripted
+      ? {}
+      : {
+          router: modelRouterOptions(config.models, secrets),
+          routes: agentPromptRoutes(config.agents, {
+            execEnv: config.execEnvironment,
+            exec,
+            ...(files?.observer !== undefined ? { observer: files.observer } : {}),
+          }),
+          ...(presets !== undefined ? { configs: { get: (id: string) => presets[id] } } : {}),
+        }),
+    defaults: modelDefaults(config, bundle, { fake: scripted, secrets }),
   });
   // Conversation `summary` mode: only installed when a state asked for it, and it
   // summarizes through the run's own prompt executor, so a scripted run stays
@@ -433,7 +461,7 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
 
   const wiring = runWiringOf(values, io.cwd);
   const inputs = values.inputs !== undefined ? recordValue("inputs", jsonValue("inputs", values.inputs, io.cwd)) : {};
-  const { registry, prompt, session, summaryModes } = buildRunEnvironment(bundle, config, wiring);
+  const { registry, prompt, session, summaryModes } = buildRunEnvironment(bundle, config, wiring, undefined, projectDir);
   warnSummaryConflicts(summaryModes, io);
   assertCapabilities(registry, bundle, config);
   const result = await executeWorkflow({
@@ -557,11 +585,13 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
       onCancelRequested: () => stop.abort(),
     });
 
-    const { registry, prompt, session, summaryModes } = buildRunEnvironment(started.bundle, project.config, wiring, {
-      artifacts,
-      store: project.artifacts,
-      observer: owner.observer(),
-    });
+    const { registry, prompt, session, summaryModes } = buildRunEnvironment(
+      started.bundle,
+      project.config,
+      wiring,
+      { artifacts, store: project.artifacts, observer: owner.observer() },
+      project.paths.projectDir,
+    );
     warnSummaryConflicts(summaryModes, io);
     try {
       assertCapabilities(registry, started.bundle, project.config);
@@ -917,7 +947,7 @@ async function cmdWorkflowCheck(argv: string[], io: CliIo): Promise<number> {
       conformanceWorkflowFiles(values.model !== undefined ? { model: values.model } : {}),
       CONFORMANCE_ID,
     );
-    const { registry, prompt, session, summaryModes } = buildRunEnvironment(bundle, project.config, wiring);
+    const { registry, prompt, session, summaryModes } = buildRunEnvironment(bundle, project.config, wiring, undefined, project.paths.projectDir);
     warnSummaryConflicts(summaryModes, io);
     assertCapabilities(registry, bundle, project.config);
     io.stderr(`checking ${digest.roots.join(", ")} (${digest.states} states) against ${specPath}\n`);

@@ -104,9 +104,13 @@ describe("syncStatus", () => {
     expect(status.blocked).toMatch(/empty/);
   });
 
-  it("refuses to judge a shared-root description against one project", () => {
+  it("judges a shared-root description against the shared root, not against the open project", () => {
+    // Same path, other layer. The base root of this suite is empty, so the answer is about the file
+    // that is not there — not about this project's description, which exists and is not empty. A
+    // machine-global document must read the same whichever checkout happens to be open.
     const status = service.syncStatus({ layer: "base", path: WORKFLOW_DESCRIPTION_PATH });
-    expect(status.blocked).toMatch(/shared root/);
+    expect(status).toMatchObject({ layer: "base", exists: false });
+    expect(status.blocked).toMatch(/empty/);
   });
 
   it("reads a baseline written in the older single-record shape", () => {
@@ -505,5 +509,105 @@ describe("runSync refusals", () => {
 
   it("reports that nothing was running when a cancel arrives late", () => {
     expect(service.cancelSync()).toEqual({ canceled: false });
+  });
+});
+
+/**
+ * The shared root is a place workflows are authored, so it is a place a description has to be
+ * syncable — and the mode people author shared workflows in is the one with no project open.
+ *
+ * Nothing here needs a project, and that is the point: the description, the workflows it is judged
+ * against, and the baseline it is recorded in are all inside `~/.jaira`. The answer is the same
+ * whether a checkout is open, none is, or a different one is tomorrow.
+ */
+describe("the shared root, with no project open", () => {
+  let home: string;
+  let base: string;
+  let bare: AppService;
+
+  const baseFile = (...parts: string[]): string => join(base, ...parts);
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "jaira-home-"));
+    base = join(home, "shared");
+    mkdirSync(join(base, "workflows"), { recursive: true });
+    writeWorkflowFiles(join(base, "workflows"), specPlanningFiles());
+    writeFileSync(baseFile("workflows", "workflow.md"), DESCRIPTION, "utf8");
+    bare = new AppService({ watchWorkflows: false, baseDir: base });
+  });
+
+  afterEach(async () => {
+    await bare.close();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it("has an answer, rather than telling you to open a project", () => {
+    const status = bare.syncStatus({ layer: "base", path: WORKFLOW_DESCRIPTION_PATH });
+    // `blocked` is what greys both buttons out, so this assertion IS the bug: the shared root has
+    // its own workflows and its own baseline, and neither of them needs a checkout.
+    expect(status.blocked).toBeUndefined();
+    expect(status.synced).toBe(false);
+    expect(status.exists).toBe(true);
+  });
+
+  it("proposes shared state files, into the shared root", async () => {
+    const result = await bare.runSync({
+      layer: "base",
+      path: WORKFLOW_DESCRIPTION_PATH,
+      direction: "states",
+      fake: fake({
+        edits: [
+          {
+            stateId: "feature/plan/gate",
+            action: "create" as const,
+            text: '{"label":"Approve the plan"}',
+            reason: "R2 asks for a human gate",
+            requirements: ["R2"],
+          },
+        ],
+      }) as never,
+    });
+
+    expect(result.workflows).toEqual(["feature/plan"]);
+    expect(result.edits?.[0]).toMatchObject({
+      stateId: "feature/plan/gate",
+      // The layer decides where a proposal lands, and with no project the shared root is the only
+      // place it could: an edit labelled `project` here would open a draft against no file at all.
+      layer: "base",
+      path: "workflows/feature/plan/gate.json",
+      applicable: true,
+    });
+    // Still a proposal. Nothing is written until the person reading it saves it.
+    expect(existsSync(baseFile("workflows", "feature", "plan", "gate.json"))).toBe(false);
+  });
+
+  it("records its baseline in the shared root, where it means the same thing in every window", async () => {
+    await bare.runSync({
+      layer: "base",
+      path: WORKFLOW_DESCRIPTION_PATH,
+      direction: "document",
+      fake: fake({ document: { text: REWRITTEN, changes: [] } }) as never,
+    });
+    bare.writeFile({ layer: "base", path: WORKFLOW_DESCRIPTION_PATH, text: REWRITTEN });
+
+    expect(bare.syncStatus({ layer: "base", path: WORKFLOW_DESCRIPTION_PATH })).toMatchObject({
+      synced: true,
+      documentChanged: false,
+      statesChanged: false,
+    });
+    // In `~/.jaira/sync.json` and not in any project's — a machine-global document whose history
+    // was scattered across checkouts would have a different answer in every window.
+    expect(existsSync(baseFile("sync.json"))).toBe(true);
+
+    // And a shared state moving is drift the shared description is answerable for.
+    bare.writeWorkflow({ stateId: "feature/plan/goals", layer: "base", text: '{"label":"Goals, revised"}' });
+    expect(bare.syncStatus({ layer: "base", path: WORKFLOW_DESCRIPTION_PATH })).toMatchObject({
+      statesChanged: true,
+      suggested: "document",
+    });
+  });
+
+  it("still says to open a project for a project-layer description", () => {
+    expect(bare.syncStatus({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH }).blocked).toMatch(/open a project/);
   });
 });

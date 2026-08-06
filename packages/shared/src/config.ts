@@ -14,8 +14,93 @@ export interface JairaModelConfig {
    * Default model id for states that name none. Must be route-prefixed
    * (`anthropic/claude-sonnet-5`, `openrouter/openai/gpt-5`) — routing is
    * explicit in declarative-ai, and a bare id is a fail-fast error.
+   *
+   * The prefix now chooses more than a provider: `claude-cli/sonnet` sends prompt
+   * states to the CLI agent, which needs no API key at all (DESIGN §8.3).
    */
   default?: string;
+  /**
+   * How each route prefix is REACHED, keyed by the prefix itself.
+   *
+   * Prefix-keyed because that is what a model id already is: `anthropic/…` and
+   * `openrouter/…` name remote fleets that each need their own key, `local/…` an
+   * OpenAI-compatible server on this machine, `embedded/…` weights loaded into this
+   * process. One map keyed the way the ids are, rather than four differently-shaped
+   * blocks that have to be kept in step with them.
+   *
+   * Absent is the ordinary case: with nothing here the provider SDKs read
+   * `ANTHROPIC_API_KEY`/`OPENROUTER_API_KEY` from the process environment, exactly as
+   * before. What this adds is the ability to name a secret that lives somewhere the
+   * environment does not — the OS keychain, or a `.env.local` beside the project.
+   */
+  routes?: Record<string, JairaModelRoute>;
+  /**
+   * Named prompt-op configurations, selected per state by `operation.configRef`.
+   *
+   * The mechanism is upstream's and predates this block: `configRef` resolves against
+   * a `ConfigurationRegistry` and merges UNDER a state's inline config and OVER the
+   * defaults. All that was ever missing was somewhere to write the presets down.
+   */
+  presets?: Record<string, Record<string, JsonValue>>;
+}
+
+/**
+ * One serving route's settings — declarative-ai's `ModelRouterOptions`, as config.
+ *
+ * Deliberately one shape rather than four: which fields apply follows from the KEY,
+ * the parser says so when they disagree, and a flat block is what a settings form can
+ * render without first learning the taxonomy.
+ */
+export interface JairaModelRoute {
+  /** Off without deleting it, so a route can be parked rather than retyped later. */
+  enabled?: boolean;
+  /**
+   * The SECRET this route's key is looked up under — a name, never a key.
+   *
+   * Resolved through the same chain every executor credential uses (OS keychain,
+   * `.env.local`/`.env` beside the project, then the base root, then the process
+   * environment), because `config.json` is committed source and a key written into it
+   * is a key in everyone's checkout.
+   */
+  credential?: string;
+  /** `local` only: the OpenAI-compatible server's base URL, version path included. */
+  baseURL?: string;
+  /** `local` only: extra request headers. */
+  headers?: Record<string, string>;
+  /**
+   * `local` only: can this server honour a full `response_format: json_schema`?
+   *
+   * A CEILING on the per-call decision, not a switch — `llama-server` and vLLM can, a
+   * bare completion shim in front of llama.cpp cannot. Default true.
+   */
+  supportsStructuredOutputs?: boolean;
+  /**
+   * `local` only: how to START the server when nothing answers `baseURL`.
+   *
+   * Absent ⇒ attached; the server is expected to be running already. Present ⇒ the
+   * router probes first and starts the process only if nothing answers, so someone who
+   * already has one running keeps theirs.
+   */
+  serve?: JairaLocalServerSpec;
+  /** `embedded` only: provider-native model id → the weights to load for it. */
+  weights?: Record<string, JairaEmbeddedWeights>;
+}
+
+export interface JairaLocalServerSpec {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  /** Polled until it answers. Defaults to `${baseURL}/models`. */
+  readyUrl?: string;
+  readyTimeoutMs?: number;
+}
+
+export interface JairaEmbeddedWeights {
+  /** Filesystem path to the GGUF. For a split model, the FIRST part. */
+  modelPath: string;
+  contextSize?: number;
+  gpuLayers?: number | "auto" | "max";
+  sequences?: number;
 }
 
 /**
@@ -488,30 +573,167 @@ function mergeAgentBlock(
   return { ...merged, genericCli: [...byName.values()] };
 }
 
+/**
+ * The route prefixes JaiRA knows how to REACH.
+ *
+ * Two families in one list, because a model id does not distinguish them and should not: the first
+ * four are declarative-ai's serving routes (a provider fleet, a local server, in-process weights), the
+ * rest are EXECUTORS — a coding agent answering the prompt itself. What a prefix selects is "who
+ * answers", and the honest surface for that is one namespace (DESIGN §8.3).
+ */
+export const MODEL_ROUTE_KEYS = ["anthropic", "openrouter", "local", "embedded"] as const;
+
+/** Which of a route's fields belong to it, so a misplaced one is refused rather than ignored. */
+const ROUTE_FIELDS: Record<string, readonly string[]> = {
+  anthropic: ["enabled", "credential"],
+  openrouter: ["enabled", "credential"],
+  local: ["enabled", "credential", "baseURL", "headers", "supportsStructuredOutputs", "serve"],
+  embedded: ["enabled", "weights"],
+};
+
+function plainObject(value: unknown, where: string): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error(`${where} must be an object`);
+  return value as Record<string, unknown>;
+}
+
+function stringMap(value: unknown, where: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(plainObject(value, where))) {
+    if (typeof entry !== "string") throw new Error(`${where}.${key} must be a string`);
+    out[key] = entry;
+  }
+  return out;
+}
+
+/**
+ * Parse one route block.
+ *
+ * Unknown-for-this-route fields are an ERROR rather than being dropped, which is the opposite of how
+ * the executor blocks are read — and deliberately so. A `baseURL` under `anthropic` is not a harmless
+ * extra key: it is somebody configuring an endpoint that will never be consulted, and the failure it
+ * produces later ("why is it still calling the public API?") is far harder to trace than a refused save
+ * that names the field.
+ */
+function parseModelRoute(value: unknown, key: string): JairaModelRoute {
+  const where = `config.models.routes.${key}`;
+  const raw = plainObject(value, where);
+  const allowed = ROUTE_FIELDS[key];
+  if (allowed === undefined) {
+    throw new Error(`${where} names an unknown route — expected one of ${MODEL_ROUTE_KEYS.join(", ")}`);
+  }
+  for (const field of Object.keys(raw)) {
+    if (!allowed.includes(field)) {
+      throw new Error(`${where}.${field} is not a setting the '${key}' route has — it takes ${allowed.join(", ")}`);
+    }
+  }
+  const route: JairaModelRoute = {};
+  if (raw["enabled"] !== undefined) {
+    if (typeof raw["enabled"] !== "boolean") throw new Error(`${where}.enabled must be a boolean`);
+    route.enabled = raw["enabled"];
+  }
+  if (raw["credential"] !== undefined) {
+    const name = raw["credential"];
+    if (typeof name !== "string" || name.length === 0) throw new Error(`${where}.credential must be a non-empty string`);
+    if (/\s/.test(name)) {
+      throw new Error(
+        `${where}.credential '${name}' looks like a secret VALUE — it must NAME a secret (like ANTHROPIC_API_KEY), which is then resolved from the keychain, a .env file, or the environment`,
+      );
+    }
+    route.credential = name;
+  }
+  if (raw["baseURL"] !== undefined) {
+    if (typeof raw["baseURL"] !== "string" || raw["baseURL"].length === 0) throw new Error(`${where}.baseURL must be a non-empty string`);
+    route.baseURL = raw["baseURL"];
+  }
+  if (raw["headers"] !== undefined) route.headers = stringMap(raw["headers"], `${where}.headers`);
+  if (raw["supportsStructuredOutputs"] !== undefined) {
+    if (typeof raw["supportsStructuredOutputs"] !== "boolean") throw new Error(`${where}.supportsStructuredOutputs must be a boolean`);
+    route.supportsStructuredOutputs = raw["supportsStructuredOutputs"];
+  }
+  if (raw["serve"] !== undefined) {
+    const serve = plainObject(raw["serve"], `${where}.serve`);
+    if (typeof serve["command"] !== "string" || serve["command"].length === 0) {
+      throw new Error(`${where}.serve.command must be a non-empty string`);
+    }
+    const spec: JairaLocalServerSpec = { command: serve["command"] };
+    if (serve["args"] !== undefined) {
+      if (!Array.isArray(serve["args"]) || serve["args"].some((a) => typeof a !== "string")) {
+        throw new Error(`${where}.serve.args must be an array of strings`);
+      }
+      spec.args = serve["args"] as string[];
+    }
+    if (serve["env"] !== undefined) spec.env = stringMap(serve["env"], `${where}.serve.env`);
+    if (serve["readyUrl"] !== undefined) {
+      if (typeof serve["readyUrl"] !== "string") throw new Error(`${where}.serve.readyUrl must be a string`);
+      spec.readyUrl = serve["readyUrl"];
+    }
+    if (serve["readyTimeoutMs"] !== undefined) {
+      if (typeof serve["readyTimeoutMs"] !== "number") throw new Error(`${where}.serve.readyTimeoutMs must be a number`);
+      spec.readyTimeoutMs = serve["readyTimeoutMs"];
+    }
+    route.serve = spec;
+  }
+  if (raw["weights"] !== undefined) {
+    const weights: Record<string, JairaEmbeddedWeights> = {};
+    for (const [id, entry] of Object.entries(plainObject(raw["weights"], `${where}.weights`))) {
+      const w = plainObject(entry, `${where}.weights.${id}`);
+      if (typeof w["modelPath"] !== "string" || w["modelPath"].length === 0) {
+        throw new Error(`${where}.weights.${id}.modelPath must be a non-empty string`);
+      }
+      weights[id] = {
+        modelPath: w["modelPath"],
+        ...(typeof w["contextSize"] === "number" ? { contextSize: w["contextSize"] } : {}),
+        ...(w["gpuLayers"] !== undefined ? { gpuLayers: w["gpuLayers"] as number | "auto" | "max" } : {}),
+        ...(typeof w["sequences"] === "number" ? { sequences: w["sequences"] } : {}),
+      };
+    }
+    route.weights = weights;
+  }
+  return route;
+}
+
+/** Parse the `models` block: the default id, how each route is reached, and the named presets. */
+function parseModels(value: unknown): JairaModelConfig {
+  if (value === undefined) return {};
+  const raw = plainObject(value, "config.models");
+  const models: JairaModelConfig = {};
+
+  const id = raw["default"];
+  if (id !== undefined) {
+    if (typeof id !== "string" || id.length === 0) throw new Error("config.models.default must be a non-empty string");
+    if (!id.includes("/")) {
+      throw new Error(
+        `config.models.default '${id}' must be route-prefixed, e.g. 'anthropic/claude-sonnet-5', 'openrouter/openai/gpt-5', or 'claude-cli/sonnet' to run it on the CLI agent`,
+      );
+    }
+    models.default = id;
+  }
+
+  if (raw["routes"] !== undefined) {
+    const routes: Record<string, JairaModelRoute> = {};
+    for (const [key, entry] of Object.entries(plainObject(raw["routes"], "config.models.routes"))) {
+      routes[key] = parseModelRoute(entry, key);
+    }
+    models.routes = routes;
+  }
+
+  if (raw["presets"] !== undefined) {
+    const presets: Record<string, Record<string, JsonValue>> = {};
+    for (const [name, entry] of Object.entries(plainObject(raw["presets"], "config.models.presets"))) {
+      presets[name] = plainObject(entry, `config.models.presets.${name}`) as Record<string, JsonValue>;
+    }
+    models.presets = presets;
+  }
+  return models;
+}
+
 export function parseConfig(raw: unknown): JairaConfig {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error("config must be a JSON object");
   }
   const cfg = raw as Record<string, unknown>;
 
-  const models: JairaModelConfig = {};
-  if (cfg["models"] !== undefined) {
-    if (cfg["models"] === null || typeof cfg["models"] !== "object" || Array.isArray(cfg["models"])) {
-      throw new Error("config.models must be an object");
-    }
-    const raw = (cfg["models"] as Record<string, unknown>)["default"];
-    if (raw !== undefined) {
-      if (typeof raw !== "string" || raw.length === 0) {
-        throw new Error("config.models.default must be a non-empty string");
-      }
-      if (!raw.includes("/")) {
-        throw new Error(
-          `config.models.default '${raw}' must be route-prefixed, e.g. 'anthropic/claude-sonnet-5' or 'openrouter/openai/gpt-5'`,
-        );
-      }
-      models.default = raw;
-    }
-  }
+  const models = parseModels(cfg["models"]);
 
   const artifactDir = cfg["artifactDir"] ?? DEFAULT_ARTIFACT_DIR;
   if (typeof artifactDir !== "string" || artifactDir.length === 0) {

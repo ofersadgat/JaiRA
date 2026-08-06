@@ -27,13 +27,16 @@ import { loadBundle } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
 import {
   baseFileTree,
+  baseSource,
   baseStateView,
   beginTaskRun,
   boardForState,
   boardView,
   browseBaseWorkflows,
+  browseSource,
   browseWorkflows,
   commitSync,
+  digestSource,
   conversationView,
   ensureWorkspace,
   fileTree,
@@ -49,8 +52,10 @@ import {
   // different question with a different answer for the same two strings.
   isUnder as isUnderState,
   listDescriptions,
+  loadLayeredConfig,
   openProject,
   ownershipOf,
+  projectSource,
   pruneHistory,
   rootsBoard,
   stateHashes,
@@ -60,12 +65,12 @@ import {
   readSyncRecord,
   syncDrift,
   taskSummaries,
-  workflowDigest,
   workflowRoots,
   type DescriptionBoundary,
   type DescriptionOwnership,
   type Project,
   type WorkflowDigestOptions,
+  type LayerSource,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -79,6 +84,8 @@ import {
   SecretResolver,
   persistEngineArtifacts,
   registerFileTools,
+  createReadFileTool,
+  READ_FILE,
   executeWorkflow,
   gateCapabilities,
   registerAgentRuntimes,
@@ -88,6 +95,9 @@ import {
   functionNamesOf,
   InteractionHub,
   modelDefaults,
+  modelRouterOptions,
+  probeModelRoutes,
+  agentPromptRoutes,
   newRegistry,
   NodeExec,
   parseFakeRules,
@@ -491,7 +501,13 @@ export class AppService {
    * `persistence/workflowSync.ts`), so something has to remember what was on offer between the run
    * and the save. Session-scoped, like the drafts it corresponds to.
    */
-  private pendingSync?: { direction: SyncDirection; document: string; remaining: Set<string> };
+  private pendingSync?: {
+    direction: SyncDirection;
+    document: string;
+    /** The layer the document lives in — which decides where its baseline is written back. */
+    layer: WorkflowLayer;
+    remaining: Set<string>;
+  };
 
   // --- lifecycle -------------------------------------------------------------
 
@@ -965,7 +981,11 @@ export class AppService {
     const fakeRules = request.fake !== undefined ? parseFakeRules(request.fake) : undefined;
     const prompt = buildPromptExecutor({
       ...(fakeRules !== undefined ? { fakeRules } : {}),
-      defaults: modelDefaults(project.config, started.bundle, { fake: fakeRules !== undefined }),
+      ...this.promptWiring(project.config, { fake: fakeRules !== undefined }),
+      defaults: modelDefaults(project.config, started.bundle, {
+        fake: fakeRules !== undefined,
+        secrets: this.secretResolver(),
+      }),
     });
 
     // Conversation `summary` mode (DESIGN §14 phase 7): installed only for the
@@ -1222,13 +1242,30 @@ export class AppService {
       file = this.p.paths.configFile;
     }
     writeFileSync(file, `${JSON.stringify(request.config, null, 2)}\n`, "utf8");
-    // The open project holds a parsed copy, so it has to be reopened for the change to take effect.
+    // The open project holds a PARSED copy, and everything downstream of this write reads that copy
+    // rather than the file: the executor inventory, the probes, and the registry a run is built
+    // from. Re-layering it here is what makes a settings change take effect now instead of at the
+    // next reopen — the settings screen would otherwise answer a save by re-reporting the old
+    // configuration, which reads as a write that did not happen.
+    if (this.project) this.project.config = loadLayeredConfig(this.project.paths);
     this.publish({ type: "store:invalidate", scope: "config" });
     this.publish({ type: "store:invalidate", scope: "workflows" });
     return this.readConfig();
   }
 
   // --- executors -------------------------------------------------------------
+
+  /**
+   * Health-check the provider routes (DESIGN §8.3) — without calling one.
+   *
+   * The counterpart of {@link AppService.probeExecutors}, and it follows the same rule for the same
+   * reason: pressing Test must not start a generation. A route has nothing cheap to invoke, so what it
+   * reports is whether a credential resolves and where from — which is exactly the question someone
+   * staring at "no model configured" needs answered.
+   */
+  probeModelRoutes(): ProbeResult[] {
+    return probeModelRoutes(this.effectiveConfig().models, this.secretResolver());
+  }
 
   /** Every executor this project could use, enabled or not (DESIGN §8.1). */
   listExecutors(): ExecutorInfo[] {
@@ -1645,9 +1682,9 @@ export class AppService {
    * text at all: a status line computed from the saved file, next to a panel showing a rewritten
    * one, would say "in sync" about a document nobody has on screen.
    *
-   * Never throws. Every way this can fail to have an answer — no project, no workflows, a base-layer
-   * description — is a `blocked` string instead, because the panel is rendered by opening a file and
-   * an exception there is a blank surface with no explanation on it.
+   * Never throws. Every way this can fail to have an answer — no project for a project-layer
+   * description, no workflows — is a `blocked` string instead, because the panel is rendered by
+   * opening a file and an exception there is a blank surface with no explanation on it.
    */
   syncStatus(request: { layer: WorkflowLayer; path: string; text?: string }): WorkflowSyncStatus {
     const base = {
@@ -1662,15 +1699,11 @@ export class AppService {
       ...(this.pendingSync !== undefined ? { pending: this.pendingSync.direction } : {}),
     } satisfies WorkflowSyncStatus;
 
-    if (this.project === undefined) return { ...base, blocked: "open a project to sync its workflows" };
-    // A shared-root description would be checked against whichever project happens to be open, and
-    // recorded in that project's baseline — an answer that changes meaning per window. The honest
-    // move is to say so rather than to produce it.
-    if (request.layer !== "project") {
-      return { ...base, blocked: "the shared root's description is not checked against one project's workflows" };
+    if (request.layer === "project" && this.project === undefined) {
+      return { ...base, blocked: "open a project to sync its workflows" };
     }
 
-    const project = this.p;
+    const source = this.syncSource(request.layer);
     let file: string;
     try {
       file = this.layerFile(request.path, request.layer);
@@ -1684,25 +1717,26 @@ export class AppService {
     // layer-wide `workflow.md`. A root named by a description that does not exist is reported here
     // rather than at run time, because it is a typo in a filename and the panel is where it shows.
     const root = descriptionRootOf(request.path);
-    const known = new Set(browseWorkflows(project).workflows.map((w) => w.rootId));
+    const where = request.layer === "base" ? "the shared root" : "this project";
+    const known = new Set(browseSource(source).workflows.map((w) => w.rootId));
     if (root !== null && !known.has(root)) {
       return {
         ...base,
         exists,
         blocked:
           known.size === 0
-            ? `'${root}' names no workflow — this project has none yet`
-            : `'${root}' names no workflow here. This project has: ${[...known].sort().join(", ")}`,
+            ? `'${root}' names no workflow — ${where} has none yet`
+            : `'${root}' names no workflow here. ${where === "this project" ? "This project" : "The shared root"} has: ${[...known].sort().join(", ")}`,
       };
     }
 
     // The state files this description is answerable for: its subtree, minus every subtree a nearer
     // description owns. Without the subtraction, editing a state would report drift on this
     // document AND on the one that actually describes it, with no way to say which is now stale.
-    const scope = this.scopeOf(project, request.path);
-    const covered = new Set(this.ownedFiles(project, request.path));
-    const states = stateHashes(project.paths.workflowsDir, covered);
-    const record = readSyncRecord(project.paths.syncFile, request.path);
+    const scope = this.scopeOf(source, request.path);
+    const covered = new Set(this.ownedFiles(source, request.path));
+    const states = stateHashes(source.paths.workflowsDir, covered);
+    const record = readSyncRecord(source.paths.syncFile, request.path);
     const drift = syncDrift(record, { documentHash: hashText(text), states });
     // Delegation is not an error, so it is reported beside the status rather than as a block — but
     // it has to be reported. Otherwise you edit a delegated state, this panel says "in step", and
@@ -1715,7 +1749,7 @@ export class AppService {
           ? delegated.length > 0
             ? `every state here is described by ${delegated.map((d) => d.document).join(", ")}`
             : root === null
-              ? "this project has no workflows to sync against"
+              ? `${where} has no workflows to sync against`
               : `'${root}' resolves entirely from the shared root, so this project has no files to sync`
           : undefined;
     return {
@@ -1742,8 +1776,7 @@ export class AppService {
    * costs are rolled up, `fake` scripts it with no provider, and it can be canceled.
    */
   async runSync(request: WorkflowSyncRequest): Promise<WorkflowSyncResult> {
-    const project = this.p;
-    if (request.layer !== "project") throw new Error("only this project's description can be synced");
+    const source = this.syncSource(request.layer);
     if (this.syncRun !== undefined) throw new Error("a sync is already running");
 
     const file = this.layerFile(request.path, request.layer);
@@ -1753,8 +1786,8 @@ export class AppService {
     // Scoped to what this description OWNS: the root it names, minus every subtree a nearer
     // description covers. The delegated subtrees are still in the digest, as contracts — a parent
     // has to be able to say what it handed off — but not as states this run may rewrite.
-    const scope = this.scopeOf(project, request.path);
-    const digest = workflowDigest(project, scope.digestOptions);
+    const scope = this.scopeOf(source, request.path);
+    const digest = digestSource(source, scope.digestOptions);
     // The same refusal `jaira workflow check` makes, for the same reason: a sync over partial
     // evidence would rewrite the document to describe workflows it could not read, or propose state
     // files against a graph it only half loaded.
@@ -1765,17 +1798,43 @@ export class AppService {
       ].join("; ");
       throw new Error(`cannot sync while a workflow does not load: ${detail}`);
     }
-    if (digest.roots.length === 0) throw new Error("this project has no workflows to sync against");
+    if (digest.roots.length === 0) {
+      throw new Error(`${request.layer === "base" ? "the shared root" : "this project"} has no workflows to sync against`);
+    }
 
     const bundle = loadBundle(syncWorkflowFiles(), syncRootId(request.direction));
     const fakeRules = request.fake !== undefined ? parseFakeRules(request.fake) : undefined;
     // Every state here is a prompt state, so the registry stays empty: a sync has no tools, runs no
     // commands and delegates to no agent, and giving it a registry that could would be a capability
     // nothing in it asks for.
+    // A sync runs no commands and delegates to no agent, so the FUNCTION registry stays empty. What it
+    // does get is `read_file`, and only that: the digest is clipped for a long state (reported in
+    // `notes` below), and a run that can open the file it was told about proposes an edit against what
+    // is actually there rather than against a truncation. `write_file` and `bash` are deliberately
+    // absent — a sync proposes text for a human to accept and must not touch disk.
     const registry = newRegistry();
+    // The merged configuration, which with no project open is the shared root's own — a base-layer
+    // sync still has to obey the model defaults someone set in `~/.jaira/config.json`.
+    const config = this.effectiveConfig();
+    registry.tools.set(
+      READ_FILE,
+      createReadFileTool({
+        // No artifact store and no destination: nothing is being PLACED, so the read falls through to
+        // the workspace, which is scoped to the workflows directory this sync is answerable for.
+        vars: {
+          taskId: "sync",
+          worktree: source.paths.workflowsDir,
+          project: source.paths.projectDir,
+          jaira: source.paths.jairaDir,
+          artifactDir: config.artifacts.dir,
+        },
+        cwd: source.paths.workflowsDir,
+      }),
+    );
     const prompt = buildPromptExecutor({
       ...(fakeRules !== undefined ? { fakeRules } : {}),
-      defaults: modelDefaults(project.config, bundle, { fake: fakeRules !== undefined }),
+      ...this.promptWiring(config, { fake: fakeRules !== undefined }),
+      defaults: modelDefaults(config, bundle, { fake: fakeRules !== undefined, secrets: this.secretResolver() }),
     });
     const { modes: _modes, ...session } = sessionServicesFor(bundle, promptSummarizer(prompt));
 
@@ -1825,8 +1884,8 @@ export class AppService {
       // Nothing to accept means the two already agree — which is a sync that succeeded, so the
       // baseline moves. The alternative would leave a project that IS in step reporting drift
       // forever, with no button that could ever clear it.
-      if (changed) this.beginPendingSync("document", request.path, [docKey(request.layer, request.path)]);
-      else this.commitSyncRecord("document", request.path);
+      if (changed) this.beginPendingSync("document", request.path, request.layer, [docKey(request.layer, request.path)]);
+      else this.commitSyncRecord("document", request.path, request.layer);
       return {
         ...common,
         document: { text, changes: outcome.document?.changes ?? [] },
@@ -1834,17 +1893,18 @@ export class AppService {
       };
     }
 
-    const edits = this.placeEdits(outcome.edits ?? [], scope.ownership);
+    const edits = this.placeEdits(outcome.edits ?? [], scope.ownership, source.layer);
     const applicable = edits.filter((e) => e.applicable);
     const identical = (outcome.edits ?? []).length - edits.length;
     if (applicable.length > 0) {
       this.beginPendingSync(
         "states",
         request.path,
+        request.layer,
         applicable.map((e) => docKey(e.layer, e.path)),
       );
     } else if (edits.length === 0) {
-      this.commitSyncRecord("states", request.path);
+      this.commitSyncRecord("states", request.path, request.layer);
     }
     return {
       ...common,
@@ -1884,7 +1944,11 @@ export class AppService {
    *    a parent document silently rewrite what a more specific one is the authority on. Reported
    *    rather than dropped, because it usually means the OTHER description is what needs changing.
    */
-  private placeEdits(edits: readonly StateEdit[], ownership: DescriptionOwnership): WorkflowSyncEdit[] {
+  private placeEdits(
+    edits: readonly StateEdit[],
+    ownership: DescriptionOwnership,
+    layer: WorkflowLayer,
+  ): WorkflowSyncEdit[] {
     const out: WorkflowSyncEdit[] = [];
     const ownerOf = (stateId: string): DescriptionBoundary | undefined =>
       ownership.delegates.find((delegate) => isUnderState(stateId, delegate.root));
@@ -1893,7 +1957,7 @@ export class AppService {
       // it declined to write rather than only that something was refused.
       const blocked = (path: string, reason: string): WorkflowSyncEdit => ({
         stateId: edit.stateId,
-        layer: "project",
+        layer,
         path,
         action: edit.action,
         text: edit.text,
@@ -1903,7 +1967,7 @@ export class AppService {
         blocked: reason,
       });
       try {
-        this.workflowFile(edit.stateId, "project");
+        this.workflowFile(edit.stateId, layer);
       } catch (e) {
         out.push(blocked(`workflows/${edit.stateId}.json`, (e as Error).message));
         continue;
@@ -1912,24 +1976,24 @@ export class AppService {
       if (owner !== undefined) {
         out.push(
           blocked(
-            this.existingStateFile(edit.stateId) ?? `workflows/${edit.stateId}.json`,
+            this.existingStateFile(edit.stateId, layer) ?? `workflows/${edit.stateId}.json`,
             `\`${owner.document}\` describes this state — change that document instead`,
           ),
         );
         continue;
       }
-      const existing = this.existingStateFile(edit.stateId);
+      const existing = this.existingStateFile(edit.stateId, layer);
       if (existing !== undefined && /\.ya?ml$/i.test(existing)) {
         out.push(blocked(existing, "this state is authored as YAML, and the proposal is JSON"));
         continue;
       }
       const path = existing ?? `workflows/${edit.stateId}.json`;
-      const file = this.layerFile(path, "project");
+      const file = this.layerFile(path, layer);
       const exists = existsSync(file);
       if (exists && hashText(readFileSync(file, "utf8")) === hashText(edit.text)) continue;
       out.push({
         stateId: edit.stateId,
-        layer: "project",
+        layer,
         path,
         // What the model called it is a claim about the project, and the project is right here.
         action: exists ? "update" : "create",
@@ -1942,12 +2006,12 @@ export class AppService {
     return out;
   }
 
-  /** The layer-relative path of a state's file, when the project already has one. */
-  private existingStateFile(stateId: string): string | undefined {
+  /** The layer-relative path of a state's file, when the layer already has one. */
+  private existingStateFile(stateId: string, layer: WorkflowLayer): string | undefined {
     for (const suffix of [".json", ".jsonc", ".yaml", ".yml"]) {
       const path = `workflows/${stateId}${suffix}`;
       try {
-        if (existsSync(this.layerFile(path, "project"))) return path;
+        if (existsSync(this.layerFile(path, layer))) return path;
       } catch {
         return undefined; // outside the root — the caller has already refused it
       }
@@ -1962,8 +2026,13 @@ export class AppService {
    * that outlived the window would credit a save made a week later to a sync nobody remembers
    * running. Losing it costs nothing but a stale baseline, which the next sync corrects.
    */
-  private beginPendingSync(direction: SyncDirection, document: string, targets: string[]): void {
-    this.pendingSync = { direction, document, remaining: new Set(targets) };
+  private beginPendingSync(
+    direction: SyncDirection,
+    document: string,
+    layer: WorkflowLayer,
+    targets: string[],
+  ): void {
+    this.pendingSync = { direction, document, layer, remaining: new Set(targets) };
   }
 
   /**
@@ -1979,7 +2048,7 @@ export class AppService {
     if (!pending.remaining.delete(docKey(layer, path))) return;
     if (pending.remaining.size > 0) return;
     this.pendingSync = undefined;
-    this.commitSyncRecord(pending.direction, pending.document);
+    this.commitSyncRecord(pending.direction, pending.document, pending.layer);
   }
 
   /**
@@ -1989,23 +2058,26 @@ export class AppService {
    * the pair agreed at one instant, and half of it taken before the save would describe a state of
    * the project that never existed.
    */
-  private commitSyncRecord(direction: SyncDirection, document: string): void {
-    const project = this.project;
-    if (project === undefined) return;
+  private commitSyncRecord(direction: SyncDirection, document: string, layer: WorkflowLayer): void {
+    let source: LayerSource;
     let text = "";
     try {
-      const file = this.layerFile(document, "project");
+      source = this.syncSource(layer);
+      const file = this.layerFile(document, layer);
       if (existsSync(file)) text = readFileSync(file, "utf8");
     } catch {
+      // The project closed between the proposal and the save, or the document moved out from under
+      // it. A baseline is a convenience; losing one costs a stale status line, which the next sync
+      // corrects.
       return;
     }
     // The same scope the status reads back, or the baseline would be taken over files this
     // description was never answerable for and every unrelated edit would read as drift.
-    const covered = new Set(this.ownedFiles(project, document));
-    commitSync(project.paths.syncFile, {
+    const covered = new Set(this.ownedFiles(source, document));
+    commitSync(source.paths.syncFile, {
       document,
       documentHash: hashText(text),
-      states: stateHashes(project.paths.workflowsDir, covered),
+      states: stateHashes(source.paths.workflowsDir, covered),
       direction,
       at: Date.now(),
     });
@@ -2022,10 +2094,10 @@ export class AppService {
    * Empty when the root does not load — a half-written state file must not silently narrow the
    * baseline to the states that still parse, and the sync itself refuses over the same condition.
    */
-  private ownedFiles(project: Project, document: string): string[] {
+  private ownedFiles(source: LayerSource, document: string): string[] {
     try {
-      const scope = this.scopeOf(project, document);
-      return workflowDigest(project, scope.digestOptions).files;
+      const scope = this.scopeOf(source, document);
+      return digestSource(source, scope.digestOptions).files;
     } catch {
       return [];
     }
@@ -2040,17 +2112,17 @@ export class AppService {
    * show as a sync that reports drift it can never clear.
    */
   private scopeOf(
-    project: Project,
+    source: LayerSource,
     document: string,
   ): { root: string | null; ownership: DescriptionOwnership; digestOptions: WorkflowDigestOptions } {
-    const browser = browseWorkflows(project);
-    const descriptions = listDescriptions(project.paths.workflowsDir);
+    const browser = browseSource(source);
+    const descriptions = listDescriptions(source.paths.workflowsDir);
     const states = [...new Set(browser.workflows.flatMap((w) => w.states))];
     const ownership = ownershipOf(document, descriptions, states);
     const boundaries = ownership.delegates.map((delegate) => ({
       stateId: delegate.root,
       document: delegate.document,
-      ...this.descriptionText(project, delegate.document),
+      ...this.descriptionText(source, delegate.document),
     }));
     return {
       root: ownership.root,
@@ -2063,13 +2135,30 @@ export class AppService {
   }
 
   /** A description's prose, for the digest to hand a parent. Absent when it cannot be read. */
-  private descriptionText(project: Project, document: string): { text?: string } {
+  private descriptionText(source: LayerSource, document: string): { text?: string } {
     try {
-      const file = join(project.paths.jairaDir, ...document.split("/"));
+      const file = join(source.paths.jairaDir, ...document.split("/"));
       return existsSync(file) ? { text: readFileSync(file, "utf8") } : {};
     } catch {
       return {};
     }
+  }
+
+  /**
+   * Which root a description is judged against, and where its baseline lives.
+   *
+   * The layer decides, and nothing else does. A description in the shared root is checked against
+   * the SHARED root's workflows and recorded in `~/.jaira/sync.json` — the same answer whether a
+   * project is open, none is, or a different one is tomorrow. That is the whole reason this is a
+   * function of the layer: judging a machine-global document against whichever checkout happened to
+   * be open would give it an answer that changed per window, and writing that answer into that
+   * project's baseline would scatter one document's history across every project on the machine.
+   *
+   * Throws for a project-layer path with no project open, which is a caller that should have
+   * checked; {@link syncStatus} reports that case as a `blocked` line instead.
+   */
+  private syncSource(layer: WorkflowLayer): LayerSource {
+    return layer === "base" ? baseSource(this.baseDir) : projectSource(this.p);
   }
 
   // --- internals -------------------------------------------------------------
@@ -2207,6 +2296,33 @@ export class AppService {
       throw new Error(`'${stateId}' does not name a state inside the ${layer} workflows directory`);
     }
     return file;
+  }
+
+  /**
+   * How prompt states reach whatever answers them, from this project's configuration.
+   *
+   * One helper for all three run paths (a task, a CLI-less sync, an ad-hoc run) because they must
+   * agree: a workflow that runs from the board and refuses from the sync panel is a bug that looks
+   * like a configuration problem. It supplies three things `buildPromptExecutor` used to do without —
+   * the provider routes with their credentials RESOLVED (a key in the keychain never used to reach the
+   * SDK at all), the named presets a state can select with `configRef`, and the agent executors a
+   * model prefix can name.
+   *
+   * A scripted run gets none of it: the fake executor answers everything and building a real transport
+   * beside it would be spawning nothing useful.
+   */
+  private promptWiring(config: JairaConfigOf, opts: { fake?: boolean } = {}): {
+    router?: ReturnType<typeof modelRouterOptions>;
+    routes?: ReturnType<typeof agentPromptRoutes>;
+    configs?: { get(id: string): Record<string, JsonValue> | undefined };
+  } {
+    if (opts.fake) return {};
+    const presets = config.models.presets;
+    return {
+      router: modelRouterOptions(config.models, this.secretResolver()),
+      routes: agentPromptRoutes(config.agents, { execEnv: config.execEnvironment }),
+      ...(presets !== undefined ? { configs: { get: (id: string) => presets[id] } } : {}),
+    };
   }
 
   /** The merged configuration, or plain defaults when no project is open. */

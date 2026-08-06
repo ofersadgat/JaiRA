@@ -26,6 +26,7 @@ import { FileInspector, FilePanel, FileTreePanel, TaskInspector, VIEWER_HEIGHT }
 import "./fileSurfaces";
 import type { FileSurfaceContext } from "./fileTypes";
 import { ExecutorsPane, LayerPicker, SettingsPane } from "./panes";
+import { ModelsPane } from "./modelsPane";
 import { Splitter } from "./splitter";
 import { History, NewTask } from "./widgets";
 import { useApp, type SettingsSection, type View } from "./store";
@@ -45,6 +46,7 @@ const RAIL: Array<[View, string, string]> = [
 const SECTIONS: Array<{ id: SettingsSection; label: string; layered: boolean }> = [
   { id: "config", label: "Configuration", layered: true },
   { id: "executors", label: "Executors", layered: true },
+  { id: "models", label: "Models", layered: true },
   { id: "history", label: "History", layered: false },
 ];
 
@@ -431,11 +433,26 @@ export default function App(): JSX.Element {
                     probes={state.probes}
                     probing={state.probing}
                     secrets={state.secrets}
+                    config={state.config}
                     busy={state.busy}
                     layer={state.configLayer}
                     onProbe={actions.probeExecutors}
                     onToggle={actions.setExecutorEnabled}
-                    onSaveSecret={actions.saveSecret}
+                    onConfigure={actions.setExecutorConfig}
+                    onAdd={actions.addExecutor}
+                    onRemove={actions.removeExecutor}
+                    onSaveCredential={actions.saveCredential}
+                  />
+                ) : null}
+                {state.section === "models" ? (
+                  <ModelsPane
+                    config={state.config}
+                    probes={state.modelProbes}
+                    busy={state.busy}
+                    layer={state.configLayer}
+                    editable={state.configLayer === "base" || state.projectDir !== null}
+                    onSave={actions.saveModels}
+                    onProbe={actions.probeModelRoutes}
                   />
                 ) : null}
                 {state.section === "history" ? (

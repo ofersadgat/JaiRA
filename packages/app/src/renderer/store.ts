@@ -52,6 +52,14 @@ import {
   withoutDraftsUnder,
   type Drafts,
 } from "./drafts";
+import {
+  addGenericExecutor,
+  applyExecutorPatch,
+  removeGenericExecutor,
+  type ExecutorPatch,
+  type ExecutorTarget,
+} from "./executorConfig";
+import { applyModelPatch, type ModelPatch } from "./modelsConfig";
 
 /** A prune plan or result, as `history:prune` returns it. */
 export type PruneReport = Response<"history:prune">;
@@ -106,6 +114,14 @@ export interface AppState {
   executors: ExecutorInfo[];
   /** The most recent health check, keyed by executor name. */
   probes: Record<string, ProbeResult>;
+  /**
+   * What the PROVIDER routes reported, keyed by route prefix.
+   *
+   * A separate map from `probes` rather than one keyed namespace: an executor and a route are
+   * different things that happen to be checkable, and a shared map would collide the moment someone
+   * configures a generic CLI called `local`.
+   */
+  modelProbes: Record<string, ProbeResult>;
   /** Executors currently being checked, so each row can show its own spinner. */
   probing: string[];
   /** What the secret store can do here — decides which "save key to…" options are offered. */
@@ -224,7 +240,7 @@ export type View = "files" | "tasks" | "settings";
  * `config` and `executors` are read at the layer {@link AppState.configLayer} names; `history` is a
  * project's run journal and has no layer to pick.
  */
-export type SettingsSection = "config" | "executors" | "history";
+export type SettingsSection = "config" | "executors" | "models" | "history";
 
 const EMPTY: AppState = {
   projectDir: null,
@@ -246,6 +262,7 @@ const EMPTY: AppState = {
   config: null,
   executors: [],
   probes: {},
+  modelProbes: {},
   probing: [],
   secrets: { keychain: false },
   schemaChoice: {},
@@ -265,19 +282,6 @@ const EMPTY: AppState = {
 
 /** Keep the live log bounded — a long run would otherwise grow without limit. */
 const STREAM_LIMIT = 300;
-
-/**
- * Where each built-in executor's settings live inside `config.agents`.
- *
- * The registry name a workflow uses (`claude-code`) and the config key (`claudeCode`) are not the
- * same string, and they should not be: one is a stable identifier a state file depends on, the
- * other is a JSON field name. This map is the one place that knows both.
- */
-const EXECUTOR_CONFIG_KEYS: Record<string, string> = {
-  "claude-code": "claudeCode",
-  "claude-cli": "claudeCli",
-  "codex-cli": "codex",
-};
 
 export function useApp() {
   const [state, setState] = useState<AppState>(EMPTY);
@@ -799,7 +803,13 @@ export function useApp() {
         if (view === "settings") void refreshConfig();
         if (view === "files") void refreshTree();
       },
-      setSection: (section: SettingsSection) => patch({ section }),
+      setSection: (section: SettingsSection) => {
+        patch({ section });
+        // Checking a route costs nothing — no request, no process — so the answer is there when the
+        // section opens rather than behind a button nobody knows to press. That matters most for the
+        // one case this screen exists for: arriving after a run refused for want of a model.
+        if (section === "models") void actions.probeModelRoutes();
+      },
       setConfigLayer: (configLayer: ConfigLayer) => patch({ configLayer }),
 
       /**
@@ -951,6 +961,33 @@ export function useApp() {
         }
       },
 
+      /**
+       * Write `config.models` into a named layer — the default id, the routes, the presets.
+       *
+       * The same layering rule the executor form follows, for the same reason: patched into that
+       * layer's own document, never the merged one, so saving in a project cannot silently copy the
+       * shared root's settings out of it.
+       */
+      saveModels: async (fields: ModelPatch, layer: ConfigLayer) => {
+        const current = ref.current.config;
+        if (!current) return;
+        const doc = applyModelPatch(layer === "base" ? current.base : current.project, fields);
+        await actions.saveConfig(layer, doc);
+        await actions.probeModelRoutes();
+      },
+
+      /** Health-check the provider routes. Never makes a request — see `model:probe`. */
+      probeModelRoutes: async () => {
+        try {
+          const results = await invoke("model:probe", undefined);
+          const modelProbes: Record<string, ProbeResult> = {};
+          for (const result of results) modelProbes[result.name] = result;
+          patch({ modelProbes });
+        } catch (e) {
+          fail(e);
+        }
+      },
+
       // --- executors --------------------------------------------------------
 
       /** Health-check one executor, or all of them when `name` is omitted. */
@@ -969,39 +1006,81 @@ export function useApp() {
       },
 
       /**
-       * Turn an executor on or off in a named layer.
+       * Write one executor's settings into a named layer.
        *
-       * Written into that layer's raw document rather than the merged one, or saving would copy
-       * every inherited base value into the project and freeze it there.
+       * Patched into that layer's raw document rather than the merged one, or saving would copy
+       * every inherited base value into the project and freeze it there. A field patched to
+       * `undefined` is removed, which is how a project stops overriding the shared root.
        */
-      setExecutorEnabled: async (name: string, enabled: boolean, layer: "base" | "project") => {
+      setExecutorConfig: async (executor: ExecutorTarget, fields: ExecutorPatch, layer: ConfigLayer) => {
         const current = ref.current.config;
         if (!current) return;
-        const doc = structuredClone((layer === "base" ? current.base : current.project) ?? {}) as Record<string, unknown>;
-        const agents = (doc["agents"] ??= {}) as Record<string, unknown>;
-        const key = EXECUTOR_CONFIG_KEYS[name];
-        if (key !== undefined) {
-          const spec = (agents[key] ??= {}) as Record<string, unknown>;
-          spec["enabled"] = enabled;
-        } else {
-          // A configured generic CLI, addressed by its registry name inside the list.
-          const list = Array.isArray(agents["genericCli"]) ? [...(agents["genericCli"] as unknown[])] : [];
-          const index = list.findIndex((e) => (e as { name?: string })?.name === name || (name === "generic-cli" && (e as { name?: string })?.name === undefined));
-          if (index < 0) return;
-          list[index] = { ...(list[index] as object), enabled };
-          agents["genericCli"] = list;
-        }
+        const doc = applyExecutorPatch(layer === "base" ? current.base : current.project, executor, fields);
         await actionsRef.current.saveConfig(layer, doc);
-        await actionsRef.current.probeExecutors(name);
+        // The write may have changed the binary or the credential, so what was known about this
+        // executor's health no longer describes the executor that is now configured.
+        await actionsRef.current.probeExecutors(executor.name);
       },
 
-      /** Store a credential. The value goes straight to main and is never held in renderer state. */
-      saveSecret: async (name: string, value: string, target: SecretTarget) => {
+      /** Turn an executor on or off — the one field every executor shares. */
+      setExecutorEnabled: async (name: string, enabled: boolean, layer: ConfigLayer) => {
+        const executor = ref.current.executors.find((e) => e.name === name);
+        if (executor === undefined) return;
+        await actionsRef.current.setExecutorConfig(executor, { enabled }, layer);
+      },
+
+      /** Declare a new non-Claude CLI executor in a layer (DESIGN §8.1's `generic-cli`). */
+      addExecutor: async (spec: { name: string; command: string }, layer: ConfigLayer) => {
+        const current = ref.current.config;
+        if (!current) return;
+        try {
+          const doc = addGenericExecutor(layer === "base" ? current.base : current.project, spec);
+          await actionsRef.current.saveConfig(layer, doc);
+          await actionsRef.current.probeExecutors();
+        } catch (e) {
+          fail(e);
+        }
+      },
+
+      /** Delete a configured CLI executor from a layer. Built-ins are turned off, never removed. */
+      removeExecutor: async (name: string, layer: ConfigLayer) => {
+        const current = ref.current.config;
+        if (!current) return;
+        const doc = removeGenericExecutor(layer === "base" ? current.base : current.project, name);
+        await actionsRef.current.saveConfig(layer, doc);
+        await actionsRef.current.probeExecutors();
+      },
+
+      /**
+       * Store an executor's credential: the NAME into config, the VALUE into the secret store.
+       *
+       * One action rather than two calls from the pane, because the two halves are one intention and
+       * doing them separately gets the order wrong in a way that shows: naming a secret the config
+       * did not mention re-probes, and a probe between the two steps reports the key as missing when
+       * it is merely a moment from being written.
+       *
+       * The value goes straight to main and is never held in renderer state; an empty one CLEARS the
+       * secret, which is how a key is revoked.
+       */
+      saveCredential: async (request: {
+        executor: ExecutorTarget & { credential?: string | undefined };
+        name: string;
+        value: string;
+        target: SecretTarget;
+        layer: ConfigLayer;
+      }) => {
+        const { executor, name, value, target, layer } = request;
         patch({ busy: true, error: null });
         try {
           await invoke("secret:set", { name, value, target });
           patch({ busy: false });
-          await actionsRef.current.probeExecutors();
+          if (name !== executor.credential) {
+            // A stored key nothing points at would never be looked up, so naming it in the layer
+            // being edited is part of saving it — not a second thing to remember.
+            await actionsRef.current.setExecutorConfig(executor, { credential: name }, layer);
+          } else {
+            await actionsRef.current.probeExecutors(executor.name);
+          }
         } catch (e) {
           fail(e);
         }

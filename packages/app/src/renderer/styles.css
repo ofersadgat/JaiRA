@@ -2285,6 +2285,11 @@ button.layer-on {
 .code-editor.tall {
   min-height: 340px;
 }
+/* A few lines of argv or environment, not a document — the full height would make a settings form
+   scroll past the button that saves it. */
+.code-editor.short {
+  min-height: 66px;
+}
 
 /* --- executors --- */
 .executors {
@@ -2330,6 +2335,27 @@ button.layer-on {
 }
 .chip-dim {
   color: var(--dim);
+}
+/* The settings form, folded out of a row. Inset and ruled off so it reads as belonging to the
+   executor above it rather than as the next one's first fields. */
+.exec-form {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 4px 0 2px;
+  padding: 8px 0 2px;
+  border-top: 1px solid var(--line);
+}
+.exec-add {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 9px;
+}
+.exec-add h4 {
+  margin: 0;
 }
 .credential {
   display: flex;

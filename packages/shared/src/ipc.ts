@@ -581,6 +581,16 @@ export interface IpcContract {
   "workflow:sync": { request: WorkflowSyncRequest; response: WorkflowSyncResult };
   /** Abort a sync in flight. A model call is long enough that a UI without this is a UI that hangs. */
   "workflow:syncCancel": { request: void; response: { canceled: boolean } };
+  /**
+   * Health-check the configured provider routes WITHOUT calling one.
+   *
+   * A route has no `--version` to run and no free endpoint to poke, so this reports exactly what can
+   * be observed for nothing: whether the named credential resolves and where from, whether a local
+   * server has an endpoint configured, whether embedded weights are named. `not-checked` where nothing
+   * could be observed — reporting an unverifiable route as healthy is the failure this surface exists
+   * to prevent, and pressing Test must never spend money.
+   */
+  "model:probe": { request: void; response: ProbeResult[] };
   /** Check a document against a registered schema — see {@link ValidateSchemaRequest}. */
   "schema:validate": { request: ValidateSchemaRequest; response: ValidateSchemaResult };
   /** Which registered schema a document already satisfies — see {@link DetectSchemaResult}. */
@@ -670,6 +680,7 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "config:write",
   "executor:list",
   "executor:probe",
+  "model:probe",
   "secret:capabilities",
   "secret:set",
 ];

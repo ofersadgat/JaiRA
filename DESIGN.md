@@ -349,9 +349,13 @@ screenshot, plus 83 tests. What that phase settled:
    `runCauses` pulls the operation-level reasons out of the journal, and
    `jaira task start` prints them as `causes`. This is what turned a real-provider
    run's opaque failure into "Anthropic API key is missing".
-7. **A model is only required when a workflow actually calls one.** `modelDefaults`
-   used to refuse any run without a configured model, which wrongly rejected a
-   workflow made entirely of function states (host code, UI gates, agents).
+7. **A model is only required when a workflow actually calls one** — and even then
+   it is CHOSEN rather than demanded (§8.3). `modelDefaults` used to refuse any run
+   without a configured model, which wrongly rejected a workflow made entirely of
+   function states (host code, UI gates, agents); it then went on wrongly rejecting
+   a prompt workflow on a machine with a working `claude` and no API key, which is
+   the setup an agent exists for. It now picks a usable provider route, else an
+   enabled agent, and refuses only when neither exists.
 8. **Real-provider status — verified 2026-07-28** (see §1h). The path is
    `models.default` (or a state's `operation.config.model`) →
    `@declarative-ai/promptop` → `@declarative-ai/llm` → the Anthropic SDK. Note a
@@ -1523,6 +1527,26 @@ a distinct outcome from `ok`, because calling an unverified executor healthy is
 the failure the check exists to prevent. Only the credential's **origin** ever
 leaves the main process; the value does not cross IPC.
 
+#### Configuring one from the app
+
+Settings → Executors edits all of this, in the layer the view's switch names: the
+binary, codex's sandbox, a `generic-cli` entry's argv and environment, the
+credential's **name**, and whether the executor is on at all. New CLI executors
+are declared there too, and removed there — a built-in is only ever turned off,
+because it is not declared anywhere to begin with.
+
+Two rules make the form safe to use against a layered configuration. It patches
+the **layer's own document**, never the merged one: saving the effective config
+into a project would copy every inherited value out of the shared root and freeze
+it there. And an **emptied field removes the key** rather than pinning the value
+that was showing, which is how a project goes back to inheriting.
+
+Storing a key does both halves of the job at once — the value goes to the secret
+target chosen (keychain, project `.env.local`, base `.env.local`), and the *name*
+is written into the layer being edited, because a stored secret that no config
+names is one nothing will ever look up. The value still never crosses back: the
+pane learns only the origin, from the probe.
+
 ### 8.2 Capability Gating
 
 A state may declare requirements (e.g. its policy includes approval-required
@@ -1532,6 +1556,66 @@ adapter's capabilities; violations block the task with a clear error rather
 than degrading silently. Provider selection itself follows the spec: the state
 names a provider; project config maps provider names to adapter configurations
 (model, API keys, CLI path, per-provider defaults).
+
+### 8.3 Who answers a prompt state
+
+A model id names its serving route as a prefix — `anthropic/claude-sonnet-5` — and since the
+declarative-ai executor split that prefix can name an **executor** rather than a provider:
+`claude-cli/sonnet` sends the call to the CLI agent, which runs on its own subscription and needs no
+API key. One namespace covers both, because what a prefix answers is a single question — *who runs
+this?* — and splitting it across two vocabularies would mean a settings screen that has to explain the
+difference before anyone can configure anything.
+
+That is the whole of the mechanism. `PromptRouterExecutor` reads the prefix and hands the op to the
+matching executor with the id untouched; every prefix it does not recognise falls through to the
+provider path, which owns them and produces the authoritative error for a typo. Selecting an agent is
+therefore not a mode — it is a model id, so an automatic choice and an explicit one are the same kind
+of thing and equally visible in a record.
+
+**`config.models` is prefix-keyed to match:**
+
+```jsonc
+"models": {
+  "default": "claude-cli/sonnet",          // absent ⇒ chosen; see below
+  "routes": {                              // HOW each prefix is reached
+    "anthropic":  { "credential": "ANTHROPIC_API_KEY" },
+    "openrouter": { "credential": "OPENROUTER_API_KEY" },
+    "local":      { "baseURL": "http://localhost:11434/v1", "serve": { "command": "ollama", "args": ["serve"] } },
+    "embedded":   { "weights": { "qwen2.5-7b": { "modelPath": "/models/qwen.gguf" } } }
+  },
+  "presets": { "fast": { "model": "anthropic/claude-haiku-4-5", "temperature": 0 } }
+}
+```
+
+`credential` NAMES a secret and never holds one, resolved through the same chain an executor's is (OS
+keychain → `.env.local`/`.env` beside the project → the same two in the base root → the process
+environment). That chain is the point: before this existed `createModelRouter()` was called with no
+options at all, so the provider SDKs read `process.env` and a key kept anywhere else never reached
+them. `presets` feed declarative-ai's named-config registry, which a state selects with
+`operation.configRef` — a mechanism that predates this block and only lacked somewhere to write the
+presets down.
+
+Four rules worth stating, each of which was a wrong answer at some point:
+
+1. **A missing model is a CHOICE, not a refusal.** `modelDefaults` used to reject any prompt-bearing
+   workflow whose config named no `models.default`. It was right that a prompt op needs something to
+   dispatch on and wrong that the something must be a provider — an installed agent needs no key, no
+   endpoint and no configuration, so the one setup that obviously worked was being turned away. It now
+   picks: a usable provider route first (someone who set up a key meant to use it), then an enabled
+   agent. It refuses only when nothing at all can answer, and names both fixes.
+2. **"Usable" is checked cheaply, never by calling.** A resolvable credential, a configured endpoint,
+   named weights. This runs on every start, so a probe that spawned a process would make launching a
+   workflow pay for a health check nobody asked for. The Test button in Settings → Models is the same
+   check, and it too never spends money.
+3. **The route prefix is stripped before the transport sees it.** `claude-cli/sonnet` reaches `claude`
+   as `sonnet`, which is a model it knows. A transport that cannot honour a specific model must
+   REFUSE rather than drop it — running a different model than the one asked for is silent, wrong, and
+   an order of magnitude off in price. JaiRA's generic CLI does exactly that unless its argv template
+   carries a `{model}` placeholder.
+4. **The placeholder id means "your own default".** An agent asked for no particular model is given
+   `agent/default`, which is inert: it satisfies the lowering (which requires a model to route a
+   *provider* call) and is never forwarded, because a binary asked for a model literally named
+   `default` would refuse — and that is precisely the zero-configuration case that has to work.
 
 ## 9. Git Integration, Worktrees, and WSL
 

@@ -68,6 +68,21 @@ export interface ProbeResult {
   credentialMissing?: string;
 }
 
+/**
+ * The variable each built-in executor's key is conventionally kept under.
+ *
+ * A SUGGESTION for the settings UI and nothing more: no lookup falls back to these, because a
+ * credential that is found under a name the config never mentions is a credential nobody can trace.
+ * What they are for is the first-run case — someone has an Anthropic key and no idea what JaiRA
+ * wants it called — where offering the conventional name is the difference between a filled-in
+ * field and a search through the documentation.
+ */
+export const SUGGESTED_CREDENTIALS: Record<string, string> = {
+  "claude-code": "ANTHROPIC_API_KEY",
+  "claude-cli": "ANTHROPIC_API_KEY",
+  "codex-cli": "OPENAI_API_KEY",
+};
+
 /** Human wording for a source, for a UI that has only the origin to show. */
 export const SECRET_SOURCE_LABELS: Record<SecretSource, string> = {
   keychain: "OS keychain",

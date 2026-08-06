@@ -31,8 +31,8 @@ import {
   type WorkflowBundle,
   type WorkflowMetrics,
 } from "@declarative-ai/hw";
-import { createPromptExecutor } from "@declarative-ai/promptop";
-import { createModelRouter } from "@declarative-ai/llm";
+import { createPromptExecutor, PromptRouterExecutor } from "@declarative-ai/promptop";
+import { createModelRouter, type ModelRouterOptions } from "@declarative-ai/llm";
 import { SchemaValidator } from "@declarative-ai/validate";
 import {
   createOperationExecutor,
@@ -46,6 +46,8 @@ import {
 import type { Approver, ExecPolicy } from "@declarative-ai/permissions";
 import type { JairaConfig } from "@jaira/shared";
 import { ScriptedFakeExecutor, type FakeRule } from "./fakeExecutor";
+import { defaultModelId } from "./modelRoutes";
+import type { SecretResolver } from "./secrets";
 
 export type WorkflowExecResult = ExecResult<ResolvedValue, WorkflowMetrics>;
 
@@ -86,8 +88,19 @@ export const DEFAULT_REPAIR_TURNS = 2;
 export interface PromptExecutorOptions {
   /** Scripted rules ⇒ a fake prompt executor instead of a real provider. */
   fakeRules?: FakeRule[];
-  /** Model defaults from project config (`config.models.default`). */
+  /** Model defaults from project config — the `ConfigLayer` a state's own config merges over. */
   defaults?: Record<string, JsonValue>;
+  /** Named presets (`config.models.presets`), selected per state by `operation.configRef`. */
+  configs?: { get(id: string): Record<string, JsonValue> | undefined };
+  /** How each provider route is reached (`config.models.routes`), credentials already resolved. */
+  router?: ModelRouterOptions;
+  /**
+   * Prompt executors reachable by model PREFIX — the configured agents.
+   *
+   * This is what lets a prompt state run on a `claude` subscription with no API key: the prefix
+   * `claude-cli` selects the CLI agent exactly as `anthropic` selects the provider.
+   */
+  routes?: Record<string, Executor<ExecServices, WorkflowMetrics>>;
   repairTurns?: number;
   /**
    * Durable memoization of model answers (`config.memo.enabled`).
@@ -109,13 +122,7 @@ export interface PromptExecutorOptions {
 export function buildPromptExecutor(options: PromptExecutorOptions = {}): Executor<ExecServices, WorkflowMetrics> {
   const base = options.fakeRules
     ? (new ScriptedFakeExecutor(options.fakeRules) as Executor<ExecServices, WorkflowMetrics>)
-    : repairing(
-        createPromptExecutor({
-          router: createModelRouter(),
-          ...(options.defaults !== undefined ? { defaults: options.defaults } : {}),
-        }) as unknown as Executor<ExecServices, WorkflowMetrics>,
-        options.repairTurns ?? DEFAULT_REPAIR_TURNS,
-      );
+    : repairing(promptRouter(options) as unknown as Executor<ExecServices, WorkflowMetrics>, options.repairTurns ?? DEFAULT_REPAIR_TURNS);
   if (options.memo === undefined) return base;
   // OUTSIDE the repair loop, so the key is the op as ASKED — one entry per logical request, and a
   // later identical request skips the whole loop rather than replaying it. Inside would key each
@@ -128,6 +135,32 @@ export function buildPromptExecutor(options: PromptExecutorOptions = {}): Execut
     { cache: options.memo.cache, namespace: options.memo.namespace },
     base as unknown as Executor,
   ) as unknown as Executor<ExecServices, WorkflowMetrics>;
+}
+
+/**
+ * The prompt leaf: a provider executor, plus every configured agent, chosen by the model's prefix.
+ *
+ * Composed as ONE object rather than branched on at each call site, because the choice is per-STATE:
+ * one workflow can have a state on `anthropic/claude-sonnet-5` beside one on `claude-cli/sonnet`, and
+ * the run should not have to be told which kind it is. `PromptRouterExecutor` reads the prefix and
+ * hands the op to the matching executor with the id untouched.
+ *
+ * The provider executor is the FALLBACK rather than a route entry, deliberately: it owns every prefix
+ * `MODEL_ROUTES` knows and produces the authoritative error for one it does not. Listing those prefixes
+ * here would be a second copy of a list that lives upstream, and copies drift.
+ */
+function promptRouter(options: PromptExecutorOptions): Executor<ExecServices, WorkflowMetrics> {
+  const provider = createPromptExecutor({
+    router: createModelRouter(options.router ?? {}),
+    ...(options.defaults !== undefined ? { defaults: options.defaults } : {}),
+    ...(options.configs !== undefined ? { configs: options.configs } : {}),
+  }) as unknown as Executor<ExecServices, WorkflowMetrics>;
+  const routes = options.routes ?? {};
+  if (Object.keys(routes).length === 0) return provider;
+  return new PromptRouterExecutor({
+    routes: routes as never,
+    fallback: provider as never,
+  }) as unknown as Executor<ExecServices, WorkflowMetrics>;
 }
 
 /** Bounded output repair (DESIGN §7.5) — off when `turns` is 0. */
@@ -298,20 +331,38 @@ export function statusOfResult(result: WorkflowExecResult): "completed" | "faile
   return result.error.classification === "canceled" ? "canceled" : "failed";
 }
 
-/** Provider/model defaults for real (non-fake) runs, from project config. */
-export function modelDefaults(config: JairaConfig, bundle: WorkflowBundle, opts?: { fake?: boolean }): Record<string, JsonValue> {
+/**
+ * Provider/model defaults for real (non-fake) runs, from project config.
+ *
+ * This used to REFUSE any prompt-bearing workflow whose config named no `models.default`, which was
+ * right about the mechanism and wrong about the world: a prompt op does need something to dispatch on,
+ * but "something" no longer has to be a provider. An installed `claude` needs no key, no endpoint and
+ * no configuration, so a machine that can obviously run the workflow was being told it could not.
+ *
+ * {@link defaultModelId} therefore CHOOSES rather than demanding: a configured provider route first
+ * (someone who set up a key meant to use it), then an enabled agent. The refusal survives for the one
+ * case that really is unrunnable — no route, no agent, and no state naming a model — and now names
+ * both fixes instead of only the one.
+ */
+export function modelDefaults(
+  config: JairaConfig,
+  bundle: WorkflowBundle,
+  opts?: { fake?: boolean; secrets?: SecretResolver },
+): Record<string, JsonValue> {
   if (opts?.fake) return {};
   // A workflow made only of function states (host code, UI gates, agents) never
   // calls a model, so demanding one would refuse a perfectly runnable workflow.
   if (!hasPromptOp(bundle)) return {};
-  const models = modelNamesOf(bundle);
-  // A prompt state naming no model relies on the configured default; with neither,
-  // the provider router has nothing to route and the run would fail deep in the
-  // engine — so refuse up front with a message naming the fix.
-  if (models.length === 0 && config.models.default === undefined) {
-    throw new Error(
-      "no model configured: set models.default in .jaira/config.json, or give the state an operation.config.model",
-    );
-  }
-  return config.models.default !== undefined ? { model: config.models.default } : {};
+  const chosen = defaultModelId(config.models, {
+    agents: config.agents,
+    ...(opts?.secrets !== undefined ? { secrets: opts.secrets } : {}),
+  });
+  if (chosen !== undefined) return { model: chosen };
+  // Every state naming its own model is a complete answer on its own — there is simply no default to
+  // supply. Only a bundle with neither is unrunnable.
+  if (modelNamesOf(bundle).length > 0) return {};
+  throw new Error(
+    "nothing can answer a prompt here: enable an agent executor (claude-cli needs no API key), " +
+      "add a provider key under models.routes, or set models.default — in Settings, or in .jaira/config.json",
+  );
 }

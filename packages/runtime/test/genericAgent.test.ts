@@ -179,3 +179,38 @@ describe("registerGenericAgents", () => {
     ).toEqual([]);
   });
 });
+
+describe("a model a generic CLI has nowhere to put", () => {
+  const fakeExec = (seen: { args?: string[] }) => ({
+    run: async (_cmd: string, args: string[]) => {
+      seen.args = args;
+      return { code: 0, stdout: "done", stderr: "", timedOut: false };
+    },
+  });
+
+  it("REFUSES rather than running the binary's default under another name", async () => {
+    // Silently dropping it would run a different model than the one asked for, which is wrong and
+    // expensive — the same rule the deny-list follows.
+    const query = createGenericCliQuery({ name: "mycli", command: "mycli" }, { exec: fakeExec({}) as never });
+    const messages = [];
+    for await (const m of query({ prompt: "go", model: "big" })) messages.push(m);
+    expect(messages[0]?.error).toMatch(/no \{model\} placeholder/);
+  });
+
+  it("substitutes it into the argv template when there IS a placeholder", async () => {
+    const seen: { args?: string[] } = {};
+    const query = createGenericCliQuery(
+      { name: "mycli", command: "mycli", args: ["-m", "{model}", "--json"] },
+      { exec: fakeExec(seen) as never },
+    );
+    for await (const _ of query({ prompt: "go", model: "big" })) void _;
+    expect(seen.args).toEqual(["-m", "big", "--json", "--", "go"]);
+  });
+
+  it("runs normally when no model was asked for, placeholder or not", async () => {
+    const seen: { args?: string[] } = {};
+    const query = createGenericCliQuery({ name: "mycli", command: "mycli" }, { exec: fakeExec(seen) as never });
+    for await (const _ of query({ prompt: "go" })) void _;
+    expect(seen.args).toEqual(["--", "go"]);
+  });
+});

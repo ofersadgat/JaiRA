@@ -271,7 +271,15 @@ export interface SyncWorkflowOptions {
  */
 export function syncWorkflowFiles(options: SyncWorkflowOptions = {}): Record<string, unknown> {
   const model = options.model;
-  const environment = { kind: "prompt", ...(model !== undefined ? { model } : {}) };
+  // `read_file`, inherited by every state below. The digest teaches by example and is the primary
+  // evidence, but it CLIPS a long state (the run reports which ones), and a proposal written against a
+  // truncation is a proposal against something that does not exist. One read-only tool closes that,
+  // and closes nothing else: there is deliberately no `write_file` and no `bash`, because a sync
+  // returns text for a human to accept and must not touch disk.
+  //
+  // A tool set also turns the prompt states into a bounded tool LOOP, which is what makes the same
+  // wiring work whether a provider model or a delegated agent is answering.
+  const environment = { kind: "prompt", tools: ["read_file"], ...(model !== undefined ? { model } : {}) };
   const check = conformanceWorkflowFiles(model !== undefined ? { model } : {});
 
   // The two leaves the check already defines, mounted by explicit id. Their inputs are wired the

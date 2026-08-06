@@ -7,6 +7,9 @@
  * exactly the same way and neither owns the wiring.
  */
 export * from "./wiring";
+// Who answers a prompt state, from config: provider routes with credentials resolved, the agent
+// executors a model prefix can name, and the default id chosen when nothing names one.
+export * from "./modelRoutes";
 export * from "./fakeExecutor";
 export * from "./scriptedFunctions";
 export * from "./interaction";

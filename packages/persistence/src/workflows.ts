@@ -108,25 +108,72 @@ export interface BrowseOptions {
 }
 
 /**
- * Browse and lint the project's live `workflows/` directory.
+ * Where a browse, a digest or a sync reads its workflows from.
+ *
+ * Named because there are two answers and they are not the same shape. With a project open the
+ * search is two layers deep and writes land in the project's `.jaira/`; with none open the shared
+ * root is the only layer there is and writes land in IT. Everything downstream — the browser, the
+ * digest, the sync baseline — needs the same four facts, and a second code path that re-derived
+ * them is how the projectless mode would end up disagreeing with the project one about which file
+ * a state came from.
+ */
+export interface LayerSource {
+  /** The layer roots, in search order — first match wins, exactly as reference resolution does. */
+  layers: ReadonlyArray<{ dir: string; layer: "project" | "base" }>;
+  /**
+   * The layer this source AUTHORS in: the one a sync may propose files against, and the one a
+   * baseline hashes. Always the first layer — the others are inherited and read-only from here.
+   */
+  layer: "project" | "base";
+  paths: JairaPaths;
+  searchPath?: readonly string[] | undefined;
+  tasks: TaskIndex;
+}
+
+/** The two layers a project searches, and the project layer as the one it writes. */
+export function projectSource(project: Project): LayerSource {
+  // The base root is browsed too, or the states a project inherits would be invisible in exactly
+  // the surface meant to show what it can run — and a lint error in a shared workflow would only
+  // ever surface as a load failure in whichever project first used it.
+  return {
+    layers: [
+      { dir: project.paths.workflowsDir, layer: "project" },
+      { dir: project.paths.base.workflowsDir, layer: "base" },
+    ],
+    layer: "project",
+    paths: project.paths,
+    searchPath: project.config.workflows.path,
+    tasks: tasksOf(project),
+  };
+}
+
+/**
+ * The shared root as the ONE layer, for when no project is open.
+ *
+ * `$`, `$JAIRA` and `$BASE` all name it, which is the truth when it is the only root there is.
+ * `$PROJECT` resolves to the base's parent and means nothing; there is no project for it to mean.
+ *
+ * No tasks, and that is not a gap: a task belongs to a project, so with none open there is nothing
+ * to be running or drifted.
+ */
+export function baseSource(baseDir: string): LayerSource {
+  const paths = basePathsAsLayer(baseDir);
+  return { layers: [{ dir: paths.workflowsDir, layer: "base" }], layer: "base", paths, tasks: EMPTY_TASKS };
+}
+
+/**
+ * Browse and lint the live `workflows/` directories a source names.
  *
  * Pure read — nothing is snapshotted or written, so a UI can call this on every
  * file-watch event.
  */
+export function browseSource(source: LayerSource, options: BrowseOptions = {}): WorkflowBrowser {
+  return browseLayers(source.paths, source.layers, source.searchPath, source.tasks, options);
+}
+
+/** Browse and lint the project's live `workflows/` directory. */
 export function browseWorkflows(project: Project, options: BrowseOptions = {}): WorkflowBrowser {
-  // Every LAYER, in search order. The base root is browsed too, or the states a project inherits
-  // would be invisible in exactly the surface meant to show what it can run — and a lint error in a
-  // shared workflow would only ever surface as a load failure in whichever project first used it.
-  return browseLayers(
-    project.paths,
-    [
-      { dir: project.paths.workflowsDir, layer: "project" },
-      { dir: project.paths.base.workflowsDir, layer: "base" },
-    ],
-    project.config.workflows.path,
-    tasksOf(project),
-    options,
-  );
+  return browseSource(projectSource(project), options);
 }
 
 /**
@@ -137,17 +184,9 @@ export function browseWorkflows(project: Project, options: BrowseOptions = {}): 
  * was the only one in JaiRA that showed state files and never linted them, so a shared workflow was
  * unvalidated in exactly the mode people write shared workflows in: nothing was red because nothing
  * had looked.
- *
- * The paths are synthesized so that the base root is the ONE layer — `$`, `$JAIRA` and `$BASE` all
- * name it, which is the truth when it is the only root there is. `$PROJECT` resolves to the base's
- * parent and means nothing; there is no project for it to mean.
- *
- * No tasks, and that is not a gap: a task belongs to a project, so with none open there is nothing
- * to be running or drifted.
  */
 export function browseBaseWorkflows(baseDir: string, options: BrowseOptions = {}): WorkflowBrowser {
-  const paths = basePathsAsLayer(baseDir);
-  return browseLayers(paths, [{ dir: paths.workflowsDir, layer: "base" }], undefined, EMPTY_TASKS, options);
+  return browseSource(baseSource(baseDir), options);
 }
 
 /**
@@ -181,8 +220,8 @@ function basePathsAsLayer(baseDir: string): JairaPaths {
   };
 }
 
-/** What a task lookup answers. Empty with no project — see {@link browseBaseWorkflows}. */
-interface TaskIndex {
+/** What a task lookup answers. Empty with no project — see {@link baseSource}. */
+export interface TaskIndex {
   byWorkflow: Map<string, string[]>;
   pins: Map<string, Array<{ taskId: string; snapshotHash: string }>>;
 }

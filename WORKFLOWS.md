@@ -693,6 +693,21 @@ the same rule.
   caught too.
 - **`permissions`** — the definition-authored baseline, beneath the project
   policy.
+- **`configRef`** — the name of a preset in `config.models.presets`, merged
+  UNDER this operation's own fields and OVER the project defaults. It is for the
+  settings a model call has and a state should not have to repeat —
+  `{"configRef": "fast"}` beside a prompt says "the cheap one", once, in a place
+  a reader can look up. Not an operation field JaiRA owns: anything the engine
+  does not claim is passed through to the call configuration, which is how this
+  works without a loader change.
+
+⚠️ **`model` names who ANSWERS, not just which weights.** The `{route}/…` prefix
+selects the executor: `anthropic/claude-sonnet-5` calls the provider,
+`claude-cli/sonnet` runs the CLI agent on its own subscription and needs no API
+key (DESIGN §8.3). The part after the prefix reaches the transport with the
+prefix stripped, so `sonnet` is what `claude` is asked for. A state naming no
+model inherits the project's chosen default, which is chosen rather than
+required — a prompt workflow runs on a machine that has only an agent installed.
 
 ### 5.2 How each field merges
 
@@ -1315,6 +1330,15 @@ Both sides can have changed, and that case is not resolved for you: neither
 button is recommended, and the line says so. There is no mechanical answer to
 which of two edited documents is now the truth, and picking one would silently
 overwrite the other.
+
+**The layer decides what a description is judged against.** A description in the
+shared root is checked against the *shared root's* workflows and recorded in
+`~/.jaira/sync.json`; a project's is checked against its own and recorded in
+`.jaira/sync.json`. So the shared root syncs with no project open — which is the
+mode shared workflows are written in — and gets the same answer in every window.
+Judging a machine-global document against whichever checkout happened to be open
+would make its status change per window, and would scatter one document's
+baseline across every project on the machine.
 
 A proposed state file is refused rather than offered when its id points outside
 `workflows/`, when the state is authored as YAML (the proposal is JSON, and

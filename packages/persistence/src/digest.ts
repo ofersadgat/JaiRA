@@ -26,7 +26,7 @@ import { join } from "node:path";
 import { loadBundle, type LoadedState, type WorkflowBundle } from "@declarative-ai/hw";
 import { isUnder } from "./descriptions";
 import type { Project } from "./project";
-import { browseWorkflows, readWorkflowsTolerantly } from "./workflows";
+import { browseSource, projectSource, readWorkflowsTolerantly, type LayerSource } from "./workflows";
 import { workflowLoadOptions } from "./workflowRefs";
 
 export interface WorkflowDigestOptions {
@@ -132,28 +132,44 @@ document that owns it.
  * the user WHICH file to fix.
  */
 export function workflowDigest(project: Project, options: WorkflowDigestOptions = {}): WorkflowDigest {
-  const browser = browseWorkflows(project);
+  return digestSource(projectSource(project), options);
+}
+
+/**
+ * The same render, over whatever layers a {@link LayerSource} names.
+ *
+ * The project-shaped entry point above is the common case; this one exists because the shared root
+ * is also a place descriptions and workflows are authored, and with no project open it is the only
+ * one. Same code either way — a second, thinner digest would be a second answer to "what will
+ * actually run", and the whole point of the digest is that there is one.
+ */
+export function digestSource(source: LayerSource, options: WorkflowDigestOptions = {}): WorkflowDigest {
+  const browser = browseSource(source);
+  const where = source.layer === "base" ? "the shared root" : "this project";
   const known = new Set(browser.workflows.map((w) => w.rootId));
   for (const root of options.roots ?? []) {
     if (!known.has(root)) {
       throw new Error(
         `unknown workflow '${root}'` +
-          (known.size > 0 ? ` — this project has: ${[...known].join(", ")}` : " — this project has no workflows"),
+          (known.size > 0 ? ` — ${where} has: ${[...known].join(", ")}` : ` — ${where} has no workflows`),
       );
     }
   }
   const wanted =
     options.roots === undefined ? browser.workflows : browser.workflows.filter((w) => options.roots!.includes(w.rootId));
 
-  const { files } = readWorkflowsTolerantly(project.paths.workflowsDir);
+  const { files } = readWorkflowsTolerantly(source.paths.workflowsDir);
   const fileOf = new Map(
     browser.files.filter((f) => f.error === undefined).map((f) => [f.stateId, f.file] as const),
   );
-  // Project-layer only, and keyed by state id: which FILE a state resolved from decides what the
-  // baseline covers, and a state the base root supplied has no project file to hash.
+  // The AUTHORED layer only, and keyed by state id: which FILE a state resolved from decides what
+  // the baseline covers, and a state an inherited layer supplied has no file here to hash. For a
+  // project that excludes the base root — a machine-wide edit must not read as drift in every
+  // project on the machine — and with no project open the base root is itself the authored layer,
+  // so the same rule keeps exactly the files this source can be asked to change.
   const projectFileOf = new Map(
     browser.files
-      .filter((f) => f.error === undefined && f.layer === "project")
+      .filter((f) => f.error === undefined && f.layer === source.layer)
       .map((f) => [f.stateId, f.file] as const),
   );
   const maxChars = options.maxStateChars ?? DEFAULT_MAX_STATE_CHARS;
@@ -190,7 +206,7 @@ export function workflowDigest(project: Project, options: WorkflowDigestOptions 
       bundle = loadBundle(
         files,
         entry.rootId,
-        workflowLoadOptions(project.paths, { path: project.config.workflows.path }),
+        workflowLoadOptions(source.paths, { ...(source.searchPath !== undefined ? { path: source.searchPath } : {}) }),
       );
     } catch (e) {
       loadErrors.push({ rootId: entry.rootId, error: (e as Error).message });
@@ -216,7 +232,7 @@ export function workflowDigest(project: Project, options: WorkflowDigestOptions 
         continue;
       }
       const file = fileOf.get(id);
-      const authored = authoredText(project.paths.workflowsDir, file, bundle.source?.[id]);
+      const authored = authoredText(source.paths.workflowsDir, file, bundle.source?.[id]);
       const clipped = authored.text.length > maxChars;
       if (clipped) truncated.push(id);
       lines.push(
