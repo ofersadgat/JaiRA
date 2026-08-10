@@ -20,7 +20,7 @@ import type {
   PromptOp,
   ResolvedValue,
 } from "@declarative-ai/exec";
-import { mergeWorkflowMetrics, type WorkflowMetrics } from "@declarative-ai/hw";
+import { emptyWorkflowMetrics, mergeWorkflowMetrics, type WorkflowMetrics } from "@declarative-ai/hw";
 
 const CAPS: Capabilities = {
   structuredOutput: true,
@@ -81,7 +81,7 @@ const failed = (reason: string, classification: "permanent" | "canceled" = "perm
 });
 
 export class ScriptedFakeExecutor implements Executor<ExecServices, WorkflowMetrics> {
-  readonly metrics = { merge: mergeWorkflowMetrics };
+  readonly metrics = { merge: mergeWorkflowMetrics, empty: emptyWorkflowMetrics };
   readonly capabilities = CAPS;
   readonly calls: PromptOp<InlineFamily>[] = [];
 

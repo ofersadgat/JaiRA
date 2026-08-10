@@ -23,21 +23,33 @@
  * `anthropic`/`openrouter`/`local`/`embedded` with lazy client construction, per-server caching and
  * managed-server supervision; this hands it its options and stays out of the way.
  */
+import { existsSync } from "node:fs";
 import type { EmbeddedModelConfig, LocalServerConfig, ModelRouterOptions } from "@declarative-ai/llm";
-import { AgentApiExecutor, type AgentQuery } from "@declarative-ai/agents-api";
-import { AgentCliExecutor, AgentCodexExecutor } from "@declarative-ai/agents-cli";
-import type { Executor, ExecServices } from "@declarative-ai/exec";
+import { AGENT_DEFAULT_MODEL, AgentApiExecutor, type AgentQuery } from "@declarative-ai/agents-api";
+import { AgentCliExecutor, AgentCodexExecutor, type SpawnProcess } from "@declarative-ai/agents-cli";
+import {
+  type ExecServices,
+  type Executor,
+  type InlineFamily,
+  type JsonValue,
+  type Operation,
+  type PromptOp,
+  type ResolvedValue,
+} from "@declarative-ai/exec";
+import type { LlmMetrics } from "@declarative-ai/llm";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import {
   MODEL_ROUTE_KEYS,
   type JairaAgentConfig,
+  type JairaExecutorDefinition,
   type JairaModelConfig,
   type JairaModelRoute,
   type ProbeResult,
+  type SecretOrigin,
 } from "@jaira/shared";
 import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, agentSpawn } from "./agents";
 import { AGENT_GENERIC_CLI, createGenericCliQuery } from "./genericAgent";
-import { enabledAdapters, enabledGenericAgents } from "./executors";
+import { defaultResolve, enabledAdapters, enabledGenericAgents } from "./executors";
 import type { Exec } from "./exec";
 import type { ExecEnv } from "./paths";
 import type { ExecObserver } from "./exec";
@@ -128,6 +140,15 @@ export interface AgentRouteOptions {
    * only for the SDK or the subprocess, which is the half a test cannot have.
    */
   query?: AgentQuery;
+  /**
+   * Replace the PROCESS seam the CLI executors spawn through — the same option
+   * {@link AgentRuntimeOptions.spawn} is, one level down from {@link AgentRouteOptions.query}.
+   *
+   * A fake query stands in for the whole transport; a fake spawn keeps the real argv building and the
+   * real stream parsing and stands in only for the binary, which is the half worth testing for a CLI
+   * agent. Absent ⇒ JaiRA's own spawn, which is what production always wants.
+   */
+  spawn?: SpawnProcess;
 }
 
 /**
@@ -143,45 +164,145 @@ export interface AgentRouteOptions {
  */
 export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentRouteOptions = {}): Record<string, PromptRoute> {
   const routes: Record<string, PromptRoute> = {};
+  const bind = (name: string, executor: PromptRoute): void => {
+    routes[name] = normaliseAgentModel(name, executor);
+  };
   const adapters = enabledAdapters(agents);
-  const spawn = agentSpawn({
-    ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
-    ...(options.observer !== undefined ? { observer: options.observer } : {}),
-  });
+  const spawn =
+    options.spawn ??
+    agentSpawn({
+      ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
+      ...(options.observer !== undefined ? { observer: options.observer } : {}),
+    });
   const query = options.query;
 
   if (adapters.includes("sdk")) {
-    routes[AGENT_SDK] = new AgentApiExecutor({ ...(query !== undefined ? { query } : {}) }) as unknown as PromptRoute;
+    bind(AGENT_SDK, new AgentApiExecutor({ ...(query !== undefined ? { query } : {}) }) );
   }
   if (adapters.includes("cli")) {
-    routes[AGENT_CLI] = new AgentCliExecutor({
-      spawn,
-      ...(agents.claudeCli?.command !== undefined ? { command: agents.claudeCli.command } : {}),
-      ...(query !== undefined ? { query } : {}),
-    }) as unknown as PromptRoute;
+    bind(
+      AGENT_CLI,
+      new AgentCliExecutor({
+        spawn,
+        ...(agents.claudeCli?.command !== undefined ? { command: agents.claudeCli.command } : {}),
+        ...(query !== undefined ? { query } : {}),
+      }),
+    );
   }
   if (adapters.includes("codex")) {
-    routes[AGENT_CODEX] = new AgentCodexExecutor({
-      spawn,
-      ...(agents.codex?.command !== undefined ? { command: agents.codex.command } : {}),
-      ...(agents.codex?.sandbox !== undefined ? { sandbox: agents.codex.sandbox } : {}),
-      ...(query !== undefined ? { query } : {}),
-    }) as unknown as PromptRoute;
+    bind(
+      AGENT_CODEX,
+      new AgentCodexExecutor({
+        spawn,
+        ...(agents.codex?.command !== undefined ? { command: agents.codex.command } : {}),
+        ...(agents.codex?.sandbox !== undefined ? { sandbox: agents.codex.sandbox } : {}),
+        ...(query !== undefined ? { query } : {}),
+      }),
+    );
   }
   for (const spec of enabledGenericAgents(agents)) {
     // A generic CLI has no adapter of its own — it IS the `AgentQuery` JaiRA builds for it, which is
     // the same seam the built-ins are driven through.
-    routes[spec.name ?? AGENT_GENERIC_CLI] = new AgentCliExecutor({
-      label: spec.name ?? AGENT_GENERIC_CLI,
-      query:
-        query ??
-        (createGenericCliQuery(spec, {
-          ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
-          ...(options.exec !== undefined ? { exec: options.exec } : {}),
-        }) as never),
-    }) as unknown as PromptRoute;
+    bind(
+      spec.name ?? AGENT_GENERIC_CLI,
+      new AgentCliExecutor({
+        label: spec.name ?? AGENT_GENERIC_CLI,
+        query:
+          query ??
+          createGenericCliQuery(spec, {
+            ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
+            ...(options.exec !== undefined ? { exec: options.exec } : {}),
+          }),
+      }),
+    );
   }
   return routes;
+}
+
+/**
+ * Normalise the "your own default" placeholder for one agent route.
+ *
+ * All that survives of the old per-agent model block, and it is not configuration — it is a fix.
+ * `<agent>/default` is a NAMED model id, so the transport's own placeholder branch never fires and it
+ * dutifully forwards the word: `claude` is asked for `--model default`, which no CLI knows. That is
+ * the zero-configuration path a fresh machine produces, so it has to work.
+ *
+ * The limits that used to live here moved to the executor tree's route node, which is what they are
+ * about: a limit on a route, not on the binary underneath it.
+ */
+export function normaliseAgentModel(name: string, inner: PromptRoute): PromptRoute {
+  const executor = inner;
+  const prefix = `${name}/`;
+  return {
+    capabilities: executor.capabilities,
+    metrics: executor.metrics,
+    ...(executor.capabilitiesFor !== undefined
+      ? { capabilitiesFor: (op: Operation<InlineFamily>) => executor.capabilitiesFor!(op) }
+      : {}),
+    start: (op: Operation<InlineFamily>, ctx: ExecServices) => {
+      if (op.kind !== "prompt") return executor.start(op, ctx);
+      const config = isPlainObject(op.config) ? (op.config as Record<string, JsonValue>) : {};
+      const asked = typeof config["model"] === "string" ? config["model"] : "";
+      const bare = asked.startsWith(prefix) ? asked.slice(prefix.length) : asked;
+      if (bare !== "" && bare !== "default") return executor.start(op, ctx);
+      // `agent/default` rather than `<name>/default`: the transport maps its own placeholder to "no
+      // model", where a named `default` reaches the binary as a model called `default`.
+      return executor.start({ ...op, config: { ...config, model: AGENT_DEFAULT_MODEL } as JsonValue }, ctx);
+    },
+  };
+}
+
+/**
+ * A glob over model ids: `*` matches any run of characters, everything else is literal.
+ *
+ * Every other regex metacharacter is escaped, `?` included — a model id is full of dots and dashes
+ * (`claude-haiku-4-5`), and a pattern that quietly meant "any character" where the author wrote a dot
+ * would be a limit that admits more than it says.
+ */
+export function matchesModel(pattern: string, model: string): boolean {
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+  return new RegExp(`^${escaped}$`).test(model);
+}
+
+function isPlainObject(value: unknown): value is Record<string, JsonValue> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * The environment variable a remote route's key is read from when config names no credential.
+ *
+ * These are the provider SDKs' OWN variables, which is what makes checking them honest: with no
+ * `credential` configured the SDK reads exactly this, so its presence is the difference between a
+ * route that works and one that fails on its first call.
+ */
+const ROUTE_ENV_VAR: Record<string, string> = {
+  anthropic: "ANTHROPIC_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
+};
+
+/**
+ * A remote route's key, as an ORIGIN — resolved through the chain, or from the conventional variable.
+ *
+ * Two paths because there are two setups and both are legitimate: a project that NAMES a secret gets
+ * it looked up wherever it lives (keychain, `.env.local`, …), and a project that names nothing falls
+ * back on the SDK's own variable. Reporting "no key" for the second would be reporting a failure for
+ * the commonest working configuration there is.
+ */
+function routeKeyOrigin(
+  key: string,
+  route: JairaModelRoute | undefined,
+  secrets: SecretResolver | undefined,
+): { found: boolean; named?: string; origin?: SecretOrigin; variable: string } {
+  const variable = ROUTE_ENV_VAR[key] ?? "";
+  if (route?.credential !== undefined) {
+    const origin = secrets?.describe(route.credential);
+    return origin === undefined
+      ? { found: false, named: route.credential, variable }
+      : { found: true, named: route.credential, origin, variable };
+  }
+  const origin = secrets?.describe(variable);
+  if (origin !== undefined) return { found: true, origin, variable };
+  return { found: secrets === undefined && process.env[variable] !== undefined, variable };
 }
 
 /**
@@ -189,61 +310,39 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
  *
  * Cheap is the requirement, not a shortcut: this runs on every run to decide what to install, and a
  * probe that spawned a process or opened a socket would make starting a workflow pay for a health
- * check nobody asked for. So: a key that resolves, an endpoint that is configured, weights that are
- * named. Anything beyond that is what the settings screen's Test button is for.
+ * check nobody asked for. So: a key that resolves, an endpoint that is configured, weights that
+ * exist on disk. Anything needing a socket is {@link probeModelRoutes}'s job.
+ *
+ * `existsSync` is the one filesystem call here, and it earns its place: a `modelPath` pointing at a
+ * GGUF that is not there is indistinguishable from a working route until the loader fails minutes
+ * into a run, and a stat is cheaper than every other thing this function already does.
  */
 function routeUsable(key: string, route: JairaModelRoute | undefined, secrets: SecretResolver | undefined): boolean {
   if (!isEnabled(route)) return false;
   if (key === "local") return route?.baseURL !== undefined;
-  if (key === "embedded") return Object.keys(route?.weights ?? {}).length > 0;
+  if (key === "embedded") return namedWeights(route).some(([, w]) => existsSync(w.modelPath));
   // A remote fleet needs a key. A named credential must RESOLVE — config naming a secret nobody has
   // set is precisely the case that used to fail deep inside the provider SDK instead of here.
-  if (route?.credential !== undefined) return secrets?.lookup(route.credential) !== undefined;
-  return process.env[key === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENROUTER_API_KEY"] !== undefined;
+  return routeKeyOrigin(key, route, secrets).found;
 }
 
-/** What each route's default model is called, for a config that names a route but no model. */
-const ROUTE_DEFAULT_MODEL: Record<string, string> = {
-  anthropic: "anthropic/claude-sonnet-5",
-  openrouter: "openrouter/anthropic/claude-sonnet-4.5",
-};
-
-export interface DefaultModelOptions {
-  agents?: JairaAgentConfig;
-  secrets?: SecretResolver;
+/** A route's weights as entries, so "how many" and "which files" are one traversal. */
+function namedWeights(route: JairaModelRoute | undefined): Array<[string, { modelPath: string }]> {
+  return Object.entries(route?.weights ?? {});
 }
 
 /**
- * The model id a prompt state should get when neither it nor config names one.
+ * Which provider routes can actually serve a call — the routes a derived tree is built from.
  *
- * "If several executors are available it should just pick one", expressed as an ORDER rather than as a
- * refusal. A configured provider route wins, because someone who set up a key meant to use it; an
- * agent comes next, because it needs no configuration at all and is therefore the only thing that can
- * work on a fresh machine; and `undefined` means nothing is available, which the caller reports.
- *
- * Returning an ID rather than an executor is what keeps this one mechanism: the id is what
- * `PromptRouterExecutor` dispatches on, what a state can override, and what shows up in a record — so
- * the automatic choice and an explicit one are the same kind of thing, and equally legible.
+ * This replaced `defaultModelId`, which answered a different and worse question: *what one model id
+ * should a state get?* A single id could never route to an agent, because `PromptRouterExecutor`
+ * dispatches on `op.config.model` while a leaf's defaults are applied after routing — so a chosen
+ * `claude-cli/…` fell through to the provider path and was refused there. What a state with no model
+ * needs is a default EXECUTOR that can route, and `resolveExecutorTree` builds one from this list.
  */
-export function defaultModelId(models: JairaModelConfig = {}, options: DefaultModelOptions = {}): string | undefined {
-  if (models.default !== undefined) return models.default;
+export function usableRouteKeys(models: JairaModelConfig = {}, secrets?: SecretResolver): string[] {
   const routes = models.routes ?? {};
-  for (const key of MODEL_ROUTE_KEYS) {
-    if (!routeUsable(key, routes[key], options.secrets)) continue;
-    if (key === "local" || key === "embedded") {
-      // A local route's model is whatever the server or the weights are called; there is no catalog
-      // default to fall back on, so only a named set of weights can supply one.
-      const first = key === "embedded" ? Object.keys(routes[key]?.weights ?? {})[0] : undefined;
-      if (first !== undefined) return `embedded/${first}`;
-      continue;
-    }
-    return ROUTE_DEFAULT_MODEL[key];
-  }
-  // Nothing configured — but an installed agent needs nothing configured. This is the branch that
-  // makes a first run work on a machine with `claude` and no API key.
-  const agentRoutes = Object.keys(agentPromptRouteNames(options.agents ?? {}));
-  const first = agentRoutes[0];
-  return first !== undefined ? `${first}/default` : undefined;
+  return MODEL_ROUTE_KEYS.filter((key) => routeUsable(key, routes[key], secrets));
 }
 
 /**
@@ -257,46 +356,184 @@ export function defaultModelId(models: JairaModelConfig = {}, options: DefaultMo
  * what the settings screen renders, and a route you have not set up yet has to be visible or there is
  * nowhere to set it up.
  */
-export function probeModelRoutes(models: JairaModelConfig = {}, secrets?: SecretResolver): ProbeResult[] {
+export async function probeModelRoutes(
+  models: JairaModelConfig = {},
+  options: RouteProbeOptions = {},
+): Promise<ProbeResult[]> {
   const routes = models.routes ?? {};
-  return MODEL_ROUTE_KEYS.map((key): ProbeResult => {
-    const route = routes[key];
-    if (!isEnabled(route)) return { name: key, status: "disabled", detail: "turned off in this configuration" };
+  return Promise.all(MODEL_ROUTE_KEYS.map((key) => probeOneRoute(key, routes[key], options)));
+}
 
-    if (key === "local") {
-      if (route?.baseURL === undefined) {
-        return { name: key, status: "not-checked", detail: "no server URL is configured, so nothing is served on this route" };
-      }
-      return {
-        name: key,
-        status: "ok",
-        detail: `${route.baseURL}${route.serve !== undefined ? ` — started with '${route.serve.command}' if nothing answers` : " — expected to be running already"}`,
-      };
-    }
+export interface RouteProbeOptions {
+  secrets?: SecretResolver;
+  /** Injected so a test can answer a server without one. Defaults to the global `fetch`. */
+  fetch?: (url: string, init: { signal: AbortSignal }) => Promise<{ ok: boolean; status: number }>;
+  /** Injected for the same reason. Defaults to `node:fs`'s `existsSync`. */
+  exists?: (path: string) => boolean;
+  /** Resolve a module id — the embedded route needs an optional package to be installed. */
+  resolve?: (id: string) => string;
+  /**
+   * How long a local server gets to answer.
+   *
+   * Short on purpose. This runs at startup, and a settings screen that takes ten seconds to tell
+   * someone their server is down is a settings screen nobody waits for. A server that cannot answer
+   * a `GET /models` in a second and a half is not one a workflow should be pointed at either.
+   */
+  timeoutMs?: number;
+}
 
-    if (key === "embedded") {
-      const named = Object.keys(route?.weights ?? {});
-      return named.length === 0
-        ? { name: key, status: "not-checked", detail: "no weights are configured, so nothing is served on this route" }
-        : { name: key, status: "ok", detail: `${named.length} model(s) configured: ${named.join(", ")}` };
-    }
+const ROUTE_TIMEOUT_MS = 1_500;
 
-    // A remote fleet needs a key, and the ONLY honest check is whether one can be found.
-    const variable = key === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENROUTER_API_KEY";
-    if (route?.credential === undefined) {
-      return process.env[variable] !== undefined
-        ? { name: key, status: "ok", detail: `no credential named — using ${variable} from the environment` }
-        : {
-            name: key,
-            status: "not-checked",
-            detail: `no credential named and no ${variable} in the environment — name a secret to use this route`,
-          };
-    }
-    const origin = secrets?.describe(route.credential);
-    return origin === undefined
-      ? { name: key, status: "failed", detail: `no value was found for '${route.credential}'`, credentialMissing: route.credential }
-      : { name: key, status: "ok", detail: `'${route.credential}' resolves`, credential: origin };
-  });
+/** The package the `embedded` route loads weights with — optional, and absent in most installs. */
+const EMBEDDED_MODULE = "node-llama-cpp";
+
+async function probeOneRoute(
+  key: string,
+  route: JairaModelRoute | undefined,
+  options: RouteProbeOptions,
+): Promise<ProbeResult> {
+  if (!isEnabled(route)) return { name: key, status: "disabled", detail: "turned off in this configuration" };
+
+  if (key === "local") return probeLocalRoute(route, options);
+  if (key === "embedded") return probeEmbeddedRoute(route, options);
+
+  // A remote fleet needs a key, and the ONLY honest check is whether one can be found. Asking the
+  // provider whether the key WORKS would mean a request, and a settings screen that quietly bills
+  // someone for opening it is worse than one that reports slightly less.
+  const found = routeKeyOrigin(key, route, options.secrets);
+  if (found.found) {
+    return {
+      name: key,
+      status: "ok",
+      detail:
+        found.named === undefined
+          ? `${found.variable} is set${found.origin ? ` (${found.origin.source})` : ""}`
+          : `'${found.named}' resolves`,
+      ...(found.origin !== undefined ? { credential: found.origin } : {}),
+    };
+  }
+  return {
+    name: key,
+    status: "failed",
+    detail:
+      found.named === undefined
+        ? `no key — ${found.variable} is not set and this route names no credential`
+        : `no value was found for '${found.named}'`,
+    fix: `store a key under ${found.named ?? found.variable}, or turn this route off`,
+    ...(found.named !== undefined ? { credentialMissing: found.named } : {}),
+  };
+}
+
+/**
+ * The local route: is a URL configured, and does anything answer it?
+ *
+ * The second half is the point. A `baseURL` alone told us nothing — the previous check reported `ok`
+ * for a server that had never been started, which is precisely the configuration a user is trying to
+ * diagnose when they open this screen. So the probe CONNECTS: one `GET` at the ready URL, short
+ * timeout, no generation and therefore no cost.
+ *
+ * A route with a `serve` block that nothing answers is still `ok`, and deliberately: the router
+ * starts that server on demand, so "nothing is listening yet" is the expected steady state rather
+ * than a fault. What the detail says is which of the two happened.
+ */
+async function probeLocalRoute(route: JairaModelRoute | undefined, options: RouteProbeOptions): Promise<ProbeResult> {
+  if (route?.baseURL === undefined) {
+    return {
+      name: "local",
+      status: "not-checked",
+      detail: "no server URL is configured, so nothing is served on this route",
+      fix: "set a server URL — http://localhost:11434/v1 for Ollama, http://localhost:1234/v1 for LM Studio",
+    };
+  }
+  const url = route.serve?.readyUrl ?? `${route.baseURL.replace(/\/+$/, "")}/models`;
+  const reached = await canReach(url, options);
+  if (reached.ok) {
+    return { name: "local", status: "ok", detail: `${route.baseURL} answered` };
+  }
+  if (route.serve !== undefined) {
+    return {
+      name: "local",
+      status: "ok",
+      detail: `nothing is listening on ${route.baseURL} yet — '${route.serve.command}' will be started when a state needs it`,
+    };
+  }
+  return {
+    name: "local",
+    status: "failed",
+    detail: `nothing answered ${url}: ${reached.reason}`,
+    fix: "start the server, correct the URL, or give this route a launch command so JaiRA can start it",
+  };
+}
+
+/** One GET, bounded. Any answer at all counts — a 404 from a live server still proves it is there. */
+async function canReach(url: string, options: RouteProbeOptions): Promise<{ ok: boolean; reason: string }> {
+  const call = options.fetch ?? ((u: string, init: { signal: AbortSignal }) => fetch(u, init));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? ROUTE_TIMEOUT_MS);
+  try {
+    const response = await call(url, { signal: controller.signal });
+    // Not `response.ok`: a server that answers 404 for `/models` is unmistakably RUNNING, and
+    // refusing it here would fail every shim whose route table differs from Ollama's.
+    return { ok: true, reason: `HTTP ${response.status}` };
+  } catch (e) {
+    const message = (e as Error).message;
+    return { ok: false, reason: controller.signal.aborted ? "no answer in time" : message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * The embedded route: are weights named, is each file actually there, and is the loader installed?
+ *
+ * All three, because each fails differently and each used to pass. The old check counted KEYS — so a
+ * config naming a GGUF that had been moved, on a machine without `node-llama-cpp`, reported `ok` and
+ * failed at the first prompt with a message from inside a package the user had never heard of.
+ */
+async function probeEmbeddedRoute(
+  route: JairaModelRoute | undefined,
+  options: RouteProbeOptions,
+): Promise<ProbeResult> {
+  const named = namedWeights(route);
+  if (named.length === 0) {
+    return {
+      name: "embedded",
+      status: "not-checked",
+      detail: "no weights are configured, so nothing is served on this route",
+      fix: 'name a GGUF: { "qwen2.5-7b": { "modelPath": "/models/qwen.gguf" } }',
+    };
+  }
+  const exists = options.exists ?? existsSync;
+  const absent = named.filter(([, w]) => !exists(w.modelPath));
+  if (absent.length === named.length) {
+    return {
+      name: "embedded",
+      status: "failed",
+      detail: `no weights file exists: ${absent.map(([id, w]) => `${id} → ${w.modelPath}`).join(", ")}`,
+      fix: "correct the modelPath, or download the GGUF to that location",
+    };
+  }
+  const resolve = options.resolve ?? defaultResolve;
+  try {
+    resolve(EMBEDDED_MODULE);
+  } catch {
+    return {
+      name: "embedded",
+      status: "failed",
+      detail: `the weights are there, but '${EMBEDDED_MODULE}' is not installed, so nothing can load them`,
+      fix: `install ${EMBEDDED_MODULE}, or serve the same weights through a local server instead`,
+    };
+  }
+  const usable = named.filter(([, w]) => exists(w.modelPath));
+  return {
+    name: "embedded",
+    status: "ok",
+    detail:
+      absent.length === 0
+        ? `${usable.length} model(s) ready: ${usable.map(([id]) => id).join(", ")}`
+        : `${usable.length} of ${named.length} ready — missing: ${absent.map(([id]) => id).join(", ")}`,
+    ...(absent.length === 0 ? {} : { fix: `correct the modelPath for ${absent.map(([id]) => id).join(", ")}` }),
+  };
 }
 
 /** The agent route NAMES, without building the executors — the cheap half of {@link agentPromptRoutes}. */
@@ -310,4 +547,53 @@ export function agentPromptRouteNames(agents: JairaAgentConfig = {}): Record<str
   if (adapters.includes("codex")) out[AGENT_CODEX] = true;
   for (const spec of enabledGenericAgents(agents)) out[spec.name ?? AGENT_GENERIC_CLI] = true;
   return out;
+}
+
+/**
+ * A named executor DEFINITION as a prompt route (`config.executors.<name>`).
+ *
+ * A definition is selected the way everything else is — by prefix — so `review/…` reaches the
+ * executor a project called `review`. What this wrapper does is turn that name back into something
+ * the transport underneath understands: the definition's `provider` becomes the prefix and its
+ * `model` the rest, so `review/anything` arrives at `claude-cli` as `opus`.
+ *
+ * The state keeps the last word on the model, as everywhere else: a state that names one under this
+ * definition gets it, and the definition's own `model` fills in only when the state asked for the
+ * placeholder. Its `config` merges UNDER the state's, for the same reason an executor's does.
+ */
+export function retargetRoute(
+  name: string,
+  definition: JairaExecutorDefinition,
+  inner: PromptRoute,
+): PromptRoute {
+  const provider = definition.provider;
+  if (provider === undefined) return inner;
+  const executor = inner;
+  return {
+    capabilities: executor.capabilities,
+    metrics: executor.metrics,
+    ...(executor.capabilitiesFor !== undefined
+      ? { capabilitiesFor: (op: Operation<InlineFamily>) => executor.capabilitiesFor!(op) }
+      : {}),
+    start: (op: Operation<InlineFamily>, ctx: ExecServices) => {
+      if (op.kind !== "prompt") return executor.start(op, ctx);
+      const config = isPlainObject(op.config) ? (op.config as Record<string, JsonValue>) : {};
+      const asked = typeof config["model"] === "string" ? config["model"] : "";
+      const prefix = `${name}/`;
+      const bare = asked.startsWith(prefix) ? asked.slice(prefix.length) : asked;
+      const wantsDefault = bare === "" || bare === "default";
+      const model = wantsDefault ? definition.model : bare;
+      return executor.start(
+        {
+          ...op,
+          config: {
+            ...(definition.config ?? {}),
+            ...config,
+            model: model === undefined ? AGENT_DEFAULT_MODEL : `${provider}/${model}`,
+          } as JsonValue,
+        },
+        ctx,
+      );
+    },
+  };
 }

@@ -236,6 +236,18 @@ export class SummarizingSessionStore implements SessionStore<JsonValue> {
   private async compactIfOver(ref: string): Promise<string> {
     if (this.options.sessions !== undefined && !this.options.sessions.has(sessionNameOf(ref))) return ref;
     const messages = await this.inner.messages(ref);
+    // TODO(sessions §12): this filter is why an AGENT's conversation never compacts.
+    //
+    // `isTurn` matches a flat `{ role, content: string }`, which is what the engine's own transcript
+    // used to hold. A real conversation holds `ModelMessage[]` — `content` is an array of parts
+    // (text, tool calls, tool results, reasoning), so `every(isTurn)` is false and this returns early
+    // and silently. The conversations that most need compacting — long agent runs full of tool
+    // traffic — are exactly the ones that never do, and nothing reports it.
+    //
+    // Fixing it means summarizing `ModelMessage` rather than `Turn`: render parts down to text for the
+    // summarizer's prompt, and keep the recent tail verbatim so tool-call/tool-result pairs stay
+    // intact (splitting a pair leaves a call with no result, which providers reject). Until then this
+    // is a no-op for agent sessions, which is at least the safe direction.
     if (!Array.isArray(messages) || !messages.every(isTurn)) return ref;
     const turns = messages as unknown as Turn[];
     const before = lengthOf(turns);

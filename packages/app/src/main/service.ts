@@ -21,9 +21,10 @@ import {
   writeFileSync,
   type FSWatcher,
 } from "node:fs";
-import { dirname, join, relative, resolve as resolvePath, sep } from "node:path";
+import { basename, dirname, join, relative, resolve as resolvePath, sep } from "node:path";
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
-import { loadBundle } from "@declarative-ai/hw";
+import { InMemoryPersistence, loadBundle, type WorkflowBundle } from "@declarative-ai/hw";
+import type { MemoCache } from "@declarative-ai/exec";
 import type { JsonValue } from "@declarative-ai/json";
 import {
   baseFileTree,
@@ -43,6 +44,9 @@ import {
   hashText,
   initBase,
   RunOwner,
+  runCauses,
+  runCostUsd,
+  stateSessions,
   cancelTask,
   createTask,
   finishTaskRun,
@@ -54,6 +58,13 @@ import {
   listDescriptions,
   loadLayeredConfig,
   openProject,
+  openSharedProject,
+  openSystemProject,
+  JobOutputSink,
+  jobOutput,
+  SqliteMemoCache,
+  SqliteSessionStore,
+  messagesOfRecord,
   ownershipOf,
   projectSource,
   pruneHistory,
@@ -69,6 +80,7 @@ import {
   type DescriptionBoundary,
   type DescriptionOwnership,
   type Project,
+  type TaskWorkspace,
   type WorkflowDigestOptions,
   type LayerSource,
 } from "@jaira/persistence";
@@ -76,8 +88,10 @@ import {
   ApprovalHub,
   artifactWiring,
   buildPromptExecutor,
+  causesOfEvents,
   compilePolicy,
   enabledAdapters,
+  failureMessage,
   enabledGenericAgents,
   listExecutors,
   probeExecutor,
@@ -94,10 +108,12 @@ import {
   registerTools,
   functionNamesOf,
   InteractionHub,
-  modelDefaults,
+  defaultExecutorTree,
   modelRouterOptions,
   probeModelRoutes,
   agentPromptRoutes,
+  agentPromptRouteNames,
+  usableRouteKeys,
   newRegistry,
   NodeExec,
   parseFakeRules,
@@ -106,6 +122,7 @@ import {
   ScriptedFunctions,
   sessionServicesFor,
   statusOfResult,
+  withTurnStream,
   syncOutcomeOf,
   syncRootId,
   syncWorkflowFiles,
@@ -123,6 +140,9 @@ import {
   isComponentName,
   isTextMime,
   jairaBasePaths,
+  SYSTEM_DIR_NAME,
+  systemProjectDir,
+  DEFAULT_EXECUTOR,
   mergeConfigDocuments,
   mimeOfPath,
   parseComponentConfig,
@@ -130,16 +150,31 @@ import {
   parseSettings,
   listSchemas,
   propertiesOf,
+  resolveExecutorTree,
   schemaById,
+  sessionKey,
+  SHARED_SESSION,
+  SYSTEM_SESSION,
   validateComponentResult,
   WORKFLOW_JSON,
 } from "@jaira/shared";
+import { Diagnostics } from "./diagnostics";
+import { ProjectSession, type SyncHolder } from "./session";
 import type {
   ApprovalScope,
   BoardView,
   ComponentConfig,
   ConfigView,
   ConversationView,
+  JobOutputChunk,
+  JobRow,
+  LogEntry,
+  LogLevel,
+  ProjectSummary,
+  RunMetrics,
+  SessionRef,
+  SessionTurn,
+  SessionView,
   CreateFileRequest,
   CreateTaskRequest,
   DeleteFileRequest,
@@ -147,6 +182,8 @@ import type {
   FileMutationResult,
   FileSource,
   FileTree,
+  AvailabilitySnapshot,
+  JairaOperationNode,
   HistorySize,
   JairaSettings,
   PendingApproval,
@@ -210,6 +247,15 @@ export interface AppServiceOptions {
   /** Override the shared base root. Defaults to the saved setting, then `JAIRA_HOME`, then `~/.jaira`. */
   baseDir?: string;
   /**
+   * Override where JaiRA's OWN project lives.
+   *
+   * Separate from {@link baseDir} because they answer different questions: `baseDir` is the root a
+   * person selected and may repoint, while this is the installation's own corner, which a repoint
+   * must not move. Defaults from `baseDir` when that is given explicitly and from the installation
+   * otherwise — see the constructor.
+   */
+  systemDir?: string;
+  /**
    * Show a file in the OS file manager, injected by the Electron main process.
    *
    * Injected for the same reason the keychain is: `shell.showItemInFolder` is Electron's, and this
@@ -226,6 +272,20 @@ export interface AppServiceOptions {
    * part worth testing anyway.
    */
   chooseDirectory?: (options: { title: string; buttonLabel: string }) => Promise<string | null>;
+  /**
+   * Run the availability checks by themselves — at construction, at project open, and after every
+   * configuration write.
+   *
+   * OFF by default, and turned on by the Electron main process. The asymmetry is deliberate: the
+   * checks spawn `--version` processes and open a socket, which is exactly right for an app that has
+   * a settings screen to keep current and exactly wrong for a headless caller that constructs a
+   * service to read one projection. A constructor that spawns processes unasked is a constructor
+   * every test then has to work around.
+   *
+   * Nothing about the checks themselves depends on this: {@link AppService.refreshAvailability} is
+   * always available, and the snapshot is always readable — this only decides who triggers them.
+   */
+  probeOnStart?: boolean;
 }
 
 /**
@@ -379,14 +439,6 @@ function pendingApprovalOf(request: ApprovalRequest): PendingApproval {
   };
 }
 
-interface LiveRun {
-  taskId: string;
-  runId: number;
-  abort: AbortController;
-  /** Resolves when the run has finished recording and settled its task row. */
-  done: Promise<void>;
-}
-
 /**
  * `startTask` as the service sees it. The IPC contract carries `fake` as opaque
  * JSON (it is parsed with `parseFakeRules`); in-process callers usually have
@@ -397,24 +449,32 @@ export interface StartRunRequest extends Omit<StartTaskRequest, "fake"> {
 }
 
 export class AppService {
-  private project?: Project;
-  private readonly live = new Map<string, LiveRun>();
-  private readonly hub: InteractionHub;
-  /** requestId → taskId, so a pending interaction can name its task. */
-  private readonly requestTask = new Map<string, string>();
   /**
-   * Function names this process routes to the renderer — the app's gate
-   * vocabulary. Grows as runs register their bundles' functions, and is what
-   * makes a parked state read `waiting_for_user` in the views.
+   * The open projects, by {@link sessionKey}.
+   *
+   * A map rather than a field, because a process holds several: the user's work, and — from the
+   * moment JaiRA's own runs became tasks — the system project behind it. Keyed by canonical
+   * directory so two spellings of one path cannot become two `better-sqlite3` handles on one file.
    */
-  private readonly interactive = new Set<string>();
+  private readonly sessions = new Map<string, ProjectSession>();
   /**
-   * Per-command approvals (DESIGN §10.2) — a separate channel from workflow gates:
-   * these are provider-initiated, so they cannot be authored states.
+   * Which session the project-free channels answer for.
+   *
+   * Never the system session. A window with no user project open must answer "list the tasks" with
+   * nothing rather than with JaiRA's own — the whole point of giving those runs their own project is
+   * that they stay out of the user's board.
    */
-  private readonly approvals: ApprovalHub;
-  /** requestId → the run it belongs to, so a decision can be audited against it. */
-  private readonly approvalRun = new Map<string, { taskId: string; runId: number }>();
+  private focusedKey?: string;
+  /**
+   * ONE request-id generator for every hub in the process.
+   *
+   * Per-session counters would each emit `ui-1`, and `submitInteraction` carries nothing but a
+   * request id — so two projects with a gate open would answer each other's. The generator is shared
+   * and the owner is recorded, which makes the id globally unique and the lookup O(1).
+   */
+  private interactionSeq = 0;
+  private approvalSeq = 0;
+  private readonly requestOwner = new Map<string, string>();
   /**
    * The JSON-editor schema machinery, built on first use.
    *
@@ -423,26 +483,163 @@ export class AppService {
    */
   private ajv?: Ajv;
   private readonly schemaValidators = new Map<string, ValidateFunction>();
+  /** What the app has said about itself — see {@link Diagnostics}. */
+  private readonly diagnostics: Diagnostics;
 
   constructor(private readonly options: AppServiceOptions = {}) {
     this.baseDir = jairaBasePaths(options.baseDir ?? settingsBaseDir()).baseDir;
-    this.hub = new InteractionHub({
-      onRequest: (request) => this.publishInteraction(request),
+    // Where JaiRA's OWN project lives, which must not move when the root does.
+    //
+    // Defaulted from the INSTALLATION (`systemProjectDir`, i.e. `JAIRA_HOME`/`~/.jaira`) rather than
+    // from `this.baseDir`, because `this.baseDir` is the SELECTED root and moving with it is exactly
+    // what this project must not do. An explicit `baseDir` is the one exception: passing it means
+    // "the whole installation is here" — which is what a test means by it, and what keeps two
+    // services in one process from sharing a database.
+    this.systemDir =
+      options.systemDir ??
+      (options.baseDir !== undefined ? join(jairaBasePaths(options.baseDir).baseDir, SYSTEM_DIR_NAME) : systemProjectDir());
+    this.diagnostics = new Diagnostics({
+      dir: join(this.baseDir, "logs"),
+      publish: (entry) => this.publish({ type: "log:entry", entry }),
+    });
+    // The checks that decide what can answer a prompt run BY THEMSELVES, from here on. They used to
+    // wait for someone to open Settings and press a button, which meant the app's own idea of what
+    // was available was whatever it had assumed — everything — until a run failed to prove otherwise.
+    if (options.probeOnStart === true) this.kickAvailability();
+  }
+
+  /**
+   * The shared root as JaiRA's own project, opened the first time something needs it.
+   *
+   * ON FIRST USE rather than in the constructor, which is where this started. Opening it eagerly made
+   * merely CONSTRUCTING a service create `~/.jaira` and a database inside it — so a person who never
+   * runs a sync still gets one, and every caller that constructs a service becomes responsible for
+   * closing a handle it never asked for. First use is the honest trigger: the runs this project holds
+   * are JaiRA's own, and until one is asked for there is nothing to hold.
+   *
+   * The guarantee that mattered survives: a system run works with NO user project open, because this
+   * does not consult one. And it still cannot take the app down — a corrupt database, a native ABI
+   * mismatch or a read-only home leaves {@link systemError} set and everything else running.
+   *
+   * Keyed by the base directory's own key, so pointing `JAIRA_PROJECT` at `~/.jaira` finds this
+   * session rather than opening a second handle on the same file.
+   */
+  private systemSession(): ProjectSession | undefined {
+    return this.roleSession("system");
+  }
+
+  /**
+   * The SELECTED root as a project — where a run of a shared workflow is recorded.
+   *
+   * Distinct from {@link systemSession} by lifetime, which is the whole reason there are two. This
+   * one IS the root, so repointing the root gives a different database and the old library's runs
+   * stop being listed — correct, because they were that library's. JaiRA's own project is pinned
+   * elsewhere so a sync's history does not go with them.
+   */
+  private sharedSession(): ProjectSession | undefined {
+    return this.roleSession("shared");
+  }
+
+  /**
+   * The shared project, but only if the root is already there.
+   *
+   * What the BROWSE surfaces use. Opening the shared project calls `initBase`, which creates the
+   * directories and a database — fine as the cost of running something, and wrong as the cost of
+   * looking. A window that has never opened a project would otherwise acquire a `~/.jaira/jaira.db`
+   * by having the Files view clicked once.
+   *
+   * It also keeps the one affordance that depends on the root being absent: the tree says "not
+   * created yet — adding a state here will create it", which is an invitation, and materializing the
+   * directory behind the reader's back turns it into a lie about what they have already done.
+   */
+  private sharedIfPresent(): ProjectSession | undefined {
+    return existsSync(jairaBasePaths(this.baseDir).workflowsDir) ? this.sharedSession() : undefined;
+  }
+
+  /**
+   * One of the two role projects, opened the first time something needs it.
+   *
+   * ON FIRST USE rather than in the constructor, which is where this started. Opening eagerly made
+   * merely CONSTRUCTING a service create directories and a database — so a person who never runs a
+   * sync still gets one, and every caller that constructs a service becomes responsible for closing
+   * a handle it never asked for. First use is the honest trigger.
+   *
+   * The guarantee that mattered survives: either works with NO user project open, because neither
+   * consults one. And neither can take the app down — a corrupt database, a native ABI mismatch or a
+   * read-only home leaves {@link roleError} set for that role and everything else running.
+   */
+  private roleSession(role: "shared" | "system"): ProjectSession | undefined {
+    const open = [...this.sessions.values()].find((s) => s.kind === role);
+    if (open !== undefined) return open;
+    // Never AFTER `close()`. A late read — a queued `job:output`, a base-layer `syncStatus` racing the
+    // quit — would otherwise re-open the database into a handle nothing will ever close again.
+    if (this.closed) return undefined;
+    // One attempt per role. Retrying on every read would re-pay a failing open — and re-create the
+    // directories — on every keystroke in a file the sync panel happens to be watching.
+    if (this.roleError[role] !== undefined) return undefined;
+    try {
+      const project =
+        role === "system"
+          ? openSystemProject({ baseDir: this.baseDir, systemDir: this.systemDir })
+          : openSharedProject({ baseDir: this.baseDir });
+      // Keyed by the directory each actually opened, so pointing `JAIRA_PROJECT` at the root finds
+      // the shared session rather than opening a second handle on the same file — and so the two
+      // roles cannot collide on one key even when the root is the default.
+      const key = sessionKey(project.paths.projectDir);
+      const session = new ProjectSession({ key, kind: role, project, ...this.hubsFor(key) });
+      this.sessions.set(key, session);
+      return session;
+    } catch (e) {
+      const message = (e as Error).message;
+      this.roleError[role] = message;
+      // Reported here rather than only where a run refuses: this is the entry someone will look for,
+      // and it has no project whose database could hold it — which is why the ring is in memory.
+      this.log({ level: "error", source: "app", message: `the ${role} project could not be opened: ${message}` });
+      return undefined;
+    }
+  }
+
+  /**
+   * Why a role project is unavailable, when it is.
+   *
+   * Held rather than thrown (see {@link roleSession}) and reported where it matters: a run refuses
+   * with this rather than with whatever the missing session would have produced three layers in.
+   */
+  private readonly roleError: { shared?: string; system?: string } = {};
+
+  /** Where JaiRA's own project lives — see the constructor. */
+  private readonly systemDir: string;
+
+  /**
+   * The hubs one session parks on, wired to publish through this service.
+   *
+   * Built per session rather than once, so a gate in one project cannot be answered by a request id
+   * minted in another — and so closing a project rejects only its own parked calls.
+   */
+  private hubsFor(key: string): { hub: InteractionHub; approvals: ApprovalHub } {
+    const hub = new InteractionHub({
+      onRequest: (request) => this.publishInteraction(key, request),
       onResolved: (requestId) => {
-        this.requestTask.delete(requestId);
+        this.sessions.get(key)?.requestTask.delete(requestId);
+        this.requestOwner.delete(requestId);
         this.publish({ type: "interaction:resolved", requestId });
       },
-      ...(options.nextInteractionId !== undefined ? { nextId: options.nextInteractionId } : {}),
+      nextId: this.options.nextInteractionId ?? (() => `ui-${++this.interactionSeq}`),
     });
-    this.approvals = new ApprovalHub({
-      onRequest: (request) => this.publish({ type: "approval:requested", pending: pendingApprovalOf(request) }),
+    const approvals = new ApprovalHub({
+      onRequest: (request) => {
+        this.requestOwner.set(request.requestId, key);
+        this.publish({ type: "approval:requested", pending: pendingApprovalOf(request) });
+      },
       onResolved: (requestId, decision) => {
         // The human's answer is the audit entry policy alone could not produce.
-        const run = this.approvalRun.get(requestId);
-        this.approvalRun.delete(requestId);
-        if (run && this.project) {
-          const request = this.approvalsSeen.get(requestId);
-          this.p.commands.record({
+        const session = this.sessions.get(key);
+        const run = session?.approvalRun.get(requestId);
+        session?.approvalRun.delete(requestId);
+        this.requestOwner.delete(requestId);
+        if (run && session) {
+          const request = session.approvalsSeen.get(requestId);
+          session.project.commands.record({
             taskId: run.taskId,
             runId: run.runId,
             tool: request?.tool ?? "unknown",
@@ -454,25 +651,14 @@ export class AppService {
             ...(request?.sessionId !== undefined ? { sessionId: request.sessionId } : {}),
           });
         }
-        this.approvalsSeen.delete(requestId);
+        session?.approvalsSeen.delete(requestId);
         this.publish({ type: "approval:resolved", requestId, decision: decision.decision });
       },
-      ...(options.nextApprovalId !== undefined ? { nextId: options.nextApprovalId } : {}),
+      // The same spelling the hub's own default uses, so ids are unchanged for anything reading them.
+      nextId: this.options.nextApprovalId ?? (() => `approval-${++this.approvalSeq}`),
     });
+    return { hub, approvals };
   }
-
-  /** Requests seen, kept until resolved so the audit entry can name the command. */
-  private readonly approvalsSeen = new Map<string, ApprovalRequest>();
-
-  /**
-   * The workflows watchers and their shared debounce timer (§11.1 re-lint).
-   *
-   * Plural because there are two roots to watch: the project's own and the shared base root. A base
-   * edit changes what THIS project runs, so leaving it unwatched would mean the browser quietly
-   * described a workflow that no longer exists.
-   */
-  private watchers: FSWatcher[] = [];
-  private watchTimer?: ReturnType<typeof setTimeout>;
 
   /**
    * The most recent probe per executor.
@@ -484,6 +670,27 @@ export class AppService {
   private readonly lastProbes = new Map<string, ProbeResult>();
 
   /**
+   * The last availability check: what answered, what did not, and when it was asked.
+   *
+   * Held rather than recomputed on demand because the checks are not all free — one of them opens a
+   * socket — and because the answer has to be READY when a settings screen is opened rather than
+   * arriving after it. {@link AppService.refreshAvailability} fills it at startup, at project open,
+   * and after every configuration write; nothing else needs to ask.
+   *
+   * `checkedAt: 0` is the honest starting value and the UI shows it as such: no check has run, which
+   * is a different statement from "everything is fine".
+   */
+  private availability: AvailabilitySnapshot = { routes: [], executors: [], checkedAt: 0 };
+
+  /**
+   * The refresh in flight, so a burst of config writes collapses into one pass.
+   *
+   * Saving a route's URL and then its credential is two writes a second apart, and each would
+   * otherwise start its own round of socket connects while the previous one was still open.
+   */
+  private availabilityRun?: Promise<AvailabilitySnapshot>;
+
+  /**
    * The resolved shared root, used by the settings, secret and workflow surfaces.
    *
    * Assigned in the constructor rather than as a field initializer: `options` is a parameter
@@ -491,32 +698,42 @@ export class AppService {
    */
   private readonly baseDir: string;
 
-  /** The sync in flight, if any — one at a time, so the abort has an unambiguous target. */
-  private syncRun?: AbortController;
-
   /**
-   * What the last sync proposed and which of its files are still unsaved.
+   * The sync state of a description no open session owns.
    *
-   * The baseline advances when a proposal is ACCEPTED, not when it is produced (see
-   * `persistence/workflowSync.ts`), so something has to remember what was on offer between the run
-   * and the save. Session-scoped, like the drafts it corresponds to.
+   * Used only when the system project could not be opened ({@link systemError}). The shared root is
+   * syncable regardless — that is the mode shared workflows are authored in — so its in-flight run
+   * and its pending proposal still need somewhere to live when there is no session to hold them.
    */
-  private pendingSync?: {
-    direction: SyncDirection;
-    document: string;
-    /** The layer the document lives in — which decides where its baseline is written back. */
-    layer: WorkflowLayer;
-    remaining: Set<string>;
-  };
+  private readonly detachedSync: SyncHolder = {};
 
   // --- lifecycle -------------------------------------------------------------
 
   async open(dir: string): Promise<{ dir: string; recovered: string[] }> {
-    await this.close();
+    // Still one USER project at a time. The map can hold several and everything below is written for
+    // that, but letting a second one STAY open is a UI decision (which project do the project-free
+    // channels answer for?) and is made separately.
+    //
+    // The system session is deliberately not closed here: it is machine-global, it holds JaiRA's own
+    // runs, and switching a checkout is not a reason to abandon a sync that is in flight against it.
+    await this.closeUserSessions();
+    const key = sessionKey(dir);
     const project = openProject(dir, { baseDir: this.baseDir });
-    this.project = project;
-    if (this.options.watchWorkflows !== false) this.watchWorkflows(project);
-    if (project.recovered.length > 0) this.publish({ type: "store:invalidate", scope: "tasks" });
+    const session = new ProjectSession({ key, kind: "user", project, ...this.hubsFor(key) });
+    this.sessions.set(key, session);
+    this.focusedKey = key;
+    this.log({
+      level: "info",
+      source: "project",
+      message: `opened ${project.paths.projectDir}`,
+      project: key,
+      ...(project.recovered.length > 0 ? { detail: { recovered: project.recovered } } : {}),
+    });
+    if (this.options.watchWorkflows !== false) this.watchWorkflows(session);
+    if (project.recovered.length > 0) this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+    // A project brings its own config layer, so what was available a moment ago is not what is
+    // available now: it can name different routes, different credentials, and different executors.
+    if (this.options.probeOnStart === true) this.kickAvailability();
     return { dir: project.paths.projectDir, recovered: project.recovered };
   }
 
@@ -528,34 +745,44 @@ export class AppService {
    * browser is still correct on demand, it just stops being live. That matters
    * because CI and Linux developers must not be a broken app.
    */
-  private watchWorkflows(project: Project): void {
+  private watchWorkflows(session: ProjectSession): void {
     const notify = (): void => {
-      clearTimeout(this.watchTimer);
+      clearTimeout(session.watchTimer);
       // Coalesce: a single save often produces several events, and an editor's
       // temp-file dance would otherwise lint a file that no longer exists.
-      this.watchTimer = setTimeout(() => {
+      session.watchTimer = setTimeout(() => {
         this.publish({ type: "store:invalidate", scope: "workflows" });
       }, this.options.watchDebounceMs ?? 150);
-      this.watchTimer.unref?.();
+      session.watchTimer.unref?.();
     };
-    for (const dir of [project.paths.workflowsDir, project.paths.base.workflowsDir]) {
+    for (const dir of [session.project.paths.workflowsDir, session.project.paths.base.workflowsDir]) {
       let watcher: FSWatcher | undefined;
       try {
         watcher = watch(dir, { recursive: true }, notify);
       } catch {
         try {
           watcher = watch(dir, notify);
-        } catch {
+        } catch (e) {
           watcher = undefined;
+          // Recursive watching is unavailable on Linux, so this is not fatal — the browser is still
+          // correct on demand, it just stops being live. Silently giving up made that indistinguishable
+          // from a watcher that was working.
+          this.log({
+            level: "warn",
+            source: "project",
+            message: `cannot watch ${dir} for changes; the workflow browser will not re-lint on save`,
+            project: session.key,
+            detail: { reason: (e as Error).message },
+          });
         }
       }
       if (watcher === undefined) continue;
       watcher.on("error", () => {
         // A deleted workflows directory ends the watch; on-demand browsing still works.
         watcher?.close();
-        this.watchers = this.watchers.filter((w) => w !== watcher);
+        session.watchers = session.watchers.filter((w) => w !== watcher);
       });
-      this.watchers.push(watcher);
+      session.watchers.push(watcher);
     }
   }
 
@@ -592,55 +819,171 @@ export class AppService {
   }
 
   current(): { dir: string } | null {
-    return this.project ? { dir: this.project.paths.projectDir } : null;
+    const session = this.sessionOf();
+    return session ? { dir: session.dir } : null;
   }
 
   /**
-   * Abort every live run and close the project.
+   * Close every open session — user projects first, JaiRA's own last.
    *
-   * Awaiting the aborted runs is not optional: a run keeps journaling for a beat
-   * after its abort (and still has a `finishTaskRun` to write), so closing the
-   * database first would throw "database connection is not open" from inside the
-   * engine's event tee — an unhandled rejection, and a task row left `running`.
+   * The order is load-bearing for the same reason a session drains its runs before closing its
+   * database: a system run can be ABOUT a user project (a sync of its description resolves that
+   * project's config and reads its workflows), so tearing the target down first would leave the run
+   * settling against a closed handle.
    */
   async close(): Promise<void> {
-    clearTimeout(this.watchTimer);
-    for (const watcher of this.watchers) watcher.close();
-    this.watchers = [];
-    this.hub.rejectAll("the project was closed");
-    this.approvals.denyAll();
-    // A sync holds no run record and nothing to settle, but it does hold a model call — and the
-    // proposal it was about to produce belongs to a project that is going away.
-    this.syncRun?.abort();
-    this.syncRun = undefined;
-    this.pendingSync = undefined;
-    const inFlight = [...this.live.values()];
-    for (const run of inFlight) run.abort.abort();
-    await Promise.allSettled(inFlight.map((run) => run.done));
-    this.live.clear();
-    this.project?.close();
-    this.project = undefined;
+    // Terminal. Set FIRST, so a read arriving during the drain cannot re-open what is being closed.
+    this.closed = true;
+    await this.closeUserSessions();
+    for (const session of [...this.sessions.values()]) await this.closeSession(session.key);
   }
 
+  /** Whether {@link close} has run. A closed service answers; it does not re-open anything. */
+  private closed = false;
+
+  /** Every user project, leaving JaiRA's own open. What switching a checkout does. */
+  private async closeUserSessions(): Promise<void> {
+    for (const session of [...this.sessions.values()]) {
+      if (session.kind === "user") await this.closeSession(session.key);
+    }
+  }
+
+  /** Close one session and forget it. Unknown keys are a no-op, so closing twice is safe. */
+  private async closeSession(key: string): Promise<void> {
+    const session = this.sessions.get(key);
+    if (session === undefined) return;
+    this.sessions.delete(key);
+    if (this.focusedKey === key) this.focusedKey = undefined;
+    for (const [requestId, owner] of [...this.requestOwner]) if (owner === key) this.requestOwner.delete(requestId);
+    await session.close();
+  }
+
+  /**
+   * The session a request names, or the focused one when it names none.
+   *
+   * `"system"` is reserved: it addresses JaiRA's own project explicitly, which is the only way to
+   * reach it — {@link focusedKey} never points there.
+   */
+  private sessionOf(ref?: string): ProjectSession | undefined {
+    if (ref === undefined) return this.focusedKey === undefined ? undefined : this.sessions.get(this.focusedKey);
+    if (ref === SYSTEM_SESSION) return this.systemSession();
+    if (ref === SHARED_SESSION) return this.sharedSession();
+    return this.sessions.get(sessionKey(ref));
+  }
+
+  /** The same, but a missing one is an error rather than an absence. */
+  private session(ref?: string): ProjectSession {
+    const session = this.sessionOf(ref);
+    if (session === undefined) {
+      throw new Error(ref === undefined ? "no project is open" : `project '${ref}' is not open`);
+    }
+    return session;
+  }
+
+  /** The focused project. Shorthand for the overwhelmingly common `this.session()`. */
   private get p(): Project {
-    if (!this.project) throw new Error("no project is open");
-    return this.project;
+    return this.session().project;
+  }
+
+  /**
+   * Is a user project open at all?
+   *
+   * The guard for every surface that FALLS BACK to the shared root rather than refusing — the files
+   * tree, a state view, the config layers. Those read the base directly, so they answer with no
+   * project; they just answer about a different thing.
+   */
+  private get hasProject(): boolean {
+    return this.sessionOf() !== undefined;
   }
 
   private publish(message: PushMessage): void {
     this.options.publish?.(message);
   }
 
-  private publishInteraction(request: HubRequest): void {
-    const taskId = [...this.live.keys()][0] ?? "";
-    this.requestTask.set(request.requestId, taskId);
+  /**
+   * Publish something that is ABOUT one project, stamped with which.
+   *
+   * The stamp is what lets a window ignore news it cannot act on. Without it, a run in JaiRA's own
+   * project invalidated "tasks", and a window with no user project open dutifully asked for a task
+   * list it has none of — which throws, by design, because a task cannot exist without a project.
+   */
+  private publishFor(session: ProjectSession, message: PushMessage): void {
+    this.publish({ ...message, project: session.dir } as PushMessage);
+  }
+
+  /**
+   * Say what happened.
+   *
+   * The one channel for everything the app used to know and never said. Deliberately not a throwing
+   * call: several of its callers are catch blocks whose whole point is that they must not fail, and a
+   * reporter that could fail is one every one of them would have to defend against — which is how the
+   * silence started.
+   */
+  private log(entry: Omit<LogEntry, "id" | "at">): void {
+    this.diagnostics.log(entry);
+  }
+
+  /**
+   * An IPC handler threw.
+   *
+   * Public because the boundary that catches it is in `index.ts`, and because it is the single
+   * highest-value diagnostic in the app: every failed channel call becomes one legible line, where
+   * before it was a rejection that died in a renderer catch and was recorded nowhere.
+   */
+  recordIpcFailure(channel: string, error: unknown): void {
+    const e = error instanceof Error ? error : new Error(String(error));
+    this.log({
+      level: "error",
+      source: "ipc",
+      message: `${channel}: ${e.message}`,
+      ...(e.stack !== undefined ? { detail: { stack: e.stack } as JsonValue } : {}),
+    });
+  }
+
+  /** The tail of what the app has said — what the Logs panel reads on open. */
+  listLogs(request: { afterId?: number; level?: LogLevel; source?: string; project?: string; limit?: number } = {}): LogEntry[] {
+    return this.diagnostics.list(request);
+  }
+
+  /** The child processes one run started, newest last. */
+  listJobs(request: { project?: string; taskId?: string; runId?: number } = {}): JobRow[] {
+    // No silent fall-through to JaiRA's own project: a job id is a rowid in ONE database, so answering
+    // an unqualified ask with the system project's rows would show an unrelated process under an id
+    // the caller took from somewhere else.
+    const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
+    if (session === undefined) return [];
+    const rows = request.taskId === undefined ? session.project.jobs.live(Date.now()) : session.project.jobs.list(request.taskId);
+    return request.runId === undefined ? rows : rows.filter((row) => row.runId === request.runId);
+  }
+
+  /**
+   * What one child process printed.
+   *
+   * POLLED with a cursor rather than pushed. A chatty agent would flood the IPC channel and the
+   * renderer with output nobody is looking at; a cursor cannot flood, and the panel asks only while it
+   * is open.
+   */
+  jobOutput(request: { project?: string; jobId: number; stream?: "stdout" | "stderr"; limit?: number }): JobOutputChunk[] {
+    // Same rule as {@link listJobs}: a job id means nothing without the database it came from.
+    const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
+    return session === undefined ? [] : jobOutput(session.project.db, request);
+  }
+
+  private publishInteraction(key: string, request: HubRequest): void {
+    this.requestOwner.set(request.requestId, key);
+    // The registration's own task, and only as a fallback the sole live run — which is the guess this
+    // used to make unconditionally, and which is right only while exactly one run exists.
+    const session = this.sessions.get(key);
+    const taskId = request.taskId ?? [...(session?.live.keys() ?? [])][0] ?? "";
+    session?.requestTask.set(request.requestId, taskId);
     this.publish({ type: "interaction:requested", pending: this.pendingOf(request) });
   }
 
   private pendingOf(request: HubRequest): PendingInteraction {
+    const owner = this.sessions.get(this.requestOwner.get(request.requestId) ?? "");
     const pending: PendingInteraction = {
       requestId: request.requestId,
-      taskId: this.requestTask.get(request.requestId) ?? "",
+      taskId: request.taskId ?? owner?.requestTask.get(request.requestId) ?? "",
       component: request.component,
       inputs: request.inputs,
     };
@@ -659,7 +1002,8 @@ export class AppService {
 
   /** The parsed contract for a parked request, when it has one. */
   private configOf(requestId: string): ComponentConfig | undefined {
-    const request = this.hub.list().find((r) => r.requestId === requestId);
+    const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
+    const request = owner?.hub.list().find((r) => r.requestId === requestId);
     if (!request || !isComponentName(request.component)) return undefined;
     try {
       return parseComponentConfig(request.component, request.inputs["config"]);
@@ -670,8 +1014,27 @@ export class AppService {
 
   // --- reads -----------------------------------------------------------------
 
-  listTasks(): TaskSummary[] {
-    return taskSummaries(this.p);
+  /**
+   * One project's tasks. Named or focused; see the channel's note on `project`.
+   *
+   * Still THROWS when nothing is open and none is named — deliberately, because an empty answer
+   * there would hide a real mistake. A caller that legitimately has no project asks for one by name
+   * instead of asking and ignoring the refusal.
+   */
+  listTasks(project?: string): TaskSummary[] {
+    return taskSummaries(this.session(project).project);
+  }
+
+  /**
+   * JaiRA's OWN runs — the syncs, and whatever else it comes to run for itself.
+   *
+   * A separate read rather than a flag on {@link listTasks}, because the two answer different
+   * questions and mixing them is the pollution the system project exists to prevent. Empty rather
+   * than an error when JaiRA's project could not be opened: nothing has run, which is an answer.
+   */
+  listSystemTasks(): TaskSummary[] {
+    const system = this.sessionOf(SYSTEM_SESSION);
+    return system === undefined ? [] : taskSummaries(system.project);
   }
 
   /**
@@ -679,8 +1042,22 @@ export class AppService {
    * whatever this process routes to the renderer. Passing it makes a parked
    * state read `waiting_for_user` on the board.
    */
+  /**
+   * The gate vocabulary, across every open project.
+   *
+   * A union rather than the focused session's, because it answers a question about the FUNCTION name
+   * — is `choose_option` something this process routes to a human? — and the answer does not vary by
+   * project. Empty with nothing open, which is the honest answer and not an error: the shared root is
+   * browsable with no project, and a state view there must still render.
+   */
+  private gateVocabulary(): ReadonlySet<string> {
+    const names = new Set<string>();
+    for (const session of this.sessions.values()) for (const name of session.interactive) names.add(name);
+    return names;
+  }
+
   private viewOptions(): { interactiveFunctions: ReadonlySet<string> } {
-    return { interactiveFunctions: this.interactive };
+    return { interactiveFunctions: this.gateVocabulary() };
   }
 
   /**
@@ -691,12 +1068,16 @@ export class AppService {
    * draw an empty board whenever the newest task belonged to a different workflow. `boardView`
    * remains the fallback, and is still what answers the no-level "just show me something" case.
    */
-  board(level?: string): BoardView {
+  board(request?: { level?: string; project?: string } | string): BoardView {
+    // A bare string is the old shape and still the common call. Widened rather than replaced because
+    // the Tasks view now draws one board PER project, and a level means nothing without saying whose.
+    const { level, project } = typeof request === "string" ? { level: request, project: undefined } : (request ?? {});
+    const open = this.session(project);
     if (level !== undefined && level.length > 0) {
-      const board = boardForState(this.p, level, this.browseWorkflows(), this.stateViewOptions());
+      const board = boardForState(open.project, level, this.browseWorkflowsIn(open), this.stateViewOptions());
       if (board) return board;
     }
-    return boardView(this.p, level, this.viewOptions());
+    return boardView(open.project, level, this.viewOptions());
   }
 
   /**
@@ -707,9 +1088,10 @@ export class AppService {
    * would make every rail click a potential error toast, which is a trap the renderer has already
    * fallen into once.
    */
-  boardRoots(): BoardView {
-    if (!this.project) return { level: "", label: "All workflows", breadcrumb: [], columns: [], atLevel: [], finished: [] };
-    return rootsBoard(this.p, this.browseWorkflows(), this.stateViewOptions());
+  boardRoots(request?: { project?: string }): BoardView {
+    const open = this.sessionOf(request?.project);
+    if (open === undefined) return { level: "", label: "All workflows", breadcrumb: [], columns: [], atLevel: [], finished: [] };
+    return rootsBoard(open.project, this.browseWorkflowsIn(open), this.stateViewOptions());
   }
 
   /**
@@ -722,8 +1104,12 @@ export class AppService {
    * start.
    */
   filesTree(): FileTree {
-    if (this.project) return fileTree(this.p, this.browseWorkflows());
+    if (this.hasProject) return fileTree(this.p, this.browseWorkflows());
     const baseDir = jairaBasePaths(this.baseDir).baseDir;
+    // Linted against the shared project's own tasks when it is open, so a state a run is pinned to
+    // reports drift here the same way it would in a checkout.
+    const shared = this.sharedIfPresent();
+    if (shared !== undefined) return baseFileTree(baseDir, browseBaseWorkflows(baseDir, {}, shared.project));
     // Linted with no project open, exactly as a project's tree is. The shared root is where a
     // workflow meant to outlive one checkout gets authored, so leaving it unvalidated meant the one
     // mode people write shared workflows in was the one mode that never said anything was wrong.
@@ -738,11 +1124,22 @@ export class AppService {
    * run-time surprise (DESIGN §8.2).
    */
   stateView(stateId: string): StateView {
-    if (this.project) return stateView(this.p, stateId, this.browseWorkflows(), this.stateViewOptions());
-    // The shared root is browsable and authorable with no project open, so a state in it has to be
-    // viewable too. What that view CANNOT know — references, drift, runs — is marked rather than
-    // reported as empty (see `StateView.fileOnly`).
+    if (this.hasProject) return stateView(this.p, stateId, this.browseWorkflows(), this.stateViewOptions());
+    // No checkout open. The shared root is still a PROJECT — it has a workflows directory and a run
+    // history of its own — so this is the full view, not a degraded one: boards, dependants, drift
+    // and the tasks that have passed through each state, exactly as a checkout gets.
+    //
+    // The browser is the BASE one even so, because it is what decides the layer, and every file here
+    // is the base layer. Reading it off the project instead would call the shared root's files
+    // `project` — and the Files view routes a run by that layer, so it would send them to whichever
+    // checkout was open. The project supplies the runs; the browser supplies the layer.
     const baseDir = jairaBasePaths(this.baseDir).baseDir;
+    const shared = this.sharedIfPresent();
+    if (shared !== undefined) {
+      return stateView(shared.project, stateId, browseBaseWorkflows(baseDir, {}, shared.project), this.stateViewOptions());
+    }
+    // Only when the shared project could not be opened at all. Then what the view CANNOT know —
+    // references, drift, runs — is marked rather than reported as empty (see `StateView.fileOnly`).
     return baseStateView(baseDir, stateId, this.stateViewOptions(), browseBaseWorkflows(baseDir));
   }
 
@@ -755,13 +1152,99 @@ export class AppService {
    * is, which is also the only layer authorable in that mode.
    */
   stateSlots(stateIds: string[]): Record<string, StateSlots> {
-    const roots = this.project ? workflowRoots(this.p) : [jairaBasePaths(this.baseDir).workflowsDir];
+    const roots = this.hasProject ? workflowRoots(this.p) : [jairaBasePaths(this.baseDir).workflowsDir];
     return stateSlots(roots, stateIds);
   }
 
   /** A task's run, read back out of the journal as turns. */
-  conversation(taskId: string): ConversationView {
-    return conversationView(this.p, taskId);
+  conversation(taskId: string, project?: string): ConversationView {
+    return conversationView(this.session(project).project, taskId);
+  }
+
+  /**
+   * Every state this task went through, with the conversation each one ran in.
+   *
+   * One half of what selecting a task at a leaf must answer. The other is {@link sessionView}, which
+   * takes one of these rows and returns the transcript behind it.
+   */
+  sessionHistory(request: { taskId: string; runId?: number; project?: string }): SessionRef[] {
+    const session = this.session(request.project);
+    const costs = new Map<string, { status: "success" | "error"; costUsd?: number; metrics?: RunMetrics }>();
+    for (const row of session.project.events.list(request.taskId, ...(request.runId !== undefined ? [{ runId: request.runId }] : []))) {
+      if (row.event.type === "operation.completed") {
+        const metrics = runMetricsOf(row.event.metrics);
+        costs.set(`${row.runId}:${row.event.instanceId}`, {
+          status: "success",
+          ...(typeof row.event.metrics?.costUsd === "number" ? { costUsd: row.event.metrics.costUsd } : {}),
+          ...(metrics !== undefined ? { metrics } : {}),
+        });
+      } else if (row.event.type === "operation.failed") {
+        costs.set(`${row.runId}:${row.event.instanceId}`, { status: "error" });
+      }
+    }
+    return stateSessions(session.project, request.taskId, request.runId).map((s) => ({
+      runId: s.runId,
+      instanceId: s.instanceId,
+      stateId: s.stateId,
+      sessionId: s.sessionId,
+      seq: s.seq,
+      at: s.at,
+      ...(costs.get(`${s.runId}:${s.instanceId}`) ?? {}),
+    }));
+  }
+
+  /**
+   * The conversation ONE state instance ran — what a leaf task shows.
+   *
+   * The record it reads is the whole `LlmOutput` the call returned, so an agent's every message, tool
+   * call and result is here rather than a summary of them. Empty is an ANSWER, not a fault: a
+   * function op runs in no conversation, and a run journaled before transcripts were kept has none to
+   * read — both say so rather than rendering a blank panel.
+   *
+   * ⚠️ What it CANNOT distinguish is a state that ran no model call from one whose call left no
+   * conversation behind, and for a long time every real (non-scripted) run was the second: a prompt
+   * core projects its `LlmOutput` down to the op's output value INSIDE the call, so the record held
+   * the answer and no messages at all. Fixed upstream — a value-mode core now reports what it
+   * appended on the `SessionOutcome` channel — rather than by softening the wording here, because the
+   * wording was right and the data was wrong.
+   */
+  sessionView(request: { taskId: string; runId?: number; instanceId?: number; project?: string }): SessionView {
+    const session = this.session(request.project);
+    const history = this.sessionHistory(request);
+    // The LAST match, not the first. Without a `runId` the history spans every run of the task, and
+    // instance ids restart at 1 on each — so `#i2` names the second instance of every run there has
+    // ever been. Taking the first match showed run 1's conversation for a card belonging to run 4,
+    // which is the same failure as showing none except that it looks like an answer.
+    const row =
+      request.instanceId === undefined
+        ? history.at(-1)
+        : [...history].reverse().find((h) => h.instanceId === request.instanceId);
+    const base = {
+      taskId: request.taskId,
+      runId: row?.runId ?? request.runId ?? 0,
+      instanceId: row?.instanceId ?? request.instanceId ?? 0,
+      stateId: row?.stateId ?? "",
+      sessionId: row?.sessionId ?? "",
+      seq: row?.seq ?? 0,
+      turns: [],
+    } satisfies SessionView;
+    if (row === undefined) {
+      return { ...base, empty: "this state ran no model call, so there is no conversation to show" };
+    }
+    // Scoped to the RUN that wrote it: a session id is instance-scoped and instance ids restart on
+    // every run, so an unscoped read would find whichever run happened to write that id last.
+    const store = new SqliteSessionStore(session.project.db, { taskId: request.taskId, runId: row.runId });
+    const record = store.at(row.sessionId, row.seq);
+    if (record === undefined) {
+      return { ...base, empty: "this run was recorded before conversations were kept" };
+    }
+    return {
+      ...base,
+      ...(record.externalId !== undefined ? { providerSessionId: record.externalId } : {}),
+      ...(row.status !== undefined ? { status: row.status } : {}),
+      ...(row.costUsd !== undefined ? { costUsd: row.costUsd } : {}),
+      turns: turnsOf(record.value),
+    };
   }
 
   /**
@@ -769,7 +1252,9 @@ export class AppService {
    *
    * Enabled is the rule, refined by the last probe when one has been taken: an executor nobody has
    * tested yet is assumed to work, because refusing to start a task over a check that has never run
-   * would be worse than the failure it is trying to prevent.
+   * would be worse than the failure it is trying to prevent. Since the checks now run at startup,
+   * "nobody has tested it yet" is a much narrower window than it used to be — but it is not empty,
+   * and the optimistic reading is still the right one inside it.
    */
   private stateViewOptions(): {
     interactiveFunctions: ReadonlySet<string>;
@@ -783,14 +1268,48 @@ export class AppService {
         .map((info) => info.name),
     );
     return {
-      interactiveFunctions: this.interactive,
+      interactiveFunctions: this.gateVocabulary(),
       availableExecutors: available,
       knownExecutors: new Set(all.map((info) => info.name)),
     };
   }
 
-  taskDetail(taskId: string): TaskDetail {
-    return taskDetailView(this.p, taskId, this.viewOptions());
+  taskDetail(taskId: string, project?: string): TaskDetail {
+    // Scoped, because the Tasks view now shows JaiRA's own runs beside the project's and selecting one
+    // must read the database it actually lives in.
+    return taskDetailView(this.session(project).project, taskId, this.viewOptions());
+  }
+
+  /**
+   * Every project this window can draw a board for — the user's, and JaiRA's own.
+   *
+   * One group per project rather than one merged board: a board is per workflow ROOT, and columns
+   * from two projects side by side would be columns of different things.
+   */
+  listProjects(): ProjectSummary[] {
+    // Materialized, so the group exists before the first run rather than appearing once something has
+    // used it. A window that shows JaiRA's board only after a sync has run is a window that cannot be
+    // used to watch the first one.
+    this.sharedSession();
+    this.systemSession();
+    const out: ProjectSummary[] = [];
+    for (const session of this.sessions.values()) {
+      const tasks = taskSummaries(session.project);
+      out.push({
+        project: session.dir,
+        // The shared group is named for the root it IS, not "shared": repointing the root is the one
+        // thing that changes which runs are in it, so the directory is the useful label.
+        label:
+          session.kind === "system" ? "JaiRA" : session.kind === "shared" ? `${basename(session.dir)} (shared)` : basename(session.dir),
+        kind: session.kind,
+        tasks: tasks.length,
+        running: tasks.filter((t) => t.status === "running").length,
+      });
+    }
+    // The user's work first, then the shared library, then JaiRA's own — outward from what you are
+    // working on to the background it runs against.
+    const rank = (kind: ProjectSummary["kind"]): number => (kind === "user" ? 0 : kind === "shared" ? 1 : 2);
+    return out.sort((a, b) => (rank(a.kind) === rank(b.kind) ? a.label.localeCompare(b.label) : rank(a.kind) - rank(b.kind)));
   }
 
   /**
@@ -800,6 +1319,11 @@ export class AppService {
    */
   browseWorkflows(): WorkflowBrowser {
     return browseWorkflows(this.p);
+  }
+
+  /** The same, for a named session — what a board drawn for another project reads. */
+  private browseWorkflowsIn(session: ProjectSession): WorkflowBrowser {
+    return browseWorkflows(session.project);
   }
 
   /** Rows currently stored, for the pruning panel's "before" figure. */
@@ -815,7 +1339,8 @@ export class AppService {
    * `pruneHistory`, so it holds no matter which caller asks.
    */
   pruneHistory(request: PruneRequest = {}): PruneResult & { remaining: HistorySize } {
-    const project = this.p;
+    const open = this.session();
+    const project = open.project;
     const days = request.olderThanDays ?? 0;
     if (!Number.isFinite(days) || days < 0) throw new Error("olderThanDays must be a non-negative number");
     const keep = request.keepRunsPerTask ?? 1;
@@ -827,17 +1352,26 @@ export class AppService {
     });
     if (!result.dryRun && result.runs.length > 0) {
       // Run history backs the detail view and the board's finished cards.
-      this.publish({ type: "store:invalidate", scope: "tasks" });
-      this.publish({ type: "store:invalidate", scope: "board" });
-      for (const run of result.runs) this.publish({ type: "store:invalidate", scope: "task", taskId: run.taskId });
+      this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
+      this.publishFor(open, { type: "store:invalidate", scope: "board" });
+      for (const run of result.runs) this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: run.taskId });
     }
     return { ...result, remaining: historySize(project) };
   }
 
   // --- writes ----------------------------------------------------------------
 
+  /**
+   * Create a task, in the focused project or in one it names.
+   *
+   * `request.project` exists for the shared root. A state under `~/.jaira/workflows` belongs to the
+   * machine rather than to a checkout, so its runs are recorded in JaiRA's own project — the same
+   * routing a base-layer description sync already uses, and the reason the Files view can offer Run
+   * on a shared workflow with no user project open at all.
+   */
   createTask(request: CreateTaskRequest): TaskSummary {
-    const project = this.p;
+    const open = this.session(request.project);
+    const project = open.project;
     const meta = createTask(project, {
       title: request.title,
       workflow: request.workflow,
@@ -846,7 +1380,7 @@ export class AppService {
       ...(request.inputs !== undefined ? { inputs: request.inputs } : {}),
       ...(request.branch !== undefined ? { branch: request.branch } : {}),
     });
-    this.publish({ type: "store:invalidate", scope: "tasks" });
+    this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
     const row = project.runtime.get(meta.id)!;
     return {
       taskId: meta.id,
@@ -865,11 +1399,60 @@ export class AppService {
    * {@link submitInteraction} unless `request.interactions` scripts them.
    */
   async startTask(request: StartRunRequest): Promise<{ taskId: string; runId: number }> {
-    const project = this.p;
-    const { taskId } = request;
-    if (this.live.has(taskId)) throw new Error(`task '${taskId}' is already running in this process`);
+    // The session that HOLDS the task, which is also whose config and secrets govern it — see the
+    // rule on {@link startRun}. For a system task those are the shared root's, which is the pairing
+    // a workflow that lives in the shared root wants.
+    const open = this.session(request.project);
+    return this.startRun(open, request.taskId, {
+      config: open.project.config,
+      secrets: this.secretResolver(open),
+      ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
+      ...(request.fake !== undefined ? { fake: request.fake } : {}),
+    });
+  }
 
-    const scripted = request.interactions ? new ScriptedFunctions(request.interactions) : undefined;
+  /**
+   * Start a run — the machinery, with the three things a caller other than a task can differ on.
+   *
+   * `startTask` is this with everything defaulted. The parameters exist for JaiRA's OWN runs (a
+   * description sync, §11.2), which are recorded in the system project but are ABOUT something else,
+   * and that split is the rule this signature encodes:
+   *
+   * > **The recording session owns the RUN. The `config`/`secrets` own the CONFIGURATION.**
+   *
+   * Get it wrong and nothing visibly breaks: a project-layer sync silently resolves the shared root's
+   * models and the shared root's credentials, calls a different model than the project asked for, and
+   * reports success.
+   */
+  private async startRun(
+    open: ProjectSession,
+    taskId: string,
+    opts: {
+      /** Whose models, presets, executors and policy govern the run. */
+      config: JairaConfigOf;
+      /** Whose `.env` chain resolves its credentials. */
+      secrets: SecretResolver;
+      /** Supplied ⇒ `ensureWorkspace` is skipped, because the caller has already decided. */
+      workspace?: TaskWorkspace;
+      /** A synthesized workflow, pinned as this run's snapshot instead of read off disk. */
+      bundle?: WorkflowBundle;
+      /**
+       * What the run may CALL, replacing the full host registry.
+       *
+       * A sync deliberately gets `read_file` and nothing else — no `write_file`, no `bash`, no agent
+       * runtimes — because it returns text for a person to accept and must not touch disk. That
+       * refusal is load-bearing, so it is a parameter rather than something to remember.
+       */
+      capabilities?: (registry: ReturnType<typeof newRegistry>) => void;
+      interactions?: StartRunRequest["interactions"];
+      fake?: JsonValue | FakeRule[];
+    },
+  ): Promise<{ taskId: string; runId: number }> {
+    const project = open.project;
+    const config = opts.config;
+    if (open.live.has(taskId)) throw new Error(`task '${taskId}' is already running in this process`);
+
+    const scripted = opts.interactions ? new ScriptedFunctions(opts.interactions) : undefined;
     const registry = newRegistry();
     // Registration order matters: a scripted answer wins over the live hub, so a
     // demo run never parks waiting for a human.
@@ -877,7 +1460,7 @@ export class AppService {
 
     // Materialize the worktree before marking the task running, so a git failure
     // leaves it startable rather than `running` with nowhere to run (DESIGN §9.2).
-    const workspace = await ensureWorkspace(project, taskId);
+    const workspace = opts.workspace ?? (await ensureWorkspace(project, taskId));
 
     // Child-process tracking (DESIGN §4.2a). The registry is built before the run
     // exists, so the observer forwards to a claim made below — safe because nothing
@@ -885,47 +1468,82 @@ export class AppService {
     let owner: RunOwner | undefined;
     let observe: ExecObserver<number> | undefined;
     const observer: ExecObserver = {
-      onSpawn: (event) => observe?.onSpawn(event),
-      onExit: (token, event) => observe?.onExit(token as number | undefined, event),
+      onSpawn: (event) => {
+        const token = observe?.onSpawn(event);
+        // The lifecycle row. `taskId` clicks through to the task and `jobId` opens what this process
+        // printed — one stamp answering both "which run was that" and "what did it say".
+        this.log({
+          level: "info",
+          source: "process",
+          message: `started ${event.command}`,
+          project: open.key,
+          taskId,
+          ...(typeof token === "number" ? { jobId: token } : {}),
+          detail: { argv: [...event.argv], ...(event.pid !== undefined ? { pid: event.pid } : {}) },
+        });
+        return token;
+      },
+      onExit: (token, event) => {
+        const code = event.signal !== null ? `signal:${event.signal}` : `exit:${event.code ?? "?"}`;
+        this.log({
+          level: event.code === 0 ? "info" : "warn",
+          source: "process",
+          message: `finished ${code}`,
+          project: open.key,
+          taskId,
+          ...(typeof token === "number" ? { jobId: token } : {}),
+        });
+        observe?.onExit(token as number | undefined, event);
+      },
+      onOutput: (token, event) => observe?.onOutput?.(token as number | undefined, event),
+      onError: (error, phase) => observe?.onError?.(error, phase),
     };
-    const exec = new NodeExec({ execEnv: project.config.execEnvironment, observer });
+    const exec = new NodeExec({ execEnv: config.execEnvironment, observer });
 
-    // Delegated agent runtimes are available to every run (DESIGN §8.1); a state
-    // reaches one with a `claude-code` function op.
-    // Only the executors this project has turned on: a disabled one is left OUT of the registry
-    // rather than registered and refusing, so a state naming it fails at start rather than midway.
-    registerAgentRuntimes(registry, {
-      execEnv: project.config.execEnvironment,
-      observer,
-      adapters: enabledAdapters(project.config.agents),
-      ...(project.config.agents.claudeCli?.command !== undefined ? { cliCommand: project.config.agents.claudeCli.command } : {}),
-      ...(project.config.agents.codex?.command !== undefined ? { codexCommand: project.config.agents.codex.command } : {}),
-      ...(project.config.agents.codex?.sandbox !== undefined ? { codexSandbox: project.config.agents.codex.sandbox } : {}),
-    });
-    // Non-Claude CLIs the project configured (DESIGN §8.1). Nothing is registered
-    // when none are, so a state naming one fails honestly instead of running some
-    // default binary.
-    registerGenericAgents(registry, {
-      execEnv: project.config.execEnvironment,
-      exec,
-      agents: enabledGenericAgents(project.config.agents),
-    });
-    // Our own tools, so an agent's commands go through the policy at all: an agent
-    // calling its native shell would be invisible to it (DESIGN §10.1).
-    registerTools(registry, { execEnv: project.config.execEnvironment, exec });
-    // A state can also run a command directly, without delegating to an agent; it
-    // gates itself with the same policy (DESIGN §10.1).
-    registerCommandFunction(registry, { execEnv: project.config.execEnvironment, exec });
+    if (opts.capabilities !== undefined) {
+      // A caller that states what the run may call gets THAT and nothing else — see `capabilities`.
+      opts.capabilities(registry);
+    } else {
+      // Delegated agent runtimes are available to every run (DESIGN §8.1); a state
+      // reaches one with a `claude-code` function op.
+      // Only the executors this project has turned on: a disabled one is left OUT of the registry
+      // rather than registered and refusing, so a state naming it fails at start rather than midway.
+      registerAgentRuntimes(registry, {
+        execEnv: config.execEnvironment,
+        observer,
+        adapters: enabledAdapters(config.agents),
+        ...(config.agents.claudeCli?.command !== undefined ? { cliCommand: config.agents.claudeCli.command } : {}),
+        ...(config.agents.codex?.command !== undefined ? { codexCommand: config.agents.codex.command } : {}),
+        ...(config.agents.codex?.sandbox !== undefined ? { codexSandbox: config.agents.codex.sandbox } : {}),
+      });
+      // Non-Claude CLIs the project configured (DESIGN §8.1). Nothing is registered
+      // when none are, so a state naming one fails honestly instead of running some
+      // default binary.
+      registerGenericAgents(registry, {
+        execEnv: config.execEnvironment,
+        exec,
+        agents: enabledGenericAgents(config.agents),
+      });
+      // Our own tools, so an agent's commands go through the policy at all: an agent
+      // calling its native shell would be invisible to it (DESIGN §10.1).
+      registerTools(registry, { execEnv: config.execEnvironment, exec });
+      // A state can also run a command directly, without delegating to an agent; it
+      // gates itself with the same policy (DESIGN §10.1).
+      registerCommandFunction(registry, { execEnv: config.execEnvironment, exec });
+    }
 
-    const started = beginTaskRun(project, taskId, { functions: registry.functions });
+    const started = beginTaskRun(project, taskId, {
+      functions: registry.functions,
+      ...(opts.bundle !== undefined ? { bundle: opts.bundle } : {}),
+    });
 
     // Artifact placement (DESIGN §7.6): one wiring shared by the file tools and the
     // post-run sink, so an agent's writes and a prompt state's returned content land
     // under the same destination.
     const artifacts = artifactWiring({
-      destination: project.config.artifacts.destination,
-      artifactDir: project.config.artifacts.dir,
-      inlineMaxBytes: project.config.artifacts.inlineMaxBytes,
+      destination: config.artifacts.destination,
+      artifactDir: config.artifacts.dir,
+      inlineMaxBytes: config.artifacts.inlineMaxBytes,
       taskId,
       runId: started.runId,
       workspaceRoot: workspace.root,
@@ -945,7 +1563,7 @@ export class AppService {
     // The RESOLVED states: a snapshot-loaded bundle carries no `source` (EXPRESSIONS.md §11), so
     // reading it would have gated a pinned run against `{}` — a check that always passes.
     const gateIssues = gateCapabilities(registry, started.bundle.states, {
-      policyNeedsApproval: policyCanEscalate(project.config.policy),
+      policyNeedsApproval: policyCanEscalate(config.policy),
     });
     if (gateIssues.length > 0) {
       finishTaskRun(project, taskId, started.runId, "failed", {
@@ -956,47 +1574,88 @@ export class AppService {
     const abort = new AbortController();
     let settle!: () => void;
     const done = new Promise<void>((resolve) => (settle = resolve));
-    this.live.set(taskId, { taskId, runId: started.runId, abort, done });
+    open.live.set(taskId, { taskId, runId: started.runId, abort, done });
 
     // Claim the run (DESIGN §4.2a). Two things follow: another process opening this
     // project will see a live heartbeat and leave the task alone instead of
     // interrupting it, and a cancel requested from elsewhere reaches this abort
     // controller through the polled flag.
+    // Where a child's output lands. Bounded head-and-tail and flushed on a debounce, because
+    // `better-sqlite3` is synchronous and this is the main thread: one INSERT per `data` event on a
+    // chatty agent is a stutter in the UI for output nobody is reading yet.
+    const output = new JobOutputSink(project.db);
     owner = new RunOwner({
       jobs: project.jobs,
       taskId,
       runId: started.runId,
-      onCancelRequested: () => this.cancelTask(taskId),
+      output,
+      onObserverError: (error, phase) =>
+        this.log({ level: "warn", source: "process", message: `recording a child process failed (${phase}): ${error.message}`, project: open.key, taskId, runId: started.runId }),
+      onCancelRequested: () => this.cancelTaskIn(open, taskId),
     });
     observe = owner.observer();
 
     // Every interactive function the bundle names that the script didn't answer
     // is routed to the renderer.
     for (const name of functionNamesOf(started.bundle)) {
-      this.interactive.add(name);
-      if (!registry.functions.has(name)) this.hub.register(registry, name);
+      open.interactive.add(name);
+      // The task is named at REGISTRATION, so every request this run parks carries it. The service
+      // used to label a request with whichever run came first in its live map — right only while
+      // exactly one existed, and now routinely wrong.
+      if (!registry.functions.has(name)) open.hub.register(registry, name, taskId);
       scripted?.registerWildcard(registry, name);
     }
 
-    const fakeRules = request.fake !== undefined ? parseFakeRules(request.fake) : undefined;
+    const fakeRules = opts.fake !== undefined ? parseFakeRules(opts.fake) : undefined;
     const prompt = buildPromptExecutor({
       ...(fakeRules !== undefined ? { fakeRules } : {}),
-      ...this.promptWiring(project.config, { fake: fakeRules !== undefined }),
-      defaults: modelDefaults(project.config, started.bundle, {
+      ...this.promptWiring(config, {
         fake: fakeRules !== undefined,
-        secrets: this.secretResolver(),
+        secrets: opts.secrets,
+        // The durable store a definition's `memoize` step writes to. The RECORDING project's, because
+        // that is where this run's database is — a memo is part of the run record, not of the config
+        // that decided which model to call.
+        memoCache: new SqliteMemoCache(project.db),
       }),
+      // The DEFAULT executor's tree, resolved from what this machine can actually do. The startup
+      // check is what makes that adaptive: without it a derived route lands on whichever adapter is
+      // listed first, installed or not, and the run fails at its first prompt with a spawn error
+      // rather than at its start with a legible one.
+      tree: this.defaultTree(config, started.bundle, fakeRules !== undefined, opts.secrets).prompt,
     });
+    // Partial answers, forwarded as they arrive. The transports already stream and nothing consumed
+    // it; hw does not drain the prompt handle's events, so this is the single consumer that contract
+    // asks for. Composed INSIDE the session layers below, which is what lets a delta name the position
+    // it belongs to instead of being attributed by guesswork.
+    const streaming = withTurnStream((delta) => {
+      this.publish({
+        type: "session:turn",
+        taskId,
+        runId: started.runId,
+        ...(delta.session !== undefined ? { sessionId: delta.session.id, seq: delta.session.seq } : {}),
+        ...(delta.stateId !== undefined ? { stateId: delta.stateId } : {}),
+        text: delta.text,
+      });
+    }, prompt);
 
     // Conversation `summary` mode (DESIGN §14 phase 7): installed only for the
     // sessions whose states asked for it, and summarizing through this run's own
     // prompt executor so a scripted run needs no provider.
-    const { modes: _summaryModes, ...session } = sessionServicesFor(started.bundle, promptSummarizer(prompt));
+    // Conversations, kept. `inner` is the seam `sessionServicesFor` has always had and never been
+    // given: without it every run built a `MapSessionStore`, wrote every model call into it complete —
+    // messages, thinking, tool calls, the provider's own handle — and dropped the whole thing when the
+    // process exited. Scoped to this run, so a stored transcript can be found from the task that made
+    // it (`stateSessions` is the other half of that join).
+    // The SUMMARIZER gets the raw executor: it runs out of band, and its deltas are not a state
+    // speaking — narrating a compaction as though it were the answer would be a lie in the viewer.
+    const { modes: _summaryModes, ...session } = sessionServicesFor(started.bundle, promptSummarizer(prompt), {
+      inner: new SqliteSessionStore(project.db, { taskId, runId: started.runId }),
+    });
 
     // Policy for this run: authored project rules compiled to an ExecPolicy, with
     // every decision audited and `require_approval` routed to the inbox (§10.2).
     const auditPolicy = (entry: PolicyAuditEntry): void => {
-      this.approvals.noteDecision(entry);
+      open.approvals.noteDecision(entry);
       project.commands.record({
         taskId,
         runId: started.runId,
@@ -1011,15 +1670,26 @@ export class AppService {
         sessionId: entry.sessionId,
       });
     };
-    const policy = compilePolicy(project.config.policy, {
-      execEnv: project.config.execEnvironment,
+    const policy = compilePolicy(config.policy, {
+      execEnv: config.execEnvironment,
       onDecision: auditPolicy,
     });
-    const approve = this.approvals.approver({ taskId });
+    const approve = open.approvals.approver({ taskId });
 
     const recorder = project.events.recorder(taskId, started.runId);
     let seq = 0;
-    this.publish({ type: "store:invalidate", scope: "tasks" });
+    // A run STARTING is the first thing anyone looking for it wants to see, and nothing said it. The
+    // logs held failures and process spawns, so a run that was merely slow looked identical to a
+    // button that did nothing.
+    this.log({
+      level: "info",
+      source: "run",
+      message: `started ${started.meta.workflow} (${taskId})`,
+      project: open.key,
+      taskId,
+      runId: started.runId,
+    });
+    this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
 
     void (async () => {
       try {
@@ -1027,13 +1697,13 @@ export class AppService {
           bundle: started.bundle,
           inputs: started.meta.inputs ?? {},
           registry,
-          prompt,
+          prompt: streaming,
           // Tee the journal: persist, then push the same event to the renderer so
           // the detail view streams live without polling the database.
           persistence: {
             record: (event, atMs) => {
               recorder.record(event, atMs);
-              this.publish({
+              this.publishFor(open, {
                 type: "engine:event",
                 taskId,
                 runId: started.runId,
@@ -1041,7 +1711,7 @@ export class AppService {
                 at: atMs,
                 event: event as unknown as JsonValue,
               });
-              this.publish({ type: "store:invalidate", scope: "board" });
+              this.publishFor(open, { type: "store:invalidate", scope: "board" });
             },
           },
           policy,
@@ -1073,25 +1743,48 @@ export class AppService {
               event: { type: "artifact.failed", name, reason: error.message } as unknown as JsonValue,
             }),
         });
+        this.log({
+          level: status === "completed" ? "info" : "warn",
+          source: "run",
+          message: `${status} ${started.meta.workflow} (${taskId})`,
+          project: open.key,
+          taskId,
+          runId: started.runId,
+          ...("error" in result && result.error !== undefined ? { detail: { reason: result.error.reason } } : {}),
+        });
         finishTaskRun(project, taskId, started.runId, status, {
           outputs: result.value,
           ...("error" in result && result.error !== undefined ? { failure: result.error } : {}),
         });
-        this.publish({ type: "run:finished", taskId, runId: started.runId, status });
+        this.publishFor(open, { type: "run:finished", taskId, runId: started.runId, status });
       } catch (e) {
         // A crash between beginTaskRun and finishTaskRun would otherwise leave the
         // task `running` forever (recovery would call it interrupted next open).
+        // The stack, before the failure becomes a bare `reason` on the run row — which is all that
+        // survived, and which turned a crash in the run loop into a one-line mystery.
+        this.log({
+          level: "error",
+          source: "engine",
+          message: `the run loop crashed: ${(e as Error).message}`,
+          project: open.key,
+          taskId,
+          runId: started.runId,
+          ...((e as Error).stack !== undefined ? { detail: { stack: (e as Error).stack! } } : {}),
+        });
         finishTaskRun(project, taskId, started.runId, "failed", {
           failure: { classification: "permanent", reason: (e as Error).message },
         });
-        this.publish({ type: "run:finished", taskId, runId: started.runId, status: "failed" });
+        this.publishFor(open, { type: "run:finished", taskId, runId: started.runId, status: "failed" });
       } finally {
         // Give up the claim and close any child still recorded as running, so the
         // next project open sees no phantom owner and no phantom orphans.
+        // Everything still buffered, written before the claim goes — a process's last words belong
+        // with the run that produced them, not with whatever timer was pending when it ended.
+        output.flush();
         owner?.release();
-        this.live.delete(taskId);
-        this.publish({ type: "store:invalidate", scope: "tasks" });
-        this.publish({ type: "store:invalidate", scope: "task", taskId });
+        open.live.delete(taskId);
+        this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
+        this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
         settle();
       }
     })();
@@ -1100,25 +1793,35 @@ export class AppService {
   }
 
   /** Cancel a task: abort a live run here, or record a terminal status. */
-  cancelTask(taskId: string): { taskId: string } {
-    const run = this.live.get(taskId);
+  cancelTask(taskId: string, project?: string): { taskId: string } {
+    return this.cancelTaskIn(this.session(project), taskId);
+  }
+
+  /**
+   * The same, in a named session.
+   *
+   * Split out because a sync is a task in JaiRA's OWN project, so cancelling one must reach a session
+   * that is deliberately never the focused one.
+   */
+  private cancelTaskIn(session: ProjectSession, taskId: string): { taskId: string } {
+    const run = session.live.get(taskId);
     if (run) {
       // Fail any gate this task is parked on, or the abort would never be observed.
-      for (const [requestId, owner] of this.requestTask) {
-        if (owner === taskId) this.hub.reject(requestId, "the task was canceled");
+      for (const [requestId, owner] of session.requestTask) {
+        if (owner === taskId) session.hub.reject(requestId, "the task was canceled");
       }
       // A parked approval blocks the agent's tool loop just as hard as a gate.
-      for (const [requestId, run] of this.approvalRun) {
-        if (run.taskId === taskId) this.approvals.decide(requestId, "deny", "once");
+      for (const [requestId, run] of session.approvalRun) {
+        if (run.taskId === taskId) session.approvals.decide(requestId, "deny", "once");
       }
       run.abort.abort();
-    } else if (this.p.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
+    } else if (session.project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
       // Another process is driving it. Raise the flag its heartbeat polls — cross-
       // process cancel needs no socket, unlike answering a parked gate (§4.2a).
-      this.p.jobs.requestCancel(taskId, Date.now());
+      session.project.jobs.requestCancel(taskId, Date.now());
     } else {
-      cancelTask(this.p, taskId);
-      this.publish({ type: "store:invalidate", scope: "tasks" });
+      cancelTask(session.project, taskId);
+      this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
     }
     return { taskId };
   }
@@ -1127,7 +1830,9 @@ export class AppService {
 
   /** Approvals awaiting a human (DESIGN §10.2). */
   pendingApprovals(): PendingApproval[] {
-    return this.approvals.list().map(pendingApprovalOf);
+    // Every session's, not the focused one's: an approval names its own request id, and a run in
+    // another project parked on a tool call is still waiting for the same person.
+    return [...this.sessions.values()].flatMap((s) => s.approvals.list().map(pendingApprovalOf));
   }
 
   /**
@@ -1135,14 +1840,18 @@ export class AppService {
    * a user is not asked the same question on every tool call.
    */
   submitApproval(requestId: string, decision: "allow" | "deny", scope: ApprovalScope = "once"): { requestId: string } {
-    if (!this.approvals.decide(requestId, decision, scope)) {
+    // Routed by OWNER rather than to the focused project. A request id is all the renderer sends, and
+    // answering it against the wrong session would deny a call nobody asked about while the one that
+    // is actually parked waits forever.
+    const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
+    if (owner === undefined || !owner.approvals.decide(requestId, decision, scope)) {
       throw new Error(`no pending approval '${requestId}'`);
     }
     return { requestId };
   }
 
   pendingInteractions(): PendingInteraction[] {
-    return this.hub.list().map((request) => this.pendingOf(request));
+    return [...this.sessions.values()].flatMap((s) => s.hub.list().map((request) => this.pendingOf(request)));
   }
 
   /**
@@ -1160,7 +1869,8 @@ export class AppService {
       const check = validateComponentResult(config, value);
       if (!check.ok) throw new Error(`invalid ${config.component} response: ${check.errors}`);
     }
-    if (!this.hub.submit(requestId, value)) {
+    const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
+    if (owner === undefined || !owner.hub.submit(requestId, value)) {
       throw new Error(`no pending interaction '${requestId}'`);
     }
     return { requestId };
@@ -1190,7 +1900,7 @@ export class AppService {
   /** Both configuration layers as authored, plus the merged result a run would use. */
   readConfig(): ConfigView {
     const base = jairaBasePaths(this.baseDir);
-    const projectFile = this.project?.paths.configFile;
+    const projectFile = this.sessionOf()?.project.paths.configFile;
     const baseDoc = readJsonIfPresent(base.configFile);
     const projectDoc = projectFile !== undefined ? readJsonIfPresent(projectFile) : null;
     return {
@@ -1225,7 +1935,7 @@ export class AppService {
     // Before validating, not after: a document reported field by field and THEN refused for having
     // nowhere to go tells the author to fix the wrong thing. The base layer is always writable —
     // it is the machine's, and `initBase` creates it — so only the project layer can fail here.
-    if (request.layer !== "base" && !this.project) {
+    if (request.layer !== "base" && !this.hasProject) {
       throw new Error("no project is open, so there is no project config to write");
     }
     const current = this.readConfig();
@@ -1247,9 +1957,13 @@ export class AppService {
     // from. Re-layering it here is what makes a settings change take effect now instead of at the
     // next reopen — the settings screen would otherwise answer a save by re-reporting the old
     // configuration, which reads as a write that did not happen.
-    if (this.project) this.project.config = loadLayeredConfig(this.project.paths);
+    for (const open of this.sessions.values()) open.project.config = loadLayeredConfig(open.project.paths);
     this.publish({ type: "store:invalidate", scope: "config" });
     this.publish({ type: "store:invalidate", scope: "workflows" });
+    // The write may have named a credential, moved a server, or turned a route on. Whatever the
+    // settings screen was showing about availability described the configuration BEFORE this, so it
+    // is re-observed rather than left to be corrected by hand.
+    if (this.options.probeOnStart === true) this.kickAvailability();
     return this.readConfig();
   }
 
@@ -1259,12 +1973,112 @@ export class AppService {
    * Health-check the provider routes (DESIGN §8.3) — without calling one.
    *
    * The counterpart of {@link AppService.probeExecutors}, and it follows the same rule for the same
-   * reason: pressing Test must not start a generation. A route has nothing cheap to invoke, so what it
-   * reports is whether a credential resolves and where from — which is exactly the question someone
-   * staring at "no model configured" needs answered.
+   * reason: a check must never start a generation. What it reports is whether a key resolves, whether
+   * a local server ANSWERS, and whether the weights a route names are on disk — everything that can
+   * be observed for nothing, and nothing that costs money.
    */
-  probeModelRoutes(): ProbeResult[] {
-    return probeModelRoutes(this.effectiveConfig().models, this.secretResolver());
+  async probeModelRoutes(): Promise<ProbeResult[]> {
+    return probeModelRoutes(this.effectiveConfig().models, { secrets: this.secretResolver() });
+  }
+
+  /**
+   * What can answer a prompt here, as last observed.
+   *
+   * The CACHED snapshot, deliberately: this is what a settings screen reads when it opens, and a read
+   * that re-ran the checks would make opening the screen the slow thing that pressing a button used
+   * to be. {@link AppService.refreshAvailability} is what makes the cache current, and it runs by
+   * itself — at startup, at project open, and after every configuration write.
+   */
+  readAvailability(): AvailabilitySnapshot {
+    return this.availability;
+  }
+
+  /**
+   * Re-observe everything, and remember it.
+   *
+   * This is the answer to "why did I have to press Test?": the checks that decide whether a provider
+   * or an executor can be used are the same checks that decide what a run picks by default, so they
+   * belong to the app's startup rather than to a button. Cheap ones (an environment variable, a file
+   * on disk) are nearly free; the two that are not (a socket to a local server, `--version` on a
+   * binary) are bounded and run concurrently.
+   *
+   * Concurrent with itself only once: a second call while one is in flight joins the first rather
+   * than starting a second round of connects.
+   */
+  async refreshAvailability(): Promise<AvailabilitySnapshot> {
+    if (this.availabilityRun !== undefined) return this.availabilityRun;
+    const run = this.computeAvailability().finally(() => {
+      this.availabilityRun = undefined;
+    });
+    this.availabilityRun = run;
+    return run;
+  }
+
+  private async computeAvailability(): Promise<AvailabilitySnapshot> {
+    const config = this.effectiveConfig();
+    const secrets = this.secretResolver();
+    const [routes, executors] = await Promise.all([
+      probeModelRoutes(config.models, { secrets }),
+      this.probeExecutors(),
+    ]);
+    // What the DEFAULT executor's tree resolves to, derived from both halves and only here: an
+    // executor whose binary is missing is not a route, which is the difference between "it routes to
+    // claude-cli" and "it routes to claude-cli and the run then fails to start it".
+    const available = new Set(executors.filter((p) => p.status === "ok").map((p) => p.name));
+    const tree = resolveExecutorTree(config.executors[DEFAULT_EXECUTOR], {
+      providers: usableRouteKeys(config.models, secrets),
+      agents: Object.keys(agentPromptRouteNames(config.agents)).filter((name) => available.has(name)),
+    });
+    this.availability = { routes, executors, tree, checkedAt: Date.now() };
+    this.publish({ type: "store:invalidate", scope: "availability" });
+    return this.availability;
+  }
+
+  /**
+   * The default executor's tree, resolved for this configuration and this machine.
+   *
+   * One place, so every UI-initiated operation — starting a task, proposing workflow changes,
+   * summarizing a conversation — gets the SAME executor. They used to build their own from the same
+   * ingredients, which is a coincidence rather than a guarantee.
+   */
+  private defaultTree(
+    config: JairaConfigOf,
+    bundle: WorkflowBundle,
+    fake: boolean,
+    secrets: SecretResolver = this.secretResolver(),
+  ): JairaOperationNode {
+    const available = this.availableExecutors();
+    return defaultExecutorTree(config, bundle, {
+      fake,
+      secrets,
+      ...(available !== undefined ? { available } : {}),
+    });
+  }
+
+  /**
+   * The executors a check has shown to work, or `undefined` when none has run yet.
+   *
+   * `undefined` rather than an empty set, and the difference is the whole contract: an empty set says
+   * "nothing works here" and would refuse every run, where "no check has run" must stay optimistic —
+   * the same rule {@link AppService.stateViewOptions} follows for the same reason.
+   */
+  private availableExecutors(): ReadonlySet<string> | undefined {
+    if (this.availability.checkedAt === 0) return undefined;
+    return new Set(this.availability.executors.filter((p) => p.status === "ok").map((p) => p.name));
+  }
+
+  /**
+   * Start a refresh without waiting for it.
+   *
+   * The callers are lifecycle points — construction, project open, a config write — and none of them
+   * should be held up by a socket timeout. The result reaches the UI through the invalidate the
+   * refresh publishes when it lands, which is the same path every other background change takes.
+   */
+  private kickAvailability(): void {
+    void this.refreshAvailability().catch(() => {
+      // A failed refresh leaves the previous snapshot in place. It is a health check: it must never
+      // be the reason the app fails to start.
+    });
   }
 
   /** Every executor this project could use, enabled or not (DESIGN §8.1). */
@@ -1696,10 +2510,12 @@ export class AppService {
       statesChanged: false,
       changedStates: [],
       suggested: null,
-      ...(this.pendingSync !== undefined ? { pending: this.pendingSync.direction } : {}),
+      ...(this.syncHolder(request.layer).pendingSync !== undefined
+        ? { pending: this.syncHolder(request.layer).pendingSync!.direction }
+        : {}),
     } satisfies WorkflowSyncStatus;
 
-    if (request.layer === "project" && this.project === undefined) {
+    if (request.layer === "project" && !this.hasProject) {
       return { ...base, blocked: "open a project to sync its workflows" };
     }
 
@@ -1775,9 +2591,45 @@ export class AppService {
    * The run is the ordinary engine (`syncWorkflowFiles`), so it obeys the project's model defaults,
    * costs are rolled up, `fake` scripts it with no provider, and it can be canceled.
    */
+  /**
+   * What a sync may CALL — one read-only tool, and nothing else.
+   *
+   * The function registry stays empty: a sync runs no commands and delegates to no agent, so giving
+   * it a registry that could would be a capability nothing in it asks for. What it does get is
+   * `read_file`, because the digest CLIPS a long state (reported in the run's `notes`) and a run that
+   * can open the file it was told about proposes an edit against what is actually there rather than
+   * against a truncation.
+   *
+   * `write_file` and `bash` are deliberately absent. A sync returns text for a person to accept; one
+   * that could touch disk would be a model with commit rights. This is a parameter to `startRun`
+   * rather than something the run assembles, so the refusal is stated where it is enforced.
+   */
+  private syncCapabilities(
+    registry: ReturnType<typeof newRegistry>,
+    source: ReturnType<AppService["syncSource"]>,
+    config: JairaConfigOf,
+  ): void {
+    registry.tools.set(
+      READ_FILE,
+      createReadFileTool({
+        // No artifact store and no destination: nothing is being PLACED, so the read falls through to
+        // the workspace, which is scoped to the workflows directory this sync is answerable for.
+        vars: {
+          taskId: "sync",
+          worktree: source.paths.workflowsDir,
+          project: source.paths.projectDir,
+          jaira: source.paths.jairaDir,
+          artifactDir: config.artifacts.dir,
+        },
+        cwd: source.paths.workflowsDir,
+      }),
+    );
+  }
+
   async runSync(request: WorkflowSyncRequest): Promise<WorkflowSyncResult> {
     const source = this.syncSource(request.layer);
-    if (this.syncRun !== undefined) throw new Error("a sync is already running");
+    const owner = this.syncHolder(request.layer);
+    if (owner.syncTask !== undefined) throw new Error("a sync is already running");
 
     const file = this.layerFile(request.path, request.layer);
     const spec = request.text ?? (existsSync(file) ? readFileSync(file, "utf8") : "");
@@ -1803,62 +2655,91 @@ export class AppService {
     }
 
     const bundle = loadBundle(syncWorkflowFiles(), syncRootId(request.direction));
-    const fakeRules = request.fake !== undefined ? parseFakeRules(request.fake) : undefined;
-    // Every state here is a prompt state, so the registry stays empty: a sync has no tools, runs no
-    // commands and delegates to no agent, and giving it a registry that could would be a capability
-    // nothing in it asks for.
-    // A sync runs no commands and delegates to no agent, so the FUNCTION registry stays empty. What it
-    // does get is `read_file`, and only that: the digest is clipped for a long state (reported in
-    // `notes` below), and a run that can open the file it was told about proposes an edit against what
-    // is actually there rather than against a truncation. `write_file` and `bash` are deliberately
-    // absent — a sync proposes text for a human to accept and must not touch disk.
-    const registry = newRegistry();
-    // The merged configuration, which with no project open is the shared root's own — a base-layer
-    // sync still has to obey the model defaults someone set in `~/.jaira/config.json`.
-    const config = this.effectiveConfig();
-    registry.tools.set(
-      READ_FILE,
-      createReadFileTool({
-        // No artifact store and no destination: nothing is being PLACED, so the read falls through to
-        // the workspace, which is scoped to the workflows directory this sync is answerable for.
-        vars: {
-          taskId: "sync",
-          worktree: source.paths.workflowsDir,
-          project: source.paths.projectDir,
-          jaira: source.paths.jairaDir,
-          artifactDir: config.artifacts.dir,
-        },
-        cwd: source.paths.workflowsDir,
-      }),
-    );
-    const prompt = buildPromptExecutor({
-      ...(fakeRules !== undefined ? { fakeRules } : {}),
-      ...this.promptWiring(config, { fake: fakeRules !== undefined }),
-      defaults: modelDefaults(config, bundle, { fake: fakeRules !== undefined, secrets: this.secretResolver() }),
+    // The configuration the run obeys is the TARGET's — the project whose description this is, or the
+    // shared root's for a base-layer one. Not the recording project's: a project-layer sync journaled
+    // into the system project must still call the model that project asked for, with the credentials
+    // its own `.env` chain resolves. See {@link startRun}.
+    // WHOSE CONFIGURATION governs it — deliberately not where it is recorded (see below). A
+    // base-layer sync resolves the SHARED root's models and the shared root's `.env`, because that
+    // is the library being synced. JaiRA's own project is a bare directory with no credential chain
+    // of its own, so reading configuration out of it would silently fall back to defaults.
+    const target = request.layer === "base" ? this.sessionOf(SHARED_SESSION) : this.sessionOf();
+    // BOTH from the target, or the two disagree. `effectiveConfig()` answers for the FOCUSED project,
+    // so a base-layer sync was resolving a user project's models against the shared root's credentials
+    // — the exact mismatch `startRun`'s contract exists to prevent, reintroduced one level above it.
+    const config = target?.project.config ?? this.effectiveConfig();
+    const secrets = this.secretResolver(target);
+
+    // WHERE THE RUN IS RECORDED. JaiRA's own project, always — so a sync works with no user project
+    // open, and never appears on a board somebody else owns. Without it there is nowhere to journal,
+    // and the run falls back to what it did before it was a task at all.
+    const system = this.sessionOf(SYSTEM_SESSION);
+    if (system === undefined) {
+      // Refused rather than run unrecorded. An unjournaled sync is what this used to be, and its
+      // failures were unreadable — running one anyway would quietly restore that, and the person
+      // would have no way to tell which kind of sync they had just watched fail.
+      throw new Error(`JaiRA's own project could not be opened, so a sync cannot be recorded: ${this.roleError.system}`);
+    }
+
+    this.log({
+      level: "info",
+      source: "sync",
+      message: `proposing ${request.direction === "document" ? "description" : "workflow"} changes for ${request.layer}:${request.path}`,
+      project: system.key,
+      detail: { workflows: digest.roots.length, spec: spec.length },
     });
-    const { modes: _modes, ...session } = sessionServicesFor(bundle, promptSummarizer(prompt));
+    const task = createTask(system.project, {
+      title: `${request.direction === "document" ? "Sync the description" : "Sync the workflows"} · ${request.path}`,
+      workflow: syncRootId(request.direction),
+      inputs: { spec, implementation: digest.markdown },
+      // The layer and the target, so a row in JaiRA's own task list says what it was about. No
+      // `branch`: `createTask` refuses one on a system project, which is what keeps these out of
+      // anybody's worktrees.
+      labels: ["jaira", "sync", request.direction, request.layer],
+    });
 
-    const abort = new AbortController();
-    this.syncRun = abort;
-    let result;
+    // Claimed and released in ONE try/finally around everything that can throw. Set outside it, the
+    // marker leaked on any failure between here and the await — `startRun` refuses a capability gate,
+    // `beginTaskRun` refuses a bundle — and that layer then reported "a sync is already running" for
+    // the life of the process, with no way to clear it.
+    owner.syncTask = task.id;
+    let started: { taskId: string; runId: number };
     try {
-      result = await executeWorkflow({
+      started = await this.startRun(system, task.id, {
+        config,
+        secrets,
         bundle,
-        inputs: { spec, implementation: digest.markdown },
-        registry,
-        prompt,
-        session,
-        abortSignal: abort.signal,
+        // The workspace is the workflows directory this sync is answerable for — NOT the system
+        // project's own directory, which is where `ensureWorkspace` would have pointed it.
+        workspace: { root: source.paths.workflowsDir, isWorktree: false },
+        capabilities: (registry) => this.syncCapabilities(registry, source, config),
+        ...(request.fake !== undefined ? { fake: request.fake } : {}),
       });
+      // The run is a task now, so waiting for it is waiting for its live entry to settle.
+      // `workflow:sync` stays blocking on purpose: the panel, the IPC contract and the result shape are
+      // unchanged, and what it gains is a journal, a live event stream and a row to go back to.
+      await system.live.get(task.id)?.done;
     } finally {
-      this.syncRun = undefined;
-    }
-    if (statusOfResult(result) !== "completed") {
-      const failure = "error" in result ? result.error : undefined;
-      throw new Error(failure?.reason ?? "the sync did not finish");
+      owner.syncTask = undefined;
     }
 
-    const outcome = syncOutcomeOf(result.value, request.direction);
+    const run = system.project.runtime.listRuns(task.id).at(-1);
+    if (run?.outcome !== "success") {
+      // The operation-level reasons, out of the journal this run now keeps — the same thing
+      // `jaira task start` prints, rather than the parent composite's view of its child. This is what
+      // the run's own `InMemoryPersistence` was standing in for before it had somewhere to write.
+      const causes = runCauses(system.project, task.id, started.runId).map((c: { stateId: string; reason: string }) => `${c.stateId}: ${c.reason}`);
+      const failure = run?.failureJson === undefined ? undefined : (JSON.parse(run.failureJson) as { reason?: string });
+      throw new Error(causes.length > 0 ? causes.join("; ") : (failure?.reason ?? "the sync did not finish"));
+    }
+
+    const outcome = syncOutcomeOf(
+      run.outputsJson === undefined ? undefined : (JSON.parse(run.outputsJson) as JsonValue),
+      request.direction,
+    );
+    // Summed from the journal rather than read off the result: the run settled into the database, and
+    // its spend is the roll-up of what each operation reported.
+    const costUsd = runCostUsd(system.project, task.id, started.runId);
     // A clipped state is evidence the run did not see in full, and the caller must be told rather
     // than shown a proposal that quietly ignored half a workflow.
     const notes = [
@@ -1875,7 +2756,7 @@ export class AppService {
       findings: outcome.findings,
       extras: outcome.extras,
       verdict,
-      ...(result.metrics.costUsd !== undefined ? { costUsd: result.metrics.costUsd } : {}),
+      ...(costUsd !== undefined ? { costUsd } : {}),
     };
 
     if (request.direction === "document") {
@@ -1919,8 +2800,14 @@ export class AppService {
 
   /** Abort a sync in flight. False when there was nothing running. */
   cancelSync(): { canceled: boolean } {
-    if (this.syncRun === undefined) return { canceled: false };
-    this.syncRun.abort();
+    // Whichever holder has one in flight. The renderer sends no layer here, and a sync is one at a
+    // time per holder, so "the one running" is unambiguous without being told.
+    const running = this.syncHolders().filter((h) => h.syncTask !== undefined);
+    if (running.length === 0) return { canceled: false };
+    const system = this.sessionOf(SYSTEM_SESSION);
+    // Cancelled as the TASK it is, so the row settles as `canceled` and the claim is released —
+    // rather than aborting the work and leaving the record saying it is still going.
+    for (const holder of running) if (system !== undefined) this.cancelTaskIn(system, holder.syncTask!);
     return { canceled: true };
   }
 
@@ -2032,7 +2919,28 @@ export class AppService {
     layer: WorkflowLayer,
     targets: string[],
   ): void {
-    this.pendingSync = { direction, document, layer, remaining: new Set(targets) };
+    this.syncHolder(layer).pendingSync = { direction, document, layer, remaining: new Set(targets) };
+  }
+
+  /**
+   * Where a description's in-flight sync state lives — the holder that owns the DOCUMENT.
+   *
+   * A base-layer description belongs to the shared root, which is the system project — so its
+   * proposal survives a user project being switched underneath it, which it did not when this was one
+   * field on the service.
+   *
+   * {@link detachedSync} is the fallback for one case only: a machine where the system project could
+   * not be opened at all (see {@link roleError}). The shared root is still syncable there, in
+   * memory, exactly as it was before it had a database.
+   */
+  private syncHolder(layer: WorkflowLayer): SyncHolder {
+    const session = layer === "base" ? this.sessionOf(SYSTEM_SESSION) : this.sessionOf();
+    return session ?? this.detachedSync;
+  }
+
+  /** Every holder a write could settle a proposal in. */
+  private syncHolders(): SyncHolder[] {
+    return [...this.sessions.values(), this.detachedSync];
   }
 
   /**
@@ -2043,12 +2951,16 @@ export class AppService {
    * them with a baseline that can never be reached except by accepting a proposal verbatim.
    */
   private noteSyncWrite(layer: WorkflowLayer, path: string): void {
-    const pending = this.pendingSync;
-    if (pending === undefined) return;
-    if (!pending.remaining.delete(docKey(layer, path))) return;
-    if (pending.remaining.size > 0) return;
-    this.pendingSync = undefined;
-    this.commitSyncRecord(pending.direction, pending.document, pending.layer);
+    // Every session's, because a write names a layer and a path but not whose proposal it settles —
+    // and a base-layer document's proposal is owned by a different session than a project file's.
+    for (const holder of this.syncHolders()) {
+      const pending = holder.pendingSync;
+      if (pending === undefined) continue;
+      if (!pending.remaining.delete(docKey(layer, path))) continue;
+      if (pending.remaining.size > 0) continue;
+      holder.pendingSync = undefined;
+      this.commitSyncRecord(pending.direction, pending.document, pending.layer);
+    }
   }
 
   /**
@@ -2172,7 +3084,7 @@ export class AppService {
    * so it is worth saying out loud rather than implying the check always ran.
    */
   private referrersOf(stateId: string): string[] {
-    if (!this.project) return [];
+    if (!this.hasProject) return [];
     try {
       return stateView(this.p, stateId, this.browseWorkflows(), this.stateViewOptions()).referencedBy;
     } catch {
@@ -2197,7 +3109,7 @@ export class AppService {
    * about a broken workflow is a run that failed to load.
    */
   private brokenBy(states: string[]): string[] {
-    if (!this.project || states.length === 0) return [];
+    if (!this.hasProject || states.length === 0) return [];
     const moving = new Set(states);
     const broken = new Set<string>();
     for (const entry of this.browseWorkflows().files) {
@@ -2311,39 +3223,56 @@ export class AppService {
    * A scripted run gets none of it: the fake executor answers everything and building a real transport
    * beside it would be spawning nothing useful.
    */
-  private promptWiring(config: JairaConfigOf, opts: { fake?: boolean } = {}): {
+  private promptWiring(
+    config: JairaConfigOf,
+    opts: { fake?: boolean; memoCache?: MemoCache; secrets?: SecretResolver } = {},
+  ): {
     router?: ReturnType<typeof modelRouterOptions>;
     routes?: ReturnType<typeof agentPromptRoutes>;
     configs?: { get(id: string): Record<string, JsonValue> | undefined };
+    definitions?: JairaConfigOf["executors"];
+    memoCache?: MemoCache;
   } {
     if (opts.fake) return {};
     const presets = config.models.presets;
     return {
-      router: modelRouterOptions(config.models, this.secretResolver()),
+      router: modelRouterOptions(config.models, opts.secrets ?? this.secretResolver()),
       routes: agentPromptRoutes(config.agents, { execEnv: config.execEnvironment }),
       ...(presets !== undefined ? { configs: { get: (id: string) => presets[id] } } : {}),
+      // The named stacks. Each becomes a route keyed by its name, so a state naming `review/…` gets
+      // the executor this project built rather than whatever the prefix would otherwise have meant.
+      ...(Object.keys(config.executors).length > 0 ? { definitions: config.executors } : {}),
+      ...(opts.memoCache !== undefined ? { memoCache: opts.memoCache } : {}),
     };
   }
 
   /** The merged configuration, or plain defaults when no project is open. */
   private effectiveConfig(): JairaConfigOf {
-    if (this.project) return this.project.config;
+    const open = this.sessionOf();
+    if (open) return open.project.config;
     const doc = readJsonIfPresent(jairaBasePaths(this.baseDir).configFile);
     return parseConfig(doc ?? {});
   }
 
-  private secretResolver(): SecretResolver {
+  /**
+   * The secret chain, anchored on one project.
+   *
+   * `target` names WHOSE `.env` chain is searched, which is not always the project a run is recorded
+   * in: a system run syncing a user project's description resolves that project's credentials, not
+   * the shared root's. Absent ⇒ the focused project, which is every ordinary caller.
+   */
+  private secretResolver(target?: ProjectSession): SecretResolver {
     const keychain = this.options.keychain;
+    const anchor = target ?? this.sessionOf();
     return new SecretResolver({
-      ...(this.project !== undefined ? { projectDir: this.project.paths.projectDir } : {}),
+      ...(anchor !== undefined ? { projectDir: anchor.dir } : {}),
       baseDir: this.baseDir,
       ...(keychain?.available() === true ? { keychain: (name: string) => keychain.get(name) } : {}),
     });
   }
 
   private requireProject(): Project {
-    if (!this.project) throw new Error("no project is open");
-    return this.project;
+    return this.session().project;
   }
 
   private requireProjectDir(): string {
@@ -2402,4 +3331,57 @@ function writeEnvEntry(file: string, name: string, value: string): void {
   const text = remaining.filter((line, i) => !(line === "" && i === remaining.length - 1)).join("\n");
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, text.length > 0 ? `${text}\n` : "", "utf8");
+}
+
+/**
+ * A stored record's messages, as turns the viewer can render.
+ *
+ * Kept close to what the provider returned: `content` is a string for an ordinary turn and an array
+ * of parts (text, tool calls, tool results, reasoning) for an agent's. Text is lifted out because
+ * every viewer wants it; the rest is passed through structured, because pairing a tool call with its
+ * result is the viewer's job and flattening it here would make that impossible.
+ */
+function turnsOf(value: JsonValue | undefined): SessionTurn[] {
+  const messages = messagesOfRecord(value);
+  return messages.map((raw) => {
+    const message = (raw ?? {}) as { role?: unknown; content?: unknown };
+    const role = typeof message.role === "string" ? message.role : "assistant";
+    if (typeof message.content === "string") return { role, text: message.content };
+    const parts = Array.isArray(message.content) ? message.content : [];
+    const text = parts
+      .filter((p): p is { type: string; text: string } => (p as { type?: unknown })?.type === "text" && typeof (p as { text?: unknown }).text === "string")
+      .map((p) => p.text)
+      .join("");
+    return {
+      role,
+      ...(text.length > 0 ? { text } : {}),
+      ...(parts.length > 0 ? { parts: parts as JsonValue } : {}),
+    };
+  });
+}
+
+/**
+ * The token counts and cost provenance off one `operation.completed`.
+ *
+ * Read defensively, field by field: `metrics` is an open record written by whichever executor ran,
+ * and different ones report different subsets — the Claude Code CLI reports a cost it was told by
+ * the provider, codex reports tokens and deliberately no cost at all. Absent stays absent rather
+ * than becoming zero, because "not reported" and "none" are different claims and the panel says so.
+ */
+function runMetricsOf(metrics: unknown): RunMetrics | undefined {
+  if (metrics === null || typeof metrics !== "object") return undefined;
+  const m = metrics as Record<string, unknown>;
+  const num = (key: string): number | undefined => (typeof m[key] === "number" ? (m[key] as number) : undefined);
+  const source = m["costSource"];
+  const out: RunMetrics = {
+    ...(source === "provider" || source === "table" || source === "unknown" ? { costSource: source } : {}),
+    ...(num("inputTokens") !== undefined ? { inputTokens: num("inputTokens")! } : {}),
+    ...(num("outputTokens") !== undefined ? { outputTokens: num("outputTokens")! } : {}),
+    ...(num("noCacheTokens") !== undefined ? { noCacheTokens: num("noCacheTokens")! } : {}),
+    ...(num("cacheReadTokens") !== undefined ? { cacheReadTokens: num("cacheReadTokens")! } : {}),
+    ...(num("cacheWriteTokens") !== undefined ? { cacheWriteTokens: num("cacheWriteTokens")! } : {}),
+    ...(num("reasoningTokens") !== undefined ? { reasoningTokens: num("reasoningTokens")! } : {}),
+    ...(num("durationMs") !== undefined ? { durationMs: num("durationMs")! } : {}),
+  };
+  return Object.keys(out).length > 0 ? out : undefined;
 }

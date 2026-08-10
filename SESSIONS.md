@@ -1,7 +1,33 @@
 # Sessions — Append-Only Conversation Streams with Forking
 
-**Status: BUILT.** All nine steps of §15 are implemented and green — `declarative-ai` on branch
-`sessions/append-only-streams`, JaiRA on `claude/brave-antonelli-dbc5ac`.
+**Status: BUILT, and now DURABLE on both sides.** The upstream half landed on `main`; the JaiRA half
+did not, so for a while every run built a `MapSessionStore`, wrote every model call into it complete,
+and dropped the lot when the process exited. `packages/persistence/src/sessionStore.ts` is §9's tables
+made real, passed as the `inner` seam `sessionServicesFor` had always taken and never been given.
+
+Four things the implementation found that this document did not anticipate:
+
+- **The journal already carried the join.** §9 assumed a state had to be linked to its conversation by
+  something new. It does not: `withSessionPosition` reports the position a call ENDED at on
+  `ExecMetrics.sessionRef`, and hw puts those metrics on `operation.completed`. A generated column over
+  the payload makes it queryable; nothing new is recorded. See `stateSessions`.
+- **`withMetrics` dropped the session outcome.** Any wrapper that re-reports metrics rebuilt the result
+  without it, so a delegated agent's `providerSessionId` never reached the store and every "resume"
+  silently opened a fresh remote conversation. Fixed upstream in `exec/handles.ts`.
+- **A session id is not unique across runs.** Instance-scoped ids (`#i2`) restart at 1 every run, which
+  costs nothing while the store dies with the run and is catastrophic once it does not: run 2 continued
+  run 1's conversation and read its whole transcript back as a preamble. The run is part of the store's
+  key — see `SessionScope`.
+- **"The response IS the delta" is true only in RECORD mode, and JaiRA was not in it.** A prompt
+  executor's default is to project the `LlmOutput` down to the op's output value inside the call, so
+  the payload the record was supposed to store no longer existed by the time `withRecord` saw it.
+  Every real run wrote a position holding the answer and no messages; only the scripted fake, which
+  reports on the `SessionOutcome` channel, ever produced a transcript — so the whole suite passed
+  while nothing a person actually ran had a conversation to read. **Fixed upstream**: a value-mode
+  core now reports what it appended on that same channel, gated on `ctx.session` (see §6, AS BUILT).
+
+§12's flat-`Turn` filter in `SummarizingSessionStore` is still outstanding: an agent's real
+`ModelMessage[]` does not match it, so those conversations never compact.
 
 The **model** below held up in full: positions, forking, copy-on-write lineage, per-operation
 granularity, compaction and resync as new sessions rather than rewrites. Four things about the
@@ -257,17 +283,40 @@ withMemoize( withSessionPosition( withRecord( core ) ) )
 | --- | --- | --- |
 | `withSessionPosition` | `exec` | Resolve `ctx.sessionRequest` → `ctx.session`; fork on `PositionTaken`; detect divergence (§11); report the effective END position |
 | `withRecord` | `exec` | Claim the position by writing a stub; fill it in on success AND failure |
-| `withSession` | `promptop` | The above, plus the two things only the llm layer knows: reading a session out of an op's config, and projecting an `LlmOutput` back down |
+| `withSession` | `promptop` | The POSITION row again — an ALTERNATIVE to `withSessionPosition`, not a superset — reading its request from the op's config instead of from `ctx`, and adding the one thing only the llm layer knows: projecting an `LlmOutput` back down |
 | Executor | — | Shape the request, perform the fork, report the handle it ended in |
+
+The two position layers answer to two different request channels, and only one of them is JaiRA's.
+`withSession` fires only when `op.config` names a `sessionId` or a `providerSessionId`; hw states
+`ctx.sessionRequest` instead and deliberately puts no session id in the op, so `withSession` composed
+here passes every op straight through. It is also prompt-only (`isPrompt`), where a delegated agent is
+a FUNCTION op and needs a session exactly as much, and it has no divergence check. `withRecord` is
+neither of them and is what actually writes rows; both position layers expect it composed inside.
+
+`withSessionPosition` is therefore richer on every axis but ONE — the projection, which exec cannot own
+because the value/record distinction is the llm layer's. That single missing half is the whole of the
+bug below.
 
 **Why the policy is in `exec` and not `promptop`.** `hw` is where the request comes from, and it
 cannot depend on `promptop`. A delegated agent needs resolution and forking exactly as much as a
 prompt op does, so putting them in the llm layer would have left the one runtime with a native fork
 primitive unable to reach it.
 
-**Two seams, not one.** `ctx.sessionRequest` is what the caller WANTS — which conversation, whether
-to branch. `ctx.session` is where it resolved to. A requester knows the first and must not know the
-second, because only the store knows where a conversation currently is.
+**Two seams, not one — AS BUILT, one.** The model was `ctx.sessionRequest` (what the caller wants:
+which conversation, whether to branch) resolved by a layer below into `ctx.session` (where it landed),
+on the principle that a requester must not claim to know where a conversation currently sits.
+
+The principle holds; the second seam does not. `hw` resolves in `servicesFor`, immediately before
+dispatch, and publishes only the POSITION. That is not claiming anything — nothing is stored, nothing
+is guessed, and the answer is a frame old rather than a stack-depth old. What it buys is that the
+services bundle carries what an executor NEEDS to make the call: a provider handle and an append/fork
+decision are session facts a prompt call consumes; a request is not. `ExecServices.sessionRequest` and
+`ExecServices.sessions` are both gone — the store is the engine's own dependency (`EngineConfig`), and
+a host composing a session layer hands that layer its own reference at construction.
+
+The fork-on-`PositionTaken` retry still has to re-resolve mid-flight, which needed the request's
+`seed`. That now rides on `ResolvedSession.seed`, so the resolution is self-sufficient and the request
+does not have to survive alongside it.
 
 The decision reaches the executor via **`ExecServices`**, not by rewriting the op's config, which is
 what hardcoded replay and forced `providerSessionId` to be refused outright.
@@ -277,6 +326,28 @@ op's output value exists so everything above the executor speaks one vocabulary.
 RESULT it destroys the payload a session needs, and the layer that wanted it then has to smuggle it
 back down — which is exactly how the `report` callback got invented. The core runs in record mode and
 `withSession` projects on its way out, being the last layer that wants the payload.
+
+**AS BUILT a VALUE-mode core reports the delta, so the projection layer is not needed at all.** The
+paragraph above describes the `withSession` path. A host that composes exec's `withSessionPosition`
+instead — which is every host, because `hw` states a REQUEST on `ctx.sessionRequest` rather than
+putting a session id in the op's config — has no layer holding the payload, since `withSessionPosition`
+lives in `exec` and cannot know what an `LlmOutput` is. So every prompt leaf ran in the DEFAULT value
+mode, the projection happened inside the call, and `withRecord` stored `{"greeting":"Hello, world!"}`
+with no messages: every transcript empty, and `external_id` null on every row, so nothing could be
+resumed by handle either.
+
+The fix is in `PromptExecutor.run`'s value-mode path: when `ctx.session` is present — which means a
+position layer is composed, which means `withRecord` is beneath it — it reports `messages` and
+`providerSessionId` on the declared `SessionOutcome` channel. That channel already existed for an
+executor whose payload is not itself a conversation; `withMetrics` already carries it across a retry,
+`withMemoize` already strips it on a replay, and both session stores already read it. Nothing new was
+added: the proviso on "the response IS the delta" — *provided the core runs in record mode* — was
+simply never enforced.
+
+⚠️ `close()` in both stores now prefers the PAYLOAD when it already carries messages. Preferring the
+report unconditionally was safe only while a record-mode core reported nothing; with both channels
+populated it would replace an `LlmOutput` with a bare `{ messages }` and discard the `thinking` and
+tool trace that record mode exists to keep.
 
 `withSessionPosition` forces `sessionResume: true` in `capabilitiesFor` so an outer `withMemoize`
 refuses to cache. A memoize composed INSIDE it keys on `id@position` (§6, Memoization).
@@ -351,11 +422,16 @@ Consequences:
   exchanged plus the provider's own identifiers. This inverts who owns transcript content and is the
   single largest change in this document.
 
-  **AS BUILT there is no channel for that report, because none is needed.** The RESPONSE is the delta:
-  a prompt op's payload is an `LlmOutput` carrying `messages` verbatim, and the record stores that
-  payload. A `SessionOutcome` channel exists only for an executor whose payload is NOT already a
-  conversation — a delegated agent answers with text and keeps its transcript server-side, so it
-  reports what it added and, critically, the provider session id it ended in.
+  **AS BUILT there is no channel for that report, because none is needed** — *provided the core runs
+  in record mode.* The RESPONSE is the delta: a prompt op's payload is an `LlmOutput` carrying
+  `messages` verbatim, and the record stores that payload. A `SessionOutcome` channel exists for an
+  executor whose payload is NOT already a conversation — a delegated agent answers with text and keeps
+  its transcript server-side, so it reports what it added and, critically, the provider session id it
+  ended in.
+
+  That proviso is doing real work, and JaiRA lost it: a VALUE-mode core has already thrown the payload
+  away by the time the record is written, so "no channel is needed" became "no conversation is kept".
+  JaiRA's leaves now run in record mode and report on the channel anyway — see §6, AS BUILT.
 - **ONE OPERATION IS ONE ENTRY.** This section originally said an operation appends many entries and
   that `[0:14]` counts ours rather than the provider's. As built the unit is the RECORD: a call that
   produced six turns advances a conversation by one, and `[0:14]` means "after fourteen calls". That

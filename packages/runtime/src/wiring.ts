@@ -26,6 +26,7 @@ import {
 } from "@declarative-ai/exec";
 import {
   createWorkflowExecutor,
+  type EngineEvent,
   type Persistence,
   type CallCache,
   type WorkflowBundle,
@@ -44,9 +45,18 @@ import {
   type RecordStore,
 } from "@declarative-ai/exec";
 import type { Approver, ExecPolicy } from "@declarative-ai/permissions";
-import type { JairaConfig } from "@jaira/shared";
+import {
+  DEFAULT_EXECUTOR,
+  resolveExecutorTree,
+  unnamedModelAnswer,
+  type JairaConfig,
+  type JairaOperationNode,
+  type JairaPromptNode,
+} from "@jaira/shared";
 import { ScriptedFakeExecutor, type FakeRule } from "./fakeExecutor";
-import { defaultModelId } from "./modelRoutes";
+import { buildPromptTree } from "./executorTree";
+import { agentPromptRouteNames, usableRouteKeys } from "./modelRoutes";
+import type { StackedExecutor } from "./executorStack";
 import type { SecretResolver } from "./secrets";
 
 export type WorkflowExecResult = ExecResult<ResolvedValue, WorkflowMetrics>;
@@ -88,8 +98,14 @@ export const DEFAULT_REPAIR_TURNS = 2;
 export interface PromptExecutorOptions {
   /** Scripted rules ⇒ a fake prompt executor instead of a real provider. */
   fakeRules?: FakeRule[];
-  /** Model defaults from project config — the `ConfigLayer` a state's own config merges over. */
-  defaults?: Record<string, JsonValue>;
+  /**
+   * The RESOLVED executor tree — every level, already derived from what is available.
+   *
+   * Absent ⇒ a bare router, which is what a caller with no configuration at all should get. Its
+   * `defaults` are what a state with no model of its own is filled in from, applied BEFORE dispatch
+   * (see `executorTree.ts` — a default applied at the leaf cannot influence routing).
+   */
+  tree?: JairaPromptNode;
   /** Named presets (`config.models.presets`), selected per state by `operation.configRef`. */
   configs?: { get(id: string): Record<string, JsonValue> | undefined };
   /** How each provider route is reached (`config.models.routes`), credentials already resolved. */
@@ -111,18 +127,37 @@ export interface PromptExecutorOptions {
    * is a legitimate but much larger claim about when two pieces of work are the same.
    */
   memo?: { cache: MemoCache; namespace: string };
+  /** Where a `memoize` step stores answers. Absent ⇒ that step is skipped and reported. */
+  memoCache?: MemoCache;
 }
 
 /**
- * The executor a state's `PromptOp` dispatches to. Real runs wrap the prompt
- * executor in `withRetry` so a schema-invalid draw is repaired with feedback
- * (DESIGN §7.5) rather than failing the state on the first bad parse; scripted
- * runs need neither retries nor a provider.
+ * The executor a state's `PromptOp` dispatches to — the prompt half of a resolved tree.
+ *
+ * It used to assemble the tree by hand: a provider leaf, a router over the configured agents, a
+ * repair loop and an optional memo, all in a fixed shape nothing could change. Now the SHAPE is the
+ * `tree` option, resolved from configuration (`@jaira/shared`'s `resolveExecutorTree`), and this only
+ * builds what it was given. What is left here is the one thing that is not configuration: the
+ * built-in repair loop, which stays because a schema-invalid draw should be repaired by default and
+ * a project that has never opened the settings screen still deserves that.
  */
 export function buildPromptExecutor(options: PromptExecutorOptions = {}): Executor<ExecServices, WorkflowMetrics> {
-  const base = options.fakeRules
-    ? (new ScriptedFakeExecutor(options.fakeRules) as Executor<ExecServices, WorkflowMetrics>)
-    : repairing(promptRouter(options) as unknown as Executor<ExecServices, WorkflowMetrics>, options.repairTurns ?? DEFAULT_REPAIR_TURNS);
+  const fake = options.fakeRules
+    ? new ScriptedFakeExecutor(options.fakeRules)
+    : undefined;
+  const tree = options.tree ?? { kind: "router" as const };
+  const prompt = buildPromptTree(fake === undefined ? tree : { kind: "router" }, {
+    ...(options.router !== undefined ? { router: options.router } : {}),
+    ...(options.configs !== undefined ? { configs: options.configs } : {}),
+    ...(options.routes !== undefined ? { agents: options.routes as Record<string, StackedExecutor> } : {}),
+    ...(options.memoCache !== undefined ? { memoCache: options.memoCache } : {}),
+    ...(fake !== undefined ? { fakePrompt: fake } : {}),
+  });
+
+  const base = repairing(
+    fake ?? prompt,
+    options.repairTurns ?? DEFAULT_REPAIR_TURNS,
+  );
   if (options.memo === undefined) return base;
   // OUTSIDE the repair loop, so the key is the op as ASKED — one entry per logical request, and a
   // later identical request skips the whole loop rather than replaying it. Inside would key each
@@ -133,40 +168,14 @@ export function buildPromptExecutor(options: PromptExecutorOptions = {}): Execut
   // dropping a configured one is how a wiring bug survives every test that uses the fake.
   return withMemoize(
     { cache: options.memo.cache, namespace: options.memo.namespace },
-    base as unknown as Executor,
-  ) as unknown as Executor<ExecServices, WorkflowMetrics>;
-}
-
-/**
- * The prompt leaf: a provider executor, plus every configured agent, chosen by the model's prefix.
- *
- * Composed as ONE object rather than branched on at each call site, because the choice is per-STATE:
- * one workflow can have a state on `anthropic/claude-sonnet-5` beside one on `claude-cli/sonnet`, and
- * the run should not have to be told which kind it is. `PromptRouterExecutor` reads the prefix and
- * hands the op to the matching executor with the id untouched.
- *
- * The provider executor is the FALLBACK rather than a route entry, deliberately: it owns every prefix
- * `MODEL_ROUTES` knows and produces the authoritative error for one it does not. Listing those prefixes
- * here would be a second copy of a list that lives upstream, and copies drift.
- */
-function promptRouter(options: PromptExecutorOptions): Executor<ExecServices, WorkflowMetrics> {
-  const provider = createPromptExecutor({
-    router: createModelRouter(options.router ?? {}),
-    ...(options.defaults !== undefined ? { defaults: options.defaults } : {}),
-    ...(options.configs !== undefined ? { configs: options.configs } : {}),
-  }) as unknown as Executor<ExecServices, WorkflowMetrics>;
-  const routes = options.routes ?? {};
-  if (Object.keys(routes).length === 0) return provider;
-  return new PromptRouterExecutor({
-    routes: routes as never,
-    fallback: provider as never,
-  }) as unknown as Executor<ExecServices, WorkflowMetrics>;
+    base,
+  );
 }
 
 /** Bounded output repair (DESIGN §7.5) — off when `turns` is 0. */
 function repairing(core: Executor<ExecServices, WorkflowMetrics>, turns: number): Executor<ExecServices, WorkflowMetrics> {
   return turns > 0
-    ? (withRetry({ validation: { turns, feedback: true } }, core) as unknown as Executor<ExecServices, WorkflowMetrics>)
+    ? withRetry({ validation: { turns, feedback: true } }, core)
     : core;
 }
 
@@ -244,17 +253,29 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
   // record would be written before anything decided where it belongs.
   //
   // exec's position layer rather than promptop's `withSession`, because the engine states
-  // a REQUEST on `ctx.sessionRequest` rather than putting a session id in the op's config —
-  // it cannot know where a conversation currently is, and deliberately does not. `withSession`
-  // reads the op config, so composed here it would find nothing and silently do nothing.
+  // a RESOLVED POSITION on `ctx.session` rather than putting a session id in the op's config.
+  // `withSession` reads the op config, so composed here it would find nothing and do nothing.
   //
   const prompt =
     cfg.session !== undefined
-      ? (withSessionPosition(
+      ? withSessionPosition(
           { sessions: cfg.session.sessions },
-          withRecord({ records: cfg.session.records }, cfg.prompt as never),
-        ) as unknown as Executor<ExecServices, WorkflowMetrics>)
+          withRecord({ records: cfg.session.records }, cfg.prompt),
+        )
       : cfg.prompt;
+  // ORDERING, since it looks inverted against SESSIONS.md §6's `withMemoize(withSessionPosition(...))`:
+  // the memo sits INSIDE both session layers, and that is the only legal place for it. An outer
+  // memoize refuses a session layer outright — `withSessionPosition` forces `sessionResume: true` into
+  // `capabilitiesFor`, and `withMemoize` answers that with `SESSION_REFUSAL` on every op — because a
+  // hit would replay a stale position. Composed inside, it sees the RESOLVED session and keys on it,
+  // which is the supported arrangement.
+  //
+  // The consequence worth knowing: `withRecord` claims the position BEFORE the memo is consulted, so a
+  // cache HIT still writes a record — and `withMemoize` strips the session outcome from a replay, so
+  // that record holds no messages. That is coherent rather than broken: the provider never saw the
+  // call, so the conversation gains no turns, and the record marks a position that was consumed. It
+  // does mean a memoized turn reads as a gap in the transcript, which is the honest depiction of a
+  // turn that never happened.
   // …and the SAME stack around the DISPATCHER, because a state's prompt op and a state's function op
   // reach the executor by two different routes: a prompt op goes straight to `config.prompt`, while a
   // function op — every DELEGATED AGENT — goes through the dispatcher. With the layer on the prompt
@@ -267,7 +288,7 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
   const operations =
     cfg.session !== undefined
       ? sessionedDispatcher(
-          createOperationExecutor({ functions: cfg.registry.functions as never, prompt: cfg.prompt as never }),
+          createOperationExecutor({ functions: cfg.registry.functions, prompt: cfg.prompt }),
           cfg.session,
         )
       : undefined;
@@ -279,6 +300,10 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     registry: cfg.registry,
     prompt,
     ...(operations !== undefined ? { operations } : {}),
+    // The store as ENGINE config, because the engine is what resolves each operation's position now —
+    // it used to be published on every child's services and looked up by a layer below. Nothing below
+    // needs the store: what reaches an executor is the position it resolved to.
+    ...(cfg.session !== undefined ? { sessions: cfg.session.sessions } : {}),
     ...(cfg.callCache !== undefined ? { callCache: cfg.callCache } : {}),
     ...(cfg.persistence !== undefined ? { persistence: cfg.persistence } : {}),
   });
@@ -288,7 +313,6 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     ...(cfg.workspace !== undefined ? { workspace: cfg.workspace } : {}),
     ...(cfg.policy !== undefined ? { policy: cfg.policy } : {}),
     ...(cfg.approve !== undefined ? { approve: cfg.approve } : {}),
-    ...(cfg.session !== undefined ? { sessions: cfg.session.sessions } : {}),
   };
   return executor.start(workflowStartOp(cfg.inputs), ctx).result;
 }
@@ -297,7 +321,7 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
  * The dispatcher with a session layer that engages only for a call the engine PLACED in a
  * conversation.
  *
- * `ctx.sessionRequest` is exactly that signal: hw states one for a prompt op and for a runtime that
+ * `ctx.session` is exactly that signal: hw resolves one for a prompt op and for a runtime that
  * declares `sessionResume`, and for nothing else. Wrapping unconditionally would be wrong in a way
  * that is easy to miss — `withRecord` records every call it sees, keyed by content hash when there is
  * no position, so every pure helper and every embedded call would start writing rows into the store
@@ -307,13 +331,13 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
  * from doing the opposite.
  */
 function sessionedDispatcher(
-  dispatcher: Executor,
+  dispatcher: Executor<ExecServices, WorkflowMetrics>,
   session: { sessions: SessionStore<JsonValue>; records: RecordStore },
 ): Executor<ExecServices, WorkflowMetrics> {
   const sessioned = withSessionPosition(
     { sessions: session.sessions },
     withRecord({ records: session.records }, dispatcher),
-  ) as unknown as Executor;
+  );
   return {
     capabilities: dispatcher.capabilities,
     metrics: dispatcher.metrics,
@@ -321,8 +345,8 @@ function sessionedDispatcher(
       ? { capabilitiesFor: (op: Operation<InlineFamily>) => dispatcher.capabilitiesFor!(op) }
       : {}),
     start: (op: Operation<InlineFamily>, ctx: ExecServices) =>
-      (ctx.sessionRequest !== undefined ? sessioned : dispatcher).start(op, ctx),
-  } as unknown as Executor<ExecServices, WorkflowMetrics>;
+      (ctx.session !== undefined ? sessioned : dispatcher).start(op, ctx),
+  };
 }
 
 /** Collapse a result into the task-status vocabulary. */
@@ -331,38 +355,182 @@ export function statusOfResult(result: WorkflowExecResult): "completed" | "faile
   return result.error.classification === "canceled" ? "canceled" : "failed";
 }
 
+/** One thing that actually went wrong, and the state it went wrong in. */
+export interface RunCause {
+  stateId: string;
+  reason: string;
+}
+
 /**
- * Provider/model defaults for real (non-fake) runs, from project config.
+ * The operation-level reasons a run failed, innermost first.
  *
- * This used to REFUSE any prompt-bearing workflow whose config named no `models.default`, which was
- * right about the mechanism and wrong about the world: a prompt op does need something to dispatch on,
- * but "something" no longer has to be a provider. An installed `claude` needs no key, no endpoint and
- * no configuration, so a machine that can obviously run the workflow was being told it could not.
+ * A composite workflow reports the PARENT's view of a failure — "child 'requirements' terminated with
+ * error and no transition handled it" — which names the state that noticed and says nothing about
+ * what broke. The reason is in the event stream, and this is how it is got out of one.
  *
- * {@link defaultModelId} therefore CHOOSES rather than demanding: a configured provider route first
- * (someone who set up a key meant to use it), then an enabled agent. The refusal survives for the one
- * case that really is unrunnable — no route, no agent, and no state naming a model — and now names
- * both fixes instead of only the one.
+ * The rows are `Persistence`'s, so an `InMemoryPersistence` handed to {@link executeWorkflow} can be
+ * read directly. `@jaira/persistence`'s `runCauses` answers the same question over the SQLite journal
+ * a task run writes; this is for a run that keeps no journal, which is every run the app starts
+ * outside a task.
  */
-export function modelDefaults(
+export function causesOfEvents(rows: readonly { event: EngineEvent }[]): RunCause[] {
+  // Per INSTANCE, last word wins. A failure a transition handled is not a cause of anything: an
+  // authored retry that fails once and then succeeds would otherwise be named in the run's reason
+  // alongside whatever actually went wrong, blaming a state that recovered.
+  const byInstance = new Map<number, RunCause | undefined>();
+  const order: number[] = [];
+  for (const { event } of rows) {
+    const at = (event as { instanceId?: number }).instanceId;
+    if (at === undefined) continue;
+    if (!byInstance.has(at)) order.push(at);
+    if (event.type === "operation.failed") byInstance.set(at, { stateId: event.stateId, reason: event.failure.reason });
+    else if (event.type === "instance.blocked") byInstance.set(at, { stateId: event.stateId, reason: event.reason });
+    // A later success on the same instance CLEARS it — the state was retried and got there.
+    else if (event.type === "operation.completed") byInstance.set(at, undefined);
+  }
+  return order.map((at) => byInstance.get(at)).filter((cause): cause is RunCause => cause !== undefined);
+}
+
+/**
+ * A run's failure, said in terms of what broke rather than of what noticed.
+ *
+ * The parent's reason is kept as the fallback and only as the fallback: it is the one message that is
+ * always present and never informative, so it appears when the journal offered nothing better.
+ */
+export function failureMessage(causes: readonly RunCause[], fallback: string): string {
+  if (causes.length === 0) return fallback;
+  return causes.map((c) => `${c.stateId}: ${c.reason}`).join("; ");
+}
+
+/**
+ * The RESOLVED default executor tree for a project — and the refusal when nothing can answer.
+ *
+ * This replaced `modelDefaults`, which returned `{ model }` for a chosen id. That shape was the
+ * problem: a single default model could not route to an agent, because the prompt router dispatches
+ * on `op.config.model` while a leaf's defaults are applied after routing. What a state with no model
+ * needs is a default EXECUTOR, and `resolveExecutorTree` derives one from what is actually usable.
+ *
+ * The one refusal worth keeping is kept: a prompt-bearing workflow on a machine where nothing can
+ * answer fails at START, with both fixes named, rather than at its first prompt.
+ */
+export function defaultExecutorTree(
   config: JairaConfig,
   bundle: WorkflowBundle,
-  opts?: { fake?: boolean; secrets?: SecretResolver },
-): Record<string, JsonValue> {
-  if (opts?.fake) return {};
-  // A workflow made only of function states (host code, UI gates, agents) never
-  // calls a model, so demanding one would refuse a perfectly runnable workflow.
-  if (!hasPromptOp(bundle)) return {};
-  const chosen = defaultModelId(config.models, {
-    agents: config.agents,
-    ...(opts?.secrets !== undefined ? { secrets: opts.secrets } : {}),
-  });
-  if (chosen !== undefined) return { model: chosen };
-  // Every state naming its own model is a complete answer on its own — there is simply no default to
-  // supply. Only a bundle with neither is unrunnable.
-  if (modelNamesOf(bundle).length > 0) return {};
-  throw new Error(
-    "nothing can answer a prompt here: enable an agent executor (claude-cli needs no API key), " +
-      "add a provider key under models.routes, or set models.default — in Settings, or in .jaira/config.json",
+  opts?: {
+    fake?: boolean;
+    secrets?: SecretResolver;
+    /**
+     * Agents a health check has shown to work here.
+     *
+     * Absent ⇒ every enabled agent is a candidate, which is the CLI's position: it takes no probes
+     * and must not refuse over a check it never ran.
+     */
+    available?: ReadonlySet<string>;
+  },
+): JairaOperationNode {
+  const agents = Object.keys(agentPromptRouteNames(config.agents)).filter(
+    (name) => opts?.available === undefined || opts.available.has(name),
   );
+  const providers = opts?.fake ? [] : usableRouteKeys(config.models, opts?.secrets);
+  const tree = resolveExecutorTree(config.executors[DEFAULT_EXECUTOR], { providers, agents });
+
+  // A scripted run answers every prompt itself, and a workflow of only function states never calls a
+  // model — neither has anything to refuse over.
+  if (opts?.fake || !hasPromptOp(bundle)) return tree;
+  // Every state naming its own model is a complete answer on its own; what needs a default is a state
+  // that names none — which is how JaiRA's own workflows are written, deliberately, so they run on
+  // whatever this machine has.
+  if (modelNamesOf(bundle).length > 0) return tree;
+  // Whether anything here answers a state that names NO model. That is the failure worth catching at
+  // the start: unanswered, the call lands in the provider fallback and is reported as an empty model
+  // from inside the SDK, several layers under the state that asked.
+  const answer = unnamedModelAnswer(tree.prompt);
+  if (answer.answers) return tree;
+  if (answer.pinned !== undefined) {
+    throw new Error(
+      `the default executor is pinned to '${answer.pinned}', which names no model, and these states name none ` +
+        "either. Give it a model, or unpin it so a route that picks its own can answer.",
+    );
+  }
+  throw new Error(
+    answer.routes.length === 0
+      ? "nothing can answer a prompt here: enable an agent executor (claude-cli needs no API key), or " +
+        "add a provider key under models.routes — in Settings, or in .jaira/config.json"
+      : `no default model: ${answer.routes.map((r) => `'${r}'`).join(", ")} serve only the models a state names, ` +
+        "and these states name none. Give one of those routes a model, set one on the default executor, or " +
+        "enable an agent executor — an agent picks its own.",
+  );
+}
+
+/** One partial answer, as it is being written. */
+export interface TurnDelta {
+  /** The conversation position the call is claiming, when it runs in one. */
+  session?: { id: string; seq: number };
+  /** The state that is speaking, recovered from the request's seed. */
+  stateId?: string;
+  text: string;
+}
+
+/**
+ * Forward a call's partial output as it arrives.
+ *
+ * Persistence happens once, when the record closes — which is correct (a half-written answer is not a
+ * turn) and leaves a long agent run showing nothing at all while it works. The transports already
+ * stream: the CLI is launched with `--include-partial-messages` and `AgentExecutor` pushes each delta
+ * onto the handle's event queue. Nothing consumed it. hw does not drain the prompt handle's `events`,
+ * so this is the single consumer that contract requires, and taking it steals nothing.
+ *
+ * Composed INSIDE the session layers, deliberately: by the time this runs, `ctx.session` is the
+ * resolved position, so a delta can name the conversation it belongs to rather than being attributed
+ * by guesswork. The seed carries the state id for the same reason.
+ *
+ * Draining is a floating promise. Awaiting it would hold `result` open until the stream closed, which
+ * would make watching a run slower than not watching one.
+ */
+export function withTurnStream(
+  sink: (delta: TurnDelta) => void,
+  inner: Executor<ExecServices, WorkflowMetrics>,
+): Executor<ExecServices, WorkflowMetrics> {
+  const executor = inner;
+  return {
+    capabilities: executor.capabilities,
+    metrics: executor.metrics,
+    ...(executor.capabilitiesFor !== undefined
+      ? { capabilitiesFor: (op: Operation<InlineFamily>) => executor.capabilitiesFor!(op) }
+      : {}),
+    start: (op: Operation<InlineFamily>, ctx: ExecServices) => {
+      const handle = executor.start(op, ctx);
+      const at = (ctx as { session?: { at?: { id: string; seq: number } } }).session?.at;
+      // The seed rides on the RESOLUTION now — hw resolves each operation's position before dispatch,
+      // so there is no request left to read it off.
+      const seed = (ctx as { session?: { seed?: string } }).session?.seed;
+      // Split on the FIRST colon. A state id is a path and contains none; an authored session name may
+      // (`session: "review:draft"`), so taking the LAST one would fold half the session name into the
+      // state id — and `lastIndexOf` returns -1 for a seed with no colon at all, which `slice(0, -1)`
+      // turns into a silently truncated id rather than an absent one.
+      const cut = seed === undefined ? -1 : seed.indexOf(":");
+      const stateId = cut > 0 ? seed!.slice(0, cut) : undefined;
+      void (async () => {
+        try {
+          for await (const event of handle.events) {
+            if (event.type !== "output_partial" || event.text.length === 0) continue;
+            try {
+              sink({
+                ...(at !== undefined ? { session: { id: at.id, seq: at.seq } } : {}),
+                ...(stateId !== undefined ? { stateId } : {}),
+                text: event.text,
+              });
+            } catch {
+              // A consumer that throws costs ONE delta, not the stream. The sink is an IPC send, which
+              // throws on a window that has gone away — and a single closed window used to silence
+              // streaming for the rest of the run, indistinguishably from an agent with nothing to say.
+            }
+          }
+        } catch {
+          // A stream that ends badly must not fail the call it was narrating.
+        }
+      })();
+      return handle;
+    },
+  };
 }

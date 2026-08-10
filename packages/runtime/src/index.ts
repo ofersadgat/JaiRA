@@ -33,3 +33,5 @@ export * from "./fileTools";
 export * from "./artifactSink";
 export * from "./secrets";
 export * from "./executors";
+export * from "./executorStack";
+export * from "./executorTree";
