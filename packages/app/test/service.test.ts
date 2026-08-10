@@ -6,13 +6,13 @@
  * plus the phase-4 seam (a run parking on a human decision that only the UI
  * channel can answer).
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { blockedRules, happyRules, HUMAN_REVIEW_FUNCTION, specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
-import type { PushMessage } from "@jaira/shared";
+import { jairaBasePaths, SHARED_SESSION, SYSTEM_SESSION, systemProjectDir, type PushMessage } from "@jaira/shared";
 import { AppService } from "../src/main/service";
 
 let dir: string;
@@ -56,7 +56,9 @@ describe("AppService reads", () => {
     const taskId = newTask();
     expect(service.listTasks()).toHaveLength(1);
     expect(service.listTasks()[0]).toMatchObject({ taskId, status: "queued", workflow: "feature/plan" });
-    expect(pushes).toContainEqual({ type: "store:invalidate", scope: "tasks" });
+    // Stamped with the project whose task list changed — see the `project` field on the push. A window
+    // showing another project, or none, ignores it rather than asking for tasks it has not got.
+    expect(pushes).toContainEqual({ type: "store:invalidate", scope: "tasks", project: dir });
   });
 
   it("projects the root board from the live workflow before any run", () => {
@@ -88,7 +90,9 @@ describe("AppService.startTask (scripted)", () => {
     expect(runId).toBe(1);
     await until(() => finished(taskId), "the run to finish");
 
-    expect(pushes).toContainEqual({ type: "run:finished", taskId, runId, status: "completed" });
+    // Stamped with the project it is about, so a window showing another one can ignore it — see the
+    // `project` field on `store:invalidate`.
+    expect(pushes).toContainEqual({ type: "run:finished", taskId, runId, status: "completed", project: dir });
     // The journal streamed live, in order, as engine events.
     const streamed = pushes.filter((m) => m.type === "engine:event");
     expect(streamed.length).toBeGreaterThan(5);
@@ -237,5 +241,343 @@ describe("AppService.cancelTask (not running here)", () => {
     const taskId = newTask();
     service.cancelTask(taskId);
     expect(service.taskDetail(taskId).status).toBe("canceled");
+  });
+});
+
+/**
+ * A process now holds SEVERAL projects, keyed by directory — so the things that used to be
+ * singletons on the service (the runs in flight, the hubs they park on, the sync in flight) belong
+ * to a session instead.
+ *
+ * Opening a second user project still closes the first: the map can hold both and everything below
+ * is written for that, but which one the project-free channels answer for is a UI decision made
+ * separately. What these defend is that the bookkeeping is per-session, so making that change later
+ * does not have to also fix a shared counter or a leaked handle.
+ */
+describe("sessions — one process, several projects", () => {
+  it("opens another project and answers as that one", async () => {
+    const other = mkdtempSync(join(tmpdir(), "jaira-app-b-"));
+    const paths = initProject(other);
+    writeWorkflowFiles(paths.workflowsDir, specPlanningFiles());
+    try {
+      expect(service.current()?.dir).toBe(dir);
+      await service.open(other);
+      expect(service.current()?.dir).toBe(other);
+      // The first project's tasks went with it — this is a different board, not a merged one.
+      expect(service.listTasks()).toEqual([]);
+    } finally {
+      // Closed before the directory goes, because Windows will not unlink an open database file —
+      // which is also the reason `close()` drains its runs before closing the handle.
+      await service.close();
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it("re-opening the same directory under another spelling does not open it twice", async () => {
+    // Two `better-sqlite3` handles on one file is the failure `sessionKey` exists to prevent, and it
+    // is invisible until two writers disagree — so it is asserted on the way in, not after.
+    await service.open(join(dir, "..", basename(dir)));
+    expect(service.current()?.dir).toBe(dir);
+    expect(() => service.listTasks()).not.toThrow();
+  });
+
+  it("closes everything, and says so rather than throwing", async () => {
+    await service.close();
+    expect(service.current()).toBeNull();
+    expect(() => service.listTasks()).toThrow(/no project is open/);
+    // Idempotent: closing what is already closed is how a window teardown is allowed to be sloppy.
+    await expect(service.close()).resolves.toBeUndefined();
+  });
+
+  it("keeps two services with different base roots out of each other's state", async () => {
+    const home = mkdtempSync(join(tmpdir(), "jaira-home-b-"));
+    const other = new AppService({ baseDir: home, watchWorkflows: false });
+    try {
+      expect(other.current()).toBeNull();
+      // The first service is still open and unaffected — no shared singleton between them.
+      expect(service.current()?.dir).toBe(dir);
+    } finally {
+      await other.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * JaiRA's own project — the shared root, opened when something first needs it.
+ *
+ * The two properties worth defending: it is never what the project-free channels answer for (or a
+ * window with no project open would list JaiRA's tasks as the user's), and it survives a checkout
+ * being switched underneath it (or a sync in flight against it would be abandoned by an unrelated
+ * action).
+ */
+describe("the system project", () => {
+  it("is not opened merely by constructing a service", async () => {
+    const home = mkdtempSync(join(tmpdir(), "jaira-sys-"));
+    const base = join(home, "shared");
+    const bare = new AppService({ baseDir: base, watchWorkflows: false });
+    try {
+      // Opening it eagerly meant a person who never runs a sync still got a database, and every
+      // caller became responsible for closing a handle it never asked for.
+      expect(existsSync(join(base, "jaira.db"))).toBe(false);
+    } finally {
+      await bare.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("is never the project the project-free channels answer for", async () => {
+    const home = mkdtempSync(join(tmpdir(), "jaira-sys-b-"));
+    const bare = new AppService({ baseDir: join(home, "shared"), watchWorkflows: false });
+    try {
+      expect(bare.current()).toBeNull();
+      // Not "here are JaiRA's own tasks" — which is exactly the pollution giving them their own
+      // project was meant to prevent.
+      expect(() => bare.listTasks()).toThrow(/no project is open/);
+    } finally {
+      await bare.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("survives switching the open project, because it is machine-global", async () => {
+    const other = mkdtempSync(join(tmpdir(), "jaira-app-c-"));
+    initProject(other);
+    try {
+      // A base-layer status read materializes it; switching checkouts must not then discard it.
+      service.syncStatus({ layer: "base", path: "workflows/workflow.md" });
+      await service.open(other);
+      expect(() => service.syncStatus({ layer: "base", path: "workflows/workflow.md" })).not.toThrow();
+    } finally {
+      await service.close();
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * A workflow that lives in the shared root, run there.
+   *
+   * The shared root is where a workflow meant to outlive one checkout gets authored, and until this
+   * it was the one place you could write a workflow and never start it: `createTask` answered for
+   * the focused project, so a shared state was unrunnable with nothing open and — with a project
+   * open — recorded a machine-wide workflow's run in one person's checkout.
+   */
+  it("runs a workflow that lives in the shared root, with no user project open", async () => {
+    const home = mkdtempSync(join(tmpdir(), "jaira-sys-run-"));
+    const base = join(home, "shared");
+    const bare = new AppService({ publish: () => undefined, baseDir: base, watchWorkflows: false });
+    try {
+      writeWorkflowFiles(jairaBasePaths(base).workflowsDir, specPlanningFiles());
+      const task = bare.createTask({
+        title: "shared plan #1",
+        workflow: "feature/plan",
+        inputs: { issue: "the issue" },
+        project: SHARED_SESSION,
+      });
+
+      // Recorded in the ROOT's own project and nowhere else. Not JaiRA's: that one holds the
+      // installation's own runs and must survive a root switch, which these deliberately do not.
+      expect(bare.listTasks(SHARED_SESSION).map((t) => t.taskId)).toEqual([task.taskId]);
+      expect(bare.listSystemTasks()).toEqual([]);
+      expect(() => bare.listTasks()).toThrow(/no project is open/);
+
+      const { runId } = await bare.startTask({
+        taskId: task.taskId,
+        project: SHARED_SESSION,
+        fake: happyRules(),
+        interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" }] },
+      });
+      expect(runId).toBe(1);
+      await until(() => bare.listTasks(SHARED_SESSION)[0]?.status === "completed", "the shared run to finish");
+      expect(bare.taskDetail(task.taskId, SHARED_SESSION).status).toBe("completed");
+    } finally {
+      await bare.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * The property the whole split exists for.
+   *
+   * Shared runs belong to the ROOT: repoint it and they are not yours any more, because a different
+   * root is a different library with a different history. JaiRA's own runs are about the
+   * installation and must survive exactly that switch. One project could not be both.
+   */
+  it("leaves a root's tasks behind when the root is repointed, but keeps JaiRA's own", async () => {
+    const home = mkdtempSync(join(tmpdir(), "jaira-roots-"));
+    const first = new AppService({ publish: () => undefined, baseDir: join(home, "one"), watchWorkflows: false });
+    const second = new AppService({
+      publish: () => undefined,
+      baseDir: join(home, "two"),
+      // The same installation, a different selected root — which is what repointing IS. Passed
+      // explicitly here because a test's `baseDir` otherwise stands in for the whole installation.
+      systemDir: join(home, "system"),
+      watchWorkflows: false,
+    });
+    try {
+      writeWorkflowFiles(jairaBasePaths(join(home, "one")).workflowsDir, specPlanningFiles());
+      first.createTask({ title: "in root one", workflow: "feature/plan", project: SHARED_SESSION });
+      expect(first.listTasks(SHARED_SESSION)).toHaveLength(1);
+
+      // A different root: none of the first root's runs are listed. They were that library's.
+      expect(second.listTasks(SHARED_SESSION)).toEqual([]);
+    } finally {
+      await first.close();
+      await second.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps JaiRA's own project out of the selected root entirely", () => {
+    // So that repointing the root cannot take it along — the directory is beside the root, not in
+    // it, and `systemProjectDir` is the one place that decides where.
+    // `resolve`d, so the expectation is too — on Windows a rooted path still gains a drive letter.
+    const install = resolve(join(tmpdir(), "install"));
+    expect(systemProjectDir({ JAIRA_HOME: install })).toBe(join(install, "system"));
+  });
+
+  it("shows a shared SUBSTATE what has run through it, not just the root", async () => {
+    // The reported bug: history appeared on the top-level file and nowhere below it. With no checkout
+    // open the state view fell back to a file-only reading, whose task lists are empty by
+    // construction — so a substate could never say anything about the runs that had gone through it,
+    // and a root only looked right because its own runs come from the task list instead.
+    const home = mkdtempSync(join(tmpdir(), "jaira-sub-"));
+    const base = join(home, "shared");
+    const bare = new AppService({ publish: () => undefined, baseDir: base, watchWorkflows: false });
+    try {
+      writeWorkflowFiles(jairaBasePaths(base).workflowsDir, specPlanningFiles());
+      const task = bare.createTask({
+        title: "shared plan #1",
+        workflow: "feature/plan",
+        inputs: { issue: "the issue" },
+        project: SHARED_SESSION,
+      });
+      await bare.startTask({
+        taskId: task.taskId,
+        project: SHARED_SESSION,
+        fake: happyRules(),
+        interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" }] },
+      });
+      await until(() => bare.listTasks(SHARED_SESSION)[0]?.status === "completed", "the shared run to finish");
+
+      // The substate knows the run went through it, and is no longer flagged as unknowable.
+      const child = bare.stateView("feature/plan/goals");
+      expect(child.fileOnly).toBeUndefined();
+      expect([...child.tasksHere, ...child.tasksRecent].map((c) => c.taskId)).toContain(task.taskId);
+      // And it is still the BASE layer, which is what routes its runs back to the shared root rather
+      // than to whichever checkout happens to be open.
+      expect(child.layer).toBe("base");
+    } finally {
+      await bare.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("still answers for the focused project when a task names none", async () => {
+    // The routing is opt-in. Everything that existed before this — the Tasks view's New task, the
+    // debug pane, the CLI path — sends no `project` and must keep landing in the checkout.
+    const taskId = service.createTask({ title: "Plan", workflow: "feature/plan" }).taskId;
+    expect(service.listTasks().map((t) => t.taskId)).toEqual([taskId]);
+  });
+});
+
+/**
+ * The conversation a state actually ran — kept, and findable from the task that ran it.
+ *
+ * Both halves of what selecting a task at a leaf must answer: every state the executor went through
+ * with its session, and the session itself. Neither existed before: `sessionServicesFor` built a
+ * `MapSessionStore` per run, the engine wrote every model call into it complete, and the process
+ * dropped the lot — which is why `conversation.ts` could say "there is no separate transcript to
+ * show" and be right.
+ */
+describe("sessions — the transcript a run produced", () => {
+  it("keeps every state's conversation, and says which state each belongs to", async () => {
+    const taskId = newTask();
+    await service.startTask({
+      taskId,
+      fake: happyRules(),
+      interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" }] },
+    });
+    await until(() => finished(taskId), "the run to finish");
+
+    const history = service.sessionHistory({ taskId });
+    // One row per operation that ran in a conversation — derived from the journal, which has carried
+    // the position on `operation.completed`'s metrics all along.
+    expect(history.length).toBeGreaterThan(0);
+    expect(history.map((h) => h.stateId)).toContain("feature/plan/goals");
+    expect(history.every((h) => h.sessionId.length > 0)).toBe(true);
+    // Ordered as the run went, which is what makes it a history rather than a set.
+    expect([...history].sort((a, b) => a.at - b.at).map((h) => h.instanceId)).toEqual(history.map((h) => h.instanceId));
+  });
+
+  it("reads one state's conversation back, whole", async () => {
+    const taskId = newTask();
+    await service.startTask({
+      taskId,
+      fake: happyRules(),
+      interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" }] },
+    });
+    await until(() => finished(taskId), "the run to finish");
+
+    const goals = service.sessionHistory({ taskId }).find((h) => h.stateId === "feature/plan/goals")!;
+    const view = service.sessionView({ taskId, instanceId: goals.instanceId });
+
+    expect(view.stateId).toBe("feature/plan/goals");
+    expect(view.status).toBe("success");
+    expect(view.turns.length).toBeGreaterThan(0);
+    // The prompt that was sent and the answer that came back — not a summary of either.
+    expect(view.turns.map((t) => t.role)).toContain("assistant");
+    expect(view.empty).toBeUndefined();
+  });
+
+  it("says so rather than rendering blank when a state ran no model call", () => {
+    const taskId = newTask();
+    const view = service.sessionView({ taskId });
+    // A queued task has run nothing. Empty is an ANSWER — a blank panel would look like a bug.
+    expect(view.turns).toEqual([]);
+    expect(view.empty).toMatch(/no conversation/);
+  });
+});
+
+/**
+ * The app can say what it did.
+ *
+ * There was no logger, no console output and no channel: an IPC handler's failure died in a renderer
+ * catch, a workflow that would not load was swallowed so the board did not blank, and an agent's
+ * stderr went to `/dev/null`. Each silence is defensible alone; together a broken machine had no
+ * story at all.
+ */
+describe("diagnostics", () => {
+  it("records a failed IPC call by channel, and still rejects to the renderer", () => {
+    // RECORDED, then RETHROWN — the renderer's contract is unchanged. That pair is the whole design:
+    // the caller still sees the error, and everyone else can now see it too.
+    service.recordIpcFailure("task:detail", new Error("unknown task 't-1'"));
+
+    const entry = service.listLogs({ source: "ipc" }).at(-1);
+    expect(entry).toMatchObject({ level: "error", source: "ipc" });
+    expect(entry?.message).toBe("task:detail: unknown task 't-1'");
+  });
+
+  it("records opening a project, which is where a recovery would be reported", async () => {
+    const entry = service.listLogs({ source: "project" }).at(-1);
+    expect(entry?.message).toContain(dir);
+  });
+
+  it("records a child process against the task that started it", async () => {
+    const taskId = newTask();
+    await service.startTask({ taskId, fake: happyRules(), interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" }] } });
+    await until(() => finished(taskId), "the run to finish");
+
+    // A scripted run spawns nothing, so this asserts the SHAPE the panel links through rather than a
+    // count: `taskId` opens the task and `jobId` opens what that process printed.
+    const rows = service.listLogs({ source: "process" });
+    for (const row of rows) expect(row.taskId).toBeDefined();
+    // …and the run itself said something, which is the point of having a log at all.
+    expect(service.listLogs().length).toBeGreaterThan(0);
+  });
+
+  it("returns no jobs and no output rather than throwing when nothing has run", () => {
+    expect(service.listJobs({ taskId: newTask() })).toEqual([]);
+    expect(service.jobOutput({ jobId: 999 })).toEqual([]);
   });
 });

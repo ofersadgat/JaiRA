@@ -29,10 +29,19 @@ const MARKDOWN = new MarkdownIt({ html: false, linkify: true, breaks: false });
  * That is a question about the output, and only the output answers it.
  */
 export function MarkdownView({ doc }: FileSurfaceProps): JSX.Element {
-  const html = useMemo(
-    () => DOMPurify.sanitize(MARKDOWN.render(doc.text), { USE_PROFILES: { html: true } }),
-    [doc.text],
-  );
   if (doc.text.trim().length === 0) return <p className="empty">This file is empty.</p>;
+  return <Markdown text={doc.text} />;
+}
+
+/**
+ * The same rendering, for text that is not a file.
+ *
+ * A model's answer is markdown and was being shown as preformatted text, so a plan came back as one
+ * long line with literal `#` and `-` in it. Split out rather than duplicated because the sanitizer
+ * and the parser configuration above are the safety story, and a second copy of a renderer is a
+ * second copy to get wrong.
+ */
+export function Markdown({ text }: { text: string }): JSX.Element {
+  const html = useMemo(() => DOMPurify.sanitize(MARKDOWN.render(text), { USE_PROFILES: { html: true } }), [text]);
   return <div className="markdown" dangerouslySetInnerHTML={{ __html: html }} />;
 }

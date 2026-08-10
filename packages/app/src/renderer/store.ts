@@ -7,13 +7,21 @@
  * is what keeps the UI from disagreeing with the engine.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { JsonValue } from "@declarative-ai/json";
 import type {
   ApprovalScope,
   BoardView,
   ConfigLayer,
   ConfigView,
   ConversationView,
+  JobOutputChunk,
+  LogEntry,
+  ProjectSummary,
+  SessionRef,
+  SessionView,
+  AvailabilitySnapshot,
   ExecutorInfo,
+  JairaOperationNode,
   FileMutationResult,
   FileNode,
   FileSource,
@@ -42,7 +50,7 @@ import type {
   TaskSummary,
   WorkflowLayer,
 } from "@jaira/shared/browser";
-import { CONFIG_JSON, isTextMime, WORKFLOW_JSON } from "@jaira/shared/browser";
+import { CONFIG_JSON, isTextMime, SHARED_SESSION, WORKFLOW_JSON } from "@jaira/shared/browser";
 import {
   docKey,
   movedDraft,
@@ -60,6 +68,8 @@ import {
   type ExecutorTarget,
 } from "./executorConfig";
 import { applyModelPatch, type ModelPatch } from "./modelsConfig";
+import { instanceAt, newestRunOf, runTargetOf } from "./runForm";
+import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestFiles, selfTestScript } from "./debugWorkflow";
 
 /** A prune plan or result, as `history:prune` returns it. */
 export type PruneReport = Response<"history:prune">;
@@ -83,6 +93,17 @@ export async function invoke<C extends IpcChannel>(channel: C, request: IpcReque
 export interface AppState {
   projectDir: string | null;
   tasks: TaskSummary[];
+  /**
+   * The SELECTED root's own tasks — runs of the workflows that live in it.
+   *
+   * Beside {@link tasks} rather than merged into it, because they answer different questions and
+   * mixing them is the pollution separate projects exist to prevent. Held because a state in the
+   * shared root runs there: its history is these, and it is readable with no checkout open at all.
+   *
+   * Scoped to the root by construction: repoint the root and this is a different database, so the
+   * old library's runs stop being listed. That is deliberate — they were that library's.
+   */
+  sharedTasks: TaskSummary[];
   board: BoardView | null;
   /**
    * The board level the Tasks view is showing. `null` is the ROOT LISTING — one column per workflow
@@ -122,8 +143,16 @@ export interface AppState {
    * configures a generic CLI called `local`.
    */
   modelProbes: Record<string, ProbeResult>;
-  /** Executors currently being checked, so each row can show its own spinner. */
-  probing: string[];
+  /**
+   * The whole availability picture as main last observed it, including WHEN.
+   *
+   * `probes`/`modelProbes` are this snapshot indexed for lookup; this is kept beside them for the two
+   * things an index cannot carry — the time of the check, and the model that would be chosen. A screen
+   * that shows a green badge without saying when it was earned is a screen that ages badly.
+   */
+  availability: AvailabilitySnapshot;
+  /** True while a re-check is in flight, so the button can say so. */
+  rechecking: boolean;
   /** What the secret store can do here — decides which "save key to…" options are offered. */
   secrets: SecretCapabilities;
   /**
@@ -155,6 +184,20 @@ export interface AppState {
   editorTab: Record<string, "form" | "json">;
 
   /**
+   * What has been typed into a state's run form, keyed by STATE ID then by input name.
+   *
+   * Keyed by state id rather than by `layer:path` — the two layers hold two copies of one state, but
+   * a run names the id and gets whichever copy the search path resolves, so remembering the boxes
+   * per file would split one form's contents across two keys that run the same thing.
+   *
+   * SPARSE, and that is what makes it work: a name absent here falls back to the slot's `default`,
+   * so opening a state shows its declared defaults without this map ever being seeded, while a box
+   * someone deliberately CLEARED is stored as `""` and stays cleared. Held here rather than in the
+   * panel for the reason the drafts are: the inspector unmounts on the next click in the tree.
+   */
+  runValues: Record<string, Record<string, string>>;
+
+  /**
    * Where the open description and the state files stand, and the last proposal.
    *
    * Beside the drafts rather than inside the panel showing it, for the reason every other piece of
@@ -164,6 +207,9 @@ export interface AppState {
    * which one it read.
    */
   sync: SyncState;
+
+  /** The Debug view's self-test — see {@link DebugState}. */
+  debug: DebugState;
 
   /**
    * The file open in the middle panel — any file, not just a state.
@@ -195,8 +241,77 @@ export interface AppState {
    * panel header puts it back on the state.
    */
   inspect: "state" | "task";
+  /**
+   * The state the inspector was describing before a task took it over — what Back returns to.
+   *
+   * Remembered rather than recomputed, because {@link stateId} moves underneath: a task's context
+   * panel links to the other states it went through, and following one changes what "before" would
+   * have meant. Null is a legitimate answer (a task clicked from the Tasks view came from no state),
+   * and Back then simply puts the column back on the open file.
+   */
+  inspectFrom: string | null;
   /** The selected task's run, read out of the journal — what a leaf state shows. */
   conversation: ConversationView | null;
+  /**
+   * Every state the selected task went through, with the conversation each ran in.
+   *
+   * Distinct from `conversation`, which is a projection of the JOURNAL — states entered, tools
+   * attempted, policy decisions. This is the transcript itself, which the journal never held.
+   */
+  sessionHistory: SessionRef[];
+  /** The conversation of the state being looked at — one operation, whole. */
+  session: SessionView | null;
+  /** Which instance the viewer is showing. Null ⇒ the task's most recent. */
+  sessionInstance: number | null;
+  /**
+   * Transcripts by instance id, for the composite view — several cards can be open at once.
+   *
+   * Beside {@link session} rather than replacing it: that one is "the conversation being read",
+   * which the leaf and the task panel both point at, while this is a CACHE of the several a run's
+   * children produced. Fetched on expand rather than up front, because rendering a list of eight
+   * folded headers would otherwise cost eight round trips before anyone had asked to read one.
+   *
+   * Cleared whenever the selected task changes — an instance id is only unique within a run, so a
+   * stale entry would show the previous task's words under this one's card.
+   */
+  sessions: Record<number, SessionView>;
+  /**
+   * What the app has said about itself, newest last, and the process output a row opened.
+   *
+   * Held rather than fetched per render because entries ARRIVE — the main process pushes each one, so
+   * the list is a live tail with a backfill, not a query.
+   */
+  logs: LogEntry[];
+  jobOutput: { jobId: number; chunks: JobOutputChunk[] } | null;
+  /**
+   * JaiRA's own runs, which belong to no checkout.
+   *
+   * Held separately from `tasks` because they answer a different question — mixing them is the
+   * pollution the system project exists to prevent — and because a window with no project open has
+   * these and nothing else.
+   */
+  /**
+   * Every project the Tasks view draws a board for, and one board apiece.
+   *
+   * Grouped rather than merged: a board's columns are the children of ONE workflow state, so columns
+   * from two projects side by side would be columns of different things. Each group keeps its own
+   * drill level, because drilling into one is not a statement about the other.
+   */
+  projects: ProjectSummary[];
+  boards: Record<string, BoardView | null>;
+  levels: Record<string, string | null>;
+  /** Which group is expanded. A collapsed one keeps its level, so re-opening it lands where it was. */
+  collapsed: Record<string, boolean>;
+  /** Which project the selected task belongs to — a task id means nothing without it. */
+  selectedProject: string | null;
+  /**
+   * The answer currently being written, before it is a turn.
+   *
+   * A record persists once, at the end of its operation — so without this a long agent run shows an
+   * empty conversation for as long as it is thinking. Cleared when the record lands, because the
+   * stored turn is the same text and better: it has its tool calls with it.
+   */
+  liveTurn: { sessionId?: string; seq?: number; stateId?: string; text: string } | null;
   /** Which section the Settings view is showing. */
   section: SettingsSection;
   /**
@@ -210,12 +325,54 @@ export interface AppState {
   configLayer: ConfigLayer;
 }
 
+/**
+ * One state file of the self-test, as the Debug view finds it on disk.
+ *
+ * `matches` is the third answer and the reason this is not a boolean: a file that exists but says
+ * something else is a file somebody edited, and overwriting it without saying so would throw away
+ * an experiment. The pane reports it and offers the overwrite as its own button.
+ */
+export interface DebugFile {
+  stateId: string;
+  /** Absolute path, for the "where did this land" line. */
+  file: string;
+  exists: boolean;
+  /** True when the file on disk is byte-for-byte what {@link selfTestFiles} would write. */
+  matches: boolean;
+}
+
+/**
+ * The Debug view's own state.
+ *
+ * Everything else it shows — the instances, the conversation, the live events — belongs to the
+ * SELECTED task and is already held above, because the self-test is an ordinary task and the point
+ * of running it here is that it goes through the ordinary machinery. What is genuinely this view's
+ * is only this: where the files are, which run it started, and how it is being run.
+ */
+export interface DebugState {
+  files: DebugFile[];
+  /** The self-test task this window started, if any. Null until the first run. */
+  taskId: string | null;
+  /** True while installing or starting — the buttons say so rather than doing it twice. */
+  busy: boolean;
+  /** The last failure, kept beside the pane rather than in the global toast, which scrolls away. */
+  error: string | null;
+}
+
 /** The sync surface's state: the last answer, the last proposal, and whether one is in flight. */
 export interface SyncState {
   status: WorkflowSyncStatus | null;
   result: WorkflowSyncResult | null;
   running: boolean;
   error: string | null;
+  /**
+   * What the run is doing, while it does it.
+   *
+   * A sync is a task in JaiRA's OWN project, so its engine events name a task this window has not
+   * selected and the per-task stream drops them. Without this the panel showed one static line for
+   * however long three model calls take — which is indistinguishable from a button that did nothing.
+   */
+  progress: string[];
 }
 
 /**
@@ -228,23 +385,42 @@ export interface SyncState {
 function clearedSync(sync: SyncState): SyncState {
   return sync.result === null && sync.status === null && sync.error === null
     ? sync
-    : { status: null, result: null, running: sync.running, error: null };
+    : { status: null, result: null, running: sync.running, error: null, progress: sync.progress };
 }
 
-/** The three destinations on the activity rail. */
-export type View = "files" | "tasks" | "settings";
+/**
+ * Fold an availability snapshot into the three fields the panes read.
+ *
+ * The snapshot is kept whole AND indexed, rather than one or the other, because the two shapes answer
+ * different questions and deriving either on every render is worse than storing both: a row needs its
+ * own result by name, and the pane header needs the check's time and the model it settled on.
+ */
+function applyAvailability(patch: (next: Partial<AppState>) => void, availability: AvailabilitySnapshot): void {
+  const index = (results: ProbeResult[]): Record<string, ProbeResult> =>
+    Object.fromEntries(results.map((result) => [result.name, result]));
+  patch({
+    availability,
+    probes: index(availability.executors),
+    modelProbes: index(availability.routes),
+  });
+}
+
+/** The destinations on the activity rail. */
+export type View = "files" | "tasks" | "logs" | "debug" | "settings";
 
 /**
  * Sections of the Settings view — everything that was never one of the two activities.
  *
- * `config` and `executors` are read at the layer {@link AppState.configLayer} names; `history` is a
- * project's run journal and has no layer to pick.
+ * `providers`, `executors` and `config` are read at the layer {@link AppState.configLayer} names;
+ * `history` is a project's run journal and has no layer to pick — nor anything to show without a
+ * project, which is why the shell hides it on an empty window rather than rendering it empty.
  */
-export type SettingsSection = "config" | "executors" | "models" | "history";
+export type SettingsSection = "providers" | "executors" | "config" | "history";
 
 const EMPTY: AppState = {
   projectDir: null,
   tasks: [],
+  sharedTasks: [],
   board: null,
   level: null,
   selected: null,
@@ -263,42 +439,145 @@ const EMPTY: AppState = {
   executors: [],
   probes: {},
   modelProbes: {},
-  probing: [],
+  availability: { routes: [], executors: [], checkedAt: 0 },
+  rechecking: false,
   secrets: { keychain: false },
   schemaChoice: {},
-  sync: { status: null, result: null, running: false, error: null },
+  sync: { status: null, result: null, running: false, error: null, progress: [] },
+  debug: { files: [], taskId: null, busy: false, error: null },
   drafts: {},
   editorTab: {},
+  runValues: {},
   doc: null,
   view: "tasks",
   tree: null,
   stateId: null,
   state: null,
   inspect: "state",
+  inspectFrom: null,
   conversation: null,
-  section: "config",
+  sessionHistory: [],
+  session: null,
+  sessionInstance: null,
+  sessions: {},
+  logs: [],
+  jobOutput: null,
+  liveTurn: null,
+  projects: [],
+  boards: {},
+  levels: {},
+  collapsed: {},
+  selectedProject: null,
+  section: "providers",
   configLayer: "project",
 };
 
 /** Keep the live log bounded — a long run would otherwise grow without limit. */
 const STREAM_LIMIT = 300;
+/** How many diagnostics the renderer keeps. The main process holds more; this is the visible tail. */
+const LOG_LIMIT = 2000;
+/** How many lines of a sync's own narration the panel keeps. Enough for a three-state run. */
+const SYNC_PROGRESS_LIMIT = 60;
+
+/** One engine event as a line: what happened, and to which state. */
+function engineLine(raw: unknown): string {
+  const event = raw as { type?: string; stateId?: string; to?: string; outcome?: string };
+  const detail = [event.stateId, event.to ?? event.outcome].filter(Boolean).join(" → ");
+  return `${event.type ?? "event"}  ${detail}`;
+}
 
 export function useApp() {
   const [state, setState] = useState<AppState>(EMPTY);
-  const patch = useCallback((next: Partial<AppState>) => setState((s) => ({ ...s, ...next })), []);
-  // Read in callbacks without making them depend on every render.
+  /**
+   * The state as callbacks need to read it: what is true NOW, not what was last painted.
+   *
+   * Declared before {@link patch} because that is what writes it. The render-time assignment below
+   * stays as the backstop that re-syncs after a functional update.
+   */
   const ref = useRef(state);
+  /**
+   * Apply a partial update, and keep {@link ref} in step with it IMMEDIATELY.
+   *
+   * The ref used to be assigned during render and nowhere else, so `ref.current` meant "the state as
+   * of the last paint" — while every reader of it in this file is a callback asking "what is true
+   * now". Between a `patch` and the render it schedules those are different answers, and the gap is
+   * not theoretical: a caller that set `projectDir` and then refreshed in the same tick read the
+   * value from before it set it, decided no project was open, and wrote an empty list that nothing
+   * retried because nothing had failed.
+   *
+   * Assigning here closes the gap for every reader at once, which is better than each of them
+   * learning to thread the new value through by hand. The render-time assignment stays as the
+   * backstop: it is what re-syncs the ref after a functional update computed from the real state.
+   */
+  const patch = useCallback((next: Partial<AppState>) => {
+    ref.current = { ...ref.current, ...next };
+    setState((s) => ({ ...s, ...next }));
+  }, []);
+  /**
+   * Update the Debug slice from its LATEST value rather than from {@link ref}.
+   *
+   * `patch({ debug: { ...ref.current.debug, … } })` is the shape the rest of this file uses for a
+   * nested slice, and it is safe only when nothing else touched the slice since the last render.
+   * A self-test run patches it four times across three awaits — install, re-read the files, start,
+   * settle — so it is exactly the case where that assumption fails, and the visible symptom would
+   * be the file list reverting to what it said before the install.
+   */
+  const patchDebug = useCallback((next: Partial<DebugState>) => {
+    ref.current = { ...ref.current, debug: { ...ref.current.debug, ...next } };
+    setState((s) => ({ ...s, debug: { ...s.debug, ...next } }));
+  }, []);
+  // The backstop: after a render the ref is the state, whatever the incremental writes above did.
   ref.current = state;
 
   const fail = useCallback((e: unknown) => patch({ error: (e as Error).message, busy: false }), [patch]);
 
+  /**
+   * The focused project's tasks.
+   *
+   * ASKED FOR unconditionally, and a refusal read as "none". The guard this replaces tested
+   * `ref.current.projectDir`, and `ref.current` is assigned during RENDER — so every caller that
+   * patched `projectDir` and then refreshed in the same tick (opening a project does exactly that)
+   * read the value from before the patch, concluded there was no project, and wrote `tasks: []`.
+   * Nothing retried it, because nothing had failed. It went unseen for as long as it did because
+   * `state.tasks` had no reader until the Files inspector grew a run history — every other surface
+   * reads the per-project boards from `project:list`.
+   *
+   * Main throws "no project is open" here deliberately, so that an empty answer cannot hide a real
+   * mistake. That is still true of main; it is just not something to raise a toast about in a window
+   * where having no project open is a perfectly ordinary state.
+   */
   const refreshTasks = useCallback(async () => {
+    // The guard is back, and it is now TRUSTWORTHY: `ref.current` is written by `patch` rather than
+    // only at render, so "is a project open" is answered with the current value instead of the last
+    // painted one. Without the guard main logs `no project is open` for every refresh in a window
+    // that simply has no project — a real error, raised by design, about a question nobody asked.
+    if (ref.current.projectDir === null) return patch({ tasks: [] });
     try {
       patch({ tasks: await invoke("task:list", undefined) });
-    } catch (e) {
-      fail(e);
+    } catch {
+      // Quiet, not a toast: the overwhelmingly likely cause is a project closing underneath a
+      // refresh already in flight, and an empty list is the right answer to that.
+      patch({ tasks: [] });
     }
-  }, [patch, fail]);
+  }, [patch]);
+
+  /**
+   * JaiRA's own runs — a separate read, because they live in a separate project.
+   *
+   * NOT guarded on a user project the way {@link refreshTasks} is, and that is the point: the shared
+   * root is browsable and now runnable with nothing open, so its history has to be readable in the
+   * same mode. Main answers with an empty list rather than an error when JaiRA's project could not
+   * be opened, so a failure here is a real one.
+   */
+  const refreshSharedTasks = useCallback(async () => {
+    try {
+      patch({ sharedTasks: await invoke("task:list", { project: SHARED_SESSION }) });
+    } catch {
+      // Quiet: the shared project materializes on first use, and a machine where it cannot be opened
+      // at all is already saying so in the log. An empty list is the right answer either way.
+      patch({ sharedTasks: [] });
+    }
+  }, [patch]);
 
   /**
    * Fetch one board level. `null` is the root listing, which is a different channel — the roots have
@@ -342,12 +621,18 @@ export function useApp() {
    * is mid-edit, and a parse error there is already reported against the file itself.
    */
   const refreshState = useCallback(
-    async (stateId: string | null) => {
-      if (stateId === null) return patch({ state: null });
+    async (stateId: string | null): Promise<StateView | null> => {
+      if (stateId === null) {
+        patch({ state: null });
+        return null;
+      }
       try {
-        patch({ state: await invoke("state:view", { stateId }) });
+        const view = await invoke("state:view", { stateId });
+        patch({ state: view });
+        return view;
       } catch {
         patch({ state: null });
+        return null;
       }
     },
     [patch],
@@ -446,11 +731,27 @@ export function useApp() {
     [patch, refreshTree, refreshState],
   );
 
+  /**
+   * The selected task's conversation.
+   *
+   * Falls back to {@link AppState.selectedProject} like {@link refreshDetail} and
+   * {@link refreshSession} do, and for the same reason: `undefined` does not mean "wherever the task
+   * is", it means "the FOCUSED project", which with no checkout open is none at all. The selection
+   * carries its project because a task id is a rowid in one database; the reads about it have to name
+   * that database every time, not only on the click that made the selection.
+   *
+   * Missing it here alone was invisible until a push arrived: `select` passes the project explicitly,
+   * so the panel filled correctly, and then the first `task`/`run:finished` invalidate re-read the
+   * conversation with no scope and main answered `no project is open`. The panel blanked mid-read and
+   * the log grew an error per engine event, while the detail and history beside it — the two that do
+   * fall back — carried on reading the right project.
+   */
   const refreshConversation = useCallback(
-    async (taskId: string | null) => {
+    async (taskId: string | null, project?: string) => {
       if (taskId === null) return patch({ conversation: null });
+      const scope = project ?? ref.current.selectedProject ?? undefined;
       try {
-        patch({ conversation: await invoke("task:conversation", { taskId }) });
+        patch({ conversation: await invoke("task:conversation", { taskId, ...(scope !== undefined ? { project: scope } : {}) }) });
       } catch {
         patch({ conversation: null });
       }
@@ -458,16 +759,202 @@ export function useApp() {
     [patch],
   );
 
-  const refreshDetail = useCallback(
-    async (taskId: string | null) => {
-      if (!taskId) return patch({ detail: null });
+  /**
+   * The transcript half: which states ran, and the conversation of the one being looked at.
+   *
+   * Fetched together because they are one question asked twice — a history row is chosen by clicking
+   * it, and the default choice is the state the task is at now. Quiet on failure like every other
+   * panel-side read: a task with no conversation is an empty viewer, not an error toast.
+   */
+  /** The backfill. Every entry after this arrives on the push, so this runs once per panel open. */
+  /**
+   * The groups, and a board for each.
+   *
+   * Never throws for want of a project: JaiRA's own is always there, which is what a window with
+   * nothing open still has to show.
+   */
+  const refreshProjects = useCallback(async () => {
+    let projects: ProjectSummary[];
+    try {
+      projects = await invoke("project:list", undefined);
+    } catch {
+      return patch({ projects: [], boards: {}, levels: {} });
+    }
+    const levels = ref.current.levels;
+    const boards: Record<string, BoardView | null> = {};
+    await Promise.all(
+      projects.map(async (p) => {
+        const level = levels[p.project] ?? null;
+        try {
+          boards[p.project] =
+            level === null
+              ? await invoke("board:roots", { project: p.project })
+              : await invoke("board:view", { level, project: p.project });
+        } catch {
+          // A group whose board will not load is shown empty rather than taking the view down with it.
+          boards[p.project] = null;
+        }
+      }),
+    );
+    patch({ projects, boards });
+  }, [patch]);
+
+  const refreshLogs = useCallback(async () => {
+    try {
+      patch({ logs: await invoke("log:list", { limit: 1000 }) });
+    } catch {
+      patch({ logs: [] });
+    }
+  }, [patch]);
+
+  /**
+   * The transcript panel: every state the task went through, and the one being read.
+   *
+   * `atState` is what makes the panel answer the question the click asked. A task's LATEST instance
+   * is the deepest state it reached, so selecting a task from the panel of `feature/plan/goals` used
+   * to open `critique`'s conversation — the right task, the wrong state, and no indication that the
+   * two had come apart. Given a state, the newest instance OF THAT STATE is shown instead; a loop
+   * runs one state several times, so newest rather than first.
+   *
+   * A miss falls back to the latest instance rather than to nothing: a task that has not reached
+   * this state yet still has a conversation worth reading, and an empty panel would be a worse
+   * answer than a labelled one — the header names the state either way.
+   */
+  const refreshSession = useCallback(
+    async (
+      taskId: string | null,
+      instanceId: number | null = null,
+      project?: string,
+      atState?: string | null,
+    ) => {
+      if (taskId === null) return patch({ sessionHistory: [], session: null, sessionInstance: null });
+      const scope = project ?? ref.current.selectedProject ?? undefined;
+      const at = scope !== undefined ? { project: scope } : {};
       try {
-        patch({ detail: await invoke("task:detail", { taskId }) });
-      } catch (e) {
-        fail(e);
+        const history = await invoke("session:history", { taskId, ...at });
+        const wanted = instanceId ?? instanceAt(history, atState ?? null);
+        const session = await invoke("session:view", {
+          taskId,
+          ...(wanted !== null ? { instanceId: wanted } : {}),
+          ...at,
+        });
+        // The live tail goes when the record lands: the stored turn is the same text with its tool
+        // calls attached, so keeping both would show the answer twice.
+        patch({ sessionHistory: history, session, sessionInstance: wanted, liveTurn: null });
+      } catch {
+        patch({ sessionHistory: [], session: null, sessionInstance: null });
       }
     },
-    [patch, fail],
+    [patch],
+  );
+
+  /**
+   * Open a state's most recent run, so looking at a state shows what it DID.
+   *
+   * Selecting a state used to load its board, its file and its lint results and leave the transcript
+   * beside them saying "select a task" — which made the one panel that answers "what did this
+   * actually say" the one panel you had to go and ask for. A state that has run has a newest run,
+   * and that is the answer to the question the click asked.
+   *
+   * Three rules keep it from fighting the person using it:
+   *
+   *  - It runs on NAVIGATION only (clicking a file, drilling a column, following a link), never on
+   *    the refresh that every journaled event triggers — otherwise each engine event would yank the
+   *    selection back to the newest run mid-read.
+   *  - The transcript opens at THIS state's instance, not the deepest one the task reached.
+   *  - `inspect` is untouched. This is not a click on a task, so it must not take the column away
+   *    from the state whose file is open — see {@link AppState.inspectFrom}.
+   */
+  /**
+   * Which project holds the runs of whatever the Files view has open.
+   *
+   * The same layer rule the Run button follows ({@link runTargetOf}), applied to READS. Every
+   * task-scoped channel — detail, conversation, session history — resolves the focused project when
+   * told nothing, and with no checkout open that is not a project at all: main throws `no project is
+   * open` for a task that exists perfectly well in the shared one. Selecting a task and asking about
+   * it have to name the same database, or looking at a shared run is a handful of errors in the log
+   * and three empty panels.
+   *
+   * Falls back to the focused project when nothing is open in the Files view, which is what the
+   * Tasks view wants.
+   */
+  const owningProject = useCallback((): string | undefined => {
+    const layer = ref.current.doc?.layer ?? ref.current.state?.layer;
+    const focused = ref.current.projectDir ?? undefined;
+    return layer === undefined ? focused : (runTargetOf(layer, ref.current.projectDir).project ?? focused);
+  }, []);
+
+  const focusStateRun = useCallback(
+    (view: StateView | null) => {
+      // Both task lists, every time a state is opened. The run history reads one of them — which one
+      // depends on the file's layer — and they are otherwise only refetched when a push says so.
+      // A push that was missed, dropped by the other-project guard, or never sent because the run
+      // failed before it emitted anything then leaves the history describing a moment that has
+      // passed, with nothing to make it look again. One round trip per navigation buys the property
+      // that looking at a state always reads a list fetched after you looked.
+      void refreshTasks();
+      void refreshSharedTasks();
+      if (view === null) {
+        patch({ selected: null, sessionHistory: [], session: null, sessionInstance: null, conversation: null, sessions: {} });
+        return;
+      }
+      const newest = newestRunOf(view);
+      if (newest === null) {
+        patch({ selected: null, sessionHistory: [], session: null, sessionInstance: null, conversation: null });
+        return;
+      }
+      // The project the STATE's runs live in, not the focused one — see `owningProject`. `view` is
+      // authoritative about the layer here, and it is the value the reads below have to agree with.
+      const at = runTargetOf(view.layer, ref.current.projectDir).project ?? ref.current.projectDir ?? undefined;
+      patch({ selected: newest.taskId, selectedProject: at ?? null, stream: [], sessions: {} });
+      void refreshConversation(newest.taskId, at);
+      void refreshSession(newest.taskId, null, at, view.stateId);
+    },
+    [patch, refreshConversation, refreshSession, refreshTasks, refreshSharedTasks],
+  );
+
+  /**
+   * One child's transcript, cached by instance id — what a run card opens.
+   *
+   * Quiet and idempotent: it fires from a click on a folded header, several may be in flight at
+   * once, and a state that ran no model call answers with `empty` rather than an error. Re-fetching
+   * one already held would flicker a card someone is reading, so a hit is a no-op.
+   */
+  const loadSession = useCallback(
+    async (instanceId: number) => {
+      const taskId = ref.current.selected;
+      if (taskId === null || ref.current.sessions[instanceId] !== undefined) return;
+      const scope = ref.current.selectedProject ?? undefined;
+      try {
+        const view = await invoke("session:view", {
+          taskId,
+          instanceId,
+          ...(scope !== undefined ? { project: scope } : {}),
+        });
+        patch({ sessions: { ...ref.current.sessions, [instanceId]: view } });
+      } catch {
+        // Left absent rather than cached as empty: the card says "not loaded" and a second click
+        // retries, where a cached failure would be permanent for the life of the selection.
+      }
+    },
+    [patch],
+  );
+
+  const refreshDetail = useCallback(
+    async (taskId: string | null, project?: string) => {
+      if (!taskId) return patch({ detail: null });
+      const scope = project ?? ref.current.selectedProject ?? undefined;
+      try {
+        patch({ detail: await invoke("task:detail", { taskId, ...(scope !== undefined ? { project: scope } : {}) }) });
+      } catch {
+        // Quiet, like the conversation and session reads beside it. This fires on every selection
+        // change and on every push about the selected task, so a selection that has gone stale — a
+        // project closed underneath it, a task pruned — would otherwise raise a toast per event
+        // rather than emptying the panel, which is the honest answer and the one already rendered.
+        patch({ detail: null });
+      }
+    },
+    [patch],
   );
 
   const refreshPending = useCallback(async () => {
@@ -487,6 +974,9 @@ export function useApp() {
   }, [patch, fail]);
 
   const refreshHistory = useCallback(async () => {
+    // Same rule as {@link refreshTasks}: run history belongs to a project, so with none open there is
+    // nothing to size.
+    if (ref.current.projectDir === null) return patch({ history: { runs: 0, events: 0, commands: 0 } });
     try {
       patch({ history: await invoke("history:size", undefined) });
     } catch (e) {
@@ -526,13 +1016,77 @@ export function useApp() {
     }
   }, [patch]);
 
+  /**
+   * Read the availability snapshot main already computed.
+   *
+   * A READ, not a check: the checks run on main's own schedule (startup, project open, config write)
+   * and this only collects the answer. That is the whole difference from the button this replaced —
+   * opening Settings should not be the thing that finally goes and looks.
+   */
+  const refreshAvailability = useCallback(async () => {
+    try {
+      const availability = await invoke("availability:read", undefined);
+      applyAvailability(patch, availability);
+    } catch {
+      // Availability is a health report. Failing to fetch one must not blank the screen it annotates.
+    }
+  }, [patch]);
+
+  /**
+   * Where the self-test's state files stand in the shared root.
+   *
+   * The SHARED root, not the project's: the self-test is a fact about this installation rather than
+   * about a checkout, and writing it into `.jaira/` would put three debug files into whatever
+   * repository happened to be open — and into its next commit. Written once, reachable from every
+   * project, and visible in the Files tree under the shared root like anything else there.
+   */
+  const refreshDebugFiles = useCallback(async () => {
+    const wanted = selfTestFiles();
+    const files = await Promise.all(
+      SELF_TEST_STATES.map(async (stateId): Promise<DebugFile> => {
+        const expected = JSON.stringify(wanted[stateId]);
+        try {
+          const source = await invoke("workflow:read", { stateId, layer: "base" });
+          let matches = false;
+          try {
+            // Compared as VALUES, not as bytes. Re-indenting a file is not editing it, and a pane
+            // that offered to overwrite a formatting change would be crying wolf.
+            matches = source.exists && JSON.stringify(JSON.parse(source.text) as unknown) === expected;
+          } catch {
+            matches = false;
+          }
+          return { stateId, file: source.file, exists: source.exists, matches };
+        } catch {
+          return { stateId, file: "", exists: false, matches: false };
+        }
+      }),
+    );
+    patchDebug({ files });
+  }, [patchDebug]);
+
   const refreshAll = useCallback(async () => {
     const current = await invoke("project:current", undefined).catch(() => null);
-    patch({ projectDir: current?.dir ?? null });
+    // With no project there is no project LAYER either, and the settings screens must not merely
+    // hide the switch — they have to actually be editing the layer they say they are. Left on
+    // `project`, every control rendered disabled with no visible reason, which is what a screen that
+    // says one thing and does another looks like.
+    patch({
+      projectDir: current?.dir ?? null,
+      ...(current ? {} : { configLayer: "base" as ConfigLayer }),
+    });
     // Before the early return: preferences are the person's, and the shared root is the machine's.
     // Both mean something with no project open, and the Files view and Settings are reachable on an
     // empty window — which is where someone goes to set the shared layer up in the first place.
-    await Promise.all([refreshSettings(), refreshTree(), refreshConfig()]);
+    // Before the early return: JaiRA's own runs belong to no checkout, so they are exactly what a
+    // window with nothing open should still be able to see.
+    await Promise.all([
+      refreshSettings(),
+      refreshTree(),
+      refreshConfig(),
+      refreshAvailability(),
+      refreshProjects(),
+      refreshSharedTasks(),
+    ]);
     if (!current) return;
     await Promise.all([
       refreshTasks(),
@@ -550,12 +1104,14 @@ export function useApp() {
   }, [
     patch,
     refreshTasks,
+    refreshSharedTasks,
     refreshBoard,
     refreshPending,
     refreshApprovals,
     refreshHistory,
     refreshSettings,
     refreshConfig,
+    refreshAvailability,
     refreshTree,
     refreshDetail,
     refreshState,
@@ -576,11 +1132,40 @@ export function useApp() {
   useEffect(() => {
     void refreshAll();
     return bridge().subscribe((message: PushMessage) => {
+      // An INVALIDATE about a project this window is not showing.
+      //
+      // Narrow on purpose. JaiRA's own project forced it — a sync runs there and invalidates ITS task
+      // list, and a window with no user project open then asked for tasks it has none of, which throws
+      // by design. But it applies to INVALIDATES only: an `engine:event` or a `log:entry` from that
+      // same run is exactly what the person who pressed the button is waiting to see, and dropping
+      // those made a running sync indistinguishable from a button that did nothing.
+      const about = (message as { project?: string }).project;
+      if (message.type === "store:invalidate" && about !== undefined && about !== ref.current.projectDir) {
+        // …except JaiRA's own lists, which are nobody's project and so are nobody's to ignore.
+        if (message.scope === "tasks") {
+          void refreshProjects();
+          // A shared workflow's runs land here, and the Files inspector shows them beside its Run
+          // button. Dropping this invalidate is what would leave that history one run behind.
+          void refreshSharedTasks();
+        }
+        return;
+      }
       switch (message.type) {
         case "store:invalidate":
           if (message.scope === "tasks") {
             void refreshTasks();
             void refreshHistory();
+            // The open state's view carries its own task lists (`tasksHere`, `tasksRecent`), which
+            // the Files inspector reads for the second half of its run history and the middle panel
+            // reads for its task list. A `tasks` invalidate is exactly the event that changes them,
+            // and it used to refresh neither — so a run started from the Run button sat there at
+            // whatever the panel last happened to fetch until something touched the board.
+            void refreshState(ref.current.stateId);
+            // JaiRA's own lists too. They are not project-scoped, so they are refreshed for an
+            // invalidate about ANY project — including the system one, whose invalidates the guard
+            // above drops.
+            void refreshProjects();
+            void refreshSharedTasks();
           }
           if (message.scope === "board") {
             void refreshBoard();
@@ -590,22 +1175,31 @@ export function useApp() {
           }
           if (message.scope === "task") {
             void refreshDetail(ref.current.selected);
-            if (ref.current.inspect === "task") void refreshConversation(ref.current.selected);
+            if (ref.current.inspect === "task") {
+              void refreshConversation(ref.current.selected);
+              void refreshSession(ref.current.selected, ref.current.sessionInstance);
+            }
           }
           if (message.scope === "workflows") {
             void refreshTree();
             void refreshState(ref.current.stateId);
           }
           if (message.scope === "config") void refreshConfig();
+          // The checks main runs by itself have landed. Nothing asked for them, so nothing is waiting
+          // on a response — this push is how their result reaches the screen.
+          if (message.scope === "availability") void refreshAvailability();
           break;
         case "engine:event": {
-          if (message.taskId !== ref.current.selected) return;
-          const event = message.event as { type?: string; stateId?: string; to?: string; outcome?: string };
-          const detail = [event.stateId, event.to ?? event.outcome].filter(Boolean).join(" → ");
-          setState((s) => ({
-            ...s,
-            stream: [...s.stream, `${event.type ?? "event"}  ${detail}`].slice(-STREAM_LIMIT),
-          }));
+          const line = engineLine(message.event);
+          // A sync's events name a task nobody selected — it runs in JaiRA's own project. While one is
+          // in flight, anything not about the selected task is that sync narrating itself.
+          if (message.taskId !== ref.current.selected) {
+            if (ref.current.sync.running) {
+              patch({ sync: { ...ref.current.sync, progress: [...ref.current.sync.progress, line].slice(-SYNC_PROGRESS_LIMIT) } });
+            }
+            return;
+          }
+          setState((s) => ({ ...s, stream: [...s.stream, line].slice(-STREAM_LIMIT) }));
           break;
         }
         case "interaction:requested":
@@ -617,17 +1211,43 @@ export function useApp() {
           void refreshApprovals();
           break;
         case "run:finished":
+          void refreshProjects();
           void refreshTasks();
+          void refreshSharedTasks();
           void refreshBoard();
           void refreshDetail(ref.current.selected);
           void refreshState(ref.current.stateId);
           if (ref.current.inspect === "task") void refreshConversation(ref.current.selected);
           break;
+        case "session:turn": {
+          // Accumulated per position: a delta is a fragment, and the fragments of one call belong to one
+          // answer. A delta for a different position REPLACES rather than appends, because that is a
+          // different state speaking and concatenating two would invent a turn neither produced.
+          const live = ref.current.liveTurn;
+          const same = live !== null && live.sessionId === message.sessionId && live.seq === message.seq;
+          patch({
+            liveTurn: {
+              ...(message.sessionId !== undefined ? { sessionId: message.sessionId } : {}),
+              ...(message.seq !== undefined ? { seq: message.seq } : {}),
+              ...(message.stateId !== undefined ? { stateId: message.stateId } : {}),
+              text: same ? live.text + message.text : message.text,
+            },
+          });
+          break;
+        }
+        case "log:entry": {
+          // Appended rather than re-fetched: entries arrive one at a time and the list is a tail.
+          // Capped, because a long agent run produces a great many and none is worth a leak.
+          const logs = [...ref.current.logs, message.entry];
+          patch({ logs: logs.length > LOG_LIMIT ? logs.slice(-LOG_LIMIT) : logs });
+          break;
+        }
       }
     });
   }, [
     refreshAll,
     refreshTasks,
+    refreshSharedTasks,
     refreshBoard,
     refreshDetail,
     refreshPending,
@@ -637,25 +1257,93 @@ export function useApp() {
     refreshTree,
     refreshState,
     refreshConversation,
+    refreshSession,
   ]);
 
   const actions = useMemo(
     () => ({
       /**
-       * Select a task.
+       * Select a task, in the project it belongs to, from wherever it was clicked.
        *
-       * Also swaps the inspector onto it, which is the whole contextual-inspector rule: what you
-       * clicked is what the right-hand panel describes. The conversation is fetched alongside the
-       * detail because a leaf state shows it immediately, and a second round trip would leave a
-       * visible gap where the transcript should be.
+       * Three things travel with the click, and each one was a bug without it:
+       *
+       *  - **`project`** — a task id is a rowid in ONE database, and both views now show JaiRA's own
+       *    runs beside the checkout's. Reading a system task out of the user's project answers
+       *    "unknown task".
+       *  - **the inspector swaps onto the task**, which is the contextual-inspector rule: what you
+       *    clicked is what the right-hand column describes. {@link AppState.inspectFrom} remembers
+       *    what it was showing, so the panel has somewhere to go back to.
+       *  - **`atState`** — the state whose panel the click came from, so the transcript opens at
+       *    THIS state's instance rather than at the deepest one the task reached. See
+       *    {@link refreshSession}.
        */
-      select: (taskId: string | null) => {
-        patch({ selected: taskId, stream: [], inspect: taskId === null ? "state" : "task" });
-        void refreshDetail(taskId);
-        void refreshConversation(taskId);
+      select: (taskId: string | null, project?: string, atState?: string | null) => {
+        // Named, then whatever the last selection resolved to, then the owner of the open file — NOT
+        // the focused project, which with no checkout open is none and makes every read that follows
+        // throw. See `owningProject`.
+        const at = project ?? ref.current.selectedProject ?? owningProject();
+        patch({
+          selected: taskId,
+          selectedProject: taskId === null ? null : (at ?? null),
+          stream: [],
+          sessions: {},
+          inspect: taskId === null ? "state" : "task",
+          // Only on the way IN. Clicking a second task while already on one must not overwrite the
+          // state we came from with the task we are leaving — that is what turns Back into a loop.
+          ...(taskId !== null && ref.current.inspect !== "task" ? { inspectFrom: ref.current.stateId } : {}),
+        });
+        void refreshDetail(taskId, at);
+        void refreshConversation(taskId, at);
+        void refreshSession(taskId, null, at, atState ?? ref.current.stateId);
       },
-      /** Put the inspector back on the state — what clicking the panel header does. */
-      inspectState: () => patch({ inspect: "state" }),
+
+      /** Fold a project's board away. Its level is kept, so re-opening lands where it was. */
+      toggleProject: (project: string) =>
+        patch({ collapsed: { ...ref.current.collapsed, [project]: !ref.current.collapsed[project] } }),
+
+      /** Drill into one project's board. `null` returns that group to its workflow roots. */
+      drillProject: (project: string, level: string | null) => {
+        patch({ levels: { ...ref.current.levels, [project]: level } });
+        void refreshProjects();
+      },
+
+      /** Fetch one child run's transcript, for a card that has just been opened. */
+      loadSession: (instanceId: number) => void loadSession(instanceId),
+
+      /** Look at another state's conversation — clicking a row of the task's history. */
+      showSession: (instanceId: number | null) => {
+        void refreshSession(ref.current.selected, instanceId);
+      },
+
+      /**
+       * Read what one process printed.
+       *
+       * POLLED on open rather than streamed: a chatty agent pushing every chunk would flood the
+       * channel with output nobody is looking at, and a fetch cannot flood.
+       */
+      openJobOutput: async (jobId: number) => {
+        try {
+          patch({ jobOutput: { jobId, chunks: await invoke("job:output", { jobId }) } });
+        } catch (e) {
+          fail(e);
+        }
+      },
+      closeJobOutput: () => patch({ jobOutput: null }),
+      /**
+       * Put the inspector back where it was before a task took it over.
+       *
+       * The Back arrow, and what clicking the panel header does. It RESTORES rather than merely
+       * switching: following a task's link to another state moves {@link AppState.stateId}, so
+       * "show the state again" and "go back" stopped being the same place the moment the task panel
+       * gained links. `inspectFrom` is the place; when it is still the open file, this is the cheap
+       * switch it always was.
+       */
+      inspectState: () => {
+        const back = ref.current.inspectFrom;
+        patch({ inspect: "state", inspectFrom: null });
+        if (back === null || back === ref.current.stateId) return;
+        actionsRef.current.selectState(back);
+      },
       /**
        * Walk into a level in the Tasks view. `null` returns to the root listing.
        *
@@ -681,18 +1369,29 @@ export function useApp() {
           fail(e);
         }
       },
-      startTask: async (taskId: string, fake?: unknown) => {
+      /**
+       * Start (or re-start) a task, in the project that holds it.
+       *
+       * `project` is not optional decoration once JaiRA's own runs are reachable from the Files
+       * inspector: a shared workflow's task is a row in the system project's database, and starting
+       * it against the focused one answers "unknown task".
+       */
+      startTask: async (taskId: string, fake?: unknown, project?: string) => {
         patch({ busy: true, error: null, stream: [] });
         try {
-          await invoke("task:start", { taskId, ...(fake !== undefined ? { fake: fake as never } : {}) });
+          await invoke("task:start", {
+            taskId,
+            ...(fake !== undefined ? { fake: fake as never } : {}),
+            ...(project !== undefined ? { project } : {}),
+          });
           patch({ busy: false });
         } catch (e) {
           fail(e);
         }
       },
-      cancelTask: async (taskId: string) => {
+      cancelTask: async (taskId: string, project?: string) => {
         try {
-          await invoke("task:cancel", { taskId });
+          await invoke("task:cancel", { taskId, ...(project !== undefined ? { project } : {}) });
         } catch (e) {
           fail(e);
         }
@@ -802,15 +1501,26 @@ export function useApp() {
         patch({ view, error: null });
         if (view === "settings") void refreshConfig();
         if (view === "files") void refreshTree();
+        // Backfilled once on open; everything after arrives on the push.
+        if (view === "logs") void refreshLogs();
+        // What the pane leads with is whether the self-test is installed, so it has to be true when
+        // the pane appears rather than after the first click.
+        if (view === "debug") void refreshDebugFiles();
       },
       setSection: (section: SettingsSection) => {
         patch({ section });
-        // Checking a route costs nothing — no request, no process — so the answer is there when the
-        // section opens rather than behind a button nobody knows to press. That matters most for the
-        // one case this screen exists for: arriving after a run refused for want of a model.
-        if (section === "models") void actions.probeModelRoutes();
+        // Read what main already knows. It does NOT trigger a check: the checks ran at startup and
+        // after the last write, so opening this section shows an answer immediately rather than a row
+        // of "not checked" that fills in a second later — which is what the old on-open probe did.
+        if (section === "providers" || section === "executors") void refreshAvailability();
       },
-      setConfigLayer: (configLayer: ConfigLayer) => patch({ configLayer }),
+      // Refused rather than silently accepted when there is nothing to write: the shell hides the
+      // switch without a project, and an action that could still be reached another way should agree
+      // with it rather than leaving the panes claiming to edit a document that does not exist.
+      setConfigLayer: (configLayer: ConfigLayer) => {
+        if (configLayer === "project" && ref.current.projectDir === null) return;
+        patch({ configLayer });
+      },
 
       /**
        * Open a file in the Files tree.
@@ -822,7 +1532,7 @@ export function useApp() {
        */
       selectFile: (node: FileNode) => {
         patch({ stateId: node.stateId ?? null, inspect: "state", doc: null, sync: clearedSync(ref.current.sync) });
-        void refreshState(node.stateId ?? null);
+        void refreshState(node.stateId ?? null).then((view) => focusStateRun(view));
         if (isTextMime(node.mime)) return void refreshDoc(node.layer, node.path);
         // A PNG or the database: `file:read` would refuse it, and a refusal here would leave the
         // panel empty with nothing to explain it. Open it as a document with no contents instead —
@@ -841,9 +1551,32 @@ export function useApp() {
        */
       selectState: (stateId: string | null) => {
         patch({ stateId, inspect: "state", doc: null, sync: clearedSync(ref.current.sync) });
-        void refreshState(stateId);
+        void refreshState(stateId).then((view) => focusStateRun(view));
         if (stateId === null) return void refreshDoc(null, null);
         void locateState(stateId).then((at) => refreshDoc(at?.layer ?? null, at?.path ?? null));
+      },
+
+      /**
+       * Open one state a task ran, showing THAT run's conversation in it.
+       *
+       * The move the task panel's list of states is for: "this is the state that failed" and "take me
+       * to it" are one thought, and they were two clicks in different places — the row read the
+       * transcript, a separate arrow opened the file, and neither did the other.
+       *
+       * Deliberately NOT {@link selectState}, which would pick the state's newest run and could
+       * therefore land you in a different task's conversation than the one you were reading. The
+       * instance is passed through, so the transcript that opens is this task's pass through this
+       * state — the exact record the row named.
+       *
+       * `inspect` stays on the task. You are walking a run's states; taking the column away from the
+       * list you are walking would end the walk after one step. The Back arrow still goes where the
+       * context came from.
+       */
+      openStateAt: (stateId: string, instanceId: number) => {
+        patch({ stateId, doc: null, sync: clearedSync(ref.current.sync) });
+        void refreshState(stateId);
+        void locateState(stateId).then((at) => refreshDoc(at?.layer ?? null, at?.path ?? null));
+        void refreshSession(ref.current.selected, instanceId, ref.current.selectedProject ?? owningProject());
       },
 
       /**
@@ -861,7 +1594,7 @@ export function useApp() {
         void refreshDoc(layer, path).then(() => {
           const stateId = ref.current.doc?.stateId ?? null;
           patch({ stateId });
-          return refreshState(stateId);
+          return refreshState(stateId).then((view) => focusStateRun(view));
         });
       },
 
@@ -900,7 +1633,7 @@ export function useApp() {
         if (doc === null) return;
         const key = docKey(doc.layer, doc.path);
         const text = ref.current.drafts[key] ?? doc.text;
-        patch({ sync: { ...ref.current.sync, running: true, error: null } });
+        patch({ sync: { ...ref.current.sync, running: true, error: null, progress: [] } });
         try {
           const result = await invoke("workflow:sync", {
             layer: doc.layer,
@@ -915,7 +1648,9 @@ export function useApp() {
           for (const edit of result.edits ?? []) {
             if (edit.applicable) drafts = withDraft(drafts, docKey(edit.layer, edit.path), edit.text);
           }
-          patch({ drafts, sync: { status: ref.current.sync.status, result, running: false, error: null } });
+          // The narration goes with the run it narrated: the result is here now, and a finished run's
+          // step-by-step is noise beside it.
+          patch({ drafts, sync: { status: ref.current.sync.status, result, running: false, error: null, progress: [] } });
           // The status moves with the proposal: a sync that found nothing to do has just recorded
           // that the two agree, and the panel should say so without being reopened.
           await actionsRef.current.syncStatus(doc.layer, doc.path);
@@ -972,38 +1707,34 @@ export function useApp() {
         const current = ref.current.config;
         if (!current) return;
         const doc = applyModelPatch(layer === "base" ? current.base : current.project, fields);
+        // The write itself makes main re-check and push, so nothing is probed from here: a probe
+        // fired beside the write would race it and report the configuration that was just replaced.
         await actions.saveConfig(layer, doc);
-        await actions.probeModelRoutes();
       },
 
-      /** Health-check the provider routes. Never makes a request — see `model:probe`. */
-      probeModelRoutes: async () => {
+      /**
+       * Re-observe everything now.
+       *
+       * The one action behind both "Re-check" buttons, because there is one question — what can
+       * answer a prompt here? — and answering half of it was how the Models screen came to show a
+       * route as fine while the executor that would actually have run was missing.
+       *
+       * It exists for the cases a startup check cannot cover: a local server started since, a key
+       * just installed outside the app. Nothing depends on it being pressed.
+       */
+      recheckAvailability: async () => {
+        if (ref.current.rechecking) return;
+        patch({ rechecking: true, error: null });
         try {
-          const results = await invoke("model:probe", undefined);
-          const modelProbes: Record<string, ProbeResult> = {};
-          for (const result of results) modelProbes[result.name] = result;
-          patch({ modelProbes });
+          applyAvailability(patch, await invoke("availability:refresh", undefined));
         } catch (e) {
           fail(e);
+        } finally {
+          patch({ rechecking: false });
         }
       },
 
       // --- executors --------------------------------------------------------
-
-      /** Health-check one executor, or all of them when `name` is omitted. */
-      probeExecutors: async (name?: string) => {
-        const targets = name !== undefined ? [name] : ref.current.executors.map((e) => e.name);
-        patch({ probing: [...new Set([...ref.current.probing, ...targets])], error: null });
-        try {
-          const results = await invoke("executor:probe", name !== undefined ? { name } : {});
-          const probes = { ...ref.current.probes };
-          for (const result of results) probes[result.name] = result;
-          patch({ probes, probing: ref.current.probing.filter((n) => !targets.includes(n)) });
-        } catch (e) {
-          patch({ probing: ref.current.probing.filter((n) => !targets.includes(n)) });
-          fail(e);
-        }
-      },
 
       /**
        * Write one executor's settings into a named layer.
@@ -1016,10 +1747,37 @@ export function useApp() {
         const current = ref.current.config;
         if (!current) return;
         const doc = applyExecutorPatch(layer === "base" ? current.base : current.project, executor, fields);
-        await actionsRef.current.saveConfig(layer, doc);
         // The write may have changed the binary or the credential, so what was known about this
-        // executor's health no longer describes the executor that is now configured.
-        await actionsRef.current.probeExecutors(executor.name);
+        // executor's health no longer describes the executor that is now configured. Main re-checks
+        // on every config write and pushes the result, so this does not ask for one itself — a probe
+        // fired here would race the write and report the executor that was just replaced.
+        await actionsRef.current.saveConfig(layer, doc);
+      },
+
+      /**
+       * Write one named executor DEFINITION into a layer (`config.executors.<name>`).
+       *
+       * `undefined` removes it. Patched into the layer's own document like every other write here,
+       * so saving in a project cannot copy the shared root's definitions out of it.
+       */
+      saveDefinition: async (
+        name: string,
+        definition: JairaOperationNode | undefined,
+        layer: ConfigLayer,
+      ) => {
+        const current = ref.current.config;
+        if (!current) return;
+        const doc = structuredClone(
+          (layer === "base" ? current.base : current.project) ?? {},
+        ) as Record<string, unknown>;
+        const executors = { ...((doc["executors"] ?? {}) as Record<string, unknown>) };
+        if (definition === undefined) delete executors[name];
+        else executors[name] = definition;
+        // An emptied block is deleted rather than left as `{}`: this layer defines no executors now,
+        // and the document should say so — an empty object reads as a deliberate, if inert, override.
+        if (Object.keys(executors).length === 0) delete doc["executors"];
+        else doc["executors"] = executors;
+        await actionsRef.current.saveConfig(layer, doc as ConfigView["effective"]);
       },
 
       /** Turn an executor on or off — the one field every executor shares. */
@@ -1036,7 +1794,6 @@ export function useApp() {
         try {
           const doc = addGenericExecutor(layer === "base" ? current.base : current.project, spec);
           await actionsRef.current.saveConfig(layer, doc);
-          await actionsRef.current.probeExecutors();
         } catch (e) {
           fail(e);
         }
@@ -1048,7 +1805,6 @@ export function useApp() {
         if (!current) return;
         const doc = removeGenericExecutor(layer === "base" ? current.base : current.project, name);
         await actionsRef.current.saveConfig(layer, doc);
-        await actionsRef.current.probeExecutors();
       },
 
       /**
@@ -1079,7 +1835,9 @@ export function useApp() {
             // being edited is part of saving it — not a second thing to remember.
             await actionsRef.current.setExecutorConfig(executor, { credential: name }, layer);
           } else {
-            await actionsRef.current.probeExecutors(executor.name);
+            // The name was already in config, so nothing was written and no re-check was pushed —
+            // but the VALUE behind it changed, which is exactly what the last check was reporting on.
+            await actionsRef.current.recheckAvailability();
           }
         } catch (e) {
           fail(e);
@@ -1300,6 +2058,131 @@ export function useApp() {
         }
       },
 
+      // --- the Debug view's self-test (DESIGN §11.3) --------------------------
+
+      /** Re-read the three state files — what the pane's status line reports. */
+      debugRefresh: () => {
+        void refreshDebugFiles();
+      },
+
+      /**
+       * Write the self-test's state files into the shared root.
+       *
+       * `force` is the difference between the two buttons. Without it only what is MISSING is
+       * written, so a file somebody edited to try something is left alone; with it all three are
+       * put back to what this build says they are.
+       */
+      debugInstall: async (force = false) => {
+        patchDebug({ busy: true, error: null });
+        try {
+          const wanted = selfTestFiles();
+          const present = new Map(ref.current.debug.files.map((f) => [f.stateId, f]));
+          for (const stateId of SELF_TEST_STATES) {
+            if (!force && present.get(stateId)?.exists === true) continue;
+            await invoke("workflow:write", {
+              stateId,
+              layer: "base",
+              text: JSON.stringify(wanted[stateId], null, 2),
+            });
+          }
+          patchDebug({ busy: false });
+          await Promise.all([refreshDebugFiles(), refreshTree()]);
+        } catch (e) {
+          patchDebug({ busy: false, error: (e as Error).message });
+        }
+      },
+
+      /**
+       * Install what is missing, make a task for the self-test, and start it.
+       *
+       * `scripted` swaps the LLM for the canned replies in `selfTestScript()`. It is the FIRST thing
+       * to try when a live run fails: everything but the provider is identical, so a scripted run
+       * that passes and a live one that does not is a provider problem, and a scripted run that
+       * fails is a JaiRA problem. That distinction is the whole reason this pane exists.
+       *
+       * `fresh` makes a new task instead of adding a run to the last one. Both are useful and they
+       * are different questions — "does it work now" versus "what changed since the last run" — so
+       * the pane offers both rather than guessing.
+       */
+      /**
+       * Run the self-test, in JaiRA's own project.
+       *
+       * It always belonged there and said otherwise. The self-test's states are written to the
+       * SHARED root — deliberately, so that "does any of this work" is a fact about the installation
+       * rather than three debug files in whatever repository happened to be open — and then the run
+       * was recorded in the focused project, which put JaiRA's own runs on the user's board and, with
+       * no project open, refused with "Open a project first". That refusal was the wrong half of the
+       * contradiction to resolve: an empty window is exactly where someone reaches for a self-test,
+       * because it is what you press when nothing else is working yet.
+       *
+       * Same rule as everything else that lives in the shared root — see `runTargetOf`.
+       */
+      debugRun: async (options: { scripted?: boolean; fresh?: boolean } = {}) => {
+        patchDebug({ busy: true, error: null });
+        try {
+          // Missing files only. A run must never silently discard an edit somebody made to the
+          // workflow it is about to run — that is the one thing this pane is watching.
+          const wanted = selfTestFiles();
+          for (const stateId of SELF_TEST_STATES) {
+            const at = ref.current.debug.files.find((f) => f.stateId === stateId);
+            if (at?.exists === true) continue;
+            await invoke("workflow:write", {
+              stateId,
+              layer: "base",
+              text: JSON.stringify(wanted[stateId], null, 2),
+            });
+          }
+          await refreshDebugFiles();
+
+          const reuse = options.fresh === true ? null : ref.current.debug.taskId;
+          const taskId =
+            reuse ??
+            (
+              await invoke("task:create", {
+                title: options.scripted === true ? "Self-test (scripted)" : "Self-test (live)",
+                workflow: SELF_TEST_ROOT,
+                labels: ["debug"],
+                project: SHARED_SESSION,
+              })
+            ).taskId;
+
+          // Selected before it is started, so every panel this view borrows — the instance tree, the
+          // conversation, the live event stream — is already pointed at the run when its first event
+          // arrives. Selecting afterwards means watching the beginning in the past tense.
+          patchDebug({ taskId });
+          patch({ selected: taskId, selectedProject: SHARED_SESSION, stream: [], inspect: "task" });
+          await Promise.all([
+            refreshSharedTasks(),
+            refreshBoard(),
+            refreshDetail(taskId, SHARED_SESSION),
+            refreshConversation(taskId, SHARED_SESSION),
+          ]);
+
+          await invoke("task:start", {
+            taskId,
+            project: SHARED_SESSION,
+            ...(options.scripted === true ? { fake: selfTestScript() } : {}),
+          });
+          patchDebug({ busy: false });
+        } catch (e) {
+          patchDebug({ busy: false, error: (e as Error).message });
+        }
+      },
+
+      /** Stop a self-test that is running — the same cancel the task panel offers. */
+      debugCancel: async () => {
+        const taskId = ref.current.debug.taskId;
+        if (taskId === null) return;
+        try {
+          await invoke("task:cancel", { taskId, project: SHARED_SESSION });
+        } catch (e) {
+          patchDebug({ busy: false, error: (e as Error).message });
+        }
+      },
+
+      /** Clear the pane's own error line. */
+      debugDismissError: () => patchDebug({ error: null }),
+
       /**
        * Remember which schema a document is being held to.
        *
@@ -1323,6 +2206,60 @@ export function useApp() {
       /** Remember which tab a state file's editor is on, so returning to the file returns to it. */
       setEditorTab: (key: string, tab: "form" | "json") =>
         patch({ editorTab: { ...ref.current.editorTab, [key]: tab } }),
+
+      /** Hold one box of a state's run form. See {@link AppState.runValues} on why `""` is stored. */
+      setRunValue: (stateId: string, name: string, text: string) =>
+        patch({
+          runValues: {
+            ...ref.current.runValues,
+            [stateId]: { ...(ref.current.runValues[stateId] ?? {}), [name]: text },
+          },
+        }),
+
+      /**
+       * Start a run of the open state, from the Files view's inspector.
+       *
+       * Create then start, as one act — the two calls are an implementation detail of `task:create`
+       * returning before anything executes, not a decision anyone wants to make twice.
+       *
+       * The new task is SELECTED before it is started, for the reason the self-test does the same:
+       * the panels that follow a run — the leaf conversation, the event stream, the task inspector —
+       * have to be pointed at it before its first event arrives, or the beginning is only readable
+       * afterwards, in the journal.
+       *
+       * `inspect` deliberately stays on the state. The run was started from the state's own panel and
+       * its history row is right there; flipping the column to the task inspector would take away the
+       * form the moment it was used, which is precisely wrong when the next thing anyone does is run
+       * it again with one input changed.
+       */
+      runState: async (stateId: string, title: string, inputs: Record<string, JsonValue>, project?: string) => {
+        patch({ busy: true, error: null, stream: [] });
+        try {
+          const at = project ?? ref.current.projectDir ?? undefined;
+          const summary = await invoke("task:create", {
+            title,
+            workflow: stateId,
+            ...(Object.keys(inputs).length > 0 ? { inputs } : {}),
+            ...(project !== undefined ? { project } : {}),
+          });
+          patch({ busy: false, selected: summary.taskId, selectedProject: at ?? null });
+          await Promise.all([
+            // Whichever list the run landed in. A shared workflow's run is in JaiRA's own project and
+            // would not appear in the checkout's — which is the list the history section reads for a
+            // base-layer file.
+            project === undefined ? refreshTasks() : refreshSharedTasks(),
+            refreshBoard(),
+            // So the run appears in the history section it was started from, now rather than at the
+            // first push.
+            refreshState(stateId),
+            refreshDetail(summary.taskId, at),
+            refreshConversation(summary.taskId, at),
+          ]);
+          await invoke("task:start", { taskId: summary.taskId, ...(project !== undefined ? { project } : {}) });
+        } catch (e) {
+          fail(e);
+        }
+      },
 
       /**
        * Which schema a document already satisfies, for the picker's initial value.
@@ -1383,6 +2320,7 @@ export function useApp() {
     }),
     [
       patch,
+      patchDebug,
       fail,
       refreshAll,
       refreshTasks,
@@ -1392,8 +2330,14 @@ export function useApp() {
       refreshTree,
       refreshState,
       refreshDoc,
+      loadSession,
       locateState,
+      owningProject,
       refreshConversation,
+      refreshSession,
+      refreshSharedTasks,
+      focusStateRun,
+      refreshDebugFiles,
       afterFileChange,
     ],
   );

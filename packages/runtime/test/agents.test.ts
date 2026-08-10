@@ -228,3 +228,78 @@ describe("gateCapabilities (DESIGN §8.2)", () => {
     expect(gateCapabilities(registry, states, {})).toEqual([]);
   });
 });
+
+/**
+ * The optional peer this repo is not optional about.
+ *
+ * `@declarative-ai/agents-cli` declares `@modelcontextprotocol/sdk` as an OPTIONAL peer, because an
+ * agent run with no approver and no host tools needs no bridge. JaiRA is never that caller: its
+ * workflows declare tools (the sync gives its states `read_file`), and a declared tool reaches a CLI
+ * agent only through an MCP server the bridge stands up. Missing, the bridge refuses before spawning
+ * and every such state fails — which is how "propose workflow changes" died on a machine that had
+ * `claude` installed and working.
+ *
+ * Checked as an import rather than as a line in `package.json`, because what breaks is resolution:
+ * the bridge reaches these three subpaths, and a version that moved one of them would install
+ * cleanly and fail at the first tool call.
+ */
+describe("the CLI agent's permission/tool bridge", () => {
+  it("can load the MCP SDK entry points it imports", async () => {
+    const [server, types, http] = await Promise.all([
+      import("@modelcontextprotocol/sdk/server/index.js"),
+      import("@modelcontextprotocol/sdk/types.js"),
+      import("@modelcontextprotocol/sdk/server/streamableHttp.js"),
+    ]);
+    expect(server.Server).toBeTypeOf("function");
+    expect(types.CallToolRequestSchema).toBeDefined();
+    expect(http.StreamableHTTPServerTransport).toBeTypeOf("function");
+  });
+});
+
+/**
+ * `agentSpawn`'s stderr — piped now, and therefore drained.
+ *
+ * It was `"ignore"`d, so an agent that failed printed why into `/dev/null` and JaiRA reported an exit
+ * code. Piping it is the fix; draining it is the PRICE. An unread pipe fills at ~64 KB and the child
+ * blocks forever on write — stdout stops, `exit` never settles — which is exactly why the stream was
+ * ignored to begin with, and exactly the regression this guards.
+ */
+describe("agentSpawn — the child's diagnostics", () => {
+  const node = process.execPath;
+
+  it("forwards stderr to the observer", async () => {
+    const seen: string[] = [];
+    const spawn = agentSpawn({
+      
+      observer: { onSpawn: () => 1, onExit: () => undefined, onOutput: (_t, e) => seen.push(`${e.stream}:${e.chunk}`) },
+    });
+
+    const proc = spawn([node, "-e", "process.stderr.write('boom');console.log('{}')"], {});
+    for await (const _line of proc.lines) void _line;
+    await proc.exit;
+
+    expect(seen.join("")).toContain("stderr:boom");
+  });
+
+  it("still exits when the child writes more to stderr than a pipe holds", async () => {
+    // 512 KB, eight times the blocking buffer. With no drain this hangs; the test fails by TIMING OUT
+    // rather than by asserting, which is the honest shape for a deadlock.
+    const script = "process.stderr.write('x'.repeat(512*1024));console.log(JSON.stringify({ok:1}))";
+    const spawn = agentSpawn({});
+
+    const proc = spawn([node, "-e", script], {});
+    const lines: string[] = [];
+    for await (const line of proc.lines) lines.push(line);
+
+    // stdout survived, which is the half a blocked child loses.
+    expect(await proc.exit).toBe(0);
+    expect(lines.join("")).toContain('{"ok":1}');
+  }, 30_000);
+
+  it("drains even with NO observer attached, because the deadlock does not care why nobody read", async () => {
+    const spawn = agentSpawn({});
+    const proc = spawn([node, "-e", "process.stderr.write('y'.repeat(256*1024));console.log('{}')"], {});
+    for await (const _line of proc.lines) void _line;
+    expect(await proc.exit).toBe(0);
+  }, 30_000);
+});

@@ -19,8 +19,10 @@ import {
   WORKFLOW_YAML,
   type WorkflowSource,
 } from "@jaira/shared/browser";
-import { Badge, Board } from "./board";
-import { Conversation } from "./detail";
+import { Badge } from "./board";
+import { CompositeView } from "./runViews";
+import { entriesOf, journalFor } from "./transcript";
+import { Transcript } from "./transcriptView";
 import { docKey, useDraftBox } from "./drafts";
 import { EditorActions } from "./editorChrome";
 import { registerFileSurface, type FileSurfaceProps } from "./fileTypes";
@@ -187,13 +189,24 @@ export function YamlView({ doc }: FileSurfaceProps): JSX.Element {
 // --- workflows ---------------------------------------------------------------
 
 /**
- * A leaf state: the tasks in it, and the conversation inside the one selected.
+ * A leaf state: the tasks in it, and what the selected one actually said.
  *
  * "Recently" exists because a leaf with nothing running would otherwise be a blank panel, and "who
  * came through here and how did it go" is the question you would ask next anyway.
+ *
+ * The right half used to be two components stacked — a session viewer over a projection of the
+ * journal — and the lower one was scoped to the TASK, not to this state. So opening one state
+ * showed its words above every event of the whole run, which read as "it is showing all the
+ * sessions". They are one stream now (`transcript.ts`), filtered to this state, and a leaf renders
+ * it with no chrome at all: chrome marks a child boundary and a leaf has no children.
  */
 function LeafPanel({ context }: FileSurfaceProps): JSX.Element {
   const { state, selected, conversation, waiting, onSelectTask, onAnswer } = context;
+  const { session, liveTurn } = context;
+  const entries = useMemo(
+    () => entriesOf(session, journalFor(conversation?.turns ?? [], state?.stateId), liveTurn?.text ?? null),
+    [session, conversation, state?.stateId, liveTurn],
+  );
   if (state === null) return <p className="empty">No state loaded.</p>;
   return (
     <div className="leaf">
@@ -230,8 +243,21 @@ function LeafPanel({ context }: FileSurfaceProps): JSX.Element {
           </>
         ) : null}
       </div>
-      <div className="leaf-convo">
-        <Conversation conversation={conversation} waiting={waiting} {...(onAnswer ? { onAnswer } : {})} />
+      <div className="leaf-convo scroll">
+        <Transcript
+          session={session}
+          entries={entries}
+          empty={selected === null ? "Select a run to see what it said." : undefined}
+        />
+        {waiting ? (
+          // Pinned rather than in the flow: it is the one turn that is not history, and scrolling
+          // away from the thing blocking the run is exactly the wrong behaviour.
+          <div className="waiting-on">
+            <Badge status="waiting_for_user" />
+            <span className="grow">Waiting on you — {waiting.component}</span>
+            {onAnswer ? <button onClick={onAnswer}>Answer</button> : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -245,10 +271,11 @@ function LeafPanel({ context }: FileSurfaceProps): JSX.Element {
  * of the same thing.
  */
 export function WorkflowRunView(props: FileSurfaceProps): JSX.Element {
-  const { state, selected, onSelectTask, onDrill } = props.context;
+  const { state } = props.context;
   if (state === null) return <p className="empty">This file does not resolve to a state.</p>;
+  // A leaf has no children, so it has no board and nothing to toggle between: it is content.
   if (state.board === null) return <LeafPanel {...props} />;
-  return <Board board={state.board} selected={selected} trays={false} onSelectTask={onSelectTask} onDrill={onDrill} />;
+  return <CompositeView {...props} state={state} />;
 }
 
 /**

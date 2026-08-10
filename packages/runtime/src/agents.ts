@@ -51,8 +51,11 @@ export const AGENT_CODEX = "codex-cli";
  * Three details are copied deliberately from upstream's version and must not be
  * "tidied":
  *
- *  - **stderr is ignored, not piped.** An unread pipe fills at ~64 KB and the child
- *    then blocks forever on write, so stdout stops and `exit` never settles.
+ *  - **stderr is piped and UNCONDITIONALLY drained.** It used to be `"ignore"`d, and the reason is
+ *    still true and still load-bearing: an unread pipe fills at ~64 KB and the child then blocks
+ *    forever on write, so stdout stops and `exit` never settles. It is piped now because an agent
+ *    that fails prints why on stderr and JaiRA was throwing that away — but the drain below runs
+ *    whether or not anybody is listening, because the deadlock does not care why the pipe is unread.
  *  - **an `error` listener is attached.** A `ChildProcess` `'error'` with no
  *    listener throws and would take the host process down — and ENOENT on a missing
  *    `claude` binary is the likeliest first-run outcome.
@@ -68,7 +71,7 @@ export function agentSpawn(options: { execEnv?: ExecEnv; observer?: ExecObserver
     });
     const child = spawn(command, args, {
       ...(cwd !== undefined ? { cwd } : {}),
-      stdio: [opts.stdin === undefined ? "ignore" : "pipe", "pipe", "ignore"],
+      stdio: [opts.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       windowsHide: true,
     });
     const lines = createInterface({ input: child.stdout!, crlfDelay: Infinity });
@@ -82,16 +85,32 @@ export function agentSpawn(options: { execEnv?: ExecEnv; observer?: ExecObserver
         ...(child.pid !== undefined ? { pid: child.pid } : {}),
         ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
       });
-    } catch {
+    } catch (e) {
       token = undefined;
+      report(observer, e, "spawn");
     }
     const observeExit = (code: number | null): void => {
       try {
         observer?.onExit(token, { code, signal: null });
-      } catch {
-        // Bookkeeping must not change the agent's outcome.
+      } catch (e) {
+        // Bookkeeping must not change the agent's outcome — but it is no longer silent about it.
+        report(observer, e, "exit");
       }
     };
+
+    // THE DRAIN, and it is not optional. Attached unconditionally, before anything can await the
+    // process: with `stdio[2]` piped and nobody reading, the child blocks at ~64 KB and never exits.
+    // Forwarding to the observer is the point; consuming the bytes is the requirement.
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (chunk: string) => {
+      try {
+        observer?.onOutput?.(token, { stream: "stderr", chunk });
+      } catch (e) {
+        report(observer, e, "output");
+      }
+    });
+    // A stream that errors is still a stream nobody may leave unhandled.
+    child.stderr?.on("error", () => undefined);
 
     let spawnError: Error | undefined;
     child.on("error", (e: Error) => {
@@ -312,4 +331,13 @@ export function gateCapabilities(
     }
   }
   return issues;
+}
+
+/** Report an observer's own failure, never rethrowing — the agent's outcome is not its business. */
+function report(observer: ExecObserver | undefined, error: unknown, phase: "spawn" | "exit" | "output"): void {
+  try {
+    observer?.onError?.(error instanceof Error ? error : new Error(String(error)), phase);
+  } catch {
+    // An error channel that throws has nowhere left to go.
+  }
 }

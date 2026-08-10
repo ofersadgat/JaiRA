@@ -21,6 +21,7 @@ import type {
   FileSource,
   FileTree,
   MoveWorkflowRequest,
+  SessionRef,
   StateView,
   TaskDetail,
   WorkflowLayer,
@@ -31,6 +32,7 @@ import { Badge } from "./board";
 import { TaskPanel } from "./detail";
 import { resolveFileSurface, type FileSurfaceContext } from "./fileTypes";
 import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem } from "./menu";
+import { RunPanel, type RunSurface } from "./runPanel";
 import { Splitter } from "./splitter";
 
 /**
@@ -797,15 +799,30 @@ export function FilePanel({
 /**
  * What the right-hand column says about the selected state.
  *
- * Everything here answers a question you can only ask while looking at a state file: does it
- * validate, what will it run on, where does control go next, who depends on it, and whether the
- * tasks currently inside it would even see an edit.
+ * Everything here answers a question you can only ask while looking at a state file: how to run it,
+ * what running it has produced before, does it validate, what will it run on, where does control go
+ * next, who depends on it, and whether the tasks currently inside it would even see an edit.
+ *
+ * Run comes FIRST, above validation, and that ordering is deliberate. The Files view is where a
+ * state is written, and the thing anyone does next after writing one is try it; a button under four
+ * sections of reference material is a button reached by scrolling past everything you already know.
+ * The validation that would have gone first is not lost — it is the reason the button is disabled,
+ * said on the button itself.
  */
 export function StateInspector({
   state,
+  run,
   onRevealIssue,
 }: {
   state: StateView | null;
+  /**
+   * Starting a run from here, and the runs already started.
+   *
+   * Absent ⇒ no host that can create a task, and the two sections are omitted rather than shown
+   * inert. The same reason the sync panel is optional on a file surface: a control that cannot do
+   * its one thing is worse than its absence.
+   */
+  run?: RunSurface | undefined;
   /**
    * Show the control an issue is about, in the editor beside this panel.
    *
@@ -822,6 +839,8 @@ export function StateInspector({
         <span className="state-id">{state.stateId.split("/").pop()}</span>
         <span className="sub">· the state</span>
       </div>
+
+      {run !== undefined ? <RunPanel state={state} run={run} /> : null}
 
       {state.fileOnly ? (
         // Everything below that depends on the project's reference graph is UNKNOWN here, not empty.
@@ -999,16 +1018,24 @@ export function StateInspector({
 export function FileInspector({
   doc,
   state,
+  run,
   onRevealIssue,
 }: {
   doc: FileSource | null;
   state: StateView | null;
+  /**
+   * Passed through to {@link StateInspector}, and only reachable there.
+   *
+   * A prompt has no declared inputs and nothing to start, so the Run section does not appear for one
+   * — which is the whole of "which files get a Run section": the ones that are states.
+   */
+  run?: RunSurface | undefined;
   /** Passed through to {@link StateInspector} — the only half of this panel with issues to reveal. */
   onRevealIssue?: ((path: string) => void) | undefined;
 }): JSX.Element {
   if (doc === null) return <p className="empty">Select a file.</p>;
   if (state !== null && doc.stateId !== undefined) {
-    return <StateInspector state={state} onRevealIssue={onRevealIssue} />;
+    return <StateInspector state={state} run={run} onRevealIssue={onRevealIssue} />;
   }
   return (
     <div className="inspector">
@@ -1041,35 +1068,224 @@ export function FileInspector({
   );
 }
 
-/** The inspector when a task is what you clicked. */
+/** `12,345` — thousands separated, because these are read at a glance and compared. */
+const count = (n: number): string => n.toLocaleString();
+
+/** `2.4 s`, `1 m 12 s`. */
+function duration(ms: number): string {
+  if (ms < 1000) return `${ms} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  const seconds = Math.round(ms / 1000);
+  return `${Math.floor(seconds / 60)} m ${seconds % 60} s`;
+}
+
+/**
+ * What the run consumed, summed across every call it made.
+ *
+ * Here because a cost with nothing beside it is a number you can only believe or disbelieve. Tokens
+ * are what make it checkable: `$0.21` next to 40k cached input tokens is an agent session doing
+ * ordinary work, and next to 300 tokens it is a bug — and those two used to look identical.
+ *
+ * `costSource` is shown whenever it is anything other than the provider's own figure, because that
+ * is the difference between a charge and an estimate. JaiRA computes neither: it records what the
+ * executor reported, and this says which kind of number that was.
+ */
+function TaskMetrics({ states }: { states: SessionRef[] }): JSX.Element | null {
+  const sum = (pick: (m: NonNullable<SessionRef["metrics"]>) => number | undefined): number | undefined => {
+    let total: number | undefined;
+    for (const row of states) {
+      const value = row.metrics === undefined ? undefined : pick(row.metrics);
+      if (value !== undefined) total = (total ?? 0) + value;
+    }
+    return total;
+  };
+  const cost = states.reduce<number | undefined>(
+    (acc, row) => (row.costUsd === undefined ? acc : (acc ?? 0) + row.costUsd),
+    undefined,
+  );
+  const started = states.reduce<number | undefined>((acc, row) => (acc === undefined ? row.at : Math.min(acc, row.at)), undefined);
+  const input = sum((m) => m.inputTokens);
+  const output = sum((m) => m.outputTokens);
+  const cached = sum((m) => m.cacheReadTokens);
+  const written = sum((m) => m.cacheWriteTokens);
+  const reasoning = sum((m) => m.reasoningTokens);
+  const spent = sum((m) => m.durationMs);
+  // Worst-of, because a total is only as trustworthy as its least trustworthy part.
+  const sources = new Set(states.map((row) => row.metrics?.costSource).filter((s) => s !== undefined));
+  const source = sources.has("unknown") ? "unknown" : sources.has("table") ? "table" : sources.has("provider") ? "provider" : undefined;
+  if (started === undefined && cost === undefined && input === undefined) return null;
+
+  return (
+    <section>
+      <h3>
+        <span>Metrics</span>
+        <span className="count">{states.length} calls</span>
+      </h3>
+      <dl className="kv metrics">
+        {started !== undefined ? (
+          <>
+            <dt>started</dt>
+            <dd title={new Date(started).toISOString()}>{new Date(started).toLocaleString()}</dd>
+          </>
+        ) : null}
+        {spent !== undefined ? (
+          <>
+            <dt>in calls</dt>
+            <dd>{duration(spent)}</dd>
+          </>
+        ) : null}
+        {cost !== undefined ? (
+          <>
+            <dt>cost</dt>
+            <dd>
+              ${cost.toFixed(4)}
+              {/* Only when it is NOT the provider's own charge. A silent estimate is the one that
+                  gets quoted back as a fact. */}
+              {source !== undefined && source !== "provider" ? (
+                <span className="chip chip-warn" title="not the provider's own charge">
+                  {source === "table" ? "price table" : "unknown"}
+                </span>
+              ) : null}
+            </dd>
+          </>
+        ) : null}
+        {input !== undefined ? (
+          <>
+            <dt>in</dt>
+            <dd title="total billed input, including cache reads and writes">{count(input)}</dd>
+          </>
+        ) : null}
+        {output !== undefined ? (
+          <>
+            <dt>out</dt>
+            <dd>
+              {count(output)}
+              {reasoning !== undefined ? <span className="sub"> · {count(reasoning)} thinking</span> : null}
+            </dd>
+          </>
+        ) : null}
+        {cached !== undefined || written !== undefined ? (
+          <>
+            <dt>cache</dt>
+            <dd title="read at roughly a tenth of the base rate; written above it">
+              {cached !== undefined ? `${count(cached)} read` : "—"}
+              {written !== undefined ? ` · ${count(written)} written` : ""}
+            </dd>
+          </>
+        ) : null}
+      </dl>
+    </section>
+  );
+}
+
+/**
+ * The inspector when a task is what you clicked.
+ *
+ * The right column is a CONTEXT panel: it describes whatever you last clicked, and clicking a task
+ * makes the task the context. Two things follow from that and neither was here before.
+ *
+ * **Back is always available.** It was a crumb rendered only when a state happened to be open, so a
+ * task reached from anywhere else was a one-way trip — the column stayed on the task until you
+ * clicked another file. It is now an arrow that is always there, and it RESTORES rather than
+ * switches: `inspectFrom` remembers where the context came from, which matters because the links
+ * below can move the open state out from under you.
+ *
+ * **It links out.** A task's whole shape is "these states, in this order", and every one of them is
+ * a file you might want to open — most of all the one that just failed. Those links are what make
+ * this a context panel rather than a status readout.
+ */
 export function TaskInspector({
   stateId,
   detail,
   stream,
+  states,
+  showing,
   onBack,
   onStart,
   onCancel,
+  onOpenState,
+  onOpenStateAt,
 }: {
+  /** Where Back goes, for the label. Null ⇒ back to whatever file is open. */
   stateId: string | null;
   detail: TaskDetail | null;
   stream: string[];
+  /** Every state the task ran, with its outcome — the panel's links out. */
+  states: SessionRef[];
+  /** Which instance's transcript the middle panel is showing, so the list says where you are. */
+  showing: number | null;
   onBack: () => void;
   onStart: () => void;
   onCancel: () => void;
+  /** Open a state's file — the link back to authoring the thing that just ran. */
+  onOpenState: (stateId: string) => void;
+  /**
+   * Open one state THIS task ran, with that pass's transcript in it.
+   *
+   * One action rather than the two it replaced (read the transcript here / open the file there):
+   * "this is the state that failed" and "take me to it" are one thought.
+   */
+  onOpenStateAt: (stateId: string, instanceId: number) => void;
 }): JSX.Element {
-  if (detail === null) return <p className="empty">Select a task.</p>;
+  const back = (
+    <button className="link back-arrow" onClick={onBack} title={stateId === null ? "Back" : `Back to ${stateId}`}>
+      ←
+    </button>
+  );
+  if (detail === null) {
+    return (
+      <div className="inspector">
+        <div className="insp-crumb">
+          {back}
+          <span className="sub">no task</span>
+        </div>
+        <p className="empty">That task could not be read.</p>
+      </div>
+    );
+  }
   return (
     <div className="inspector">
       <div className="insp-crumb">
-        {stateId !== null ? (
-          <button className="link" onClick={onBack}>
-            {stateId.split("/").pop()}
-          </button>
-        ) : null}
-        <span className="sub">›</span>
-        <span className="state-id">{detail.title}</span>
+        {back}
+        <span className="state-id ellip">{detail.title}</span>
+        <span className="sub">· the task</span>
       </div>
-      <TaskPanel detail={detail} stream={stream} onStart={onStart} onCancel={onCancel} />
+
+      {states.length > 0 ? <TaskMetrics states={states} /> : null}
+
+      {states.length > 0 ? (
+        <section>
+          {/* In run order, because that is the shape of what happened. A row opens the state's FILE
+              and puts THIS run's pass through it in the transcript beside it — which is the move you
+              want when the answer to "what went wrong" turns out to be "the prompt". */}
+          <h3>
+            <span>States it ran</span>
+            <span className="count">{states.length}</span>
+          </h3>
+          <div className="task-states">
+            {states.map((row) => (
+              <div
+                key={`${row.runId}:${row.instanceId}`}
+                className={`leaf-row task-state-row${row.instanceId === showing ? " sel" : ""}`}
+                onClick={() => onOpenStateAt(row.stateId, row.instanceId)}
+                title={`open ${row.stateId} and read this run's pass through it`}
+              >
+                <span className={`dot ${row.status ?? "unknown"}`} />
+                <span className="grow ellip">{row.stateId}</span>
+                {row.costUsd !== undefined ? <span className="cost">${row.costUsd.toFixed(3)}</span> : null}
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <TaskPanel
+        detail={detail}
+        stream={stream}
+        onStart={onStart}
+        onCancel={onCancel}
+        onOpenState={onOpenState}
+      />
     </div>
   );
 }

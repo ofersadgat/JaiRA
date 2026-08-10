@@ -8,6 +8,7 @@
  * overrides. The two directories have the same shape on purpose — a workflow moves
  * between them by being copied, with nothing to rewrite.
  */
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -56,13 +57,23 @@ export interface JairaPaths {
 }
 
 /**
- * The shared root's layout (`$BASE`).
+ * The shared root's layout (`$BASE`) — the library every project resolves against, and JaiRA's own
+ * project.
  *
- * Deliberately a subset of {@link JairaPaths}: the base holds AUTHORED things —
- * workflows, functions, skills, config, settings, secrets — and no run state. There
- * is no database and no snapshots directory here, because runs belong to a project
- * and putting one machine's history behind every project would be a shared mutable
- * pile with no owner.
+ * It holds the AUTHORED things a machine shares: workflows, functions, skills, config, settings,
+ * secrets. It also holds run state, which it did not use to.
+ *
+ * **The amendment.** This said "there is no database and no snapshots directory here, because runs
+ * belong to a project and putting one machine's history behind every project would be a shared
+ * mutable pile with no owner." The reasoning stands and the conclusion no longer follows: JaiRA runs
+ * workflows of its OWN — the description sync, summarization, the conformance check — and those runs
+ * have an owner. It is this root. Their alternative was a user's project, where they would appear on
+ * a board nobody put them on and hold worktrees nobody asked for; or nowhere, which is what they had,
+ * and why a failed sync could not be read back at all.
+ *
+ * So this is a pile with an owner, and the ownership is enforced rather than asserted: a task created
+ * here may not name a branch (see `createTask`), so JaiRA's own runs can never take a worktree.
+ * `worktreesDir` is the one field {@link baseAsProjectPaths} still fabricates.
  */
 export interface JairaBasePaths {
   baseDir: string;
@@ -75,6 +86,11 @@ export interface JairaBasePaths {
   /** Machine-local secrets, checked after the project's own (see the secret chain). */
   envFile: string;
   envLocalFile: string;
+  /** Run state for JaiRA's own project — see the amendment above. */
+  dbFile: string;
+  snapshotsDir: string;
+  tasksDir: string;
+  syncFile: string;
 }
 
 export const JAIRA_DIR_NAME = ".jaira";
@@ -105,6 +121,41 @@ export function jairaBasePaths(baseDir: string = defaultBaseDir()): JairaBasePat
     skillsDir: join(root, "skills"),
     envFile: join(root, ".env"),
     envLocalFile: join(root, ".env.local"),
+    dbFile: join(root, "jaira.db"),
+    snapshotsDir: join(root, "snapshots"),
+    tasksDir: join(root, "tasks"),
+    syncFile: join(root, "sync.json"),
+  };
+}
+
+/**
+ * The shared root as a PROJECT — what `openSystemProject` opens.
+ *
+ * Not `jairaPaths(baseDir)`, which would look for `~/.jaira/.jaira/workflows`: the base's directories
+ * sit directly under it, because it is the library rather than a checkout's override of one. So this
+ * maps the base's own fields onto the project shape, with two deliberate differences:
+ *
+ *  - **`roots` is the base alone.** There is no layer behind it; it IS the layer behind everything
+ *    else. A project's `roots` puts its own `.jaira/` first and this second.
+ *  - **`worktreesDir` is fabricated.** `~` is not a git repository and JaiRA's own runs are refused a
+ *    branch, so nothing ever resolves it. It is present because the type requires it, and pointing it
+ *    somewhere impossible is better than pointing it somewhere plausible.
+ */
+export function baseAsProjectPaths(baseDir: string = defaultBaseDir()): JairaPaths {
+  const base = jairaBasePaths(baseDir);
+  return {
+    projectDir: base.baseDir,
+    jairaDir: base.baseDir,
+    configFile: base.configFile,
+    workflowsDir: base.workflowsDir,
+    snapshotsDir: base.snapshotsDir,
+    tasksDir: base.tasksDir,
+    skillsDir: base.skillsDir,
+    dbFile: base.dbFile,
+    syncFile: base.syncFile,
+    worktreesDir: join(base.baseDir, WORKTREES_DIR_NAME),
+    base,
+    roots: [base.baseDir],
   };
 }
 
@@ -149,4 +200,58 @@ export function workflowSearchPath(roots: readonly string[]): string[] {
 /** Where a task's worktree lives (DESIGN §3, §9.2). */
 export function worktreePathFor(paths: JairaPaths, taskId: string): string {
   return join(paths.worktreesDir, taskId);
+}
+
+/**
+ * The identity of an open project — one key per `.jaira/`, however the path was spelled.
+ *
+ * This exists because a process may now hold several projects at once, keyed by directory, and two
+ * keys that name one directory would mean two `better-sqlite3` handles on one file: two writers, two
+ * recovery passes, and a `jobs` claim each believes it owns. Every spelling therefore has to collapse
+ * to the same string, and there are three ways they differ:
+ *
+ *  - **Relative or `..`-laden** — `resolve` settles it.
+ *  - **Junctions, symlinks and 8.3 short names** — `realpath` settles those, and Windows file
+ *    dialogs still hand out short names. Best-effort: a directory that does not exist yet (an `init`
+ *    about to create it) has no real path, and its resolved form is the honest answer.
+ *  - **Case** — only on Windows, where `C:\Foo` and `c:\foo` are one directory. Lowercasing
+ *    elsewhere would merge two genuinely different projects, which is the worse failure.
+ */
+/**
+ * The reserved key for JaiRA's own project (`~/.jaira`, DESIGN §3.1).
+ *
+ * Re-exported from here, where every other path-shaped name lives, but DEFINED in `ipc.ts`: it is a
+ * value the renderer sends, and this module is Node-only — it reaches for `realpath` two lines
+ * below. Importing it for one string constant would pull `node:fs` into the browser bundle.
+ */
+export { SHARED_SESSION, SYSTEM_SESSION } from "./ipc";
+
+/**
+ * Where JaiRA's OWN project lives — the one a root switch must not move.
+ *
+ * Pinned to the DEFAULT base directory rather than to the selected root, which is the whole point:
+ * a description sync is about the installation, so pointing the root somewhere else must not leave
+ * its history behind in the old one. A subdirectory rather than the root itself, because when the
+ * root IS the default the two projects would otherwise share a directory and a database.
+ *
+ * One function so it can move. `defaultBaseDir` still reads the environment, so a test — and an
+ * installation that relocates `~/.jaira` wholesale — keeps working; what it deliberately does NOT
+ * read is `settings.baseDir`, which is the thing the user changes.
+ */
+export function systemProjectDir(env: NodeJS.ProcessEnv = process.env): string {
+  return join(defaultBaseDir(env), SYSTEM_DIR_NAME);
+}
+
+/** The subdirectory of the default root that holds JaiRA's own project. */
+export const SYSTEM_DIR_NAME = "system";
+
+export function sessionKey(dir: string): string {
+  const resolved = resolve(dir);
+  let real = resolved;
+  try {
+    real = realpathSync.native(resolved);
+  } catch {
+    // Not there yet, or not readable. `resolved` is already canonical enough to key by.
+  }
+  return process.platform === "win32" ? real.toLowerCase() : real;
 }

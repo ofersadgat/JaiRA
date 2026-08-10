@@ -15,6 +15,7 @@ import { parseConfig } from "@jaira/shared";
 import {
   addGenericExecutor,
   applyExecutorPatch,
+  credentialUseOf,
   editableFields,
   executorBlock,
   formatArgs,
@@ -44,14 +45,29 @@ describe("patching a built-in executor", () => {
   });
 
   it("keeps the rest of the layer, including the other executors", () => {
-    const before = { models: { default: "anthropic/claude-sonnet-5" }, agents: { codex: { sandbox: "read-only" } } };
+    const before = { artifactDir: "out", agents: { codex: { sandbox: "read-only" } } };
 
-    const doc = applyExecutorPatch(before, claudeCli, { credential: "ANTHROPIC_API_KEY" });
+    const doc = applyExecutorPatch(before, claudeCli, { command: "/opt/claude" });
 
-    expect(loadable(doc)).toEqual({
-      models: { default: "anthropic/claude-sonnet-5" },
-      agents: { codex: { sandbox: "read-only" }, claudeCli: { credential: "ANTHROPIC_API_KEY" } },
+    expect(loadable(doc)).toMatchObject({
+      artifactDir: "out",
+      agents: { codex: { sandbox: "read-only" }, claudeCli: { command: "/opt/claude" } },
     });
+  });
+
+  /**
+   * A patch takes a DOTTED path, and a container the removal emptied goes with it.
+   *
+   * Nothing in an agent block is nested any more — model limits moved to the executor tree's route
+   * node — but the mechanism stays, because it is what makes "clear it and save" mean "go back to
+   * inheriting" rather than "write an inert `{}`".
+   */
+  it("drops a container a removal emptied instead of leaving it behind", () => {
+    const before = { agents: { claudeCli: { command: "claude" } } };
+
+    const doc = applyExecutorPatch(before, claudeCli, { command: undefined });
+
+    expect(loadable(doc)).toEqual({});
   });
 
   it("does not mutate the document it was given — the store still holds the last read", () => {
@@ -174,12 +190,41 @@ describe("adding and removing a CLI executor", () => {
 
 describe("the fields a kind offers", () => {
   it("offers no command for the in-process adapter, which has no binary to point at", () => {
-    expect(editableFields("sdk")).toEqual(["credential"]);
+    expect(editableFields("sdk")).not.toContain("command");
+    expect(editableFields("sdk")).toContain("credential");
   });
 
   it("offers the sandbox only for codex, whose enforcement it is", () => {
     expect(editableFields("codex")).toContain("sandbox");
     expect(editableFields("cli")).not.toContain("sandbox");
+  });
+
+  /**
+   * The two Claude adapters are DIFFERENT forms, which is the whole point of the split.
+   *
+   * One is an API client and needs a key; the other is a program that already knows who its user is
+   * and needs a path. Offering a key for the second is what made this screen ask for a secret nothing
+   * would read, so `cli` not having the field is the assertion that matters here.
+   */
+  it("asks the CLI for a binary and the SDK for a key, and neither for the other's", () => {
+    expect(editableFields("cli")).toContain("command");
+    expect(editableFields("cli")).not.toContain("credential");
+    expect(credentialUseOf("cli")).toBe("none");
+    expect(credentialUseOf("sdk")).toBe("required");
+    expect(credentialUseOf("codex")).toBe("optional");
+  });
+
+  /**
+   * Model limits are NOT an executor's fields any more.
+   *
+   * They moved to the executor tree's route node, because that is what they are about: a limit on a
+   * route, not on the binary underneath it. This block is now only what the runtime IS.
+   */
+  it("offers no model limits — those belong to the route, not the runtime", () => {
+    for (const kind of ["sdk", "cli", "codex", "generic"] as const) {
+      expect(editableFields(kind)).not.toContain("modelDefault");
+      expect(editableFields(kind)).not.toContain("modelAllow");
+    }
   });
 });
 

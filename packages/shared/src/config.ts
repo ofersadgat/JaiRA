@@ -8,17 +8,22 @@
  * root. Exec environment, policy, and agent runtimes arrive in later phases.
  */
 import type { JsonValue } from "@declarative-ai/json";
+import type { CredentialUse } from "./executors";
+import { EXECUTOR_STEPS, type JairaExecutorSteps } from "./executorStack";
+import { parseFunctionRule, type JairaOperationNode, type JairaPromptNode } from "./executorTree";
 
+/**
+ * How each provider route is REACHED, and the named presets.
+ *
+ * There is no `default` here any more, and its absence is the point. A default MODEL was always the
+ * wrong shape for the question: what a state with no model of its own needs is a default EXECUTOR —
+ * something that can route — and a bare id could not be one. It also could not work, because
+ * `PromptRouterExecutor` dispatches on `op.config.model` while `defaults` are applied inside a leaf's
+ * lowering: a default naming an agent was invisible to the routing that had to happen first, so it
+ * fell through to the provider path and was refused there. The default call settings now belong to
+ * the default executor's prompt node, which applies them BEFORE dispatch (`./executorTree`).
+ */
 export interface JairaModelConfig {
-  /**
-   * Default model id for states that name none. Must be route-prefixed
-   * (`anthropic/claude-sonnet-5`, `openrouter/openai/gpt-5`) — routing is
-   * explicit in declarative-ai, and a bare id is a fail-fast error.
-   *
-   * The prefix now chooses more than a provider: `claude-cli/sonnet` sends prompt
-   * states to the CLI agent, which needs no API key at all (DESIGN §8.3).
-   */
-  default?: string;
   /**
    * How each route prefix is REACHED, keyed by the prefix itself.
    *
@@ -123,6 +128,15 @@ export type JairaExecEnvironment = "windows" | { wsl: string };
  * base root, then the process environment), because `config.json` is committed source and a key in
  * it is a key in everyone's checkout.
  */
+/**
+ * What every agent runtime carries: whether it exists here, and how it authenticates.
+ *
+ * Deliberately NOT which models it may run. That was `agents.<executor>.models`, and it was the wrong
+ * place: which models a route may be asked for is a fact about the ROUTE, and the route lives in the
+ * executor tree (`executors.<name>.prompt.routes.<prefix>`). Two homes for one setting meant two
+ * screens, two parsers, and a question — "does this limit apply to the tree's route or to the agent
+ * underneath it?" — with no good answer. This block is now only what the agent IS.
+ */
 export interface JairaExecutorConfig {
   enabled?: boolean;
   credential?: string;
@@ -132,11 +146,33 @@ export interface JairaExecutorConfig {
 export const BUILTIN_EXECUTORS = ["claude-code", "claude-cli", "codex-cli"] as const;
 export type BuiltinExecutor = (typeof BUILTIN_EXECUTORS)[number];
 
-/** Settings for the two built-in Claude adapters (SDK and CLI). */
-export interface JairaClaudeAgentConfig extends JairaExecutorConfig {
-  /** Path to the binary. CLI adapter only; default `claude` on PATH. */
-  command?: string;
+/**
+ * The in-process Claude Agent SDK adapter (`claude-code`).
+ *
+ * An API client: it needs a key and has no binary to point at. That it takes `credential` and no
+ * `command`, where {@link JairaClaudeCliConfig} takes the opposite, is the whole difference between
+ * the two Claude runtimes — and the reason they are two types rather than one shared block.
+ */
+export interface JairaClaudeCodeConfig extends JairaExecutorConfig {
+  credential?: string;
 }
+
+/**
+ * The subprocess Claude adapter (`claude-cli`).
+ *
+ * **No `credential`, deliberately.** `claude` authenticates itself against the subscription its user
+ * signed into; it does not take an API key from JaiRA and would ignore one. A field for it invited
+ * someone to store a secret nothing reads and then to believe the executor was configured because
+ * the box was full — so the parser refuses it and names the reason.
+ */
+export interface JairaClaudeCliConfig extends JairaExecutorConfig {
+  /** Path to the binary. Default `claude` on PATH. */
+  command?: string;
+  credential?: never;
+}
+
+/** @deprecated The two Claude adapters no longer share a shape — see the two types above. */
+export type JairaClaudeAgentConfig = JairaClaudeCodeConfig & { command?: string };
 
 /**
  * A non-Claude coding-agent CLI (DESIGN §8.1's `generic-cli`, §16).
@@ -189,9 +225,9 @@ export interface JairaAgentConfig {
   /** Settings for the built-in `codex-cli` runtime. */
   codex?: JairaCodexAgentConfig;
   /** Settings for the built-in `claude-code` runtime (the in-process SDK adapter). */
-  claudeCode?: JairaClaudeAgentConfig;
+  claudeCode?: JairaClaudeCodeConfig;
   /** Settings for the built-in `claude-cli` runtime (the subprocess adapter). */
-  claudeCli?: JairaClaudeAgentConfig;
+  claudeCli?: JairaClaudeCliConfig;
 }
 
 /**
@@ -216,6 +252,15 @@ export const DEFAULT_INLINE_MAX_BYTES = 65_536;
 
 export interface JairaConfig {
   models: JairaModelConfig;
+  /**
+   * Named executors, each a TREE (`./executorTree`) — the configuration of every level.
+   *
+   * `default` is the one every UI-initiated operation uses, and it always resolves: what is stored
+   * here is a sparse OVERLAY, and `resolveExecutorTree` derives the rest from what is available. An
+   * empty map therefore still means "an operation executor over a function executor and a router
+   * across every provider and agent" — the tree JaiRA used to build by hand and could not express.
+   */
+  executors: Record<string, JairaOperationNode>;
   /**
    * @deprecated Use `artifacts.dir`. Kept because it was the original §15 Q1
    * surface and existing configs set it; it seeds `artifacts.dir` when present.
@@ -305,6 +350,7 @@ export function defaultConfig(): JairaConfig {
     execEnvironment: "windows",
     policy: {},
     agents: {},
+    executors: {},
     workflows: {},
   };
 }
@@ -403,12 +449,26 @@ function parseArtifacts(raw: unknown, artifactDir: string): JairaArtifactConfig 
  * *looks* like a key here would be the single easiest way to end up with a secret committed in
  * `config.json`, so a string containing whitespace is refused with the reason spelled out.
  */
-function checkExecutorFields(spec: Record<string, unknown>, where: string): void {
+function checkExecutorFields(
+  spec: Record<string, unknown>,
+  where: string,
+  credentialUse: CredentialUse = "optional",
+): void {
   if (spec["enabled"] !== undefined && typeof spec["enabled"] !== "boolean") {
     throw new Error(`${where}.enabled must be a boolean`);
   }
   const credential = spec["credential"];
   if (credential === undefined) return;
+  // Refused rather than ignored, for the reason `parseModelRoute` refuses a misplaced field: a key
+  // configured for a runtime that will never read one is not a harmless extra: it is somebody
+  // believing an executor is set up, and the failure it produces ("why is it still not signed in?")
+  // is far harder to trace than a save that names the field.
+  if (credentialUse === "none") {
+    throw new Error(
+      `${where}.credential is not a setting this executor has — it authenticates itself, so no API ` +
+        `key is used. Remove the field; sign in with the binary itself instead.`,
+    );
+  }
   if (typeof credential !== "string" || credential.length === 0) {
     throw new Error(`${where}.credential must be a non-empty string`);
   }
@@ -420,15 +480,39 @@ function checkExecutorFields(spec: Record<string, unknown>, where: string): void
   }
 }
 
-function parseClaudeAgent(raw: unknown, where: string): JairaClaudeAgentConfig | undefined {
+function parseClaudeCode(raw: unknown, where: string): JairaClaudeCodeConfig | undefined {
   if (raw === undefined) return undefined;
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${where} must be an object`);
   const spec = raw as Record<string, unknown>;
-  checkExecutorFields(spec, where);
+  // `command` is listed so the SPECIFIC refusal below fires rather than the generic "not a setting":
+  // someone who wrote it has a real misconception — that this adapter is a binary — and the message
+  // that names the other one is worth far more than the shorter refusal.
+  allowedFields(spec, ["enabled", "credential", "command"], where);
+  checkExecutorFields(spec, where, "required");
+  if (spec["command"] !== undefined) {
+    throw new Error(
+      `${where}.command is not a setting this executor has — it runs the SDK inside this process, ` +
+        `so there is no binary to point at. Configure agents.claudeCli instead.`,
+    );
+  }
+  return spec as JairaClaudeCodeConfig;
+}
+
+function parseClaudeCli(raw: unknown, where: string): JairaClaudeCliConfig | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${where} must be an object`);
+  const spec = raw as Record<string, unknown>;
+  // Unknown fields are refused here as everywhere else. `models` used to be one of these blocks'
+  // settings and is not any more — a limit on which models a route may run belongs to the route, and
+  // silently accepting it here would leave someone believing a limit was in force that is not.
+  // `credential` is listed for the reason `command` is on the SDK block: the specific refusal
+  // explains that this runtime signs itself in, and the generic one would not.
+  allowedFields(spec, ["enabled", "command", "credential"], where);
+  checkExecutorFields(spec, where, "none");
   if (spec["command"] !== undefined && (typeof spec["command"] !== "string" || spec["command"].length === 0)) {
     throw new Error(`${where}.command must be a non-empty string`);
   }
-  return spec as JairaClaudeAgentConfig;
+  return spec as JairaClaudeCliConfig;
 }
 
 function parseAgents(raw: unknown): JairaAgentConfig {
@@ -437,8 +521,8 @@ function parseAgents(raw: unknown): JairaAgentConfig {
     throw new Error("config.agents must be an object");
   }
   const codex = parseCodexAgent((raw as Record<string, unknown>)["codex"]);
-  const claudeCode = parseClaudeAgent((raw as Record<string, unknown>)["claudeCode"], "config.agents.claudeCode");
-  const claudeCli = parseClaudeAgent((raw as Record<string, unknown>)["claudeCli"], "config.agents.claudeCli");
+  const claudeCode = parseClaudeCode((raw as Record<string, unknown>)["claudeCode"], "config.agents.claudeCode");
+  const claudeCli = parseClaudeCli((raw as Record<string, unknown>)["claudeCli"], "config.agents.claudeCli");
   const builtins = {
     ...(codex !== undefined ? { codex } : {}),
     ...(claudeCode !== undefined ? { claudeCode } : {}),
@@ -474,6 +558,7 @@ function parseAgents(raw: unknown): JairaAgentConfig {
     ) {
       throw new Error(`${where}.env must be an object of strings`);
     }
+    allowedFields(spec, ["enabled", "credential", "name", "command", "args", "prompt", "env"], where);
     checkExecutorFields(spec, where);
     return spec as unknown as JairaGenericCliAgent;
   });
@@ -490,6 +575,7 @@ function parseCodexAgent(raw: unknown): JairaCodexAgentConfig | undefined {
     throw new Error("config.agents.codex must be an object");
   }
   const spec = raw as Record<string, unknown>;
+  allowedFields(spec, ["enabled", "command", "sandbox", "credential"], "config.agents.codex");
   checkExecutorFields(spec, "config.agents.codex");
   if (spec["command"] !== undefined && (typeof spec["command"] !== "string" || spec["command"].length === 0)) {
     throw new Error("config.agents.codex.command must be a non-empty string");
@@ -698,15 +784,14 @@ function parseModels(value: unknown): JairaModelConfig {
   const raw = plainObject(value, "config.models");
   const models: JairaModelConfig = {};
 
-  const id = raw["default"];
-  if (id !== undefined) {
-    if (typeof id !== "string" || id.length === 0) throw new Error("config.models.default must be a non-empty string");
-    if (!id.includes("/")) {
-      throw new Error(
-        `config.models.default '${id}' must be route-prefixed, e.g. 'anthropic/claude-sonnet-5', 'openrouter/openai/gpt-5', or 'claude-cli/sonnet' to run it on the CLI agent`,
-      );
-    }
-    models.default = id;
+  if (raw["default"] !== undefined) {
+    // Refused rather than ignored, because a config carrying it was RELYING on it. It never worked
+    // for an agent id anyway (the router dispatches before a leaf's defaults are applied), so a
+    // silent drop would turn a broken setting into an invisible one.
+    throw new Error(
+      "config.models.default has moved: the default call settings belong to the default executor's " +
+        "prompt node — executors.default.prompt.defaults.model — which is applied before routing",
+    );
   }
 
   if (raw["routes"] !== undefined) {
@@ -751,6 +836,222 @@ export function parseConfig(raw: unknown): JairaConfig {
     execEnvironment: parseExecEnvironment(cfg["execEnvironment"]),
     policy: (rawPolicy as Record<string, JsonValue> | undefined) ?? {},
     agents: parseAgents(cfg["agents"]),
+    executors: parseExecutorDefinitions(cfg["executors"]),
     workflows: parseWorkflows(cfg["workflows"]),
   };
+}
+
+/**
+ * Parse the named executor trees (`./executorTree`).
+ *
+ * What is stored is an OVERLAY, so almost everything is optional and an absent field means "derive
+ * it" rather than "no value". What the parser is strict about is what is PRESENT: a mis-spelled node
+ * field is a setting that silently is not there, on a tree whose whole job is to be explicit.
+ *
+ * Recursive, because the tree is: a router's routes are prompt nodes, and one of those may be a
+ * router again.
+ */
+function parseExecutorDefinitions(raw: unknown): Record<string, JairaOperationNode> {
+  if (raw === undefined) return {};
+  const map = plainObject(raw, "config.executors");
+  const out: Record<string, JairaOperationNode> = {};
+  for (const [name, entry] of Object.entries(map)) {
+    const where = `config.executors.${name}`;
+    if (name.includes("/")) {
+      throw new Error(`${where} must not contain '/' — an executor's name IS a model prefix, and a prefix ends at the first slash`);
+    }
+    out[name] = parseOperationNode(entry, where);
+  }
+  return out;
+}
+
+/** The top of the tree: dispatch on the kind of operation. */
+function parseOperationNode(raw: unknown, where: string): JairaOperationNode {
+  const spec = plainObject(raw, where);
+  allowedFields(spec, ["kind", "description", "function", "prompt", "steps"], where);
+  if (spec["kind"] !== undefined && spec["kind"] !== "operation") {
+    throw new Error(`${where}.kind must be "operation" — it is the top of the tree, which dispatches prompt ops from function ops`);
+  }
+  if (spec["description"] !== undefined && (typeof spec["description"] !== "string" || spec["description"].length === 0)) {
+    throw new Error(`${where}.description must be a non-empty string`);
+  }
+  return {
+    kind: "operation",
+    ...(spec["description"] !== undefined ? { description: spec["description"] as string } : {}),
+    ...(spec["function"] !== undefined ? { function: parseFunctionNode(spec["function"], `${where}.function`) } : {}),
+    ...(spec["prompt"] !== undefined ? { prompt: parsePromptNode(spec["prompt"], `${where}.prompt`) } : {}),
+    ...(spec["steps"] !== undefined ? { steps: parseExecutorSteps(spec["steps"], `${where}.steps`) } : {}),
+  };
+}
+
+function parseFunctionNode(raw: unknown, where: string): JairaOperationNode["function"] {
+  const spec = plainObject(raw, where);
+  allowedFields(spec, ["kind", "rules", "steps"], where);
+  if (spec["kind"] !== undefined && spec["kind"] !== "function") throw new Error(`${where}.kind must be "function"`);
+  if (spec["rules"] !== undefined) {
+    for (const [i, rule] of patternList(spec["rules"], `${where}.rules`).entries()) {
+      if (parseFunctionRule(rule) === undefined) {
+        throw new Error(`${where}.rules[${i}] ('${rule}') is not a rule — write everything, nothing, +name or -name`);
+      }
+    }
+  }
+  return {
+    kind: "function",
+    ...(spec["rules"] !== undefined ? { rules: patternList(spec["rules"], `${where}.rules`) } : {}),
+    ...(spec["steps"] !== undefined ? { steps: parseExecutorSteps(spec["steps"], `${where}.steps`) } : {}),
+  };
+}
+
+/**
+ * A prompt node — a router, a provider, or an agent.
+ *
+ * The kind may be ABSENT at the top of the prompt half, where it is derived as the router: that is
+ * the shape a fresh install gets, and demanding it be written down would mean every project stating
+ * the one thing it never wants to change.
+ */
+function parsePromptNode(raw: unknown, where: string, position: "top" | "route" = "top"): JairaPromptNode {
+  const spec = plainObject(raw, where);
+  // At the TOP of the prompt half, an absent kind is the router — the shape a fresh install gets, and
+  // the one nobody should have to state. Inside `routes`, an absent kind is a LEAF whose identity the
+  // PREFIX already gives: a node under `routes.anthropic` is that provider, and writing it down would
+  // be writing down what the key says. Resolution supplies it either way.
+  const stated = spec["kind"];
+  const kind = stated ?? (position === "top" ? "router" : "leaf");
+  if (kind !== "router" && kind !== "provider" && kind !== "agent" && kind !== "leaf") {
+    throw new Error(`${where}.kind must be one of router, provider, agent`);
+  }
+
+  if (kind === "leaf") {
+    // Neither name is required — the route key supplies it — so both are permitted and only their
+    // shape is checked. A field belonging to neither is still refused.
+    allowedFields(spec, ["provider", "agent", "model", "allow", "defaults", "steps"], where);
+    return leafFields(spec, where, undefined) as JairaPromptNode;
+  }
+
+  if (kind === "router") {
+    allowedFields(spec, ["kind", "defaults", "routes", "fallback", "steps"], where);
+    const routes: Record<string, JairaPromptNode> = {};
+    for (const [prefix, entry] of Object.entries(plainObject(spec["routes"] ?? {}, `${where}.routes`))) {
+      if (prefix.includes("/")) {
+        throw new Error(`${where}.routes.${prefix} must not contain '/' — a route key IS a model prefix`);
+      }
+      routes[prefix] = parsePromptNode(entry, `${where}.routes.${prefix}`, "route");
+    }
+    return {
+      kind: "router",
+      ...(spec["defaults"] !== undefined
+        ? { defaults: plainObject(spec["defaults"], `${where}.defaults`) as Record<string, JsonValue> }
+        : {}),
+      ...(Object.keys(routes).length > 0 ? { routes } : {}),
+      ...(spec["fallback"] !== undefined ? { fallback: parsePromptNode(spec["fallback"], `${where}.fallback`) } : {}),
+      ...(spec["steps"] !== undefined ? { steps: parseExecutorSteps(spec["steps"], `${where}.steps`) } : {}),
+    };
+  }
+
+  const target = kind === "provider" ? "provider" : "agent";
+  allowedFields(spec, ["kind", target, "model", "allow", "defaults", "steps"], where);
+  return { kind, ...leafFields(spec, where, target) } as JairaPromptNode;
+}
+
+/** The settings a provider node and an agent node share, plus whichever name they carry. */
+function leafFields(
+  spec: Record<string, unknown>,
+  where: string,
+  target: "provider" | "agent" | undefined,
+): Record<string, unknown> {
+  const names: Array<"provider" | "agent"> = target === undefined ? ["provider", "agent"] : [target];
+  for (const field of [...names, "model"]) {
+    if (spec[field] !== undefined && (typeof spec[field] !== "string" || (spec[field] as string).length === 0)) {
+      throw new Error(`${where}.${field} must be a non-empty string`);
+    }
+  }
+  const owner = names.map((n) => spec[n]).find((v): v is string => typeof v === "string");
+  const model = spec["model"] as string | undefined;
+  // The node's own name is the prefix, so a prefixed model would be doubled — `claude-cli/opus` on a
+  // node whose agent is `claude-cli` reaches the binary as a model nothing knows.
+  if (owner !== undefined && model !== undefined && model.startsWith(`${owner}/`)) {
+    throw new Error(
+      `${where}.model ('${model}') must be the model as it is known there ('${model.slice(owner.length + 1)}') — ` +
+        `the route's own name is already the prefix`,
+    );
+  }
+  return {
+    ...Object.fromEntries(names.filter((n) => spec[n] !== undefined).map((n) => [n, spec[n]])),
+    ...(model !== undefined ? { model } : {}),
+    ...(spec["allow"] !== undefined ? { allow: patternList(spec["allow"], `${where}.allow`) } : {}),
+    ...(spec["defaults"] !== undefined
+      ? { defaults: plainObject(spec["defaults"], `${where}.defaults`) as Record<string, JsonValue> }
+      : {}),
+    ...(spec["steps"] !== undefined ? { steps: parseExecutorSteps(spec["steps"], `${where}.steps`) } : {}),
+  };
+}
+
+/** Refuse a field this node does not have, naming the ones it does. */
+function allowedFields(spec: Record<string, unknown>, allowed: string[], where: string): void {
+  for (const field of Object.keys(spec)) {
+    if (!allowed.includes(field)) {
+      throw new Error(`${where}.${field} is not a setting — it takes ${allowed.join(", ")}`);
+    }
+  }
+}
+
+/** A non-empty list of non-empty patterns. Empty would be a limit that admits nothing, never meant. */
+function patternList(raw: unknown, where: string): string[] {
+  if (!Array.isArray(raw) || raw.length === 0) throw new Error(`${where} must be a non-empty array of patterns`);
+  return raw.map((entry, i) => {
+    if (typeof entry !== "string" || entry.trim().length === 0) {
+      throw new Error(`${where}[${i}] must be a non-empty string`);
+    }
+    return entry;
+  });
+}
+
+function parseExecutorSteps(raw: unknown, where: string): JairaExecutorSteps {
+  const map = plainObject(raw, where);
+  const out: Record<string, unknown> = {};
+  for (const [name, entry] of Object.entries(map)) {
+    const step = EXECUTOR_STEPS.find((s) => s.name === name);
+    if (step === undefined) {
+      throw new Error(`${where}.${name} is not a step — the stack is built from ${EXECUTOR_STEPS.map((s) => s.name).join(", ")}`);
+    }
+    out[name] = checkAgainstSchema(entry, step.schema, `${where}.${name}`);
+  }
+  return out as JairaExecutorSteps;
+}
+
+/**
+ * Check a value against one of the step schemas — the small subset those schemas actually use.
+ *
+ * Deliberately not a general JSON Schema validator: `@declarative-ai/validate` is one and it is
+ * Node-only, while this file is in everyone's bundle. What the step schemas use is objects, numbers,
+ * booleans, strings and `required`, so that is what this reads. Anything richer belongs in a schema
+ * these are not, and would be a reason to move the check rather than to grow this.
+ */
+function checkAgainstSchema(value: unknown, schema: Record<string, JsonValue>, where: string): Record<string, unknown> {
+  const spec = plainObject(value, where);
+  const properties = (schema["properties"] ?? {}) as Record<string, Record<string, JsonValue>>;
+  for (const field of Object.keys(spec)) {
+    if (properties[field] === undefined) {
+      throw new Error(`${where}.${field} is not a setting — it takes ${Object.keys(properties).join(", ")}`);
+    }
+  }
+  for (const required of (schema["required"] ?? []) as string[]) {
+    if (spec[required] === undefined) throw new Error(`${where}.${required} is required`);
+  }
+  for (const [field, sub] of Object.entries(properties)) {
+    const held = spec[field];
+    if (held === undefined) continue;
+    if (sub["type"] === "object") {
+      checkAgainstSchema(held, sub, `${where}.${field}`);
+      continue;
+    }
+    if (sub["type"] === "number" && (typeof held !== "number" || !Number.isFinite(held))) {
+      throw new Error(`${where}.${field} must be a number`);
+    }
+    if (sub["type"] === "boolean" && typeof held !== "boolean") throw new Error(`${where}.${field} must be a boolean`);
+    if (sub["type"] === "string" && (typeof held !== "string" || held.length === 0)) {
+      throw new Error(`${where}.${field} must be a non-empty string`);
+    }
+  }
+  return spec;
 }

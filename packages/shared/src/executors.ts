@@ -9,6 +9,89 @@
 /** How an executor is driven, which decides what a health check can even observe. */
 export type ExecutorKind = "sdk" | "cli" | "codex" | "generic";
 
+/**
+ * What a credential MEANS for a kind of executor — three answers, not two.
+ *
+ * The middle one is the whole reason this exists. `claude-cli` authenticates itself: it carries the
+ * subscription the user already signed into, and it will not read an API key out of the environment
+ * to decide who it is. Offering a key field for it was worse than useless — it invited someone to
+ * store a secret that nothing would ever read, and then to believe the executor was configured
+ * because the box was filled in. `none` is therefore a claim about the RUNTIME, not a UI preference:
+ * the parser refuses a `credential` under such an executor for the same reason.
+ */
+export type CredentialUse = "required" | "optional" | "none";
+
+/**
+ * One editable field of an executor — what the runtime IS, and nothing about which models it runs.
+ *
+ * Model limits used to live here too. They moved to the executor TREE's route node, because that is
+ * what they are about: a limit on a route, not on the binary underneath it.
+ */
+export type ExecutorField =
+  | "name"
+  | "command"
+  | "credential"
+  | "sandbox"
+  | "args"
+  | "prompt"
+  | "env";
+
+/**
+ * What each KIND of executor is, and what it can be configured with.
+ *
+ * One table rather than a `switch` per surface, because "which fields does codex have" was being
+ * answered independently by the config parser, the form, and the probe — three answers that drifted.
+ * A kind that gains a field gains it everywhere from here.
+ */
+export interface ExecutorKindSpec {
+  label: string;
+  /** One line, addressed to someone deciding whether they want this executor at all. */
+  hint: string;
+  /** The settings this kind actually has, in the order a form should offer them. */
+  fields: ExecutorField[];
+  /** Whether this runtime uses an API key at all — see {@link CredentialUse}. */
+  credential: CredentialUse;
+  /** The variable a `required`/`optional` key is conventionally kept under. A suggestion only. */
+  suggestedCredential?: string;
+}
+
+/**
+ * The four kinds, and the deliberately different shapes they take.
+ *
+ * `sdk` and `cli` are both Claude and they are NOT the same form: the in-process SDK is an API client
+ * and needs a key; the CLI is a program that already knows who its user is and needs a path. Treating
+ * them as one "executor" with one generic block is what produced a settings screen asking for an
+ * Anthropic key in order to run a binary that would have ignored it.
+ */
+export const EXECUTOR_KINDS: Record<ExecutorKind, ExecutorKindSpec> = {
+  sdk: {
+    label: "in-process SDK",
+    hint: "The Claude Agent SDK, running inside this process. Needs an API key and the npm package.",
+    fields: ["credential"],
+    credential: "required",
+    suggestedCredential: "ANTHROPIC_API_KEY",
+  },
+  cli: {
+    label: "Claude CLI",
+    hint: "The `claude` binary, on its own subscription — it signs itself in, so no API key is used.",
+    fields: ["command"],
+    credential: "none",
+  },
+  codex: {
+    label: "Codex CLI",
+    hint: "The `codex` binary. Signs itself in, or uses a key when one is named. Enforces policy through its sandbox.",
+    fields: ["command", "sandbox", "credential"],
+    credential: "optional",
+    suggestedCredential: "OPENAI_API_KEY",
+  },
+  generic: {
+    label: "a CLI agent",
+    hint: "Any other coding-agent binary, driven by an argv template. Enforces no policy of its own.",
+    fields: ["name", "command", "args", "prompt", "env", "credential"],
+    credential: "optional",
+  },
+};
+
 /** Which link of the secret chain supplied a credential. */
 export type SecretSource =
   | "keychain"
@@ -41,6 +124,14 @@ export interface ExecutorInfo {
   command?: string;
   /** The secret this executor's credential is looked up under, when config names one. */
   credential?: string;
+  /**
+   * Whether this runtime uses a key at all — {@link EXECUTOR_KINDS}, carried on the instance.
+   *
+   * Carried rather than re-derived because every consumer needs it and the kind table lives in one
+   * package: the probe decides whether a missing key is a failure, and the form decides whether to
+   * offer the box, from this one field.
+   */
+  credentialUse: CredentialUse;
   /** What the runtime can enforce of the project's policy (DESIGN §8.2). */
   policyEnforcement: "callback" | "config" | "none";
   /** Set for a built-in whose behaviour config also tunes, e.g. codex's sandbox. */
@@ -66,6 +157,40 @@ export interface ProbeResult {
   credential?: SecretOrigin;
   /** Set when config names a credential and nothing in the chain supplies it. */
   credentialMissing?: string;
+  /**
+   * What would FIX a `failed` route or executor, in one imperative line.
+   *
+   * Separate from `detail` because they are different sentences and the UI shows them differently:
+   * `detail` is what was observed, this is what to do about it. A check that concludes "unavailable"
+   * without saying how to change that is the thing this whole surface was added to stop doing.
+   */
+  fix?: string;
+}
+
+/**
+ * Everything the app observed about who can answer a prompt, and when it looked.
+ *
+ * One snapshot rather than two independent probe maps because it is read as one question — *what can
+ * run here right now?* — and because the answer includes {@link AvailabilitySnapshot.defaultModel},
+ * which is derived from BOTH halves and would otherwise be recomputed differently by each caller.
+ */
+import type { JairaOperationNode } from "./executorTree";
+
+export interface AvailabilitySnapshot {
+  /** Provider routes, keyed in `MODEL_ROUTE_KEYS` order. */
+  routes: ProbeResult[];
+  /** Executors, in inventory order. */
+  executors: ProbeResult[];
+  /**
+   * The DEFAULT executor, resolved — the whole tree, derived from what the checks above found.
+   *
+   * The tree rather than a chosen model id, because a model id could never be the answer: it cannot
+   * route, and a default naming an agent was invisible to the routing that has to happen first. What
+   * a state with no model of its own gets is this executor.
+   */
+  tree?: JairaOperationNode;
+  /** Epoch ms of the check, or 0 when none has run yet. */
+  checkedAt: number;
 }
 
 /**
@@ -76,10 +201,12 @@ export interface ProbeResult {
  * What they are for is the first-run case — someone has an Anthropic key and no idea what JaiRA
  * wants it called — where offering the conventional name is the difference between a filled-in
  * field and a search through the documentation.
+ *
+ * `claude-cli` is absent, and its absence is the point: the CLI signs itself in, so there is no key
+ * for it to suggest and the form does not offer one ({@link EXECUTOR_KINDS}).
  */
 export const SUGGESTED_CREDENTIALS: Record<string, string> = {
   "claude-code": "ANTHROPIC_API_KEY",
-  "claude-cli": "ANTHROPIC_API_KEY",
   "codex-cli": "OPENAI_API_KEY",
 };
 

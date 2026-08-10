@@ -104,14 +104,50 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
     project.db.transaction(() => {
       const dropEvents = project.db.prepare(`DELETE FROM events WHERE run_id = ?`);
       const dropCommands = project.db.prepare(`DELETE FROM command_log WHERE run_id = ?`);
+      // A job's captured output hangs off the job, and jobs were never pruned at all — so a run's
+      // children were half-collected and the rows nobody deleted grew forever.
+      const dropJobOutput = project.db.prepare(
+        `DELETE FROM job_output WHERE job_id IN (SELECT id FROM jobs WHERE run_id = ?)`,
+      );
+      const dropJobs = project.db.prepare(`DELETE FROM jobs WHERE run_id = ?`);
+      // A conversation belongs to the run that held it (see `SessionScope`), so pruning the run
+      // prunes its transcripts — and the lineage rows they hang off with them.
+      const dropRecords = project.db.prepare(`DELETE FROM operation_records WHERE run_id = ?`);
+      // A branch with no records left AND no descendant pointing at it. Both conditions matter, and
+      // the first one alone is actively destructive:
+      //
+      //  - A RECORDLESS branch is normal and transient. `resolve` and `fork` insert the lineage row
+      //    before the first record exists, so "no records" is also what an in-flight call of ANOTHER
+      //    run looks like. Deleting it re-created it later with no parent, silently truncating a
+      //    conversation's inherited prefix.
+      //  - `parent REFERENCES sessions(id)` with foreign keys ON means removing a parent that still
+      //    has a child ABORTS THE WHOLE TRANSACTION — taking the events, jobs and runs with it.
+      //
+      // Age-bounded for the same reason: a conversation younger than the prune window belongs to work
+      // that is still going on.
+      const dropSessions = project.db.prepare(
+        `DELETE FROM sessions
+          WHERE created_at < ?
+            AND id NOT IN (SELECT DISTINCT session_id FROM operation_records)
+            AND id NOT IN (SELECT parent FROM sessions WHERE parent IS NOT NULL)`,
+      );
       const dropRun = project.db.prepare(`DELETE FROM runs WHERE id = ?`);
       for (const run of runs) {
         // Children before the parent: `command_log.run_id` and `events.run_id`
         // reference `runs(id)`, so the run row goes last or the FK refuses.
         dropEvents.run(run.runId);
         dropCommands.run(run.runId);
+        dropJobOutput.run(run.runId);
+        dropJobs.run(run.runId);
+        dropRecords.run(run.runId);
         dropRun.run(run.runId);
       }
+      // Once, after the records are gone. Repeated until it stops removing anything, because a chain
+      // is peeled a generation at a time: deleting a leaf is what makes its parent deletable.
+      let removed = 0;
+      do {
+        removed = dropSessions.run(before).changes;
+      } while (removed > 0);
     })();
   }
 

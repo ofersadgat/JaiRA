@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   defaultConfig,
@@ -10,6 +13,7 @@ import {
   newTaskId,
   parseConfig,
   parseTaskMeta,
+  sessionKey,
 } from "../src/index";
 
 describe("task ids", () => {
@@ -45,18 +49,25 @@ describe("parseTaskMeta", () => {
 });
 
 describe("config", () => {
-  it("parses the default model and defaults artifactDir", () => {
-    const cfg = parseConfig({ models: { default: "anthropic/claude-sonnet-5" } });
-    expect(cfg.models.default).toBe("anthropic/claude-sonnet-5");
-    expect(cfg.artifactDir).toBe("jaira-artifacts");
+  it("defaults artifactDir, and refuses the retired models.default", () => {
+    expect(parseConfig({}).artifactDir).toBe("jaira-artifacts");
     expect(parseConfig({})).toEqual(defaultConfig());
     expect(() => parseConfig({ models: "nope" })).toThrow(/must be an object/);
     expect(() => parseConfig([])).toThrow(/object/);
+    // A default MODEL could never route: the prompt router dispatches on `op.config.model` while a
+    // leaf's defaults are applied inside its own lowering, so a default naming an agent was invisible
+    // to the routing that had to happen first. Refused rather than dropped, because a config carrying
+    // it was relying on it.
+    expect(() => parseConfig({ models: { default: "anthropic/claude-sonnet-5" } })).toThrow(
+      /executors.default.prompt.defaults.model/,
+    );
   });
 
-  it("requires the default model to be route-prefixed (routing is explicit)", () => {
-    expect(() => parseConfig({ models: { default: "claude-sonnet-5" } })).toThrow(/route-prefixed/);
-    expect(() => parseConfig({ models: { default: "" } })).toThrow(/non-empty/);
+  it("points a config still carrying models.default at where those settings moved", () => {
+    // Any value at all, well-formed or not: the field itself is gone, so validating its shape would
+    // be validating a setting nothing reads.
+    expect(() => parseConfig({ models: { default: "claude-sonnet-5" } })).toThrow(/has moved/);
+    expect(() => parseConfig({ models: { default: "anthropic/claude-sonnet-5" } })).toThrow(/has moved/);
   });
 
   it("parses generic-cli agents", () => {
@@ -95,5 +106,41 @@ describe("paths", () => {
     expect(paths.jairaDir.endsWith(".jaira")).toBe(true);
     expect(paths.workflowsDir).toContain(".jaira");
     expect(paths.dbFile.endsWith("jaira.db")).toBe(true);
+  });
+});
+
+/**
+ * The identity of an open project, now that a process holds several.
+ *
+ * The failure this prevents is not cosmetic: two keys naming one directory would mean two
+ * `better-sqlite3` handles on one file — two writers, two recovery passes, and a `jobs` claim each
+ * believes it owns.
+ */
+describe("sessionKey", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jaira-key-"));
+
+  it("collapses spellings of the same directory to one key", () => {
+    expect(sessionKey(dir)).toBe(sessionKey(join(dir, "..", basename(dir))));
+    expect(sessionKey(dir)).toBe(sessionKey(`${dir}${sep}`.slice(0, -1)));
+  });
+
+  it("keeps genuinely different directories apart", () => {
+    expect(sessionKey(join(dir, "a"))).not.toBe(sessionKey(join(dir, "b")));
+  });
+
+  it.runIf(process.platform === "win32")("ignores case on Windows, where one path is one directory", () => {
+    expect(sessionKey(dir.toUpperCase())).toBe(sessionKey(dir.toLowerCase()));
+  });
+
+  it.runIf(process.platform !== "win32")("keeps case elsewhere, where two spellings are two directories", () => {
+    // Lowercasing on a case-sensitive filesystem would merge two real projects, which is the worse
+    // failure of the two — so the normalization is deliberately platform-conditional.
+    expect(sessionKey("/tmp/Foo")).not.toBe(sessionKey("/tmp/foo"));
+  });
+
+  it("answers for a directory that does not exist yet, which is what `init` hands it", () => {
+    const missing = join(dir, "not-created-yet");
+    expect(sessionKey(missing)).toBe(sessionKey(missing));
+    expect(sessionKey(missing).length).toBeGreaterThan(0);
   });
 });

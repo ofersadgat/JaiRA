@@ -147,3 +147,61 @@ describeWsl(`NodeExec (WSL: ${DISTRO ?? "unavailable"})`, () => {
     expect(listing).toContain("package.json");
   });
 });
+
+/**
+ * The child's output, as it arrives — and the deadlock that guards.
+ *
+ * `agentSpawn` used to send an agent's stderr to `/dev/null`, so "the agent exited 1" was the whole
+ * story of every failure. Piping it means the pipe MUST be drained: an unread one fills at ~64 KB and
+ * the child then blocks forever on write, so stdout stops and the process never exits. That is not a
+ * hypothesis to be careful about — it is the reason the stream was ignored in the first place, and the
+ * regression these tests exist for.
+ */
+describe("ExecObserver output", () => {
+  const node = process.execPath;
+
+  it("forwards both streams as they arrive", async () => {
+    const seen: Array<{ stream: string; chunk: string }> = [];
+    const exec = new NodeExec({ observer: { onSpawn: () => 1, onExit: () => undefined, onOutput: (_t, e) => seen.push(e) } });
+
+    const result = await exec.run(node, ["-e", "process.stdout.write('out');process.stderr.write('err')"]);
+
+    expect(result.code).toBe(0);
+    expect(seen.filter((e) => e.stream === "stdout").map((e) => e.chunk).join("")).toBe("out");
+    expect(seen.filter((e) => e.stream === "stderr").map((e) => e.chunk).join("")).toBe("err");
+  });
+
+  it("survives a child that writes far more to stderr than a pipe holds", async () => {
+    // 512 KB — eight times the buffer that blocks. Without a drain this never settles, so the test
+    // fails by TIMING OUT rather than by asserting, which is the honest shape for a deadlock.
+    const script = "process.stderr.write('x'.repeat(512*1024));process.stdout.write('done')";
+    const exec = new NodeExec({ observer: { onSpawn: () => 1, onExit: () => undefined } });
+
+    const result = await exec.run(node, ["-e", script]);
+
+    expect(result.code).toBe(0);
+    // …and stdout still arrived, which is what a blocked child would have lost.
+    expect(result.stdout).toBe("done");
+    expect(result.stderr.length).toBe(512 * 1024);
+  }, 30_000);
+
+  it("reports an observer that throws instead of swallowing it", async () => {
+    const errors: Array<{ phase: string; message: string }> = [];
+    const exec = new NodeExec({
+      observer: {
+        onSpawn: () => {
+          throw new Error("recording broke");
+        },
+        onExit: () => undefined,
+        onError: (e, phase) => errors.push({ phase, message: e.message }),
+      },
+    });
+
+    // The command still succeeds: a failed record must never change its outcome. What changed is that
+    // the failure is now visible somewhere rather than being dropped on the floor.
+    const result = await exec.run(node, ["-e", "process.stdout.write('ok')"]);
+
+    expect(result.stdout).toBe("ok");
+    expect(errors).toEqual([{ phase: "spawn", message: "recording broke" }]);
+  });
+});

@@ -57,7 +57,7 @@ import {
   registerFileTools,
   type ArtifactStore,
   type ExecObserver,
-  modelDefaults,
+  defaultExecutorTree,
   modelRouterOptions,
   agentPromptRoutes,
   SecretResolver,
@@ -346,7 +346,10 @@ function buildRunEnvironment(
           }),
           ...(presets !== undefined ? { configs: { get: (id: string) => presets[id] } } : {}),
         }),
-    defaults: modelDefaults(config, bundle, { fake: scripted, secrets }),
+    // The DEFAULT executor, resolved — the same tree the app builds, so a workflow behaves the
+    // same way whichever drives it. The CLI passes no availability: it takes no probes, and must not
+    // refuse over a check it never ran.
+    tree: defaultExecutorTree(config, bundle, { fake: scripted, secrets }).prompt,
   });
   // Conversation `summary` mode: only installed when a state asked for it, and it
   // summarizes through the run's own prompt executor, so a scripted run stays

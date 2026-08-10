@@ -103,6 +103,7 @@ describe("what actually gets registered", () => {
 
 describe("probeExecutor", () => {
   const cli = () => listExecutors().find((e) => e.name === "claude-cli")!;
+  const codex = () => listExecutors().find((e) => e.name === "codex-cli")!;
 
   it("checks a CLI with --version, and reports the version it answered with", async () => {
     const exec = fakeExec({ claude: { code: 0, stdout: "2.1.142 (Claude Code)\n" } });
@@ -137,21 +138,21 @@ describe("probeExecutor", () => {
   });
 
   it("fails a working binary whose named credential nothing supplies", async () => {
-    const exec = fakeExec({ claude: { code: 0, stdout: "2.1.142" } });
-    const info = { ...cli(), credential: "ANTHROPIC_API_KEY" };
+    const exec = fakeExec({ codex: { code: 0, stdout: "0.4.1" } });
+    const info = { ...codex(), credential: "OPENAI_API_KEY" };
     const secrets = new SecretResolver({ baseDir, env: {} });
 
     const result = await probeExecutor(info, { exec, secrets });
 
     // The binary IS there — reporting "ok" would read as "this works", and the first real call
     // would then fail for a reason the health check had already been asked about.
-    expect(result).toMatchObject({ status: "failed", credentialMissing: "ANTHROPIC_API_KEY" });
+    expect(result).toMatchObject({ status: "failed", credentialMissing: "OPENAI_API_KEY" });
   });
 
   it("passes once the credential resolves, and names only its origin", async () => {
-    writeFileSync(join(baseDir, ".env"), "ANTHROPIC_API_KEY=sk-not-a-real-key", "utf8");
-    const exec = fakeExec({ claude: { code: 0, stdout: "2.1.142" } });
-    const info = { ...cli(), credential: "ANTHROPIC_API_KEY" };
+    writeFileSync(join(baseDir, ".env"), "OPENAI_API_KEY=sk-not-a-real-key", "utf8");
+    const exec = fakeExec({ codex: { code: 0, stdout: "0.4.1" } });
+    const info = { ...codex(), credential: "OPENAI_API_KEY" };
 
     const result = await probeExecutor(info, { exec, secrets: new SecretResolver({ baseDir, env: {} }) });
 
@@ -160,13 +161,33 @@ describe("probeExecutor", () => {
     expect(JSON.stringify(result)).not.toContain("sk-not-a-real-key");
   });
 
+  /**
+   * The CLI adapter takes no key, so a missing one cannot make it unhealthy.
+   *
+   * This is the case the old probe got wrong in the one direction that matters: it checked a
+   * credential for every kind, so `claude-cli` on a machine with no `ANTHROPIC_API_KEY` reported
+   * `failed` — the one executor that works with no API key at all, marked as the broken one.
+   */
+  it("never looks for a key for a runtime that signs itself in", async () => {
+    const exec = fakeExec({ claude: { code: 0, stdout: "2.1.142" } });
+    const secrets = new SecretResolver({ baseDir, env: {} });
+
+    const result = await probeExecutor(cli(), { exec, secrets });
+
+    expect(result.status).toBe("ok");
+    expect(result.credentialMissing).toBeUndefined();
+    expect(result.detail).toContain("no key is needed");
+  });
+
   it("checks the SDK adapter by resolving its package, not by spawning anything", async () => {
     const exec = fakeExec({});
     const sdk = listExecutors().find((e) => e.name === "claude-code")!;
+    const secrets = new SecretResolver({ baseDir, env: { ANTHROPIC_API_KEY: "sk-not-a-real-key" } });
 
-    const installed = await probeExecutor(sdk, { exec, resolve: () => "/somewhere/index.js" });
+    const installed = await probeExecutor(sdk, { exec, secrets, resolve: () => "/somewhere/index.js" });
     const missing = await probeExecutor(sdk, {
       exec,
+      secrets,
       resolve: () => {
         throw new Error("Cannot find module");
       },
@@ -176,6 +197,27 @@ describe("probeExecutor", () => {
     expect(missing).toMatchObject({ status: "failed" });
     expect(missing.detail).toContain("not installed");
     expect(exec.calls).toEqual([]);
+  });
+
+  /**
+   * The SDK is an API client: installed but keyless, it cannot make a single call.
+   *
+   * It used to report `ok` in exactly that state, because with no `credential` named there was
+   * nothing to look up — so the check passed by having asked no question.
+   */
+  it("fails the SDK adapter when the package is there but no key is", async () => {
+    const exec = fakeExec({});
+    const sdk = listExecutors().find((e) => e.name === "claude-code")!;
+
+    const result = await probeExecutor(sdk, {
+      exec,
+      secrets: new SecretResolver({ baseDir, env: {} }),
+      resolve: () => "/somewhere/index.js",
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.detail).toContain("no API key is configured");
+    expect(result.fix).toContain("claude-cli");
   });
 
   /**
@@ -199,7 +241,7 @@ describe("probeExecutor", () => {
   it("says so rather than guessing when there is nothing to check", async () => {
     const exec = fakeExec({});
     const result = await probeExecutor(
-      { name: "odd", kind: "generic", enabled: true, policyEnforcement: "none" },
+      { name: "odd", kind: "generic", enabled: true, credentialUse: "optional", policyEnforcement: "none" },
       { exec },
     );
 

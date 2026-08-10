@@ -47,6 +47,15 @@ export const GENERIC_CLI_CAPS: RuntimeCapabilities = {
   policyEnforcement: "none",
   interactive: false,
   streaming: false,
+  /**
+   * FALSE, unlike the `claude` and `codex` transports it inherits from.
+   *
+   * Those two carry an output schema natively (`--json-schema`, `--output-schema`). A generic CLI is
+   * an arbitrary binary with an argv template — there is no flag to put a schema in and no field to
+   * read one back from, so claiming the capability would be claiming a guarantee nothing enforces.
+   * The query refuses a schema outright rather than dropping it.
+   */
+  structuredOutput: false,
 };
 
 /** Where the prompt is substituted when the argv template does not name it. */
@@ -81,6 +90,19 @@ export interface GenericCliQueryOptions {
 export function createGenericCliQuery(spec: JairaGenericCliAgent, options: GenericCliQueryOptions = {}): AgentQuery {
   const exec = options.exec ?? new NodeExec();
   return async function* genericCliQuery(opts): AsyncIterable<AgentStreamMessage> {
+    // REFUSED, not dropped — the same rule the model check below follows. A generic CLI has no schema
+    // flag and no structured field, so a caller that asked for a shape would get prose back and be
+    // told nothing about why. Worse, that failure is classified `api-retriable`, so a repair loop
+    // would re-run the whole binary twice more with a hint it has no way to act on.
+    if (opts.schema !== undefined) {
+      yield {
+        type: "other",
+        error:
+          "a generic CLI agent has no output-schema channel, so a state that declares outputs cannot run on one — " +
+          "run it on claude-cli or codex-cli, which carry a schema natively, or on a provider route",
+      };
+      return;
+    }
     const template = spec.args ?? [];
     // A model this template has nowhere to put is REFUSED, not dropped. Running whatever the binary
     // defaults to while the workflow believes it asked for something else is silent and expensive —

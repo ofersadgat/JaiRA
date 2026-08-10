@@ -510,6 +510,22 @@ describe("runSync refusals", () => {
   it("reports that nothing was running when a cancel arrives late", () => {
     expect(service.cancelSync()).toEqual({ canceled: false });
   });
+
+  it("reports what broke, not the parent's view of it", async () => {
+    // The composite's own reason is "child 'requirements' terminated with error and no transition
+    // handled it" — the state that NOTICED, never the one that failed. A panel showing that has told
+    // the person nothing they can act on, which is the whole reason a sync buffers its event stream.
+    await expect(
+      service.runSync({
+        layer: "project",
+        path: WORKFLOW_DESCRIPTION_PATH,
+        direction: "document",
+        fake: [
+          { promptIncludes: "Break it into the individual requirements", error: "no API key for route 'anthropic'" },
+        ] as never,
+      }),
+    ).rejects.toThrow(/workflow\/conformance\/requirements: no API key for route 'anthropic'/);
+  });
 });
 
 /**
@@ -609,5 +625,350 @@ describe("the shared root, with no project open", () => {
 
   it("still says to open a project for a project-layer description", () => {
     expect(bare.syncStatus({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH }).blocked).toMatch(/open a project/);
+  });
+});
+
+/**
+ * A sync is a RUN, and now it is recorded like one.
+ *
+ * It used to call `executeWorkflow` directly: no task, no run, no journal. So a failure could only
+ * ever report the parent composite's view of its child ("child 'requirements' terminated with error
+ * and no transition handled it"), which names the state that noticed and not the one that broke —
+ * and nothing about the run survived long enough to be looked at afterwards.
+ *
+ * Recording it in JaiRA's OWN project rather than the user's is what makes both halves work: it runs
+ * with no project open, and it never appears on a board somebody else owns.
+ */
+describe("a sync as a task in the system project", () => {
+  // Its OWN base root. The suite's other tests share one (`test/setup.ts` points `JAIRA_HOME` at a
+  // scratch directory per worker), and JaiRA's project lives in it — so a count asserted against the
+  // shared one would be a count of every sync the file has run.
+  let home: string;
+  let own: AppService;
+
+  beforeEach(async () => {
+    home = mkdtempSync(join(tmpdir(), "jaira-sync-home-"));
+    own = new AppService({ watchWorkflows: false, baseDir: join(home, "shared") });
+    await own.open(dir);
+  });
+
+  afterEach(async () => {
+    await own.close();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  const systemTasks = () => own.listSystemTasks();
+
+  const syncIt = () =>
+    own.runSync({
+      layer: "project",
+      path: WORKFLOW_DESCRIPTION_PATH,
+      direction: "document",
+      fake: fake({ document: { text: REWRITTEN, changes: [] } }) as never,
+    });
+
+  it("records the run in JaiRA's project and nothing in the user's", async () => {
+    await syncIt();
+
+    const rows = systemTasks();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: "completed", workflow: "workflow/sync/document" });
+    // The user's board is untouched — which is the whole reason these runs have a project of their
+    // own rather than borrowing whichever one happens to be open.
+    expect(own.listTasks()).toEqual([]);
+  });
+
+  it("labels the row with what it was about, so the list is readable", async () => {
+    await syncIt();
+    const row = systemTasks()[0]!;
+    expect(row.labels).toEqual(expect.arrayContaining(["jaira", "sync", "document", "project"]));
+    expect(row.title).toContain(WORKFLOW_DESCRIPTION_PATH);
+  });
+
+  it("keeps a journal, so a failure names the state that broke rather than the one that noticed", async () => {
+    await expect(
+      own.runSync({
+        layer: "project",
+        path: WORKFLOW_DESCRIPTION_PATH,
+        direction: "document",
+        fake: [{ promptIncludes: "Break it into the individual requirements", error: "no API key for route 'anthropic'" }] as never,
+      }),
+    ).rejects.toThrow(/workflow\/conformance\/requirements: no API key for route 'anthropic'/);
+
+    // …and the failed run is still there to look at, which it was not when a sync kept no record.
+    const rows = systemTasks();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.status).toBe("failed");
+  });
+
+  it("runs against the workflows it is about, not against JaiRA's own directory", async () => {
+    // `ensureWorkspace` would have pointed the run at the system project (`~/.jaira`), which is where
+    // it is RECORDED and not what it is about. The workspace is passed explicitly for that reason, and
+    // it is what scopes the run's one tool — `read_file` — to the right directory.
+    const result = await syncIt();
+    expect(result.workflows).toContain("feature/plan");
+    expect(systemTasks()[0]?.status).toBe("completed");
+  });
+
+  it("refuses a second sync while one is running, and forgets it once it lands", async () => {
+    await syncIt();
+    // The guard is per holder and cleared in a `finally`, so a completed sync does not wedge the
+    // next one — which a run that threw between start and settle would have done.
+    await expect(syncIt()).resolves.toBeDefined();
+    expect(systemTasks()).toHaveLength(2);
+  });
+});
+
+/**
+ * A run in JaiRA's own project must not make a window ask about a project it has not got.
+ *
+ * The reported failure: pressing "Propose workflow changes" with no user project open produced
+ * "no project is open" from `task:list` and `history:size`. The sync runs in the system project and
+ * invalidates ITS task list; the window took that as news about its own and went looking.
+ */
+describe("what a system run tells the window", () => {
+  it("stamps its invalidates with the project they are about", async () => {
+    const home = mkdtempSync(join(tmpdir(), "jaira-push-"));
+    const pushes: Array<{ type: string; project?: string }> = [];
+    const bare = new AppService({
+      watchWorkflows: false,
+      baseDir: join(home, "shared"),
+      publish: (m) => pushes.push(m as { type: string; project?: string }),
+    });
+    try {
+      await bare.open(dir);
+      await bare.runSync({
+        layer: "project",
+        path: WORKFLOW_DESCRIPTION_PATH,
+        direction: "document",
+        fake: fake({ document: { text: REWRITTEN, changes: [] } }) as never,
+      });
+
+      const runNews = pushes.filter((m) => m.type === "run:finished" || m.type === "engine:event");
+      expect(runNews.length).toBeGreaterThan(0);
+      // Every one names the SYSTEM project, never the open user project — which is what lets the
+      // window tell "my tasks changed" from "JaiRA's did". JaiRA's own project is its own directory
+      // now, beside the root rather than being it, so that a root switch does not take it along.
+      for (const m of runNews) expect(m.project).toBe(join(home, "shared", "system"));
+      expect(runNews.some((m) => m.project === dir)).toBe(false);
+    } finally {
+      await bare.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * The reported failure, exactly: press "Propose workflow changes" on a shared-root description with
+ * NO project open, and the window fills with `no project is open` from `task:list` and `history:size`.
+ *
+ * Nothing was wrong with those channels. A task cannot exist without a project and main says so by
+ * throwing, deliberately, because an empty answer would hide a real mistake. What was wrong is that
+ * the sync runs in JaiRA's OWN project and invalidated ITS task list — and an unstamped invalidate
+ * reads as news about whatever the window happens to be showing, which was nothing.
+ */
+describe("a base-layer sync with no project open", () => {
+  let home: string;
+  let base: string;
+  let bare: AppService;
+  let pushes: Array<{ type: string; scope?: string; project?: string }>;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "jaira-nopush-"));
+    base = join(home, "shared");
+    mkdirSync(join(base, "workflows"), { recursive: true });
+    writeWorkflowFiles(join(base, "workflows"), specPlanningFiles());
+    writeFileSync(join(base, "workflows", "workflow.md"), DESCRIPTION, "utf8");
+    pushes = [];
+    bare = new AppService({
+      watchWorkflows: false,
+      baseDir: base,
+      publish: (m) => pushes.push(m as { type: string; scope?: string; project?: string }),
+    });
+  });
+
+  afterEach(async () => {
+    await bare.close();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it("never tells the window that ITS tasks changed", async () => {
+    expect(bare.current()).toBeNull();
+
+    await bare.runSync({
+      layer: "base",
+      path: WORKFLOW_DESCRIPTION_PATH,
+      direction: "document",
+      fake: fake({ document: { text: REWRITTEN, changes: [] } }) as never,
+    });
+
+    // Every project-scoped push names the project it is about. An unstamped one is machine-wide
+    // (`config`, `availability`) and would be acted on by a window with nothing open — which is the
+    // bug: `refreshTasks` then calls `task:list`, which throws by design.
+    const projectScoped = pushes.filter(
+      (m) =>
+        m.type === "run:finished" ||
+        m.type === "engine:event" ||
+        (m.type === "store:invalidate" && (m.scope === "tasks" || m.scope === "board" || m.scope === "task")),
+    );
+    expect(projectScoped.length).toBeGreaterThan(0);
+    // JaiRA's own project, which is a directory beside the root rather than the root itself: a
+    // description sync is about the installation, so its history must not move when the root does.
+    for (const m of projectScoped) expect(m.project).toBe(join(base, "system"));
+  });
+});
+
+/**
+ * A sync you can SEE.
+ *
+ * The complaint that produced these: pressing the button with no project open did not error any more,
+ * and also did not appear to do anything. Nothing logged that it had started, JaiRA's own task list
+ * was not reachable from anywhere, and the run's engine events named a task the window had not
+ * selected — so a run taking three model calls looked exactly like a button that did nothing.
+ */
+describe("what a sync with no project open leaves behind", () => {
+  let home: string;
+  let base: string;
+  let bare: AppService;
+  let pushes: Array<{ type: string; taskId?: string }>;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "jaira-visible-"));
+    base = join(home, "shared");
+    mkdirSync(join(base, "workflows"), { recursive: true });
+    writeWorkflowFiles(join(base, "workflows"), specPlanningFiles());
+    writeFileSync(join(base, "workflows", "workflow.md"), DESCRIPTION, "utf8");
+    pushes = [];
+    bare = new AppService({
+      watchWorkflows: false,
+      baseDir: base,
+      publish: (m) => pushes.push(m as { type: string; taskId?: string }),
+    });
+  });
+
+  afterEach(async () => {
+    await bare.close();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  const runIt = () =>
+    bare.runSync({
+      layer: "base",
+      path: WORKFLOW_DESCRIPTION_PATH,
+      direction: "document",
+      fake: fake({ document: { text: REWRITTEN, changes: [] } }) as never,
+    });
+
+  it("says it started, and says how it ended", async () => {
+    await runIt();
+
+    const messages = bare.listLogs().map((e) => e.message);
+    // The button was pressed — before, nothing at all recorded that.
+    expect(messages.some((m) => m.includes("proposing description changes for base:"))).toBe(true);
+    expect(messages.some((m) => m.startsWith("started workflow/sync/document"))).toBe(true);
+    expect(messages.some((m) => m.startsWith("completed workflow/sync/document"))).toBe(true);
+  });
+
+  it("leaves the run in a list the window can actually read", async () => {
+    await runIt();
+
+    // `listSystemTasks` existed and was reachable from nowhere: no IPC channel, no store slice, no
+    // view. A run recorded where nothing can read it is not visible.
+    const own = bare.listSystemTasks();
+    expect(own).toHaveLength(1);
+    expect(own[0]).toMatchObject({ status: "completed", workflow: "workflow/sync/document" });
+  });
+
+  it("narrates itself while it runs, on a channel with no selected task", async () => {
+    await runIt();
+
+    // The engine events are what the panel turns into a progress list. They name JaiRA's own task,
+    // which the window has not selected — so they are only useful if the panel takes them anyway.
+    const events = pushes.filter((m) => m.type === "engine:event");
+    expect(events.length).toBeGreaterThan(3);
+    expect(new Set(events.map((m) => m.taskId)).size).toBe(1);
+  });
+});
+
+/**
+ * One board PER PROJECT, and each one drillable.
+ *
+ * The Tasks view is a thing you drill into: columns are a state's children, cards are tasks on their
+ * active path, and double-clicking follows the task down. A summary strip of names and status dots is
+ * none of that. So JaiRA's own runs get the same board everything else gets — grouped rather than
+ * merged, because two projects' columns are columns of different things.
+ */
+describe("the Tasks view's groups", () => {
+  it("lists every project it can draw a board for, the user's first", async () => {
+    const groups = service.listProjects();
+
+    // Three now, outward from what you are working on: the checkout, the shared library it can draw
+    // workflows from, and JaiRA's own runs behind both.
+    expect(groups.map((g) => g.kind)).toEqual(["user", "shared", "system"]);
+    expect(groups[0]).toMatchObject({ project: dir, kind: "user" });
+    expect(groups[1]).toMatchObject({ kind: "shared" });
+    expect(groups[2]).toMatchObject({ label: "JaiRA", kind: "system" });
+  });
+
+  it("counts each group's own tasks, not the other's", async () => {
+    // Its OWN base root: this suite shares one, and JaiRA's project lives in it — so a count against
+    // the shared one would be a count of every sync the file has run.
+    const home = mkdtempSync(join(tmpdir(), "jaira-groups-"));
+    const own = new AppService({ watchWorkflows: false, baseDir: join(home, "shared") });
+    try {
+      await own.open(dir);
+      own.createTask({ title: "mine", workflow: "feature/plan", inputs: { issue: "x" } });
+      await own.runSync({
+        layer: "project",
+        path: WORKFLOW_DESCRIPTION_PATH,
+        direction: "document",
+        fake: fake({ document: { text: REWRITTEN, changes: [] } }) as never,
+      });
+
+      const groups = own.listProjects();
+      expect(groups.find((g) => g.kind === "user")?.tasks).toBe(1);
+      // The sync's task is JaiRA's, and appears only under JaiRA.
+      expect(groups.find((g) => g.kind === "system")?.tasks).toBe(1);
+    } finally {
+      await own.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("draws a real board for JaiRA's own project — columns and cards, not a summary", async () => {
+    await syncDocument();
+    const system = service.listProjects().find((g) => g.kind === "system")!.project;
+
+    // Roots first, which is where a group opens: one column per workflow it has run.
+    const roots = service.boardRoots({ project: system });
+    expect(roots.columns.map((c) => c.stateId)).toContain("workflow/sync/document");
+
+    // …and drilling into one gives that state's children, exactly as it does for a checkout.
+    const board = service.board({ level: "workflow/sync/document", project: system });
+    expect(board.level).toBe("workflow/sync/document");
+    expect(board.columns.map((c) => c.key)).toEqual(["requirements", "assessment", "revision"]);
+  });
+
+  it("reads a task's detail from the project it belongs to", async () => {
+    await syncDocument();
+    const system = service.listProjects().find((g) => g.kind === "system")!.project;
+    const taskId = service.listSystemTasks()[0]!.taskId;
+
+    // A task id is a rowid in ONE database. Unscoped, this is "unknown task" — which is what selecting
+    // a JaiRA run in the board would have produced.
+    expect(() => service.taskDetail(taskId)).toThrow(/unknown task/);
+    expect(service.taskDetail(taskId, system)).toMatchObject({ taskId, status: "completed" });
+  });
+
+  it("drills each group independently", async () => {
+    await syncDocument();
+    const system = service.listProjects().find((g) => g.kind === "system")!.project;
+
+    // Drilling JaiRA's board says nothing about the checkout's — each group keeps its own level,
+    // because looking into one is not a statement about the other.
+    const theirs = service.board({ level: "workflow/sync/document", project: system });
+    const mine = service.board({ level: "feature/plan" });
+    expect(theirs.level).toBe("workflow/sync/document");
+    expect(mine.level).toBe("feature/plan");
   });
 });

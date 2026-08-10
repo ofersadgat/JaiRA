@@ -285,7 +285,16 @@ export function WorkflowSyncPanel(props: FileSurfaceProps): JSX.Element {
           </div>
         ) : null}
 
-        {running ? <div className="sub">Reading the workflows and the description…</div> : null}
+        {running ? (
+          <div className="sync-progress">
+            <div className="sub">Reading the workflows and the description…</div>
+            {/* What the run is actually doing. Three model calls over a whole digest take a while, and a
+                single static line for the duration is indistinguishable from a button that did nothing. */}
+            {(sync?.progress ?? []).length > 0 ? (
+              <pre className="sync-steps">{(sync?.progress ?? []).slice(-8).join("\n")}</pre>
+            ) : null}
+          </div>
+        ) : null}
         {sync?.error ? <div className="notice bad">{sync.error}</div> : null}
         {status?.pending !== undefined && !running ? (
           <div className="sub">

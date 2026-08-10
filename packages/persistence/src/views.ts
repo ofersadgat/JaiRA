@@ -121,6 +121,103 @@ export function runCauses(project: Project, taskId: string, runId?: number): Arr
   return causes;
 }
 
+/**
+ * One state instance, and the conversation position its operation ran at.
+ *
+ * This is the join the leaf panel asks for twice — "the session for this state" and "every state
+ * this task went through, with its session" — and it needs nothing new recorded. The engine already
+ * carries it: `withSessionPosition` reports the position a call ENDED at on `ExecMetrics.sessionRef`
+ * (`<id>@<seq+1>`, its documented contract), and hw puts those metrics on `operation.completed`. The
+ * journal has held the link all along; it was simply not queryable without reading every payload,
+ * which is what the `session_ref` generated column fixed.
+ */
+export interface StateSession {
+  runId: number;
+  instanceId: number;
+  stateId: string;
+  /** The conversation. Opaque — nothing here parses it beyond splitting the position off. */
+  sessionId: string;
+  /** Where THIS operation's record sits in it. One position back from where the call ended. */
+  seq: number;
+  at: number;
+}
+
+/**
+ * Split `<id>@<seq>` — on the LAST `@`, because a session id may contain one.
+ *
+ * A compaction mints `planning~compact1@7`, so a ref built from it reads `planning~compact1@7@8`.
+ * Splitting on the first `@` would name a conversation that does not exist.
+ */
+export function parseSessionRef(ref: string): { id: string; seq: number } | undefined {
+  const at = ref.lastIndexOf("@");
+  if (at <= 0) return undefined;
+  const seq = Number(ref.slice(at + 1));
+  return Number.isInteger(seq) ? { id: ref.slice(0, at), seq } : undefined;
+}
+
+/**
+ * Every operation of a task that ran in a conversation, oldest first.
+ *
+ * `runId` narrows it to one run; absent, it is the task's whole history — which is what the "all the
+ * other states the executor went through" half of the leaf panel reads.
+ */
+export function stateSessions(project: Project, taskId: string, runId?: number): StateSession[] {
+  // Queried through the `session_ref` generated column rather than by folding the whole journal: the
+  // rows wanted are a small fraction of a run's events, the column is indexed, and NOT NULL on it is
+  // precisely "this operation ran in a conversation". That column is what migration 1 exists for.
+  const rows = project.db
+    .prepare(
+      `SELECT run_id, payload_json, session_ref, created_at FROM events
+        WHERE task_id = ? AND type = 'operation.completed' AND session_ref IS NOT NULL
+          ${runId === undefined ? "" : "AND run_id = ?"}
+        ORDER BY seq`,
+    )
+    .all(...(runId === undefined ? [taskId] : [taskId, runId])) as Array<{
+    run_id: number;
+    payload_json: string;
+    session_ref: string;
+    created_at: number;
+  }>;
+  const out: StateSession[] = [];
+  for (const row of rows) {
+    const position = parseSessionRef(row.session_ref);
+    if (position === undefined) continue;
+    const event = JSON.parse(row.payload_json) as { instanceId: number; stateId: string };
+    out.push({
+      runId: row.run_id,
+      instanceId: event.instanceId,
+      stateId: event.stateId,
+      sessionId: position.id,
+      // The record was written at the position the call STARTED from, which is one back from where it
+      // ended. `withSessionPosition` reports the end because that is the value a caller cannot
+      // otherwise learn — a call that had to fork ended somewhere it did not begin.
+      seq: position.seq - 1,
+      at: row.created_at,
+    });
+  }
+  return out;
+}
+
+/**
+ * What one run spent, summed from the journal.
+ *
+ * The engine reports cost per completed operation, and the run row does not carry a total — so this
+ * is the roll-up, computed where the events already are. `undefined` when no operation reported one,
+ * which is a different claim from zero: a scripted run costs nothing, and a run whose transport does
+ * not price its calls costs an unknown amount.
+ */
+export function runCostUsd(project: Project, taskId: string, runId?: number): number | undefined {
+  const target = runId ?? project.runtime.listRuns(taskId).at(-1)?.id;
+  if (target === undefined) return undefined;
+  let total: number | undefined;
+  for (const row of project.events.list(taskId, { runId: target })) {
+    if (row.event.type !== "operation.completed") continue;
+    const cost = row.event.metrics?.costUsd;
+    if (typeof cost === "number") total = (total ?? 0) + cost;
+  }
+  return total;
+}
+
 /** The projected latest run of a task (empty when it has never run). */
 export function latestRun(project: Project, taskId: string, shape?: WorkflowShape): ProjectedRun {
   const runs = project.runtime.listRuns(taskId);

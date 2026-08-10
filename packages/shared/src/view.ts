@@ -50,6 +50,24 @@ export interface InstanceNode {
   superseded: boolean;
   startedAt: number;
   endedAt?: number;
+  /**
+   * What this instance was CALLED WITH — the inputs the engine resolved on the way in.
+   *
+   * Recorded on `instance.entered` since the journal existed and projected nowhere until now. It is
+   * what lets a card say which of four `design` runs it is: the state id and the child key are the
+   * same on all of them, and the inputs are the only thing that differs.
+   *
+   * Values are shown previewed in a card header and in full inside the conversation, so they travel
+   * whole rather than pre-truncated — the projection does not know which of the two is asking.
+   */
+  inputs?: Record<string, JsonValue>;
+  /**
+   * What to call this RUN, resolved from {@link inputs} — see `resolveLabel`.
+   *
+   * Distinct from the state's own name, which is the same on every run of it. Absent when the state
+   * declares no label, and the caller then falls back to listing the inputs.
+   */
+  label?: string;
   children: InstanceNode[];
 }
 
@@ -490,6 +508,23 @@ export interface HistorySize {
   commands: number;
 }
 
+/**
+ * One project this window can draw a board for.
+ *
+ * The Tasks view groups by project rather than merging: a board is per workflow ROOT, so columns from
+ * two projects side by side would be columns of different things.
+ */
+export interface ProjectSummary {
+  /** The project directory — the key every project-scoped channel takes. */
+  project: string;
+  /** What to call it in a group header. */
+  label: string;
+  /** `shared` is the selected root as a project; `system` is JaiRA's own. See `SHARED_SESSION`. */
+  kind: "user" | "shared" | "system";
+  tasks: number;
+  running: number;
+}
+
 /** A row in the task list. */
 export interface TaskSummary {
   taskId: string;
@@ -500,4 +535,159 @@ export interface TaskSummary {
   snapshotHash?: string;
   createdAt: string;
   updatedAt: number;
+}
+
+/**
+ * One state instance and the conversation its operation ran in — a row of the task's history.
+ *
+ * "Every state the executor went through, with its session", which is one half of what selecting a
+ * task at a leaf must answer. Derived from the journal: hw puts the position a call ended at on
+ * `operation.completed`'s metrics, so the link needed nothing new recorded.
+ */
+export interface SessionRef {
+  runId: number;
+  instanceId: number;
+  stateId: string;
+  /** The conversation. Opaque — the UI shows it, nothing parses it. */
+  sessionId: string;
+  /** Where this operation's record sits in that conversation. */
+  seq: number;
+  at: number;
+  /** Present once the operation settled. */
+  status?: "success" | "error";
+  costUsd?: number;
+  /** What the call consumed and what that number is worth — see {@link RunMetrics}. */
+  metrics?: RunMetrics;
+}
+
+/**
+ * What one call (or one whole run) actually consumed.
+ *
+ * Recorded on `operation.completed` all along and shown nowhere, which made a cost figure something
+ * to either believe or not. Tokens are the thing that makes it checkable: `$0.21` beside 40k cached
+ * input tokens is a Claude Code session doing ordinary work, and beside 300 tokens it is a bug —
+ * and until these were on screen those two looked identical.
+ *
+ * Split the way it is BILLED rather than into one input number, because the rates differ by an order
+ * of magnitude: a cache read costs about a tenth of the base rate and a 1-hour cache write about
+ * twice it, so a single "input" figure cannot be priced and cannot be checked against a total.
+ */
+export interface RunMetrics {
+  /** How much a cost figure can be trusted: the provider's own charge, our price table, or a guess. */
+  costSource?: "provider" | "table" | "unknown";
+  /** Total input, INCLUDING cache reads and writes — the provider's billed input. */
+  inputTokens?: number;
+  outputTokens?: number;
+  /** Uncached input, billed at the base rate. */
+  noCacheTokens?: number;
+  /** Cache hits, billed at roughly a tenth of the base rate. */
+  cacheReadTokens?: number;
+  /** Input written to the cache, billed above the base rate. */
+  cacheWriteTokens?: number;
+  /** Reasoning output, a subset of {@link outputTokens}. */
+  reasoningTokens?: number;
+  /** Wall-clock for the call, ms. */
+  durationMs?: number;
+}
+
+/**
+ * One turn of a conversation, as the viewer renders it.
+ *
+ * Deliberately close to what the provider returned rather than a projection of it: a delegated agent
+ * hands back every message, tool call and result on the same wire, and the record stores that
+ * verbatim. Flattening it here would throw away exactly what a session view is for.
+ */
+export interface SessionTurn {
+  role: string;
+  /** The turn's text, when it has any — a tool-call turn does not. */
+  text?: string;
+  /** Tool calls and their results, kept structured so a viewer can pair and collapse them. */
+  parts?: JsonValue;
+}
+
+/**
+ * The conversation ONE state instance ran.
+ *
+ * A leaf state runs one operation, which is one record at one position — and for a delegated agent
+ * that single operation contains the agent's whole loop. So this is the whole thing, undivided.
+ */
+export interface SessionView {
+  taskId: string;
+  runId: number;
+  instanceId: number;
+  stateId: string;
+  sessionId: string;
+  seq: number;
+  /** The agent's own session handle, when it had one — what lets its native transcript be found. */
+  providerSessionId?: string;
+  status?: "success" | "error";
+  costUsd?: number;
+  turns: SessionTurn[];
+  /** Set when the state ran in no conversation at all — a function op, or a run before this existed. */
+  empty?: string;
+}
+
+/** How bad an entry is. Filtering by one means "this and worse", not "this exactly". */
+export type LogLevel = "debug" | "info" | "warn" | "error";
+
+/**
+ * One line of what the app did.
+ *
+ * Three streams share this shape because they answer one question — "what happened, and where do I
+ * look next" — and keeping them apart in the UI would mean three panels nobody correlates. What makes
+ * a row actionable is its POINTERS: `taskId` opens the task, `instanceId` selects the state inside it,
+ * `jobId` opens that process's captured output.
+ */
+export interface LogEntry {
+  id: number;
+  at: number;
+  level: LogLevel;
+  /** Where it came from — `ipc`, `engine`, `process`, `project`, `availability`, `app`. */
+  source: string;
+  message: string;
+  /** The session key of the project it concerns, when it concerns one. */
+  project?: string;
+  taskId?: string;
+  runId?: number;
+  instanceId?: number;
+  jobId?: number;
+  /** A stack, an argv, an exit code — whatever the reader would want and the message cannot hold. */
+  detail?: JsonValue;
+}
+
+/** A process JaiRA claimed or started (DESIGN §4.2a). Named here so the renderer can read one. */
+export type JobKind = "run" | "process";
+
+export interface JobRow {
+  id: number;
+  kind: JobKind;
+  taskId?: string;
+  runId?: number;
+  parentJobId?: number;
+  ownerToken: string;
+  pid?: number;
+  command?: string;
+  /** Where it ran. Received from the observer and, until there was a column, dropped. */
+  cwd?: string;
+  startedAt: number;
+  heartbeatAt: number;
+  cancelRequestedAt?: number;
+  endedAt?: number;
+  outcome?: string;
+}
+
+/**
+ * A slice of what a child process printed.
+ *
+ * `dropped` is the bytes elided immediately BEFORE this chunk. The capture keeps a head and a tail
+ * and discards the middle, so a reader who cannot see the gap would misread the tail as the whole.
+ */
+export interface JobOutputChunk {
+  id: number;
+  jobId: number;
+  stream: "stdout" | "stderr";
+  seq: number;
+  chunk: string;
+  dropped: number;
+  createdAt: number;
 }

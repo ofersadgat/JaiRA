@@ -25,10 +25,10 @@ function loadable(doc: unknown): ReturnType<typeof parseConfig> {
 }
 
 describe("patching config.models", () => {
-  it("writes the default id and leaves the rest of the document alone", () => {
-    const doc = applyModelPatch({ artifactDir: "out", models: { presets: { fast: {} } } }, { default: "claude-cli/sonnet" });
-    expect(doc).toMatchObject({ artifactDir: "out", models: { default: "claude-cli/sonnet", presets: { fast: {} } } });
-    expect(loadable(doc).models.default).toBe("claude-cli/sonnet");
+  it("writes a preset and leaves the rest of the document alone", () => {
+    const doc = applyModelPatch({ artifactDir: "out", models: { presets: { fast: {} } } }, { "presets.slow": { topP: 1 } });
+    expect(doc).toMatchObject({ artifactDir: "out", models: { presets: { fast: {}, slow: { topP: 1 } } } });
+    expect(loadable(doc).models.presets?.["slow"]).toEqual({ topP: 1 });
   });
 
   it("writes a nested route field through a dotted path", () => {
@@ -40,15 +40,14 @@ describe("patching config.models", () => {
   it("does not mutate the document it was given", () => {
     // The store holds the last-read ConfigView; editing it in place would leave the UI showing a value
     // the write might still be refused for.
-    const before = { models: { default: "anthropic/x" } };
-    applyModelPatch(before, { default: "openrouter/y" });
-    expect(before.models.default).toBe("anthropic/x");
+    const before = { models: { routes: { anthropic: { credential: "A" } } } };
+    applyModelPatch(before, { "routes.anthropic.credential": "B" });
+    expect(before.models.routes.anthropic.credential).toBe("A");
   });
 
   it("REMOVES a key on undefined, which is how a layer goes back to inheriting", () => {
-    const doc = applyModelPatch({ models: { default: "anthropic/x" } }, { default: undefined });
-    expect(defaultModel(doc)).toBe("");
-    expect(loadable(doc).models.default).toBeUndefined();
+    const doc = applyModelPatch({ models: { presets: { fast: {} } } }, { "presets.fast": undefined });
+    expect(loadable(doc).models.presets?.["fast"]).toBeUndefined();
   });
 
   it("deletes an emptied route rather than leaving `{}` behind", () => {

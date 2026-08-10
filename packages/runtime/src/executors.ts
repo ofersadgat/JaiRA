@@ -23,7 +23,10 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import {
   BUILTIN_EXECUTORS,
+  EXECUTOR_KINDS,
+  type CredentialUse,
   type ExecutorInfo,
+  type ExecutorKind,
   type JairaAgentConfig,
   type JairaConfig,
   type JairaExecutorConfig,
@@ -72,38 +75,65 @@ function withOptional<T extends object>(base: T, extra: Record<string, string | 
  */
 export function listExecutors(agents: JairaAgentConfig = {}): ExecutorInfo[] {
   const out: ExecutorInfo[] = [
-    withOptional<ExecutorInfo>(
-      { name: AGENT_SDK, kind: "sdk", enabled: isEnabled(agents.claudeCode), policyEnforcement: "callback" },
-      { credential: agents.claudeCode?.credential },
-    ),
-    withOptional<ExecutorInfo>(
-      { name: AGENT_CLI, kind: "cli", enabled: isEnabled(agents.claudeCli), policyEnforcement: "callback" },
-      { command: agents.claudeCli?.command ?? DEFAULT_COMMANDS[AGENT_CLI], credential: agents.claudeCli?.credential },
-    ),
-    withOptional<ExecutorInfo>(
-      { name: AGENT_CODEX, kind: "codex", enabled: isEnabled(agents.codex), policyEnforcement: "config" },
-      {
-        command: agents.codex?.command ?? DEFAULT_COMMANDS[AGENT_CODEX],
-        credential: agents.codex?.credential,
-        sandbox: agents.codex?.sandbox,
-      },
-    ),
+      withOptional<ExecutorInfo>(
+        {
+          name: AGENT_SDK,
+          kind: "sdk",
+          enabled: isEnabled(agents.claudeCode),
+          credentialUse: credentialUseOf("sdk"),
+          policyEnforcement: "callback",
+        },
+        { credential: agents.claudeCode?.credential },
+      ),
+      withOptional<ExecutorInfo>(
+        {
+          name: AGENT_CLI,
+          kind: "cli",
+          enabled: isEnabled(agents.claudeCli),
+          credentialUse: credentialUseOf("cli"),
+          policyEnforcement: "callback",
+        },
+        // No credential: `claude` signs itself in, and the parser refuses one under `claudeCli`.
+        { command: agents.claudeCli?.command ?? DEFAULT_COMMANDS[AGENT_CLI] },
+      ),
+      withOptional<ExecutorInfo>(
+        {
+          name: AGENT_CODEX,
+          kind: "codex",
+          enabled: isEnabled(agents.codex),
+          credentialUse: credentialUseOf("codex"),
+          policyEnforcement: "config",
+        },
+        {
+          command: agents.codex?.command ?? DEFAULT_COMMANDS[AGENT_CODEX],
+          credential: agents.codex?.credential,
+          sandbox: agents.codex?.sandbox,
+        },
+      ),
   ];
   for (const spec of agents.genericCli ?? []) {
     out.push(
-      withOptional<ExecutorInfo>(
-        {
-          name: spec.name ?? AGENT_GENERIC_CLI,
-          kind: "generic",
-          enabled: isEnabled(spec),
-          // A generic binary has no permission callback, which is the whole of §8.2's objection.
-          policyEnforcement: "none",
-        },
-        { command: spec.command, credential: spec.credential },
+      (
+        withOptional<ExecutorInfo>(
+          {
+            name: spec.name ?? AGENT_GENERIC_CLI,
+            kind: "generic",
+            enabled: isEnabled(spec),
+            credentialUse: credentialUseOf("generic"),
+            // A generic binary has no permission callback, which is the whole of §8.2's objection.
+            policyEnforcement: "none",
+          },
+          { command: spec.command, credential: spec.credential },
+        )
       ),
     );
   }
   return out;
+}
+
+/** What a credential means for this kind — the one table, read rather than re-decided. */
+function credentialUseOf(kind: ExecutorKind): CredentialUse {
+  return EXECUTOR_KINDS[kind].credential;
 }
 
 /** Which built-in adapters `registerAgentRuntimes` should install for this config. */
@@ -147,7 +177,7 @@ const DEFAULT_TIMEOUT_MS = 10_000;
  * Built lazily rather than at module load: this is only needed by the `sdk` branch, and a resolver
  * that throws while being constructed would take the whole inventory down with it.
  */
-function defaultResolve(id: string): string {
+export function defaultResolve(id: string): string {
   const base = typeof __filename === "string" ? __filename : join(process.cwd(), "noop.js");
   return createRequire(base).resolve(id);
 }
@@ -165,8 +195,9 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
     return { name: info.name, status: "disabled", detail: "turned off in this project's configuration" };
   }
 
-  // The credential is checked for every kind, because a present binary with no key fails at the
-  // first call — and "the binary is there" would otherwise read as "this works".
+  // Checked for every kind that USES one. `claude-cli` does not: it carries the subscription its user
+  // signed into, so reporting it unhealthy for a missing API key would be reporting a fault that does
+  // not exist — and offering to fix it would be offering to store a secret nothing reads.
   const credential = probeCredential(info, options.secrets);
 
   if (info.kind === "sdk") {
@@ -178,16 +209,34 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
         name: info.name,
         status: "failed",
         detail: `'${AGENT_SDK_MODULE}' is not installed, so the in-process adapter cannot run`,
+        fix: `install ${AGENT_SDK_MODULE}, or use claude-cli instead — it needs neither the package nor a key`,
         ...credential,
+      };
+    }
+    if (credential.credentialMissing !== undefined) {
+      return {
+        name: info.name,
+        status: "failed",
+        detail: `the SDK is installed, but no value was found for '${credential.credentialMissing}'`,
+        fix: `store a value for '${credential.credentialMissing}', or use claude-cli — it runs on its own subscription`,
+        ...credential,
+      };
+    }
+    // A REQUIRED key that config never names is just as fatal as one that will not resolve, and used
+    // to pass silently: with no `credential` field there was nothing to look up, so the probe reported
+    // an SDK adapter that cannot make a single call as healthy.
+    if (info.credential === undefined && !hasAnyKey(options.secrets, SDK_KEY_NAMES)) {
+      return {
+        name: info.name,
+        status: "failed",
+        detail: `the SDK is installed, but no API key is configured — ${SDK_KEY_NAMES[0]} is not set`,
+        fix: `store a key under ${SDK_KEY_NAMES[0]}, or use claude-cli — it runs on its own subscription`,
       };
     }
     return {
       name: info.name,
-      status: credential.credentialMissing !== undefined ? "failed" : "ok",
-      detail:
-        credential.credentialMissing !== undefined
-          ? `the SDK is installed, but no value was found for '${credential.credentialMissing}'`
-          : `'${AGENT_SDK_MODULE}' is installed`,
+      status: "ok",
+      detail: `'${AGENT_SDK_MODULE}' is installed`,
       ...credential,
     };
   }
@@ -196,6 +245,7 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
     return { name: info.name, status: "not-checked", detail: "no command is configured to check", ...credential };
   }
 
+  const missing = `'${info.command}' was not found — install it, or point this executor at its full path`;
   let result;
   try {
     result = await options.exec.run(info.command, ["--version"], {
@@ -203,11 +253,23 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
       timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     });
   } catch (e) {
-    return { name: info.name, status: "failed", detail: `'${info.command}' could not be started: ${(e as Error).message}`, ...credential };
+    return {
+      name: info.name,
+      status: "failed",
+      detail: `'${info.command}' could not be started: ${(e as Error).message}`,
+      fix: missing,
+      ...credential,
+    };
   }
 
   if (result.timedOut) {
-    return { name: info.name, status: "failed", detail: `'${info.command} --version' did not answer in time`, ...credential };
+    return {
+      name: info.name,
+      status: "failed",
+      detail: `'${info.command} --version' did not answer in time`,
+      fix: missing,
+      ...credential,
+    };
   }
   if (result.code !== 0) {
     // A non-zero exit is reported with the binary's OWN words: "not recognized" and "permission
@@ -217,6 +279,7 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
       name: info.name,
       status: "failed",
       detail: `'${info.command} --version' exited ${result.code}${said ? `: ${said}` : ""}`,
+      fix: missing,
       ...credential,
     };
   }
@@ -227,6 +290,7 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
       name: info.name,
       status: "failed",
       detail: `'${info.command}' runs, but no value was found for '${credential.credentialMissing}'`,
+      fix: `store a value for '${credential.credentialMissing}', or clear the field to let the binary sign itself in`,
       ...(version ? { version } : {}),
       ...credential,
     };
@@ -234,18 +298,43 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
   return {
     name: info.name,
     status: "ok",
-    detail: `'${info.command}' responded`,
+    detail:
+      info.credentialUse === "none"
+        ? `'${info.command}' responded — it signs itself in, so no key is needed`
+        : `'${info.command}' responded`,
     ...(version ? { version } : {}),
     ...credential,
   };
 }
 
-/** Resolve the named credential, reporting only its ORIGIN — the value must not leave this process. */
+/** The variables the in-process SDK will read a key from if config names none. */
+const SDK_KEY_NAMES = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"];
+
+/**
+ * Is ANY of these set, anywhere in the chain? The un-named fallback the SDK itself would find.
+ *
+ * The resolver, when there is one, is the ONLY source consulted — it already ends in the process
+ * environment, and reading `process.env` beside it would bypass the injected environment a test
+ * resolver exists to provide.
+ */
+function hasAnyKey(secrets: SecretResolver | undefined, names: string[]): boolean {
+  return secrets !== undefined
+    ? names.some((name) => secrets.describe(name) !== undefined)
+    : names.some((name) => process.env[name] !== undefined);
+}
+
+/**
+ * Resolve the named credential, reporting only its ORIGIN — the value must not leave this process.
+ *
+ * A `none` executor is skipped entirely rather than merely reported as having no credential: the
+ * parser refuses the field there, so config cannot name one, and looking anyway would only invite the
+ * "found it in the environment" answer for a key the runtime will never read.
+ */
 function probeCredential(
   info: ExecutorInfo,
   secrets: SecretResolver | undefined,
 ): { credential?: SecretOrigin; credentialMissing?: string } {
-  if (info.credential === undefined) return {};
+  if (info.credentialUse === "none" || info.credential === undefined) return {};
   const origin = secrets?.describe(info.credential);
   if (origin === undefined) return { credentialMissing: info.credential };
   return { credential: origin };

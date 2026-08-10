@@ -2291,87 +2291,6 @@ button.layer-on {
   min-height: 66px;
 }
 
-/* --- executors --- */
-.executors {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.executors > li {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 9px;
-  background: var(--panel-2);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-/* A disabled executor stays fully legible — it is dimmed, not hidden, or there would be no way to
-   turn it back on. */
-.executors > li.off {
-  opacity: 0.62;
-}
-.exec-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.exec-head .task-title {
-  flex: 1;
-}
-.toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  cursor: pointer;
-}
-.toggle input {
-  width: auto;
-  margin: 0;
-}
-.chip-dim {
-  color: var(--dim);
-}
-/* The settings form, folded out of a row. Inset and ruled off so it reads as belonging to the
-   executor above it rather than as the next one's first fields. */
-.exec-form {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  margin: 4px 0 2px;
-  padding: 8px 0 2px;
-  border-top: 1px solid var(--line);
-}
-.exec-add {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  border: 1px dashed var(--line);
-  border-radius: 8px;
-  padding: 9px;
-}
-.exec-add h4 {
-  margin: 0;
-}
-.credential {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  align-items: flex-start;
-}
-.key-entry {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 5px;
-  width: 100%;
-}
-.key-entry input {
-  grid-column: 1 / -1;
-}
 .editor-head {
   display: flex;
   align-items: flex-start;
@@ -2458,4 +2377,1437 @@ button.layer-on {
   cursor: pointer;
   max-width: 70vw;
   z-index: 60;
+}
+
+/* --- the configuration surfaces (Providers, Executors) ---------------------
+ *
+ * One vocabulary for both screens, borrowed from findmyprompt's search-config panel: a field is a
+ * label, the key it writes, a hint and a control stacked TIGHT; fields flow into a responsive grid
+ * rather than one per line; a level of the type hierarchy is a visible band; and rare settings hide
+ * behind a disclosure.
+ *
+ * The rules below are all variable-driven. An inline colour would be a light-mode assumption that
+ * the dark palette has no way to override, which is why none of this is styled at the call site.
+ */
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.settings-head > .layer-picker {
+  flex: 1;
+  max-width: 320px;
+}
+.settings-head > .sub {
+  flex: 1;
+  min-width: 220px;
+}
+.settings-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.cfg-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding-bottom: 24px;
+  /* A settings form stretched across a wide window is a form nobody scans: the eye has to travel
+     the whole width to get from a label to its control. Wide enough for three fields per row. */
+  max-width: 940px;
+}
+
+/* A group is a whole family — "Model providers", "Presets". Its heading carries the one sentence
+   that says what everything under it has in common. */
+.cfg-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cfg-group-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.cfg-group-head h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+.cfg-group-head > p {
+  margin: 0;
+  max-width: 70ch;
+}
+
+.cfg-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* One provider / executor / preset. The left edge carries its state as a colour, so a column of
+   them reads at a glance without any row having to shout. */
+.cfg-row {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.cfg-row.available {
+  border-left-color: var(--ok);
+}
+.cfg-row.unavailable {
+  border-left-color: var(--bad);
+}
+.cfg-row.unconfigured {
+  border-left-color: var(--warn);
+}
+/* A row turned off stays fully legible — dimmed, not hidden, or there would be no way back on. */
+.cfg-row.off {
+  opacity: 0.6;
+}
+.cfg-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cfg-row-title {
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cfg-row-title.mono,
+.cfg-hint.mono {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+.cfg-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+/* --- the four states ---
+   A pill rather than a checkbox, because a checkbox can only say on or off: an unavailable provider
+   rendered as a ticked box is how this screen came to claim four working providers on a machine
+   configured for none. "Enabled" is an intention; "ready" is an observation; they disagree. */
+.cfg-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 8px 1px 6px;
+  white-space: nowrap;
+  flex: none;
+}
+.cfg-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
+}
+.cfg-status.available {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+}
+.cfg-status.unavailable {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 45%, transparent);
+}
+.cfg-status.unconfigured {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+
+/* --- a level of the type hierarchy ---
+   Nested and ruled on the left, so "every CLI agent has a command" and "codex alone has a sandbox"
+   are visibly different statements rather than two boxes in one pile. */
+.cfg-level {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cfg-level[data-depth="1"],
+.cfg-level[data-depth="2"] {
+  border-left: 2px solid var(--line);
+  padding-left: 12px;
+  margin-left: 3px;
+}
+.cfg-level-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cfg-level-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.cfg-level-head > .cfg-hint {
+  max-width: 70ch;
+}
+.cfg-level-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* --- a field --- */
+.cfg-grid {
+  display: grid;
+  gap: 14px;
+  align-items: start;
+}
+.cfg-field {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  min-width: 0;
+}
+.cfg-field-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.cfg-label {
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--text);
+}
+/* The config key this box writes. Not decoration: it is the only thing connecting a friendly label
+   to the `config.json` a user may also be editing by hand, and to the error the parser produces. */
+.cfg-param {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 10px;
+  color: var(--dim);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+/* This layer states the value, as opposed to inheriting it — a different fact with different
+   consequences for saving, and previously invisible. */
+.cfg-set {
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 999px;
+  padding: 0 5px;
+}
+.cfg-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--dim);
+  margin: 0;
+}
+/* What a check observed, and what would change it. Set apart from the description above it because
+   they are different kinds of sentence: one is a standing fact about the provider, the other is a
+   report about this machine at this moment. */
+.cfg-report {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--dim);
+  background: var(--panel-2);
+  border-radius: 6px;
+  border-left: 2px solid var(--line);
+  padding: 6px 9px;
+  margin: 1px 0 2px;
+}
+.cfg-report.unavailable {
+  border-left-color: var(--bad);
+  color: var(--bad);
+}
+.cfg-report.unconfigured {
+  border-left-color: var(--warn);
+  color: var(--warn);
+}
+.cfg-report.available {
+  border-left-color: var(--ok);
+}
+/* What would fix a failed check — the half a health report usually leaves out. */
+.cfg-fix {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--accent);
+  margin: 0;
+}
+.cfg-control {
+  display: flex;
+}
+.cfg-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cfg-input {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.cfg-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.cfg-input:disabled {
+  opacity: 0.55;
+}
+.cfg-input.mono {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+}
+.cfg-input.num {
+  max-width: 120px;
+}
+textarea.cfg-input {
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.cfg-chip {
+  padding: 3px 11px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--dim);
+}
+.cfg-chip.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* --- a disclosure --- */
+.cfg-disclosure {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.cfg-disclosure-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  background: none;
+  border: none;
+  border-radius: 0;
+  text-align: left;
+  color: var(--dim);
+}
+.cfg-disclosure-head:hover:not(:disabled) {
+  border-color: transparent;
+  color: var(--text);
+}
+.cfg-caret {
+  font-size: 9px;
+  transition: transform 0.12s;
+}
+.cfg-disclosure.open .cfg-caret {
+  transform: rotate(90deg);
+}
+.cfg-disclosure-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+.cfg-disclosure-body {
+  padding: 11px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.cfg-credential {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 2px;
+}
+.cfg-key-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 420px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+/* --- the LLM configuration element ---
+   A rail of categories, each carrying a live one-line SUMMARY, beside a detail pane. The summaries
+   are what keep a form this size legible: you can see that sampling is at defaults and reasoning is
+   off without opening either. */
+.llm-config {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel);
+}
+.llm-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--panel-2);
+  border-right: 1px solid var(--line);
+  align-content: start;
+}
+.llm-rail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  white-space: normal;
+}
+.llm-rail-item:hover:not(:disabled) {
+  border-color: var(--line);
+}
+.llm-rail-item.on {
+  background: var(--panel);
+  border-color: var(--line);
+}
+.llm-rail-label {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--dim);
+}
+.llm-rail-item.on .llm-rail-label {
+  color: var(--text);
+}
+.llm-rail-summary {
+  font-size: 10.5px;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  white-space: nowrap;
+}
+.llm-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 13px 15px;
+  align-content: start;
+}
+.llm-detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.llm-detail-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.llm-detail-head > .cfg-hint {
+  max-width: 70ch;
+}
+
+/* Narrow drawer: the rail would leave the detail pane unusable, so it becomes a row of tabs. */
+@media (max-width: 720px) {
+  .llm-config {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .llm-rail {
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .llm-rail-item {
+    flex: none;
+  }
+}
+
+/* --- an executor's steps ---
+   One card per layer of the stack, in composition order, numbered. The number is load-bearing: the
+   order is not the author's to choose (memoize outermost so a hit skips everything; rate limiting
+   inside retry so each attempt is admitted separately), so the screen has to SHOW the order rather
+   than imply that dragging would change it. */
+.cfg-step {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  opacity: 0.72;
+}
+.cfg-step.on {
+  background: var(--panel);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  opacity: 1;
+}
+.cfg-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cfg-step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 10px;
+  color: var(--dim);
+  flex: none;
+}
+.cfg-step.on .cfg-step-index {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.cfg-step-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  flex: 1;
+}
+.cfg-step-body {
+  margin-top: 6px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+}
+/* A nested object or a registered widget takes the whole row of the field grid — a two-column
+   sub-form squeezed into one cell is unreadable at any drawer width. */
+.cfg-span {
+  grid-column: 1 / -1;
+}
+
+/* --- the executor tree ---
+   Each level announces what it IS and which upstream class it builds, so the screen and the code name
+   the same thing. A route is derived until something pins it, and the two read differently on
+   purpose: derived follows what is available, pinned never moves again. */
+.cfg-node-banner {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  border-left: 2px solid var(--accent);
+}
+.cfg-node-kind {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.cfg-node-banner > .cfg-hint {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.cfg-route {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* Dashed while it is still adaptive: a derived route is a consequence of what is installed, not a
+   decision anyone made, and it should not look like one. */
+.cfg-route.derived {
+  border-style: dashed;
+}
+.cfg-route-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cfg-route-prefix {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.cfg-route-head > .cfg-hint {
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cfg-route-body {
+  margin-top: 6px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+}
+
+/* --- ordered rule lists (function rules, policy rules) ---
+   A list with move controls rather than a set of checkboxes, because the ORDER is the meaning:
+   "everything, then not run_command" and "nothing, then read_file" are both two rules, and a grid
+   could express neither without silently picking one of them. */
+.cfg-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.cfg-rule-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  counter-reset: rule;
+}
+.cfg-rule {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+.cfg-rule.everything,
+.cfg-rule.allow {
+  border-left-color: var(--ok);
+}
+.cfg-rule.nothing,
+.cfg-rule.deny {
+  border-left-color: var(--bad);
+}
+.cfg-rule.bad {
+  border-left-color: var(--warn);
+}
+.cfg-rule-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 10px;
+  color: var(--dim);
+  flex: none;
+}
+.cfg-rule-text {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  flex: 1;
+}
+.cfg-rule .cfg-input {
+  width: auto;
+  flex: 1 1 140px;
+  min-width: 110px;
+}
+.cfg-rule select.cfg-input {
+  flex: 0 0 86px;
+}
+.cfg-rule-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+.cfg-rule-add .cfg-input {
+  width: auto;
+  flex: 0 1 200px;
+}
+.cfg-rule-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.cfg-rule-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cfg-rule-head select.cfg-input {
+  width: auto;
+  flex: 0 0 130px;
+}
+.cfg-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* --- the conversation a state ran (session.tsx) -------------------------------
+   Its own grid inside the leaf's right half: the states down one side, the chosen
+   state's transcript down the other. Both scroll independently, because reading a
+   long transcript must not lose the list you picked it from. */
+.session {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  border-bottom: 1px solid var(--line);
+}
+.session-history {
+  overflow: auto;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+  padding: 6px;
+}
+.session-history h3 {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin: 2px 4px 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.session-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.session-row:hover { background: var(--hover); }
+.session-row.sel { background: var(--sel); }
+.session-row .cost { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.session-row .dot,
+.session-head .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--muted);
+}
+.session-row .dot.success, .session-head .dot.success { background: var(--ok, #3fa34d); }
+.session-row .dot.error, .session-head .dot.error { background: var(--bad, #c0392b); }
+
+.session-body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.session-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.sturns { overflow: auto; min-height: 0; padding: 6px 10px; }
+.sturn { display: flex; gap: 8px; padding: 5px 0; border-top: 1px solid var(--line-faint, var(--line)); }
+.sturn:first-child { border-top: none; }
+.sturn-role {
+  flex: none;
+  width: 46px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding-top: 2px;
+}
+.sturn-body { min-width: 0; flex: 1; }
+/* Wrapped rather than clipped: a prompt is the thing being read, not a label. */
+.sturn-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.turn-parts { margin-top: 4px; display: flex; flex-direction: column; gap: 3px; }
+/* Collapsed by default: a tool call's arguments are evidence you go looking for, not context you
+   read past on the way to the answer. */
+.part > summary { cursor: pointer; font-size: 11px; display: flex; gap: 6px; align-items: baseline; }
+.part-kind { color: var(--muted); text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; }
+.part-tool { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.part > pre {
+  margin: 4px 0 6px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+/* --- the Logs panel (logs.tsx) ------------------------------------------------ */
+.logs-view { grid-template-columns: minmax(0, 1fr); }
+.logs { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.logs-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.logs-bar input { flex: none; width: 220px; }
+.logs-list { flex: 1; overflow: auto; min-height: 0; padding: 4px 0; }
+.log-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 10px;
+  font-size: 11.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.log-row:hover { background: var(--hover); }
+.log-at { color: var(--muted); flex: none; font-variant-numeric: tabular-nums; }
+.log-level { flex: none; width: 40px; text-transform: uppercase; font-size: 10px; }
+.log-level.log-warn { color: var(--warn, #b8860b); }
+.log-level.log-error { color: var(--bad, #c0392b); }
+.log-source { flex: none; width: 74px; color: var(--muted); }
+.log-message { overflow-wrap: anywhere; }
+.log-row .link { flex: none; background: none; border: none; padding: 0 2px; color: var(--accent, #3b7dd8); cursor: pointer; font-size: 11px; }
+
+/* The captured output of one process, opened from a row. Bounded above so the list it came from
+   stays reachable — reading a log should not mean losing your place in it. */
+.console { border-top: 1px solid var(--line); display: flex; flex-direction: column; max-height: 45%; min-height: 0; }
+.console-head { display: flex; gap: 8px; align-items: center; padding: 5px 10px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.console-stream { overflow: auto; min-height: 0; padding: 4px 10px; }
+.console-stream h4 { margin: 4px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.console-stream pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.console-stderr pre { color: var(--bad, #c0392b); }
+/* Not decoration: without it the tail reads as the whole, which is the misreading that makes a
+   truncated log worse than no log. */
+.console-gap { margin: 6px 0; color: var(--muted); font-style: italic; font-size: 11px; }
+
+/* An answer still being written. Marked rather than blended in: it has no tool calls yet and may
+   still change, so a reader must be able to tell a draft from a record. */
+.sturn-live .sturn-role { color: var(--accent, #3b7dd8); }
+.sturn-live .sturn-text { opacity: 0.85; }
+.sturn-live .sturn-text::after {
+  content: "▍";
+  animation: sturn-caret 1s steps(2) infinite;
+}
+@keyframes sturn-caret {
+  50% { opacity: 0; }
+}
+
+/* A sync narrating itself while it runs — see SyncState.progress. */
+.sync-progress { display: flex; flex-direction: column; gap: 4px; }
+.sync-steps {
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+
+
+/* --- one board per project, grouped (App.tsx, tasks view) ---------------------
+   The Tasks view is a thing you DRILL INTO, so each group gets the real board —
+   columns and cards — rather than a summary of one. Grouped vertically because a
+   board's columns are the children of one workflow state: two projects' columns
+   side by side would be columns of different things. */
+.tasks-view .col.mid { overflow: auto; display: flex; flex-direction: column; min-height: 0; }
+.board-group { display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid var(--line); }
+/* A collapsed group is a header and nothing else, so several fit on screen at once. */
+.board-group.shut { flex: none; }
+.board-group-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  background: var(--head, transparent);
+}
+.board-group-head:hover { background: var(--hover); }
+.board-group-head .twist { flex: none; width: 10px; color: var(--muted); }
+/* JaiRA's own project reads as background rather than as your work. */
+.board-group-head .system { color: var(--muted); font-style: italic; }
+.board-group:not(.shut) { flex: 1 1 auto; }
+
+
+/* --- the Debug view (debugPane.tsx) -------------------------------------------
+   Two columns and no splitter: unlike Files and Tasks, neither side is a place
+   you work in for long — the left is a fixed sequence of steps and the right is
+   the ordinary task panel — so there is nothing here worth a remembered width. */
+.debug-view { grid-template-columns: minmax(0, 1fr) var(--pane-right, 360px); }
+.debug {
+  overflow: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.debug > section { display: flex; flex-direction: column; gap: 8px; }
+.debug-head h2 { margin: 0 0 4px; font-size: 15px; }
+.debug-head .sub { margin: 0; max-width: 70ch; line-height: 1.5; }
+
+/* The two stages, numbered — the sequence the cursor follows, written the way the
+   file declares it rather than as prose about it. */
+.debug-stages { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.debug-stages li { font-size: 12px; line-height: 1.6; }
+.debug-stages .mono { font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+.debug-stages .sub { font-size: 12px; }
+
+.debug-source > div { margin-top: 8px; }
+.debug-source summary { cursor: pointer; font-size: 12px; color: var(--dim); }
+
+.debug-file {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.debug-file:hover { background: var(--hover, var(--panel-2)); }
+.debug-file .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--dim); }
+.debug-file .dot.success { background: var(--ok); }
+.debug-file .dot.error { background: var(--bad); }
+.debug-file .mono { font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+
+/* The one thing someone crossing the room can read. A verdict that needs to be
+   found among five panels is a verdict nobody trusts they read correctly. */
+.debug-verdict {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.debug-verdict-word { font-size: 18px; font-weight: 700; letter-spacing: 0.06em; }
+.debug-verdict.good { border-left-color: var(--ok); }
+.debug-verdict.good .debug-verdict-word { color: var(--ok); }
+.debug-verdict.bad { border-left-color: var(--bad); }
+.debug-verdict.bad .debug-verdict-word { color: var(--bad); }
+.debug-verdict.unknown { border-left-color: var(--warn); }
+.debug-verdict.unknown .debug-verdict-word { color: var(--warn); }
+
+/* The transcript is the tallest thing here and the reason the column scrolls; it
+   gets a fixed height so the sections under it stay reachable without a hunt. */
+.debug-transcript .session { height: 320px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+
+/* --- running a state from the inspector --- */
+/* The two sections sit at the top of a 220–680px column, so everything here is fighting for width:
+   labels above boxes rather than beside them, and one row per previous run. */
+.run-section {
+  gap: 8px;
+}
+.run-field > span {
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  color: var(--fg);
+}
+.run-field .req {
+  color: var(--bad);
+}
+/* The box, not the label, carries the fault — the message below it names the field already. */
+.run-field.bad .cfg-input {
+  border-color: var(--bad);
+}
+.run-field .sub.ellip {
+  font-size: 10.5px;
+}
+.run-fixed {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+.run-bool {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.run-actions {
+  margin-top: 2px;
+}
+/* The reason a disabled Run is disabled. It wraps rather than truncating: "issue is required" is
+   the whole instruction, and an ellipsis through it would leave a button that is off for no
+   visible reason. */
+.run-actions .sub {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.run-history {
+  gap: 3px;
+}
+/* Which of the two groups a run is in — see `runHistoryOf`. A heading rather than a section of its
+   own, because two headings called History would be worse than one with two labels under it. */
+.run-group {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-top: 5px;
+}
+.run-row {
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.run-row .run-at {
+  flex: none;
+  font-size: 10.5px;
+}
+/* Which project the run is recorded in. Quiet, but never hidden — a shared workflow runs in JaiRA's
+   own project with `~/.jaira` as its workspace, and that must not be a discovery. */
+.run-target {
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.run-target b {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* --- the task context panel --- */
+/* Always present, unlike the crumb it replaced: a task reached from anywhere other than an open
+   state used to be a one-way trip. */
+.back-arrow {
+  flex: none;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+}
+.task-states {
+  display: flex;
+  flex-direction: column;
+}
+.task-state-row {
+  padding: 4px 6px;
+  font-size: 11.5px;
+  font-family: ui-monospace, Consolas, monospace;
+}
+/* The ↗ only earns its space on the row you are pointing at — the row itself is already a click,
+   and two competing affordances on every line reads as noise. */
+.task-state-row .open-state {
+  flex: none;
+  opacity: 0;
+  padding: 0 2px;
+}
+.task-state-row:hover .open-state,
+.task-state-row .open-state:focus-visible {
+  opacity: 1;
+}
+/* Numbers read at a glance and compared against each other, so they line up and share a width. */
+.kv.metrics {
+  grid-template-columns: 58px minmax(0, 1fr);
+  font-variant-numeric: tabular-nums;
+}
+.kv.metrics dd .chip {
+  margin-left: 5px;
+}
+
+/* --- the transcript --- */
+/* Full-width rows with a role line, not bubbles: the panel can be 300px wide and a bubble spends a
+   third of that on the gutter beside it. Tool output then gets the whole column, which is what it
+   needs and what a bubble cannot give it. */
+.ts {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 10px 12px;
+  min-width: 0;
+}
+.ts-who {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 3px;
+  min-width: 0;
+}
+.ts-role {
+  font-size: 12px;
+  color: var(--dim);
+}
+.ts-role-assistant {
+  color: var(--accent);
+}
+.ts-role-user {
+  color: var(--text);
+}
+/* Right-aligned and tabular, so they line up down the page and the gap between two calls can be
+   read without arithmetic. */
+.ts-at {
+  flex: none;
+  font-size: 11px;
+  color: var(--dim);
+  font-family: ui-monospace, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.ts-text,
+.ts-text-live {
+  margin: 0;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+.ts-msg-system .ts-text {
+  color: var(--dim);
+}
+.ts-msg .markdown {
+  font-size: 13px;
+  line-height: 1.65;
+}
+.ts-msg .markdown > *:first-child {
+  margin-top: 0;
+}
+.ts-msg .markdown > *:last-child {
+  margin-bottom: 0;
+}
+.ts-live .ts-text-live {
+  color: var(--dim);
+}
+
+/* A tool call is one line until asked. An agent loop is mostly these, and forty expanded is a
+   transcript nobody reaches the end of. */
+.ts-tool {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.ts-tool-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 8px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text);
+}
+.ts-tool-line:hover {
+  background: var(--panel-2);
+}
+.ts-tool.open .ts-tool-line {
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+}
+.ts-caret {
+  flex: none;
+  color: var(--dim);
+  font-size: 10px;
+}
+.ts-tool-name {
+  flex: none;
+}
+.ts-tool-line .grow {
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ts-verdict {
+  flex: none;
+}
+.ts-verdict.ok {
+  color: var(--ok);
+}
+.ts-verdict.bad {
+  color: var(--bad);
+}
+.ts-payload {
+  margin: 0;
+  padding: 7px 9px;
+  background: var(--panel-2);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--dim);
+  overflow-x: auto;
+  max-height: 340px;
+}
+
+/* A journal fact is not something anybody said, so it is a strip rather than a message. */
+.ts-event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--panel-2);
+  color: var(--dim);
+}
+.ts-event.ts-warn {
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--warn);
+}
+.ts-event.ts-bad {
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+  color: var(--bad);
+}
+
+/* --- run cards --- */
+/* Chrome marks a CHILD boundary. A leaf has none, so it renders bare — see `transcriptView.tsx`. */
+.ts-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+}
+.ts-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.ts-card.live {
+  border-color: var(--accent);
+}
+.ts-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+.ts-card-head:hover {
+  background: var(--panel-2);
+}
+.ts-card.open .ts-card-head {
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+}
+.ts-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+.ts-dot-completed {
+  background: var(--ok);
+}
+.ts-dot-failed {
+  background: var(--bad);
+}
+.ts-dot-running {
+  background: var(--accent);
+}
+.ts-dot-waiting_for_user {
+  background: var(--warn);
+}
+/* The call signature: what was run, and what it was called with. The same line the board card
+   carries, because they are the same fact. */
+.ts-sig {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ts-sig-name {
+  color: var(--text);
+}
+.ts-sig-label {
+  color: var(--dim);
+  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+}
+.ts-sig-args {
+  color: var(--dim);
+}
+.ts-sig-value {
+  color: var(--tok-string);
+}
+.ts-card-meta {
+  flex: none;
+  font-size: 11px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.ts-card-body .ts {
+  padding: 8px 10px;
+}
+
+/* --- a composite's two readings --- */
+.composite {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.composite-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+/* Two words rather than icons: "where is everything" and "what did it say" are not a picture. */
+.run-mode {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.run-mode button {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: 12px;
+  padding: 4px 11px;
+  color: var(--dim);
+}
+.run-mode button.on {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.run-convo {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.run-convo-rule {
+  height: 1px;
+  background: var(--line);
+  margin: 2px 12px 0;
+}
+
+/* One column per declared child, one card per EXECUTION — see `runViews.tsx`. */
+.run-board {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  overflow-x: auto;
+}
+.run-col {
+  flex: 0 0 190px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.run-col > h3 {
+  flex: none;
+}
+.run-col-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.run-tile {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.run-tile:hover {
+  background: var(--panel-2);
+}
+.run-tile.sel {
+  border-color: var(--accent);
+}
+.run-tile-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  min-width: 0;
+}
+/* The inputs that travel with the card. Muted, because they identify the run rather than name it. */
+.run-tile-args {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--dim);
+  line-height: 1.45;
+  display: flex;
+  flex-direction: column;
+}
+.run-tile-meta {
+  font-size: 10.5px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
 }

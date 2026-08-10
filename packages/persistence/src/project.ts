@@ -9,12 +9,14 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  baseAsProjectPaths,
   defaultConfig,
   jairaBasePaths,
   jairaPaths,
   mergeConfigDocuments,
   parseConfig,
   readJsonFile,
+  systemProjectDir,
   type JairaBasePaths,
   type JairaConfig,
   type JairaPaths,
@@ -28,6 +30,15 @@ import { RuntimeStore } from "./runtime";
 import { TaskFileStore } from "./taskStore";
 
 export interface Project {
+  /**
+   * A user's checkout, or JaiRA's own.
+   *
+   * `system` is the shared root opened as a project in its own right, so JaiRA's workflows — the
+   * description sync, summarization, the conformance check — have somewhere to be recorded. It is
+   * not a decoration: `createTask` refuses a branch on one, which is what keeps those runs out of
+   * anybody's worktrees.
+   */
+  kind: "project" | "shared" | "system";
   paths: JairaPaths;
   config: JairaConfig;
   db: JairaDb;
@@ -99,7 +110,69 @@ export function initBase(baseDir?: string): JairaBasePaths {
   mkdirSync(base.workflowsDir, { recursive: true });
   mkdirSync(base.functionsDir, { recursive: true });
   mkdirSync(base.skillsDir, { recursive: true });
+  // Run state for JaiRA's own project. Created with the rest so the layout is whole after one call,
+  // rather than half-created until the first system run happens to need the other half.
+  mkdirSync(base.snapshotsDir, { recursive: true });
+  mkdirSync(base.tasksDir, { recursive: true });
+  // The same rule a project's `.jaira/` follows, for a stronger reason: plenty of people keep their
+  // home directory in a synced folder or a dotfiles repository, and a database that lands there is
+  // one machine's run history replicated onto every other.
+  const ignoreFile = join(base.baseDir, ".gitignore");
+  if (!existsSync(ignoreFile)) writeFileSync(ignoreFile, JAIRA_GITIGNORE, "utf8");
   return base;
+}
+
+/**
+ * Open the SELECTED root as a project in its own right (DESIGN §3.1, amended).
+ *
+ * Where a run of a workflow living in `<root>/workflows` is recorded. Scoped to the root by
+ * construction — it IS the root — which is the property that matters: point the root elsewhere and
+ * these tasks stop being listed, because a different root is a different library with a different
+ * history.
+ *
+ * Deliberately not `openProject(baseDir)`, and not for one reason but four. `openProject` refuses a
+ * directory with no `.jaira/`, and the base has none — its directories sit directly under it.
+ * `jairaPaths(baseDir)` would therefore look for `~/.jaira/.jaira/workflows`. `worktreesDir` would
+ * resolve beside a home directory that is not a git repository. And `loadLayeredConfig` would merge
+ * the base config with ITSELF, since for this layout `paths.configFile` and `paths.base.configFile`
+ * are the same file — harmless today only because merging a document over itself is idempotent, and
+ * a trap the moment a merge rule stops being.
+ *
+ * So the config is parsed directly: there is no layer behind the base, because it IS the layer.
+ */
+export function openSharedProject(opts?: { now?: () => number; staleMs?: number; baseDir?: string }): Project {
+  const base = initBase(opts?.baseDir);
+  const paths = baseAsProjectPaths(base.baseDir);
+  const doc = existsSync(paths.configFile) ? readJsonFile(paths.configFile) : undefined;
+  return openAt(paths, doc === undefined ? defaultConfig() : parseConfig(doc), "shared", opts);
+}
+
+/**
+ * JaiRA's OWN project — the one a root switch must not move.
+ *
+ * A fixed directory under the DEFAULT root ({@link systemProjectDir}), not the selected one. A
+ * description sync is a fact about the installation, so its history has to outlive a person
+ * repointing their shared library; and it must not sit on the same board as that library's runs,
+ * which is what giving JaiRA's runs their own project was for in the first place.
+ *
+ * Its config is the SHARED root's, not its own: the system directory holds a database and nothing
+ * else, and a sync still has to resolve the models and credentials the installation is configured
+ * with rather than a bare default.
+ */
+export function openSystemProject(opts?: {
+  now?: () => number;
+  staleMs?: number;
+  /** The SELECTED root — where the config and credentials come from. */
+  baseDir?: string;
+  /** Where JaiRA's own project lives. Defaults to {@link systemProjectDir}; see the note there. */
+  systemDir?: string;
+}): Project {
+  const base = initBase(opts?.baseDir);
+  const paths = baseAsProjectPaths(opts?.systemDir ?? systemProjectDir());
+  mkdirSync(paths.projectDir, { recursive: true });
+  const configFile = jairaBasePaths(base.baseDir).configFile;
+  const doc = existsSync(configFile) ? readJsonFile(configFile) : undefined;
+  return openAt(paths, doc === undefined ? defaultConfig() : parseConfig(doc), "system", opts);
 }
 
 /**
@@ -122,9 +195,24 @@ export function openProject(
   if (!existsSync(paths.jairaDir)) {
     throw new Error(`${paths.projectDir} is not a JaiRA project (no .jaira/ — run 'jaira init')`);
   }
-  const now = opts?.now ?? Date.now;
   initBase(paths.base.baseDir);
-  const config = loadLayeredConfig(paths);
+  return openAt(paths, loadLayeredConfig(paths), "project", opts);
+}
+
+/**
+ * The open itself, once the layout and the configuration have been decided.
+ *
+ * Shared by both entry points because everything from here down is the same question — what does this
+ * database say was happening when we last looked? — and the two differ only in where the layout came
+ * from and how its config was resolved.
+ */
+function openAt(
+  paths: JairaPaths,
+  config: JairaConfig,
+  kind: Project["kind"],
+  opts?: { now?: () => number; staleMs?: number },
+): Project {
+  const now = opts?.now ?? Date.now;
   const db = openDb(paths.dbFile);
   const runtime = new RuntimeStore(db);
   const jobs = new JobStore(db, opts?.staleMs);
@@ -139,6 +227,7 @@ export function openProject(
   jobs.reapStale(at);
 
   return {
+    kind,
     paths,
     config,
     db,

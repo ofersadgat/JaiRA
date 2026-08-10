@@ -88,23 +88,52 @@ describe("the merged document is what gets validated", () => {
   it("reads the executor fields off every kind of executor", () => {
     const config = parseConfig({
       agents: {
-        claudeCode: { enabled: false },
-        claudeCli: { credential: "ANTHROPIC_API_KEY" },
+        claudeCode: { enabled: false, credential: "ANTHROPIC_API_KEY" },
+        claudeCli: { command: "/opt/claude" },
         codex: { enabled: true, sandbox: "read-only" },
         genericCli: [{ command: "aider", enabled: false }],
       },
     });
 
     expect(config.agents.claudeCode?.enabled).toBe(false);
-    expect(config.agents.claudeCli?.credential).toBe("ANTHROPIC_API_KEY");
+    expect(config.agents.claudeCode?.credential).toBe("ANTHROPIC_API_KEY");
+    expect(config.agents.claudeCli?.command).toBe("/opt/claude");
     expect(config.agents.codex?.sandbox).toBe("read-only");
     expect(config.agents.genericCli?.[0]?.enabled).toBe(false);
   });
 
+  /**
+   * The two Claude adapters take OPPOSITE settings, and each refuses the other's.
+   *
+   * They were one shared block, which is how the settings screen came to ask for an Anthropic key in
+   * order to run a binary that signs itself in and would have ignored one. A key stored there is a
+   * secret nothing ever reads, and the belief that the executor is configured is worse than the
+   * missing field.
+   */
+  it("refuses a key for the CLI, which signs itself in, and a command for the in-process SDK", () => {
+    expect(() => parseConfig({ agents: { claudeCli: { credential: "ANTHROPIC_API_KEY" } } })).toThrow(
+      /authenticates itself/,
+    );
+    expect(() => parseConfig({ agents: { claudeCode: { command: "claude" } } })).toThrow(/no binary to point at/);
+  });
+
   it("refuses a credential that looks like a value rather than a name", () => {
     // The single easiest way to end up with a secret committed in config.json.
-    expect(() => parseConfig({ agents: { claudeCli: { credential: "sk-ant secret value" } } })).toThrow(
+    expect(() => parseConfig({ agents: { codex: { credential: "sk-ant secret value" } } })).toThrow(
       /must NAME a secret, not hold one/,
+    );
+  });
+
+  /**
+   * Model limits are NOT an agent's business any more.
+   *
+   * They live on the executor tree's route node, because that is what they are about: a limit on a
+   * route, not on the binary underneath it. Two homes for one setting meant two screens, two parsers,
+   * and a question with no good answer — does this apply to the route, or to the agent under it?
+   */
+  it("refuses model limits on an agent, which is the route's business now", () => {
+    expect(() => parseConfig({ agents: { claudeCli: { models: { default: "opus" } } } })).toThrow(
+      /is not a setting/,
     );
   });
 

@@ -1,14 +1,22 @@
 /**
- * A task's run, read back out of the journal as a conversation (DESIGN §11.1).
+ * A task's run, read back out of the journal as a TIMELINE (DESIGN §11.1).
  *
- * There is no separate transcript to show. The event journal *is* the record of what happened
- * (SPEC §10.2), and the command log is the record of what the agent tried to do, so this merges the
- * two into one time-ordered reading: which state ran, what it called, whether its output validated,
- * and every point a human was asked something.
+ * This used to open "there is no separate transcript to show", and that was true when it was written.
+ * It is not now: `SqliteSessionStore` keeps every model call's messages, and `sessionView` reads them
+ * back. So the two are different things, and the split is worth stating rather than blurring.
  *
- * Merged rather than concatenated, because the interesting moments are precisely where the two
- * streams interleave — a policy escalation lands *inside* an operation, and separating them loses
- * the one thing the reader wants to know, which is what the agent was doing when it asked.
+ * **The transcript** is what a state SAID — the prompt, the answer, the agent's tool calls and their
+ * results. One state, one operation, one conversation.
+ *
+ * **This** is what happened AROUND those operations: which state ran, what it called, whether its
+ * output validated, every transition, and every point a human was asked something. None of it appears
+ * in a transcript, because none of it happens inside a model call. A policy escalation and a human
+ * gate land BETWEEN turns, and this is the only place they are visible.
+ *
+ * Merged from the journal and the command log rather than concatenated, because the interesting
+ * moments are precisely where those two streams interleave — an escalation lands *inside* an
+ * operation, and separating them loses the one thing the reader wants to know, which is what the
+ * agent was doing when it asked.
  */
 import type { JsonValue } from "@declarative-ai/json";
 import type { ConversationTurn, ConversationView } from "@jaira/shared";

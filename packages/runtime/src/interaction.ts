@@ -29,6 +29,14 @@ export interface HubRequest {
   /** The registered function name — the UI component to render. */
   component: string;
   inputs: Record<string, JsonValue>;
+  /**
+   * The task whose run parked, when the registration named one.
+   *
+   * Carried rather than inferred, because the alternative was a guess: the app used to label a
+   * request with whichever run happened to be first in its live map, which is right only while
+   * exactly one run exists. A registration belongs to one run, so that is where the answer is.
+   */
+  taskId?: string;
 }
 
 type Pending = {
@@ -59,18 +67,30 @@ export class InteractionHub {
   /**
    * Register `name` as an interactive function backed by this hub. Every call
    * parks until `submit`/`reject` names its request id.
+   *
+   * `taskId` is the run this registration serves — a registry is built per run, so it is known here
+   * and stamped on every request the registration parks.
    */
-  register(registry: CapabilityRegistry<WorkflowMetrics>, name: string): this {
+  register(registry: CapabilityRegistry<WorkflowMetrics>, name: string, taskId?: string): this {
     registry.functions.set(
       name,
-      hostFunction(async (inputs: FunctionInputs) => this.park(name, inputs), INTERACTIVE),
+      hostFunction(async (inputs: FunctionInputs) => this.park(name, inputs, taskId), INTERACTIVE),
     );
     return this;
   }
 
-  private park(component: string, inputs: FunctionInputs): Promise<FunctionResult<ResolvedValue, WorkflowMetrics>> {
+  private park(
+    component: string,
+    inputs: FunctionInputs,
+    taskId?: string,
+  ): Promise<FunctionResult<ResolvedValue, WorkflowMetrics>> {
     const requestId = this.options.nextId?.() ?? `ui-${++this.counter}`;
-    const request: HubRequest = { requestId, component, inputs: inputs as Record<string, JsonValue> };
+    const request: HubRequest = {
+      requestId,
+      component,
+      inputs: inputs as Record<string, JsonValue>,
+      ...(taskId !== undefined ? { taskId } : {}),
+    };
     return new Promise<FunctionResult<ResolvedValue, WorkflowMetrics>>((resolve) => {
       this.pending.set(requestId, { request, resolve });
       this.options.onRequest?.(request);

@@ -16,6 +16,8 @@
  *    than as a phantom node.
  */
 import type { EngineEvent } from "@declarative-ai/hw";
+import type { JsonValue } from "@declarative-ai/json";
+import { resolveLabel } from "./runLabel";
 import type {
   BlockedChild,
   BoardCard,
@@ -67,6 +69,33 @@ const OUTCOME_STATUS: Record<string, InstanceStatus> = {
  * operation has started but not finished is `waiting_for_user` rather than a
  * generic `running`, which is what the board badge needs.
  */
+/** The resolved inputs off an entry event, as plain JSON. Absent when the run recorded none. */
+function inputsOf(event: Extract<EngineEvent, { type: "instance.entered" }>): Record<string, JsonValue> | undefined {
+  const raw = event.inputs as Record<string, unknown> | undefined;
+  if (raw === undefined) return undefined;
+  const out: Record<string, JsonValue> = {};
+  // A `ResolvedValue` wraps the value the engine settled on; anything not JSON-shaped (a stream, a
+  // symbol) is dropped rather than stringified, because a card showing `[object Object]` is worse
+  // than a card showing one input fewer.
+  for (const [name, value] of Object.entries(raw)) {
+    const unwrapped = value !== null && typeof value === "object" && "value" in value
+      ? (value as { value: unknown }).value
+      : value;
+    if (unwrapped === undefined || typeof unwrapped === "function" || typeof unwrapped === "symbol") continue;
+    out[name] = unwrapped as JsonValue;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** This run's name, resolved from the state's `label` against its own inputs — see `resolveLabel`. */
+function runLabelOf(
+  event: Extract<EngineEvent, { type: "instance.entered" }>,
+  shape?: WorkflowShape,
+): string | undefined {
+  const declared = shape?.[event.stateId]?.label;
+  return resolveLabel(declared, inputsOf(event) ?? {}).label;
+}
+
 export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape, atMs?: readonly number[]): ProjectedRun {
   const byId = new Map<number, MutableNode>();
   const roots: MutableNode[] = [];
@@ -87,6 +116,12 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
           iteration: 0,
           superseded: false,
           startedAt: at,
+          // What this run was CALLED WITH, and what to call it. Both come off the entry event, which
+          // has carried the resolved inputs since the journal existed and projected them nowhere.
+          // They are what tells four runs of one child apart: the state id, the child key and the
+          // state's own name are identical across all of them.
+          ...(inputsOf(event) !== undefined ? { inputs: inputsOf(event)! } : {}),
+          ...(runLabelOf(event, shape) !== undefined ? { label: runLabelOf(event, shape)! } : {}),
           children: [],
         };
         byId.set(node.instanceId, node);

@@ -812,9 +812,60 @@ settings):
   .env / .env.local           machine-local credentials (see §8.1)
 ```
 
-It holds **authored** things only. There is no database and no snapshot cache
-here: runs belong to a project, and putting one machine's history behind every
-project would be a shared mutable pile with no owner.
+It holds the **authored** things every project can reach — and, since JaiRA
+gained workflows of its own, a `jaira.db`, a `snapshots/` and a `tasks/` beside
+them:
+
+```
+  jaira.db                    JaiRA's own runs (see below)
+  snapshots/                  pinned versions of the workflows they ran
+  tasks/                      their task files
+```
+
+This amends the rule that stood here. It read: *"There is no database and no
+snapshot cache here: runs belong to a project, and putting one machine's history
+behind every project would be a shared mutable pile with no owner."* The
+reasoning is still right; the conclusion stopped following. JaiRA runs workflows
+of its own — the description sync (§11.2), summarization, the conformance check
+— and **those runs have an owner. It is this root.** Their alternatives were a
+user's project, where they appear on a board nobody put them on and take
+worktrees nobody asked for, or nowhere at all, which is what they had, and why a
+failed sync could not be read back afterwards.
+
+So it is a pile with an owner, and the ownership is enforced rather than
+asserted:
+
+- **A task created here may not name a branch.** `createTask` refuses one, so a
+  system run can never take a worktree. `worktreesDir` is the single field
+  `baseAsProjectPaths` still fabricates, and nothing resolves it.
+- **It is never the focused project.** A window with no project open answers
+  "list the tasks" with nothing, not with one of these — which is the whole point
+  of separating them. Each is reachable only by naming it.
+- **It opens on first use, not at startup.** Someone who never runs a sync never
+  gets a database. The failure of that open is reported rather than fatal.
+
+**Two owners, not one.** The pile above turned out to be holding two kinds of run
+with different LIFETIMES, and one project could not be both:
+
+- **`"shared"` — the SELECTED root, as a project.** Runs of the workflows that
+  live in `<root>/workflows`: the library a person authors and runs directly from
+  the Files view. It IS the root, so repointing the root gives a different
+  database and the old library's runs stop being listed. That is correct, not a
+  loss — they were that library's history, and a different root is a different
+  library.
+- **`"system"` — JaiRA's own**, at `<installation>/system/`, where the
+  installation is `JAIRA_HOME`/`~/.jaira` and explicitly *not* the selected root.
+  A description sync is a fact about the installation, so its history has to
+  survive the switch that the shared project's deliberately does not. It has no
+  configuration of its own — the directory holds a database and nothing else — so
+  it borrows the shared root's, because a sync must still call the model the
+  installation is configured with and resolve the credentials it has.
+
+Conflating them meant a sync's bookkeeping travelled with a root switch and sat
+on the same board as a person's own shared runs. Both refuse a branch, because
+neither directory is a checkout. Both appear in the Tasks view as their own
+group, ordered outward from what you are working on: the checkout, the shared
+library it draws workflows from, then JaiRA's own behind both.
 
 Everything derives from one list — the **layer roots**,
 `[<project>/.jaira, ~/.jaira]` (`jairaPaths().roots`):
@@ -1486,16 +1537,40 @@ stdout) into this one event vocabulary.
    native policy hooks are worth wiring (`policyEnforcement: "config"` or
    `"none"` until then).
 
-#### Turning an executor off, and checking it works
+#### An executor's settings are its KIND's settings
 
-Every executor — the three built-ins and each configured `generic-cli` — carries
-two settings in common (`config.agents.*`):
+There is no generic executor block, and the attempt to have one is what produced
+a settings screen asking for an Anthropic API key in order to run a binary that
+signs itself in and would have ignored it. `EXECUTOR_KINDS` is the single table
+— read by the config parser, the probe, and the form — and the four kinds
+deliberately disagree:
+
+| kind      | binary  | credential   | what it is                                    |
+| --------- | ------- | ------------ | --------------------------------------------- |
+| `sdk`     | —       | **required** | an API client, in process; no binary to point at |
+| `cli`     | yes     | **none**     | `claude`, on the subscription its user signed into |
+| `codex`   | yes     | optional     | `codex`, which signs itself in *or* takes a key |
+| `generic` | yes     | optional     | any other agent binary, driven by an argv template |
+
+`credential: "none"` is a claim about the **runtime**, not a UI preference: the
+parser refuses `agents.claudeCli.credential` outright, and the pane offers no key
+entry, because a stored secret nothing ever reads is worse than a missing field —
+it leaves someone believing the executor is configured. Symmetrically,
+`agents.claudeCode.command` is refused: the SDK adapter has no process to point
+at.
+
+Every executor still carries `enabled` and `models` in common (`config.agents.*`):
 
 - **`enabled`.** Defaults to true, so a project that configures nothing gets
   everything. `false` leaves the runtime **out of the registry entirely**, which
   is deliberately louder than registering a stub that refuses when called: a
   workflow that cannot run here fails at start as an unregistered function
   rather than halfway through a run.
+- **`models`.** Which models this executor may be asked for, and with what — see
+  "Constraining an executor" in §8.3.
+
+And where a kind takes one:
+
 - **`credential`.** *Names* a secret; it never holds one. `config.json` is
   committed source, so a key written there is a key in everyone's checkout and
   in the history forever. The parser refuses a value containing whitespace with
@@ -1522,30 +1597,92 @@ command line for reasons nothing reports.
 
 `probeExecutor` health-checks one without running it: `--version` (the one
 invocation these binaries all support, that exits immediately, and that cannot
-be talked into doing work) plus a credential lookup. It reports `not-checked` as
-a distinct outcome from `ok`, because calling an unverified executor healthy is
-the failure the check exists to prevent. Only the credential's **origin** ever
-leaves the main process; the value does not cross IPC.
+be talked into doing work) plus, **for the kinds that use one**, a credential
+lookup. It reports `not-checked` as a distinct outcome from `ok`, because calling
+an unverified executor healthy is the failure the check exists to prevent. Only
+the credential's **origin** ever leaves the main process; the value does not
+cross IPC.
+
+The kind decides what a missing key means, and both directions were wrong before:
+
+- `cli` is never asked about a key at all. It used to be, so `claude-cli` on a
+  machine with no `ANTHROPIC_API_KEY` reported *failed* — the one executor that
+  works with no API key, marked as the broken one.
+- `sdk` fails when the package is installed but **no** key can be found, even
+  when config names none. It used to pass in exactly that state, because with no
+  `credential` field there was nothing to look up: the check succeeded by having
+  asked no question, and the adapter could not have made a single call.
+
+A failed probe also carries a **`fix`** — one imperative line saying what would
+change the answer. A health check that concludes "unavailable" and stops has told
+you the less useful half of what it knows.
 
 #### Configuring one from the app
 
-Settings → Executors edits all of this, in the layer the view's switch names: the
-binary, codex's sandbox, a `generic-cli` entry's argv and environment, the
-credential's **name**, and whether the executor is on at all. New CLI executors
-are declared there too, and removed there — a built-in is only ever turned off,
-because it is not declared anywhere to begin with.
+Three screens, and the split is the thing about them worth stating:
+**Providers** is *what can run here and how do I set it up*; **Executors** is
+*what actually gets used*. They were one tab, which is why it answered neither
+well — "Anthropic has a key" and "prompts go to Anthropic" are different facts,
+and one row with one checkbox was being asked to mean both.
 
-Two rules make the form safe to use against a layered configuration. It patches
-the **layer's own document**, never the merged one: saving the effective config
-into a project would copy every inherited value out of the shared root and freeze
-it there. And an **emptied field removes the key** rather than pinning the value
-that was showing, which is how a project goes back to inheriting.
+**Providers** lists everything that can answer a prompt — the four serving routes
+and every agent runtime, in one list, because a model provider and an agent
+provider differ in their settings and not in their purpose. Each row's form is
+**its kind's form**, laid out as the type hierarchy rather than flattened: the
+level every provider shares, then the level that makes it an API provider or a
+CLI agent, then the level that makes it codex. That is what lets a reader see
+which settings every CLI has and which are codex's alone, instead of one pile of
+boxes. New agent CLIs are declared here and removed here; a built-in is only ever
+turned off, because it is not declared anywhere to begin with.
+
+A row's state is a **pill, not a checkbox**, and it has four values: ready, not
+working, not set up, turned off. A checkbox can say only on or off, so an
+unavailable provider rendered as a ticked box — which is how the screen came to
+claim four working providers on a machine configured for none. "Enabled" is an
+intention and "ready" is an observation; they disagree constantly, and the UI has
+to be able to say so. A row that is not working also carries its `fix`.
+
+**Executors** holds the default model (with what it currently resolves to), each
+executor's `models` rules, and the named presets. Every LLM configuration on it —
+an executor's call defaults, a preset — is edited with the same element: a rail
+of categories, each carrying a live one-line summary, beside a detail pane. It
+replaced a JSON textarea, which made the user the parser: you had to already know
+the field is `maxOutputTokens` and not `maxTokens`, and that a model is sampling
+XOR reasoning — neither of which the box told you, and both of which it would
+accept and then fail on at run time. Unknown keys survive in a JSON escape hatch,
+so the form is never lossy.
+
+**Configuration** is the rest of `config.json` — artifacts, where commands run,
+the safety policy, memoization, workflow lookup — and it is a FORM. It was a raw
+JSON editor, which is the same failure the LLM config box had: it makes the user
+the parser. You had to already know the field is `inlineMaxBytes` and not
+`maxInlineBytes`, that `execEnvironment` is `"windows" | { wsl }`, and that a
+destination is a template over a closed variable set. Two things get bespoke
+controls because their shape carries meaning a property walk cannot: the exec
+environment (a union spelled as a string or an object) and the policy (an ORDERED
+rule list over parsed command intent, first match wins — so a list with move
+controls, exactly as the function rules are). The raw document stays behind a
+disclosure, because the policy block is `Record<string, JsonValue>` and a project
+may carry a field newer than the form.
+
+Two rules make any of these forms safe against a layered configuration. It patches the
+**layer's own document**, never the merged one: saving the effective config into a
+project would copy every inherited value out of the shared root and freeze it
+there. And an **emptied field removes the key** rather than pinning the value that
+was showing, which is how a project goes back to inheriting.
+
+**With no project open there is no project layer**, so the switch is absent rather
+than disabled and the screens edit the shared root — actually, not just in the
+wording. Left pointed at `project`, every control rendered disabled with no
+visible reason, which is what a screen that says one thing and does another looks
+like.
 
 Storing a key does both halves of the job at once — the value goes to the secret
 target chosen (keychain, project `.env.local`, base `.env.local`), and the *name*
 is written into the layer being edited, because a stored secret that no config
 names is one nothing will ever look up. The value still never crosses back: the
-pane learns only the origin, from the probe.
+pane learns only the origin, from the probe. A provider whose kind uses no key is
+offered no key entry at all.
 
 ### 8.2 Capability Gating
 
@@ -1601,12 +1738,27 @@ Four rules worth stating, each of which was a wrong answer at some point:
    workflow whose config named no `models.default`. It was right that a prompt op needs something to
    dispatch on and wrong that the something must be a provider — an installed agent needs no key, no
    endpoint and no configuration, so the one setup that obviously worked was being turned away. It now
-   picks: a usable provider route first (someone who set up a key meant to use it), then an enabled
-   agent. It refuses only when nothing at all can answer, and names both fixes.
-2. **"Usable" is checked cheaply, never by calling.** A resolvable credential, a configured endpoint,
-   named weights. This runs on every start, so a probe that spawned a process would make launching a
-   workflow pay for a health check nobody asked for. The Test button in Settings → Models is the same
-   check, and it too never spends money.
+   picks: a usable provider route first (someone who set up a key meant to use it), then an agent that
+   a check has shown to WORK. It refuses only when nothing at all can answer, and names both fixes.
+2. **"Usable" is checked cheaply on every run, and thoroughly in the background.** These are two
+   different checks and conflating them was the mistake:
+   - `routeUsable` runs on every workflow start and must stay free — a resolvable credential, a
+     configured endpoint, a weights file that exists. It opens no socket and spawns no process,
+     because launching a workflow must not pay for a health check nobody asked for.
+   - `probeModelRoutes` / `probeExecutor` are the real observation, and they run **by themselves**:
+     at startup, at project open, and after every configuration write. They connect to a local
+     server, stat the GGUF, resolve the loader package, and run `--version`. Neither ever generates,
+     so neither ever spends money.
+
+   The result is one `AvailabilitySnapshot` — routes, executors, the chosen default, and the *time of
+   the check* — cached in the main process and read by the settings screen over `availability:read`.
+   Nothing has to be pressed. The button that remains says **Re-check**, and exists only for a world
+   that changed since: a server started, a key installed in another window.
+
+   `checkedAt: 0` is a first-class value and the UI renders it as "not checked yet". "No check has
+   run" and "everything is fine" are different statements, and rendering the second for the first is
+   the whole failure this replaced — every provider used to show as enabled, on a machine configured
+   for none of them, because nothing had ever looked.
 3. **The route prefix is stripped before the transport sees it.** `claude-cli/sonnet` reaches `claude`
    as `sonnet`, which is a model it knows. A transport that cannot honour a specific model must
    REFUSE rather than drop it — running a different model than the one asked for is silent, wrong, and
@@ -1616,6 +1768,179 @@ Four rules worth stating, each of which was a wrong answer at some point:
    `agent/default`, which is inert: it satisfies the lowering (which requires a model to route a
    *provider* call) and is never forwarded, because a binary asked for a model literally named
    `default` would refuse — and that is precisely the zero-configuration case that has to work.
+
+   This only held for the transport's *own* placeholder. `claude-cli/default` — which is exactly what
+   `defaultModelId` produces on a fresh machine — is a NAMED id, so the placeholder branch never
+   fired and the prefix-stripping handed `claude` `--model default`. `constrainRoute` normalises it,
+   which is why every agent route is wrapped and not only a configured one.
+
+#### An executor is a TREE, and there is always a default one
+
+An executor in declarative-ai is a composition, not an object:
+
+```text
+operation   → OperationExecutor      dispatch on op.kind
+├─ function → FunctionExecutor       the run's registry, optionally narrowed
+└─ prompt   → PromptRouterExecutor   dispatch on the model id's prefix
+     ├─ anthropic  → PromptExecutor      via ModelRouter
+     ├─ claude-cli → AgentCliExecutor
+     └─ …
+```
+
+`config.executors.<name>` is that tree, at every level, and **`default` is the one
+every UI-initiated operation uses** — starting a task, proposing workflow changes,
+summarizing a conversation. Those three used to assemble their own from the same
+ingredients, which is a coincidence rather than a guarantee.
+
+Two rules make it usable, and they are the whole design:
+
+1. **Absent means DERIVED, not empty.** What is stored is a sparse OVERLAY;
+   `resolveExecutorTree` builds the whole tree from what is actually available and
+   lays the overlay on top. With an empty config the default executor is still
+   complete — an operation executor over a function executor and a router across
+   every usable provider and every working agent.
+2. **A change pins only what changed.** Writing a rate limit onto the `anthropic`
+   route stores exactly that, so an agent installed tomorrow still gets a route by
+   itself. Materializing the resolved tree into `config.json` on first edit would
+   freeze today's answer into everyone's configuration, and they would never pick
+   up a better one.
+
+So the settings screen shows the whole tree EXPANDED while the file stays a few
+lines, and every value is marked as one of two things: **derived** (adaptive) or
+**pinned** (stated here, and it will not move again).
+
+```jsonc
+"executors": {
+  "default": {
+    "prompt": {
+      "defaults": { "model": "claude-cli/sonnet" },     // applied BEFORE dispatch
+      "routes": { "claude-cli": { "model": "opus", "steps": { "retry": { "transient": 3 } } } }
+    }
+  }
+}
+```
+
+**`models.default` is gone**, and it could never have worked. `PromptRouterExecutor`
+dispatches on `op.config.model`, while a leaf's `defaults` are applied inside its
+own lowering — *after* routing. A default naming an agent was therefore invisible
+to the routing that had to happen first: a state naming no model fell through to
+the provider path and was asked for `claude-cli/default` there, which `ModelRouter`
+cannot serve. The router node's `defaults` are applied on the way IN, which is what
+makes a default executor able to route at all. The parser refuses the old field
+rather than dropping it, because a config carrying it was relying on it.
+
+Each node carries its own `steps`, so "a rate limit on this one route" and "a
+deadline on the whole tree" are different statements — which one `steps` block at
+the top could not make.
+
+**The function half takes RULES, not an allow list**: an ordered
+`["everything", "-run_command"]`, walked top to bottom with the last match
+winning. The useful statements are subtractive — "everything this workflow
+registers, except the one that runs commands" is one rule after a baseline, where
+an allow list would have to name every function that exists and be edited again
+whenever a workflow gains a state. A list of only `+` rules reads as an allow
+list, because otherwise `+read_file` would be a no-op. The form offers
+`BUILTIN_FUNCTIONS` in a dropdown beside a free-text box: the list cannot be
+exhaustive (a workflow registers a sub-workflow under its own state id), so
+offering only the known names would make the common case easy and the real case
+impossible.
+
+**Which models a route may run belongs to the ROUTE.** It used to also live at
+`config.agents.<executor>.models`, and two homes for one setting meant two
+screens, two parsers, and a question with no good answer — does this limit apply
+to the tree's route or to the agent underneath it? The agent block is now only
+what the runtime IS. All that survives there is `normaliseAgentModel`, which is a
+fix rather than a setting: `<agent>/default` is a NAMED id, so a transport's own
+placeholder branch never fires and it forwards the word, asking `claude` for
+`--model default`.
+
+#### The steps a node is wrapped in
+
+Every node of the tree can be wrapped in cross-cutting layers.
+`@declarative-ai/exec`'s `hydrate.ts` states the shape:
+
+```ts
+compose(leaf)
+  .with(withRateLimit(...))   // a concurrency slot and rate headroom
+  .with(withRetry(...))       // transient re-attempts, schema repair
+  .with(withMemoize(...))     // a durable answer cache
+```
+
+JaiRA hardcoded exactly one instance of it — two repair turns and an on/off memo —
+so the stack was a fact about the program rather than a choice. Any node's `steps`
+makes it a choice:
+
+```jsonc
+"steps": {
+  "memoize":   { "namespace": "review" },
+  "retry":     { "transient": 3, "validation": { "turns": 2, "feedback": true } },
+  "rateLimit": { "maxConcurrency": 4, "rpm": 60 },
+  "deadline":  { "maxDurationMs": 300000 }
+}
+```
+
+Three rules, each the opposite of a worse answer:
+
+1. **The steps are a SET; the ORDER is JaiRA's.** Order is load-bearing —
+   memoize outermost so a hit skips everything, rate limiting INSIDE retry so a
+   re-attempt after a 429 waits for headroom again rather than holding one slot
+   across the whole loop and its backoff. Those are correctness properties, not
+   preferences, and a drag-to-reorder list would be an invitation to build a
+   stack that is quietly wrong. `EXECUTOR_STEP_ORDER` is the list, and the screen
+   NUMBERS the steps rather than implying they can be moved.
+2. **Each step carries its own JSON Schema**, in `@jaira/shared`'s
+   `executorStack.ts`. The config parser validates against it, the settings form
+   is GENERATED from it, and `composeExecutorStack` applies it — so a step that
+   gains a field gains a control, a label, a hint and validation at once. The
+   alternative is three hand-written descriptions of one shape, drifting. This is
+   findmyprompt's signature-driven form, whose `SchemaForm`/`registry`/
+   `presentation` split is ported into `renderer/schemaForm/`.
+3. **A step that is off is not in the stack at all** — not a layer that does
+   nothing. `composeExecutorStack` returns the core UNCHANGED for a definition
+   with no steps, and reports what it applied and what it could not (a `memoize`
+   with no project has no store, and is reported rather than silently dropped).
+
+One honest limit the screen states rather than hides: an AGENT declares
+`memoizable: false` — it mutates the workspace and runs its own non-deterministic
+loop — so `withMemoize` declines to key its calls. A `memoize` step on an
+agent-backed node is applied and does nothing, and the form says so beside the
+step. Budget (`withBudget`) is not offered at all, because it needs a
+`BudgetMeter` wallet JaiRA does not yet have; offering a control that silently did
+nothing is the failure this whole section is about.
+
+#### Constraining a provider, wherever it is reached
+
+A node's `model` / `allow` / `defaults` constrain it in the tree. The same three
+settings also live on `config.agents.<executor>.models`, and that is not a
+duplicate: they apply to that runtime **however it is reached** — through the
+default executor's derived route, through a route someone pinned, or through a
+second executor entirely. A tree node says "this route runs opus"; the provider
+block says "this agent may only ever run opus".
+
+```jsonc
+"claudeCli": {
+  "models": {
+    "default": "opus",                    // what `claude-cli/default` resolves to
+    "allow":   ["opus", "sonnet"],        // patterns; `*` matches any run of characters
+    "config":  { "temperature": 0 }       // merged UNDER a state's own config
+  }
+}
+```
+
+Patterns are matched against the id **without** this executor's prefix — what the transport is
+actually handed — which is what lets one vocabulary express both *only opus* (`opus`) and *only this
+provider* (`openrouter/*`, for a generic CLI whose model ids name one). `constrainRoute` applies all
+three above the transport rather than inside each adapter, because the question is identical for an
+SDK, a subprocess and an argv template, and answering it three times is how three answers drift.
+
+Two rules it does not bend:
+
+- **A disallowed model is REFUSED, never substituted.** Rule 3's objection applies with more force
+  here: quietly running a permitted model in place of a forbidden one is invisible and can be an
+  order of magnitude off in price. The state fails permanently, quoting the rule that refused it.
+- **"Your own default" cannot satisfy an allow list.** With `allow` set and no `models.default`, a
+  state asking for the placeholder is refused rather than let through — a limit that a caller can
+  step around by declining to name anything is not a limit.
 
 ## 9. Git Integration, Worktrees, and WSL
 
@@ -1721,6 +2046,163 @@ run-record requirements of spec §10.2.
   workflow written there is checked before any project has ever referenced it.
   Skipping this left the one mode people author shared workflows in as the one
   mode that never reported anything wrong.
+- **Run it from the file you are looking at**: the Files inspector opens with a
+  **Run** section — one box per input the selected state declares — over a
+  **History** section of what running it has produced. Before this, the loop
+  "change a state, try it, read what happened" left the view: a task was created
+  in Tasks against a state id typed from memory, and the inputs went into a
+  single free-text box regardless of what the state actually asked for. Five
+  decisions hold it together:
+  - **Every state, not only a root.** Any state id can be loaded as a bundle root,
+    so a child runs standalone; there is nothing to gain by refusing. Non-state
+    files have no Run section at all — a prompt declares no inputs and starts
+    nothing.
+  - **The LAYER decides which project records the run.** A state under
+    `<root>/workflows` belongs to the shared library, so it runs in the root opened
+    as a project of its own (`project: "shared"` on `task:create`/`task:start`); a
+    project-layer state runs in the open checkout. Anything else gets both halves
+    wrong: a shared workflow would clutter one checkout's board, and the shared
+    root would be unrunnable in the mode it is most often authored in — with no
+    checkout open at all. That mode now works end to end, which is why
+    `StateView.fileOnly` is not a refusal: it means the VIEW was read without a
+    checkout, and only the things that genuinely need one (dependants, tasks that
+    passed through) are marked unknown. The panel names the target above the
+    button, because the trade is real — a shared run's workspace is the root, not
+    your repo, and a shared workflow expecting a checkout will not find one.
+  - **The boxes come from the slot's `schema`**, through the same vocabulary the
+    slot table uses, and make the same refusal: a schema richer than the
+    vocabulary (`properties`, an `enum`, a bound) gets a JSON box rather than a
+    control that could only round the value down. A string slot takes its text
+    VERBATIM — a helpful JSON parse there would send the number `123` into a slot
+    declared as a string, and the mismatch would surface mid-run.
+  - **Empty is absent, never `""`.** A slot with a `default` is therefore
+    satisfied by an empty box (§4.1), and a required one is refused here rather
+    than at the first state of the run.
+  - **The SAVED file runs.** Fields are read from disk, never from the draft,
+    because a run pins a snapshot (§5.3). Unsaved edits are announced, not
+    refused — comparing what you last saved against what you are about to write is
+    most of why the button is there.
+  - **History is two groups**, because they are two questions. *Started here* is
+    every task whose workflow IS this state, read out of the TARGET project — the
+    database the button writes to, which for a shared file is JaiRA's own. *Also
+    passed through* is every task that entered it inside some larger workflow,
+    projected from the state view and therefore the focused project's. For a root
+    the second is usually empty and for a child the first is, and conflating them
+    would make the section say nothing on either. Each group carries its project
+    through to the click, because a task id is a rowid in one database.
+  - **A list is refetched when you LOOK, not only when a push says so.** The
+    history was the first reader `state.tasks` ever had — every other surface
+    reads the per-project boards from `project:list` — and it inherited a bug that
+    had therefore never been visible: `refreshTasks` guarded on
+    `ref.current.projectDir`, and `ref.current` is assigned during RENDER, so a
+    caller that patched the project and refreshed in the same tick read the value
+    from before the patch, concluded there was no project, and wrote `tasks: []`.
+    Nothing retried, because nothing had failed. The guard is gone (main's refusal
+    is the answer, read as "none"), a `tasks` invalidate now also refreshes the
+    open `StateView` — which carries the second group — and opening a state
+    refetches both lists outright. One round trip per navigation buys the property
+    that looking at a state always reads a list fetched after you looked, which no
+    amount of push plumbing can guarantee on its own: a run that fails before
+    emitting anything sends no push at all. The empty state names what it searched
+    rather than asserting "never run", so a wrong empty can be told from a right
+    one without a debugger.
+  Run sits ABOVE validation in the column: the validation that would have gone
+  first is what disables the button, said on the button itself. Warnings do not
+  disable it — a warning that refused would just be an error.
+- **With no checkout open, a shared state gets the FULL view, not a degraded
+  one**: it used to fall back to reading the file alone, whose task lists are
+  empty by construction — so history appeared on a shared workflow's root (whose
+  own runs come from the task list) and on none of its substates (whose runs come
+  from the state view). Now that the root is a project, the view is projected from
+  it: boards, dependants, drift, and the tasks that passed through each state. The
+  browser stays the BASE one even so, because it is what decides the LAYER and
+  every file here is the base layer — reading that off the project would call
+  these files `project`, and the Files view routes a run by that layer, so it
+  would send them to whichever checkout was open. The project supplies the runs;
+  the browser supplies the layer. The browse surfaces open the shared project only
+  when the root already EXISTS: opening it creates directories and a database,
+  which is the cost of running something and not of looking, and materializing it
+  would also turn the tree's "not created yet — adding a state here will create
+  it" into a lie about what you had already done.
+- **A cost with nothing beside it is a number you can only believe**: the task
+  panel shows what a run consumed — started, time in calls, tokens in/out, cache
+  read and written, thinking — because that is what makes the money checkable.
+  `$0.21` beside 40k cached input tokens is an agent session doing ordinary work
+  and beside 300 tokens it is a bug, and those two used to look identical. JaiRA
+  computes no cost: it records what the executor reported, and `costSource` is
+  shown whenever that is anything other than the provider's own charge, because a
+  silent estimate is the one that gets quoted back as a fact. Tokens are split the
+  way they are BILLED rather than into one input figure — a cache read costs about
+  a tenth of the base rate — since a single number cannot be priced or checked.
+- **One transcript, not two stacked panels**: a run is described by two records
+  and neither is sufficient. The SESSION holds every model call verbatim; the
+  JOURNAL holds what happened around those calls — a policy escalation, a gate, a
+  failure, a transition — which appear in no conversation because nobody said
+  them. Showing both by stacking two components left the reader to interleave them
+  by eye, and the lower one was scoped to the TASK rather than to the state, so
+  opening one state showed its words above the whole run's events. That is what
+  read as "it is showing all the sessions". They are now normalised into one
+  time-ordered list, filtered to the state, and the journal's `operation`, `tool`
+  and `output` turns are DROPPED — they are the session's own material told worse,
+  and keeping them printed every model call twice.
+- **Chrome marks a child boundary, and nothing else.** A leaf renders its
+  transcript bare. A composite renders its OWN operation bare, in exactly the same
+  way — it is this state speaking, not a child — and then one card per child RUN
+  beneath it. So there is no leaf mode and composite mode; there is content, and
+  there are cards around children, and a leaf simply has no children. A state that
+  ran three times is three sibling cards rather than one card that has to explain
+  itself, because a single card cannot be clicked into three transcripts.
+- **A run names itself**: `label` is an expression, evaluated against that run's
+  resolved inputs (`.inputs.description`), so four `design` runs that share a state
+  id, a child key and a state name are still told apart by what each was called
+  with. **The leading dot is what makes it a reference** — not "does it parse",
+  because a bare word parses perfectly well as an identifier and reading it that
+  way would turn every label already written into a lookup of a variable that does
+  not exist. With no label, the card lists its parameters instead: something has to
+  distinguish them. Only a literal and a `.inputs.<name>` path resolve; richer
+  expressions are a producer tree only the engine can evaluate, and a second
+  half-evaluator is how the two come to disagree about what an expression means.
+  The values were already on `instance.entered` and projected nowhere, so the cards
+  cost no new plumbing.
+- **A composite has two honest readings, so they are a toggle**: the board answers
+  *where is everything* (a column per declared child, the workflow's shape); the
+  conversation answers *what did it say* (the state's own operation, then its
+  children's runs in the order they happened, one task's shape). Neither is a view
+  of the other. With a run selected the board's columns hold one card per
+  EXECUTION rather than one per task, and clicking one opens its transcript — the
+  same object seen twice, which is why the collapsed card and the board card are
+  one component. Transcripts are fetched on expand: rendering eight folded headers
+  must not cost eight round trips before anyone has asked to read one.
+- **The inspector is a CONTEXT panel, and context has a way back**: the right
+  column describes whatever you last clicked, and clicking a task makes the task
+  the context. That was already half-true and the missing half was the return
+  trip — the way back was a breadcrumb rendered only when a state happened to be
+  open, so a task reached from anywhere else held the column until you clicked
+  another file. It is now an arrow that is always there, and it RESTORES rather
+  than switches: the task's panel links out to every state the run went through,
+  and following one moves the open state, so "show the state again" and "go back"
+  stopped being the same place. `inspectFrom` records where the context came
+  from, and only on the way IN — clicking a second task while already on one must
+  not overwrite it, or Back becomes a loop.
+- **A state's panel opens on what the state DID**: selecting a state loaded its
+  board, its file and its lint results and left the transcript beside them saying
+  "select a task", which made the one panel that answers "what did this actually
+  say" the one panel you had to go and ask for. It now opens the state's newest
+  run — a task parked here NOW before one that merely finished later, because
+  "what is happening in this state" beats "what was touched most recently". This
+  fires on navigation only, never on the refresh every journaled event triggers,
+  or each engine event would yank the selection back mid-read. It does not touch
+  `inspect`: opening a file is not clicking a task, and must not take the column
+  away from the state.
+- **A transcript is chosen by state, not by recency**: a task's latest instance is
+  the DEEPEST state it reached, so selecting a task from `feature/plan/goals`
+  opened `critique`'s conversation — the right task, the wrong state, and nothing
+  on screen saying the two had come apart. The click now carries the state it came
+  from, and the newest instance of THAT state is shown; newest rather than first,
+  because a loop runs one state several times and the last pass is the one being
+  asked about. A task that never reached the state falls back to the latest rather
+  than to nothing — the header names the state either way, and a labelled
+  conversation beats an empty panel.
 - **Operation input checks**: the engine asks whether a state passes its
   operation what the operation's registered implementation requires — the same
   question `children.<key>.inputs` has always been asked ("required child input
@@ -1807,6 +2289,11 @@ run-record requirements of spec §10.2.
   is rather than leaving an empty field that reads as an omission.
 - **Pruning panel** (§12, SPEC §13): stored counts, then preview → delete. Never
   one click, because pruned history is not recoverable.
+- **Debug** (§11.3): a two-state workflow this app installs and runs against
+  itself, with the files, the instance tree, the events and the transcript all on
+  screen. On the rail rather than inside Settings — it is what you reach for when
+  the app is misbehaving, and burying it behind a configuration screen would make
+  it hardest to find in exactly the situation it exists for.
 
 ### 11.2 IPC Contract
 
@@ -1815,6 +2302,65 @@ Hand-rolled typed contract in `@jaira/shared` over `ipcMain.handle` /
 at the boundary on both sides. Board state is a subscription: the renderer
 subscribes to task/instance change events and maintains a local store
 (Zustand); no polling.
+
+### 11.3 The Debug view — a self-test you can watch
+
+Every screen in this app is downstream of one question: *does a workflow, run
+here, actually work?* Until this view there was no way to ask it without first
+authoring a workflow, configuring a provider, creating a task and reading a
+board — four things that can each be the broken one, so a failure anywhere said
+nothing about where.
+
+The Debug view asks it in one click. It installs a two-state workflow, runs it as
+an ordinary task, and shows the answer beside the machinery that produced it.
+
+**The workflow is two prompt states, and the second is the point.**
+`debug/hello_world/say` is asked to say hello world and publishes the reply as a
+typed `string`. `debug/hello_world/check` declares that string as a **required
+input**, wired on the mount as `.children.say.outputs.greeting`, and reports
+whether it was a hello-world greeting. So a pass proves more than "the provider
+answered": the first call's structured output validated, bound, crossed the
+sequence, and was interpolated into the second call's prompt. Had the wiring
+broken, `check` would be judging an empty string — and its prompt asks it to say
+so rather than to guess.
+
+**Nothing about it is a special path.** The files are written through
+`workflow:write`, the task through `task:create`, the run through `task:start` —
+the same three channels the Files tree and the board use. That is what makes a
+pass here mean something about the real thing, and it is why the pane shows the
+state files verbatim and links each one into the Files view: what it runs is
+inspectable, editable and deletable like anything else.
+
+**Two run modes, and reaching for the second is the diagnostic.** *Scripted*
+replaces the model with canned replies (`fake`, the same surface the CLI's
+`--fake` exposes) and exercises the engine, the bindings, the journal, the board
+and every panel with no provider and no cost. *Live* is the identical run against
+whatever `models.default` resolves to. Scripted passing and live failing is a
+provider problem; scripted failing is a JaiRA problem. Splitting the two is most
+of the value of the view.
+
+**The files live in the shared root** (§3.1), not in the open project: the
+self-test is a fact about this installation, and three debug files under a
+checkout's `.jaira/` are three files in its next commit. A run installs only what
+is MISSING, so a file someone edited to try something is never silently
+overwritten — the pane reports the difference and offers the overwrite as its own
+button.
+
+**No model is pinned anywhere in the workflow.** Every prompt state inherits
+`models.default`, so the self-test asks whatever this machine is actually set up
+to ask. Pinning one would make it a test of a model rather than a test of the
+installation.
+
+**A pass is a literal `true`.** The verdict comes off a model, so a missing
+field, a string `"true"`, or a run that failed before publishing anything all
+read as *no verdict* — a truthiness check would turn two of those three into a
+green banner. The pane shows the greeting beside the judgement for the same
+reason: a verdict without the evidence it judged is one you cannot check.
+
+The rest of the pane is borrowed rather than rebuilt — the task panel, the
+session transcript and the journal viewer are the same components Tasks and Files
+render. A debug view that drew its own version of the screen it exists to test
+would be testing the wrong screen.
 
 ## 12. Task Lifecycle and Board Semantics
 

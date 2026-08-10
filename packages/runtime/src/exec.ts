@@ -67,6 +67,26 @@ export interface Exec {
 export interface ExecObserver<T = unknown> {
   onSpawn(event: { command: string; argv: readonly string[]; pid?: number; cwd?: string }): T | undefined;
   onExit(token: T | undefined, event: { code: number | null; signal: NodeJS.Signals | null }): void;
+  /**
+   * A chunk of the child's output, as it arrives.
+   *
+   * OPTIONAL, so an observer that only counts processes — which is what every existing one does —
+   * keeps compiling. What it is for is diagnostics: an agent that fails prints why on stderr, and
+   * JaiRA discarded that stream entirely, so "the agent exited 1" was the whole story.
+   *
+   * This is deliberately NOT where a conversation comes from. An agent's stdout is its protocol
+   * stream and its meaning is stored as a session (`SqliteSessionStore`); capturing it here as raw
+   * text would be megabytes of noise answering a question already answered.
+   */
+  onOutput?(token: T | undefined, event: { stream: "stdout" | "stderr"; chunk: string }): void;
+  /**
+   * Reporting itself failed.
+   *
+   * The calls above are wrapped in `try/catch` so that a broken observer cannot change a command's
+   * outcome — which is right, and which meant a broken observer was completely silent. This is the
+   * channel that was missing.
+   */
+  onError?(error: Error, phase: "spawn" | "exit" | "output"): void;
 }
 
 /**
@@ -124,7 +144,17 @@ export class NodeExec implements Exec {
     } = {},
   ) {}
 
+  /** Report a failure in the observer itself — never rethrow, because it is not the command's fault. */
+  private reportObserverError(error: unknown, phase: "spawn" | "exit" | "output"): void {
+    try {
+      this.defaults.observer?.onError?.(error instanceof Error ? error : new Error(String(error)), phase);
+    } catch {
+      // An error channel that throws has nowhere left to go. Swallowed, and only here.
+    }
+  }
+
   run(command: string, args: readonly string[], options: ExecOptions = {}): Promise<ExecResult> {
+    const report = (error: unknown, phase: "spawn" | "exit" | "output"): void => this.reportObserverError(error, phase);
     const merged: ExecOptions = {
       ...options,
       execEnv: options.execEnv ?? this.defaults.execEnv ?? "windows",
@@ -154,14 +184,24 @@ export class NodeExec implements Exec {
           ...(child.pid !== undefined ? { pid: child.pid } : {}),
           ...(cwd !== undefined ? { cwd } : {}),
         });
-      } catch {
+      } catch (e) {
         token = undefined;
+        report(e, "spawn");
       }
       const observeExit = (code: number | null, signal: NodeJS.Signals | null): void => {
         try {
           this.defaults.observer?.onExit(token, { code, signal });
-        } catch {
-          // As above: a failed record must not change the command's outcome.
+        } catch (e) {
+          // As above: a failed record must not change the command's outcome — but it is no longer
+          // silent about it.
+          report(e, "exit");
+        }
+      };
+      const observeOutput = (stream: "stdout" | "stderr", chunk: string): void => {
+        try {
+          this.defaults.observer?.onOutput?.(token, { stream, chunk });
+        } catch (e) {
+          report(e, "output");
         }
       };
 
@@ -193,8 +233,16 @@ export class NodeExec implements Exec {
         merged.abortSignal?.removeEventListener("abort", onAbort);
       };
 
-      child.stdout?.on("data", (chunk: Buffer) => (stdout += chunk.toString("utf8")));
-      child.stderr?.on("data", (chunk: Buffer) => (stderr += chunk.toString("utf8")));
+      child.stdout?.on("data", (chunk: Buffer) => {
+        const text = chunk.toString("utf8");
+        stdout += text;
+        observeOutput("stdout", text);
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        const text = chunk.toString("utf8");
+        stderr += text;
+        observeOutput("stderr", text);
+      });
 
       child.on("error", (error) => {
         if (settled) return;

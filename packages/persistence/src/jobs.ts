@@ -16,23 +16,10 @@
 import { randomUUID } from "node:crypto";
 import type { JairaDb } from "./db";
 
-export type JobKind = "run" | "process";
-
-export interface JobRow {
-  id: number;
-  kind: JobKind;
-  taskId?: string;
-  runId?: number;
-  parentJobId?: number;
-  ownerToken: string;
-  pid?: number;
-  command?: string;
-  startedAt: number;
-  heartbeatAt: number;
-  cancelRequestedAt?: number;
-  endedAt?: number;
-  outcome?: string;
-}
+// The wire shapes live in `@jaira/shared` so the renderer can name one without reaching into this
+// Node-only package — the same rule the lint and view models already follow.
+import type { JobKind, JobRow } from "@jaira/shared";
+export type { JobKind, JobRow } from "@jaira/shared";
 
 interface RawJob {
   id: number;
@@ -109,12 +96,14 @@ export class JobStore {
     runId?: number;
     command: string;
     pid?: number;
+    /** Where it ran. Received from the observer and, until there was a column, dropped. */
+    cwd?: string;
     nowMs: number;
   }): number {
     const res = this.db
       .prepare(
-        `INSERT INTO jobs (kind, task_id, run_id, parent_job_id, owner_token, pid, command, started_at, heartbeat_at)
-         VALUES ('process', ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO jobs (kind, task_id, run_id, parent_job_id, owner_token, pid, command, cwd, started_at, heartbeat_at)
+         VALUES ('process', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.taskId ?? null,
@@ -123,6 +112,7 @@ export class JobStore {
         input.ownerToken,
         input.pid ?? null,
         input.command,
+        input.cwd ?? null,
         input.nowMs,
         input.nowMs,
       );

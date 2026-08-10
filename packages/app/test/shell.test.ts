@@ -159,7 +159,11 @@ describe("with no project open", () => {
 
       const view = bare.stateView("review");
 
-      expect(view).toMatchObject({ stateId: "review", label: "Shared review", layer: "base", fileOnly: true });
+      // NOT `fileOnly`: the shared root is a project in its own right now, so this is the full view —
+      // lint, dependants, drift and the runs that have passed through — rather than a reading of the
+      // file alone. `layer` is still `base`, which is what routes its runs back to the shared root.
+      expect(view).toMatchObject({ stateId: "review", label: "Shared review", layer: "base" });
+      expect(view.fileOnly).toBeUndefined();
       expect(view.board?.columns.map((c) => c.key)).toEqual(["step"]);
     } finally {
       await bare.close();

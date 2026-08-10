@@ -14,12 +14,19 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import type { ComponentConfig } from "./components";
-import type { ExecutorInfo, ProbeResult, SecretTarget } from "./executors";
+import type { AvailabilitySnapshot, ExecutorInfo, ProbeResult, SecretTarget } from "./executors";
 import type { JairaSettings } from "./settings";
 import type { SchemaViolation } from "./schemas";
 import type {
   BoardView,
   ConversationView,
+  JobOutputChunk,
+  JobRow,
+  LogEntry,
+  LogLevel,
+  ProjectSummary,
+  SessionRef,
+  SessionView,
   FileTree,
   HistorySize,
   PruneResult,
@@ -33,6 +40,43 @@ import type {
 
 // --- invoke channels ---------------------------------------------------------
 
+/**
+ * Which project a task-scoped call is about. Absent ⇒ the focused one.
+ *
+ * Two values are reserved, and they are the only way to reach the projects they name because the
+ * focus never points at either: {@link SHARED_SESSION} is the selected root opened as a project, and
+ * {@link SYSTEM_SESSION} is JaiRA's own. `shared` is what makes a workflow living in
+ * `<root>/workflows` runnable at all — the run has to be recorded somewhere, and recording it in
+ * whichever checkout happened to be open is how a shared library becomes one project's clutter.
+ */
+export type ProjectRef = string;
+
+/**
+ * The reserved value of {@link ProjectRef} that names JaiRA's OWN project.
+ *
+ * Aliases rather than paths, because a caller asking for one is asking for a role — "wherever this
+ * machine keeps JaiRA's runs" — and must not have to know where it was put. Re-exported from
+ * `paths.ts`, which is where the rest of the path vocabulary lives, but defined here because the
+ * renderer sends them and `paths.ts` is Node-only.
+ *
+ * `system` and {@link SHARED_SESSION} are two projects and the difference is their LIFETIME:
+ *
+ *  - **system** holds JaiRA's own runs — a description sync, and whatever else it comes to run for
+ *    itself. Those happen whatever root is selected, because they are about the installation. It
+ *    therefore lives at a fixed location that a root switch does not move.
+ *  - **shared** holds runs of the workflows in the ROOT — the shared library a person authors in
+ *    `~/.jaira/workflows`. Point the root somewhere else and those runs are not yours any more: a
+ *    different root is a different library with a different history, and none of the old tasks
+ *    should still be listed.
+ *
+ * Conflating them meant a sync's bookkeeping travelled with a root switch and sat on the same board
+ * as a person's own shared runs. They are separate databases now.
+ */
+export const SYSTEM_SESSION = "system";
+
+/** The reserved {@link ProjectRef} for the selected root, opened as a project. See {@link SYSTEM_SESSION}. */
+export const SHARED_SESSION = "shared";
+
 export interface CreateTaskRequest {
   title: string;
   workflow: string;
@@ -40,6 +84,8 @@ export interface CreateTaskRequest {
   labels?: string[];
   inputs?: Record<string, JsonValue>;
   branch?: string;
+  /** Where the task is recorded. See {@link ProjectRef}. */
+  project?: ProjectRef;
 }
 
 export interface StartTaskRequest {
@@ -49,6 +95,14 @@ export interface StartTaskRequest {
   interactions?: Record<string, JsonValue[]>;
   /** Scripted prompt rules (the `--fake` surface), for demos and tests. */
   fake?: JsonValue;
+  /**
+   * Which project holds the task. See {@link ProjectRef}.
+   *
+   * It also decides whose config and credentials govern the run — a system run resolves the shared
+   * root's models and the shared root's `.env`, which is the correct pairing for a workflow that
+   * belongs to the machine rather than to a checkout.
+   */
+  project?: ProjectRef;
 }
 
 /**
@@ -533,21 +587,28 @@ export interface IpcContract {
    */
   "project:choose": { request: { mode: "open" | "init" } | void; response: { dir: string } | null };
   "project:current": { request: void; response: { dir: string } | null };
-  "task:list": { request: void; response: TaskSummary[] };
-  "task:detail": { request: { taskId: string }; response: TaskDetail };
+  /**
+   * One project's tasks. Absent `project` ⇒ the focused one, and no project open is an ERROR.
+   *
+   * `project` is how the Files view reads a shared workflow's runs: those are recorded in the
+   * selected root's own project ({@link SHARED_SESSION}), which is a different database from the
+   * checkout's and is readable with no checkout open at all.
+   */
+  "task:list": { request: { project?: ProjectRef } | void; response: TaskSummary[] };
+  "task:detail": { request: { taskId: string; project?: string }; response: TaskDetail };
   "task:create": { request: CreateTaskRequest; response: TaskSummary };
   "task:start": { request: StartTaskRequest; response: { taskId: string; runId: number } };
-  "task:cancel": { request: { taskId: string }; response: { taskId: string } };
+  "task:cancel": { request: { taskId: string; project?: ProjectRef }; response: { taskId: string } };
   /**
    * One board level. `level` is any state id — not only one on the newest task's workflow — so the
    * Files view can open the board of whatever the tree has selected.
    */
-  "board:view": { request: { level?: string }; response: BoardView };
+  "board:view": { request: { level?: string; project?: string }; response: BoardView };
   /**
    * The top of the board: one column per workflow root, project and shared together. This is the
    * root listing of the file-explorer metaphor, and the only level whose columns have no run order.
    */
-  "board:roots": { request: void; response: BoardView };
+  "board:roots": { request: { project?: string } | void; response: BoardView };
   /** Every file under both roots, as a tree — the Files view's left panel. */
   "files:tree": { request: void; response: FileTree };
   /** Everything the Files view shows about one state: its board or its tasks, plus the inspector. */
@@ -562,7 +623,44 @@ export interface IpcContract {
    */
   "state:slots": { request: { stateIds: string[] }; response: Record<string, StateSlots> };
   /** A task's run, read back out of the journal as turns. */
-  "task:conversation": { request: { taskId: string }; response: ConversationView };
+  "task:conversation": { request: { taskId: string; project?: string }; response: ConversationView };
+  /**
+   * JaiRA's OWN runs — the syncs, and whatever else it comes to run for itself (DESIGN §3.1).
+   *
+   * A separate channel rather than a flag on `task:list`, because the two answer different questions
+   * and mixing them is the pollution the system project exists to prevent. Empty, never an error: a
+   * window with no project open still has these, which is the whole point of them having a home.
+   */
+  /** JaiRA's OWN runs — {@link SYSTEM_SESSION}'s. Empty, never an error, when it cannot be opened. */
+  "task:system": { request: void; response: TaskSummary[] };
+  /** Every project this window can draw a board for — the user's, and JaiRA's own. */
+  "project:list": { request: void; response: ProjectSummary[] };
+  /** Every state a task went through, with the conversation each ran in (§11.3). */
+  "session:history": { request: { taskId: string; runId?: number; project?: string }; response: SessionRef[] };
+  /** One state instance's conversation, whole — see {@link SessionView}. */
+  "session:view": {
+    request: { taskId: string; runId?: number; instanceId?: number; project?: string };
+    response: SessionView;
+  };
+  /** The tail of what the app has said about itself. */
+  "log:list": {
+    request: { afterId?: number; level?: LogLevel; source?: string; project?: string; limit?: number } | void;
+    response: LogEntry[];
+  };
+  /** The child processes a run started. */
+  "job:list": { request: { project?: string; taskId?: string; runId?: number } | void; response: JobRow[] };
+  /**
+   * What one of them printed — POLLED, never pushed: a chatty child would flood the channel with
+   * output nobody is looking at, and a fetch cannot flood.
+   *
+   * Whole each time, with no cursor. The capture keeps a head and a tail and REWRITES both on every
+   * flush, so row ids change as a process runs — an `afterId` over them would re-deliver everything
+   * and call it new. Two rows per stream is a cheap thing to re-read.
+   */
+  "job:output": {
+    request: { project?: string; jobId: number; stream?: "stdout" | "stderr"; limit?: number };
+    response: JobOutputChunk[];
+  };
   "interaction:pending": { request: void; response: PendingInteraction[] };
   "interaction:submit": { request: SubmitInteractionRequest; response: { requestId: string } };
   "approval:pending": { request: void; response: PendingApproval[] };
@@ -584,13 +682,23 @@ export interface IpcContract {
   /**
    * Health-check the configured provider routes WITHOUT calling one.
    *
-   * A route has no `--version` to run and no free endpoint to poke, so this reports exactly what can
-   * be observed for nothing: whether the named credential resolves and where from, whether a local
-   * server has an endpoint configured, whether embedded weights are named. `not-checked` where nothing
-   * could be observed — reporting an unverifiable route as healthy is the failure this surface exists
-   * to prevent, and pressing Test must never spend money.
+   * A route has no `--version` to run, so this reports exactly what can be observed for nothing:
+   * whether the named credential resolves and where from, whether a local server ANSWERS its ready
+   * URL, whether the weights a route names exist on disk and have a loader installed. `not-checked`
+   * where nothing could be observed — reporting an unverifiable route as healthy is the failure this
+   * surface exists to prevent, and a check must never spend money.
    */
   "model:probe": { request: void; response: ProbeResult[] };
+  /**
+   * What can answer a prompt here, as last observed — routes, executors, and the chosen default.
+   *
+   * The CACHED snapshot. The checks behind it run by themselves at startup, at project open and after
+   * every configuration write, so a screen that shows availability reads it rather than asking for
+   * it: the app should already know, and a user should not have to press anything to find out.
+   */
+  "availability:read": { request: void; response: AvailabilitySnapshot };
+  /** Re-observe everything now — for a server that has since been started, or a key just installed. */
+  "availability:refresh": { request: void; response: AvailabilitySnapshot };
   /** Check a document against a registered schema — see {@link ValidateSchemaRequest}. */
   "schema:validate": { request: ValidateSchemaRequest; response: ValidateSchemaResult };
   /** Which registered schema a document already satisfies — see {@link DetectSchemaResult}. */
@@ -652,6 +760,13 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "state:view",
   "state:slots",
   "task:conversation",
+  "task:system",
+  "project:list",
+  "session:history",
+  "session:view",
+  "log:list",
+  "job:list",
+  "job:output",
   "interaction:pending",
   "interaction:submit",
   "approval:pending",
@@ -681,6 +796,8 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "executor:list",
   "executor:probe",
   "model:probe",
+  "availability:read",
+  "availability:refresh",
   "secret:capabilities",
   "secret:set",
 ];
@@ -693,18 +810,60 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
  * board consistent without the renderer re-deriving engine semantics.
  */
 export type PushMessage =
-  | { type: "engine:event"; taskId: string; runId: number; seq: number; at: number; event: JsonValue }
+  | { type: "engine:event"; taskId: string; runId: number; seq: number; at: number; event: JsonValue; project?: string }
   /**
    * `workflows` fires when a watched workflows directory changes on disk (§11.1's re-lint) — the
    * project's and the shared base root's alike, since a base edit changes what this project runs.
-   * `config` fires when either configuration layer is rewritten.
+   * `config` fires when either configuration layer is rewritten. `availability` fires when the
+   * automatic health checks land — at startup, at project open, and after a configuration write —
+   * which is what lets a settings screen show what actually works without having asked for it.
    */
-  | { type: "store:invalidate"; scope: "tasks" | "board" | "task" | "workflows" | "config"; taskId?: string }
+  | {
+      type: "store:invalidate";
+      scope: "tasks" | "board" | "task" | "workflows" | "config" | "availability";
+      taskId?: string;
+      /**
+       * The project directory this concerns, when it concerns one.
+       *
+       * A window showing project A must IGNORE an invalidate about B, and the case that forced it is
+       * JaiRA's own project: a sync runs there and invalidates ITS task list, so a window with no user
+       * project open went and asked for tasks it has none of and was told "no project is open".
+       *
+       * Absent ⇒ machine-wide, which is what `config` and `availability` are.
+       */
+      project?: string;
+    }
   | { type: "interaction:requested"; pending: PendingInteraction }
   | { type: "interaction:resolved"; requestId: string }
   | { type: "approval:requested"; pending: PendingApproval }
   | { type: "approval:resolved"; requestId: string; decision: "allow" | "deny" }
-  | { type: "run:finished"; taskId: string; runId: number; status: "completed" | "failed" | "canceled" };
+  | {
+      type: "run:finished";
+      taskId: string;
+      runId: number;
+      status: "completed" | "failed" | "canceled";
+      /** Whose run it was — see `store:invalidate`. */
+      project?: string;
+    }
+  /** One line of what the app did — the Logs panel's live feed (§11.4). */
+  | { type: "log:entry"; entry: LogEntry }
+  /**
+   * A partial answer, as a state is writing it.
+   *
+   * The transcript is persisted once, when the operation's record closes — correct, because a
+   * half-written answer is not a turn, and the reason a long agent run used to show nothing at all
+   * while it worked. This is the gap: deltas as they arrive, keyed by the conversation POSITION so a
+   * viewer can tell whether they belong to the state it is showing.
+   */
+  | {
+      type: "session:turn";
+      taskId: string;
+      runId: number;
+      sessionId?: string;
+      seq?: number;
+      stateId?: string;
+      text: string;
+    };
 
 export const PUSH_CHANNEL = "jaira:push";
 

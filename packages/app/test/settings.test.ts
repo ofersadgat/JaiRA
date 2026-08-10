@@ -16,12 +16,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
+import type { PushMessage } from "@jaira/shared";
 import { AppService, type KeychainPort } from "../src/main/service";
 
 let dir: string;
 let baseDir: string;
 let service: AppService;
 let stored: Record<string, string>;
+let pushes: PushMessage[];
 
 /** An in-memory stand-in for Electron's `safeStorage` — the seam that keeps this headless. */
 function fakeKeychain(available = true): KeychainPort {
@@ -42,8 +44,14 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-app-settings-"));
   baseDir = mkdtempSync(join(tmpdir(), "jaira-app-base-"));
   stored = {};
+  pushes = [];
   initProject(dir);
-  service = new AppService({ baseDir, watchWorkflows: false, keychain: fakeKeychain() });
+  service = new AppService({
+    baseDir,
+    watchWorkflows: false,
+    keychain: fakeKeychain(),
+    publish: (m) => pushes.push(m),
+  });
 });
 
 afterEach(async () => {
@@ -180,14 +188,14 @@ describe("configuration with a project", () => {
 
   it("reports both layers and the merged result", () => {
     writeFileSync(join(baseDir, "config.json"), JSON.stringify({ memo: { enabled: true } }), "utf8");
-    writeFileSync(join(dir, ".jaira", "config.json"), JSON.stringify({ models: { default: "anthropic/x" } }), "utf8");
+    writeFileSync(join(dir, ".jaira", "config.json"), JSON.stringify({ artifactDir: "from-project" }), "utf8");
 
     const view = service.readConfig();
 
     expect(view.base).toEqual({ memo: { enabled: true } });
-    expect(view.project).toEqual({ models: { default: "anthropic/x" } });
+    expect(view.project).toEqual({ artifactDir: "from-project" });
     // The question this pane exists to answer: what will actually run.
-    expect(view.effective).toMatchObject({ memo: { enabled: true }, models: { default: "anthropic/x" } });
+    expect(view.effective).toMatchObject({ memo: { enabled: true }, artifactDir: "from-project" });
   });
 
   it("writes the base layer, creating the shared root if needed", () => {
@@ -199,21 +207,19 @@ describe("configuration with a project", () => {
   it("writes the project layer without copying the base's values into it", () => {
     writeFileSync(join(baseDir, "config.json"), JSON.stringify({ memo: { enabled: true } }), "utf8");
 
-    service.writeConfig({ layer: "project", config: { models: { default: "anthropic/y" } } });
+    service.writeConfig({ layer: "project", config: { artifactDir: "mine" } });
 
     // Only what was authored: saving the MERGED document would freeze today's base values into the
     // project and quietly sever it from future base changes.
-    expect(JSON.parse(readFileSync(join(dir, ".jaira", "config.json"), "utf8"))).toEqual({
-      models: { default: "anthropic/y" },
-    });
+    expect(JSON.parse(readFileSync(join(dir, ".jaira", "config.json"), "utf8"))).toEqual({ artifactDir: "mine" });
   });
 
   it("refuses an invalid document and leaves the file untouched", () => {
     const before = readFileSync(join(dir, ".jaira", "config.json"), "utf8");
 
-    expect(() => service.writeConfig({ layer: "project", config: { models: { default: "bare-model-id" } } })).toThrow(
-      /route-prefixed/,
-    );
+    expect(() =>
+      service.writeConfig({ layer: "project", config: { executors: { default: { prompt: { kind: "wizard" } } } } }),
+    ).toThrow(/router, provider, agent/);
     expect(readFileSync(join(dir, ".jaira", "config.json"), "utf8")).toBe(before);
   });
 
@@ -301,10 +307,15 @@ describe("secrets", () => {
     expect(service.secretCapabilities()).toEqual({ keychain: true });
   });
 
-  it("explains the absence rather than silently offering fewer options", () => {
+  it("explains the absence rather than silently offering fewer options", async () => {
     const without = new AppService({ baseDir, watchWorkflows: false, keychain: fakeKeychain(false) });
-
-    expect(without.secretCapabilities()).toMatchObject({ keychain: false, keychainReason: "no encrypted store here" });
+    try {
+      expect(without.secretCapabilities()).toMatchObject({ keychain: false, keychainReason: "no encrypted store here" });
+    } finally {
+      // Constructing a service opens JaiRA's own project, so one that is not closed leaves a database
+      // handle on the shared root — which Windows then refuses to unlink in the teardown.
+      await without.close();
+    }
   });
 
   it("stores a key in the keychain, and clears it with an empty value", () => {
@@ -386,5 +397,92 @@ describe("workflow authoring", () => {
     expect(() => service.readWorkflow({ stateId: "C:/Windows/System32/x", layer: "project" })).toThrow(
       /does not name a state inside/,
     );
+  });
+});
+
+/**
+ * Availability: what can answer a prompt here, observed rather than assumed (DESIGN §8.3).
+ *
+ * The behaviour these defend is the one the settings screen was missing entirely. Every provider
+ * rendered as enabled and every executor as fine, because nothing had ever looked — the only thing
+ * that would look was a button, and pressing it changed one of the two halves. So a machine with no
+ * API key and no `claude` installed showed four healthy providers and three healthy executors, and
+ * the first run then failed with a message the screen had had every chance to give first.
+ */
+describe("availability", () => {
+  beforeEach(async () => {
+    await service.open(dir);
+  });
+
+  it("has looked at nothing until it is asked to, and says so rather than guessing", () => {
+    // `checkedAt: 0` is load-bearing. "No check has run" and "everything is fine" are different
+    // statements, and rendering the second for the first is the failure this surface prevents.
+    expect(service.readAvailability()).toEqual({ routes: [], executors: [], checkedAt: 0 });
+  });
+
+  it("reports every route and every executor once a check has run", async () => {
+    const snapshot = await service.refreshAvailability();
+
+    expect(snapshot.routes.map((r) => r.name)).toEqual(["anthropic", "openrouter", "local", "embedded"]);
+    expect(snapshot.executors.map((e) => e.name)).toEqual(["claude-code", "claude-cli", "codex-cli"]);
+    expect(snapshot.checkedAt).toBeGreaterThan(0);
+    // Read back without re-checking: this is what opening the settings screen does.
+    expect(service.readAvailability()).toEqual(snapshot);
+  });
+
+  it("reports a provider with no key as unavailable, and says what would fix it", async () => {
+    const { routes } = await service.refreshAvailability();
+    const anthropic = routes.find((r) => r.name === "anthropic")!;
+
+    // The base root is a temp dir with no `.env`, and `credential` names nothing, so the only
+    // remaining source is the process environment. Whichever way that falls, the check must have
+    // reached a conclusion — and an unavailable route must carry the way out of it.
+    expect(["ok", "failed"]).toContain(anthropic.status);
+    if (anthropic.status === "failed") expect(anthropic.fix).toContain("ANTHROPIC_API_KEY");
+  });
+
+  it("does not check a route the configuration turned off", async () => {
+    service.writeConfig({ layer: "project", config: { models: { routes: { openrouter: { enabled: false } } } } });
+
+    const { routes } = await service.refreshAvailability();
+
+    expect(routes.find((r) => r.name === "openrouter")).toMatchObject({ status: "disabled" });
+  });
+
+  it("publishes an invalidate when a check lands, which is how the screen hears about it", async () => {
+    pushes.length = 0;
+
+    await service.refreshAvailability();
+
+    expect(pushes.some((m) => m.type === "store:invalidate" && m.scope === "availability")).toBe(true);
+  });
+
+  it("collapses concurrent refreshes into one pass", async () => {
+    // Two settings saved a second apart would otherwise each open their own round of connects while
+    // the previous one was still in flight.
+    const [first, second] = await Promise.all([service.refreshAvailability(), service.refreshAvailability()]);
+
+    expect(first).toBe(second);
+  });
+
+  /**
+   * The DEFAULT executor, resolved — which is a tree rather than a chosen model id.
+   *
+   * A model id could never be the answer: it cannot route, and the prompt router dispatches before a
+   * leaf's defaults are applied, so a default naming an agent was invisible to the routing that had
+   * to happen first.
+   */
+  it("resolves the default executor's tree from what actually works", async () => {
+    const { tree, executors } = await service.refreshAvailability();
+
+    expect(tree?.kind).toBe("operation");
+    expect(tree?.prompt?.kind).toBe("router");
+    const routes = Object.keys((tree?.prompt as { routes?: Record<string, unknown> }).routes ?? {});
+    // An executor whose binary is missing is not a route: that is the difference between routing to
+    // claude-cli and routing to claude-cli and then failing to start it.
+    for (const executor of executors) {
+      if (executor.status === "ok") expect(routes).toContain(executor.name);
+      else expect(routes).not.toContain(executor.name);
+    }
   });
 });

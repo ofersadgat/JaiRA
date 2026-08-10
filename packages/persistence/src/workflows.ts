@@ -25,9 +25,10 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import type { FunctionCapabilities } from "@declarative-ai/exec";
 import { loadBundle, parseReferencedFile, resolveStateRef, snapshotHash, stateIdFromPath, validateBundle } from "@declarative-ai/hw";
-import { componentConfigIssues, conversationModesOf, jairaBasePaths, parseJsonText, type JairaPaths } from "@jaira/shared";
+import { baseAsProjectPaths, componentConfigIssues, conversationModesOf, parseJsonText, type JairaPaths } from "@jaira/shared";
 import type { LintIssue, WorkflowBrowser, WorkflowEntry, WorkflowFileEntry } from "@jaira/shared";
 import type { Project } from "./project";
+import { checkLabel } from "./runLabel";
 import { isStateFile } from "./snapshots";
 import { workflowLoadOptions } from "./workflowRefs";
 
@@ -156,9 +157,18 @@ export function projectSource(project: Project): LayerSource {
  * No tasks, and that is not a gap: a task belongs to a project, so with none open there is nothing
  * to be running or drifted.
  */
-export function baseSource(baseDir: string): LayerSource {
+export function baseSource(baseDir: string, project?: Project): LayerSource {
   const paths = basePathsAsLayer(baseDir);
-  return { layers: [{ dir: paths.workflowsDir, layer: "base" }], layer: "base", paths, tasks: EMPTY_TASKS };
+  // The shared root's own project, when it is open. Its runs are what make a shared state's view say
+  // anything at all about what has happened in it — which tasks are here, which are pinned to a
+  // stale snapshot. Without it every shared state reads as one nothing has ever run, and the Files
+  // view says so, wrongly.
+  return {
+    layers: [{ dir: paths.workflowsDir, layer: "base" }],
+    layer: "base",
+    paths,
+    tasks: project === undefined ? EMPTY_TASKS : tasksOf(project),
+  };
 }
 
 /**
@@ -185,40 +195,19 @@ export function browseWorkflows(project: Project, options: BrowseOptions = {}): 
  * unvalidated in exactly the mode people write shared workflows in: nothing was red because nothing
  * had looked.
  */
-export function browseBaseWorkflows(baseDir: string, options: BrowseOptions = {}): WorkflowBrowser {
-  return browseSource(baseSource(baseDir), options);
+export function browseBaseWorkflows(baseDir: string, options: BrowseOptions = {}, project?: Project): WorkflowBrowser {
+  return browseSource(baseSource(baseDir, project), options);
 }
 
 /**
  * A `JairaPaths` whose single layer root is the shared root.
  *
- * Built explicitly rather than by pointing `jairaPaths` at the base's parent. That trick appears to
- * work — `jairaPaths` collapses `roots` to one when the base and the project's `.jaira/` are the
- * same directory — but it only holds when the base is literally named `.jaira`. Relocate it with
- * `JAIRA_HOME` and the two stop coinciding, `workflowsDir` points at a sibling that does not exist,
- * and the browse silently finds no states at all.
- *
- * The run-state fields are filled in for the type's sake and are never read: browsing is a pure read
- * of `workflows/`, and there is no database, no snapshot and no worktree without a project.
+ * This used to be a local fiction whose run-state fields were, in its own words, "filled in for the
+ * type's sake and never read". They are read now — the shared root is a project (DESIGN §3.1,
+ * amended) — so the layout moved to `@jaira/shared` beside the base paths it derives from, and this
+ * is the alias the browse surfaces kept.
  */
-function basePathsAsLayer(baseDir: string): JairaPaths {
-  const base = jairaBasePaths(resolve(baseDir));
-  return {
-    // Both anchors name the shared root, because with no project open it is the only root there is.
-    projectDir: base.baseDir,
-    jairaDir: base.baseDir,
-    configFile: base.configFile,
-    workflowsDir: base.workflowsDir,
-    skillsDir: base.skillsDir,
-    snapshotsDir: join(base.baseDir, "snapshots"),
-    tasksDir: join(base.baseDir, "tasks"),
-    dbFile: join(base.baseDir, "jaira.db"),
-    syncFile: join(base.baseDir, "sync.json"),
-    worktreesDir: join(base.baseDir, "worktrees"),
-    base,
-    roots: [base.baseDir],
-  };
-}
+const basePathsAsLayer = (baseDir: string): JairaPaths => baseAsProjectPaths(resolve(baseDir));
 
 /** What a task lookup answers. Empty with no project — see {@link baseSource}. */
 export interface TaskIndex {
@@ -370,6 +359,19 @@ function browseLayers(
         severity: "warning",
       });
     }
+    // A `label` that references an input the state does not declare. Reported here rather than
+    // discovered as an unlabelled card three states into a run — the whole value of naming a run by
+    // its input is lost silently when the name resolves to nothing.
+    for (const id of states) {
+      const def = effective[id] as { label?: unknown; inputs?: unknown } | undefined;
+      if (def?.label === undefined) continue;
+      const declared = def.inputs !== null && typeof def.inputs === "object" ? Object.keys(def.inputs) : [];
+      const issue = checkLabel(def.label, declared);
+      if (issue !== undefined) {
+        issues.push({ stateId: id, path: "label", message: issue.message, severity: "warning" });
+      }
+    }
+
     const hash = snapshotHash(bundle);
     // A task pinned to a different hash is running older source — worth showing,
     // since execution reads the snapshot and never live `workflows/` (§5.3).

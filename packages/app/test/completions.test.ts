@@ -139,6 +139,7 @@ describe("function names", () => {
     name,
     kind: "cli",
     enabled,
+    credentialUse: "none",
     policyEnforcement: "callback",
   });
 

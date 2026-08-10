@@ -9,6 +9,7 @@
  * without migration of what exists.
  */
 import Database from "better-sqlite3";
+import { migrate } from "./migrations";
 import { abiAdvice, sqliteBinding } from "./nativeBinding";
 
 export type JairaDb = Database.Database;
@@ -160,6 +161,9 @@ export function openDb(file: string): JairaDb {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+  // AFTER the schema, so a fresh database gets every table before a migration tries to alter one —
+  // and so a step that adds a column runs against the table `SCHEMA` has just guaranteed exists.
+  migrate(db);
   return db;
 }
 

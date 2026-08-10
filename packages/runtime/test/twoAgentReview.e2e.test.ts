@@ -133,12 +133,14 @@ describe("a code review by two different agents", () => {
     const claude = launches.find((l) => l.argv[0] === "claude")!;
     const codex = launches.find((l) => l.argv[0] === "codex")!;
 
-    // Claude: the prompt is a positional after `--`, and the run is `-p --output-format stream-json`.
+    // Claude: `-p --output-format stream-json`, nothing positional at all, and the prompt on STDIN —
+    // where `-p` reads it, and where a prompt longer than a command line can hold still arrives.
     expect(claude.argv).toContain("--output-format");
-    expect(claude.argv.at(-1)).toBe("Review this change and list what is wrong: diff --git a/x b/x");
-    expect(claude.stdin).toBeUndefined();
+    expect(claude.argv).not.toContain("--");
+    expect(claude.stdin).toBe("Review this change and list what is wrong: diff --git a/x b/x");
 
-    // Codex: `exec --json`, an explicit sandbox, and the prompt on STDIN.
+    // Codex: `exec --json`, an explicit sandbox, and the prompt on stdin behind its own `-` operand.
+    // Same channel, different way of saying so — which is the point: one authored state, two protocols.
     expect(codex.argv.slice(0, 3)).toEqual(["codex", "exec", "--json"]);
     expect(codex.argv).toContain('sandbox_mode="workspace-write"');
     expect(codex.stdin).toBe("Review this change and list what is wrong: diff --git a/x b/x");

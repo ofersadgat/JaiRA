@@ -11,9 +11,22 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { defaultConfig, parseConfig, type JairaConfig } from "@jaira/shared";
-import { agentPromptRouteNames, defaultModelId, modelRouterOptions } from "../src/modelRoutes";
-import { modelDefaults } from "../src/wiring";
+import {
+  defaultConfig,
+  parseConfig,
+  unnamedRouteOf,
+  type JairaConfig,
+  type JairaPromptNode,
+  type ProbeResult,
+} from "@jaira/shared";
+import {
+  agentPromptRouteNames,
+  normaliseAgentModel,
+  modelRouterOptions,
+  probeModelRoutes,
+  usableRouteKeys,
+} from "../src/modelRoutes";
+import { defaultExecutorTree } from "../src/wiring";
 import { SecretResolver } from "../src/secrets";
 import { syncWorkflowFiles, syncRootId } from "../src/syncWorkflow";
 import { loadBundle } from "@declarative-ai/hw";
@@ -71,69 +84,86 @@ describe("modelRouterOptions — config.models.routes → ModelRouterOptions", (
   });
 });
 
-describe("defaultModelId — 'if several are available, just pick one'", () => {
-  it("an explicit models.default always wins", () => {
-    expect(defaultModelId({ default: "openrouter/openai/gpt-5" })).toBe("openrouter/openai/gpt-5");
+/**
+ * What can serve a call — the list a derived executor tree is built from.
+ *
+ * `defaultModelId` used to answer a different and worse question: *what one model id should a state
+ * get?* A single id could never route to an agent, because `PromptRouterExecutor` dispatches on
+ * `op.config.model` while a leaf's defaults are applied after routing — so a chosen `claude-cli/…`
+ * fell through to the provider path and was refused there. What a state with no model needs is a
+ * default EXECUTOR, and these are the two halves it is derived from.
+ */
+describe("what can serve a call", () => {
+  it("counts a provider route whose key resolves", () => {
+    expect(usableRouteKeys({ routes: { anthropic: { credential: "MY_KEY" } } }, secretsWith({ MY_KEY: "k" }))).toEqual([
+      "anthropic",
+    ]);
   });
 
-  it("prefers a configured provider route — someone who set up a key meant to use it", () => {
-    const chosen = defaultModelId(
-      { routes: { anthropic: { credential: "MY_KEY" } } },
-      { agents: {}, secrets: secretsWith({ MY_KEY: "k" }) },
-    );
-    expect(chosen).toBe("anthropic/claude-sonnet-5");
-  });
-
-  it("falls back to an AGENT when no provider route is usable — the reported bug", () => {
-    // Nothing configured at all: no key, no endpoint, no default. An installed CLI agent needs none
-    // of those, so this is the branch that makes a first run work.
-    const chosen = defaultModelId({}, { agents: {}, secrets: secretsWith({}) });
-    expect(chosen).toBe("claude-cli/default");
-  });
-
-  it("does NOT pick a provider route whose named credential resolves to nothing", () => {
+  it("does NOT count a route whose named credential resolves to nothing", () => {
     // Config naming a secret nobody has set is exactly the case that used to fail deep inside the
     // provider SDK, long after the run started, instead of being skipped here.
-    const chosen = defaultModelId(
-      { routes: { anthropic: { credential: "ABSENT" } } },
-      { agents: {}, secrets: secretsWith({}) },
-    );
-    expect(chosen).toBe("claude-cli/default");
+    expect(usableRouteKeys({ routes: { anthropic: { credential: "ABSENT" } } }, secretsWith({}))).toEqual([]);
   });
 
-  it("has nothing to offer when every agent is turned off and no route is configured", () => {
-    const agents = { claudeCode: { enabled: false }, claudeCli: { enabled: false }, codex: { enabled: false } };
-    expect(defaultModelId({}, { agents, secrets: secretsWith({}) })).toBeUndefined();
+  it("counts nothing at all on a machine with no keys and no endpoints", () => {
+    expect(usableRouteKeys({}, secretsWith({}))).toEqual([]);
   });
 
   it("names the CLI agent first, because it is the one that needs no API key", () => {
+    // Which makes it the route a first run lands on: nothing configured, and it still works.
     expect(Object.keys(agentPromptRouteNames({}))[0]).toBe("claude-cli");
+  });
+
+  it("offers no agents at all when every one of them is turned off", () => {
+    const agents = { claudeCode: { enabled: false }, claudeCli: { enabled: false }, codex: { enabled: false } };
+    expect(Object.keys(agentPromptRouteNames(agents))).toEqual([]);
   });
 });
 
-describe("modelDefaults — the refusal that reported the bug", () => {
-  it("no longer refuses a prompt workflow just because models.default is unset", () => {
+describe("defaultExecutorTree — the refusal that reported the bug", () => {
+  it("no longer refuses a prompt workflow just because nothing names a model", () => {
     // This is the exact call the sync panel makes. It used to throw
     // "no model configured: set models.default in .jaira/config.json".
-    const defaults = modelDefaults(config({}), syncBundle(), { secrets: secretsWith({}) });
-    expect(defaults).toEqual({ model: "claude-cli/default" });
+    const tree = defaultExecutorTree(config({}), syncBundle(), { secrets: secretsWith({}) });
+    expect(Object.keys((tree.prompt as { routes?: Record<string, unknown> }).routes ?? {})).toContain("claude-cli");
   });
 
-  it("still refuses when genuinely nothing can answer — and names BOTH fixes", () => {
+  it("gives that tree a route that answers a state naming no model, which is every state in it", () => {
+    // A route the run cannot reach is not a route. Every state in the sync workflow names no model, so
+    // without this the router had no prefix to dispatch on and the call went to the provider fallback
+    // — reported as "child 'requirements' terminated with error" with the real reason four layers down.
+    const tree = defaultExecutorTree(config({}), syncBundle(), { secrets: secretsWith({}) });
+    expect(unnamedRouteOf((tree.prompt as { routes?: Record<string, JairaPromptNode> }).routes)).toBe("claude-cli");
+  });
+
+  it("refuses a machine whose only route serves nothing but models a state names", () => {
+    // A key resolves, so there IS a route — but a remote fleet has no default, and these states name
+    // no model. Said at the start of the run, where it is a configuration problem, rather than by the
+    // SDK at the first call, where it reads as "model must be a non-empty string".
     const agents = { claudeCode: { enabled: false }, claudeCli: { enabled: false }, codex: { enabled: false } };
-    expect(() => modelDefaults(config({ agents }), syncBundle(), { secrets: secretsWith({}) })).toThrow(
-      /enable an agent executor .*models\.routes.*models\.default/s,
+    const models = { routes: { anthropic: { credential: "MY_KEY" } } };
+    expect(() =>
+      defaultExecutorTree(config({ agents, models }), syncBundle(), { secrets: secretsWith({ MY_KEY: "sk-ant-xyz" }) }),
+    ).toThrow(/no default model: 'anthropic'/);
+  });
+
+  it("still refuses when genuinely nothing can answer — and names both fixes", () => {
+    const agents = { claudeCode: { enabled: false }, claudeCli: { enabled: false }, codex: { enabled: false } };
+    expect(() => defaultExecutorTree(config({ agents }), syncBundle(), { secrets: secretsWith({}) })).toThrow(
+      /enable an agent executor .*models\.routes/s,
     );
   });
 
   it("asks for nothing at all from a workflow with no prompt state", () => {
     const agents = { claudeCode: { enabled: false }, claudeCli: { enabled: false }, codex: { enabled: false } };
     const functionOnly = { states: { root: { operation: { kind: "function", functionRef: "noop" } } } } as never;
-    expect(modelDefaults(config({ agents }), functionOnly)).toEqual({});
+    expect(() => defaultExecutorTree(config({ agents }), functionOnly)).not.toThrow();
   });
 
   it("stays out of the way of a scripted run", () => {
-    expect(modelDefaults(config({}), syncBundle(), { fake: true })).toEqual({});
+    const agents = { claudeCode: { enabled: false }, claudeCli: { enabled: false }, codex: { enabled: false } };
+    expect(() => defaultExecutorTree(config({ agents }), syncBundle(), { fake: true })).not.toThrow();
   });
 });
 
@@ -141,12 +171,10 @@ describe("the config surface", () => {
   it("accepts a prefix-keyed routes block and round-trips it", () => {
     const parsed = parseConfig({
       models: {
-        default: "claude-cli/sonnet",
         routes: { anthropic: { credential: "ANTHROPIC_API_KEY" }, local: { baseURL: "http://localhost:1234/v1" } },
         presets: { fast: { model: "anthropic/claude-haiku-4-5", temperature: 0 } },
       },
     });
-    expect(parsed.models.default).toBe("claude-cli/sonnet");
     expect(parsed.models.routes?.["anthropic"]?.credential).toBe("ANTHROPIC_API_KEY");
     expect(parsed.models.presets?.["fast"]).toMatchObject({ temperature: 0 });
   });
@@ -164,7 +192,179 @@ describe("the config surface", () => {
     expect(() => parseConfig({ models: { routes: { anthropic: { credential: "sk ant 123" } } } })).toThrow(/must NAME a secret/);
   });
 
-  it("still requires models.default to be route-prefixed, and now says the agent form too", () => {
-    expect(() => parseConfig({ models: { default: "claude-sonnet-5" } })).toThrow(/claude-cli\/sonnet/);
+  it("refuses models.default outright, naming where the default call settings went", () => {
+    // It could never route: the prompt router dispatches on `op.config.model` while a leaf's defaults
+    // are applied after routing, so a default naming an agent was invisible to the routing that had
+    // to happen first. Refused rather than dropped — a config carrying it was relying on it.
+    expect(() => parseConfig({ models: { default: "claude-cli/sonnet" } })).toThrow(
+      /executors\.default\.prompt\.defaults\.model/,
+    );
+  });
+});
+
+/**
+ * The route health check, now that it actually observes something.
+ *
+ * What it used to do was count keys. A `local` route reported `ok` for a server that had never been
+ * started, and an `embedded` route reported `ok` for a GGUF that had been moved — which is the exact
+ * configuration someone opens this screen to diagnose. So the checks now connect and stat, and the
+ * ones that cannot be done for free are still not done at all.
+ */
+describe("probeModelRoutes — what can actually be reached", () => {
+  const answers = { fetch: async () => ({ ok: true, status: 200 }) };
+  const refuses = {
+    fetch: async () => {
+      throw new Error("ECONNREFUSED");
+    },
+  };
+  const find = (results: ProbeResult[], name: string): ProbeResult => results.find((r) => r.name === name)!;
+
+  it("fails a remote route with no key rather than calling it 'not checked'", async () => {
+    const results = await probeModelRoutes({ routes: { anthropic: {} } }, { secrets: secretsWith({}) });
+    const anthropic = find(results, "anthropic");
+
+    // "not checked" was the old answer, and it is the wrong one: nothing is missing from the CHECK,
+    // the key is missing from the machine. A route in this state cannot serve a single call.
+    expect(anthropic.status).toBe("failed");
+    expect(anthropic.detail).toContain("ANTHROPIC_API_KEY");
+    expect(anthropic.fix).toContain("ANTHROPIC_API_KEY");
+  });
+
+  it("passes a remote route whose named credential resolves, and names only its origin", async () => {
+    const results = await probeModelRoutes(
+      { routes: { anthropic: { credential: "MY_KEY" } } },
+      { secrets: secretsWith({ MY_KEY: "sk-ant-xyz" }) },
+    );
+
+    expect(find(results, "anthropic").status).toBe("ok");
+    expect(JSON.stringify(results)).not.toContain("sk-ant-xyz");
+  });
+
+  it("CONNECTS to a local server rather than trusting that a URL means one is there", async () => {
+    const up = await probeModelRoutes(
+      { routes: { local: { baseURL: "http://localhost:11434/v1" } } },
+      { secrets: secretsWith({}), ...answers },
+    );
+    const down = await probeModelRoutes(
+      { routes: { local: { baseURL: "http://localhost:11434/v1" } } },
+      { secrets: secretsWith({}), ...refuses },
+    );
+
+    expect(find(up, "local").status).toBe("ok");
+    expect(find(down, "local").status).toBe("failed");
+    expect(find(down, "local").detail).toContain("nothing answered");
+  });
+
+  it("still passes an unanswered local route that JaiRA is allowed to START", async () => {
+    // Not a fault: the router launches it on demand, so "nothing listening yet" is the steady state.
+    const results = await probeModelRoutes(
+      { routes: { local: { baseURL: "http://localhost:11434/v1", serve: { command: "ollama", args: ["serve"] } } } },
+      { secrets: secretsWith({}), ...refuses },
+    );
+
+    expect(find(results, "local").status).toBe("ok");
+    expect(find(results, "local").detail).toContain("ollama");
+  });
+
+  it("fails embedded weights whose file is not on disk, naming the path", async () => {
+    const results = await probeModelRoutes(
+      { routes: { embedded: { weights: { qwen: { modelPath: "/models/gone.gguf" } } } } },
+      { secrets: secretsWith({}), exists: () => false },
+    );
+
+    expect(find(results, "embedded").status).toBe("failed");
+    expect(find(results, "embedded").detail).toContain("/models/gone.gguf");
+  });
+
+  it("fails embedded weights that exist but have no loader installed", async () => {
+    const results = await probeModelRoutes(
+      { routes: { embedded: { weights: { qwen: { modelPath: "/models/qwen.gguf" } } } } },
+      {
+        secrets: secretsWith({}),
+        exists: () => true,
+        resolve: () => {
+          throw new Error("Cannot find module");
+        },
+      },
+    );
+
+    expect(find(results, "embedded").status).toBe("failed");
+    expect(find(results, "embedded").detail).toContain("node-llama-cpp");
+  });
+
+  it("says a route is off without checking it", async () => {
+    const results = await probeModelRoutes(
+      { routes: { local: { enabled: false, baseURL: "http://localhost:11434/v1" } } },
+      {
+        secrets: secretsWith({}),
+        fetch: async () => {
+          throw new Error("this route should never have been reached");
+        },
+      },
+    );
+
+    expect(find(results, "local").status).toBe("disabled");
+  });
+});
+
+/**
+ * The per-executor model block (DESIGN §8.3) — the three limits, enforced.
+ *
+ * A prefix used to select an executor and nothing more, so "run this on the CLI agent, and only ever
+ * with sonnet" was not expressible. These check that it now is, and that a refusal is a REFUSAL: a
+ * disallowed model must never be quietly swapped for a permitted one, because running something other
+ * than what was asked for is invisible and can be an order of magnitude off in price.
+ */
+/**
+ * What survives of the per-agent model block: the placeholder fix, and nothing configurable.
+ *
+ * `<agent>/default` is a NAMED model id, so a transport's own placeholder branch never fires and it
+ * forwards the word — `claude --model default`, which no CLI knows. That is exactly the
+ * zero-configuration path a fresh machine produces, so it has to work. The LIMITS that used to live
+ * here moved to the executor tree's route node, which is what they are about.
+ */
+describe("normaliseAgentModel", () => {
+  const promptOp = (model?: string): unknown => ({
+    kind: "prompt",
+    user: { kind: "text", binding: { text: "hi" } },
+    config: model === undefined ? {} : { model },
+    input: {},
+    output: { name: "answer", kind: "json" },
+  });
+
+  function spy(): { seen: Array<Record<string, unknown>>; executor: never } {
+    const seen: Array<Record<string, unknown>> = [];
+    return {
+      seen,
+      executor: {
+        capabilities: {},
+        metrics: { merge: (a: unknown) => a },
+        start: (op: { config: Record<string, unknown> }) => {
+          seen.push(op.config);
+          return { events: [], result: Promise.resolve({ value: null, metrics: {} }), cancel: async () => undefined };
+        },
+      } as never,
+    };
+  }
+
+  it("turns the placeholder into the transport's own, not a model called default", () => {
+    const { seen, executor } = spy();
+    normaliseAgentModel("claude-cli", executor).start(promptOp("claude-cli/default") as never, {} as never);
+    expect(seen[0]?.["model"]).toBe("agent/default");
+  });
+
+  it("leaves a real model alone", () => {
+    const { seen, executor } = spy();
+    normaliseAgentModel("claude-cli", executor).start(promptOp("claude-cli/opus") as never, {} as never);
+    expect(seen[0]?.["model"]).toBe("claude-cli/opus");
+  });
+
+  it("leaves a function op alone — it has no model to normalise", () => {
+    const { seen, executor } = spy();
+    normaliseAgentModel("claude-cli", executor).start(
+      { kind: "function", functionRef: "x", input: {}, output: { name: "o", kind: "json" } } as never,
+      {} as never,
+    );
+    expect(seen).toHaveLength(1);
   });
 });

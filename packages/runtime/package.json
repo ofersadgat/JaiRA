@@ -29,6 +29,7 @@
     "@declarative-ai/validate": "file:../../../declarative-ai/packages/validate",
     "@jaira/shared": "*",
     "@declarative-ai/agents-api": "file:../../../declarative-ai/packages/agents-api",
-    "@declarative-ai/agents-cli": "file:../../../declarative-ai/packages/agents-cli"
+    "@declarative-ai/agents-cli": "file:../../../declarative-ai/packages/agents-cli",
+    "@modelcontextprotocol/sdk": "^1.29.0"
   }
 }

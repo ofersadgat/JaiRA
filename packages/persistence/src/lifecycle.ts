@@ -23,6 +23,14 @@ export interface CreateTaskInput {
 }
 
 export function createTask(project: Project, input: CreateTaskInput, nowMs = Date.now()): TaskMeta {
+  // Neither project that is not a checkout takes a worktree, and this is where that is ENFORCED
+  // rather than promised. Neither directory is a git repository, so a bound task in one would fail
+  // inside `ensureWorkspace` at start — a refusal at creation says the same thing where it can still
+  // be acted on. Both kinds, not just `system`: the shared root gained its own project and inherited
+  // exactly the same non-checkout-ness.
+  if (project.kind !== "project" && input.branch !== undefined) {
+    throw new Error(`a ${project.kind} task cannot be bound to a branch — ${project.kind === "shared" ? "the shared root" : "JaiRA's own project"} is not a checkout`);
+  }
   const meta: TaskMeta = {
     id: input.id ?? newTaskId(),
     title: input.title,
@@ -59,6 +67,18 @@ export interface BeginRunOptions {
    * `validateBundle`'s default.
    */
   functions?: ReadonlyMap<string, FunctionCapabilities>;
+  /**
+   * A workflow that exists only in memory — pinned as this run's snapshot instead of read off disk.
+   *
+   * For JaiRA's OWN workflows (the description sync, the conformance check), which are synthesized
+   * rather than authored into anyone's `workflows/`. A snapshot stores a RESOLVED definition and
+   * `ensureSnapshot` already takes a bundle, so nothing about pinning one needs a file to exist —
+   * only the read that produces it did.
+   *
+   * Stated rather than arranged by pre-setting `snapshotHash`, which also works: that borrows the
+   * "re-run after interruption" branch below, and a reader would never find it there.
+   */
+  bundle?: WorkflowBundle;
   nowMs?: number;
 }
 
@@ -89,6 +109,14 @@ export function beginTaskRun(project: Project, taskId: string, options: BeginRun
     bundle = loadSnapshot(project.paths.snapshotsDir, runtime.snapshotHash);
     hash = runtime.snapshotHash;
     dir = `${project.paths.snapshotsDir}/${hash}`;
+  } else if (options.bundle !== undefined) {
+    // Supplied whole: nothing to read, nothing to validate against a directory it was never in. It is
+    // still snapshotted, so a re-run of this task replays the same definition through the branch
+    // above rather than depending on the caller synthesizing an identical one.
+    bundle = options.bundle;
+    const snap = ensureSnapshot(project.paths.snapshotsDir, bundle);
+    hash = snap.hash;
+    dir = snap.dir;
   } else {
     // Unreadable files are collected rather than thrown: only the root's transitive
     // closure matters, so one half-saved scratch file elsewhere must not block every

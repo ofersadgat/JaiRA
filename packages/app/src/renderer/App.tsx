@@ -12,11 +12,15 @@
  *  - **Settings** holds everything that was never one of the two: configuration, executors,
  *    credentials, history.
  *
+ * Two more sit beside them and belong to neither: **Logs** is what the app said about itself, and
+ * **Debug** (DESIGN §11.3) runs a two-state workflow against this installation so that "does any of
+ * this work" is a button rather than an afternoon.
+ *
  * The approvals strip spans all three. A blocked tool loop is the one thing that must never scroll
  * away, and it stays visible while you are deep in the Files tree.
  */
 import { useMemo, useState, type CSSProperties, type JSX } from "react";
-import type { PendingApproval, PendingInteraction } from "@jaira/shared/browser";
+import type { ConfigLayer, PendingApproval, PendingInteraction } from "@jaira/shared/browser";
 import { Board, PathBar } from "./board";
 import { ApprovalDialog, InteractionDialog } from "./components";
 import { TaskPanel } from "./detail";
@@ -25,29 +29,114 @@ import { FileInspector, FilePanel, FileTreePanel, TaskInspector, VIEWER_HEIGHT }
 // surface registry. Nothing else in the shell references the built-in surfaces by name.
 import "./fileSurfaces";
 import type { FileSurfaceContext } from "./fileTypes";
-import { ExecutorsPane, LayerPicker, SettingsPane } from "./panes";
-import { ModelsPane } from "./modelsPane";
+import { LogsPanel } from "./logs";
+import { LayerPicker, SettingsPane } from "./panes";
+import { ConfigPane } from "./configPane";
+import { DebugPane } from "./debugPane";
+import { ProvidersPane } from "./providersPane";
+import { ExecutorsPane } from "./executorsPane";
+import { initialRunValues, runFieldsOf, runTargetOf } from "./runForm";
+import type { RunSurface } from "./runPanel";
 import { Splitter } from "./splitter";
 import { History, NewTask } from "./widgets";
 import { useApp, type SettingsSection, type View } from "./store";
 
+/**
+ * The bar above every settings section: which layer is being edited, and when the checks last ran.
+ *
+ * One component rather than a picker in each pane, and it is where the no-project rule lives. With
+ * no project open there is no `.jaira/config.json` to write, so the switch is not merely disabled —
+ * it is ABSENT, along with every mention of "this project". A control offering a choice that cannot
+ * be made is worse than no control: the old screen showed the switch, let it be clicked, and then
+ * explained in a notice that nothing could be saved.
+ */
+function SettingsHeader({
+  section,
+  layer,
+  hasProject,
+  busy,
+  rechecking,
+  checkedAt,
+  onLayer,
+  onRecheck,
+}: {
+  section: SettingsSection;
+  layer: ConfigLayer;
+  hasProject: boolean;
+  busy: boolean;
+  rechecking: boolean;
+  checkedAt: number;
+  onLayer: (layer: ConfigLayer) => void;
+  onRecheck: () => void;
+}): JSX.Element | null {
+  const meta = SECTIONS.find((s) => s.id === section);
+  const observed = section === "providers" || section === "executors";
+  if (meta === undefined || (!meta.layered && !observed)) return null;
+  return (
+    <div className="settings-head">
+      {meta.layered ? (
+        hasProject ? (
+          <LayerPicker value={layer} onChange={onLayer} disabled={busy} />
+        ) : (
+          <span className="sub">
+            Editing the shared settings, which apply to every project on this machine. Open a project to
+            override them for it.
+          </span>
+        )
+      ) : null}
+      {observed ? (
+        <div className="settings-head-right">
+          {/* Not "Test": nothing here is waiting to be tested. The checks ran at startup and after the
+              last save; this is only for a world that changed since — a server started, a key
+              installed in another window. */}
+          <span className="sub">{checkedAgo(checkedAt)}</span>
+          <button className="ghost" onClick={onRecheck} disabled={busy || rechecking}>
+            {rechecking ? "checking…" : "Re-check"}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** "checked 2 min ago", or the honest absence of one. */
+function checkedAgo(at: number): string {
+  if (at === 0) return "not checked yet";
+  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (seconds < 60) return "checked just now";
+  const minutes = Math.round(seconds / 60);
+  return minutes < 60 ? `checked ${minutes} min ago` : `checked ${Math.round(minutes / 60)} h ago`;
+}
+
 const RAIL: Array<[View, string, string]> = [
   ["files", "❏", "Files"],
   ["tasks", "▶", "Tasks"],
+  ["logs", "≡", "Logs"],
+  // On the rail rather than inside Settings: the self-test is the thing you reach for when the app
+  // is not behaving, and burying it behind a configuration screen would make it hardest to find in
+  // exactly the situation it exists for.
+  ["debug", "⌁", "Debug"],
 ];
 
 /**
  * The Settings sections.
  *
- * `layered` marks the two the layer switch applies to. History is a project's run journal — there is
+ * `layered` marks the ones the layer switch applies to. History is a project's run journal — there is
  * no shared version of it to edit — so showing the switch above it would offer a choice that changes
- * nothing.
+ * nothing. `needsProject` marks the ones with nothing to say on an empty window; they are HIDDEN
+ * there rather than shown empty, because a section that cannot do anything is a section that should
+ * not be offered.
+ *
+ * Providers and Executors are the two halves of one question that used to be one tab and answered
+ * neither half: *what can run here* and *what actually gets used*. "Anthropic has a key" and
+ * "prompts go to Anthropic" are different facts, and one row with one checkbox was being asked to
+ * mean both.
  */
-const SECTIONS: Array<{ id: SettingsSection; label: string; layered: boolean }> = [
-  { id: "config", label: "Configuration", layered: true },
+const SECTIONS: Array<{ id: SettingsSection; label: string; layered: boolean; needsProject?: boolean }> = [
+  { id: "providers", label: "Providers", layered: true },
   { id: "executors", label: "Executors", layered: true },
-  { id: "models", label: "Models", layered: true },
-  { id: "history", label: "History", layered: false },
+  { id: "config", label: "Configuration", layered: true },
+  { id: "history", label: "History", layered: false, needsProject: true },
 ];
 
 /**
@@ -159,6 +248,56 @@ export default function App(): JSX.Element {
   const waiting = pending.find((p) => p.taskId === state.selected);
 
   /**
+   * The open state's declared inputs, read from the SAVED document.
+   *
+   * Memoised on the text rather than recomputed per render: this parses the file, and it sits above
+   * a form whose every keystroke re-renders the column. `doc.text` and not the draft — a run pins
+   * what is on disk (DESIGN §5.3), so boxes built from unsaved typing would describe inputs the run
+   * is not going to have. The panel says so instead.
+   */
+  const runFields = useMemo(
+    () => (state.doc === null || state.doc.stateId === undefined ? null : runFieldsOf(state.doc.text, state.doc.mime)),
+    [state.doc],
+  );
+
+  /**
+   * Starting a run of the open state, and what has run before.
+   *
+   * Assembled here for the same reason the file surfaces are: the inspector renders a column and
+   * should not also know how a task gets made. Absent when the open file is not a state — which is
+   * what keeps the Run section off a prompt.
+   */
+  const runSurface: RunSurface | undefined = ((): RunSurface | undefined => {
+    const doc = state.doc;
+    if (doc === null || doc.stateId === undefined) return undefined;
+    // The LAYER decides where it runs: the shared root is JaiRA's own project, a project file is the
+    // open checkout's. Same routing a base-layer description sync uses — see `runTargetOf`.
+    const target = runTargetOf(doc.layer, state.projectDir);
+    const dir =
+      target.project === undefined
+        ? (state.projectDir ?? undefined)
+        : state.projects.find((p) => p.kind === "shared")?.project;
+    return {
+      fields: runFields,
+      // Declared defaults underneath, what has been typed over the top. See `AppState.runValues`:
+      // the map is sparse, so a box nobody has touched shows its default and a box someone
+      // emptied stays empty.
+      values: { ...initialRunValues(runFields ?? []), ...(state.runValues[doc.stateId] ?? {}) },
+      target,
+      targetDir: dir,
+      exists: doc.exists,
+      dirty: dirtyFiles.has(`${doc.layer}:${doc.path}`),
+      busy: state.busy,
+      // The target's task list, so "started here" is read out of the database the button writes to.
+      tasks: target.project === undefined ? state.tasks : state.sharedTasks,
+      selected: state.selected,
+      onChange: (name, text) => actions.setRunValue(doc.stateId ?? "", name, text),
+      onRun: (title, inputs) => void actions.runState(doc.stateId ?? "", title, inputs, target.project),
+      onSelectTask: actions.select,
+    };
+  })();
+
+  /**
    * Everything a file surface may need beyond the file itself.
    *
    * Assembled here, once, rather than threaded through {@link FilePanel}: the panel decides geometry
@@ -172,6 +311,14 @@ export default function App(): JSX.Element {
     executors: state.executors,
     selected: state.selected,
     conversation: state.conversation,
+    detail,
+    sessions: state.sessions,
+    onLoadSession: actions.loadSession,
+    sessionHistory: state.sessionHistory,
+    session: state.session,
+    sessionInstance: state.sessionInstance,
+    liveTurn: state.liveTurn,
+    onShowSession: actions.showSession,
     waiting: waiting ? { component: waiting.config?.prompt ?? waiting.component } : undefined,
     onSelectTask: actions.select,
     onDrill: actions.selectState,
@@ -190,6 +337,7 @@ export default function App(): JSX.Element {
       result: state.sync.result,
       running: state.sync.running,
       error: state.sync.error,
+      progress: state.sync.progress,
       refresh: actions.syncStatus,
       run: actions.runSync,
       cancel: actions.cancelSync,
@@ -301,17 +449,29 @@ export default function App(): JSX.Element {
               <aside className="col panel">
                 {state.inspect === "task" ? (
                   <TaskInspector
-                    stateId={state.stateId}
+                    stateId={state.inspectFrom}
                     detail={detail}
                     stream={state.stream}
+                    states={state.sessionHistory}
+                    showing={state.sessionInstance}
+                    onOpenState={actions.selectState}
+                    onOpenStateAt={actions.openStateAt}
                     onBack={actions.inspectState}
-                    onStart={() => (detail ? actions.startTask(detail.taskId) : undefined)}
-                    onCancel={() => (detail ? actions.cancelTask(detail.taskId) : undefined)}
+                    // In the project that HOLDS it. Clicking a shared workflow's run in the history
+                    // section selects a task in JaiRA's own project, and starting or cancelling it
+                    // against the open checkout would answer "unknown task".
+                    onStart={() =>
+                      detail ? actions.startTask(detail.taskId, undefined, state.selectedProject ?? undefined) : undefined
+                    }
+                    onCancel={() =>
+                      detail ? actions.cancelTask(detail.taskId, state.selectedProject ?? undefined) : undefined
+                    }
                   />
                 ) : (
                   <FileInspector
                     doc={state.doc}
                     state={state.state}
+                    run={runSurface}
                     onRevealIssue={(path) => setReveal((last) => ({ path, nonce: (last?.nonce ?? 0) + 1 }))}
                   />
                 )}
@@ -322,23 +482,56 @@ export default function App(): JSX.Element {
           {view === "tasks" ? (
             <div className="view tasks-view" style={{ "--pane-right": `${panes.tasksRight}px` } as CSSProperties}>
               <div className="col mid">
-                <PathBar breadcrumb={board?.breadcrumb ?? []} onGo={actions.drillTo}>
-                  <span className="sub">
-                    {state.tasks.length} tasks · {state.tasks.filter((t) => t.status === "running").length} running
-                  </span>
-                  <NewTask onCreate={actions.createTask} busy={state.busy} />
-                </PathBar>
-                {board ? (
-                  <Board
-                    board={board}
-                    selected={state.selected}
-                    numbered={board.level !== ""}
-                    onSelectTask={actions.select}
-                    onDrill={actions.drillTo}
-                  />
-                ) : (
-                  <p className="empty">Open a project to see its board.</p>
-                )}
+                {/*
+                  ONE BOARD PER PROJECT, grouped — the user's checkout, and JaiRA's own runs beneath it.
+                  Grouped rather than merged because a board's columns are the children of ONE workflow
+                  state: columns from two projects side by side would be columns of different things.
+                  Each group carries its own breadcrumb and its own drill level, because drilling into
+                  one is not a statement about the other.
+                */}
+                {state.projects.length === 0 ? <p className="empty">Open a project to see its board.</p> : null}
+                {state.projects.map((p) => {
+                  const group = state.boards[p.project] ?? null;
+                  const shut = state.collapsed[p.project] === true;
+                  return (
+                    <section key={p.project} className={`board-group${shut ? " shut" : ""}`}>
+                      <header className="board-group-head" onClick={() => actions.toggleProject(p.project)}>
+                        <span className="twist">{shut ? "▸" : "▾"}</span>
+                        <span className={`grow ellip ${p.kind}`} title={p.project}>
+                          {p.label}
+                        </span>
+                        <span className="sub">
+                          {p.tasks} tasks{p.running > 0 ? ` · ${p.running} running` : ""}
+                        </span>
+                      </header>
+                      {shut ? null : (
+                        <>
+                          <PathBar
+                            breadcrumb={group?.breadcrumb ?? []}
+                            onGo={(level) => actions.drillProject(p.project, level)}
+                          >
+                            {/* Only the focused project can be created into: a task belongs to a
+                                checkout, and JaiRA's own runs are started by JaiRA. */}
+                            {p.project === state.projectDir ? (
+                              <NewTask onCreate={actions.createTask} busy={state.busy} />
+                            ) : null}
+                          </PathBar>
+                          {group ? (
+                            <Board
+                              board={group}
+                              selected={state.selectedProject === p.project ? state.selected : null}
+                              numbered={group.level !== ""}
+                              onSelectTask={(taskId) => actions.select(taskId, p.project)}
+                              onDrill={(level) => actions.drillProject(p.project, level)}
+                            />
+                          ) : (
+                            <p className="empty">No board here yet.</p>
+                          )}
+                        </>
+                      )}
+                    </section>
+                  );
+                })}
               </div>
 
               <Splitter
@@ -370,12 +563,51 @@ export default function App(): JSX.Element {
             </div>
           ) : null}
 
+          {view === "logs" ? (
+            <div className="view logs-view">
+              <LogsPanel
+                entries={state.logs}
+                output={state.jobOutput}
+                onOpenJob={(jobId) => void actions.openJobOutput(jobId)}
+                onOpenTask={(taskId) => {
+                  // Into the task, in the view that shows one — a link that only filtered this list
+                  // would answer "where do I look next" with "here".
+                  actions.setView("tasks");
+                  actions.select(taskId);
+                }}
+                onClearOutput={actions.closeJobOutput}
+              />
+            </div>
+          ) : null}
+
+          {view === "debug" ? (
+            <DebugPane
+              debug={state.debug}
+              detail={detail}
+              conversation={state.conversation}
+              sessionHistory={state.sessionHistory}
+              session={state.session}
+              sessionInstance={state.sessionInstance}
+              liveTurn={state.liveTurn}
+              stream={state.stream}
+              availability={state.availability}
+              hasProject={state.projectDir !== null}
+              onRun={(options) => void actions.debugRun(options)}
+              onCancel={() => void actions.debugCancel()}
+              onInstall={(force) => void actions.debugInstall(force)}
+              onRecheck={actions.debugRefresh}
+              onDismissError={actions.debugDismissError}
+              onOpenState={(stateId) => void actions.openWorkflow(stateId, "base")}
+              onShowSession={actions.showSession}
+            />
+          ) : null}
+
           {view === "settings" ? (
             <div className="view settings-view" style={{ "--pane-left": `${panes.settingsLeft}px` } as CSSProperties}>
               <aside className="col side">
                 <h3>Settings</h3>
                 <ul className="sections">
-                  {SECTIONS.map(({ id, label }) => (
+                  {SECTIONS.filter((s) => !s.needsProject || state.projectDir !== null).map(({ id, label }) => (
                     <li
                       key={id}
                       className={state.section === id ? "sel" : undefined}
@@ -411,51 +643,66 @@ export default function App(): JSX.Element {
               />
 
               <div className="col mid settings-body">
-                {/* One switch for every section under it. The layer is an axis across Configuration
-                    and Executors, not a place you navigate to — which is what it used to be for one
-                    of them and a picker for the other. */}
-                {SECTIONS.find((s) => s.id === state.section)?.layered ? (
-                  <LayerPicker value={state.configLayer} onChange={actions.setConfigLayer} disabled={state.busy} />
-                ) : null}
+                <SettingsHeader
+                  section={state.section}
+                  layer={state.configLayer}
+                  hasProject={state.projectDir !== null}
+                  busy={state.busy}
+                  rechecking={state.rechecking}
+                  checkedAt={state.availability.checkedAt}
+                  onLayer={actions.setConfigLayer}
+                  onRecheck={actions.recheckAvailability}
+                />
                 {state.section === "config" ? (
-                  <SettingsPane
+                  <ConfigPane
                     config={state.config}
                     layer={state.configLayer}
                     busy={state.busy}
-                    drafts={state.drafts}
-                    onDraft={actions.setDraft}
+                    editable={state.configLayer === "base" || state.projectDir !== null}
                     onSave={actions.saveConfig}
-                  />
+                  >
+                    <SettingsPane
+                      config={state.config}
+                      layer={state.configLayer}
+                      busy={state.busy}
+                      drafts={state.drafts}
+                      onDraft={actions.setDraft}
+                      onSave={actions.saveConfig}
+                    />
+                  </ConfigPane>
                 ) : null}
-                {state.section === "executors" ? (
-                  <ExecutorsPane
-                    executors={state.executors}
-                    probes={state.probes}
-                    probing={state.probing}
-                    secrets={state.secrets}
+                {state.section === "providers" ? (
+                  <ProvidersPane
                     config={state.config}
+                    executors={state.executors}
+                    routeProbes={state.modelProbes}
+                    executorProbes={state.probes}
+                    secrets={state.secrets}
                     busy={state.busy}
                     layer={state.configLayer}
-                    onProbe={actions.probeExecutors}
-                    onToggle={actions.setExecutorEnabled}
-                    onConfigure={actions.setExecutorConfig}
+                    editable={state.configLayer === "base" || state.projectDir !== null}
+                    onSaveRoute={actions.saveModels}
+                    onSaveExecutor={actions.setExecutorConfig}
                     onAdd={actions.addExecutor}
                     onRemove={actions.removeExecutor}
                     onSaveCredential={actions.saveCredential}
                   />
                 ) : null}
-                {state.section === "models" ? (
-                  <ModelsPane
+                {state.section === "executors" ? (
+                  <ExecutorsPane
                     config={state.config}
-                    probes={state.modelProbes}
+                    executors={state.executors}
+                    probes={state.probes}
+                    availability={state.availability}
                     busy={state.busy}
                     layer={state.configLayer}
                     editable={state.configLayer === "base" || state.projectDir !== null}
-                    onSave={actions.saveModels}
-                    onProbe={actions.probeModelRoutes}
+                    onSaveModels={actions.saveModels}
+                    onSaveExecutor={actions.setExecutorConfig}
+                    onSaveDefinition={actions.saveDefinition}
                   />
                 ) : null}
-                {state.section === "history" ? (
+                {state.section === "history" && state.projectDir !== null ? (
                   <History
                     size={state.history}
                     report={state.prune}

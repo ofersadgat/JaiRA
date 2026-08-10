@@ -26,11 +26,14 @@ import type {
   DetectSchemaResult,
   ConfigView,
   ConversationView,
+  SessionRef,
+  SessionView,
   ExecutorInfo,
   FileSource,
   FileTree,
   StateSlots,
   StateView,
+  TaskDetail,
   SyncDirection,
   ValidateSchemaResult,
   WorkflowLayer,
@@ -61,6 +64,8 @@ export interface SyncSurface {
   result: WorkflowSyncResult | null;
   running: boolean;
   error: string | null;
+  /** What the run is doing while it does it — see `SyncState.progress`. */
+  progress: string[];
   /**
    * Ask for the status of one document.
    *
@@ -105,6 +110,24 @@ export interface FileSurfaceContext {
   /** The selected task, and its conversation — what a leaf state's viewer shows. */
   selected: string | null;
   conversation: ConversationView | null;
+  /**
+   * The selected task's instance tree — every state it entered, in the shape it entered them.
+   *
+   * What the composite views are built from. A board column holds one card per EXECUTION rather
+   * than one per task, and an execution is an instance: the state id and the child key are the same
+   * on every pass through a loop, and only the instance tells them apart.
+   */
+  detail: TaskDetail | null;
+  /** Transcripts by instance id, and how to fetch one. See `AppState.sessions`. */
+  sessions: Record<number, SessionView>;
+  onLoadSession: (instanceId: number) => void;
+  /** Every state that task went through, and the transcript of the one being looked at. */
+  sessionHistory: SessionRef[];
+  session: SessionView | null;
+  sessionInstance: number | null;
+  /** The answer being written right now, when there is one. */
+  liveTurn: { sessionId?: string; seq?: number; stateId?: string; text: string } | null;
+  onShowSession: (instanceId: number | null) => void;
   waiting?: { component: string } | undefined;
   onSelectTask: (taskId: string) => void;
   onDrill: (stateId: string) => void;

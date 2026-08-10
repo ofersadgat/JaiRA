@@ -23,7 +23,9 @@
  *
  * Pure functions over plain documents: no React, no IPC, and therefore testable without either.
  */
-import type { ExecutorKind } from "@jaira/shared/browser";
+import { EXECUTOR_KINDS, type CredentialUse, type ExecutorField, type ExecutorKind } from "@jaira/shared/browser";
+
+export type { ExecutorField } from "@jaira/shared/browser";
 
 /**
  * Where each built-in executor's settings live inside `config.agents`.
@@ -44,28 +46,39 @@ export const DEFAULT_GENERIC_NAME = "generic-cli";
 /** The sandbox values codex accepts, in the order the parser lists them. */
 export const CODEX_SANDBOXES = ["read-only", "workspace-write", "danger-full-access"] as const;
 
-/** One editable field of an executor. `name` is a generic entry's registry name. */
-export type ExecutorField = "name" | "command" | "credential" | "sandbox" | "args" | "prompt" | "env";
-
 /**
  * Which fields a kind actually has.
  *
- * Driven by the config types rather than by what the form could plausibly show: offering `command`
- * for the in-process SDK adapter would be offering a setting that has nowhere to go, and a field
- * that silently does nothing is worse than an absent one.
+ * Read from `EXECUTOR_KINDS` rather than decided here, because the config parser and the probe read
+ * the same table: a field this form offered that the parser refused, or a key it asked for that the
+ * runtime never reads, is exactly the drift one table exists to prevent. That drift was not
+ * hypothetical — this used to offer an API key for `claude-cli`, which signs itself in and would
+ * have ignored one.
  */
 export function editableFields(kind: ExecutorKind): ExecutorField[] {
-  switch (kind) {
-    case "sdk":
-      return ["credential"];
-    case "cli":
-      return ["command", "credential"];
-    case "codex":
-      return ["command", "sandbox", "credential"];
-    case "generic":
-      return ["name", "command", "args", "prompt", "env", "credential"];
-  }
+  return EXECUTOR_KINDS[kind].fields;
 }
+
+/** Whether this kind uses a key at all, which decides if the key entry is offered. */
+export function credentialUseOf(kind: ExecutorKind): CredentialUse {
+  return EXECUTOR_KINDS[kind].credential;
+}
+
+/**
+ * Where each field lives inside an executor's config block.
+ *
+ * The three model fields are nested (`models.default`), the rest are flat. One map rather than a
+ * branch at each call site, so a patch, a read and a placeholder all agree on the path.
+ */
+export const FIELD_PATHS: Record<ExecutorField, string> = {
+  name: "name",
+  command: "command",
+  credential: "credential",
+  sandbox: "sandbox",
+  args: "args",
+  prompt: "prompt",
+  env: "env",
+};
 
 /** A field write. `undefined` REMOVES the key, which is how a layer goes back to inheriting. */
 export type ExecutorPatch = Record<string, unknown>;
@@ -194,14 +207,44 @@ export function removeGenericExecutor(doc: unknown, name: string): unknown {
   return prune(next, block);
 }
 
-/** Apply the field writes, deleting on `undefined`. */
+/**
+ * Apply the field writes, deleting on `undefined`.
+ *
+ * Keys are DOTTED paths, so `models.default` and `command` are one spelling rather than two — the
+ * same rule `applyModelPatch` follows, for the same reason. A container the write EMPTIED is deleted
+ * rather than left as `{}`, so clearing the last model setting takes the `models` block with it
+ * instead of leaving an inert override behind.
+ */
 function applyFields(block: Record<string, unknown>, patch: ExecutorPatch): Record<string, unknown> {
   const next = { ...block };
-  for (const [field, value] of Object.entries(patch)) {
-    if (value === undefined) delete next[field];
-    else next[field] = value;
+  for (const [path, value] of Object.entries(patch)) {
+    const parts = path.split(".");
+    const chain: Array<{ parent: Record<string, unknown>; key: string }> = [];
+    let cursor = next;
+    for (const part of parts.slice(0, -1)) {
+      cursor[part] = isObject(cursor[part]) ? { ...(cursor[part] as Record<string, unknown>) } : {};
+      chain.push({ parent: cursor, key: part });
+      cursor = cursor[part] as Record<string, unknown>;
+    }
+    const leaf = parts[parts.length - 1]!;
+    if (value === undefined) delete cursor[leaf];
+    else cursor[leaf] = value;
+    for (const { parent, key } of chain.reverse()) {
+      const inner = parent[key];
+      if (isObject(inner) && Object.keys(inner).length === 0) delete parent[key];
+    }
   }
   return next;
+}
+
+/** Read a dotted path out of a block — the counterpart of {@link applyFields}'s write. */
+export function fieldAt(block: Record<string, unknown> | undefined, path: string): unknown {
+  let cursor: unknown = block;
+  for (const part of path.split(".")) {
+    if (!isObject(cursor)) return undefined;
+    cursor = cursor[part];
+  }
+  return cursor;
 }
 
 /** Drop an `agents` block that no longer holds anything, so an untouched layer stays empty. */
@@ -255,6 +298,17 @@ export function parseEnv(text: string): Record<string, string> | undefined {
     out[match[1]!] = match[2]!;
   }
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** Allowed model patterns, one per line — the same spelling the argv box uses, for the same reason. */
+export function formatAllow(allow: unknown): string {
+  return Array.isArray(allow) ? allow.filter((a): a is string => typeof a === "string").join("\n") : "";
+}
+
+/** Parse the allow box. Blank means "no limit", which is different from an empty list. */
+export function parseAllow(text: string): string[] | undefined {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+  return lines.length > 0 ? lines : undefined;
 }
 
 /** A secret NAME, not a secret — the same rule `config.json`'s parser enforces, checked early. */

@@ -9,8 +9,8 @@ import { describe, expect, it } from "vitest";
 import { isOk, promptOp } from "@declarative-ai/exec";
 import { AgentCliExecutor } from "@declarative-ai/agents-cli";
 import { agentSpawn } from "../src/agents";
-import { buildPromptExecutor, modelDefaults } from "../src/wiring";
-import { agentPromptRoutes, defaultModelId } from "../src/modelRoutes";
+import { buildPromptExecutor, defaultExecutorTree } from "../src/wiring";
+import { agentPromptRoutes } from "../src/modelRoutes";
 import { defaultConfig } from "@jaira/shared";
 
 const live = process.env["JAIRA_LIVE_AGENT"] === "1";
@@ -25,14 +25,15 @@ describe.skipIf(!live)("a prompt op answered by the real claude CLI", () => {
   }, 120_000);
 
   it("routes by PREFIX through the same executor the app builds", async () => {
-    // The end-to-end claim: config names nothing, `defaultModelId` picks the agent, and the router
-    // sends the op there — which is exactly what the sync panel now does.
+    // The end-to-end claim: config names nothing, the DEFAULT executor's tree derives a route to the
+    // agent, and the router sends the op there — which is exactly what the sync panel now does.
     const config = defaultConfig();
-    expect(defaultModelId(config.models, { agents: config.agents })).toBe("claude-cli/default");
+    const tree = defaultExecutorTree(config, { states: { s: { operation: { kind: "prompt" } } } } as never);
+    expect(Object.keys((tree.prompt as { routes?: Record<string, unknown> }).routes ?? {})).toContain("claude-cli");
 
     const prompt = buildPromptExecutor({
       routes: agentPromptRoutes(config.agents, {}),
-      defaults: modelDefaults(config, { states: { s: { operation: { kind: "prompt" } } } } as never),
+      tree: tree.prompt,
     });
     const op = promptOp({
       user: "Reply with exactly the word: routed",

@@ -81,6 +81,11 @@ const service = new AppService({
     if (window && !window.isDestroyed()) window.webContents.send(PUSH_CHANNEL, message);
   },
   keychain: electronKeychain(),
+  // The app checks what can actually answer a prompt — by itself, at startup, at project open, and
+  // after every configuration write. It is the one caller that should: it has a settings screen to
+  // keep honest, and a user who should never have to press a button to find out that the provider
+  // the screen shows as enabled has no key behind it.
+  probeOnStart: true,
   // The two capabilities the service cannot have itself: a file manager and a directory dialog are
   // both Electron's, and the service stays Electron-free so it remains testable headlessly.
   reveal: (file: string) => shell.showItemInFolder(file),
@@ -106,17 +111,25 @@ const handlers: Record<IpcChannel, Handler> = {
   "project:choose": ((request: { mode?: "open" | "init" } | undefined) =>
     service.chooseProject(request?.mode ?? "open")) as Handler,
   "project:current": (() => service.current()) as Handler,
-  "task:list": (() => service.listTasks()) as Handler,
-  "task:detail": ((request: { taskId: string }) => service.taskDetail(request.taskId)) as Handler,
+  "task:list": ((request: { project?: string } | undefined) => service.listTasks(request?.project)) as Handler,
+  "task:detail": ((request: { taskId: string; project?: string }) => service.taskDetail(request.taskId, request.project)) as Handler,
   "task:create": ((request: Parameters<typeof service.createTask>[0]) => service.createTask(request)) as Handler,
   "task:start": ((request: Parameters<typeof service.startTask>[0]) => service.startTask(request)) as Handler,
-  "task:cancel": ((request: { taskId: string }) => service.cancelTask(request.taskId)) as Handler,
-  "board:view": ((request: { level?: string } | undefined) => service.board(request?.level)) as Handler,
-  "board:roots": (() => service.boardRoots()) as Handler,
+  "task:cancel": ((request: { taskId: string; project?: string }) =>
+    service.cancelTask(request.taskId, request.project)) as Handler,
+  "board:view": ((request: { level?: string; project?: string } | undefined) => service.board(request ?? {})) as Handler,
+  "board:roots": ((request: { project?: string } | undefined) => service.boardRoots(request ?? {})) as Handler,
   "files:tree": (() => service.filesTree()) as Handler,
   "state:view": ((request: { stateId: string }) => service.stateView(request.stateId)) as Handler,
   "state:slots": ((request: { stateIds: string[] }) => service.stateSlots(request.stateIds)) as Handler,
-  "task:conversation": ((request: { taskId: string }) => service.conversation(request.taskId)) as Handler,
+  "task:conversation": ((request: { taskId: string; project?: string }) => service.conversation(request.taskId, request.project)) as Handler,
+  "task:system": (() => service.listSystemTasks()) as Handler,
+  "project:list": (() => service.listProjects()) as Handler,
+  "session:history": ((request: Parameters<typeof service.sessionHistory>[0]) => service.sessionHistory(request)) as Handler,
+  "session:view": ((request: Parameters<typeof service.sessionView>[0]) => service.sessionView(request)) as Handler,
+  "log:list": ((request: Parameters<typeof service.listLogs>[0]) => service.listLogs(request)) as Handler,
+  "job:list": ((request: Parameters<typeof service.listJobs>[0]) => service.listJobs(request)) as Handler,
+  "job:output": ((request: Parameters<typeof service.jobOutput>[0]) => service.jobOutput(request)) as Handler,
   "interaction:pending": (() => service.pendingInteractions()) as Handler,
   "interaction:submit": ((request: { requestId: string; value: never }) =>
     service.submitInteraction(request.requestId, request.value)) as Handler,
@@ -151,6 +164,8 @@ const handlers: Record<IpcChannel, Handler> = {
   "executor:list": (() => service.listExecutors()) as Handler,
   "executor:probe": ((request: { name?: string } | undefined) => service.probeExecutors(request?.name)) as Handler,
   "model:probe": (() => service.probeModelRoutes()) as Handler,
+  "availability:read": (() => service.readAvailability()) as Handler,
+  "availability:refresh": (() => service.refreshAvailability()) as Handler,
   "secret:capabilities": (() => service.secretCapabilities()) as Handler,
   "secret:set": ((request: Parameters<typeof service.setSecret>[0]) => service.setSecret(request)) as Handler,
 };
@@ -158,9 +173,17 @@ const handlers: Record<IpcChannel, Handler> = {
 function registerIpc(): void {
   for (const channel of IPC_CHANNELS) {
     ipcMain.handle(channel, async (_event: IpcMainInvokeEvent, request: unknown) => {
-      // Errors surface as rejections the renderer can display; the service's
-      // messages are already human-facing ("unknown task 't-1'").
-      return (handlers[channel] as (request: unknown) => unknown)(request);
+      try {
+        // Errors surface as rejections the renderer can display; the service's
+        // messages are already human-facing ("unknown task 't-1'").
+        return await (handlers[channel] as (request: unknown) => unknown)(request);
+      } catch (e) {
+        // RECORDED, then RETHROWN. The renderer's contract is unchanged — it still gets the rejection
+        // and still shows the message — but the failure is no longer invisible to everyone else. Every
+        // handler failure in the app becomes one line naming the channel, for six lines here.
+        service.recordIpcFailure(channel, e);
+        throw e;
+      }
     });
   }
 }

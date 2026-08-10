@@ -531,6 +531,19 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
   }));
   const byRoot = new Map(columns.map((c) => [c.key, c]));
 
+  // A workflow this project has RUN but has no file for still gets a column.
+  //
+  // Roots are derived from `workflows/` because that is where a workflow you can start lives. JaiRA's
+  // own project is the case that does not fit: its workflows are SYNTHESIZED and pinned as snapshots
+  // (`beginTaskRun`'s `bundle` option), so there is no file to derive a root from — and a board built
+  // from files alone showed nothing at all for a project whose whole content is runs.
+  for (const summary of summaries) {
+    if (summary.workflow.length === 0 || byRoot.has(summary.workflow)) continue;
+    const column = { key: summary.workflow, stateId: summary.workflow, cards: [] as BoardCard[] };
+    columns.push(column);
+    byRoot.set(column.key, column);
+  }
+
   for (const summary of summaries) {
     // One bundle per workflow would be cheaper, but a card at this level only needs the task's own
     // active path, and `latestRun` without a shape still yields one.

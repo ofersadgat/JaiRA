@@ -9,6 +9,7 @@
  * program started the run.
  */
 import type { ExecObserver } from "@jaira/runtime";
+import type { JobOutputSink } from "./jobOutput";
 import { DEFAULT_HEARTBEAT_MS, newOwnerToken, type JobStore } from "./jobs";
 
 export interface RunOwnerOptions {
@@ -20,6 +21,13 @@ export interface RunOwnerOptions {
   now?: () => number;
   /** Called when another process asks this run to stop (the polled cancel flag). */
   onCancelRequested?: () => void;
+  /**
+   * Where a child's output goes. Absent ⇒ it is drained and discarded, which is what a caller that
+   * only wants process TRACKING should get — capturing it is a separate decision.
+   */
+  output?: JobOutputSink;
+  /** Where a failure in the recording itself is reported. Absent ⇒ swallowed, as it always was. */
+  onObserverError?: (error: Error, phase: "spawn" | "exit" | "output") => void;
 }
 
 /**
@@ -73,12 +81,21 @@ export class RunOwner {
           runId: this.options.runId,
           command: [event.command, ...event.argv].join(" "),
           ...(event.pid !== undefined ? { pid: event.pid } : {}),
+          ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
           nowMs: this.now(),
         }),
       onExit: (token, event) => {
         if (token === undefined) return;
+        // Flush before the row closes, so a process's last words are written with it rather than on
+        // whatever timer happened to be pending when it died.
+        if (token !== undefined) this.options.output?.end(token);
         this.options.jobs.end(token, event.signal !== null ? `signal:${event.signal}` : `exit:${event.code ?? "?"}`, this.now());
       },
+      onOutput: (token, event) => {
+        if (token === undefined) return;
+        this.options.output?.write(token, event.stream, event.chunk);
+      },
+      ...(this.options.onObserverError !== undefined ? { onError: this.options.onObserverError } : {}),
     };
   }
 

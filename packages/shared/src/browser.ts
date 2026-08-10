@@ -20,5 +20,8 @@ export * from "./components";
 export * from "./json";
 export * from "./settings";
 export * from "./executors";
+export * from "./executorStack";
+export * from "./executorTree";
+export * from "./configSchema";
 export * from "./slotTypes";
 export * from "./references";
