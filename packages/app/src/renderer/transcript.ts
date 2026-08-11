@@ -42,8 +42,31 @@ export interface ToolEntry {
   /** The first argument worth showing on the collapsed line — a path, a command. */
   summary: string;
   ok?: boolean;
-  /** Everything else, shown when expanded. */
-  detail?: JsonValue;
+  /** What it was called with. Absent means the record kept no arguments, which is not `null`. */
+  args?: JsonValue;
+  /** What came back, once it has. Absent while the call is still in flight. */
+  result?: JsonValue;
+  /**
+   * The provider's own id for the call.
+   *
+   * Kept because a call and its result are frequently in DIFFERENT turns — an assistant turn holds
+   * `tool_use`, the user turn after it holds `tool_result` — so pairing cannot be done inside one
+   * turn and this is the only thing that connects them across two.
+   */
+  callId?: string;
+}
+
+/**
+ * A model's private reasoning, when the record kept it.
+ *
+ * Its own kind rather than a tool call whose name happens to be "thinking", which is what it used to
+ * be: a thinking block has text and no arguments, so everything a tool line shows about it was empty
+ * and the payload printed as `null`.
+ */
+export interface ThoughtEntry {
+  kind: "thought";
+  at?: number;
+  text: string;
 }
 
 /** Something the journal recorded that nobody said: a gate, a policy call, a failure, a transition. */
@@ -60,57 +83,148 @@ export interface LiveEntry {
   text: string;
 }
 
-export type TranscriptEntry = MessageEntry | ToolEntry | EventEntry | LiveEntry;
+export type TranscriptEntry = MessageEntry | ToolEntry | EventEntry | LiveEntry | ThoughtEntry;
 
 /**
- * The tool calls on one turn, paired with their results.
+ * A result that has not been attached to its call yet — an intermediate, never rendered.
  *
- * A call and its result arrive as two entries on the same wire and only this layer knows both
- * shapes, which is why the record keeps `parts` structured rather than flattening it to text.
+ * It exists because pairing is not a per-turn job: Anthropic's shape puts `tool_use` on the
+ * assistant turn and `tool_result` on the user turn that follows, so the call this belongs to was
+ * emitted by an earlier pass through {@link messagePartsOf}. {@link entriesOf} is where the two meet.
  */
-export function toolPartsOf(parts: JsonValue | undefined): ToolEntry[] {
+export interface ResultPart {
+  kind: "result";
+  callId?: string;
+  result: JsonValue;
+  /**
+   * The provider said so itself, on the part rather than in the payload.
+   *
+   * Anthropic's `is_error` travels beside the content, so a failed command whose output is the plain
+   * string `exit 1` looks like a perfectly good result to anything reading only the payload.
+   */
+  failed?: boolean;
+}
+
+export type MessagePart = ToolEntry | ThoughtEntry | ResultPart;
+
+/**
+ * Parts that carry nothing anybody reads — stream bookkeeping the SDKs emit between the real ones.
+ *
+ * Dropped by name rather than by "has no payload", because they are known noise and an unknown part
+ * with no payload is a different thing: possibly a shape we should be showing and are not.
+ */
+const NOISE = new Set(["step-start", "step-finish", "start-step", "finish-step", "start", "finish"]);
+
+/** The first key present, so one reader covers two spellings of the same field. */
+function pick(part: Record<string, unknown>, keys: readonly string[]): unknown {
+  for (const key of keys) if (part[key] !== undefined) return part[key];
+  return undefined;
+}
+
+/**
+ * What one content part IS.
+ *
+ * Two families of spelling reach here and both have to work. The Vercel SDK writes `tool-call` /
+ * `tool-result` with `toolName`, `args` and `toolCallId`; Anthropic — which is what a Claude CLI
+ * session records — writes `tool_use` / `tool_result` with `name`, `input` and `id`. The old rule
+ * was "anything that is not text is a tool call, and its payload is `args`", which for an Anthropic
+ * record found no arguments on anything and printed `null` under every line, and turned every
+ * `thinking` block into a nameless tool.
+ *
+ * Order matters: `tool_result` contains both "tool" and "result", and it is a result. A result is
+ * matched on the END of the type rather than anywhere in it, because `tool-<name>` is also a legal
+ * spelling for a CALL and a tool called `search_results` must not be read as somebody's answer.
+ */
+function kindOfPart(type: string): "text" | "thought" | "result" | "call" | "noise" | "other" {
+  if (type === "text") return "text";
+  if (NOISE.has(type)) return "noise";
+  if (type.includes("thinking") || type.includes("reasoning")) return "thought";
+  if (type === "result" || type.endsWith("-result") || type.endsWith("_result")) return "result";
+  if (type.includes("tool")) return "call";
+  return "other";
+}
+
+/** `tool-call` and `tool_use` both name a tool; `tool-search` names itself. */
+function toolNameOf(part: Record<string, unknown>, type: string): string {
+  const named = pick(part, ["toolName", "name", "tool_name"]);
+  if (typeof named === "string" && named.length > 0) return named;
+  // `tool-<name>` is the SDK's typed-tool spelling, where the type IS the name.
+  const bare = type.replace(/^tool[-_]/, "");
+  return bare.length > 0 && bare !== "call" && bare !== "use" && bare !== "invocation" ? bare : type;
+}
+
+/**
+ * One turn's content parts, in the order they were written.
+ *
+ * Text is skipped — it is the message itself, and {@link messageOf} has already joined it. What is
+ * left is what the old panel could not show: reasoning, calls, and results.
+ */
+export function messagePartsOf(parts: JsonValue | undefined): MessagePart[] {
   if (!Array.isArray(parts)) return [];
-  const out: ToolEntry[] = [];
-  const results = new Map<string, unknown>();
+  const out: MessagePart[] = [];
   for (const part of parts) {
-    const p = part as { type?: string; toolCallId?: string; result?: unknown };
-    if (typeof p?.type === "string" && p.type.includes("result") && typeof p.toolCallId === "string") {
-      results.set(p.toolCallId, p.result);
+    if (part === null || typeof part !== "object" || Array.isArray(part)) continue;
+    const p = part as Record<string, unknown>;
+    const type = typeof p["type"] === "string" ? (p["type"] as string) : "";
+    if (type === "") continue;
+    const kind = kindOfPart(type);
+    if (kind === "text" || kind === "noise") continue;
+
+    if (kind === "thought") {
+      const text = pick(p, ["thinking", "text", "reasoning", "content"]);
+      // A redacted block is a real fact — the model thought and the provider withheld it — so it is
+      // said rather than dropped.
+      out.push({ kind: "thought", text: typeof text === "string" && text.length > 0 ? text : "(withheld by the provider)" });
+      continue;
     }
-  }
-  for (const part of parts) {
-    const p = part as { type?: string; toolName?: string; toolCallId?: string; args?: unknown; result?: unknown };
-    if (typeof p?.type !== "string" || p.type === "text" || p.type.includes("result")) continue;
-    const args = p.args as Record<string, unknown> | undefined;
-    const result = p.toolCallId !== undefined ? results.get(p.toolCallId) : p.result;
+
+    const callId = pick(p, ["toolCallId", "tool_use_id", "toolUseId", "id"]);
+    if (kind === "result") {
+      const flagged = pick(p, ["is_error", "isError"]) === true;
+      out.push({
+        kind: "result",
+        ...(typeof callId === "string" ? { callId } : {}),
+        ...(flagged ? { failed: true } : {}),
+        result: (pick(p, ["result", "output", "content"]) ?? null) as JsonValue,
+      });
+      continue;
+    }
+
+    const args = pick(p, ["args", "input", "arguments", "parameters"]);
+    // An unrecognised part is shown only when it has something in it. A shape nobody anticipated
+    // that carries a payload is worth seeing; one that carries nothing is noise we have not named.
+    if (kind === "other" && args === undefined) continue;
     out.push({
       kind: "tool",
-      name: p.toolName ?? p.type,
+      name: kind === "other" ? type : toolNameOf(p, type),
       summary: firstArgOf(args),
-      // Absent, not false: a call still in flight has no verdict, and rendering one as a failure is
-      // the kind of wrong that gets acted on.
-      ...(result === undefined ? {} : { ok: !isErrorish(result) }),
-      ...(result === undefined ? { detail: (args ?? null) as JsonValue } : { detail: result as JsonValue }),
+      ...(typeof callId === "string" ? { callId } : {}),
+      ...(args === undefined ? {} : { args: args as JsonValue }),
     });
   }
   return out;
 }
 
 /** The one argument worth putting on a collapsed line: a path, a command, the first string there is. */
-function firstArgOf(args: Record<string, unknown> | undefined): string {
-  if (args === undefined) return "";
+function firstArgOf(args: unknown): string {
+  // Some tools take a bare string, and it is the whole of what they were called with.
+  if (typeof args === "string") return args;
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return "";
+  const record = args as Record<string, unknown>;
   for (const key of ["command", "path", "file", "file_path", "pattern", "query", "url"]) {
-    const value = args[key];
+    const value = record[key];
     if (typeof value === "string") return value;
   }
-  const first = Object.values(args).find((v) => typeof v === "string");
+  const first = Object.values(record).find((v) => typeof v === "string");
   return typeof first === "string" ? first : "";
 }
 
 function isErrorish(result: unknown): boolean {
   if (result === null || typeof result !== "object") return false;
   const r = result as Record<string, unknown>;
-  return r["error"] !== undefined || r["isError"] === true || r["ok"] === false;
+  // `is_error` is Anthropic's spelling and travels on a `tool_result` block — the one a Claude CLI
+  // session actually records.
+  return r["error"] !== undefined || r["isError"] === true || r["is_error"] === true || r["ok"] === false;
 }
 
 // --- building the list --------------------------------------------------------
@@ -135,13 +249,23 @@ function eventOf(turn: ConversationTurn): EventEntry | undefined {
   return { kind: "event", at: turn.at, tone, text };
 }
 
-function messageOf(turn: SessionTurn, at?: number): TranscriptEntry[] {
-  const entries: TranscriptEntry[] = [];
+/**
+ * One turn as entries: what it thought, what it said, what it then did.
+ *
+ * That is also the order, and it is the order the parts arrive in — a model reasons, answers, and
+ * calls. Reasoning is lifted above the message rather than left in part order because the message is
+ * assembled from every text part at once, so there is no single position left to interleave it at.
+ */
+function messageOf(turn: SessionTurn, at?: number): Array<TranscriptEntry | ResultPart> {
+  const entries: Array<TranscriptEntry | ResultPart> = [];
   const hasText = turn.text !== undefined && turn.text.length > 0;
-  const tools = toolPartsOf(turn.parts);
+  const parts = messagePartsOf(turn.parts);
+  const stamp = <T extends { at?: number }>(entry: T): T => (at !== undefined ? { ...entry, at } : entry);
+
+  for (const part of parts) if (part.kind === "thought") entries.push(stamp(part));
   // A turn that is nothing but tool calls contributes no message — an empty assistant bubble above
   // three tool lines is a bubble that says only that the model spoke, which the lines already do.
-  if (hasText || tools.length === 0) {
+  if (hasText || parts.length === 0) {
     entries.push({
       kind: "message",
       role: turn.role,
@@ -149,10 +273,55 @@ function messageOf(turn: SessionTurn, at?: number): TranscriptEntry[] {
       ...(turn.text !== undefined ? { text: turn.text } : {}),
     });
   }
-  // After the text, because that is the order they happened in: the model says what it is about to
-  // do, then does it.
-  for (const tool of tools) entries.push(at !== undefined ? { ...tool, at } : tool);
+  for (const part of parts) {
+    if (part.kind === "thought") continue;
+    entries.push(part.kind === "result" ? part : stamp(part));
+  }
   return entries;
+}
+
+/**
+ * Attach each result to the call it answers, wherever that call was.
+ *
+ * A result is not an entry of its own: on screen it is the verdict on the line that made the call,
+ * and the payload behind it. An ORPHAN — a result whose call is not in this conversation — becomes
+ * its own line instead of vanishing, because a result nobody asked for is a fact about the record.
+ */
+/** Did it fail — because the provider flagged it, or because the payload says so. */
+function failed(part: ResultPart): boolean {
+  return part.failed === true || isErrorish(part.result);
+}
+
+function pairResults(entries: Array<TranscriptEntry | ResultPart>): TranscriptEntry[] {
+  const byId = new Map<string, ToolEntry>();
+  const unanswered: ToolEntry[] = [];
+  const out: TranscriptEntry[] = [];
+  for (const entry of entries) {
+    if (entry.kind === "tool") {
+      if (entry.callId !== undefined) byId.set(entry.callId, entry);
+      unanswered.push(entry);
+      out.push(entry);
+      continue;
+    }
+    if (entry.kind !== "result") {
+      out.push(entry);
+      continue;
+    }
+    // By id where there is one; otherwise the oldest call still waiting, which is the only reading
+    // available and the right one for a provider that answers in order.
+    const call = entry.callId !== undefined ? byId.get(entry.callId) : unanswered[0];
+    if (call === undefined) {
+      out.push({ kind: "tool", name: "result", summary: "", ok: !failed(entry), result: entry.result });
+      continue;
+    }
+    call.result = entry.result;
+    // Absent, not false: a call still in flight has no verdict, and rendering one as a failure is
+    // the kind of wrong that gets acted on.
+    call.ok = !failed(entry);
+    const at = unanswered.indexOf(call);
+    if (at >= 0) unanswered.splice(at, 1);
+  }
+  return out;
 }
 
 /**
@@ -169,8 +338,11 @@ export function entriesOf(
   journal: readonly ConversationTurn[] = [],
   live?: string | null,
 ): TranscriptEntry[] {
-  const entries: TranscriptEntry[] = [];
-  for (const turn of session?.turns ?? []) entries.push(...messageOf(turn));
+  const said: Array<TranscriptEntry | ResultPart> = [];
+  for (const turn of session?.turns ?? []) said.push(...messageOf(turn));
+  // Across the whole conversation, not per turn: `tool_use` and its `tool_result` are on different
+  // turns in every Anthropic-shaped record, which is most of them.
+  const entries: TranscriptEntry[] = pairResults(said);
   for (const turn of journal) {
     const event = eventOf(turn);
     if (event !== undefined) entries.push(event);

@@ -26,6 +26,7 @@ import type {
   DetectSchemaResult,
   ConfigView,
   ConversationView,
+  InstanceNode,
   SessionRef,
   SessionView,
   ExecutorInfo,
@@ -43,6 +44,7 @@ import type {
 } from "@jaira/shared/browser";
 import { mimeFallbacks } from "@jaira/shared/browser";
 import type { Drafts, SetDraft } from "./drafts";
+import type { TrailStep } from "./trail";
 
 /** What a surface does with the file. The two halves of the panel, top to bottom. */
 export type FileAction = "view" | "edit";
@@ -131,6 +133,48 @@ export interface FileSurfaceContext {
   waiting?: { component: string } | undefined;
   onSelectTask: (taskId: string) => void;
   onDrill: (stateId: string) => void;
+  /**
+   * The runs walked into below this file, and the two moves that change them.
+   *
+   * The address bar and the viewer read the same list: the bar draws it, and the viewer shows its
+   * LAST element. That is the whole contract — everything else about which board or which transcript
+   * appears follows from which step is on the end.
+   *
+   * Optional so a surface can be rendered outside the shell; absent behaves as an empty trail, which
+   * is the state's own view.
+   */
+  trail?: readonly TrailStep[] | undefined;
+  /** The tail's declared children, when the tail is deeper than this file — see `AppState.trailState`. */
+  trailState?: StateView | null | undefined;
+  /** Walk into a run: append it to the path and show it. */
+  onWalkInto?: ((node: InstanceNode) => void) | undefined;
+  /**
+   * Walk SIDEWAYS: replace the path from `index` down with this run.
+   *
+   * What a chevron's menu does — picking a sibling of a level you are already standing on is not a
+   * step deeper, and appending it would claim a descent that did not happen.
+   */
+  onWalkTo?: ((index: number, node: InstanceNode) => void) | undefined;
+  /** Open any file by its address — what the chevrons above a document that is not a state offer. */
+  onOpenFile?: ((layer: WorkflowLayer, path: string) => void) | undefined;
+  /** Show a DIRECTORY's contents — what makes the address bar's folder crumbs lead anywhere. */
+  onOpenDir?: ((layer: WorkflowLayer, path: string) => void) | undefined;
+  /**
+   * Choose another project.
+   *
+   * The last entry under the root crumb's chevron, and the only navigation in that bar that is not
+   * already on disk: every other place it can go is a path under a root this window has open.
+   */
+  onOpenProject?: (() => void) | undefined;
+  /**
+   * Which reading of a composite is on screen — its board, or its conversation.
+   *
+   * Here rather than inside the viewer because the control that switches it is in the panel's top
+   * bar, and the bar and the viewer are siblings. Optional, and the viewer falls back to its own
+   * state: a surface rendered outside the shell still toggles, it just has no bar to do it from.
+   */
+  runMode?: "board" | "conversation" | undefined;
+  onRunMode?: ((mode: "board" | "conversation") => void) | undefined;
   onAnswer?: (() => void) | undefined;
   /** Write a configuration layer as a parsed document — validated in main, unlike a raw file write. */
   onSaveConfig: (layer: ConfigLayer, doc: unknown) => void;

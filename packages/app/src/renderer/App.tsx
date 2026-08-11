@@ -24,7 +24,15 @@ import type { ConfigLayer, PendingApproval, PendingInteraction } from "@jaira/sh
 import { Board, PathBar } from "./board";
 import { ApprovalDialog, InteractionDialog } from "./components";
 import { TaskPanel } from "./detail";
-import { FileInspector, FilePanel, FileTreePanel, TaskInspector, VIEWER_HEIGHT } from "./files";
+import {
+  FileInspector,
+  FilePanel,
+  FileTreePanel,
+  FolderInspector,
+  RunInspector,
+  TaskInspector,
+  VIEWER_HEIGHT,
+} from "./files";
 // Imported for its registrations: this is what puts markdown, JSON, YAML, states and config into the
 // surface registry. Nothing else in the shell references the built-in surfaces by name.
 import "./fileSurfaces";
@@ -38,6 +46,7 @@ import { ExecutorsPane } from "./executorsPane";
 import { initialRunValues, runFieldsOf, runTargetOf } from "./runForm";
 import type { RunSurface } from "./runPanel";
 import { Splitter } from "./splitter";
+import { nodeAt } from "./trail";
 import { History, NewTask } from "./widgets";
 import { useApp, type SettingsSection, type View } from "./store";
 
@@ -234,6 +243,16 @@ export default function App(): JSX.Element {
    * twice mean "show me again" rather than nothing — see `FileSurfaceContext.revealIssue`.
    */
   const [reveal, setReveal] = useState<{ path: string; nonce: number } | null>(null);
+  /**
+   * Whether the Files view's lower half is open, and which reading its viewer is showing.
+   *
+   * Both are held here for the reason the pane widths are: they are statements about this window's
+   * layout, they are set from the panel's top bar, and they have to survive clicking another file —
+   * which unmounts everything below the bar. Session-scoped, like the widths: a view preference is
+   * not something to decide a configuration layer for.
+   */
+  const [configOpen, setConfigOpen] = useState(true);
+  const [runMode, setRunMode] = useState<"board" | "conversation">("board");
   const { board, detail, pending, view } = state;
 
   /**
@@ -322,6 +341,17 @@ export default function App(): JSX.Element {
     waiting: waiting ? { component: waiting.config?.prompt ?? waiting.component } : undefined,
     onSelectTask: actions.select,
     onDrill: actions.selectState,
+    // The address bar's tail and the viewer read the same list: the bar draws it, the viewer shows
+    // its last element. See `trail.ts`.
+    trail: state.trail,
+    trailState: state.trailState,
+    onWalkInto: actions.walkInto,
+    onWalkTo: actions.walkTo,
+    onOpenFile: actions.openPath,
+    onOpenDir: actions.openDir,
+    onOpenProject: () => actions.chooseProject("open"),
+    runMode,
+    onRunMode: setRunMode,
     onAnswer: waiting ? () => actions.select(waiting.taskId) : undefined,
     onSaveConfig: actions.saveConfig,
     validateSchema: actions.validateSchema,
@@ -428,10 +458,14 @@ export default function App(): JSX.Element {
 
               <FilePanel
                 doc={state.doc}
+                dir={state.dir}
                 busy={state.busy}
                 context={surfaces}
                 viewerHeight={panes.filesTop}
                 onViewerHeight={(filesTop) => setPanes((p) => ({ ...p, filesTop }))}
+                configOpen={configOpen}
+                onConfigOpen={setConfigOpen}
+                onWalkBack={actions.walkBackTo}
                 onSave={actions.saveDoc}
                 onInspect={actions.inspectState}
               />
@@ -447,6 +481,16 @@ export default function App(): JSX.Element {
               />
 
               <aside className="col panel">
+                {/*
+                  The context panel describes the LAST ELEMENT OF THE ADDRESS BAR, always: the run
+                  the path ends on, or the open file when no run is on it. One rule, decided by the
+                  bar rather than by a mode, which is what stops the two from disagreeing — the panel
+                  used to keep describing a file while the path beside it stood on a run.
+
+                  The task is the one exception, and it is reached only by asking for it on the run's
+                  own panel: a run belongs to a task, but a task is not a level of the address and
+                  cannot be navigated to. Any change to the bar drops back to the rule.
+                */}
                 {state.inspect === "task" ? (
                   <TaskInspector
                     stateId={state.inspectFrom}
@@ -467,6 +511,27 @@ export default function App(): JSX.Element {
                       detail ? actions.cancelTask(detail.taskId, state.selectedProject ?? undefined) : undefined
                     }
                   />
+                ) : state.trail.length > 0 ? (
+                  <RunInspector
+                    node={nodeAt(detail?.instances ?? [], state.trail.at(-1)!.instanceId) ?? null}
+                    stateId={state.trail.at(-1)!.stateId}
+                    detail={detail}
+                    stream={state.stream}
+                    states={state.sessionHistory}
+                    depth={state.trail.length}
+                    onBack={() => actions.walkBackTo(state.trail.length - 2)}
+                    onShowTask={actions.inspectTask}
+                    onStart={() =>
+                      detail ? actions.startTask(detail.taskId, undefined, state.selectedProject ?? undefined) : undefined
+                    }
+                    onCancel={() =>
+                      detail ? actions.cancelTask(detail.taskId, state.selectedProject ?? undefined) : undefined
+                    }
+                    onOpenState={actions.selectState}
+                  />
+                ) : state.dir !== null ? (
+                  // A folder is the end of the address too, so it is what the panel describes.
+                  <FolderInspector layer={state.dir.layer} path={state.dir.path} tree={state.tree} />
                 ) : (
                   <FileInspector
                     doc={state.doc}

@@ -19,6 +19,16 @@ export interface MenuItem {
   disabled?: boolean;
   /** Draw a rule above this item — the grouping is the only structure a flat menu has. */
   separator?: boolean;
+  /**
+   * "You are here."
+   *
+   * For a menu that lists alternatives to something already chosen — the address bar's chevrons —
+   * where a list with no mark on the current entry makes you count segments to work out which one
+   * you are looking at.
+   */
+  checked?: boolean;
+  /** A second line, dimmer: what distinguishes this entry from the others. */
+  note?: string;
 }
 
 export interface MenuAnchor {
@@ -59,7 +69,9 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAnchor; onClose: 
   }, [onClose]);
 
   const width = 232;
-  const height = anchor.items.length * 27 + 10;
+  // A noted item is two lines. Only the tallest case has to be right — this is a clamp against the
+  // window edge, not a layout.
+  const height = anchor.items.length * (anchor.items.some((i) => i.note !== undefined) ? 40 : 27) + 10;
   const left = Math.min(anchor.x, Math.max(4, window.innerWidth - width - 4));
   const top = Math.min(anchor.y, Math.max(4, window.innerHeight - height - 4));
 
@@ -69,14 +81,16 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAnchor; onClose: 
         <button
           key={`${item.label}-${i}`}
           role="menuitem"
-          className={`menu-item${item.danger ? " danger" : ""}${item.separator ? " sep" : ""}`}
+          className={`menu-item${item.danger ? " danger" : ""}${item.separator ? " sep" : ""}${item.checked === true ? " here" : ""}`}
           disabled={item.disabled === true}
           onClick={() => {
             onClose();
             item.onSelect();
           }}
         >
-          {item.label}
+          {item.checked === true ? <span className="menu-mark">•</span> : null}
+          <span className="grow ellip">{item.label}</span>
+          {item.note !== undefined ? <span className="menu-note ellip">{item.note}</span> : null}
         </button>
       ))}
     </div>

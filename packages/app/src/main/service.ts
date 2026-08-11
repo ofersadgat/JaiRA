@@ -1238,12 +1238,22 @@ export class AppService {
     if (record === undefined) {
       return { ...base, empty: "this run was recorded before conversations were kept" };
     }
+    // Everything the conversation already contained when this state entered it — the ref spelling is
+    // `<id>@<position>`, and `messages` materializes every record BELOW that position, walking forks.
+    // What this state actually said is its record minus that, and only that belongs on screen.
+    const inherited = store.messages(`${row.sessionId}@${row.seq}`);
+    const turns = turnsOf(record.value, inherited);
+    if (turns.length === 0 && inherited.length > 0) {
+      // The record was nothing but the history it was handed. Rare, and an answer rather than a
+      // blank panel: the call happened, and it added nothing anybody can read.
+      return { ...base, empty: "this state added nothing to the conversation it was given" };
+    }
     return {
       ...base,
       ...(record.externalId !== undefined ? { providerSessionId: record.externalId } : {}),
       ...(row.status !== undefined ? { status: row.status } : {}),
       ...(row.costUsd !== undefined ? { costUsd: row.costUsd } : {}),
-      turns: turnsOf(record.value),
+      turns,
     };
   }
 
@@ -3334,6 +3344,27 @@ function writeEnvEntry(file: string, name: string, value: string): void {
 }
 
 /**
+ * What THIS record added to the conversation, with the part it merely inherited removed.
+ *
+ * A session is append-only and shared: a state that resumes one is handed everything said before it
+ * and its call returns the whole conversation, prior states included. Rendering that verbatim made
+ * every state after the first show its predecessors' words as its own — the deeper into a workflow
+ * you looked, the more of somebody else's transcript you read.
+ *
+ * The prefix has to match ENTIRELY before anything is dropped. A record that carries the history
+ * begins with it exactly; one that carries only its own delta does not, and a partial match is
+ * neither — most likely two states that happened to open with the same system prompt. Dropping on a
+ * partial match would eat a real first message, so a partial match drops nothing.
+ */
+export function ownMessages(messages: readonly JsonValue[], inherited: readonly JsonValue[]): JsonValue[] {
+  if (inherited.length === 0 || messages.length < inherited.length) return [...messages];
+  for (const [i, message] of inherited.entries()) {
+    if (JSON.stringify(messages[i]) !== JSON.stringify(message)) return [...messages];
+  }
+  return messages.slice(inherited.length);
+}
+
+/**
  * A stored record's messages, as turns the viewer can render.
  *
  * Kept close to what the provider returned: `content` is a string for an ordinary turn and an array
@@ -3341,8 +3372,8 @@ function writeEnvEntry(file: string, name: string, value: string): void {
  * every viewer wants it; the rest is passed through structured, because pairing a tool call with its
  * result is the viewer's job and flattening it here would make that impossible.
  */
-function turnsOf(value: JsonValue | undefined): SessionTurn[] {
-  const messages = messagesOfRecord(value);
+function turnsOf(value: JsonValue | undefined, inherited: readonly JsonValue[] = []): SessionTurn[] {
+  const messages = ownMessages(messagesOfRecord(value), inherited);
   return messages.map((raw) => {
     const message = (raw ?? {}) as { role?: unknown; content?: unknown };
     const role = typeof message.role === "string" ? message.role : "assistant";

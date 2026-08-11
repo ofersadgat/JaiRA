@@ -27,6 +27,7 @@ import type {
   FileSource,
   FileTree,
   HistorySize,
+  InstanceNode,
   IpcChannel,
   IpcRequest,
   IpcResponse,
@@ -68,7 +69,9 @@ import {
   type ExecutorTarget,
 } from "./executorConfig";
 import { applyModelPatch, type ModelPatch } from "./modelsConfig";
+import type { FileSelection } from "./files";
 import { instanceAt, newestRunOf, runTargetOf } from "./runForm";
+import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestFiles, selfTestScript } from "./debugWorkflow";
 
 /** A prune plan or result, as `history:prune` returns it. */
@@ -89,6 +92,9 @@ function bridge(): JairaBridge {
 export async function invoke<C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> {
   return bridge().invoke(channel, request);
 }
+
+/** See {@link AppState.inspect}. */
+export type InspectSubject = "path" | "task";
 
 export interface AppState {
   projectDir: string | null;
@@ -220,6 +226,20 @@ export interface AppState {
    */
   doc: FileSource | null;
 
+  /**
+   * The DIRECTORY open in the middle panel, when a directory is what was opened.
+   *
+   * Beside {@link doc} rather than folded into it, because a folder is not a document: it has no
+   * text, no viewer and no editor, and giving it a `FileSource` with an empty body would make every
+   * surface in the registry have to know it was lying. Exactly one of the two is set — opening
+   * either clears the other, which is what makes "what is the panel showing" a question with one
+   * answer.
+   *
+   * A path of `""` is the layer root itself, which is a real place you can stand: it is what the
+   * chevron before the project crumb navigates to.
+   */
+  dir: FileSelection | null;
+
   // --- the shell ------------------------------------------------------------
 
   /** Which of the three views the rail has selected. */
@@ -237,10 +257,18 @@ export interface AppState {
   /** Everything about that state: its board or its tasks, plus the inspector's subject. */
   state: StateView | null;
   /**
-   * What the inspector is describing. Clicking a card or a task row makes it the task; clicking the
-   * panel header puts it back on the state.
+   * What the context panel is describing.
+   *
+   * `path` is the rule and the default: the panel describes the LAST ELEMENT OF THE ADDRESS BAR —
+   * the run the path ends on, or the open file when no run is on it. It is not a third subject
+   * beside "file" and "run"; it is the statement that those two are decided by the bar rather than
+   * by a mode, which is what stops the two from disagreeing. Every navigation returns to it.
+   *
+   * `task` is the one deliberate exception, reached only by asking for it on the run's own panel.
+   * A task is not a level of the address — a run belongs to one, but you cannot navigate to it —
+   * so it cannot be expressed as a position, and any change to the bar drops back to `path`.
    */
-  inspect: "state" | "task";
+  inspect: InspectSubject;
   /**
    * The state the inspector was describing before a task took it over — what Back returns to.
    *
@@ -312,6 +340,25 @@ export interface AppState {
    * stored turn is the same text and better: it has its tool calls with it.
    */
   liveTurn: { sessionId?: string; seq?: number; stateId?: string; text: string } | null;
+  /**
+   * The runs walked into below the open file — the tail of the Files view's address bar.
+   *
+   * The state-id crumbs come from the document and are fixed by which file is open; these are where
+   * you went from there, and the viewer shows the LAST one. See `trail.ts` for why it is a list
+   * rather than a selection, and why it is scoped to one task.
+   *
+   * Empty means "the state itself, before a run was chosen": a composite shows its task board and a
+   * leaf asks you to pick one.
+   */
+  trail: TrailStep[];
+  /**
+   * The state view of the trail's tail, when the tail is deeper than the open file.
+   *
+   * Only for its DECLARED CHILDREN — a board's columns are what the state declares, so a child that
+   * was never reached is still a column, and the instance tree alone cannot know about one. Null
+   * when the tail is the open file's own state, which already has its view in {@link state}.
+   */
+  trailState: StateView | null;
   /** Which section the Settings view is showing. */
   section: SettingsSection;
   /**
@@ -449,11 +496,12 @@ const EMPTY: AppState = {
   editorTab: {},
   runValues: {},
   doc: null,
+  dir: null,
   view: "tasks",
   tree: null,
   stateId: null,
   state: null,
-  inspect: "state",
+  inspect: "path",
   inspectFrom: null,
   conversation: null,
   sessionHistory: [],
@@ -468,6 +516,8 @@ const EMPTY: AppState = {
   levels: {},
   collapsed: {},
   selectedProject: null,
+  trail: [],
+  trailState: null,
   section: "providers",
   configLayer: "project",
 };
@@ -724,7 +774,7 @@ export function useApp() {
       await refreshTree();
       const open = ref.current.stateId;
       if (open !== null && result.states.includes(open)) {
-        return patch({ stateId: null, state: null, doc: null, inspect: "state" });
+        return patch({ stateId: null, state: null, doc: null, dir: null, inspect: "path" });
       }
       await refreshState(open);
     },
@@ -826,8 +876,14 @@ export function useApp() {
       instanceId: number | null = null,
       project?: string,
       atState?: string | null,
-    ) => {
-      if (taskId === null) return patch({ sessionHistory: [], session: null, sessionInstance: null });
+      // Which instance was resolved, so a NAVIGATION can start the trail at it. Returned rather than
+      // patched here: this also runs on every invalidating push, and re-seeding the trail from one
+      // would drop you back to the top of the walk on each engine event.
+    ): Promise<number | null> => {
+      if (taskId === null) {
+        patch({ sessionHistory: [], session: null, sessionInstance: null });
+        return null;
+      }
       const scope = project ?? ref.current.selectedProject ?? undefined;
       const at = scope !== undefined ? { project: scope } : {};
       try {
@@ -841,9 +897,57 @@ export function useApp() {
         // The live tail goes when the record lands: the stored turn is the same text with its tool
         // calls attached, so keeping both would show the answer twice.
         patch({ sessionHistory: history, session, sessionInstance: wanted, liveTurn: null });
+        return wanted;
       } catch {
         patch({ sessionHistory: [], session: null, sessionInstance: null });
+        return null;
       }
+    },
+    [patch],
+  );
+
+  /**
+   * The declared children of whatever the trail is standing on.
+   *
+   * Fetched only when the tail is DEEPER than the open file: a board's columns are what a state
+   * declares, and a child that was never reached is a column the instance tree cannot know about.
+   * At the base the open file's own view already answers it, and asking again would be a round trip
+   * for a value we are holding.
+   */
+  const refreshTrailState = useCallback(
+    async (stateId: string | null) => {
+      if (stateId === null || stateId === ref.current.stateId) return patch({ trailState: null });
+      try {
+        patch({ trailState: await invoke("state:view", { stateId }) });
+      } catch {
+        // A state that will not load leaves the board to the instance tree, which is the honest
+        // fallback: the columns that ran, without the ones that did not.
+        patch({ trailState: null });
+      }
+    },
+    [patch],
+  );
+
+  /**
+   * Put the trail on ONE run — the base of a walk.
+   *
+   * Every navigation that chooses a run lands here: selecting a task, opening a state on its newest
+   * run, following a link from the task panel. It REPLACES rather than appends, because arriving at
+   * a run from outside is not a step deeper into the walk you were on — and an instance id from
+   * another task names nothing here.
+   */
+  const seedTrail = useCallback(
+    (detail: TaskDetail | null, stateId: string | null) => {
+      // A LATE answer for a file that is no longer open. Every caller resolves the run over a round
+      // trip, so clicking a second file before the first one's detail lands would otherwise put that
+      // file's run on this file's path — the one thing an address bar must never do.
+      if (stateId !== null && stateId !== ref.current.stateId) return;
+      // From the INSTANCE TREE, not the session history. A composite orchestrates and says nothing,
+      // so it has no conversation and no session row — which is why seeding from the history left
+      // exactly the states with children showing no run on the path at all.
+      const node = stateId === null ? undefined : instanceOf(detail?.instances ?? [], stateId);
+      if (node === undefined) return patch({ trail: [], trailState: null });
+      patch({ trail: [stepOf(node)], trailState: null });
     },
     [patch],
   );
@@ -884,6 +988,36 @@ export function useApp() {
     return layer === undefined ? focused : (runTargetOf(layer, ref.current.projectDir).project ?? focused);
   }, []);
 
+  const refreshDetail = useCallback(
+    // The detail is RETURNED as well as patched, because it is what a navigation seeds the address
+    // bar from: the run a path stands on is an instance, and the instance tree is the only record
+    // that has one for a state which ran no model call.
+    async (taskId: string | null, project?: string): Promise<TaskDetail | null> => {
+      if (!taskId) {
+        patch({ detail: null, trail: [], trailState: null });
+        return null;
+      }
+      const scope = project ?? ref.current.selectedProject ?? undefined;
+      try {
+        const detail = await invoke("task:detail", { taskId, ...(scope !== undefined ? { project: scope } : {}) });
+        // The walk is checked against the tree it walks. A retry restarts instance ids, so a trail
+        // held across one would offer crumbs into a run that no longer exists — and the address bar
+        // is the one surface that must not describe a place you cannot get to.
+        const trail = prunedTrail(ref.current.trail, detail.instances);
+        patch({ detail, ...(sameTrail(trail, ref.current.trail) ? {} : { trail }) });
+        return detail;
+      } catch {
+        // Quiet, like the conversation and session reads beside it. This fires on every selection
+        // change and on every push about the selected task, so a selection that has gone stale — a
+        // project closed underneath it, a task pruned — would otherwise raise a toast per event
+        // rather than emptying the panel, which is the honest answer and the one already rendered.
+        patch({ detail: null });
+      }
+      return null;
+    },
+    [patch],
+  );
+
   const focusStateRun = useCallback(
     (view: StateView | null) => {
       // Both task lists, every time a state is opened. The run history reads one of them — which one
@@ -895,22 +1029,28 @@ export function useApp() {
       void refreshTasks();
       void refreshSharedTasks();
       if (view === null) {
-        patch({ selected: null, sessionHistory: [], session: null, sessionInstance: null, conversation: null, sessions: {} });
+        patch({ selected: null, sessionHistory: [], session: null, sessionInstance: null, conversation: null, sessions: {}, trail: [], trailState: null });
         return;
       }
       const newest = newestRunOf(view);
       if (newest === null) {
-        patch({ selected: null, sessionHistory: [], session: null, sessionInstance: null, conversation: null });
+        patch({ selected: null, sessionHistory: [], session: null, sessionInstance: null, conversation: null, trail: [], trailState: null });
         return;
       }
       // The project the STATE's runs live in, not the focused one — see `owningProject`. `view` is
       // authoritative about the layer here, and it is the value the reads below have to agree with.
       const at = runTargetOf(view.layer, ref.current.projectDir).project ?? ref.current.projectDir ?? undefined;
-      patch({ selected: newest.taskId, selectedProject: at ?? null, stream: [], sessions: {} });
+      patch({ selected: newest.taskId, selectedProject: at ?? null, stream: [], sessions: {}, trail: [], trailState: null });
       void refreshConversation(newest.taskId, at);
       void refreshSession(newest.taskId, null, at, view.stateId);
+      // The trail starts at the run that was opened: the panel is showing it, so the address bar has
+      // to say so — a path whose last element is not what is on screen is not an address. The detail
+      // is fetched HERE rather than only on a click, because that instance tree is both what the
+      // board draws and what the path stands on, and without it the two disagreed on open: the bar
+      // said no run, the panel showed one.
+      void refreshDetail(newest.taskId, at).then((detail) => seedTrail(detail, view.stateId));
     },
-    [patch, refreshConversation, refreshSession, refreshTasks, refreshSharedTasks],
+    [patch, refreshConversation, refreshDetail, refreshSession, refreshTasks, refreshSharedTasks, seedTrail],
   );
 
   /**
@@ -940,22 +1080,6 @@ export function useApp() {
     [patch],
   );
 
-  const refreshDetail = useCallback(
-    async (taskId: string | null, project?: string) => {
-      if (!taskId) return patch({ detail: null });
-      const scope = project ?? ref.current.selectedProject ?? undefined;
-      try {
-        patch({ detail: await invoke("task:detail", { taskId, ...(scope !== undefined ? { project: scope } : {}) }) });
-      } catch {
-        // Quiet, like the conversation and session reads beside it. This fires on every selection
-        // change and on every push about the selected task, so a selection that has gone stale — a
-        // project closed underneath it, a task pruned — would otherwise raise a toast per event
-        // rather than emptying the panel, which is the honest answer and the one already rendered.
-        patch({ detail: null });
-      }
-    },
-    [patch],
-  );
 
   const refreshPending = useCallback(async () => {
     try {
@@ -1175,7 +1299,10 @@ export function useApp() {
           }
           if (message.scope === "task") {
             void refreshDetail(ref.current.selected);
-            if (ref.current.inspect === "task") {
+            // Whenever a run is on screen — the address bar is standing on one, or the panel is on
+            // its task. Keyed off `inspect` alone, a walk into a run left the transcript frozen at
+            // whatever it said when you walked in.
+            if (ref.current.inspect === "task" || ref.current.trail.length > 0) {
               void refreshConversation(ref.current.selected);
               void refreshSession(ref.current.selected, ref.current.sessionInstance);
             }
@@ -1217,7 +1344,9 @@ export function useApp() {
           void refreshBoard();
           void refreshDetail(ref.current.selected);
           void refreshState(ref.current.stateId);
-          if (ref.current.inspect === "task") void refreshConversation(ref.current.selected);
+          if (ref.current.inspect === "task" || ref.current.trail.length > 0) {
+            void refreshConversation(ref.current.selected);
+          }
           break;
         case "session:turn": {
           // Accumulated per position: a delta is a fragment, and the fragments of one call belong to one
@@ -1282,19 +1411,81 @@ export function useApp() {
         // the focused project, which with no checkout open is none and makes every read that follows
         // throw. See `owningProject`.
         const at = project ?? ref.current.selectedProject ?? owningProject();
+        const from = atState ?? ref.current.stateId;
         patch({
           selected: taskId,
           selectedProject: taskId === null ? null : (at ?? null),
           stream: [],
           sessions: {},
-          inspect: taskId === null ? "state" : "task",
+          // A trail names one task's instances (see `trail.ts`), so arriving at another task starts
+          // a new one rather than extending this.
+          trail: [],
+          trailState: null,
+          // Back to following the bar. A task card in a state's board IS a run of that state, and the
+          // panel describes wherever the path now ends — see {@link AppState.inspect}.
+          inspect: "path",
           // Only on the way IN. Clicking a second task while already on one must not overwrite the
           // state we came from with the task we are leaving — that is what turns Back into a loop.
-          ...(taskId !== null && ref.current.inspect !== "task" ? { inspectFrom: ref.current.stateId } : {}),
+          ...(taskId !== null && ref.current.inspect === "path" ? { inspectFrom: ref.current.stateId } : {}),
         });
-        void refreshDetail(taskId, at);
+        void refreshDetail(taskId, at).then((detail) => seedTrail(detail, from));
         void refreshConversation(taskId, at);
-        void refreshSession(taskId, null, at, atState ?? ref.current.stateId);
+        void refreshSession(taskId, null, at, from);
+      },
+
+      /**
+       * Walk into a run: append it to the path, and show it.
+       *
+       * The whole of "the view is the last element" — everything else here is bookkeeping to make
+       * that true. The transcript moves to this instance (so a leaf tail shows what it said), the
+       * declared children of its state are fetched (so a composite tail has columns for what never
+       * ran), and the inspector follows, because the context bar describes where you are standing.
+       */
+      walkInto: (node: InstanceNode) => actionsRef.current.walkTo(ref.current.trail.length, node),
+
+      /**
+       * Put a run at one level of the path, replacing everything from there down.
+       *
+       * Both moves are this. Walking IN appends at the end; picking a sibling out of a chevron's menu
+       * replaces at that level, because a sibling is not a step deeper and the levels below it
+       * described a descent through the run you just left.
+       */
+      walkTo: (index: number, node: InstanceNode) => {
+        patch({ trail: [...ref.current.trail.slice(0, index), stepOf(node)], inspect: "path" });
+        void refreshSession(ref.current.selected, node.instanceId, ref.current.selectedProject ?? undefined);
+        void refreshTrailState(node.stateId);
+      },
+
+      /**
+       * Walk back out to a crumb. `-1` is the file itself — the state, before any run was chosen.
+       *
+       * Truncating to the file CLEARS the selection rather than keeping it: with no run in the path
+       * the view is the state's own board, and a highlighted task in it would be claiming a run is
+       * open when the bar says none is.
+       */
+      walkBackTo: (index: number) => {
+        if (index < 0) {
+          // The detail goes with the selection. Left behind, the board would keep drawing that run's
+          // executions — the previous level of the walk — under a path that says no run is open.
+          patch({
+            trail: [],
+            trailState: null,
+            selected: null,
+            detail: null,
+            conversation: null,
+            session: null,
+            sessionInstance: null,
+            sessions: {},
+            inspect: "path",
+          });
+          return;
+        }
+        const trail = ref.current.trail.slice(0, index + 1);
+        const step = trail.at(-1);
+        if (step === undefined) return;
+        patch({ trail, inspect: "path" });
+        void refreshSession(ref.current.selected, step.instanceId, ref.current.selectedProject ?? undefined);
+        void refreshTrailState(step.stateId);
       },
 
       /** Fold a project's board away. Its level is kept, so re-opening lands where it was. */
@@ -1340,10 +1531,21 @@ export function useApp() {
        */
       inspectState: () => {
         const back = ref.current.inspectFrom;
-        patch({ inspect: "state", inspectFrom: null });
+        patch({ inspect: "path", inspectFrom: null });
+        // Which now means "describe the end of the address again" — the file when no run is on it,
+        // and the run when one is. Restoring the state that was open is the other half, and it is
+        // still needed because a task's links can move it out from under you.
         if (back === null || back === ref.current.stateId) return;
         actionsRef.current.selectState(back);
       },
+      /**
+       * Describe the TASK a run belongs to, rather than the run.
+       *
+       * The third subject of the context panel, and the only one with no click of its own: a run is
+       * reached by walking into it and a file by opening it, but the task around them is something
+       * you ask for — which is why this is a link on the run's panel rather than a mode.
+       */
+      inspectTask: () => patch({ inspect: "task" }),
       /**
        * Walk into a level in the Tasks view. `null` returns to the root listing.
        *
@@ -1531,7 +1733,7 @@ export function useApp() {
        * that task has nothing to do with the new file.
        */
       selectFile: (node: FileNode) => {
-        patch({ stateId: node.stateId ?? null, inspect: "state", doc: null, sync: clearedSync(ref.current.sync) });
+        patch({ stateId: node.stateId ?? null, inspect: "path", doc: null, dir: null, sync: clearedSync(ref.current.sync) });
         void refreshState(node.stateId ?? null).then((view) => focusStateRun(view));
         if (isTextMime(node.mime)) return void refreshDoc(node.layer, node.path);
         // A PNG or the database: `file:read` would refuse it, and a refusal here would leave the
@@ -1550,7 +1752,7 @@ export function useApp() {
        * the file this resolves to, so it always says where you are.
        */
       selectState: (stateId: string | null) => {
-        patch({ stateId, inspect: "state", doc: null, sync: clearedSync(ref.current.sync) });
+        patch({ stateId, inspect: "path", doc: null, dir: null, sync: clearedSync(ref.current.sync) });
         void refreshState(stateId).then((view) => focusStateRun(view));
         if (stateId === null) return void refreshDoc(null, null);
         void locateState(stateId).then((at) => refreshDoc(at?.layer ?? null, at?.path ?? null));
@@ -1573,10 +1775,42 @@ export function useApp() {
        * context came from.
        */
       openStateAt: (stateId: string, instanceId: number) => {
-        patch({ stateId, doc: null, sync: clearedSync(ref.current.sync) });
+        // `inspect` goes back to the path like every other move that changes the bar. This one used
+        // to hold the column on the task so its list of states could be walked; it cannot any more,
+        // because the rule is that the panel describes where the address ends. The list is one click
+        // away on the run's own panel.
+        patch({ stateId, doc: null, dir: null, inspect: "path", sync: clearedSync(ref.current.sync) });
         void refreshState(stateId);
         void locateState(stateId).then((at) => refreshDoc(at?.layer ?? null, at?.path ?? null));
         void refreshSession(ref.current.selected, instanceId, ref.current.selectedProject ?? owningProject());
+        // The path lands on the run that was clicked, not on the state's newest — the row named one
+        // pass through it, and that is the one about to be on screen.
+        const node = nodeAt(ref.current.detail?.instances ?? [], instanceId);
+        patch(node === undefined ? { trail: [], trailState: null } : { trail: [stepOf(node)], trailState: null });
+      },
+
+      /**
+       * Open a DIRECTORY: show what is in it, as a file explorer does.
+       *
+       * The other half of an address bar. A path whose segments you can click is only navigable if
+       * the segments themselves are places — and every segment but the last one is a folder, so
+       * without this the bar could only ever go to the file it already had open.
+       *
+       * `""` is the layer root. Everything a file open would set is cleared, because a folder is not
+       * a state and not a document: leaving `stateId` behind would leave the inspector describing a
+       * state you have navigated away from, and the trail with it.
+       */
+      openDir: (layer: WorkflowLayer, path: string) => {
+        patch({
+          dir: { layer, path },
+          doc: null,
+          stateId: null,
+          state: null,
+          inspect: "path",
+          trail: [],
+          trailState: null,
+          sync: clearedSync(ref.current.sync),
+        });
       },
 
       /**
@@ -1588,7 +1822,7 @@ export function useApp() {
        * is the correct picture of what saving would do.
        */
       openPath: (layer: WorkflowLayer, path: string) => {
-        patch({ inspect: "state", doc: null, sync: clearedSync(ref.current.sync) });
+        patch({ inspect: "path", doc: null, dir: null, sync: clearedSync(ref.current.sync) });
         // One read, not two: the document that arrives is what says whether this path defines a
         // state, and asking twice is how the panel and the inspector end up a revision apart.
         void refreshDoc(layer, path).then(() => {
@@ -1853,7 +2087,7 @@ export function useApp() {
        * two copies, and resolving the id again would be free to pick the other one.
        */
       openWorkflow: async (stateId: string, layer: WorkflowLayer) => {
-        patch({ busy: true, error: null, view: "files", stateId, inspect: "state" });
+        patch({ busy: true, error: null, view: "files", stateId, inspect: "path" });
         try {
           const at = await locateState(stateId, layer);
           await refreshDoc(layer, at?.path ?? `workflows/${stateId}.json`);
@@ -1875,7 +2109,7 @@ export function useApp() {
         patch({ busy: true, error: null, view: "files" });
         try {
           await invoke("workflow:write", { stateId, layer, text: "{}" });
-          patch({ busy: false, stateId, inspect: "state" });
+          patch({ busy: false, stateId, inspect: "path" });
           await Promise.all([
             refreshTree(),
             refreshState(stateId),
@@ -1932,7 +2166,7 @@ export function useApp() {
               patch({ drafts: movedDraft(ref.current.drafts, docKey(from.layer, from.path), to) });
             }
             if (ref.current.stateId === request.stateId || request.copy === true) {
-              patch({ stateId: result.stateId, inspect: "state" });
+              patch({ stateId: result.stateId, inspect: "path" });
               await Promise.all([refreshState(result.stateId), refreshDoc(at?.layer ?? null, at?.path ?? null)]);
             } else {
               await refreshState(ref.current.stateId);
@@ -1961,7 +2195,7 @@ export function useApp() {
             if (at !== null) patch({ drafts: withoutDraftsUnder(ref.current.drafts, at.layer, at.path) });
             await refreshTree();
             if (wasOpen) {
-              patch({ stateId: null, state: null, inspect: "state", doc: null });
+              patch({ stateId: null, state: null, inspect: "path", doc: null });
             } else {
               await refreshState(ref.current.stateId);
             }
@@ -2150,7 +2384,7 @@ export function useApp() {
           // conversation, the live event stream — is already pointed at the run when its first event
           // arrives. Selecting afterwards means watching the beginning in the past tense.
           patchDebug({ taskId });
-          patch({ selected: taskId, selectedProject: SHARED_SESSION, stream: [], inspect: "task" });
+          patch({ selected: taskId, selectedProject: SHARED_SESSION, stream: [], inspect: "path" });
           await Promise.all([
             refreshSharedTasks(),
             refreshBoard(),
@@ -2339,6 +2573,8 @@ export function useApp() {
       focusStateRun,
       refreshDebugFiles,
       afterFileChange,
+      refreshTrailState,
+      seedTrail,
     ],
   );
 

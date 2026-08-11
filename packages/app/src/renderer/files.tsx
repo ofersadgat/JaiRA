@@ -14,12 +14,14 @@
  * The tree shows BOTH layer roots, which is what removes the layer picker: which copy of a file you
  * are about to edit is its position on screen rather than a mode you have to remember being in.
  */
-import { useState, type CSSProperties, type JSX } from "react";
+import { Fragment, useMemo, useState, type CSSProperties, type JSX } from "react";
 import type {
+  BoardCard,
   FileMutationResult,
   FileNode,
   FileSource,
   FileTree,
+  InstanceNode,
   MoveWorkflowRequest,
   SessionRef,
   StateView,
@@ -33,7 +35,11 @@ import { TaskPanel } from "./detail";
 import { resolveFileSurface, type FileSurfaceContext } from "./fileTypes";
 import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem } from "./menu";
 import { RunPanel, type RunSurface } from "./runPanel";
+import { RunModeToggle } from "./runViews";
+import { signatureOf } from "./transcript";
+import { durationOf } from "./transcriptView";
 import { Splitter } from "./splitter";
+import { nodeAt, stepOf, type TrailStep } from "./trail";
 
 /**
  * How tall the viewer opens, and what a double-click on the divider restores.
@@ -666,50 +672,506 @@ export function FileTreePanel({
 // --- the middle panel --------------------------------------------------------
 
 /**
- * The head of the middle panel: what is open, and where it lives.
+ * Every state id in either root — which crumbs above are worth making clickable.
  *
- * It says the same three things about every file — its name, its layer, its type — and adds the
- * state's own summary when the file happens to define one. Clicking it puts the inspector back on
- * the file, which is the way out of having drilled into a task.
+ * A state id is a PATH, so `plan/draft/critique` names two ancestors. Both usually exist as files
+ * and opening one is the move the bar is for; neither is guaranteed to, because an id is a naming
+ * convention rather than a containment rule and `plan/draft` can exist with no `plan`. A crumb that
+ * opens nothing is worse than a crumb that is plainly not a link, so this is what decides.
  */
-function FileHead({
-  doc,
+function stateIdsOf(tree: FileTree | null): ReadonlySet<string> {
+  const out = new Set<string>();
+  const walk = (nodes: readonly FileNode[]): void => {
+    for (const node of nodes) {
+      if (node.stateId !== undefined) out.add(node.stateId);
+      if (node.children) walk(node.children);
+    }
+  };
+  for (const root of tree?.roots ?? []) walk(root.nodes);
+  return out;
+}
+
+/**
+ * One crumb of the address bar.
+ *
+ * `go` is what clicking it does; a crumb with none is either where you are standing or a segment
+ * that names nothing openable. The two KINDS are drawn differently because they are different
+ * things: the file's own hierarchy is fixed by which document is open, and the runs after it are a
+ * walk you can take back.
+ */
+export interface Crumb {
+  text: string;
+  /**
+   * Which family it belongs to, which is what it LOOKS like.
+   *
+   * Three, and they are three different kinds of thing rather than three levels of importance: a
+   * `folder` is a place on disk, a `state` is a level of the workflow hierarchy, a `run` is one
+   * execution. Every member of a family looks identical to every other — including the layer root,
+   * which is a folder like any other and had a pill of its own for no reason except that it happened
+   * to be first.
+   */
+  kind: "folder" | "state" | "run";
+  /** The full story, for the tooltip: which instance, which state it ran, where on disk. */
+  title?: string;
+  go?: () => void;
+  /**
+   * The other things that could be at this level — what the `›` before this crumb drops down.
+   *
+   * The Explorer move: a separator is not decoration, it is the join between two levels, and the
+   * question it can answer is "what else is in the one on the left". For a path crumb that is the
+   * containing directory's entries; for a run it is the sibling runs, which is the board one level
+   * up without going back to it; for the ROOT it is the other roots, and the way to another project.
+   *
+   * Absent when there is no OTHER — a menu whose one entry names where you already are is a control
+   * that does nothing, so the chevron stays a plain glyph. See {@link alternatives}.
+   */
+  options?: MenuItem[];
+}
+
+/**
+ * The directory the workflow hierarchy lives in.
+ *
+ * The one place a path stops being folders and starts being state ids: `workflows/debug/plan.json`
+ * defines the state `debug/plan`. Above it a segment is a folder; below it a segment is a level of
+ * the hierarchy, which is what decides the colour.
+ */
+const WORKFLOWS = "workflows";
+
+/** The state id a directory under `workflows/` is the prefix of, or null when it is not under one. */
+function stateIdOfDir(path: string): string | null {
+  if (path === WORKFLOWS) return "";
+  return path.startsWith(`${WORKFLOWS}/`) ? path.slice(WORKFLOWS.length + 1) : null;
+}
+
+/** Everything the address bar needs to build itself. Grouped, because it is most of a screen's state. */
+export interface CrumbInput {
+  /** Which root the address is in. */
+  layer: WorkflowLayer;
+  /** The path under that root; `""` is the root itself, which is a real place to stand. */
+  path: string;
+  /** The state this path defines, when it defines one — what makes the last crumb a state. */
+  stateId?: string | undefined;
+  /** True when the path names a DIRECTORY, so its last crumb is a folder rather than a document. */
+  isDir?: boolean | undefined;
+  /** Every state id in either root — which segments under `workflows/` have a file behind them. */
+  states: ReadonlySet<string>;
+  /** Both roots, whole: the chevrons are directory listings and this is the directory. */
+  tree: FileTree | null;
+  trail: readonly TrailStep[];
+  /** The selected task's instance tree — where a run's siblings come from. */
+  instances: readonly InstanceNode[];
+  /** The other runs of the open state: what the chevron before the base run offers. */
+  runs: readonly BoardCard[];
+  selectedTask: string | null;
+  /**
+   * The selected task's own name — what the BASE run crumb reads.
+   *
+   * A run is identified by its task, not by its instance id: instance ids restart at 1 on every run,
+   * so the root instance of every task is `#1` and a base crumb built from one said the same thing
+   * whichever run you picked. See {@link runCrumbOf}.
+   */
+  taskTitle?: string | undefined;
+  onOpenState: (stateId: string) => void;
+  onOpenFile: (layer: WorkflowLayer, path: string) => void;
+  /** Show a directory's contents. `""` is the root. */
+  onOpenDir: (layer: WorkflowLayer, path: string) => void;
+  /** Choose another project — the last entry under the root's chevron. */
+  onOpenProject?: (() => void) | undefined;
+  onWalkBack: (index: number) => void;
+  /** Replace the path from `index` down with this run — walking sideways rather than in. */
+  onWalkTo: (index: number, node: InstanceNode) => void;
+  onSelectTask: (taskId: string) => void;
+}
+
+/**
+ * A level's menu, or nothing when there is nowhere else to go.
+ *
+ * The list always CONTAINS where you are — that is what the mark is for, and a list that dropped it
+ * would make you count the path to see which one you were on. But a list that is ONLY where you are
+ * is a chevron that opens to tell you what the crumb beside it already says.
+ */
+function alternatives(options: MenuItem[]): MenuItem[] | undefined {
+  return options.some((option) => option.checked !== true) ? options : undefined;
+}
+
+/**
+ * What is in one directory of one layer: subdirectories first, then files, each by name.
+ *
+ * Directories first because that is the order every file manager has used for thirty years, and the
+ * reason is still true — the folders are how you keep going, the files are where you stop.
+ */
+function entriesUnder(tree: FileTree | null, layer: WorkflowLayer, dir: string): FileNode[] {
+  const out: FileNode[] = [];
+  const walk = (nodes: readonly FileNode[]): void => {
+    for (const node of nodes) {
+      const parent = node.path.includes("/") ? node.path.slice(0, node.path.lastIndexOf("/")) : "";
+      if (parent === dir) out.push(node);
+      if (node.children) walk(node.children);
+    }
+  };
+  for (const root of tree?.roots ?? []) if (root.layer === layer) walk(root.nodes);
+  return out.sort((a, b) =>
+    a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "directory" ? -1 : 1,
+  );
+}
+
+/** One directory entry, as the thing a chevron offers: a folder to enter, a state, or a file. */
+export function entryItem(node: FileNode, current: string, input: Pick<CrumbInput, "onOpenDir" | "onOpenState" | "onOpenFile">): MenuItem {
+  const checked = node.path === current;
+  if (node.kind === "directory") {
+    return { label: node.name, note: "folder", checked, onSelect: () => input.onOpenDir(node.layer, node.path) };
+  }
+  // A state is offered by its ID rather than its filename: `hello_world`, not `hello_world.json`.
+  // The extension is a fact about storage, and the bar it would land in speaks state ids.
+  if (node.stateId !== undefined) {
+    const id = node.stateId;
+    return { label: id.split("/").pop() ?? id, checked, onSelect: () => input.onOpenState(id) };
+  }
+  return { label: node.name, checked, onSelect: () => input.onOpenFile(node.layer, node.path) };
+}
+
+/**
+ * A run's name with the part the path already says taken off the front.
+ *
+ * The Run panel names a task after the state and a count — `debug/hello_world #2` — so under a path
+ * reading `debug › hello_world` the useful half is `#2`, and the rest is the two crumbs to its left
+ * repeated. Anything that does NOT start with the state id is left alone: `Fix the parser` is a name
+ * somebody chose, and shortening it would be inventing an abbreviation.
+ */
+export function shortRunName(title: string, stateId: string | undefined): string {
+  if (stateId === undefined || !title.startsWith(stateId)) return title;
+  const rest = title.slice(stateId.length).trim();
+  return rest.length > 0 ? rest : title;
+}
+
+/**
+ * How a run reads in the path: which TASK at the base, its own name below that.
+ *
+ * The rule is POSITIONAL, and it has to be. The first step is the open file's own state — that state
+ * is the crumb immediately before it, by construction — so whatever the run is CALLED there is
+ * another word for a level the path already has: `hello_world › Hello-world self-test` spends a
+ * segment saying nothing twice and reads as if the second were a state of its own. What is new about
+ * that crumb is WHICH RUN, and the run is identified by its task.
+ *
+ * It is emphatically NOT the instance id. Instance ids restart at 1 on every run, so the root
+ * instance of every task is `#1` — the base crumb read `#1` no matter which run you picked, which is
+ * indistinguishable from a selection that did not happen. The instance id survives as the fallback
+ * for a run with no task title to use, and in the tooltip, where it is precise and not alone.
+ *
+ * Below the base the state is not in the path at all, so the run's name is the only thing that says
+ * which of the parent's children this is — `Say hello`, and `#7` when it has no name.
+ */
+function runCrumbOf(step: TrailStep, index: number, taskTitle: string | undefined, stateId: string | undefined): string {
+  if (index > 0) return step.name ?? `#${step.instanceId}`;
+  return taskTitle === undefined ? `#${step.instanceId}` : shortRunName(taskTitle, stateId);
+}
+
+/**
+ * The path across the top, as a file explorer draws one.
+ *
+ * THREE families, joined into one address. The FOLDERS are the real path on disk, root included —
+ * every one of them a place you can navigate to, which is what makes the bar an address rather than
+ * a label. The STATES are the segments under `workflows/`, where a path stops being directories and
+ * becomes the workflow hierarchy. The RUNS are where you went from there, one crumb per run walked
+ * into, and the view below shows the last element.
+ *
+ * The root used to be a pill of its own and the folders above `workflows/` were not shown at all,
+ * which made the one segment that was drawn differently also the only one you could not click. It is
+ * an ordinary folder crumb now.
+ *
+ * With a run on the path, the file's own last segment stops being where you are and becomes a link
+ * like the rest — clicking it is how you get back out to the state itself.
+ */
+export function crumbsOf(input: CrumbInput): Crumb[] {
+  const { layer, path, stateId, isDir, states, tree, trail, instances, runs, selectedTask } = input;
+  const out: Crumb[] = [];
+  const segments = path === "" ? [] : path.split("/");
+  const root = tree?.roots.find((r) => r.layer === layer);
+
+  // The root, as a folder like any other. Its menu is the other roots — and the way to a project
+  // that is not open, which is the only navigation in this bar that is not already on disk.
+  const roots: MenuItem[] = (tree?.roots ?? []).map((entry) => ({
+    label: entry.layer === "project" ? ".jaira" : "~/.jaira",
+    note: entry.layer === "project" ? "this project" : "shared",
+    checked: entry.layer === layer,
+    onSelect: () => input.onOpenDir(entry.layer, ""),
+  }));
+  if (input.onOpenProject !== undefined) {
+    roots.push({ label: "Open another project…", separator: roots.length > 0, onSelect: input.onOpenProject });
+  }
+  out.push({
+    text: layer === "project" ? ".jaira" : "~/.jaira",
+    kind: "folder",
+    ...(root !== undefined ? { title: root.dir } : {}),
+    ...(segments.length > 0 || trail.length > 0 ? { go: () => input.onOpenDir(layer, "") } : {}),
+    ...(alternatives(roots) !== undefined ? { options: alternatives(roots)! } : {}),
+  });
+
+  segments.forEach((segment, i) => {
+    const here = segments.slice(0, i + 1).join("/");
+    const last = i === segments.length - 1;
+    const dirId = stateIdOfDir(here);
+    // Under `workflows/` a segment is a level of the hierarchy whether or not a file sits at that
+    // id — `debug/` with no `debug.json` is still the first half of `debug/hello_world`. What the
+    // file's existence decides is where clicking it GOES: to the state, or to the folder that is
+    // all there is.
+    const asState = last && stateId !== undefined ? stateId : dirId !== null && dirId !== "" ? dirId : undefined;
+    const text = last && stateId !== undefined ? (stateId.split("/").pop() ?? segment) : segment;
+    const go = last
+      ? // Where you already are — unless a run has been walked into, in which case this is the way
+        // back out to it. It walks the trail rather than re-opening the document it already has.
+        trail.length > 0
+        ? (): void => input.onWalkBack(-1)
+        : undefined
+      : asState !== undefined && states.has(asState)
+        ? (): void => input.onOpenState(asState)
+        : (): void => input.onOpenDir(layer, here);
+    const options = alternatives(
+      entriesUnder(tree, layer, segments.slice(0, i).join("/")).map((node) => entryItem(node, here, input)),
+    );
+    out.push({
+      text,
+      kind: asState === undefined ? "folder" : "state",
+      title: asState === undefined ? here : asState,
+      ...(go !== undefined ? { go } : {}),
+      ...(options !== undefined ? { options } : {}),
+    });
+  });
+
+  // A folder's own last crumb is where you are standing, so it gets the current-level treatment the
+  // last path segment already has. Nothing more to add — but the LISTING below it is the view, and
+  // that is what makes `isDir` worth carrying.
+  void isDir;
+
+  trail.forEach((step, i) => {
+    const last = i === trail.length - 1;
+    // The BASE's alternatives are the other runs of this state — which are other tasks, since one
+    // task's newest pass is what the base stands for. Deeper, they are the sibling runs under the
+    // same parent, which is the board one level up without having to go back to it.
+    const parent = i === 0 ? undefined : nodeAt(instances, trail[i - 1]!.instanceId);
+    const options = alternatives(
+      i === 0
+        ? runs.map((card) => ({
+            // Shortened exactly as the crumb it would become, so picking `#2` out of this list puts
+            // `#2` on the bar rather than something that has to be recognised as the same run.
+            label: shortRunName(card.title, stateId),
+            note: card.activeStateId ?? card.status,
+            checked: card.taskId === selectedTask,
+            onSelect: () => input.onSelectTask(card.taskId),
+          }))
+        : [...(parent?.children ?? [])]
+            .filter((child) => !child.superseded)
+            .sort((a, b) => a.startedAt - b.startedAt)
+            .map((child) => {
+              const sibling = stepOf(child);
+              return {
+                label: sibling.name ?? `#${child.instanceId}`,
+                note: child.status.replace(/_/g, " "),
+                checked: child.instanceId === step.instanceId,
+                onSelect: () => input.onWalkTo(i, child),
+              };
+            }),
+    );
+    out.push({
+      text: runCrumbOf(step, i, input.taskTitle, stateId),
+      kind: "run",
+      title:
+        i === 0 && input.taskTitle !== undefined
+          ? `${input.taskTitle} — run #${step.instanceId} of ${step.stateId}`
+          : `run #${step.instanceId} of ${step.stateId}`,
+      ...(last ? {} : { go: () => input.onWalkBack(i) }),
+      ...(options !== undefined ? { options } : {}),
+    });
+  });
+  return out;
+}
+
+/**
+ * The head of the middle panel: an address bar for what is open.
+ *
+ * It used to be a title and a subtitle — the state id on one line, its layer and child count on the
+ * next — which said where you were and offered no way anywhere. The path is the same information
+ * arranged so that every level above the one you are on is one click, which is what a file explorer
+ * does with exactly this data.
+ *
+ * Clicking the bar itself still puts the inspector back on the file: that is the way out of having
+ * drilled into a task, and it is why the crumbs stop the click from propagating.
+ */
+function DocBar({
+  input,
   state,
   onInspect,
+  children,
 }: {
-  doc: FileSource;
+  /** Everything the path is built from — see {@link crumbsOf}. */
+  input: CrumbInput;
   state: StateView | null;
   onInspect: () => void;
+  /** The right-hand end of the bar — what mode the panel below is in, when it has one. */
+  children?: React.ReactNode;
 }): JSX.Element {
+  // Which chevron is open, so the same click closes it and the glyph can turn to face down.
+  const [menu, setMenu] = useState<(MenuAnchor & { at: number }) | null>(null);
   const errors = state === null ? 0 : state.issues.filter((i) => i.severity === "error").length;
   const warnings = state === null ? 0 : state.issues.length - errors;
+  const crumbs = crumbsOf(input);
   return (
-    <header className="doc-head" onClick={onInspect} title={doc.file}>
-      <div className="doc-title">
-        <div className="state-id">{state?.stateId ?? doc.path}</div>
-        <div className="sub ellip">
-          {state?.label ? `${state.label} · ` : ""}
-          {LAYER_LABEL[doc.layer]}
-          {state === null
-            ? ` · ${doc.mime}`
-            : state.children.length > 0
-              ? ` · ${state.children.length} child ${state.children.length === 1 ? "state" : "states"}`
-              : " · no child states"}
-        </div>
-      </div>
-      {doc.exists ? null : <span className="chip">new</span>}
+    <header className="doc-bar" onClick={onInspect} title={LAYER_LABEL[input.layer]}>
+      {crumbs.map((crumb, i) => (
+        <span key={`${i}:${crumb.kind}:${crumb.text}`} className="crumb-part">
+          {/* The separator is the join between two levels, so it is where "what ELSE is at this
+              level" belongs — Explorer's move, and the reason it turns to face down when open. A
+              level with no alternatives keeps a plain glyph rather than an empty menu. */}
+          {crumb.options === undefined ? (
+            // The root has nothing to its left, so its chevron would be a separator between the bar
+            // and the window. It keeps the menu and loses the glyph.
+            i === 0 ? null : <span className="crumb-sep">›</span>
+          ) : (
+            <button
+              className={`crumb-sep${menu?.at === i ? " open" : ""}${i === 0 ? " first" : ""}`}
+              title="what else is at this level"
+              aria-haspopup="menu"
+              onClick={(e) => {
+                e.stopPropagation();
+                const box = e.currentTarget.getBoundingClientRect();
+                setMenu(menu?.at === i ? null : { at: i, x: box.left, y: box.bottom + 2, items: crumb.options! });
+              }}
+            >
+              {menu?.at === i ? "⌄" : "›"}
+            </button>
+          )}
+          {crumb.go === undefined ? (
+            <span
+              className={`crumb crumb-${crumb.kind} ${i === crumbs.length - 1 ? "last" : "inert"}`}
+              title={crumb.title}
+            >
+              {crumb.text}
+            </span>
+          ) : (
+            <button
+              className={`crumb crumb-${crumb.kind}`}
+              title={crumb.title ?? (crumb.kind === "run" ? "back to this run" : "open this state")}
+              onClick={(e) => {
+                e.stopPropagation();
+                crumb.go?.();
+              }}
+            >
+              {crumb.text}
+            </button>
+          )}
+        </span>
+      ))}
+      <span className="grow" />
+      {/*
+        The state's human name, at the RIGHT-HAND end with the rest of what is true about the open
+        file. It sat directly after the crumbs, where — with no `›` in front of it — it read as one
+        more segment of the path, which is the one thing it must not look like: it names the file,
+        not a level you can go to. The task a run belongs to is not here at all; that is the context
+        panel's subject, and one identity in two places is how the two come to disagree.
+      */}
+      {state?.label ? (
+        <span className="sub ellip doc-label" title={state.label}>
+          {state.label}
+        </span>
+      ) : null}
       {errors > 0 ? <span className="chip chip-bad">{errors} error</span> : null}
       {warnings > 0 ? <span className="chip chip-warn">{warnings} warning</span> : null}
+      {/* Controls, not navigation: the bar's own click means "describe this file", and a toggle that
+          also did that would be a toggle you cannot press without a side effect. */}
+      {children !== undefined ? (
+        <span className="doc-bar-tools" onClick={(e) => e.stopPropagation()}>
+          {children}
+        </span>
+      ) : null}
+      {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
     </header>
+  );
+}
+
+/**
+ * A directory, as a file explorer shows one.
+ *
+ * The other thing the middle panel can be showing, and the reason the address bar's folder crumbs
+ * lead anywhere. Deliberately NOT a second tree: the tree beside it already answers "where is
+ * everything", and what this answers is "what is in the place I have navigated to" — one level, in
+ * the order a file manager has used for thirty years, with the folders first because they are how
+ * you keep going.
+ *
+ * `..` is a real row rather than a reliance on the bar. Going up is the most common move in a
+ * listing, and making it the one move that has to be made somewhere else is how a listing becomes a
+ * dead end.
+ */
+function DirectoryPanel({
+  layer,
+  path,
+  tree,
+  onOpenDir,
+  onOpenFile,
+  onOpenState,
+}: {
+  layer: WorkflowLayer;
+  path: string;
+  tree: FileTree | null;
+  onOpenDir: (layer: WorkflowLayer, path: string) => void;
+  onOpenFile: (layer: WorkflowLayer, path: string) => void;
+  onOpenState: (stateId: string) => void;
+}): JSX.Element {
+  const entries = entriesUnder(tree, layer, path);
+  const parent = path === "" ? null : path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+  return (
+    <div className="folder">
+      <div className="folder-list">
+        {parent !== null ? (
+          <button type="button" className="folder-row up" onClick={() => onOpenDir(layer, parent)}>
+            <span className="glyph">↰</span>
+            <span className="grow">..</span>
+          </button>
+        ) : null}
+        {entries.map((node) => (
+          <button
+            type="button"
+            key={node.path}
+            className={`folder-row${node.kind === "directory" ? " dir" : ""}`}
+            title={node.error ?? node.path}
+            onClick={() =>
+              node.kind === "directory"
+                ? onOpenDir(node.layer, node.path)
+                : node.stateId !== undefined
+                  ? onOpenState(node.stateId)
+                  : onOpenFile(node.layer, node.path)
+            }
+          >
+            <span className="glyph">{node.kind === "directory" ? "▸" : (KIND_GLYPH[node.kind] ?? "·")}</span>
+            {/* States read as their ids, like everywhere else the bar speaks: the extension is a fact
+                about storage and this is a view of the workflow. */}
+            <span className="grow ellip">{node.stateId !== undefined ? (node.stateId.split("/").pop() ?? node.name) : node.name}</span>
+            {node.error !== undefined ? <span className="chip chip-bad">!</span> : null}
+            {node.error === undefined && (node.lint?.errors ?? 0) > 0 ? (
+              <span className="chip chip-bad">{node.lint!.errors}</span>
+            ) : null}
+            {node.error === undefined && (node.lint?.errors ?? 0) === 0 && (node.lint?.warnings ?? 0) > 0 ? (
+              <span className="chip chip-warn">{node.lint!.warnings}</span>
+            ) : null}
+            {node.shadowed ? <span className="chip">shadowed</span> : null}
+          </button>
+        ))}
+        {entries.length === 0 ? <p className="empty">This folder is empty.</p> : null}
+      </div>
+    </div>
   );
 }
 
 /**
  * The open file: what it IS above, what it SAYS below.
  *
- * Both at once, and always — putting the two behind a mode toggle meant every glance at a state's
+ * Both at once by default — putting the two behind a mode toggle meant every glance at a state's
  * configuration cost you sight of its runs, which is the same mistake the old settings drawer made
  * at the window level, repeated one panel down.
+ *
+ * The lower half FOLDS, which is not that mistake returning. A mode is a place you are in and have
+ * to remember leaving; this is a strip along the bottom that says what is behind it, takes one click,
+ * and defaults open. What it buys is the case the split cannot serve: watching a board while the
+ * form you finished with an hour ago holds the bottom third of the column.
  *
  * Neither half is chosen here. `resolveFileSurface` answers "what renders a `text/markdown` for
  * reading" and "what renders it for editing", and this component only decides the geometry: with a
@@ -719,14 +1181,20 @@ function FileHead({
  */
 export function FilePanel({
   doc,
+  dir,
   busy,
   context,
   viewerHeight,
   onViewerHeight,
+  configOpen = true,
+  onConfigOpen,
+  onWalkBack,
   onSave,
   onInspect,
 }: {
   doc: FileSource | null;
+  /** The directory open instead, when one is — exactly one of the two is ever set. */
+  dir?: FileSelection | null;
   busy: boolean;
   context: FileSurfaceContext;
   /**
@@ -738,10 +1206,72 @@ export function FilePanel({
    */
   viewerHeight: number;
   onViewerHeight: (height: number) => void;
+  /**
+   * Whether the lower half is open, or folded down to the bar that restores it.
+   *
+   * A state's configuration is what you edit for a minute and then want out of the way for ten:
+   * watching a run on a board squeezed into the top third of the column is the reason this exists.
+   * Held by the shell with the pane sizes, for the same reason they are — it must survive clicking
+   * another file.
+   */
+  configOpen?: boolean;
+  onConfigOpen?: ((open: boolean) => void) | undefined;
+  /** Walk the address bar back to a crumb; `-1` is the file with no run open. */
+  onWalkBack?: ((index: number) => void) | undefined;
   onSave: (text: string) => void;
   onInspect: () => void;
 }): JSX.Element {
+  // Before the early return: a hook cannot be conditional, and "no file open" is a condition.
+  const known = useMemo(() => stateIdsOf(context.tree), [context.tree]);
+
+  /**
+   * Everything the address bar needs, for whichever of the two things is open.
+   *
+   * One assembly rather than two, because the bar does not care: a folder and a document are both
+   * addresses under a layer root, and the only difference is which of them has a state id and what
+   * is rendered underneath.
+   */
+  const barFor = (at: { layer: WorkflowLayer; path: string; stateId?: string | undefined; isDir?: boolean }): CrumbInput => ({
+    layer: at.layer,
+    path: at.path,
+    ...(at.stateId !== undefined ? { stateId: at.stateId } : {}),
+    ...(at.isDir === true ? { isDir: true } : {}),
+    states: known,
+    tree: context.tree,
+    trail: context.trail ?? [],
+    instances: context.detail?.instances ?? [],
+    // The state's own runs, which is what the base chevron offers: the ones parked here now first,
+    // then the ones that have been through. Same order the leaf panel lists them in.
+    runs: [...(context.state?.tasksHere ?? []), ...(context.state?.tasksRecent ?? [])],
+    selectedTask: context.selected,
+    ...(context.detail !== null ? { taskTitle: context.detail.title } : {}),
+    onOpenState: context.onDrill,
+    onOpenFile: context.onOpenFile ?? ((): void => {}),
+    onOpenDir: context.onOpenDir ?? ((): void => {}),
+    ...(context.onOpenProject !== undefined ? { onOpenProject: context.onOpenProject } : {}),
+    onWalkBack: onWalkBack ?? ((): void => {}),
+    onWalkTo: context.onWalkTo ?? ((): void => {}),
+    onSelectTask: context.onSelectTask,
+  });
+
   if (doc === null) {
+    // A folder is an address like any other, so it gets the same bar — and a listing where a
+    // document would have had its viewer and editor.
+    if (dir != null) {
+      return (
+        <div className="col mid">
+          <DocBar input={barFor({ ...dir, isDir: true })} state={null} onInspect={onInspect} />
+          <DirectoryPanel
+            layer={dir.layer}
+            path={dir.path}
+            tree={context.tree}
+            onOpenDir={context.onOpenDir ?? ((): void => {})}
+            onOpenFile={context.onOpenFile ?? ((): void => {})}
+            onOpenState={context.onDrill}
+          />
+        </div>
+      );
+    }
     return (
       <div className="col mid">
         <p className="empty">Select a file in the tree.</p>
@@ -752,10 +1282,29 @@ export function FilePanel({
   const View = resolveFileSurface(doc.mime, "view");
   const Edit = resolveFileSurface(doc.mime, "edit");
   const props = { doc, busy, onSave, context };
+  const trail = context.trail ?? [];
+  // Only where there are two readings — a leaf state's viewer is its conversation, and so is a run
+  // that entered no children. Asked of the trail's TAIL, because that is what the panel is showing.
+  const tail = trail.at(-1);
+  const toggleable =
+    doc.stateId !== undefined &&
+    context.state?.board != null &&
+    (tail === undefined || tail.stateId === doc.stateId || (context.trailState?.board ?? null) !== null);
+  // With no viewer the editor IS the panel, so there is nothing to fold it away from.
+  const shut = View !== null && !configOpen;
 
   return (
-    <div className="col mid" style={{ "--viewer-height": `${viewerHeight}px` } as CSSProperties}>
-      <FileHead doc={doc} state={context.state} onInspect={onInspect} />
+    <div
+      className={`col mid${shut ? " config-shut" : ""}`}
+      style={{ "--viewer-height": `${viewerHeight}px` } as CSSProperties}
+    >
+      <DocBar input={barFor(doc)} state={context.state} onInspect={onInspect}>
+        {/* Only where there are two readings to switch between. A run with no children says what it
+            said and nothing else, so a toggle on it would be one live option and one dead one. */}
+        {toggleable && context.onRunMode !== undefined ? (
+          <RunModeToggle mode={context.runMode ?? "board"} onMode={context.onRunMode} />
+        ) : undefined}
+      </DocBar>
 
       {View ? (
         <>
@@ -765,23 +1314,49 @@ export function FilePanel({
           {/* The halves were 46/54 and immovable, which is a guess about what you are doing: a board
               with nine columns and a form with three fields want opposite splits, and the same file
               wants opposite splits at different moments. `reserve` is measured against the column,
-              so the divider cannot be dragged off the bottom of a short window. */}
-          <Splitter
-            orientation="horizontal"
-            label="Resize the viewer"
-            value={viewerHeight}
-            reset={VIEWER_HEIGHT}
-            min={80}
-            max={1600}
-            reserve={200}
-            onChange={onViewerHeight}
-          />
+              so the divider cannot be dragged off the bottom of a short window.
+
+              Gone entirely when the lower half is folded: a divider with nothing below it to resize
+              is a handle that moves a number nobody can see. */}
+          {shut ? null : (
+            <Splitter
+              orientation="horizontal"
+              label="Resize the viewer"
+              value={viewerHeight}
+              reset={VIEWER_HEIGHT}
+              min={80}
+              max={1600}
+              reserve={200}
+              onChange={onViewerHeight}
+            />
+          )}
         </>
       ) : null}
 
-      <div className={View ? "config-half" : "config-half whole"}>
-        {View ? <h3 className="half-label">{doc.stateId !== undefined ? "Configuration" : "Source"}</h3> : null}
-        {Edit ? (
+      <div className={View ? `config-half${shut ? " shut" : ""}` : "config-half whole"}>
+        {View ? (
+          // The label became the control. Folded, this row IS the lower half — a bar across the
+          // bottom of the column saying what is behind it and taking one click to bring back.
+          <button
+            type="button"
+            className="half-bar"
+            onClick={() => onConfigOpen?.(shut)}
+            disabled={onConfigOpen === undefined}
+            title={shut ? "show the editor" : "fold the editor away"}
+          >
+            <span className="half-caret">{shut ? "▴" : "▾"}</span>
+            <span className="half-label">{doc.stateId !== undefined ? "Configuration" : "Source"}</span>
+            <span className="grow" />
+            {/* Only when folded, and only when it matters: an editor you cannot see holding an
+                unsaved change is the one thing this fold could cost you. */}
+            {shut && context.drafts?.[`${doc.layer}:${doc.path}`] !== undefined ? (
+              <span className="dirty-dot" title="unsaved edits">
+                ●
+              </span>
+            ) : null}
+          </button>
+        ) : null}
+        {shut ? null : Edit ? (
           <Edit {...props} />
         ) : (
           // Reached only by a type that is not text — an image, the database, an archive. Naming the
@@ -1015,6 +1590,53 @@ export function StateInspector({
  * say: where it is, what it is, and how big. Saying that little honestly is better than borrowing
  * the state inspector's headings and leaving them all empty.
  */
+export function FolderInspector({
+  layer,
+  path,
+  tree,
+}: {
+  layer: WorkflowLayer;
+  path: string;
+  tree: FileTree | null;
+}): JSX.Element {
+  const entries = entriesUnder(tree, layer, path);
+  const dirs = entries.filter((node) => node.kind === "directory").length;
+  const states = entries.filter((node) => node.stateId !== undefined).length;
+  const root = tree?.roots.find((r) => r.layer === layer);
+  return (
+    <div className="inspector">
+      <div className="insp-crumb">
+        <span className="state-id ellip">{path === "" ? (layer === "project" ? ".jaira" : "~/.jaira") : (path.split("/").pop() ?? path)}</span>
+        <span className="sub">· the folder</span>
+      </div>
+      <section>
+        <dl className="kv">
+          <dt>path</dt>
+          <dd>
+            <code className="ellip">{path === "" ? "/" : path}</code>
+          </dd>
+          <dt>layer</dt>
+          <dd>{LAYER_LABEL[layer]}</dd>
+          <dt>holds</dt>
+          <dd>
+            {dirs > 0 ? `${dirs} folder${dirs === 1 ? "" : "s"}` : "no folders"}
+            {`, ${entries.length - dirs} file${entries.length - dirs === 1 ? "" : "s"}`}
+            {states > 0 ? <span className="sub"> · {states} states</span> : null}
+          </dd>
+        </dl>
+      </section>
+      {root !== undefined ? (
+        <section>
+          <div className="sub file-path" title={root.dir}>
+            {root.dir}
+            {path === "" ? "" : `/${path}`}
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
 export function FileInspector({
   doc,
   state,
@@ -1175,6 +1797,117 @@ function TaskMetrics({ states }: { states: SessionRef[] }): JSX.Element | null {
         ) : null}
       </dl>
     </section>
+  );
+}
+
+/**
+ * The inspector when the address bar is standing on a RUN.
+ *
+ * The context panel describes the last element of the path, and once the path can end on a run, the
+ * thing to describe is that run: what it was called with, how it went, what it cost. Those are per
+ * EXECUTION facts, and the task panel below cannot carry them — a task that looped four times has
+ * one status and four runs, and averaging them is how a failed pass disappears.
+ *
+ * The task is still here, underneath. A run belongs to one, and starting, cancelling and the live
+ * event stream are the task's business rather than the run's.
+ */
+export function RunInspector({
+  node,
+  stateId,
+  detail,
+  stream,
+  states,
+  depth,
+  onBack,
+  onShowTask,
+  onStart,
+  onCancel,
+  onOpenState,
+}: {
+  /** The run being described. Null ⇒ the trail names an instance this task no longer has. */
+  node: InstanceNode | null;
+  /** The state that run entered — what the "open its file" link opens. */
+  stateId: string;
+  detail: TaskDetail | null;
+  stream: string[];
+  /** The task's session rows, from which this run's own metrics are taken. */
+  states: SessionRef[];
+  /** How deep the walk is, so Back can say what it goes back to. */
+  depth: number;
+  onBack: () => void;
+  /** Describe the TASK instead — the third subject of this column, and the only one with no click. */
+  onShowTask: () => void;
+  onStart: () => void;
+  onCancel: () => void;
+  onOpenState: (stateId: string) => void;
+}): JSX.Element {
+  const sig = node === null ? null : signatureOf(node);
+  // This run's own row, not the task's. `instanceId` is what tells four passes apart, and it is the
+  // whole reason these numbers are worth showing separately from the task's total.
+  const mine = node === null ? [] : states.filter((row) => row.instanceId === node.instanceId);
+  const took = node?.endedAt !== undefined ? durationOf(node.endedAt - node.startedAt) : undefined;
+  return (
+    <div className="inspector">
+      <div className="insp-crumb">
+        <button className="link back-arrow" onClick={onBack} title={depth > 1 ? "back to the run above" : "back to the state"}>
+          ←
+        </button>
+        <span className="state-id ellip">{sig?.label ?? sig?.name ?? stateId.split("/").pop()}</span>
+        <span className="sub">· the run</span>
+        <span className="grow" />
+        {detail !== null ? (
+          <button className="link" onClick={onShowTask} title="describe the task this run belongs to">
+            the task ↗
+          </button>
+        ) : null}
+      </div>
+
+      {node === null ? (
+        // Two different absences, and saying "it was re-run" about the first would be a bug report
+        // for something that is merely a round trip in flight.
+        <p className="empty">{detail === null ? "Reading the run…" : "That run is no longer in this task — it was re-run."}</p>
+      ) : (
+        <section>
+          <h3>
+            <span>This run</span>
+            <span className={`chip chip-${node.status === "completed" ? "ok" : node.status === "failed" ? "bad" : "warn"}`}>
+              {node.status.replace(/_/g, " ")}
+            </span>
+          </h3>
+          <dl className="kv">
+            <dt>state</dt>
+            <dd>
+              <button className="link ellip" onClick={() => onOpenState(node.stateId)} title="open its file">
+                {node.stateId}
+              </button>
+            </dd>
+            <dt>started</dt>
+            <dd title={new Date(node.startedAt).toISOString()}>{new Date(node.startedAt).toLocaleTimeString()}</dd>
+            {took !== undefined ? (
+              <>
+                <dt>took</dt>
+                <dd>{took}</dd>
+              </>
+            ) : null}
+            {/* What it was called with — the same values the card's signature previews, in full. */}
+            {(sig?.params ?? []).map((param) => (
+              <Fragment key={param.name}>
+                <dt className="ellip">{param.name}</dt>
+                <dd className="ellip" title={param.preview}>
+                  <code>{param.preview}</code>
+                </dd>
+              </Fragment>
+            ))}
+          </dl>
+        </section>
+      )}
+
+      {mine.length > 0 ? <TaskMetrics states={mine} /> : null}
+
+      {detail !== null ? (
+        <TaskPanel detail={detail} stream={stream} onStart={onStart} onCancel={onCancel} onOpenState={onOpenState} />
+      ) : null}
+    </div>
   );
 }
 

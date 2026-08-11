@@ -13,7 +13,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { blockedRules, happyRules, HUMAN_REVIEW_FUNCTION, specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
 import { jairaBasePaths, SHARED_SESSION, SYSTEM_SESSION, systemProjectDir, type PushMessage } from "@jaira/shared";
-import { AppService } from "../src/main/service";
+import type { JsonValue } from "@declarative-ai/json";
+import { AppService, ownMessages } from "../src/main/service";
 
 let dir: string;
 let service: AppService;
@@ -536,6 +537,41 @@ describe("sessions — the transcript a run produced", () => {
     // A queued task has run nothing. Empty is an ANSWER — a blank panel would look like a bug.
     expect(view.turns).toEqual([]);
     expect(view.empty).toMatch(/no conversation/);
+  });
+
+  /**
+   * A state's transcript is what THIS state said, not what the session contains.
+   *
+   * A session is append-only and shared, so a state that resumes one is handed everything said
+   * before it and its call answers with the whole conversation. Rendered verbatim, every state after
+   * the first showed its predecessors' words as its own.
+   */
+  describe("what a state added, against what it inherited", () => {
+    const said = (role: string, text: string): JsonValue => ({ role, content: text });
+
+    it("drops the prefix the state was handed, keeping only what it added", () => {
+      const inherited = [said("user", "plan it"), said("assistant", "three goals")];
+      const whole = [...inherited, said("user", "now critique"), said("assistant", "two problems")];
+      expect(ownMessages(whole, inherited)).toEqual([said("user", "now critique"), said("assistant", "two problems")]);
+    });
+
+    it("keeps everything when the record holds only its own delta", () => {
+      // An executor that reports what it appended rather than the whole conversation. Its record does
+      // not begin with the prefix, and taking the first two messages off it would eat real turns.
+      const delta = [said("user", "now critique"), said("assistant", "two problems")];
+      expect(ownMessages(delta, [said("user", "plan it"), said("assistant", "three goals")])).toEqual(delta);
+    });
+
+    it("keeps everything on a PARTIAL match — two states opening the same way is not history", () => {
+      const inherited = [said("system", "you are a planner"), said("user", "plan it")];
+      const whole = [said("system", "you are a planner"), said("user", "critique it")];
+      expect(ownMessages(whole, inherited)).toEqual(whole);
+    });
+
+    it("changes nothing for the first state in a session, which inherited none", () => {
+      const first = [said("user", "plan it")];
+      expect(ownMessages(first, [])).toEqual(first);
+    });
   });
 });
 

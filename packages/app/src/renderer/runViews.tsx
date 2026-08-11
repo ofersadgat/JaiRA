@@ -14,31 +14,16 @@
  */
 import { useMemo, useState, type JSX } from "react";
 import type { InstanceNode, StateChild, StateView, TaskDetail } from "@jaira/shared/browser";
-import { Board } from "./board";
+import { Board, Column, Tile } from "./board";
 import { entriesOf, journalFor, signatureOf } from "./transcript";
+import { instanceOf as instanceOfState, nodeAt } from "./trail";
 import { ChildRuns, Transcript, durationOf } from "./transcriptView";
 import type { FileSurfaceProps } from "./fileTypes";
 
-/**
- * The instance in the tree that IS this state, for the run being read.
- *
- * Depth-first and newest-first, so a state re-entered by a loop resolves to its latest pass — the
- * one whose children are on screen. A superseded instance is skipped: its children were cleared by
- * a sequence reset and showing them would populate the board with runs the engine has disowned.
- */
-export function instanceOf(nodes: readonly InstanceNode[], stateId: string): InstanceNode | undefined {
-  let best: InstanceNode | undefined;
-  const walk = (list: readonly InstanceNode[]): void => {
-    for (const node of list) {
-      if (node.stateId === stateId && !node.superseded) {
-        if (best === undefined || node.startedAt >= best.startedAt) best = node;
-      }
-      walk(node.children);
-    }
-  };
-  walk(nodes);
-  return best;
-}
+// Moved to `trail.ts`, which is where the tree queries live now — it also seeds a walk, and that
+// has to work for a composite, which has no session row to look one up by. Re-exported because this
+// is where the board that uses it has always found it.
+export { instanceOf } from "./trail";
 
 /** Every execution of each declared child, keyed by the child key the parent mounted it under. */
 export function runsByChild(parent: InstanceNode | undefined): Map<string, InstanceNode[]> {
@@ -54,7 +39,14 @@ export function runsByChild(parent: InstanceNode | undefined): Map<string, Insta
   return out;
 }
 
-/** One execution, as a card in a board column. The same signature line the transcript card carries. */
+/**
+ * One execution, as a card in a board column.
+ *
+ * The same {@link Tile} the Tasks view puts a task in — the tile is chrome, and a board of runs and
+ * a board of tasks are the same picture of two different things. What is this board's own is the
+ * body: a run is identified by what it was CALLED WITH, which is the same signature the transcript
+ * card carries, because they are the same object seen twice.
+ */
 function RunTile({
   node,
   index,
@@ -71,20 +63,26 @@ function RunTile({
   const sig = signatureOf(node);
   const took = node.endedAt !== undefined ? durationOf(node.endedAt - node.startedAt) : undefined;
   return (
-    <div
-      className={`run-tile${selected ? " sel" : ""}`}
-      onClick={onOpen}
-      title={`${node.stateId} · ${new Date(node.startedAt).toLocaleString()}`}
+    <Tile
+      status={node.status}
+      title={sig.label ?? sig.name}
+      selected={selected}
+      tip={`${node.stateId} · ${new Date(node.startedAt).toLocaleString()}`}
+      // Only when there is more than one. A lone card numbered "1 of 1" is a question raised and
+      // immediately answered.
+      trailing={total > 1 ? <span className="chip">{index + 1}</span> : undefined}
+      meta={
+        <>
+          <span className="ellip">
+            {node.status === "running" ? "running" : (took ?? new Date(node.startedAt).toLocaleTimeString())}
+          </span>
+          <span className="card-status">{node.status.replace(/_/g, " ")}</span>
+        </>
+      }
+      onSelect={onOpen}
     >
-      <div className="run-tile-top">
-        <span className={`ts-dot ts-dot-${node.status}`} />
-        <span className="grow ellip">{sig.label ?? sig.name}</span>
-        {/* Only when there is more than one. A lone card numbered "1 of 1" is a question raised and
-            immediately answered. */}
-        {total > 1 ? <span className="chip">{index + 1}</span> : null}
-      </div>
       {sig.params.length > 0 ? (
-        <div className="run-tile-args">
+        <div className="card-args">
           {sig.params.slice(0, 2).map((param) => (
             <div key={param.name} className="ellip">
               {param.name} {param.preview}
@@ -93,10 +91,7 @@ function RunTile({
           {sig.params.length > 2 ? <div className="sub">+{sig.params.length - 2} more</div> : null}
         </div>
       ) : null}
-      <div className="run-tile-meta">
-        {node.status === "running" ? "running" : (took ?? new Date(node.startedAt).toLocaleTimeString())}
-      </div>
-    </div>
+    </Tile>
   );
 }
 
@@ -121,17 +116,19 @@ export function RunBoard({
   onOpen: (node: InstanceNode) => void;
 }): JSX.Element {
   const byChild = useMemo(() => runsByChild(parent), [parent]);
+  // What actually ran, when nothing says what was declared — a state view still in flight, or one
+  // that would not load. Fewer columns than the truth (a child nothing reached cannot appear) but
+  // never wrong about the ones it draws, which beats an empty board while a fetch lands.
+  const columns = declared.length > 0 ? declared : [...byChild.keys()].map((key) => ({ key }) as StateChild);
   return (
-    <div className="run-board">
-      {declared.map((child) => {
-        const runs = byChild.get(child.key) ?? [];
-        return (
-          <div className="run-col" key={child.key}>
-            <h3>
-              <span className="ellip">{child.label ?? child.key}</span>
-              <span className="count">{runs.length}</span>
-            </h3>
-            <div className="run-col-body">
+    // The same board the Tasks view draws, down to the class names: one column per declared child,
+    // numbered in run order, cards inside. What differs is that a card here is one EXECUTION.
+    <div className="board-body">
+      <div className="columns">
+        {columns.map((child, index) => {
+          const runs = byChild.get(child.key) ?? [];
+          return (
+            <Column key={child.key} name={child.label ?? child.key} seq={index + 1} count={runs.length} empty="not reached">
               {runs.map((node, i) => (
                 <RunTile
                   key={node.instanceId}
@@ -142,40 +139,46 @@ export function RunBoard({
                   onOpen={() => onOpen(node)}
                 />
               ))}
-              {runs.length === 0 ? <p className="empty">not reached</p> : null}
-            </div>
-          </div>
-        );
-      })}
+            </Column>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
 /**
- * The composite's conversation: its own words, then a card per child run.
+ * One run's conversation: its own words, then a card per child run.
  *
- * The state's own operation is rendered BARE, exactly as a leaf is, because chrome marks a child
+ * The run's own operation is rendered BARE, exactly as a leaf is, because chrome marks a child
  * boundary and this is not a child — it is this state speaking. A composite that orchestrates and
  * says nothing itself contributes no empty block; it is cards all the way down.
+ *
+ * `parent` is the run being READ, which is the trail's tail rather than the open file's own
+ * instance: walking into a child and asking what it said must show that child's words, not its
+ * grandparent's with the child's card somewhere below.
  */
 export function RunConversation({
-  state,
+  parent,
+  stateId,
   detail,
   context,
   open,
   onToggle,
 }: {
-  state: StateView;
+  /** The run whose conversation this is. Undefined ⇒ nothing has run here yet. */
+  parent: InstanceNode | undefined;
+  /** The state that run entered — what its journal facts are filed under. */
+  stateId: string;
   detail: TaskDetail | null;
   context: FileSurfaceProps["context"];
   open: ReadonlySet<number>;
   onToggle: (instanceId: number) => void;
 }): JSX.Element {
   const { conversation, session, liveTurn, sessions } = context;
-  const parent = useMemo(() => instanceOf(detail?.instances ?? [], state.stateId), [detail, state.stateId]);
   const own = useMemo(
-    () => entriesOf(session, journalFor(conversation?.turns ?? [], state.stateId), liveTurn?.text ?? null),
-    [session, conversation, state.stateId, liveTurn],
+    () => entriesOf(session, journalFor(conversation?.turns ?? [], stateId), liveTurn?.text ?? null),
+    [session, conversation, stateId, liveTurn],
   );
 
   if (detail === null) return <p className="empty">Select a run to see what it said.</p>;
@@ -222,14 +225,62 @@ export function RunModeToggle({ mode, onMode }: { mode: RunMode; onMode: (mode: 
   );
 }
 
-/** Everything a composite shows: the toggle, and whichever half it selects. */
+/**
+ * Where the walk is standing, and what is under it.
+ *
+ * The trail's tail is the answer to both questions, and everything the panel renders comes from
+ * here. The FALLBACK is what keeps the old behaviour honest rather than special: with no run walked
+ * into, the run is this state's own newest instance and the declared children are the open file's —
+ * exactly what the panel showed before there was a trail.
+ */
+export function standingOn(
+  state: StateView,
+  context: FileSurfaceProps["context"],
+): { node: InstanceNode | undefined; stateId: string; declared: readonly StateChild[]; deep: boolean } {
+  const detail = context.detail;
+  const tail = context.trail?.at(-1);
+  if (tail === undefined) {
+    return {
+      node: instanceOfState(detail?.instances ?? [], state.stateId),
+      stateId: state.stateId,
+      declared: state.children,
+      deep: false,
+    };
+  }
+  const deep = tail.stateId !== state.stateId;
+  return {
+    node: nodeAt(detail?.instances ?? [], tail.instanceId),
+    stateId: tail.stateId,
+    // A step deeper is a different state, and its columns are ITS declared children. `trailState` is
+    // fetched for exactly this; without it the board falls back to what actually ran, which is the
+    // instance tree's own answer and misses only the children nothing reached.
+    declared: deep ? (context.trailState?.children ?? []) : state.children,
+    deep,
+  };
+}
+
+/**
+ * Everything a state's viewer shows: whichever reading the toggle selects, of wherever the trail is
+ * standing.
+ *
+ * The toggle is in the panel's top bar — it is a statement about what the whole middle column is
+ * showing, and it belongs with the address bar for the same reason a browser's view controls do.
+ * The mode comes from the context when there is a bar to set it and from local state when there is
+ * not, so this component works either way rather than requiring a host it cannot check for.
+ *
+ * Clicking a run card WALKS IN rather than opening it in place: the card is a level of the address,
+ * so it becomes the last crumb and this view redraws one level down. That is the only way out of the
+ * old behaviour's dead end, where three levels of drilling left no record of the two above.
+ */
 export function CompositeView(props: FileSurfaceProps & { state: StateView }): JSX.Element {
   const { state, context } = props;
-  const { detail, selected, onSelectTask, onDrill, onLoadSession, sessions } = context;
-  const [mode, setMode] = useState<RunMode>("board");
+  const { detail, selected, onSelectTask, onDrill, onLoadSession, sessions, onWalkInto } = context;
+  const [ownMode, setOwnMode] = useState<RunMode>("board");
+  const mode = context.runMode ?? ownMode;
+  const setMode = context.onRunMode ?? setOwnMode;
   const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
 
-  const parent = useMemo(() => instanceOf(detail?.instances ?? [], state.stateId), [detail, state.stateId]);
+  const at = standingOn(state, context);
 
   const toggle = (instanceId: number): void => {
     setOpen((current) => {
@@ -244,38 +295,50 @@ export function CompositeView(props: FileSurfaceProps & { state: StateView }): J
     });
   };
 
-  /** Clicking a card in the board opens its transcript, which is the other half of the toggle. */
+  /**
+   * Clicking a card walks into it. Without a host that can — a surface rendered outside the shell —
+   * it falls back to what it did before: open that run's transcript in place.
+   */
   const openRun = (node: InstanceNode): void => {
+    if (onWalkInto !== undefined) return onWalkInto(node);
     setMode("conversation");
     setOpen(new Set([node.instanceId]));
     if (sessions[node.instanceId] === undefined) onLoadSession(node.instanceId);
   };
 
+  // A run that declared no children and entered none is a LEAF of the walk: there is no board to
+  // draw for it, so its conversation is the only reading and the toggle says so by being absent.
+  const board =
+    mode === "board" && (at.declared.length > 0 || (at.node?.children.length ?? 0) > 0 || at.node === undefined);
+
   return (
+    // No bar of its own naming the run any more. Which run every reading is about is a question the
+    // ADDRESS answers — it is the last element of the path — and saying it twice, once in a path and
+    // once in a strip below it, is how the two come to disagree.
     <div className="composite">
-      <div className="composite-bar">
-        <RunModeToggle mode={mode} onMode={setMode} />
-        <span className="grow" />
-        {/* Which run both halves are about. Without it the board reads as every task at once, which
-            is what it used to be. */}
-        {detail !== null ? <span className="sub ellip">{detail.title}</span> : null}
-      </div>
-      {mode === "board" ? (
-        detail === null ? (
-          // No run selected: the workflow's own shape, from the task board. Cards are tasks here
+      {board ? (
+        at.node === undefined ? (
+          // No run walked into: the workflow's own shape, from the task board. Cards are tasks here
           // because there is no run to take executions from — which is the honest answer, not a
-          // second design.
+          // second design. Clicking one selects it, which is what puts a run on the path.
           <Board board={state.board!} selected={selected} trays={false} onSelectTask={onSelectTask} onDrill={onDrill} />
         ) : (
           <RunBoard
-            declared={state.children}
-            parent={parent}
+            declared={at.declared}
+            parent={at.node}
             openInstance={open.size === 1 ? [...open][0]! : null}
             onOpen={openRun}
           />
         )
       ) : (
-        <RunConversation state={state} detail={detail} context={context} open={open} onToggle={toggle} />
+        <RunConversation
+          parent={at.node}
+          stateId={at.stateId}
+          detail={detail}
+          context={context}
+          open={open}
+          onToggle={toggle}
+        />
       )}
     </div>
   );

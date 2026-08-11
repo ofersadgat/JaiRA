@@ -2164,6 +2164,15 @@ run-record requirements of spec §10.2.
   half-evaluator is how the two come to disagree about what an expression means.
   The values were already on `instance.entered` and projected nowhere, so the cards
   cost no new plumbing.
+- **Two boards, one set of chrome**: the Tasks view's board and a run's board
+  disagree about what a card IS — a task there, one EXECUTION of a declared child
+  here, which is what makes a loop legible (three passes, three cards). That
+  difference is real and it is why there are two. Everything around it — the
+  column track, the sticky header and its count, the raised card with a status
+  stripe, the footer under a rule — is identical, and was duplicated rather than
+  shared, so restyling one of them left the other looking like the app it used to
+  be. `Tile` and `Column` are that shared chrome; each board supplies what goes
+  inside, which for a run is the inputs it was called with.
 - **A composite has two honest readings, so they are a toggle**: the board answers
   *where is everything* (a column per declared child, the workflow's shape); the
   conversation answers *what did it say* (the state's own operation, then its
@@ -2173,6 +2182,143 @@ run-record requirements of spec §10.2.
   same object seen twice, which is why the collapsed card and the board card are
   one component. Transcripts are fetched on expand: rendering eight folded headers
   must not cost eight round trips before anyone has asked to read one.
+- **The toggle belongs to the panel, not to the viewer inside it**: it says what
+  the whole middle column is showing, so it sits on the top bar with the path and
+  the file's chips rather than on a strip inside the board it switches. The mode
+  therefore lives in the shell beside the pane widths — a viewer that owned it
+  would lose it every time another file was clicked — and the viewer falls back to
+  its own state when it is rendered somewhere with no bar.
+- **The panel's head is an ADDRESS BAR**: a state id is a path, and its segments
+  are the workflow hierarchy the open state sits in. Drawn as crumbs, every level
+  above the one you are on is one click; drawn as a title and a subtitle, which is
+  what it was, the same information offered nowhere to go. A crumb is a link only
+  when a file with that id exists — an id is a naming convention, not a
+  containment rule, so `plan/draft` can exist with no `plan`, and a crumb that
+  opens nothing is worse than one that is plainly not a link.
+- **The BASE run crumb names the TASK; deeper ones carry their own name**:
+  `~/.jaira › debug › hello_world › #3 › Say hello`. The rule is positional, and
+  it has to be. The first step is the open file's own state, and that state is the
+  crumb immediately before it by construction — so whatever the run is *called*
+  there is another word for a level the path already has. `hello_world ›
+  Hello-world self-test` spends a segment saying one thing twice, and the second
+  reads as a state of its own. What is new about that crumb is WHICH RUN, and a
+  run is identified by its task. It is emphatically NOT the instance id: instance
+  ids restart at 1 on every run, so the root instance of every task is `#1`, and a
+  base crumb built from one read `#1` whichever run you picked out of the chevron
+  — identical before and after, which is indistinguishable from a selection that
+  did not happen. A task's name is shortened by the state id it starts with,
+  because the Run panel names tasks `<state> #<n>` and the path already says the
+  state; a name somebody chose (`Fix the parser`) is left alone, since shortening
+  it would be inventing an abbreviation. The instance id survives as the fallback
+  when there is no task to name, and in the tooltip, where it is precise and not
+  alone. Below the base the state is not in
+  the path at all, so the run's name is the only thing saying which of the
+  parent's children it is. (Comparing the name against the previous crumb's text
+  is not enough: a label and a state id are different strings for the same state.)
+  The run's identity goes in the PATH rather than in a strip below it — the bar
+  under the board naming the selected task is gone, since "which run is this" is
+  what an address answers, and saying it in two places is how the two come to
+  disagree. The task itself is named only in the context panel; putting it on the
+  bar after the crumbs, with no `›` in front, made it read as one more segment.
+- **A walk is seeded from the INSTANCE TREE, never from the session history**: a
+  composite orchestrates and says nothing itself, so it has no conversation and no
+  session row — and seeding a path from the sessions meant exactly the states with
+  children, the only ones you can walk into, showed no run on the path at all. The
+  instance tree has a node for every state entered, whether or not it spoke. The
+  same read is what the board draws, so it is fetched on opening a file rather than
+  only on a click: without it the bar said no run was open while the panel below was
+  showing one.
+- **The address continues past the file, one crumb per run walked into**, and the
+  viewer shows the LAST element. Clicking a run appends it; clicking a child of
+  that run appends that; clicking a crumb truncates back to it. The alternative —
+  select a run, and let the panel replace itself — is what the board did, and it
+  answers "what is inside this" while forgetting the question that got you there:
+  four levels in, there was no record of the three above and no way back but to
+  re-open the file and drill again. A list keeps every level, and the crumb IS the
+  way back. Two consequences follow. The trail is scoped to ONE task, because an
+  instance id is unique only within a run of one — so selecting another task
+  restarts it rather than extending it, and a retry (which restarts instance ids)
+  truncates it at the first step that no longer resolves; a path with a hole in it
+  is not a shorter path, it is a claim about a descent that did not happen. And a
+  step deeper is a different STATE, so the board below it takes its columns from
+  that state's declared children rather than the open file's — fetched for the
+  tail, and falling back to the child keys that actually ran, which is fewer
+  columns than the truth but never a wrong one.
+- **The bar shows the WHOLE address, in three families**, and every member of a
+  family looks identical to every other: FOLDERS (grey) are the real path on disk,
+  the layer root included; STATES (blue) are the segments under `workflows/`, where
+  a path stops being directories and becomes the workflow hierarchy; RUNS are where
+  you went from there. The root used to be a bordered pill and the directories
+  above `workflows/` were not drawn at all, which made the one segment styled
+  differently also the only one you could not click. A segment under `workflows/`
+  is a state whether or not a file sits at that id — `plan/` with no `plan.json` is
+  still the first half of `plan/draft`, and what the file's existence decides is
+  where clicking it goes: to the state, or to the folder that is all there is.
+- **A folder is a place you can stand**, and standing on one shows its contents the
+  way a file explorer does — one level, folders first, `..` as a real row rather
+  than a reliance on the bar. Without it the address bar's folder crumbs led
+  nowhere, which is to say it was not an address bar: every segment but the last
+  was a word. The listing is not a second tree — the tree beside it answers "where
+  is everything", this answers "what is in the place I navigated to".
+- **A chevron drops down the alternatives at that level**, as a file explorer's
+  does. A separator is not punctuation: it is the join between two levels, and the
+  question it can answer is "what else is in the one on the left". Before a path
+  segment that is the containing directory's entries — folders to enter, states by
+  their ID rather than their filename (the extension is a fact about storage and
+  the bar speaks state ids), other files by name. Before the ROOT it is the other
+  roots, plus the way to a project this window has not got open, which is the only
+  navigation in the bar that is not already on disk. Before the base run it is the
+  state's other runs, which are other tasks, since one task's newest pass is what
+  the base stands for. Below the base it is the sibling runs under the same parent,
+  which is the board one level up without going back to it — and picking one
+  REPLACES that level rather than appending, because a sibling is not a step
+  deeper and the levels below it described a descent through the run you just
+  left. The menu always contains where you are, marked, so the list does not have
+  to be counted against the path; it is absent entirely when that is the ONLY
+  entry, since a chevron opening to tell you what the crumb beside it already says
+  is a control that does nothing.
+- **The context panel describes the last element too, ALWAYS**: standing on a run
+  it is that run — what it was called with, how it went, what that one pass cost.
+  Those are per-EXECUTION facts and the task panel cannot carry them: a task that
+  looped four times has one status and four runs, and averaging them is how a
+  failed pass disappears. With no run on the path it is the open file. The rule is
+  the whole mechanism, not a default: the panel is a function of the bar, so there
+  is no mode to get stuck in and no way for the two to disagree — which they did,
+  the panel describing a file while the path beside it stood on a run, because the
+  subject was tracked separately and only some navigations updated it. Every move
+  that changes the bar returns to the rule. The TASK is the one exception, and it
+  is reached only by asking for it on the run's own panel: a run belongs to a task,
+  but a task is not a level of an address and cannot be navigated to. It follows
+  that a state's Run button and lint results are behind the state's own crumb
+  whenever a run is on the path — one click out, which is what "up a level" costs
+  in any address bar.
+- **The configuration folds to a bottom bar**: both halves at once is right while
+  authoring and wrong while watching, and a state's form is what you edit for a
+  minute and then want out of the way for ten. Folded, the label row IS the lower
+  half — a strip across the bottom saying what is behind it — and the divider goes
+  with it, because a handle that resizes something invisible is a handle that moves
+  a number nobody can see. It carries the unsaved-edits dot: an editor you cannot
+  see holding a change is the one thing the fold could cost you.
+- **A state's transcript is what it ADDED, not what the session holds**: a session
+  is append-only and shared, so a state resuming one is handed everything said
+  before it and its call answers with the whole conversation. Rendered verbatim,
+  every state after the first showed its predecessors' words as its own — the
+  deeper into a workflow you looked, the more of somebody else's transcript you
+  read. The record is now diffed against what the position below it materializes,
+  and the inherited prefix must match ENTIRELY before anything is dropped: a
+  record carrying only its own delta does not begin with the prefix, and a partial
+  match is most likely two states that open with the same system prompt.
+- **The transcript is a chat, and its parts are read as what they are**: what the
+  workflow sent goes right, what came back goes left, and only MESSAGES take
+  sides — a tool call, a thinking block and a journal event are not things anybody
+  said, so they stay full width, which is also what a payload needs. Parts are
+  classified rather than assumed: the old rule was "anything that is not text is a
+  tool call, and its payload is `args`", which is the Vercel spelling — an
+  Anthropic-shaped record (`tool_use`/`tool_result`, `name`, `input`, `id`, and
+  `thinking` blocks) matched none of it, so every tool line printed `null` and
+  every thought became a nameless tool. Both spellings are read now, a call keeps
+  BOTH halves when its result arrives, and pairing happens across the whole
+  conversation because the call and its result are on different turns.
 - **The inspector is a CONTEXT panel, and context has a way back**: the right
   column describes whatever you last clicked, and clicking a task makes the task
   the context. That was already half-true and the missing half was the return

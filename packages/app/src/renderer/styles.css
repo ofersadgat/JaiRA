@@ -474,6 +474,10 @@ code {
   box-shadow: var(--lift);
 }
 .menu-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
   background: transparent;
   border: 0;
   border-radius: 0;
@@ -484,6 +488,34 @@ code {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Which of the alternatives is the one already chosen. The dot sits in the gutter the others leave
+   empty, so the list stays aligned whether or not anything is marked. */
+.menu-item .menu-mark {
+  flex: none;
+  width: 6px;
+  margin-left: -12px;
+  color: var(--accent);
+}
+.menu-item.here {
+  font-weight: 600;
+}
+.menu-item .grow {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* What tells two otherwise identical entries apart — a status, a state. */
+.menu-note {
+  flex: none;
+  max-width: 45%;
+  font-size: 11px;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.menu-item:hover:not(:disabled) .menu-note,
+.menu-item:hover:not(:disabled) .menu-mark {
+  color: var(--panel);
 }
 .menu-item:hover:not(:disabled) {
   background: var(--accent);
@@ -519,21 +551,145 @@ code {
   border-top: 1px solid var(--line);
 }
 
-/* --- the middle panel's head --- */
-.doc-head {
+/* --- the middle panel's head ---
+   An address bar, not a title: the segments of a path ARE the hierarchy the open thing sits in, so
+   every level above the one you are on is a place to click. Laid out like a file explorer's for
+   exactly that reason — this is the same job, over the same kind of path.
+
+   THREE families, and the rule is that every member of a family looks identical to every other:
+
+     folder  grey     a place on disk — the layer root included, which is a folder like any other
+     state   blue     a level of the workflow hierarchy, below `workflows/`
+     run     text     one execution, marked with the glyph the board uses for walking in
+
+   The root used to be a bordered pill, which made the one segment drawn differently also the only
+   one that could not be clicked.
+
+   Every rule here is scoped to `.doc-bar` on purpose: `.crumb` and `.crumb.last` are shared with the
+   Tasks view's own path bar, and an unscoped rule would either lose to it or change it. */
+.doc-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 15px;
+  gap: 3px;
+  padding: 7px 12px;
   flex: none;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   cursor: pointer;
-}
-.doc-title {
-  flex: 1;
   min-width: 0;
 }
+.doc-bar .crumb {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12.5px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+/* A folder: where the thing lives. Grey, whether it is the root, a directory on the way, or the
+   one you are standing in. */
+.doc-bar .crumb-folder,
+.doc-bar .crumb-folder.last {
+  color: var(--dim);
+}
+.doc-bar button.crumb-folder:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--panel-2);
+}
+/* A state: a level of the workflow. The same blue whether or not it is where you are — what marks
+   the current one is weight, not another colour. */
+.doc-bar .crumb-state,
+.doc-bar .crumb-state.last {
+  color: var(--accent);
+}
+.doc-bar button.crumb-state:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+.doc-bar .crumb.last {
+  font-weight: 600;
+  cursor: default;
+}
+/*
+ * A run is neither: not a place on disk and not a level of the workflow, but one execution that
+ * happened at one. It carries a name a person wrote (a label, a task title), so it is set in the
+ * reading font and marked with the glyph the board uses for walking in.
+ */
+.doc-bar .crumb-run,
+.doc-bar .crumb-run.last {
+  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+  font-size: 12px;
+  max-width: 190px;
+  color: var(--text);
+}
+.doc-bar .crumb-run::before {
+  content: "▸ ";
+  color: var(--dim);
+}
+.doc-bar .crumb-run.last {
+  background: var(--panel-2);
+  border-radius: 5px;
+}
+.doc-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: 6px;
+}
+.doc-bar-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  cursor: default;
+}
+
+/* --- a folder, as a file explorer shows one ---
+   One level of the tree, in the place a document's viewer and editor would be. Rows rather than a
+   nested list: this answers "what is in the place I navigated to", and the tree beside it already
+   answers "where is everything". */
+.folder {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+.folder-list {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+  gap: 1px;
+}
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 13px;
+  min-width: 0;
+}
+.folder-row:hover:not(:disabled) {
+  background: var(--panel-2);
+  border-color: var(--line);
+}
+.folder-row .glyph {
+  flex: none;
+  width: 14px;
+  color: var(--dim);
+}
+/* Folders lead somewhere, so they read as the way onward rather than as a destination. */
+.folder-row.dir .grow {
+  font-weight: 600;
+}
+.folder-row.up {
+  color: var(--dim);
+}
+
 .state-id {
   font-family: ui-monospace, Consolas, monospace;
   font-size: 13px;
@@ -583,9 +739,49 @@ code {
   background: var(--panel);
   overflow: hidden;
 }
+/* The label IS the control. Folded, this row is the whole lower half — a bar across the bottom of
+   the column that says what is behind it and takes one click to bring back. */
+.half-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  width: 100%;
+  padding: 3px 6px;
+  margin: -2px -6px 0;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  text-align: left;
+}
+.half-bar:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+.half-caret {
+  flex: none;
+  color: var(--dim);
+  font-size: 10px;
+}
 .half-label {
   margin: 0;
   flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+/* Folded: the half stops being a pane and becomes the strip that restores it. No `flex: 1`, no
+   minimum, nothing to scroll — the viewer above takes the height this gives up. */
+.config-half.shut {
+  flex: none;
+  min-height: 0;
+  padding: 6px 15px;
+  gap: 0;
+}
+.mid.config-shut .run-half {
+  flex: 1 1 auto;
+  height: auto;
 }
 /* The editing surface fills this half and scrolls INSIDE itself, rather than the half scrolling the
    whole surface past its own action bar. That is what puts Save and Revert in the same place on
@@ -1556,6 +1752,31 @@ button.sm {
 .crumb-sep {
   color: var(--dim);
 }
+/* The separator, when it is the join between two levels rather than a mark between two words: it
+   drops down what else could stand at this level. Sized to stay a separator — a chevron that grew
+   into a button would turn a path into a toolbar. */
+button.crumb-sep {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 1px 3px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--dim);
+}
+button.crumb-sep:hover:not(:disabled) {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--text);
+}
+button.crumb-sep.first {
+  margin-right: 2px;
+}
+button.crumb-sep.open {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--accent);
+}
 
 .board-body {
   flex: 1;
@@ -1567,30 +1788,48 @@ button.sm {
   flex-direction: column;
   gap: 14px;
 }
+/* A tracked board, the way every issue tracker draws one: the column is a recessed TRACK and the
+   cards are raised tiles sitting in it. That inversion is the whole of the look — a column and its
+   cards used to be the same panel colour with two borders between them, which reads as a list of
+   boxes rather than as a place work moves through.
+
+   Columns keep a floor and a ceiling and scroll horizontally past it. Equal fractions of the window
+   made a nine-child workflow into nine unreadable slivers. */
 .columns {
   display: flex;
-  gap: 11px;
+  gap: 10px;
   align-items: flex-start;
 }
 .column {
-  flex: 1 1 0;
-  min-width: 170px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 10px;
+  flex: 1 0 210px;
+  max-width: 320px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-2);
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 8px 8px 4px;
   cursor: pointer;
 }
 .column:hover {
-  border-color: var(--accent);
+  border-color: var(--line);
 }
+/* The header stays put while the cards move under it, which is what makes a long column readable. */
 .column h4 {
-  font-size: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  font-size: 11px;
   color: var(--dim);
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 8px;
+  margin: 0 0 8px;
+  padding: 2px 2px 6px;
+  background: var(--panel-2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 /* The sequence number is the order the children RUN in. Absent at the root listing, where the
    columns are workflow roots and have no order relative to each other. */
@@ -1603,23 +1842,72 @@ button.sm {
   flex: none;
   font-variant-numeric: tabular-nums;
 }
+/* The count as a pill rather than loose text — it is a quantity, and it reads as one. */
+.column h4 .count {
+  flex: none;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--line);
+  color: var(--dim);
+  font-size: 10.5px;
+  line-height: 15px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 .col-name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text);
+  color: var(--dim);
   font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.column > .empty {
+  padding: 2px 4px 8px;
 }
 
 .card {
-  background: var(--panel-2);
+  position: relative;
+  background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 8px;
-  margin-bottom: 8px;
+  border-radius: 4px;
+  padding: 8px 9px 7px 11px;
+  margin-bottom: 7px;
   cursor: pointer;
+  box-shadow: 0 1px 1px rgba(24, 30, 42, 0.09);
+}
+:root[data-theme="dark"] .card {
+  box-shadow: none;
+}
+/* The status as a stripe down the edge — a whole column's worth is readable in one glance, which a
+   glyph per card is not. The badge stays: the stripe says which, the glyph says what. */
+.card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 4px 0 0 4px;
+  background: var(--dim);
+}
+.card-running::before,
+.card-interrupted::before {
+  background: var(--accent);
+}
+.card-waiting_for_user::before {
+  background: var(--warn);
+}
+.card-completed::before {
+  background: var(--ok);
+}
+.card-failed::before,
+.card-blocked::before,
+.card-timeout::before {
+  background: var(--bad);
 }
 .card:last-child {
   margin-bottom: 0;
@@ -1629,7 +1917,7 @@ button.sm {
 }
 .card-selected {
   border-color: var(--accent);
-  box-shadow: inset 2px 0 0 var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 .card-head {
   display: flex;
@@ -1637,18 +1925,57 @@ button.sm {
   gap: 6px;
 }
 .card-title {
+  flex: 1;
+  min-width: 0;
   font-weight: 600;
-}
-.card-meta {
-  color: var(--dim);
-  font-size: 11px;
-  margin-top: 3px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Where the task actually is, as a footer under a rule — the tracker convention, and it stops the
+   state id from competing with the title for the same line. */
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 11px;
+  font-family: ui-monospace, Consolas, monospace;
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-meta .ellip {
+  flex: 1;
+  min-width: 0;
+}
+.card-status {
+  flex: none;
+  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.card-running .card-status,
+.card-interrupted .card-status {
+  color: var(--accent);
+}
+.card-waiting_for_user .card-status {
+  color: var(--warn);
+}
+.card-completed .card-status {
+  color: var(--ok);
+}
+.card-failed .card-status,
+.card-blocked .card-status,
+.card-timeout .card-status {
+  color: var(--bad);
+}
 .drill {
-  margin-left: auto;
+  flex: none;
   color: var(--accent);
 }
 .tray h4 {
@@ -3470,16 +3797,42 @@ textarea.cfg-input {
   margin-left: 5px;
 }
 
-/* --- the transcript --- */
-/* Full-width rows with a role line, not bubbles: the panel can be 300px wide and a bubble spends a
-   third of that on the gutter beside it. Tool output then gets the whole column, which is what it
-   needs and what a bubble cannot give it. */
+/* --- the transcript ---
+   A chat: what the workflow SENT down the right, what came back down the left. Messages are bubbles
+   and take most of the width but not all of it, so the side a turn is on is legible at a glance.
+   Tool calls, thinking and journal events are NOT messages — nobody said them — so they stay full
+   width, which is also what a tool payload needs and what a bubble could not give it. */
 .ts {
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 10px 12px;
   min-width: 0;
+}
+.ts-msg {
+  max-width: 88%;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  min-width: 0;
+}
+.ts-left {
+  align-self: flex-start;
+  border-bottom-left-radius: 3px;
+}
+.ts-right {
+  align-self: flex-end;
+  border-bottom-right-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+}
+/* The frame the run was given rather than a turn in it: quieter than both sides, and full width,
+   because it is context for everything below it. */
+.ts-msg-system {
+  max-width: 100%;
+  background: none;
+  border-style: dashed;
 }
 .ts-who {
   display: flex;
@@ -3488,15 +3841,28 @@ textarea.cfg-input {
   margin-bottom: 3px;
   min-width: 0;
 }
+/* The role reads on the outside edge of its own bubble, as the name over a chat message does. */
+.ts-who-right {
+  flex-direction: row-reverse;
+}
 .ts-role {
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   color: var(--dim);
 }
 .ts-role-assistant {
   color: var(--accent);
 }
+/* Coloured, like the assistant's. It was `--text`, which is the colour of ordinary prose — so the
+   one label that says "this is what YOU sent" looked like a line of the transcript rather than a
+   heading over it. */
 .ts-role-user {
-  color: var(--text);
+  color: var(--ok);
+}
+.ts-role-system {
+  color: var(--warn);
 }
 /* Right-aligned and tabular, so they line up down the page and the gap between two calls can be
    read without arithmetic. */
@@ -3585,6 +3951,12 @@ textarea.cfg-input {
 .ts-verdict.bad {
   color: var(--bad);
 }
+/* BOTH halves, labelled — what it was called with, and what came back. One or the other is what
+   printed `null` under a line whose record kept only the other. */
+.ts-payloads {
+  display: flex;
+  flex-direction: column;
+}
 .ts-payload {
   margin: 0;
   padding: 7px 9px;
@@ -3595,6 +3967,71 @@ textarea.cfg-input {
   color: var(--dim);
   overflow-x: auto;
   max-height: 340px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ts-payloads > .ts-payload + .ts-payload {
+  border-top: 1px solid var(--line);
+}
+.ts-payload-label {
+  display: block;
+  margin-bottom: 3px;
+  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--tok-hint);
+}
+/* "Nothing was recorded" is an answer. `null` is what a viewer prints when it has not got one. */
+.ts-payload-empty {
+  font-style: italic;
+  color: var(--tok-hint);
+}
+
+/* Not what the model said — what it was working through on the way to saying it. Folded, and
+   quieter than a message, so a long chain of reasoning costs one line until it is wanted. */
+.ts-think {
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.ts-think-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 4px 8px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+  color: var(--dim);
+}
+.ts-think-line:hover {
+  background: var(--panel-2);
+}
+.ts-think-label {
+  flex: none;
+  font-style: italic;
+}
+.ts-think-line .grow {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--tok-hint);
+}
+.ts-think-text {
+  margin: 0;
+  padding: 7px 10px;
+  border-top: 1px dashed var(--line);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.6;
+  font-style: italic;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--dim);
 }
 
 /* A journal fact is not something anybody said, so it is a strip rather than a message. */
@@ -3712,14 +4149,6 @@ textarea.cfg-input {
   min-height: 0;
   flex: 1;
 }
-.composite-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--line);
-  flex: none;
-}
 /* Two words rather than icons: "where is everything" and "what did it say" are not a picture. */
 .run-mode {
   display: inline-flex;
@@ -3750,64 +4179,15 @@ textarea.cfg-input {
   margin: 2px 12px 0;
 }
 
-/* One column per declared child, one card per EXECUTION — see `runViews.tsx`. */
-.run-board {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  gap: 8px;
-  padding: 10px;
-  overflow-x: auto;
-}
-.run-col {
-  flex: 0 0 190px;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.run-col > h3 {
-  flex: none;
-}
-.run-col-body {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  overflow-y: auto;
-  min-height: 0;
-}
-.run-tile {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 6px 8px;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.run-tile:hover {
-  background: var(--panel-2);
-}
-.run-tile.sel {
-  border-color: var(--accent);
-}
-.run-tile-top {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  min-width: 0;
-}
-/* The inputs that travel with the card. Muted, because they identify the run rather than name it. */
-.run-tile-args {
+/* A run board is the SAME board — see `Tile` and `Column` in `board.tsx`. All that is left here is
+   what a run card has and a task card does not: the inputs it was called with. */
+.card-args {
   font-family: ui-monospace, Consolas, monospace;
   font-size: 10.5px;
   color: var(--dim);
   line-height: 1.45;
+  margin-top: 5px;
   display: flex;
   flex-direction: column;
-}
-.run-tile-meta {
-  font-size: 10.5px;
-  color: var(--dim);
-  font-variant-numeric: tabular-nums;
+  min-width: 0;
 }

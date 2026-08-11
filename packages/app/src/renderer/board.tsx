@@ -11,7 +11,7 @@
  * part in it: a guard that jumps backwards is control flow, and letting it reorder the columns would
  * turn the board's shape into something you cannot read left to right.
  */
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import type { BoardCard, BoardView } from "@jaira/shared/browser";
 
 const BADGE: Record<string, string> = {
@@ -51,6 +51,100 @@ export function drillTargetOf(board: BoardView, card: BoardCard): string | undef
   return at < 0 ? undefined : card.activePath[at + 1]?.stateId;
 }
 
+/**
+ * A card on a board — the CHROME, with no opinion about what it is a card of.
+ *
+ * The two boards in this app disagree about what a card IS: on the Tasks view it is a task, and
+ * inside a run it is one EXECUTION of a declared child, which is what makes a loop legible (three
+ * passes, three cards). That difference is real and it is why there are two boards. Everything
+ * around it — the raised tile, the status stripe down the edge, the head row, the footer under a
+ * rule — is the same in both, and was duplicated instead of shared until restyling one of them
+ * left the other behind.
+ */
+export function Tile({
+  status,
+  title,
+  trailing,
+  meta,
+  selected,
+  tip,
+  children,
+  onSelect,
+  onDrill,
+}: {
+  /** Colours the stripe and picks the badge glyph. Absent ⇒ neither, for a card of something with
+      no state of its own to report. */
+  status?: string;
+  title: ReactNode;
+  /** The far end of the head row: a drill arrow, which pass this is. */
+  trailing?: ReactNode;
+  /** The footer under the rule — where a card says what it is, having said what it is called. */
+  meta?: ReactNode;
+  selected?: boolean;
+  tip?: string;
+  /** Anything between the head and the footer. The run board puts its call arguments here. */
+  children?: ReactNode;
+  onSelect: () => void;
+  onDrill?: (() => void) | undefined;
+}): JSX.Element {
+  return (
+    <div
+      className={`card${status !== undefined ? ` card-${status}` : ""}${selected === true ? " card-selected" : ""}`}
+      onClick={onSelect}
+      onDoubleClick={onDrill}
+      {...(tip !== undefined ? { title: tip } : {})}
+    >
+      <div className="card-head">
+        {status !== undefined ? <Badge status={status} /> : null}
+        <span className="card-title">{title}</span>
+        {trailing}
+      </div>
+      {children}
+      {meta !== undefined ? <div className="card-meta">{meta}</div> : null}
+    </div>
+  );
+}
+
+/**
+ * A board column — the track, and whatever cards were put in it.
+ *
+ * Also chrome, and shared for the same reason: a column of tasks and a column of executions are
+ * both "a heading, a count, and a stack of cards", and the only board-specific thing about either
+ * is what goes inside.
+ */
+export function Column({
+  name,
+  seq,
+  count,
+  empty,
+  tip,
+  onOpen,
+  children,
+}: {
+  name: ReactNode;
+  /** The order this child RUNS in. Absent at the root listing, where the columns have no order. */
+  seq?: number;
+  count: number;
+  /** What to say when there are no cards — "not reached" and "—" are different facts. */
+  empty: string;
+  tip?: string;
+  /** Walking into the column itself, where that means anything. */
+  onOpen?: (() => void) | undefined;
+  children?: ReactNode;
+}): JSX.Element {
+  return (
+    <section className="column" {...(onOpen !== undefined ? { onDoubleClick: onOpen } : {})} {...(tip !== undefined ? { title: tip } : {})}>
+      <h4>
+        {seq !== undefined ? <span className="seq">{seq}</span> : null}
+        <span className="col-name">{name}</span>
+        <span className="count">{count}</span>
+      </h4>
+      {children}
+      {count === 0 ? <div className="empty">{empty}</div> : null}
+    </section>
+  );
+}
+
 export function Card({
   card,
   selected,
@@ -62,20 +156,27 @@ export function Card({
   onSelect: () => void;
   onDrill?: () => void;
 }): JSX.Element {
+  // The card's own status — the one the board is actually about, which for a task inside a workflow
+  // is where it is NOW rather than what the task as a whole is doing.
+  const status = card.activeStatus ?? card.status;
   return (
-    <div
-      className={`card${selected ? " card-selected" : ""}`}
-      onClick={onSelect}
-      onDoubleClick={onDrill}
-      title={onDrill ? "double-click to walk into this state" : (card.activeStateId ?? card.status)}
-    >
-      <div className="card-head">
-        <Badge status={card.activeStatus ?? card.status} />
-        <span className="card-title">{card.title}</span>
-        {onDrill ? <span className="drill">↳</span> : null}
-      </div>
-      <div className="card-meta">{card.activeStateId ?? card.status}</div>
-    </div>
+    <Tile
+      status={status}
+      title={card.title}
+      selected={selected}
+      tip={onDrill ? "double-click to walk into this state" : (card.activeStateId ?? card.status)}
+      trailing={onDrill ? <span className="drill">↳</span> : undefined}
+      // The status in words as well as in the stripe: a colour is a reminder, not a label, and the
+      // state a task is sitting in is the thing you came to the board to read.
+      meta={
+        <>
+          <span className="ellip">{card.activeStateId ?? card.status}</span>
+          {card.activeStateId !== undefined ? <span className="card-status">{status.replace(/_/g, " ")}</span> : null}
+        </>
+      }
+      onSelect={onSelect}
+      onDrill={onDrill}
+    />
   );
 }
 
@@ -109,17 +210,15 @@ export function Board({
     <div className="board-body">
       <div className="columns">
         {board.columns.map((column, index) => (
-          <section
+          <Column
             key={column.key}
-            className="column"
-            onDoubleClick={() => onDrill(column.stateId)}
-            title={`double-click to open ${column.stateId}`}
+            name={column.label ?? column.key}
+            {...(numbered ? { seq: index + 1 } : {})}
+            count={column.cards.length}
+            empty="—"
+            tip={`double-click to open ${column.stateId}`}
+            onOpen={() => onDrill(column.stateId)}
           >
-            <h4>
-              {numbered ? <span className="seq">{index + 1}</span> : null}
-              <span className="col-name">{column.label ?? column.key}</span>
-              <span className="count">{column.cards.length}</span>
-            </h4>
             {column.cards.map((card) => (
               <Card
                 key={card.taskId}
@@ -131,8 +230,7 @@ export function Board({
                   : {})}
               />
             ))}
-            {column.cards.length === 0 ? <div className="empty">—</div> : null}
-          </section>
+          </Column>
         ))}
         {board.columns.length === 0 ? <p className="empty">This state has no children.</p> : null}
       </div>

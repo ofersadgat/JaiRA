@@ -19,11 +19,12 @@
  */
 import { useState, type JSX, type ReactNode } from "react";
 import type { InstanceNode, SessionView } from "@jaira/shared/browser";
+import type { JsonValue } from "@declarative-ai/json";
 import { Markdown } from "./markdown";
 import {
-  entriesOf,
   signatureOf,
   type SignatureParam,
+  type ThoughtEntry,
   type ToolEntry,
   type TranscriptEntry,
 } from "./transcript";
@@ -41,15 +42,37 @@ export function durationOf(ms: number): string {
   return `${Math.floor(seconds / 60)} m ${seconds % 60} s`;
 }
 
+/**
+ * Which side of the chat a message sits on.
+ *
+ * What the workflow SENT is on the right and what came back is on the left, which is the arrangement
+ * every chat client uses and therefore the one nobody has to learn. `system` goes left with the
+ * model's own words because it is not something you typed either — it is the frame the run was given.
+ */
+function sideOf(role: string): "right" | "left" {
+  return role === "user" ? "right" : "left";
+}
+
 /** The role line above a message, and the timestamp that ends it. */
 function Who({ role, at, note }: { role: string; at?: number; note?: string }): JSX.Element {
   return (
-    <div className="ts-who">
+    <div className={`ts-who ts-who-${sideOf(role)}`}>
       <span className={`ts-role ts-role-${role}`}>{role === "user" ? "you" : role}</span>
       {note !== undefined ? <span className="sub">{note}</span> : null}
       <span className="grow" />
       <span className="ts-at">{clockOf(at)}</span>
     </div>
+  );
+}
+
+/** A payload block, or the honest statement that the record kept none. */
+function Payload({ label, value }: { label: string; value: JsonValue | undefined }): JSX.Element {
+  if (value === undefined) return <div className="ts-payload ts-payload-empty">no {label} was recorded</div>;
+  return (
+    <pre className="ts-payload">
+      <span className="ts-payload-label">{label}</span>
+      {typeof value === "string" ? value : JSON.stringify(value, null, 2)}
+    </pre>
   );
 }
 
@@ -59,6 +82,10 @@ function Who({ role, at, note }: { role: string; at?: number; note?: string }): 
  * Collapsed by default because an agent loop is mostly these — forty of them expanded is a
  * transcript nobody reads to the end. The line keeps the two things worth scanning: what was called
  * and whether it worked.
+ *
+ * Expanded shows BOTH halves, labelled. It used to show one — the result if there was one, the
+ * arguments otherwise — so a call you opened to find out what it was asked answered with what it
+ * returned instead, and a record that kept neither printed the word `null`.
  */
 function Tool({ entry }: { entry: ToolEntry }): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -73,7 +100,41 @@ function Tool({ entry }: { entry: ToolEntry }): JSX.Element {
           <span className={`ts-verdict ${entry.ok ? "ok" : "bad"}`}>{entry.ok ? "✓" : "!"}</span>
         )}
       </button>
-      {open ? <pre className="ts-payload">{JSON.stringify(entry.detail ?? null, null, 2)}</pre> : null}
+      {open ? (
+        <div className="ts-payloads">
+          <Payload label="arguments" value={entry.args} />
+          {/* A call still in flight has no result, and saying so is different from showing an empty
+              one — which is why this is absent rather than an empty block. */}
+          {entry.ok === undefined && entry.result === undefined ? (
+            <div className="ts-payload ts-payload-empty">still running</div>
+          ) : (
+            <Payload label="result" value={entry.result} />
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * A block of the model's own reasoning.
+ *
+ * Folded, and dimmer than a message: it is not what the model said, it is what it was working
+ * through on the way to saying it. The first line is on the summary, because that is usually enough
+ * to decide whether the rest is worth opening.
+ */
+function Thought({ entry }: { entry: ThoughtEntry }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const firstLine = entry.text.replace(/\s+/g, " ").trim();
+  return (
+    <div className={`ts-think${open ? " open" : ""}`}>
+      <button type="button" className="ts-think-line" onClick={() => setOpen((v) => !v)}>
+        <span className="ts-caret">{open ? "▾" : "▸"}</span>
+        <span className="ts-think-label">thinking</span>
+        <span className="grow ellip">{open ? "" : firstLine}</span>
+        <span className="ts-at">{clockOf(entry.at)}</span>
+      </button>
+      {open ? <pre className="ts-think-text">{entry.text}</pre> : null}
     </div>
   );
 }
@@ -81,6 +142,7 @@ function Tool({ entry }: { entry: ToolEntry }): JSX.Element {
 /** One entry, whatever kind it is. */
 function Entry({ entry }: { entry: TranscriptEntry }): JSX.Element {
   if (entry.kind === "tool") return <Tool entry={entry} />;
+  if (entry.kind === "thought") return <Thought entry={entry} />;
   if (entry.kind === "event") {
     return (
       <div className={`ts-event ts-${entry.tone}`}>
@@ -91,7 +153,7 @@ function Entry({ entry }: { entry: TranscriptEntry }): JSX.Element {
   }
   if (entry.kind === "live") {
     return (
-      <div className="ts-msg ts-live">
+      <div className="ts-msg ts-msg-assistant ts-left ts-live">
         <Who role="assistant" note="writing…" />
         {/* Plain text, not markdown: a half-arrived answer has half a fenced block in it, and
             rendering that produces a code block that swallows the rest of the stream. */}
@@ -100,7 +162,7 @@ function Entry({ entry }: { entry: TranscriptEntry }): JSX.Element {
     );
   }
   return (
-    <div className={`ts-msg ts-msg-${entry.role}`}>
+    <div className={`ts-msg ts-msg-${entry.role} ts-${sideOf(entry.role)}`}>
       <Who role={entry.role} at={entry.at} />
       {entry.text === undefined || entry.text.length === 0 ? null : entry.role === "assistant" ? (
         <Markdown text={entry.text} />
