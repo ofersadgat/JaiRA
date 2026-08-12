@@ -328,6 +328,7 @@ export default function App(): JSX.Element {
     detail,
     sessions: state.sessions,
     onLoadSession: actions.loadSession,
+    onLoadSessions: actions.loadSessions,
     sessionHistory: state.sessionHistory,
     session: state.session,
     sessionInstance: state.sessionInstance,

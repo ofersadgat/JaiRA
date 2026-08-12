@@ -24,14 +24,17 @@
  *
  * ## The chrome rule
  *
- * Chrome marks a CHILD boundary and nothing else. A leaf renders {@link Transcript} bare. A
- * composite renders its OWN operation bare, in exactly the same way, and then one {@link RunCard}
- * per child run beneath it. So there is no "leaf mode" and "composite mode" — there is content, and
- * there are cards around children, and a leaf simply has no children.
+ * Chrome marks a boundary between one OPERATION and the next, and nothing else. A single run's words
+ * are {@link Transcript}, bare. Where several runs are shown together — which is what the session
+ * panels in `sessionPanels.tsx` do — each gets a {@link RunCard} around it.
  *
  * A run is the unit, so a state that ran three times is three sibling cards rather than one card
  * that has to explain itself. Each is headed by its call signature, which is the same line the board
  * card carries, because they are the same fact: a run, and what it was called with.
+ *
+ * What decides which cards sit together is NOT this file. It used to be — a composite's own words
+ * with its children's cards underneath — and that arrangement is gone, because it grouped by state
+ * where the thing being read is grouped by conversation. See `sessionBands.ts`.
  */
 import { useState, type JSX, type ReactNode } from "react";
 import type { InstanceNode, SessionView } from "@jaira/shared/browser";
@@ -421,39 +424,3 @@ export function RunCard({
   );
 }
 
-/**
- * A composite's conversation: what this state said, then a card per child run.
- *
- * The children are taken in the order they STARTED rather than in declaration order, because this
- * is a transcript — the question it answers is what happened, and a sequence reset or an async child
- * makes those two orders differ exactly when it matters most.
- */
-export function ChildRuns({
-  nodes,
-  openIds,
-  onToggle,
-  render,
-}: {
-  nodes: InstanceNode[];
-  openIds: ReadonlySet<number>;
-  onToggle: (instanceId: number) => void;
-  /** The transcript for one child, fetched by the host — see {@link RunCard}. */
-  render: (node: InstanceNode) => ReactNode;
-}): JSX.Element {
-  const ordered = [...nodes].sort((a, b) => a.startedAt - b.startedAt);
-  return (
-    <div className="ts-cards">
-      {ordered.map((node) => (
-        <RunCard
-          key={node.instanceId}
-          node={node}
-          open={openIds.has(node.instanceId)}
-          running={node.status === "running"}
-          onToggle={() => onToggle(node.instanceId)}
-        >
-          {render(node)}
-        </RunCard>
-      ))}
-    </div>
-  );
-}

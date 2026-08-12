@@ -553,6 +553,15 @@ export interface SessionRef {
   /** Where this operation's record sits in that conversation. */
   seq: number;
   at: number;
+  /**
+   * When the CALL began — `operation.started`, not the instance's entry.
+   *
+   * The two differ by the whole of a subtree for a composite that both delegates and speaks, and the
+   * difference is what decides whether two sessions were running at the same time. A conversation
+   * laid out with vertical space standing for time needs the operation's own span; the instance's is
+   * an envelope around it. Absent for a run journaled before this was projected.
+   */
+  startedAt?: number;
   /** Present once the operation settled. */
   status?: "success" | "error";
   costUsd?: number;

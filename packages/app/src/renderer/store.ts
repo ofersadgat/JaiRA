@@ -1161,6 +1161,48 @@ export function useApp() {
     [patch],
   );
 
+  /**
+   * Several transcripts, in one round and one patch.
+   *
+   * The conversation panel needs every session under the run it is drawing, because it opens all of
+   * them — see `RunConversation`. Done one at a time that is N round trips AND N patches, and the
+   * patches are the expensive half: each one re-renders a conversation that is still filling in, so
+   * the panel visibly assembles itself a state at a time.
+   *
+   * Failures are DROPPED rather than cached, exactly as the single fetch drops them — a missing entry
+   * is a card that says "loading" and will be asked for again, where a cached failure would be
+   * permanent for the life of the selection. The `taskId` is re-read after the awaits because a
+   * selection can change while eight requests are in flight, and writing those answers into the new
+   * selection would file one task's words under another's instance ids.
+   */
+  const loadSessions = useCallback(
+    async (instanceIds: readonly number[]) => {
+      const taskId = ref.current.selected;
+      if (taskId === null) return;
+      const scope = ref.current.selectedProject ?? undefined;
+      const wanted = instanceIds.filter((id) => ref.current.sessions[id] === undefined);
+      if (wanted.length === 0) return;
+      const loaded = await Promise.all(
+        wanted.map(async (instanceId) => {
+          try {
+            const view = await invoke("session:view", {
+              taskId,
+              instanceId,
+              ...(scope !== undefined ? { project: scope } : {}),
+            });
+            return [instanceId, view] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      if (ref.current.selected !== taskId) return;
+      const next = { ...ref.current.sessions };
+      for (const entry of loaded) if (entry !== null) next[entry[0]] = entry[1];
+      patch({ sessions: next });
+    },
+    [patch],
+  );
 
   const refreshPending = useCallback(async () => {
     try {
@@ -1586,6 +1628,9 @@ export function useApp() {
 
       /** Fetch one child run's transcript, for a card that has just been opened. */
       loadSession: (instanceId: number) => void loadSession(instanceId),
+
+      /** Fetch every transcript a session-panelled conversation is about to draw. */
+      loadSessions: (instanceIds: readonly number[]) => void loadSessions(instanceIds),
 
       /** Look at another state's conversation — clicking a row of the task's history. */
       showSession: (instanceId: number | null) => {
@@ -2676,6 +2721,7 @@ export function useApp() {
       refreshState,
       refreshDoc,
       loadSession,
+      loadSessions,
       locateState,
       owningProject,
       refreshConversation,

@@ -511,6 +511,23 @@ describe("sessions — the transcript a run produced", () => {
     expect([...history].sort((a, b) => a.at - b.at).map((h) => h.instanceId)).toEqual(history.map((h) => h.instanceId));
   });
 
+  it("says when each call BEGAN, not only when it landed", async () => {
+    const taskId = newTask();
+    await service.startTask({
+      taskId,
+      fake: happyRules(),
+      interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" }] },
+    });
+    await until(() => finished(taskId), "the run to finish");
+
+    const history = service.sessionHistory({ taskId });
+    // What decides whether two conversations were running at the same time — the conversation panel
+    // lays sessions out with vertical space standing for time, and a completion alone cannot say
+    // whether the call before it overlapped the one beside it. See `sessionBands.ts`.
+    expect(history.every((h) => h.startedAt !== undefined)).toBe(true);
+    expect(history.every((h) => h.startedAt! <= h.at)).toBe(true);
+  });
+
   it("reads one state's conversation back, whole", async () => {
     const taskId = newTask();
     await service.startTask({

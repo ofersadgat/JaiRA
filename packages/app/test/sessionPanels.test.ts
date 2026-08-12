@@ -1,0 +1,144 @@
+/**
+ * What the session panels actually DRAW.
+ *
+ * `sessionBands.test.ts` covers the model — which sessions band together, and where a conversation
+ * was cut. This covers the half that only exists on screen: that a cut is rendered as a torn edge
+ * naming the session on BOTH sides, that a lone conversation gets no layout control it could only be
+ * wrong about, and that a band of two lays out as columns while a band of three falls back to tabs.
+ *
+ * Rendered to static markup rather than through a DOM harness. The claims here are structural — what
+ * is on the page and what it says — and that is exactly what a server render answers, without the
+ * repo taking on jsdom and a testing library to ask it.
+ */
+import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import type { InstanceNode, SessionRef } from "@jaira/shared/browser";
+import { bandsOf, piecesOf } from "../src/renderer/sessionBands";
+import { SessionBandsView } from "../src/renderer/sessionPanels";
+
+const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
+  status: "completed",
+  iteration: 0,
+  superseded: false,
+  startedAt: 0,
+  children: [],
+  ...patch,
+});
+
+const ref = (instanceId: number, sessionId: string, startedAt: number, at: number): SessionRef =>
+  ({ runId: 1, instanceId, stateId: `s${instanceId}`, sessionId, seq: 0, startedAt, at }) as SessionRef;
+
+const parentOf = (kids: Array<{ id: number; from: number; to: number }>): InstanceNode =>
+  node({
+    instanceId: 1,
+    stateId: "plan",
+    children: kids.map((kid) =>
+      node({ instanceId: kid.id, stateId: `s${kid.id}`, childKey: `k${kid.id}`, startedAt: kid.from, endedAt: kid.to }),
+    ),
+  });
+
+/** The markup for a run, with each state's transcript stubbed to a recognisable line. */
+const draw = (parent: InstanceNode, refs: SessionRef[]): string =>
+  renderToStaticMarkup(
+    createElement(SessionBandsView, {
+      bands: bandsOf(piecesOf(parent, refs, 1)),
+      render: (piece) => createElement("p", null, `said by #${piece.node.instanceId}`),
+    }),
+  );
+
+describe("what a conversation draws", () => {
+  it("gives each session its own sheet, and every state's words a place in one", () => {
+    const html = draw(parentOf([
+      { id: 2, from: 0, to: 10 },
+      { id: 3, from: 11, to: 20 },
+    ]), [ref(2, "planning", 0, 10), ref(3, "review", 11, 20)]);
+    expect(html.match(/sb-sheet/g)).toHaveLength(2);
+    expect(html).toContain("said by #2");
+    expect(html).toContain("said by #3");
+  });
+
+  it("names a conversation in the grey above it, not in a bar across the top of it", () => {
+    const html = draw(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)]);
+    // The name is outside the sheet, so it comes BEFORE the border it labels.
+    expect(html.indexOf("planning")).toBeLessThan(html.indexOf("sb-sheet"));
+    expect(html).toContain("sb-gutter");
+    // Nothing counts the states for you — the cards below are the count.
+    expect(html).not.toMatch(/\d+ states?</);
+  });
+
+  it("names the interruption on both sides of it", () => {
+    const html = draw(parentOf([
+      { id: 2, from: 0, to: 10 },
+      { id: 3, from: 11, to: 20 },
+      { id: 4, from: 21, to: 30 },
+    ]), [ref(2, "planning", 0, 10), ref(3, "review", 11, 20), ref(4, "planning", 21, 30)]);
+    // Named on both edges, because the two halves have to be findable from each other — a bar
+    // reading only "paused" leaves you counting panels to work out which thread came back.
+    expect(html).toContain('paused session <span class="mono">planning</span>');
+    expect(html).toContain('resumed session <span class="mono">planning</span>');
+    // The session that ran in the gap is a whole panel, not an edge.
+    expect(html).not.toContain("session <span class=\"mono\">review</span>");
+    // Cut edges are squared, so the halves read as halves — see `.sb-sheet.paused`.
+    expect(html).toContain("sb-sheet paused");
+    expect(html).toContain("sb-sheet resumed");
+  });
+
+  it("draws no bar at all when nothing interrupted the conversation", () => {
+    const html = draw(parentOf([
+      { id: 2, from: 0, to: 10 },
+      { id: 3, from: 11, to: 20 },
+    ]), [ref(2, "planning", 0, 10), ref(3, "planning", 11, 20)]);
+    expect(html).not.toContain("sb-tear");
+    expect(html.match(/sb-sheet/g)).toHaveLength(1);
+  });
+
+  it("offers no layout control over a band with one conversation in it", () => {
+    const html = draw(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)]);
+    expect(html).not.toContain("sb-layout");
+  });
+
+  it("lays two concurrent sessions out side by side, both named and both visible", () => {
+    const html = draw(parentOf([
+      { id: 2, from: 0, to: 20 },
+      { id: 3, from: 5, to: 25 },
+    ]), [ref(2, "planning", 0, 20), ref(3, "review", 5, 25)]);
+    expect(html).toContain("sb-columns");
+    expect(html).toContain("said by #2");
+    expect(html).toContain("said by #3");
+    // Each column carries its own name, since one gutter above the band could only label one of them.
+    expect(html.match(/sb-gutter/g)).toHaveLength(2);
+    expect(html).toContain("planning");
+    expect(html).toContain("review");
+  });
+
+  it("falls back to tabs at three, showing one and filing the rest", () => {
+    const html = draw(parentOf([
+      { id: 2, from: 0, to: 30 },
+      { id: 3, from: 5, to: 25 },
+      { id: 4, from: 8, to: 22 },
+    ]), [ref(2, "a", 0, 30), ref(3, "b", 5, 25), ref(4, "c", 8, 22)]);
+    expect(html).toContain("sb-tabs");
+    expect(html).not.toContain("sb-columns");
+    expect(html).toContain("said by #2");
+    expect(html).not.toContain("said by #3");
+    // The tab already names the panel under it; a gutter repeating it would say nothing.
+    expect(html).not.toContain("sb-gutter");
+  });
+
+  it("says so rather than going blank when a state ran in no conversation", () => {
+    const html = draw(parentOf([{ id: 2, from: 0, to: 10 }]), []);
+    expect(html).toContain("no conversation");
+    expect(html).toContain("said by #2");
+    expect(html).not.toContain("sb-tear");
+  });
+
+  it("shows a composite that only orchestrates its children, and nothing of its own", () => {
+    const parent = parentOf([
+      { id: 2, from: 0, to: 10 },
+      { id: 3, from: 11, to: 20 },
+    ]);
+    const html = draw(parent, [ref(2, "planning", 0, 10), ref(3, "planning", 11, 20)]);
+    expect(html).not.toContain("said by #1");
+  });
+});

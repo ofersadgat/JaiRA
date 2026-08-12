@@ -197,6 +197,7 @@ const EMPTY_CONTEXT: FileSurfaceContext = {
   detail: null,
   sessions: {},
   onLoadSession: () => undefined,
+  onLoadSessions: () => undefined,
   sessionHistory: [],
   session: null,
   sessionInstance: null,

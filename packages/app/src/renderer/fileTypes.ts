@@ -147,6 +147,15 @@ export interface FileSurfaceContext {
   /** Transcripts by instance id, and how to fetch one. See `AppState.sessions`. */
   sessions: Record<number, SessionView>;
   onLoadSession: (instanceId: number) => void;
+  /**
+   * Fetch SEVERAL, in one round.
+   *
+   * Beside the single fetch rather than replacing it: one card being expanded is still one
+   * transcript. What needs this is the session-panelled conversation, which opens every panel it
+   * draws and so wants every transcript in the subtree at once — as one patch, because eight separate
+   * ones re-render the whole conversation eight times while it is still assembling itself.
+   */
+  onLoadSessions: (instanceIds: readonly number[]) => void;
   /** Every state that task went through, and the transcript of the one being looked at. */
   sessionHistory: SessionRef[];
   session: SessionView | null;

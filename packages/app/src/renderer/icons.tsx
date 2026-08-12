@@ -24,7 +24,7 @@ import type { WorkIconName } from "./transcript";
  * runs in the direction that matters: the model decides what a row can BE, and this table fails to
  * compile if it cannot draw one of them. A view is allowed to know about the model. Not the reverse.
  */
-const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send" | "model" | "shield" | "anthropic" | "openai" | "lock" | "unlocked" | "star" | "pencil" | "plan", string[]> = {
+const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send" | "model" | "shield" | "anthropic" | "openai" | "lock" | "unlocked" | "star" | "pencil" | "plan" | "columns" | "tabs", string[]> = {
   terminal: ["M4 17l6-6-6-6", "M12 19h8"],
   read: ["M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
   write: ["M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7", "M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"],
@@ -50,6 +50,10 @@ const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send" | "mod
   star: ["m12 3 2.6 5.6 6.1.8-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6L3.3 9.4l6.1-.8Z"],
   pencil: ["M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17Z", "M14.5 6.5 17.5 9.5"],
   plan: ["M6 3h9l4 4v14H6z", "M9 9h6", "M9 13h6", "M9 17h4"],
+  // The two ways concurrent sessions can be arranged, drawn as the arrangement itself: two panes
+  // abreast, or one pane with its siblings filed behind a row of tabs.
+  columns: ["M4 4h16v16H4z", "M12 4v16"],
+  tabs: ["M4 8h16v12H4z", "M4 8V5h7l1.5 3"],
   // Anthropic's mark, taken from the vetted `simple-icons` set that findmyprompt generates its
   // provider glyphs from — traced by hand it would be a worse copy of a logo people know exactly.
   // Used for the routes that ARE Anthropic: the provider, and `claude-cli`, which is the same

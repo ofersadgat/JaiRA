@@ -1195,8 +1195,20 @@ export class AppService {
   sessionHistory(request: { taskId: string; runId?: number; project?: string }): SessionRef[] {
     const session = this.session(request.project);
     const costs = new Map<string, { status: "success" | "error"; costUsd?: number; metrics?: RunMetrics }>();
+    // When each CALL began, which `stateSessions` cannot see — it reads `operation.completed` alone,
+    // and a completion carries no start. Taken from the same pass the costs come from rather than a
+    // query of its own: this loop is already reading every event of the run.
+    //
+    // A LIST per instance, not a value. One instance runs one operation in the ordinary case, but a
+    // conversation continued by hand runs another in the same state, and a single slot would hand
+    // both of them the same timestamp — putting the older call at the newer one's position, which is
+    // exactly the ordering the conversation panel lays out by.
+    const starts = new Map<string, number[]>();
     for (const row of session.project.events.list(request.taskId, ...(request.runId !== undefined ? [{ runId: request.runId }] : []))) {
-      if (row.event.type === "operation.completed") {
+      if (row.event.type === "operation.started") {
+        const key = `${row.runId}:${row.event.instanceId}`;
+        starts.set(key, [...(starts.get(key) ?? []), row.createdAt]);
+      } else if (row.event.type === "operation.completed") {
         const metrics = runMetricsOf(row.event.metrics);
         costs.set(`${row.runId}:${row.event.instanceId}`, {
           status: "success",
@@ -1207,15 +1219,25 @@ export class AppService {
         costs.set(`${row.runId}:${row.event.instanceId}`, { status: "error" });
       }
     }
-    return stateSessions(session.project, request.taskId, request.runId).map((s) => ({
-      runId: s.runId,
-      instanceId: s.instanceId,
-      stateId: s.stateId,
-      sessionId: s.sessionId,
-      seq: s.seq,
-      at: s.at,
-      ...(costs.get(`${s.runId}:${s.instanceId}`) ?? {}),
-    }));
+    // `stateSessions` returns completions in journal order, so the n-th row of an instance is the
+    // n-th call it made — which is what pairs it with the n-th start.
+    const taken = new Map<string, number>();
+    return stateSessions(session.project, request.taskId, request.runId).map((s) => {
+      const key = `${s.runId}:${s.instanceId}`;
+      const nth = taken.get(key) ?? 0;
+      taken.set(key, nth + 1);
+      const startedAt = starts.get(key)?.[nth];
+      return {
+        runId: s.runId,
+        instanceId: s.instanceId,
+        stateId: s.stateId,
+        sessionId: s.sessionId,
+        seq: s.seq,
+        at: s.at,
+        ...(startedAt !== undefined ? { startedAt } : {}),
+        ...(costs.get(key) ?? {}),
+      };
+    });
   }
 
   /**

@@ -12,12 +12,14 @@
  * one card per EXECUTION, because a state that ran three times is three things that happened and a
  * single card cannot be clicked into three different transcripts.
  */
-import { useEffect, useMemo, useState, type JSX } from "react";
+import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
 import type { ChatPlanView, ChatSettings, InstanceNode, StateChild, StateView, TaskDetail } from "@jaira/shared/browser";
 import { Board, Column, Tile } from "./board";
 import { entriesOf, journalFor, signatureOf } from "./transcript";
 import { instanceOf as instanceOfState, nodeAt } from "./trail";
-import { ChildRuns, Paper, Transcript, durationOf } from "./transcriptView";
+import { Transcript, durationOf } from "./transcriptView";
+import { bandsOf, instancesOf, piecesOf, type SessionPiece } from "./sessionBands";
+import { SessionBandsView } from "./sessionPanels";
 import type { FileSurfaceProps } from "./fileTypes";
 import { Composer } from "./composer";
 import { invoke } from "./store";
@@ -150,61 +152,80 @@ export function RunBoard({
 }
 
 /**
- * One run's conversation: its own words, then a card per child run.
+ * One run's conversation, as a panel per SESSION — see `sessionBands.ts` and `sessionPanels.tsx`.
  *
- * The run's own operation is rendered BARE, exactly as a leaf is, because chrome marks a child
- * boundary and this is not a child — it is this state speaking. A composite that orchestrates and
- * says nothing itself contributes no empty block; it is cards all the way down.
+ * What this replaced was organised by state: the run's own words at the top, then a card per child
+ * run underneath. That had two things wrong with it. The small one is that a composite has no
+ * conversation of its own, and the transcript that appeared above the cards anyway was whichever one
+ * happened to be LAST in the whole task — `sessionView` falls back to `history.at(-1)` when it is
+ * asked about an instance that never spoke, and a state with no operation is exactly that instance.
  *
- * `parent` is the run being READ, which is the trail's tail rather than the open file's own
- * instance: walking into a child and asking what it said must show that child's words, not its
- * grandparent's with the child's card somewhere below.
+ * The large one is that a state is not the unit a conversation has. Sessions are shared — several
+ * states continuing one thread is the ordinary case, and the point of declaring one — so a layout
+ * keyed on states cannot say which of the things on screen were talking to the same context. Keyed on
+ * sessions, it says nothing else.
+ *
+ * `parent` is the run being READ, which is the trail's tail rather than the open file's own instance:
+ * walking into a child and asking what it said must show that child's words. Everything BELOW that
+ * run is flattened into the same set of panels rather than nested, because a grandchild that
+ * continues its grandparent's session belongs in that session's panel — see `piecesOf`.
  */
 export function RunConversation({
   parent,
-  stateId,
   detail,
   context,
-  open,
-  onToggle,
 }: {
   /** The run whose conversation this is. Undefined ⇒ nothing has run here yet. */
   parent: InstanceNode | undefined;
-  /** The state that run entered — what its journal facts are filed under. */
-  stateId: string;
   detail: TaskDetail | null;
   context: FileSurfaceProps["context"];
-  open: ReadonlySet<number>;
-  onToggle: (instanceId: number) => void;
 }): JSX.Element {
-  const { conversation, session, liveTurn, sessions } = context;
-  const own = useMemo(
-    () => entriesOf(session, journalFor(conversation?.turns ?? [], stateId), liveTurn?.text ?? null),
-    [session, conversation, stateId, liveTurn],
-  );
+  const { conversation, liveTurn, sessions, sessionHistory, onLoadSessions } = context;
+  // The history spans every run of the task and instance ids restart on each, so an unscoped join
+  // would match this run's `#i2` against three older runs' as well. The instance tree is the latest
+  // run's, and this is the id that goes with it.
+  const runId = detail?.runs[detail.runs.length - 1]?.runId;
+  const bands = useMemo(() => bandsOf(piecesOf(parent, sessionHistory, runId)), [parent, sessionHistory, runId]);
+  const needed = useMemo(() => instancesOf(bands), [bands]);
+
+  // Every panel is open, so every transcript in them is needed — fetched in one round rather than
+  // on expand, which is what the folded card design paid for and this one does not.
+  useEffect(() => {
+    const missing = needed.filter((instanceId) => sessions[instanceId] === undefined);
+    if (missing.length > 0) onLoadSessions(missing);
+  }, [needed, sessions, onLoadSessions]);
 
   if (detail === null) return <p className="empty">Select a run to see what it said.</p>;
-  const kids = parent?.children.filter((node) => !node.superseded) ?? [];
+
+  /**
+   * One piece's transcript.
+   *
+   * The live delta is matched on the POSITION rather than on the state: a loop runs one state several
+   * times and only the position tells the passes apart. A piece that has not written a position yet
+   * has none to match, so it falls back to the state — which is the only handle a call still in
+   * flight offers, and is why an answer appears while it is being written rather than after.
+   */
+  const render = (piece: SessionPiece): ReactNode => {
+    const view = sessions[piece.node.instanceId];
+    if (view === undefined) return <p className="empty">Loading…</p>;
+    const live =
+      liveTurn === null
+        ? null
+        : piece.sessionId !== undefined
+          ? liveTurn.sessionId === piece.sessionId && liveTurn.seq === piece.seq
+            ? liveTurn.text
+            : null
+          : liveTurn.stateId === piece.node.stateId && piece.node.status === "running"
+            ? liveTurn.text
+            : null;
+    const entries = entriesOf(view, journalFor(conversation?.turns ?? [], piece.node.stateId), live);
+    return <Transcript session={view} entries={entries} />;
+  };
+
   return (
     <div className="run-convo-wrap">
       <div className="run-convo scroll">
-      <Paper>
-        {/* Only when it said something. An empty block above the cards would claim the parent spoke. */}
-        {own.length > 0 ? <Transcript entries={own} /> : null}
-        {own.length > 0 && kids.length > 0 ? <div className="run-convo-rule" /> : null}
-        {kids.length === 0 && own.length === 0 ? <p className="empty">This run has not entered a child yet.</p> : null}
-        <ChildRuns
-          nodes={kids}
-          openIds={open}
-          onToggle={onToggle}
-          render={(node) => {
-            const child = sessions[node.instanceId];
-            if (child === undefined) return <p className="empty">Loading…</p>;
-            const entries = entriesOf(child, journalFor(conversation?.turns ?? [], node.stateId));
-            return <Transcript session={child} entries={entries} />;
-          }}
-        />
-      </Paper>
+        <SessionBandsView bands={bands} render={render} empty="This run has not entered a child yet." />
       </div>
       {/* Pinned below the scroller, not inside it: what you are about to say does not scroll away
           with what was already said. */}
@@ -365,36 +386,25 @@ export function standingOn(
  */
 export function CompositeView(props: FileSurfaceProps & { state: StateView }): JSX.Element {
   const { state, context } = props;
-  const { detail, selected, onSelectTask, onDrill, onLoadSession, sessions, onWalkInto } = context;
+  const { detail, selected, onSelectTask, onDrill, onWalkInto } = context;
   const [ownMode, setOwnMode] = useState<RunMode>("board");
   const mode = context.runMode ?? ownMode;
   const setMode = context.onRunMode ?? setOwnMode;
+  // Which card the BOARD is showing as selected. It no longer decides anything in the conversation —
+  // the panels there open every session they hold — so this is now what it always looked like: the
+  // board's own selection.
   const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
 
   const at = standingOn(state, context);
 
-  const toggle = (instanceId: number): void => {
-    setOpen((current) => {
-      const next = new Set(current);
-      if (next.has(instanceId)) next.delete(instanceId);
-      else {
-        next.add(instanceId);
-        // Fetched on expand, not up front — see `AppState.sessions`.
-        if (sessions[instanceId] === undefined) onLoadSession(instanceId);
-      }
-      return next;
-    });
-  };
-
   /**
    * Clicking a card walks into it. Without a host that can — a surface rendered outside the shell —
-   * it falls back to what it did before: open that run's transcript in place.
+   * it falls back to what it did before: show that run's conversation in place.
    */
   const openRun = (node: InstanceNode): void => {
     if (onWalkInto !== undefined) return onWalkInto(node);
     setMode("conversation");
     setOpen(new Set([node.instanceId]));
-    if (sessions[node.instanceId] === undefined) onLoadSession(node.instanceId);
   };
 
   // A run that declared no children and entered none is a LEAF of the walk: there is no board to
@@ -422,14 +432,7 @@ export function CompositeView(props: FileSurfaceProps & { state: StateView }): J
           />
         )
       ) : (
-        <RunConversation
-          parent={at.node}
-          stateId={at.stateId}
-          detail={detail}
-          context={context}
-          open={open}
-          onToggle={toggle}
-        />
+        <RunConversation parent={at.node} detail={detail} context={context} />
       )}
     </div>
   );
