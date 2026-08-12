@@ -805,7 +805,7 @@ settings):
 ```text
 ~/.jaira/                     the shared layer; the same shape as a project's
   config.json                 defaults every project inherits
-  settings.json               user preferences (theme) — NOT project config
+  settings.json               user preferences (theme, layout) — NOT project config
   workflows/                  state files every project can reach
   functions/                  operation documents every project can reach
   skills/                     shared skill library
@@ -2185,9 +2185,11 @@ run-record requirements of spec §10.2.
 - **The toggle belongs to the panel, not to the viewer inside it**: it says what
   the whole middle column is showing, so it sits on the top bar with the path and
   the file's chips rather than on a strip inside the board it switches. The mode
-  therefore lives in the shell beside the pane widths — a viewer that owned it
-  would lose it every time another file was clicked — and the viewer falls back to
-  its own state when it is rendered somewhere with no bar.
+  therefore lives in the shell — a viewer that owned it would lose it every time
+  another file was clicked — and the viewer falls back to its own state when it
+  is rendered somewhere with no bar. Session-scoped, unlike the layout beside it:
+  it says what you are currently reading about one run, not how you like the
+  window arranged.
 - **The panel's head is an ADDRESS BAR**: a state id is a path, and its segments
   are the workflow hierarchy the open state sits in. Drawn as crumbs, every level
   above the one you are on is one click; drawn as a title and a subtitle, which is
@@ -2367,13 +2369,30 @@ run-record requirements of spec §10.2.
   suggestion: an explicit choice, including "none", wins from then on.
 - **Resizable panes**: every side pane is a grid track driven by a variable that
   a divider writes, with keyboard nudges and double-click-to-reset. Widths are
-  per view and session-scoped — a pane width is a preference about this window,
-  and persisting it would mean deciding which configuration layer owned it. The
+  per CONTROL — the layout of Files has nothing to say about the layout of
+  Tasks — and they OUTLIVE the window; see *Remembered layout* below. The
   same control divides the Files view's two ROWS, the viewer over the editor: a
   board with nine columns and a form with three fields want opposite splits, so
   the 46/54 the stylesheet used to impose was right for neither. Only that one
   is a height, and it may still shrink — the editor below claims a floor first,
   so a split dragged while maximised survives the window being restored.
+- **Remembered layout**: how you arranged the window survives closing it. Every
+  divider you drag, every fold you close, and every branch of the Files tree or
+  the Tasks board you collapse is stored in `~/.jaira/settings.json` beside the
+  theme — one person, one machine, never a checkout, so a layout preference can
+  never arrive through a pull request. What it is NOT is a fourth configuration
+  layer: the file holds three maps keyed by an id the renderer owns (a size, a
+  disclosure, a folded branch), which is what keeps remembering a new control
+  down to one constant rather than a shared type, a parser and a migration.
+  Three rules make it behave. An ABSENT id means the control's own default, so a
+  settings file written before a pane existed — or hand-edited into nonsense,
+  which is parsed entry by entry — opens the app exactly as a fresh install
+  does. Collapsed branches are stored NEGATIVELY, as what is shut, because a
+  branch created after the file was written must never appear folded. And the
+  window OWNS the layout once it has read it: the file seeds it at startup and
+  is written back a beat after each gesture (plus once more on the way out), so
+  a `settings.json` re-read — one happens on every project open — cannot snap a
+  divider back to where it was before the drag.
 - **One chrome for every editor**: a bar of standing facts on top, the document
   in the middle, Save and Revert underneath. Each editing surface scrolls
   INSIDE itself so the actions never move — the authoring form used to put a
@@ -2391,9 +2410,9 @@ run-record requirements of spec §10.2.
   tree mark the rows with something pending — an invisible unsaved edit is one
   that leaves with the window. Renames and deletes take their subtree's drafts
   with them, so a path recreated later does not open showing someone's abandoned
-  edit to the file it replaced. Session-scoped, like pane widths and the schema
-  choice: writing them to disk would mean deciding which configuration layer owned
-  a change nobody has committed to yet. The state form's tab is remembered the
+  edit to the file it replaced. Session-scoped, like the schema choice: writing
+  them to disk would mean deciding which configuration layer owned a change
+  nobody has committed to yet. The state form's tab is remembered the
   same way, per file, so returning to a state you were hand-editing does not put
   you back on the form.
 - **Authoring form**: covers WORKFLOWS.md §2–§7 over the parsed document, with a

@@ -60,7 +60,9 @@ import {
 import { EditorActions } from "./editorChrome";
 import { cursorContext, siblingKeys } from "./jsonCursor";
 import { highlightJson, splitTokensAt, type HighlightLine, type Token } from "./jsonHighlight";
+import type { UiSurface } from "./fileTypes";
 import { Splitter } from "./splitter";
+import { FOLD, PANE, paneDefault } from "./uiState";
 
 /** How long to wait after the last keystroke before asking main to check the draft. */
 const VALIDATE_DEBOUNCE_MS = 300;
@@ -100,8 +102,40 @@ export interface SchemaJsonEditorProps {
    */
   wrap?: boolean;
   onWrap?: ((wrap: boolean) => void) | undefined;
+  /**
+   * The field reference beside the editor: whether it is showing, how wide it is, and where those
+   * two are kept.
+   *
+   * Controlled or local on the same terms as {@link SchemaJsonEditorProps.wrap}. Worth remembering
+   * for the reason any pane is: the reference is either something you work with or something you
+   * never open, and re-deciding that on every file is the version of the question nobody wants.
+   */
+  reference?: boolean;
+  onReference?: ((show: boolean) => void) | undefined;
+  referenceWidth?: number;
+  onReferenceWidth?: ((width: number) => void) | undefined;
   /** Extra controls for the host to place beside the picker. */
   children?: React.ReactNode;
+}
+
+/**
+ * The four field-reference props, wired to the window's remembered layout.
+ *
+ * One helper rather than the same four lines at each call site: this editor is reached two ways —
+ * directly for a `.json` file, and through the workflow editor's JSON tab — and the panel should not
+ * be remembered on one and forgotten on the other. Returns nothing when there is no host to remember
+ * through, which leaves the editor on its own state.
+ */
+export function schemaReferenceProps(
+  ui: UiSurface | undefined,
+): Pick<SchemaJsonEditorProps, "reference" | "onReference" | "referenceWidth" | "onReferenceWidth"> {
+  if (ui === undefined) return {};
+  return {
+    reference: ui.open(FOLD.schemaReference, false),
+    onReference: (show) => ui.setOpen(FOLD.schemaReference, show),
+    referenceWidth: ui.pane(PANE.schemaReference, REFERENCE_WIDTH),
+    onReferenceWidth: (width) => ui.setPane(PANE.schemaReference, width),
+  };
 }
 
 export function SchemaJsonEditor({
@@ -116,6 +150,10 @@ export function SchemaJsonEditor({
   onSchema,
   wrap,
   onWrap,
+  reference,
+  onReference,
+  referenceWidth,
+  onReferenceWidth,
   children,
 }: SchemaJsonEditorProps): JSX.Element {
   const area = useRef<HTMLTextAreaElement | null>(null);
@@ -129,8 +167,9 @@ export function SchemaJsonEditor({
   const [menuAt, setMenuAt] = useState<{ left: number; top: number; above: boolean } | null>(null);
   const [result, setResult] = useState<ValidateSchemaResult | null>(null);
   const [cursor, setCursor] = useState(0);
-  const [showReference, setShowReference] = useState(false);
-  const [referenceWidth, setReferenceWidth] = useState(REFERENCE_WIDTH);
+  /** Used only when the host controls neither — see {@link SchemaJsonEditorProps.reference}. */
+  const [localReference, setLocalReference] = useState(false);
+  const [localReferenceWidth, setLocalReferenceWidth] = useState(REFERENCE_WIDTH);
   /** Which suggestion the keyboard has selected. Reset whenever the list changes. */
   const [highlighted, setHighlighted] = useState(0);
   /** Escape hides the list until the next edit — a way to see the line under it. */
@@ -140,6 +179,13 @@ export function SchemaJsonEditor({
 
   const wrapping = wrap ?? localWrap;
   const setWrapping = (next: boolean): void => (onWrap ? onWrap(next) : setLocalWrap(next));
+
+  const showReference = reference ?? localReference;
+  const setShowReference = (next: boolean): void =>
+    onReference ? onReference(next) : setLocalReference(next);
+  const width = referenceWidth ?? localReferenceWidth;
+  const setWidth = (next: number): void =>
+    onReferenceWidth ? onReferenceWidth(next) : setLocalReferenceWidth(next);
 
   const entry = schemaId === null ? undefined : schemaById(schemaId);
 
@@ -509,7 +555,7 @@ export function SchemaJsonEditor({
             >
               Add missing fields
             </button>
-            <button className="ghost" onClick={() => setShowReference((v) => !v)}>
+            <button className="ghost" onClick={() => setShowReference(!showReference)}>
               {showReference ? "Hide fields" : "Fields"}
             </button>
             <SchemaStatus result={result} />
@@ -530,7 +576,7 @@ export function SchemaJsonEditor({
           scrolling away from the line that raised the question. */}
       <div
         className={`schema-body${showReference && entry ? " with-reference" : ""}`}
-        style={{ "--reference-width": `${referenceWidth}px` } as CSSProperties}
+        style={{ "--reference-width": `${width}px` } as CSSProperties}
       >
         <div className="schema-main">
       <div className={`editor-stack${wrapping ? " wrap" : ""}`}>
@@ -629,12 +675,12 @@ export function SchemaJsonEditor({
           <>
             <Splitter
               label="Resize the field reference"
-              value={referenceWidth}
+              value={width}
               reset={REFERENCE_WIDTH}
               invert
               min={200}
               max={620}
-              onChange={setReferenceWidth}
+              onChange={setWidth}
             />
             <SchemaReference entry={entry} />
           </>
@@ -726,8 +772,14 @@ function SchemaReference({ entry }: { entry: SchemaEntry }): JSX.Element {
  */
 const REFERENCE_DEPTH = 6;
 
-/** How wide the reference column opens. Wide enough for a key, a type and a short description. */
-const REFERENCE_WIDTH = 300;
+/**
+ * How wide the reference column opens, and what a double-click on its divider restores.
+ *
+ * Read from the layout table so that the default and the remembered value cannot drift apart — the
+ * shell stores this pane under {@link PANE.schemaReference}, and a second copy of the number here
+ * would be the one a "reset" put back.
+ */
+const REFERENCE_WIDTH = paneDefault(PANE.schemaReference);
 
 /** The placeholder a map's author-chosen key is shown as. Any name resolves the same way. */
 const ANY_KEY = "*";

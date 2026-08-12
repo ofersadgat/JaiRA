@@ -75,6 +75,8 @@ export function SettingsPane({
   drafts,
   onDraft,
   onSave,
+  showEffective,
+  onShowEffective,
 }: {
   config: ConfigView | null;
   /**
@@ -98,8 +100,19 @@ export function SettingsPane({
   drafts?: Drafts | undefined;
   onDraft?: SetDraft | undefined;
   onSave: (layer: ConfigLayer, doc: unknown) => void;
+  /**
+   * Whether the merged result is showing, and where that is remembered.
+   *
+   * Controlled by the shell, which keeps it with the rest of the window's layout, and local when
+   * rendered without one. "What will actually run" is a question some people want answered on every
+   * screen and others never — which makes it a preference rather than a per-visit decision.
+   */
+  showEffective?: boolean;
+  onShowEffective?: ((open: boolean) => void) | undefined;
 }): JSX.Element {
-  const [showEffective, setShowEffective] = useState(false);
+  const [localEffective, setLocalEffective] = useState(false);
+  const showing = showEffective ?? localEffective;
+  const show = (next: boolean): void => (onShowEffective ? onShowEffective(next) : setLocalEffective(next));
 
   if (config === null) {
     return <p className="empty">Configuration is unavailable — the app could not read it.</p>;
@@ -152,12 +165,12 @@ export function SettingsPane({
       <ConfigEdit {...surface} />
 
       <div className="pane-actions">
-        <button className="ghost" onClick={() => setShowEffective((v) => !v)}>
-          {showEffective ? "Hide effective" : "Show effective"}
+        <button className="ghost" onClick={() => show(!showing)}>
+          {showing ? "Hide effective" : "Show effective"}
         </button>
       </div>
 
-      {showEffective ? (
+      {showing ? (
         <section>
           <h4>Effective configuration</h4>
           {/* The answer to "what will actually run": both layers merged, parsed, defaults filled in. */}

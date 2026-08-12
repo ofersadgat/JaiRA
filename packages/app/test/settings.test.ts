@@ -63,7 +63,7 @@ afterEach(async () => {
 describe("user settings", () => {
   it("defaults to the light theme, with no project open", () => {
     // Preferences belong to the person, not the checkout — the theme must apply on an empty window.
-    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false });
+    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, shut: {} } });
   });
 
   it("persists a change and reads it back", () => {
@@ -76,7 +76,7 @@ describe("user settings", () => {
     writeFileSync(join(baseDir, "settings.json"), "{ not json", "utf8");
 
     // A broken preferences file must never stop the app opening.
-    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false });
+    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, shut: {} } });
   });
 
   it("keeps the JSON editor's wrap preference, and defaults it off", () => {
@@ -91,7 +91,59 @@ describe("user settings", () => {
 
   it("reads a settings file written before wrapJson existed", () => {
     writeFileSync(join(baseDir, "settings.json"), JSON.stringify({ theme: "dark" }), "utf8");
-    expect(service.readSettings()).toEqual({ theme: "dark", wrapJson: false });
+    expect(service.readSettings()).toEqual({ theme: "dark", wrapJson: false, ui: { panes: {}, open: {}, shut: {} } });
+  });
+
+  /**
+   * The window's layout — pane sizes, folds, collapsed branches (DESIGN §11.1).
+   *
+   * It rides in the preferences file for the reason the theme does: it is how the app looks to one
+   * person on one machine, and it must never arrive through a pull request. What is tested here is
+   * only the part main owns — that it round-trips, that it replaces rather than accumulates, and
+   * that a file which has been hand-edited into nonsense still opens the app.
+   */
+  it("remembers the window layout, and writes it whole", () => {
+    const ui = { panes: { "files.tree": 310 }, open: { "files.editor": false }, shut: { "files.folders": ["project:workflows"] } };
+    expect(service.writeSettings({ ui })).toMatchObject({ ui });
+    expect(service.readSettings().ui).toEqual(ui);
+
+    // Replaced, not merged: the renderer holds the live copy and sends all of it, which is what
+    // makes forgetting a pane possible at all — a deep merge would leave every id ever stored.
+    const later = { panes: { "tasks.panel": 420 }, open: {}, shut: {} };
+    service.writeSettings({ ui: later });
+    expect(service.readSettings().ui).toEqual(later);
+  });
+
+  it("keeps the layout out of the way of the other preferences", () => {
+    service.writeSettings({ ui: { panes: { "files.tree": 310 }, open: {}, shut: {} } });
+    expect(service.writeSettings({ theme: "dark" }).ui.panes["files.tree"]).toBe(310);
+    expect(service.readSettings().theme).toBe("dark");
+  });
+
+  it("drops layout entries of the wrong shape rather than the whole layout", () => {
+    writeFileSync(
+      join(baseDir, "settings.json"),
+      JSON.stringify({
+        theme: "dark",
+        ui: {
+          // A size that is not a number, one that would swallow the window, and one that is fine.
+          panes: { "files.tree": "wide", "files.inspector": 99999, "tasks.panel": 400 },
+          open: { "files.editor": "yes", "settings.effective": true },
+          // A list that is not one, and one that has grown a duplicate by hand.
+          shut: { "tasks.projects": "everything", "files.folders": ["a", "a", "b"] },
+        },
+      }),
+      "utf8",
+    );
+
+    // One unreadable id costs its own pane and nothing else: this document is a cache of gestures,
+    // not something anyone authored, so a value whose meaning changed between versions must not
+    // throw away the other forty.
+    expect(service.readSettings().ui).toEqual({
+      panes: { "files.inspector": 4000, "tasks.panel": 400 },
+      open: { "settings.effective": true },
+      shut: { "files.folders": ["a", "b"] },
+    });
   });
 });
 

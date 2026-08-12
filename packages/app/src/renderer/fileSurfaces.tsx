@@ -27,7 +27,7 @@ import { docKey, useDraftBox } from "./drafts";
 import { EditorActions } from "./editorChrome";
 import { registerFileSurface, type FileSurfaceProps } from "./fileTypes";
 import { MarkdownView } from "./markdown";
-import { SchemaJsonEditor } from "./schemaEditor";
+import { SchemaJsonEditor, schemaReferenceProps } from "./schemaEditor";
 import { WorkflowEditor } from "./stateEditor";
 import { WorkflowSyncPanel } from "./syncPanel";
 
@@ -178,6 +178,8 @@ export function JsonEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.
       onSchema={(schemaId) => context.onSchemaChoice(key, schemaId)}
       wrap={context.wrapJson}
       onWrap={context.onWrapJson}
+      // The field reference is a pane like any other in the window, so it is remembered like one.
+      {...schemaReferenceProps(context.ui)}
     />
   );
 }
@@ -312,6 +314,9 @@ export function WorkflowEdit({ doc, busy, onSave, context }: FileSurfaceProps): 
       loadStateSlots={context.stateSlots}
       wrapJson={context.wrapJson}
       onWrapJson={context.onWrapJson}
+      // So the JSON tab's field reference is the same remembered panel the plain JSON editor shows,
+      // rather than one that opens shut every time you reach it from a state file.
+      ui={context.ui}
       // What the inspector is reporting, and which of it to go to. The editor marks its own controls
       // from the same list the panel beside it is showing, so "3 errors" and three red boxes are one
       // fact rather than two surfaces that can disagree.

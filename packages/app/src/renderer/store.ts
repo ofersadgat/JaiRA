@@ -22,6 +22,7 @@ import type {
   AvailabilitySnapshot,
   ExecutorInfo,
   JairaOperationNode,
+  JairaUiState,
   FileMutationResult,
   FileNode,
   FileSource,
@@ -73,6 +74,7 @@ import type { FileSelection } from "./files";
 import { instanceAt, newestRunOf, runTargetOf } from "./runForm";
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestFiles, selfTestScript } from "./debugWorkflow";
+import { emptyUiState, SHUT, toggleShut, withOpen, withPane } from "./uiState";
 
 /** A prune plan or result, as `history:prune` returns it. */
 export type PruneReport = Response<"history:prune">;
@@ -324,12 +326,14 @@ export interface AppState {
    * Grouped rather than merged: a board's columns are the children of ONE workflow state, so columns
    * from two projects side by side would be columns of different things. Each group keeps its own
    * drill level, because drilling into one is not a statement about the other.
+   *
+   * WHICH GROUPS ARE FOLDED is not here. That is a layout preference like the pane widths, so it
+   * lives in `settings.ui.shut` under `SHUT.projects` and outlives the window; `levels` stays behind
+   * regardless, which is what makes re-opening a group land where it was rather than at its roots.
    */
   projects: ProjectSummary[];
   boards: Record<string, BoardView | null>;
   levels: Record<string, string | null>;
-  /** Which group is expanded. A collapsed one keeps its level, so re-opening it lands where it was. */
-  collapsed: Record<string, boolean>;
   /** Which project the selected task belongs to — a task id means nothing without it. */
   selectedProject: string | null;
   /**
@@ -480,8 +484,10 @@ const EMPTY: AppState = {
   error: null,
   busy: false,
   // Light until the saved preference says otherwise, matching the stylesheet's own default so the
-  // first paint and the loaded setting agree in the common case.
-  settings: { theme: "light", wrapJson: false },
+  // first paint and the loaded setting agree in the common case. The layout starts EMPTY rather than
+  // at the defaults: an absent id means "whatever this control opens at", so the first paint is the
+  // default layout without this having to restate what those numbers are.
+  settings: { theme: "light", wrapJson: false, ui: emptyUiState() },
   config: null,
   executors: [],
   probes: {},
@@ -514,7 +520,6 @@ const EMPTY: AppState = {
   projects: [],
   boards: {},
   levels: {},
-  collapsed: {},
   selectedProject: null,
   trail: [],
   trailState: null,
@@ -528,6 +533,14 @@ const STREAM_LIMIT = 300;
 const LOG_LIMIT = 2000;
 /** How many lines of a sync's own narration the panel keeps. Enough for a three-state run. */
 const SYNC_PROGRESS_LIMIT = 60;
+/**
+ * How long the layout has to stop changing before it is written to `settings.json`, in ms.
+ *
+ * Long enough that a drag is one write rather than several hundred, short enough that letting go of
+ * a divider and quitting immediately still saves — which is the case the `pagehide` flush exists to
+ * cover anyway. A click on a fold pays this too, and nobody can tell.
+ */
+const UI_WRITE_DELAY = 400;
 
 /** One engine event as a line: what happened, and to which state. */
 function engineLine(raw: unknown): string {
@@ -580,6 +593,74 @@ export function useApp() {
   ref.current = state;
 
   const fail = useCallback((e: unknown) => patch({ error: (e as Error).message, busy: false }), [patch]);
+
+  /**
+   * The pending write of the remembered layout, and whether one has been read yet.
+   *
+   * Both are refs rather than state because neither is drawn. `hydrated` is the one that matters:
+   * after the first successful read the RENDERER owns the layout, and a later `settings:read` — one
+   * happens on every project open — must not overwrite a divider dragged a moment ago with what the
+   * file said before the drag.
+   */
+  const uiWrite = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const uiHydrated = useRef(false);
+
+  /**
+   * A settings document from main, with THIS window's layout kept.
+   *
+   * Every write to `settings.json` answers with the whole file, and the layout inside it is up to
+   * {@link UI_WRITE_DELAY} out of date — a divider dragged and the theme flipped a moment later
+   * would answer with the width from before the drag and snap the pane back. Same rule as
+   * {@link refreshSettings}: the file seeds the layout once, and the window owns it after that.
+   */
+  const keepingUi = useCallback((settings: JairaSettings): JairaSettings => {
+    return { ...settings, ui: ref.current.settings.ui };
+  }, []);
+
+  /** Push the layout to disk now, cancelling any write that was waiting to happen. */
+  const flushUi = useCallback(() => {
+    if (uiWrite.current === null) return;
+    clearTimeout(uiWrite.current);
+    uiWrite.current = null;
+    // Quiet on failure, and deliberately so: this is a cache of gestures. A preferences file that
+    // cannot be written is not worth a toast over a window whose layout is already correct.
+    void invoke("settings:write", { ui: ref.current.settings.ui }).catch(() => undefined);
+  }, []);
+
+  /**
+   * Apply a layout change locally, and write it to disk once the gesture stops.
+   *
+   * The local patch is not debounced — it is what the pane is drawn from, so a dragged divider has
+   * to follow the pointer. The FILE write is, because a drag is sixty of these a second and each one
+   * is a `writeFileSync` in main. The value written is read from the ref at the moment of the write
+   * rather than captured here, so the trailing call always stores where the drag ended.
+   */
+  const setUi = useCallback(
+    (ui: JairaUiState) => {
+      patch({ settings: { ...ref.current.settings, ui } });
+      if (uiWrite.current !== null) clearTimeout(uiWrite.current);
+      uiWrite.current = setTimeout(() => {
+        uiWrite.current = null;
+        void invoke("settings:write", { ui: ref.current.settings.ui }).catch(() => undefined);
+      }, UI_WRITE_DELAY);
+    },
+    [patch],
+  );
+
+  /**
+   * Do not lose the last gesture to the window closing.
+   *
+   * A layout change made inside {@link UI_WRITE_DELAY} of a quit is exactly the one someone would
+   * notice missing — you drag a pane and close the app because you are done. `pagehide` fires on the
+   * way out and is the last point at which the renderer can still reach main.
+   */
+  useEffect(() => {
+    window.addEventListener("pagehide", flushUi);
+    return () => {
+      window.removeEventListener("pagehide", flushUi);
+      flushUi();
+    };
+  }, [flushUi]);
 
   /**
    * The focused project's tasks.
@@ -1120,11 +1201,17 @@ export function useApp() {
    */
   const refreshSettings = useCallback(async () => {
     try {
-      patch({ settings: await invoke("settings:read", undefined) });
+      const settings = await invoke("settings:read", undefined);
+      // The LAYOUT is taken from the file once and owned here afterwards. This runs again on every
+      // project open, and by then the window has a layout that the file may be up to
+      // {@link UI_WRITE_DELAY} behind — so re-reading it would occasionally snap a divider back to
+      // where it was before the drag that opened the project.
+      patch({ settings: uiHydrated.current ? keepingUi(settings) : settings });
+      uiHydrated.current = true;
     } catch (e) {
       fail(e);
     }
-  }, [patch, fail]);
+  }, [patch, fail, keepingUi]);
 
   const refreshConfig = useCallback(async () => {
     try {
@@ -1489,8 +1576,7 @@ export function useApp() {
       },
 
       /** Fold a project's board away. Its level is kept, so re-opening lands where it was. */
-      toggleProject: (project: string) =>
-        patch({ collapsed: { ...ref.current.collapsed, [project]: !ref.current.collapsed[project] } }),
+      toggleProject: (project: string) => setUi(toggleShut(ref.current.settings.ui, SHUT.projects, project)),
 
       /** Drill into one project's board. `null` returns that group to its workflow roots. */
       drillProject: (project: string, level: string | null) => {
@@ -1683,11 +1769,34 @@ export function useApp() {
       setTheme: async (theme: JairaTheme) => {
         patch({ settings: { ...ref.current.settings, theme } });
         try {
-          patch({ settings: await invoke("settings:write", { theme }) });
+          patch({ settings: keepingUi(await invoke("settings:write", { theme })) });
         } catch (e) {
           fail(e);
         }
       },
+
+      // --- the remembered layout (see `uiState.ts`) ---------------------------
+
+      /**
+       * Resize a pane.
+       *
+       * Every splitter in the app calls this instead of a `useState` setter, which is the whole
+       * change: a width used to be undone by closing the window, and two of them by switching views.
+       * The write to disk is deferred — see {@link setUi} — so a drag stays a drag.
+       */
+      setPane: (id: string, size: number) => setUi(withPane(ref.current.settings.ui, id, size)),
+
+      /** Open or close a disclosure — the Files editor half, the field reference, "Show effective". */
+      setFold: (id: string, open: boolean) => setUi(withOpen(ref.current.settings.ui, id, open)),
+
+      /**
+       * Fold one branch of a collapsible tree, or unfold it.
+       *
+       * The row key is the tree's own — `layer:path` for the Files tree — and it is stored rather
+       * than interpreted here, because which rows exist is the tree's business and a folded key that
+       * no longer matches anything is harmless.
+       */
+      toggleShut: (id: string, key: string) => setUi(toggleShut(ref.current.settings.ui, id, key)),
 
       // --- the shell --------------------------------------------------------
 
@@ -2286,7 +2395,7 @@ export function useApp() {
       setWrapJson: async (wrapJson: boolean) => {
         patch({ settings: { ...ref.current.settings, wrapJson } });
         try {
-          patch({ settings: await invoke("settings:write", { wrapJson }) });
+          patch({ settings: keepingUi(await invoke("settings:write", { wrapJson })) });
         } catch (e) {
           fail(e);
         }
@@ -2555,6 +2664,8 @@ export function useApp() {
     [
       patch,
       patchDebug,
+      setUi,
+      keepingUi,
       fail,
       refreshAll,
       refreshTasks,

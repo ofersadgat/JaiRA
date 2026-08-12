@@ -31,7 +31,6 @@ import {
   FolderInspector,
   RunInspector,
   TaskInspector,
-  VIEWER_HEIGHT,
 } from "./files";
 // Imported for its registrations: this is what puts markdown, JSON, YAML, states and config into the
 // surface registry. Nothing else in the shell references the built-in surfaces by name.
@@ -47,6 +46,7 @@ import { initialRunValues, runFieldsOf, runTargetOf } from "./runForm";
 import type { RunSurface } from "./runPanel";
 import { Splitter } from "./splitter";
 import { nodeAt } from "./trail";
+import { FOLD, PANE, SHUT, openOf, paneDefault, paneOf, shutOf } from "./uiState";
 import { History, NewTask } from "./widgets";
 import { useApp, type SettingsSection, type View } from "./store";
 
@@ -149,31 +149,6 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; layered: boolean; ne
 ];
 
 /**
- * The side-pane widths, and what a double-click on a divider restores.
- *
- * These are the numbers the stylesheet used to hard-code. They moved here because a splitter needs a
- * value to write and a default to go back to, and having the two in different files is how a "reset"
- * ends up restoring a width that was changed months ago in the other one.
- *
- * Held per VIEW rather than shared, for the reason the views are siblings in the first place: the
- * layout of Files has nothing to say about the layout of Tasks, and one tree width dragged narrow
- * should not follow you into a board.
- *
- * `filesTop` is the odd one: a HEIGHT, and the only horizontal divider in the app. It lives here
- * anyway, because what it is really about is the same thing the others are — this window's layout
- * surviving a click on another file.
- */
-const PANE_DEFAULTS = {
-  filesLeft: 250,
-  filesRight: 300,
-  filesTop: VIEWER_HEIGHT,
-  tasksRight: 360,
-  settingsLeft: 214,
-};
-
-type PaneWidths = typeof PANE_DEFAULTS;
-
-/**
  * The approvals strip.
  *
  * Command approvals come first: an agent's tool loop is blocked until one is answered, whereas a
@@ -232,9 +207,15 @@ function InboxStrip({
 
 export default function App(): JSX.Element {
   const { state, actions } = useApp();
-  // Session-scoped, like the schema choice: a pane width is a view preference about this window, and
-  // writing it to disk would mean deciding which configuration layer it belonged to.
-  const [panes, setPanes] = useState<PaneWidths>(PANE_DEFAULTS);
+  /**
+   * The remembered layout — every pane size, fold and collapsed branch in the window.
+   *
+   * It reads out of `settings.json` (see `uiState.ts`) rather than out of `useState`, which is the
+   * one thing that makes a dragged divider or a folded branch outlive the window. Held per CONTROL
+   * rather than per view: the layout of Files has nothing to say about the layout of Tasks, and one
+   * tree width dragged narrow should not follow you into a board.
+   */
+  const ui = state.settings.ui;
   /**
    * Which diagnostic the inspector last asked the editor to show.
    *
@@ -244,14 +225,14 @@ export default function App(): JSX.Element {
    */
   const [reveal, setReveal] = useState<{ path: string; nonce: number } | null>(null);
   /**
-   * Whether the Files view's lower half is open, and which reading its viewer is showing.
+   * Which reading the Files viewer is showing — a board, or the conversation.
    *
-   * Both are held here for the reason the pane widths are: they are statements about this window's
-   * layout, they are set from the panel's top bar, and they have to survive clicking another file —
-   * which unmounts everything below the bar. Session-scoped, like the widths: a view preference is
-   * not something to decide a configuration layer for.
+   * Held here rather than in the panel for the reason the layout is: it is set from the panel's top
+   * bar and has to survive clicking another file, which unmounts everything below that bar. Unlike
+   * the layout it is session-scoped ON PURPOSE — it says what you are currently reading about one
+   * run, not how you like the window arranged, and restoring it a week later would answer a question
+   * nobody had asked yet.
    */
-  const [configOpen, setConfigOpen] = useState(true);
   const [runMode, setRunMode] = useState<"board" | "conversation">("board");
   const { board, detail, pending, view } = state;
 
@@ -262,6 +243,17 @@ export default function App(): JSX.Element {
    * second flag to keep in step with it.
    */
   const dirtyFiles = useMemo(() => new Set(Object.keys(state.drafts)), [state.drafts]);
+
+  /**
+   * The board groups folded away, by project directory.
+   *
+   * Built once per render rather than inside the map over projects: `shutOf` materialises a Set, and
+   * asking it per row would build one per board on the screen to answer one question about each.
+   */
+  const foldedProjects = useMemo(() => shutOf(ui, SHUT.projects), [ui]);
+
+  /** The same, for the Files tree's branches — see {@link foldedProjects}. */
+  const foldedFolders = useMemo(() => shutOf(ui, SHUT.folders), [ui]);
 
   // The interaction the selected task is parked on, if any — what the leaf conversation pins.
   const waiting = pending.find((p) => p.taskId === state.selected);
@@ -363,6 +355,15 @@ export default function App(): JSX.Element {
     onSchemaChoice: actions.setSchemaChoice,
     drafts: state.drafts,
     onDraft: actions.setDraft,
+    // The same store the shell's own dividers and folds write to, reached by name. A surface with a
+    // pane of its own — the JSON editor's field reference is the one — therefore remembers it the
+    // same way the columns around it do, without the shell having to know that pane exists.
+    ui: {
+      pane: (id, fallback) => ui.panes[id] ?? fallback,
+      setPane: actions.setPane,
+      open: (id, fallback) => ui.open[id] ?? fallback,
+      setOpen: actions.setFold,
+    },
     // The description's viewer, and the one surface that can write to files other than the open one
     // — a proposed state file becomes a draft against its own row in the tree.
     sync: {
@@ -428,7 +429,12 @@ export default function App(): JSX.Element {
           {view === "files" ? (
             <div
               className="view files-view"
-              style={{ "--pane-left": `${panes.filesLeft}px`, "--pane-right": `${panes.filesRight}px` } as CSSProperties}
+              style={
+                {
+                  "--pane-left": `${paneOf(ui, PANE.filesTree)}px`,
+                  "--pane-right": `${paneOf(ui, PANE.filesInspector)}px`,
+                } as CSSProperties
+              }
             >
               <FileTreePanel
                 tree={state.tree}
@@ -437,6 +443,11 @@ export default function App(): JSX.Element {
                 // showing it, this is the only thing that says so about a file you are not looking
                 // at — and an unsaved change nobody can see is one that gets closed with the window.
                 dirty={dirtyFiles}
+                // Which branches are folded, and where a click on a twisty goes. Both come from the
+                // saved layout rather than from the panel's own state, which is what makes the shape
+                // of the tree the thing you left it as rather than a fresh full expansion.
+                collapsed={foldedFolders}
+                onToggleCollapsed={(key) => actions.toggleShut(SHUT.folders, key)}
                 busy={state.busy}
                 hasProject={state.projectDir !== null}
                 onSelect={actions.selectFile}
@@ -452,11 +463,11 @@ export default function App(): JSX.Element {
 
               <Splitter
                 label="Resize the file tree"
-                value={panes.filesLeft}
-                reset={PANE_DEFAULTS.filesLeft}
+                value={paneOf(ui, PANE.filesTree)}
+                reset={paneDefault(PANE.filesTree)}
                 min={170}
                 max={560}
-                onChange={(filesLeft) => setPanes((p) => ({ ...p, filesLeft }))}
+                onChange={(size) => actions.setPane(PANE.filesTree, size)}
               />
 
               <FilePanel
@@ -464,10 +475,10 @@ export default function App(): JSX.Element {
                 dir={state.dir}
                 busy={state.busy}
                 context={surfaces}
-                viewerHeight={panes.filesTop}
-                onViewerHeight={(filesTop) => setPanes((p) => ({ ...p, filesTop }))}
-                configOpen={configOpen}
-                onConfigOpen={setConfigOpen}
+                viewerHeight={paneOf(ui, PANE.filesViewer)}
+                onViewerHeight={(size) => actions.setPane(PANE.filesViewer, size)}
+                configOpen={openOf(ui, FOLD.filesEditor)}
+                onConfigOpen={(open) => actions.setFold(FOLD.filesEditor, open)}
                 onWalkBack={actions.walkBackTo}
                 onSave={actions.saveDoc}
                 onInspect={actions.inspectState}
@@ -475,12 +486,12 @@ export default function App(): JSX.Element {
 
               <Splitter
                 label="Resize the inspector"
-                value={panes.filesRight}
-                reset={PANE_DEFAULTS.filesRight}
+                value={paneOf(ui, PANE.filesInspector)}
+                reset={paneDefault(PANE.filesInspector)}
                 invert
                 min={220}
                 max={680}
-                onChange={(filesRight) => setPanes((p) => ({ ...p, filesRight }))}
+                onChange={(size) => actions.setPane(PANE.filesInspector, size)}
               />
 
               <aside className="col panel">
@@ -548,7 +559,10 @@ export default function App(): JSX.Element {
           ) : null}
 
           {view === "tasks" ? (
-            <div className="view tasks-view" style={{ "--pane-right": `${panes.tasksRight}px` } as CSSProperties}>
+            <div
+              className="view tasks-view"
+              style={{ "--pane-right": `${paneOf(ui, PANE.tasksPanel)}px` } as CSSProperties}
+            >
               <div className="col mid">
                 {/*
                   ONE BOARD PER PROJECT, grouped — the user's checkout, and JaiRA's own runs beneath it.
@@ -560,7 +574,7 @@ export default function App(): JSX.Element {
                 {state.projects.length === 0 ? <p className="empty">Open a project to see its board.</p> : null}
                 {state.projects.map((p) => {
                   const group = state.boards[p.project] ?? null;
-                  const shut = state.collapsed[p.project] === true;
+                  const shut = foldedProjects.has(p.project);
                   return (
                     <section key={p.project} className={`board-group${shut ? " shut" : ""}`}>
                       <header className="board-group-head" onClick={() => actions.toggleProject(p.project)}>
@@ -604,12 +618,12 @@ export default function App(): JSX.Element {
 
               <Splitter
                 label="Resize the task panel"
-                value={panes.tasksRight}
-                reset={PANE_DEFAULTS.tasksRight}
+                value={paneOf(ui, PANE.tasksPanel)}
+                reset={paneDefault(PANE.tasksPanel)}
                 invert
                 min={260}
                 max={760}
-                onChange={(tasksRight) => setPanes((p) => ({ ...p, tasksRight }))}
+                onChange={(size) => actions.setPane(PANE.tasksPanel, size)}
               />
 
               <aside className="col panel">
@@ -671,7 +685,10 @@ export default function App(): JSX.Element {
           ) : null}
 
           {view === "settings" ? (
-            <div className="view settings-view" style={{ "--pane-left": `${panes.settingsLeft}px` } as CSSProperties}>
+            <div
+              className="view settings-view"
+              style={{ "--pane-left": `${paneOf(ui, PANE.settingsSections)}px` } as CSSProperties}
+            >
               <aside className="col side">
                 <h3>Settings</h3>
                 <ul className="sections">
@@ -703,11 +720,11 @@ export default function App(): JSX.Element {
 
               <Splitter
                 label="Resize the settings sections"
-                value={panes.settingsLeft}
-                reset={PANE_DEFAULTS.settingsLeft}
+                value={paneOf(ui, PANE.settingsSections)}
+                reset={paneDefault(PANE.settingsSections)}
                 min={150}
                 max={420}
-                onChange={(settingsLeft) => setPanes((p) => ({ ...p, settingsLeft }))}
+                onChange={(size) => actions.setPane(PANE.settingsSections, size)}
               />
 
               <div className="col mid settings-body">
@@ -736,6 +753,8 @@ export default function App(): JSX.Element {
                       drafts={state.drafts}
                       onDraft={actions.setDraft}
                       onSave={actions.saveConfig}
+                      showEffective={openOf(ui, FOLD.settingsEffective)}
+                      onShowEffective={(open) => actions.setFold(FOLD.settingsEffective, open)}
                     />
                   </ConfigPane>
                 ) : null}

@@ -34,7 +34,8 @@ import {
 } from "./stateForm";
 import { EditorActions } from "./editorChrome";
 import { anchorFor, fieldClass, FLASH_MS, formIssues, markFor, NO_ISSUES, type FormIssues } from "./issues";
-import { SchemaJsonEditor } from "./schemaEditor";
+import type { UiSurface } from "./fileTypes";
+import { SchemaJsonEditor, schemaReferenceProps } from "./schemaEditor";
 import { SlotTable } from "./slotTable";
 import { EMPTY_OPERATION_FIELDS, type OperationFieldsForm } from "./operationForm";
 import { operationFieldPaths, OperationDataLists, OperationFieldsEditor, REF_HINT } from "./operationFields";
@@ -570,6 +571,7 @@ export function WorkflowEditor({
   loadStateSlots = NO_STATE_SLOTS,
   wrapJson,
   onWrapJson,
+  ui,
   issues = [],
   reveal = null,
   draft,
@@ -601,6 +603,13 @@ export function WorkflowEditor({
   /** Word wrap on the JSON tab. Passed through so the preference is one setting, not one per editor. */
   wrapJson?: boolean;
   onWrapJson?: ((wrap: boolean) => void) | undefined;
+  /**
+   * The window's remembered layout, for the JSON tab's field reference — see `uiState.ts`.
+   *
+   * Passed through for the same reason the wrap preference is: the reference panel is one panel, and
+   * whether it is open should not depend on which editor you happened to reach it from.
+   */
+  ui?: UiSurface | undefined;
   /**
    * What the linter says about this state — the same list the inspector is showing beside it.
    *
@@ -1155,6 +1164,7 @@ export function WorkflowEditor({
           onSchema={setSchemaId}
           {...(wrapJson !== undefined ? { wrap: wrapJson } : {})}
           onWrap={onWrapJson}
+          {...schemaReferenceProps(ui)}
         />
       ) : (
         <>

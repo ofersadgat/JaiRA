@@ -40,15 +40,16 @@ import { signatureOf } from "./transcript";
 import { durationOf } from "./transcriptView";
 import { Splitter } from "./splitter";
 import { nodeAt, stepOf, type TrailStep } from "./trail";
+import { PANE, paneDefault } from "./uiState";
 
 /**
  * How tall the viewer opens, and what a double-click on the divider restores.
  *
- * Roughly the 46% the stylesheet used to give it on a full-height window. Exported because the
- * shell holds the live value with the rest of the pane sizes, and a default living in two files is
- * a default that stops agreeing with itself.
+ * Roughly the 46% the stylesheet used to give it on a full-height window. Read from the layout
+ * table rather than written here, because the shell holds the live value with the rest of the pane
+ * sizes — and a default living in two files is a default that stops agreeing with itself.
  */
-export const VIEWER_HEIGHT = 320;
+const VIEWER_HEIGHT = paneDefault(PANE.filesViewer);
 
 /** What the tree highlights: a file is identified by its layer and its path, never by its id. */
 export interface FileSelection {
@@ -216,6 +217,8 @@ export function FileTreePanel({
   tree,
   selected,
   dirty = EMPTY_DIRTY,
+  collapsed: collapsedProp,
+  onToggleCollapsed,
   busy,
   hasProject,
   onSelect,
@@ -232,6 +235,19 @@ export function FileTreePanel({
   selected: FileSelection | null;
   /** Files with unsaved edits, by `layer:path`. Defaulted, so a host with no draft store shows none. */
   dirty?: ReadonlySet<string>;
+  /**
+   * The folded branches, by the same `layer:path` key, and how to fold or unfold one.
+   *
+   * Controlled when both are supplied — the shell keeps them in `settings.json`, so the shape you
+   * left the tree in is the shape it opens in — and local otherwise, which keeps this panel usable
+   * on its own. Same arrangement as the JSON editor's wrap preference, for the same reason: a
+   * component that REQUIRED a store would be a component you could not render without one.
+   *
+   * Negative — what is listed is SHUT — because a tree defaults to expanded, and a new folder must
+   * never appear collapsed on the strength of a file written before it existed.
+   */
+  collapsed?: ReadonlySet<string> | undefined;
+  onToggleCollapsed?: ((key: string) => void) | undefined;
   busy: boolean;
   /** Project-layer operations are impossible without one, so they are offered disabled, not hidden. */
   hasProject: boolean;
@@ -256,7 +272,9 @@ export function FileTreePanel({
   onDeleteFile: (layer: WorkflowLayer, path: string, force?: boolean) => Promise<FileMutationResult | null>;
   onReveal: (file: string) => void;
 }): JSX.Element {
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  /** Used only when the host does not control the folding — see the prop's own note. */
+  const [ownCollapsed, setOwnCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const collapsed = collapsedProp ?? ownCollapsed;
   const [filter, setFilter] = useState("");
   const [newId, setNewId] = useState("");
   const [newLayer, setNewLayer] = useState<WorkflowLayer>("project");
@@ -549,13 +567,15 @@ export function FileTreePanel({
   const openMenu = (node: FileNode, rootDir: string, x: number, y: number): void =>
     setMenu({ x, y, items: itemsFor(node, rootDir) });
 
-  const toggle = (key: string): void =>
-    setCollapsed((current) => {
+  const toggle = (key: string): void => {
+    if (onToggleCollapsed !== undefined) return onToggleCollapsed(key);
+    setOwnCollapsed((current) => {
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
+  };
 
   // Filtering flattens: a match three directories down is useless if its parents are still folded,
   // and re-deriving which ancestors to force open costs more than just listing the hits.

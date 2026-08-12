@@ -2374,7 +2374,14 @@ export class AppService {
     return readSettingsFile(this.baseDir);
   }
 
-  /** Merge a partial change into the settings file and return the whole result. */
+  /**
+   * Merge a partial change into the settings file and return the whole result.
+   *
+   * ONE level deep, which is what the `ui` slice has to be written whole for: a patch carrying only
+   * `panes` would replace the folds and the tree state with nothing. That is the renderer's rule to
+   * keep (it holds the live copy, so sending all of it costs it nothing), and a deep merge here
+   * would be worse than the rule — it would leave no way to REMOVE a remembered pane at all.
+   */
   writeSettings(patch: Partial<JairaSettings>): JairaSettings {
     const next: JairaSettings = { ...this.readSettings(), ...patch };
     const file = jairaBasePaths(this.baseDir).settingsFile;

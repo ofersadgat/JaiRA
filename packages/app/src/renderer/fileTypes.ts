@@ -91,6 +91,22 @@ export interface SyncSurface {
 }
 
 /**
+ * The window's remembered layout, as a surface sees it — see `uiState.ts`.
+ *
+ * Getters that take their own fallback, rather than a value plus a default table. A surface knows
+ * what its pane opens at and the store does not, so the store is not the place to keep that number;
+ * this way a new pane in a new surface needs nothing here at all.
+ */
+export interface UiSurface {
+  /** The remembered size of a named pane, in px, or `fallback` when nothing has been dragged. */
+  pane: (id: string, fallback: number) => number;
+  setPane: (id: string, size: number) => void;
+  /** Whether a named disclosure is open, or `fallback` when nothing has been remembered. */
+  open: (id: string, fallback: boolean) => boolean;
+  setOpen: (id: string, open: boolean) => void;
+}
+
+/**
  * Everything a surface may need beyond the file itself.
  *
  * One bag rather than per-type props, and that is a deliberate trade. A workflow's viewer needs the
@@ -241,6 +257,17 @@ export interface FileSurfaceContext {
   /** Word wrap in the JSON editor — a saved preference, not per-document. */
   wrapJson: boolean;
   onWrapJson: (wrap: boolean) => void;
+  /**
+   * The window's remembered layout, for surfaces that have a pane or a fold of their own.
+   *
+   * Four functions rather than the state itself, and that is what keeps the coupling one-way: a
+   * surface asks for the size of a named pane and reports a new one, and never learns that the
+   * answer is stored in `settings.json` or what else is in there beside it.
+   *
+   * Optional, like the draft store and for the same reason — a surface rendered outside the shell
+   * (the settings panes do this) still has to work, and falls back to its own state.
+   */
+  ui?: UiSurface | undefined;
   /**
    * The diagnostic the inspector last asked to be SHOWN, as a lint path (`outputs.report`).
    *
