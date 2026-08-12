@@ -24,6 +24,7 @@
  * managed-server supervision; this hands it its options and stays out of the way.
  */
 import { existsSync } from "node:fs";
+import { keyForModel, ModelInfo } from "@declarative-ai/llm";
 import type { EmbeddedModelConfig, LocalServerConfig, ModelRouterOptions } from "@declarative-ai/llm";
 import { AGENT_DEFAULT_MODEL, AgentApiExecutor, type AgentQuery } from "@declarative-ai/agents-api";
 import { AgentCliExecutor, AgentCodexExecutor, type SpawnProcess } from "@declarative-ai/agents-cli";
@@ -80,6 +81,14 @@ export function modelRouterOptions(models: JairaModelConfig = {}, secrets?: Secr
   const anthropic = isEnabled(routes["anthropic"]) ? routes["anthropic"] : undefined;
   const anthropicKey = keyFor(anthropic);
   if (anthropicKey !== undefined) options.anthropicApiKey = anthropicKey;
+
+  const openai = isEnabled(routes["openai"]) ? routes["openai"] : undefined;
+  const openAiKey = keyFor(openai);
+  if (openAiKey !== undefined) options.openAiApiKey = openAiKey;
+  // A base URL is a legitimate thing to set on this route rather than a local-only idea: Azure
+  // OpenAI and every gateway in front of it speak the same protocol, so pointing the route at one
+  // is configuration rather than a route of its own.
+  if (openai?.baseURL !== undefined) options.openAiBaseURL = openai.baseURL;
 
   const openrouter = isEnabled(routes["openrouter"]) ? routes["openrouter"] : undefined;
   const openRouterKey = keyFor(openrouter);
@@ -596,4 +605,38 @@ export function retargetRoute(
       );
     },
   };
+}
+
+/**
+ * Every model that can be used, as `{route}/{model}` ids.
+ *
+ * The catalog, not a guess and not "what this project happens to name". `ModelInfo` ships a committed
+ * snapshot of routes, prices and capabilities, so the answer to "what could I switch to" already
+ * exists — an earlier version of this listed only the ids the open workflow mentioned, which made the
+ * picker a mirror of the file you were already reading rather than a menu of choices.
+ *
+ * AGENT routes are added on top, because they are not in the catalog and could not be: `claude-cli`
+ * and `claude-code` name a program on this machine that picks its own weights, so there is no row of
+ * prices to publish for them. They still belong beside `anthropic` as peers — the reader is choosing
+ * who answers, and "the CLI on my subscription" and "the API" are two different answers to that.
+ */
+export interface KnownModel {
+  /** The `{route}/{model}` id, as a state would write it. */
+  id: string;
+  /** What it can be GIVEN and what it can PRODUCE — what the picker filters on. */
+  input: string[];
+  output: string[];
+}
+
+export function knownModels(): KnownModel[] {
+  return ModelInfo.instance
+    .list()
+    .map((row) => ({
+      id: keyForModel(row),
+      // Defaulted rather than left empty: every model takes text and answers with it, and a filter
+      // over an absent field would hide a row for saying nothing rather than for being unable.
+      input: [...(row.modalities?.input ?? ["text"])],
+      output: [...(row.modalities?.output ?? ["text"])],
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
 }

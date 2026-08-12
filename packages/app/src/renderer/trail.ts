@@ -101,11 +101,16 @@ export function instanceOf(nodes: readonly InstanceNode[], stateId: string): Ins
  * Truncated at the first miss rather than filtered: the steps are a PATH, and a path with a hole in
  * it is not a shorter path, it is a claim about a descent that did not happen. A re-run restarts
  * instance ids, so this is what stops the bar from offering four crumbs into a run that is gone.
+ *
+ * The STATE is checked as well as the id, and that is the same fact stated twice rather than a
+ * belt-and-braces. Instance ids restart, so a re-run does not merely invalidate them — it REISSUES
+ * them, and `#3` in the new run is a live node under a different state. On existence alone the crumb
+ * survives, keeps its old label, and walks into someone else's run.
  */
 export function prunedTrail(trail: readonly TrailStep[], nodes: readonly InstanceNode[]): TrailStep[] {
   const kept: TrailStep[] = [];
   for (const step of trail) {
-    if (nodeAt(nodes, step.instanceId) === undefined) break;
+    if (nodeAt(nodes, step.instanceId)?.stateId !== step.stateId) break;
     kept.push(step);
   }
   return kept;

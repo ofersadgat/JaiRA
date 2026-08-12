@@ -17,6 +17,7 @@ import type { ComponentConfig } from "./components";
 import type { AvailabilitySnapshot, ExecutorInfo, ProbeResult, SecretTarget } from "./executors";
 import type { JairaSettings } from "./settings";
 import type { SchemaViolation } from "./schemas";
+import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type {
   BoardView,
   ConversationView,
@@ -642,6 +643,26 @@ export interface IpcContract {
     request: { taskId: string; runId?: number; instanceId?: number; project?: string };
     response: SessionView;
   };
+  /**
+   * The settings a hand-typed message WOULD run under, before one is sent.
+   *
+   * Separate from sending because the composer renders the moment a run is selected, and a control
+   * that only learned its value by sending would be one nobody could trust before committing to it.
+   */
+  "chat:plan": {
+    request: { taskId: string; instanceId: number; project?: string; overrides?: ChatSettings };
+    response: ChatPlanView;
+  };
+  /**
+   * Send one message into the conversation an instance ran, as a child of that instance.
+   *
+   * Not a run: no workspace is materialized, no job is claimed, and the task's status does not move.
+   * A conversation continued by hand is a conversation, not a second execution of the workflow.
+   */
+  "chat:send": {
+    request: { taskId: string; instanceId: number; message: string; project?: string; overrides?: ChatSettings };
+    response: { instanceId: number; iteration: number; sessionRef?: string; failure?: string; steered?: boolean };
+  };
   /** The tail of what the app has said about itself. */
   "log:list": {
     request: { afterId?: number; level?: LogLevel; source?: string; project?: string; limit?: number } | void;
@@ -764,6 +785,8 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "project:list",
   "session:history",
   "session:view",
+  "chat:plan",
+  "chat:send",
   "log:list",
   "job:list",
   "job:output",

@@ -423,7 +423,7 @@ describe("availability", () => {
   it("reports every route and every executor once a check has run", async () => {
     const snapshot = await service.refreshAvailability();
 
-    expect(snapshot.routes.map((r) => r.name)).toEqual(["anthropic", "openrouter", "local", "embedded"]);
+    expect(snapshot.routes.map((r) => r.name)).toEqual(["anthropic", "openai", "openrouter", "local", "embedded"]);
     expect(snapshot.executors.map((e) => e.name)).toEqual(["claude-code", "claude-cli", "codex-cli"]);
     expect(snapshot.checkedAt).toBeGreaterThan(0);
     // Read back without re-checking: this is what opening the settings screen does.

@@ -22,7 +22,9 @@ import {
   type ResolvedValue,
   type Tool,
 } from "@declarative-ai/exec";
-import { isPermissionDenied, PermissionLedger, withPermission } from "@declarative-ai/permissions";
+import { createToolGate, isPermissionDenied, PermissionLedger, withPermission } from "@declarative-ai/permissions";
+import { READ_FILE, WRITE_FILE } from "./fileTools";
+import type { Approver, ExecPolicy, PermissionMode, ToolGate } from "@declarative-ai/permissions";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { NodeExec, type Exec } from "./exec";
 import { isDeniedPath } from "./policy";
@@ -183,3 +185,101 @@ export function registerCommandFunction(
   const fn = createRunCommandFunction(options);
   registry.functions.set(RUN_COMMAND, hostFunction(fn.run, fn.capabilities));
 }
+
+/**
+ * Resolve tool names to CALLABLE tools, each already under the policy.
+ *
+ * The engine does this for a state's operation (`resolveTools`), and nothing outside the engine
+ * could — which is why a hand-continued turn ran without tools at all for a while. That was a false
+ * dichotomy: the choice looked like "duplicate the guard or go without", and the third option is the
+ * one {@link createRunCommandFunction} already takes — reuse `withPermission`, the same primitive the
+ * engine reuses, so there is still exactly one implementation of "resolve a mode, consult `smart`,
+ * escalate to the human".
+ *
+ * JaiRA owns both halves here: it registered the tools and it compiled the policy, so it always
+ * knows what it is handing over. A name it cannot resolve is an ERROR rather than a silent omission —
+ * a turn that quietly ran without the tool it was promised is the failure worth being loud about.
+ *
+ * ## Both halves of the surface, because the route is not known yet
+ *
+ * The tools come back WRAPPED and a {@link ToolGate} comes back beside them, and both are needed
+ * because this runs before anything has decided which executor answers. Wrapping is the safe default:
+ * an unwrapped tool reaching a `policyEnforcement: "none"` executor is an ungated tool. But if the
+ * route turns out to be a delegated AGENT, that agent arrives with its OWN Bash and Write, which no
+ * wrapper here can reach — it gates those through the gate, or not at all.
+ *
+ * The wrapped names are declared `preGated` so the two do not both fire on one call: the agent
+ * pre-approves them at configuration and the wrapper makes the real decision when the tool runs.
+ */
+export function gateTools(options: {
+  registry: { tools: Map<string, Tool> };
+  /** The names the operation asked for. Empty ⇒ no tools, which is a real answer. */
+  names: readonly string[];
+  /** The conversation these permissions are remembered against — one ledger per session. */
+  sessionId: string;
+  policy?: ExecPolicy | undefined;
+  approve?: Approver | undefined;
+  /** The operation's own `permissions` block: a profile, a default mode, per-tool modes. */
+  authored?: { profile?: string; default?: PermissionMode; tools?: Record<string, PermissionMode> } | undefined;
+}): { tools: Record<string, Tool>; gate: ToolGate } {
+  const ledger = new PermissionLedger({ baseline: options.policy?.baseline ?? {} });
+  if (options.authored?.profile !== undefined) ledger.seedProfile(options.sessionId, options.authored.profile);
+  // With no approver wired, an `ask` denies — the same unattended default the approval hub takes.
+  const approve: Approver = options.approve ?? (() => ({ decision: "deny", scope: "once" }));
+  /** One gate over the SAME ledger, so a decision made at either end is remembered at both. */
+  const gate = createToolGate({
+    ledger,
+    sessionId: options.sessionId,
+    approve,
+    preGated: options.names,
+    ...(options.authored !== undefined ? { authored: options.authored } : {}),
+    ...(options.policy?.smart !== undefined ? { smart: options.policy.smart } : {}),
+    ...(options.policy?.profiles !== undefined ? { profiles: options.policy.profiles } : {}),
+  });
+  if (options.names.length === 0) return { tools: {}, gate };
+  const out: Record<string, Tool> = {};
+  for (const name of options.names) {
+    const tool = options.registry.tools.get(name);
+    if (tool === undefined) throw new Error(`tool '${name}' is not registered`);
+    // OWN entries only. These maps are keyed by TOOL NAME, so a tool called `constructor` would
+    // otherwise resolve its mode — and its smart rule — to a prototype member.
+    const authoredMode =
+      (options.authored?.tools !== undefined && Object.hasOwn(options.authored.tools, name)
+        ? options.authored.tools[name]
+        : undefined) ?? options.authored?.default;
+    out[name] = withPermission(tool, {
+      ledger,
+      sessionId: options.sessionId,
+      toolName: name,
+      approve,
+      ...(authoredMode !== undefined ? { authoredMode } : {}),
+      ...(options.policy?.smart?.[name] !== undefined ? { smart: options.policy.smart[name] } : {}),
+      ...(options.policy?.profiles !== undefined ? { profiles: options.policy.profiles } : {}),
+    });
+  }
+  return { tools: out, gate };
+}
+
+/**
+ * Every tool JaiRA can put under its OWN policy, and whether each one can change anything.
+ *
+ * Three, and deliberately so. A delegated agent arrives with its own tool set and enforces it through
+ * its native permission callback (`policyEnforcement: "callback"`); these are the ones JaiRA registers
+ * and gates itself, which is what "listing a tool puts its commands under the policy at all" means.
+ * A caller listing choices for a person wants exactly this, not the union with whatever an agent
+ * happens to ship — those are not JaiRA's to grant or refuse.
+ *
+ * `readOnly` is carried here rather than read off the built tools because the callers that need it
+ * are describing choices, not making calls: a permission PRESET assigns a mode per tool by asking
+ * whether the tool writes, and it should not have to construct a shell and an artifact store to find
+ * out. It is a restatement, so it can drift — `tools.test.ts` asserts this table against what
+ * {@link registerTools} actually builds, which is the only thing that makes a restatement safe.
+ */
+export const JAIRA_TOOLS = [
+  { name: "bash", readOnly: false },
+  { name: READ_FILE, readOnly: true },
+  { name: WRITE_FILE, readOnly: false },
+] as const satisfies readonly { name: string; readOnly: boolean }[];
+
+/** Just the names — the shape most callers want. */
+export const JAIRA_TOOL_NAMES = JAIRA_TOOLS.map((t) => t.name);

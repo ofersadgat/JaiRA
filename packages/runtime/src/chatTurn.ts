@@ -1,0 +1,192 @@
+/**
+ * One typed message, run and recorded.
+ *
+ * The engine is not involved and does not need to be. A chat child never participates in the state
+ * machine — nothing binds to its output, no transition fires from it — so what is left of "run a
+ * state" is: resolve a position, call the executor, write the journal events a projection reads.
+ * All three are things the engine does for an ordinary state, and all three are small.
+ *
+ * ## The loop is one instance, not one per message
+ *
+ * A fifty-message conversation is ONE instance at `iteration: 50`, and that is load-bearing rather
+ * than tidy. `projection.ts` marks a previous instance under the same child key as superseded the
+ * moment that key is re-entered, and the conversation view filters superseded nodes out — so a
+ * message-per-instance design would make every message but the last silently vanish from the panel
+ * that exists to show them.
+ *
+ * So the first message enters the instance and every message after it takes a transition. The
+ * projection reads `iteration` straight off `transition.taken`, and re-terminating an id it has
+ * already terminated just moves `endedAt` forward. Nothing else has to know the loop exists.
+ *
+ * ## Terminating between messages is deliberate
+ *
+ * A chat child that stayed `running` while it waited for someone to type would make its whole task
+ * read as busy — task status derives from the instance tree, so an idle conversation would look like
+ * work in flight forever. Each turn therefore ends properly, and the next one reopens the same
+ * instance rather than a new one.
+ */
+import type { EngineEvent, TerminationOutcome, WorkflowMetrics } from "@declarative-ai/hw";
+import type {
+  ExecServices,
+  Executor,
+  InlineFamily,
+  PromptOp,
+  ResolvedValue,
+  SessionStore,
+} from "@declarative-ai/exec";
+import type { JsonValue } from "@declarative-ai/json";
+
+/**
+ * Where a chat instance's id comes from.
+ *
+ * The engine allocates from `this.nextInstanceId++`, a counter it owns in memory, and a conversation
+ * may be continued while that engine is still running — so picking `max(id) + 1` off the journal
+ * would race it and silently reuse an id the engine is about to hand out. A disjoint space costs
+ * nothing and cannot collide.
+ *
+ * A high base rather than a negative number: `instance.blocked` already uses `-1` as a sentinel
+ * meaning "no instance exists to attach this to", and sitting beside a sentinel is a poor place to
+ * put real instances.
+ */
+export const CHAT_INSTANCE_BASE = 1_000_000;
+
+/** True for an id this module minted rather than the engine — see {@link CHAT_INSTANCE_BASE}. */
+export function isChatInstance(instanceId: number): boolean {
+  return instanceId >= CHAT_INSTANCE_BASE;
+}
+
+/**
+ * The child key a hand-continued conversation is mounted at.
+ *
+ * One reserved key per host, which is what makes the loop one node: a second `instance.entered` under
+ * the same key would supersede the first and the panel would show only the latest message. It is not
+ * a key any workflow declares, so it never collides with an authored child — and the board draws its
+ * columns from the DECLARED children, so a conversation appears in the transcript without inventing a
+ * column in a board the workflow's author never wrote.
+ */
+export const CHAT_CHILD_KEY = "ask";
+
+/** Which conversation, and where in the tree it hangs. */
+export interface ChatInstance {
+  /** The synthetic child's own id. See {@link CHAT_INSTANCE_BASE}. */
+  instanceId: number;
+  /** The instance being read — the one this conversation is a child OF. */
+  parentInstanceId: number;
+  /** The state the child is recorded under, which is the host's own id. */
+  stateId: string;
+  /** The reserved key this conversation is mounted at. One per host, so the loop stays one node. */
+  childKey: string;
+  /** 0 for the first message, then one per message. */
+  iteration: number;
+}
+
+export interface ChatTurnPorts {
+  /**
+   * The prompt executor, ALREADY under `withSessionLayers`.
+   *
+   * Taken layered rather than layering it here, because the stores are the caller's and the ordering
+   * is a correctness property that belongs in one place — see `withSessionLayers`. A caller that
+   * hands over a bare executor gets a turn that runs and is never recorded, which is the failure this
+   * module cannot detect and the helper exists to prevent.
+   */
+  executor: Executor<ExecServices, WorkflowMetrics>;
+  sessions: SessionStore<JsonValue>;
+  /** The run's journal. Same sink the engine writes to, so one projection reads both. */
+  record: (event: EngineEvent, atMs: number) => void;
+  /** Everything the call needs that is not the session: tools, workspace, validator, abort. */
+  services?: ExecServices;
+  now?: () => number;
+}
+
+export interface ChatTurnRequest {
+  instance: ChatInstance;
+  operation: PromptOp<InlineFamily>;
+  /** The exact position the displayed transcript ends at. */
+  position: string;
+}
+
+export interface ChatTurnResult {
+  /** What came back, when it did. */
+  value?: ResolvedValue;
+  /** Where the conversation now ends — the caller's next `position`. */
+  sessionRef?: string;
+  /** Why it did not, worded for someone reading the transcript rather than a stack trace. */
+  failure?: string;
+}
+
+/**
+ * The seed a fork of this turn would be named by.
+ *
+ * `mint` is deterministic — `s_${seed}` — so two forks sharing a seed share an id and collide. hw
+ * uses `${stateId}:${sessionId}`, stable per state so a REPLAY of one call lands on the conversation
+ * it landed on before instead of minting a second beside it. A chat turn wants the same property per
+ * MESSAGE, which is what the iteration is doing here: replaying message 4 reuses message 4's branch,
+ * and message 5 cannot land on it.
+ */
+function seedFor(instance: ChatInstance): string {
+  return `chat:${instance.instanceId}:${instance.iteration}`;
+}
+
+/**
+ * Run one message and journal it.
+ *
+ * Failures are RETURNED, never thrown: a model that refused is a turn of the conversation, and the
+ * journal has to record it as one or the panel shows a message that was sent and no reason it went
+ * nowhere. Only a caller bug — a store that will not resolve — escapes.
+ */
+export async function runChatTurn(ports: ChatTurnPorts, request: ChatTurnRequest): Promise<ChatTurnResult> {
+  const { instance } = request;
+  const now = ports.now ?? (() => Date.now());
+  const at = now();
+  const emit = (event: EngineEvent, when: number = now()): void => ports.record(event, when);
+  const where = { instanceId: instance.instanceId, stateId: instance.stateId };
+
+  // Entering once and transitioning after is what keeps a long conversation one node — see the
+  // module header on why a second `instance.entered` under this key would hide everything above it.
+  if (instance.iteration === 0) {
+    emit(
+      {
+        type: "instance.entered",
+        ...where,
+        childKey: instance.childKey,
+        parentInstanceId: instance.parentInstanceId,
+        // The message is not an input the way a state's inputs are — it is the operation's own
+        // prompt, and it is already in the transcript. Recording it here would print it twice.
+        inputs: {},
+      },
+      at,
+    );
+  } else {
+    emit({ type: "transition.taken", ...where, to: instance.stateId, iteration: instance.iteration }, at);
+  }
+  emit({ type: "operation.started", ...where, op: "prompt" }, at);
+
+  const resolved = await ports.sessions.resolve({ ref: request.position, seed: seedFor(instance) });
+  const result = await ports.executor.start(request.operation, { ...ports.services, session: resolved }).result;
+
+  // The join between a turn and its transcript. `withSessionPosition` stamps the position a call
+  // ENDED at onto the metrics, and the projection reads it off `operation.completed` — so dropping it
+  // here would record a conversation nothing could find its way back to.
+  const sessionRef = result.metrics.sessionRef;
+
+  // `"error" in result`, not `result.error`: the success branch has no `error` key at all, precisely
+  // so that the second spelling fails to compile rather than compiling and widening `value`.
+  if ("error" in result) {
+    const failure = result.error;
+    emit({ type: "operation.failed", ...where, op: "prompt", failure });
+    emit({ type: "instance.terminated", ...where, outcome: outcomeOf(failure), failure });
+    return { ...(sessionRef !== undefined ? { sessionRef } : {}), failure: failure.reason };
+  }
+
+  emit({ type: "operation.completed", ...where, op: "prompt", metrics: result.metrics });
+  emit({ type: "instance.terminated", ...where, outcome: "success" });
+  return {
+    ...(result.value !== undefined ? { value: result.value } : {}),
+    ...(sessionRef !== undefined ? { sessionRef } : {}),
+  };
+}
+
+/** A cancel reads as cancelled rather than failed — the person stopped it, nothing went wrong. */
+function outcomeOf(failure: { classification?: string }): TerminationOutcome {
+  return failure.classification === "canceled" ? "canceled" : "error";
+}

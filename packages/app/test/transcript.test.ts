@@ -7,7 +7,17 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ConversationTurn, InstanceNode, SessionView } from "@jaira/shared/browser";
-import { entriesOf, journalFor, messagePartsOf, previewOf, signatureOf, type ToolEntry } from "../src/renderer/transcript";
+import {
+  blocksOf,
+  entriesOf,
+  iconOf,
+  journalFor,
+  messagePartsOf,
+  previewOf,
+  signatureOf,
+  type ToolEntry,
+  type TranscriptEntry,
+} from "../src/renderer/transcript";
 
 const session = (turns: SessionView["turns"]): SessionView =>
   ({ taskId: "t", runId: 1, instanceId: 2, stateId: "plan/goals", sessionId: "#i2", seq: 0, turns }) as SessionView;
@@ -198,5 +208,66 @@ describe("the signature line", () => {
 
   it("falls back to the state id for a run entered as a root, which has no key", () => {
     expect(signatureOf({ stateId: "feature/plan", childKey: undefined, label: undefined, inputs: undefined }).name).toBe("plan");
+  });
+});
+
+describe("folding a flat list into messages and the work between them", () => {
+  const tool = (name: string): TranscriptEntry => ({ kind: "tool", name, summary: "" });
+  const say = (role: string): TranscriptEntry => ({ kind: "message", role, text: role });
+
+  it("gathers a run of calls, thoughts and events into one block", () => {
+    const blocks = blocksOf([
+      say("user"),
+      { kind: "thought", text: "check the file first" },
+      tool("Read"),
+      { kind: "event", tone: "warn", text: "policy escalated" },
+      say("assistant"),
+    ]);
+    expect(blocks.map((b) => b.kind)).toEqual(["message", "work", "message"]);
+    expect(blocks[1]).toMatchObject({ kind: "work", entries: [{ kind: "thought" }, { kind: "tool" }, { kind: "event" }] });
+  });
+
+  it("opens with a work block when the run acted before anybody spoke", () => {
+    // The common shape for a state whose operation is a bare agent loop, and the one a renderer
+    // that assumed "message first" put an empty bubble above.
+    expect(blocksOf([tool("Bash"), say("assistant")]).map((b) => b.kind)).toEqual(["work", "message"]);
+  });
+
+  it("starts a new block after each message, so a fold cannot span an answer", () => {
+    const blocks = blocksOf([tool("a"), say("assistant"), tool("b")]);
+    expect(blocks.map((b) => b.kind)).toEqual(["work", "message", "work"]);
+  });
+
+  it("leaves the live turn on its own — it is being said, not done", () => {
+    expect(blocksOf([tool("a"), { kind: "live", text: "half an answ" }]).map((b) => b.kind)).toEqual(["work", "live"]);
+  });
+});
+
+describe("which glyph a line of work draws with", () => {
+  const tool = (name: string) => iconOf({ kind: "tool", name, summary: "" });
+
+  it("reads the family off the tool's name", () => {
+    expect(tool("Bash")).toBe("terminal");
+    expect(tool("Read")).toBe("read");
+    expect(tool("NotebookEdit")).toBe("write");
+    expect(tool("Grep")).toBe("search");
+    expect(tool("Task")).toBe("agent");
+  });
+
+  it("calls a web tool web, though its name also says fetch or search", () => {
+    // Order is the whole design: `WebSearch` is a web thing and `Glob` is a search, and only the
+    // sequence of the tests tells them apart.
+    expect(tool("WebFetch")).toBe("web");
+    expect(tool("WebSearch")).toBe("web");
+  });
+
+  it("falls back to a plain tool rather than guessing", () => {
+    expect(tool("mcp__weather__forecast")).toBe("tool");
+  });
+
+  it("marks a thought and tells a fact from a warning", () => {
+    expect(iconOf({ kind: "thought", text: "…" })).toBe("think");
+    expect(iconOf({ kind: "event", tone: "plain", text: "went to draft" })).toBe("note");
+    expect(iconOf({ kind: "event", tone: "bad", text: "failed" })).toBe("alert");
   });
 });

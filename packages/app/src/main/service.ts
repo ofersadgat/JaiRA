@@ -23,8 +23,9 @@ import {
 } from "node:fs";
 import { basename, dirname, join, relative, resolve as resolvePath, sep } from "node:path";
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
-import { InMemoryPersistence, loadBundle, type WorkflowBundle } from "@declarative-ai/hw";
-import type { MemoCache } from "@declarative-ai/exec";
+import { InMemoryPersistence, loadBundle, type LoadedState, type WorkflowBundle } from "@declarative-ai/hw";
+import type { ExecServices, MemoCache } from "@declarative-ai/exec";
+import type { ExecPolicy } from "@declarative-ai/permissions";
 import type { JsonValue } from "@declarative-ai/json";
 import {
   baseFileTree,
@@ -77,6 +78,9 @@ import {
   syncDrift,
   taskSummaries,
   workflowRoots,
+  bundleFor,
+  projectRun,
+  eventsOf,
   type DescriptionBoundary,
   type DescriptionOwnership,
   type Project,
@@ -106,6 +110,7 @@ import {
   registerCommandFunction,
   registerGenericAgents,
   registerTools,
+  gateTools,
   functionNamesOf,
   InteractionHub,
   defaultExecutorTree,
@@ -113,6 +118,8 @@ import {
   probeModelRoutes,
   agentPromptRoutes,
   agentPromptRouteNames,
+  knownModels,
+  JAIRA_TOOLS,
   usableRouteKeys,
   newRegistry,
   NodeExec,
@@ -122,6 +129,16 @@ import {
   ScriptedFunctions,
   sessionServicesFor,
   statusOfResult,
+  chatOperationOf,
+  chatPlanFor,
+  holdsConversation,
+  isChatInstance,
+  runChatTurn,
+  withSessionLayers,
+  CHAT_INSTANCE_BASE,
+  CHAT_CHILD_KEY,
+  type ChatSettings,
+  type ChatTurnResult,
   withTurnStream,
   syncOutcomeOf,
   syncRootId,
@@ -157,6 +174,9 @@ import {
   SYSTEM_SESSION,
   validateComponentResult,
   WORKFLOW_JSON,
+  unnamedRouteOf,
+  PERMISSION_PRESETS,
+  presetOf,
 } from "@jaira/shared";
 import { Diagnostics } from "./diagnostics";
 import { ProjectSession, type SyncHolder } from "./session";
@@ -219,6 +239,11 @@ import type {
   WriteConfigRequest,
   WriteFileRequest,
   WriteWorkflowRequest,
+  InstanceNode,
+  ChatPlanView,
+  JairaPromptNode,
+  PermissionMode,
+  ToolChoice,
 } from "@jaira/shared";
 
 export type Publish = (message: PushMessage) => void;
@@ -1646,7 +1671,7 @@ export class AppService {
         ...(delta.stateId !== undefined ? { stateId: delta.stateId } : {}),
         text: delta.text,
       });
-    }, prompt);
+    }, prompt, open.liveCalls);
 
     // Conversation `summary` mode (DESIGN §14 phase 7): installed only for the
     // sessions whose states asked for it, and summarizing through this run's own
@@ -1802,9 +1827,462 @@ export class AppService {
     return { taskId, runId: started.runId };
   }
 
+  // --- continuing a conversation by hand ---------------------------------------
+  //
+  // A person typing into a run's transcript. The message runs as a prompt op under a child of the
+  // instance being read — inheriting that state's model, tools and permissions from the run's PINNED
+  // snapshot — and takes no part in the state machine: nothing binds to it, no transition fires from
+  // it, and the task's status does not move. See `chatOperation.ts` and `chatTurn.ts`.
+
+  /**
+   * The settings a message WOULD run under, for the composer to show before anything is sent.
+   *
+   * Separate from sending because the composer has to render the model, effort, permissions and tools
+   * the moment a run is selected — and a control that only learned its value by sending a message
+   * would be a control nobody could trust before they had already committed to using it.
+   */
+  chatPlan(request: { taskId: string; instanceId: number; project?: string; overrides?: ChatSettings }): ChatPlanView {
+    const open = this.session(request.project);
+    const context = this.chatContextOf(request.taskId, request.instanceId, request.project);
+    const sessionId = sessionOf(context.position);
+    // Which of the three things Enter does. Read at plan time rather than pushed: the composer
+    // re-asks whenever the settings change, and a stale answer here is one wrong word rather than a
+    // wrong action, because `sendChatMessage` re-checks before it does anything.
+    const live: ChatPlanView["live"] =
+      open.liveCalls.get(sessionId) === undefined ? "idle" : open.liveCalls.canSend(sessionId) ? "steerable" : "busy";
+    const plan = chatPlanFor(context.path, request.overrides ?? {});
+    // Built ONCE and shared with `effectiveOf`: it lists the routes on offer here and supplies the
+    // pinned/unnamed-route fallback there, and `defaultTree` compiles the whole prompt tree.
+    const router = this.defaultTree(open.project.config, context.bundle, false, this.secretResolver(open)).prompt as {
+      defaults?: Record<string, JsonValue>;
+      routes?: Record<string, JairaPromptNode>;
+    };
+    // The gateable set, named once — see JAIRA_TOOLS. Each carries `readOnly`, which is what lets a
+    // preset assign a mode by asking what the tool DOES rather than by knowing its name. A CLI route
+    // also offers "default", which means its OWN tools rather than any of these.
+    const tools: ToolChoice[] = JAIRA_TOOLS.map((t) => ({ name: t.name, readOnly: t.readOnly }));
+    return {
+      ...plan,
+      live,
+      effective: this.effectiveOf(open, router, plan, request.taskId, context.runId, context.position, tools),
+      available: {
+        // Provider routes AND agent routes, as peers. `claude-cli` and `anthropic` are two different
+        // answers to "who answers this" — one is a program on this machine running on a subscription,
+        // the other is the API — so they are sibling rows rather than one folded into the other.
+        routes: [...new Set([...Object.keys(router.routes ?? {}), ...Object.keys(agentPromptRouteNames(open.project.config.agents))])].sort(),
+        tools,
+        models: knownModels(),
+      },
+    };
+  }
+
+  /**
+   * Which model answered the last turn of this conversation.
+   *
+   * Read off the STORED RESULT rather than inferred from config, because it is the only place the
+   * answer exists: routing happens inside the call, so a state naming `claude-cli` and a state naming
+   * nothing at all both resolve to a model that no configuration file mentions.
+   */
+  private modelOfRecord(open: ProjectSession, taskId: string, runId: number, position: string): string | undefined {
+    const at = position.lastIndexOf("@");
+    if (at <= 0) return undefined;
+    const id = position.slice(0, at);
+    const seq = Number(position.slice(at + 1));
+    if (!Number.isInteger(seq)) return undefined;
+    // Scoped to the RUN that wrote it, exactly as sessionView is: a session id is instance-scoped
+    // and instance ids restart every run, so an unscoped read finds whichever run wrote that id last.
+    const store = new SqliteSessionStore(open.project.db, { taskId, runId });
+    // The position is where the NEXT turn goes, so the last one written is the seq below it.
+    const record = store.at(id, seq - 1) ?? store.at(id, seq);
+    // `record.value` is the ENVELOPE; the `LlmOutput` is its own `value` inside it — the same nesting
+    // `messagesOfRecord` reads as `value.value.messages`. Reading one level too shallow found `model`
+    // on nothing, so this silently never fired and every chip fell through to the router default.
+    const envelope = record?.value;
+    if (envelope === null || typeof envelope !== "object" || Array.isArray(envelope)) return undefined;
+    const output = (envelope as Record<string, unknown>)["value"];
+    if (output === null || typeof output !== "object" || Array.isArray(output)) return undefined;
+    const model = (output as Record<string, unknown>)["model"];
+    return typeof model === "string" && model.length > 0 ? model : undefined;
+  }
+  /**
+   * What will ACTUALLY run when nothing is changed.
+   *
+   * A control saying "no model" is answering a question nobody asked. The person is not wondering
+   * whether the state named one — they are wondering what happens if they press Enter, and "nothing
+   * was declared here" is a fact about the workflow file rather than an answer about the call.
+   *
+   * Where a value cannot be known, this says which thing decides it rather than inventing one. The
+   * model is the interesting case: a state naming none does not fall back to a fixed default, it
+   * falls to the ROUTER, which picks the first route that can answer an unnamed model. So the honest
+   * answer is the route's name, not a model id we would have had to make up.
+   *
+   * Takes the resolved prompt ROUTER rather than building one: the caller has already built it to
+   * list the routes it offers, and `defaultTree` is not cheap enough to run twice for one view.
+   */
+  private effectiveOf(
+    open: ProjectSession,
+    router: { defaults?: Record<string, JsonValue>; routes?: Record<string, JairaPromptNode> },
+    plan: ReturnType<typeof chatPlanFor>,
+    taskId: string,
+    runId: number,
+    position: string,
+    tools: readonly ToolChoice[],
+  ): ChatPlanView["effective"] {
+    // What ANSWERED this conversation last, read off the stored result. It beats everything below it:
+    // a state that named no model, or named a route that picks its own, was still answered by
+    // something, and the record is where that decision was written down.
+    const model =
+      plan.settings.model ??
+      this.modelOfRecord(open, taskId, runId, position) ??
+      (() => {
+        const pinned = router.defaults?.["model"];
+        if (typeof pinned === "string") return pinned;
+        const route = unnamedRouteOf(router.routes);
+        // A REAL id, not prose. "claude-cli decides" was declining to answer a question this can
+        // answer well enough: the route is known now and the model it will pick is not, and
+        // `claude-cli/default` says exactly that in the one syntax everything downstream parses.
+        // It is also why the chip lost its logo — the icon reads the route off the prefix, and a
+        // string with a space in it has no prefix to read.
+        return route === undefined ? undefined : `${route}/default`;
+      })();
+    return {
+      ...(model !== undefined ? { model } : {}),
+      // No project-level default to read: a call with no `reasoning` gets the model's own. Naming
+      // the decider beats printing a value we invented.
+      reasoning: plan.settings.reasoning?.effort ?? "the model's default",
+      // The per-tool MAP, named as the preset it matches — see `postureOf`. The map is what the
+      // executor is handed, so it is the only honest thing to report.
+      permissions: postureOf(open.project.config, tools, plan.settings.permissions),
+    };
+  }
+
+  /**
+   * Send one message into the conversation an instance ran, as a child of that instance.
+   *
+   * The child never joins the state machine — nothing binds to it and no transition fires from it —
+   * so this assembles what a prompt call needs and nothing else. Notably NOT a run: no workspace is
+   * materialized, no job is claimed, no task status moves. A conversation continued by hand is a
+   * conversation, not a second execution of the workflow.
+   */
+  async sendChatMessage(request: {
+    taskId: string;
+    instanceId: number;
+    message: string;
+    overrides?: ChatSettings;
+    project?: string;
+    /** Scripted answers, exactly as {@link startTask} takes them — a demo conversation needs no provider. */
+    fake?: JsonValue | FakeRule[];
+  }): Promise<ChatTurnResult & { instanceId: number; iteration: number; steered?: boolean }> {
+    if (request.message.trim() === "") throw new Error("a message cannot be empty");
+    const open = this.session(request.project);
+    const project = open.project;
+    let context = this.chatContextOf(request.taskId, request.instanceId, request.project);
+
+    // A call still taking its turn, in the conversation being read. Talking to THAT is different from
+    // starting a turn beside it: the message joins the turn already in progress and the agent answers
+    // in its own stream, so there is no child to record and no position to claim. Only some transports
+    // can do it — `sessionSteering` is declared, not discovered — and `steerOf` returns nothing at all
+    // when they cannot, which is why this is a branch rather than an attempt.
+    const steer = this.steerOf(open, context.position);
+    if (steer !== undefined) {
+      await steer.send(request.message);
+      return { instanceId: context.hostInstanceId, iteration: context.iteration, steered: true };
+    }
+
+    // It cannot be steered, so WAIT for it instead of appending beside it. There is no queue here and
+    // nothing is stored: the promise already exists, and waiting on it is the whole mechanism.
+    const sessionId = sessionOf(context.position);
+    if (open.liveCalls.get(sessionId) !== undefined) {
+      // BOUNDED. An unbounded await is the same promise the call is parked on, so a provider that
+      // stops answering takes this IPC handler with it — the composer sits on `busy` with no reply,
+      // no error and nothing to cancel. Past the bound we append BESIDE the call instead, which
+      // `withSessionPosition` handles by forking: a branch is a worse answer than a continuation and
+      // a much better one than a request that never returns.
+      const settled = await open.liveCalls.settle(sessionId, CHAT_WAIT_MS);
+      // Re-read, because the head MOVED — which is the entire reason for waiting. Sending the position
+      // computed before the wait would fork every time and defeat it.
+      if (settled) context = this.chatContextOf(request.taskId, request.instanceId, request.project);
+    }
+    // NOT refused when the state named no model. Refusing rejected exactly the case the resolution
+    // chain exists for: a state naming none is answered by the ROUTER, which is how its own run
+    // succeeded — so throwing here made a continuation refuse what the workflow does routinely, and
+    // did it while the chip above showed a model. The op carries no model and the router answers it,
+    // exactly as it answered the state.
+    const plan = chatPlanFor(context.path, request.overrides ?? {});
+
+    const config = project.config;
+    const secrets = this.secretResolver(open);
+    const fakeRules = request.fake !== undefined ? parseFakeRules(request.fake) : undefined;
+    const fake = fakeRules !== undefined;
+    // ONE executor, used twice. It was built twice — once for the summarizer and once for the turn —
+    // with hand-copied options and a memo cache each, so the two had to be kept in step by eye and
+    // neither could reuse the other's memo. The summarizer takes the BARE executor and the turn takes
+    // it under the session layers, which is the only difference between the two uses.
+    const prompt = buildPromptExecutor({
+      ...(fakeRules !== undefined ? { fakeRules } : {}),
+      ...this.promptWiring(config, { fake, secrets, memoCache: new SqliteMemoCache(project.db) }),
+      tree: this.defaultTree(config, context.bundle, fake, secrets).prompt,
+    });
+    // The WIRED executor, not a bare one. Summarizing through `buildPromptExecutor()` with no options
+    // is a router with no tree, no routes and no keys, so a conversation in `summary` mode would
+    // compact through something that cannot reach a provider.
+    const stores = sessionServicesFor(context.bundle, promptSummarizer(prompt), {
+      inner: new SqliteSessionStore(project.db, { taskId: request.taskId, runId: context.runId }),
+    });
+    const executor = withSessionLayers(stores, prompt);
+
+    // JaiRA registered these and JaiRA compiled the policy, so it always knows what it is handing
+    // over — see `gateTools`. An unresolvable name throws rather than quietly running without it.
+    //
+    // BOTH registrations, exactly as `startTask` does them. `registerTools` supplies `bash` alone;
+    // the file tools come from `registerFileTools`, and with only the first of the two a reader who
+    // ticked `read_file` got `tool 'read_file' is not registered` — the loud failure that call is
+    // designed to give for a name nobody registered, raised here for a wiring gap instead.
+    const registry = newRegistry();
+    registerTools(registry, { execEnv: config.execEnvironment, exec: new NodeExec({ execEnv: config.execEnvironment }) });
+    // The same artifact wiring the run used, so a file this turn writes lands where that run's files
+    // landed rather than somewhere only this conversation knows about.
+    //
+    // The workspace root is READ, never ensured: a bound task's worktree path is recorded, and
+    // `ensureWorkspace` would CREATE one — which is the one thing this path promises not to do, since
+    // a conversation is not a second execution. An unbound task, or a bound one whose worktree has
+    // been removed, falls back to the project directory, which is where its run read from anyway.
+    const recordedWorktree = project.runtime.get(request.taskId)?.worktreePath;
+    const workspaceRoot =
+      recordedWorktree !== undefined && existsSync(recordedWorktree) ? recordedWorktree : project.paths.projectDir;
+    const artifacts = artifactWiring({
+      destination: config.artifacts.destination,
+      artifactDir: config.artifacts.dir,
+      inlineMaxBytes: config.artifacts.inlineMaxBytes,
+      taskId: request.taskId,
+      runId: context.runId,
+      workspaceRoot,
+      projectDir: project.paths.projectDir,
+      jairaDir: project.paths.jairaDir,
+    });
+    registerFileTools(registry, {
+      destination: artifacts.destination,
+      store: project.artifacts,
+      vars: artifacts.vars,
+      inlineMaxBytes: artifacts.inlineMaxBytes,
+    });
+    const approve = open.approvals.approver({ taskId: request.taskId });
+    /**
+     * The project policy with THIS message's per-tool modes folded into its baseline.
+     *
+     * Two consumers, and the fold is for the second. `gateTools` reads the authored modes directly,
+     * so JaiRA's own tools are gated either way. But a DELEGATED agent reads `ctx.policy.baseline.tools`
+     * to build its deny floor — the set of tools it is never even offered — and that read goes to the
+     * project baseline, which knows nothing about what was picked in the composer. Unfolded, a tool
+     * set to `deny` here was still handed to the agent, refused only once it tried to call it.
+     *
+     * The message's own choice wins over the project's: it is the narrower, later statement.
+     */
+    const compiled = compilePolicy(config.policy, { execEnv: config.execEnvironment });
+    const authoredModes = plan.settings.permissions?.tools;
+    const policy: ExecPolicy =
+      authoredModes === undefined
+        ? compiled
+        : { ...compiled, baseline: { ...compiled.baseline, tools: { ...compiled.baseline?.tools, ...authoredModes } } };
+    const { tools, gate } = gateTools({
+      registry,
+      names: plan.settings.tools ?? [],
+      sessionId: sessionOf(context.position),
+      policy,
+      approve,
+      ...(plan.settings.permissions !== undefined ? { authored: plan.settings.permissions } : {}),
+    });
+
+    const { operation } = chatOperationOf(plan, { message: request.message, session: { id: context.position } });
+    const recorder = project.events.recorder(request.taskId, context.runId);
+    const result = await runChatTurn(
+      {
+        executor,
+        sessions: stores.sessions,
+        record: (event, atMs) => recorder.record(event, atMs),
+        /**
+         * Everything the call needs that is not the session — and three of the four were missing.
+         *
+         * `tools` alone gated JaiRA's own three and nothing else, which is only half the surface when
+         * the route is a delegated agent. Such an agent arrives with its OWN tools and enforces them
+         * through the two seams below, so a turn that supplied neither ran `claude-cli`'s built-in
+         * Bash and Write with no approval prompt and no deny floor — while the composer above it
+         * displayed a permission posture that had no bearing on them.
+         *
+         *  - `gate` is the full decision — profile, mode, `smart`, then the human — over the agent's
+         *    OWN tools, which no wrapper here can reach. It is what makes the four modes mean the
+         *    same thing on an agent route as on a plain model one.
+         *  - `approve` is the older, thinner seam an adapter falls back to, and what the gate itself
+         *    escalates to. Absent, an un-gated adapter builds no callback at all.
+         *  - `policy` is where an adapter reads its deny floor — the tools it is not offered in the
+         *    first place. Folded with this message's choices above.
+         *  - `workspace` is what `bash` and the file tools resolve paths against, so without it a
+         *    command ran in whatever directory the app was launched from. The run's own root — read,
+         *    never ensured (see above).
+         */
+        services: { tools, gate, workspace: { root: workspaceRoot }, policy, approve } as ExecServices,
+      },
+      {
+        instance: {
+          // Derived, never allocated: stable per host instance, so the second message reopens the
+          // same node instead of entering a sibling that would supersede the first. Keyed on the
+          // HOST rather than on whatever was clicked, so two composites under one speaking state
+          // continue the same conversation instead of minting a chat child each.
+          instanceId: CHAT_INSTANCE_BASE + context.hostInstanceId,
+          parentInstanceId: context.hostInstanceId,
+          stateId: context.stateId,
+          childKey: CHAT_CHILD_KEY,
+          iteration: context.iteration,
+        },
+        operation,
+        position: context.position,
+      },
+    );
+    // `task`, not `tasks`. The renderer refreshes the conversation and the session views on `task`
+    // and only the task LIST on `tasks` — so the plural left the reply invisible: the box cleared,
+    // the turn ran, and the panel above stayed byte-identical until something unrelated invalidated.
+    this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: request.taskId });
+    return { ...result, instanceId: CHAT_INSTANCE_BASE + context.hostInstanceId, iteration: context.iteration };
+  }
+
+  /**
+   * The control for a call in flight in this conversation, when there is one and it can be talked to.
+   *
+   * The position a reply would be sent AT is `<session>@<seq>`, and the register is keyed by the
+   * session alone — a call in flight has not finished claiming its position, so matching on the whole
+   * ref would never hit. Splitting on the last `@` is the same arithmetic the store uses, and it is
+   * why a compaction's `planning~compact1@3` still resolves to one id.
+   */
+  private steerOf(open: ProjectSession, position: string): { send(text: string): Promise<void> } | undefined {
+    // `send` specifically, not `control`: every method on `ExecControl` is individually optional, so
+    // a transport offering `interrupt` and nothing else is representable — and would give us an object
+    // here whose `send` is not there.
+    const send = open.liveCalls.get(sessionOf(position))?.control?.send;
+    return send === undefined ? undefined : { send: (text) => send(text) };
+  }
+
+  /**
+   * Everything a chat turn needs to know about where it is being sent.
+   *
+   * The bundle is the run's PINNED snapshot rather than live `workflows/`, for the same reason
+   * execution reads the snapshot: the settings shown must be the ones the conversation on screen
+   * actually ran under, and an edit since then would otherwise silently change them.
+   */
+  private chatContextOf(
+    taskId: string,
+    instanceId: number,
+    projectKey?: string,
+  ): {
+    bundle: WorkflowBundle;
+    runId: number;
+    /** The instance whose conversation is being continued — see below on why it may not be the one asked for. */
+    hostInstanceId: number;
+    stateId: string;
+    path: Array<LoadedState | undefined>;
+    position: string;
+    iteration: number;
+  } {
+    const open = this.session(projectKey);
+    const project = open.project;
+    const runs = project.runtime.listRuns(taskId);
+    const run = runs[runs.length - 1];
+    if (run === undefined) throw new Error(`task '${taskId}' has never run`);
+    const task = project.runtime.get(taskId);
+    const bundle = bundleFor(project, task?.snapshotHash ?? run.snapshotHash, run.snapshotHash);
+    if (bundle === undefined) throw new Error(`the snapshot for run ${run.id} is missing`);
+
+    const { events, atMs } = eventsOf(project.events.list(taskId, { runId: run.id }));
+    const tree = projectRun(events, undefined, atMs);
+    const found = AppService.findInstance(tree.instances, instanceId);
+    if (found === undefined) throw new Error(`run ${run.id} has no instance ${instanceId}`);
+
+    // Nearest first: the clicked instance, then its ancestors.
+    const path = found.path.map((node) => bundle.states[node.stateId]);
+    // The HOST — the nearest instance on that path that actually holds a conversation.
+    //
+    // Resolved with `holdsConversation`, the same predicate `chatPlanFor` picks its SETTINGS with,
+    // because the two answers have to be about one state. Reading the settings from one instance and
+    // the position from another is not a near miss: it is a plan for one conversation and a position
+    // in a different one, and the position lookup then simply finds nothing.
+    //
+    // A CHAT child is skipped rather than matched. It is recorded under its host's state id, so it
+    // passes `holdsConversation` on the state alone — and a reader who clicks the reply they are
+    // already looking at would then mount a second conversation INSIDE the first, at iteration 0,
+    // under `2_000_000 + n`. A chat child IS a conversation; it does not host one. Addressing it
+    // means continuing it, which is its host's turn to take.
+    const hostAt = found.path.findIndex(
+      (node) => !isChatInstance(node.instanceId) && holdsConversation(bundle.states[node.stateId]),
+    );
+    if (hostAt === -1) {
+      // The honest answer for a COMPOSITE. It orchestrates and says nothing, so it has no session and
+      // no position; and its ancestors are composites too, since a state that speaks has no children
+      // to be an ancestor OF. Its panel shows its children's transcripts, and which of three
+      // conversations a message belongs to is not a question this can answer on the reader's behalf.
+      throw new Error(`instance ${instanceId} is not part of any conversation — no state on its path runs a prompt`);
+    }
+    const host = found.path[hostAt]!;
+    const chatId = CHAT_INSTANCE_BASE + host.instanceId;
+    const chat = host.children.find((c: InstanceNode) => c.instanceId === chatId);
+    return {
+      bundle,
+      runId: run.id,
+      hostInstanceId: host.instanceId,
+      stateId: host.stateId,
+      // From the host outward. `chatPlanFor` would find the same state in the longer list, but the
+      // states BELOW the host are not ancestors of the conversation and have no business in it.
+      path: path.slice(hostAt),
+      position: this.chatPositionOf(taskId, run.id, host.instanceId, projectKey),
+      // The loop's next turn. `iteration` counts transitions taken, so a child that has answered
+      // twice is at 1 and the message about to be sent is 2.
+      iteration: chat === undefined ? 0 : chat.iteration + 1,
+    };
+  }
+
+  /**
+   * Where the displayed conversation currently ends.
+   *
+   * The chat child's own last turn when it has one, the host's otherwise — a reply continues what is
+   * on screen, and after the first exchange what is on screen ends with the reply rather than with
+   * the state that started it. `seq + 1` because a row names the position a call was AT and the next
+   * call goes after it, which is the same arithmetic `withSessionPosition` reports back.
+   *
+   * Takes the HOST's id, never the clicked one: a composite has no row here at all, which is what
+   * `chatContextOf` resolves before it calls this.
+   */
+  private chatPositionOf(taskId: string, runId: number, hostInstanceId: number, projectKey?: string): string {
+    const history = this.sessionHistory({ taskId, runId, project: projectKey });
+    const mine = [...history]
+      .reverse()
+      .find((h) => h.instanceId === CHAT_INSTANCE_BASE + hostInstanceId || h.instanceId === hostInstanceId);
+    if (mine === undefined) {
+      throw new Error(`instance ${hostInstanceId} ran no model call, so there is no conversation to continue`);
+    }
+    return `${mine.sessionId}@${mine.seq + 1}`;
+  }
+
   /** Cancel a task: abort a live run here, or record a terminal status. */
   cancelTask(taskId: string, project?: string): { taskId: string } {
     return this.cancelTaskIn(this.session(project), taskId);
+  }
+
+  /**
+   * One instance and the ancestors above it, nearest first.
+   *
+   * The path is what lets a composite continue under the nearest state that actually holds a
+   * conversation — see `chatPlanFor`. Built by walking down and remembering the way, because the
+   * projection's nodes carry `parentInstanceId` but the tree is only navigable downward.
+   */
+  private static findInstance(
+    roots: readonly InstanceNode[],
+    instanceId: number,
+    above: InstanceNode[] = [],
+  ): { node: InstanceNode; path: InstanceNode[] } | undefined {
+    for (const node of roots) {
+      if (node.instanceId === instanceId) return { node, path: [node, ...above] };
+      const found = AppService.findInstance(node.children, instanceId, [node, ...above]);
+      if (found !== undefined) return found;
+    }
+    return undefined;
   }
 
   /**
@@ -3416,3 +3894,64 @@ function runMetricsOf(metrics: unknown): RunMetrics | undefined {
   };
   return Object.keys(out).length > 0 ? out : undefined;
 }
+
+/**
+ * How long a typed message waits behind a call that cannot be steered.
+ *
+ * Two minutes is longer than most turns and shorter than a person's patience for a box that has
+ * stopped responding. The bound exists at all because the wait is on the CALL's own promise, so
+ * without one a stalled provider hangs the IPC handler and the composer sits on `busy` forever with
+ * nothing to cancel. Past it the message is appended beside the running call and forks — a branch,
+ * which is a real answer, rather than silence, which is not.
+ */
+const CHAT_WAIT_MS = 120_000;
+
+/**
+ * The conversation a position names — `<session>@<seq>` without the seq.
+ *
+ * Split on the LAST `@`, which is the same arithmetic the session store uses: a compaction mints
+ * `planning~compact1` and a ref into it carries two, so splitting on the first would name a session
+ * that does not exist. A call in flight has not finished claiming its position, so the register is
+ * keyed by the session alone and matching a whole ref would never hit.
+ */
+function sessionOf(position: string): string {
+  const at = position.lastIndexOf("@");
+  return at > 0 ? position.slice(0, at) : position;
+}
+
+/**
+ * The permission posture a call runs under, worded as the control that sets it.
+ *
+ * The per-tool MAP is the answer, because the map is what reaches the executor — `gateTools` reads a
+ * mode per tool out of it. So this names the preset those modes correspond to, and says `custom`
+ * when they are nobody's. A reader comparing the chip against the tool list sees the same fact
+ * twice, which is the point.
+ *
+ * A PROFILE can still narrow it, and is reported when one is in force. It is never something the
+ * composer wrote — it can only be inherited from the state or compiled from the project policy — but
+ * it gates ahead of every mode, so omitting it would understate what will happen. `full` is left
+ * unsaid: it excludes nothing, and a posture line that always ends in the same word teaches nothing.
+ *
+ * Compiled rather than read off the raw config, so what is reported is what would be enforced:
+ * `compilePolicy` folds the authored rules into a baseline.
+ */
+function postureOf(
+  config: JairaConfigOf,
+  tools: readonly ToolChoice[],
+  authored?: { profile?: string; default?: PermissionMode; tools?: Record<string, PermissionMode> },
+): string {
+  const { baseline } = compilePolicy(config.policy, { execEnv: config.execEnvironment });
+  const preset = presetOf(authored?.tools, tools);
+  const modes =
+    preset?.label ??
+    (authored?.tools !== undefined && Object.keys(authored.tools).length > 0
+      ? "custom"
+      : // Nothing per-tool was set, so every tool falls to the default — which is a preset by another
+        // name, and `ask` is where the ledger itself ends up.
+        (PERMISSION_PRESETS.find((p) => p.id === (authored?.default ?? baseline?.default ?? "ask"))?.label ??
+          `${authored?.default ?? baseline?.default ?? "ask"} by default`));
+  // The ledger's own fallback, mirrored: `resolveProfile` ends at `full`, which narrows nothing.
+  const profile = authored?.profile ?? baseline?.profile ?? "full";
+  return profile === "full" ? modes : `${profile} · ${modes}`;
+}
+

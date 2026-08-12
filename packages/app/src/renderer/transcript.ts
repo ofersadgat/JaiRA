@@ -85,6 +85,92 @@ export interface LiveEntry {
 
 export type TranscriptEntry = MessageEntry | ToolEntry | EventEntry | LiveEntry | ThoughtEntry;
 
+// --- work blocks --------------------------------------------------------------
+
+/** An entry nobody SAID: a call, a piece of reasoning, a fact the journal recorded. */
+export type WorkEntry = ToolEntry | ThoughtEntry | EventEntry;
+
+/**
+ * A run of consecutive work, between one message and the next.
+ *
+ * It exists because the interesting unit in an agent loop is not the individual call — it is the
+ * stretch of forty of them between "do this" and "here is what I found". Grouping them lets the
+ * renderer treat that stretch as one thing it can fold, which is the difference between a transcript
+ * you scroll past and one you read.
+ */
+export interface WorkBlock {
+  kind: "work";
+  entries: WorkEntry[];
+}
+
+/** What the renderer walks: things that were said, and the work between them. */
+export type TranscriptBlock = MessageEntry | LiveEntry | WorkBlock;
+
+/**
+ * Fold a flat entry list into messages and the work between them.
+ *
+ * Order is preserved exactly — this only decides where the seams are, never what is on which side
+ * of one. A transcript that opens with fifteen tool calls before anybody speaks is one leading work
+ * block, which is the right answer and also the common one.
+ */
+export function blocksOf(entries: readonly TranscriptEntry[]): TranscriptBlock[] {
+  const out: TranscriptBlock[] = [];
+  for (const entry of entries) {
+    if (entry.kind === "message" || entry.kind === "live") {
+      out.push(entry);
+      continue;
+    }
+    const last = out[out.length - 1];
+    if (last !== undefined && last.kind === "work") last.entries.push(entry);
+    else out.push({ kind: "work", entries: [entry] });
+  }
+  return out;
+}
+
+/**
+ * What a line of work IS, as far as a reader skimming the left margin is concerned.
+ *
+ * Declared here rather than beside the paths, because this is a fact about the transcript and not
+ * about SVG: `icons.tsx` imports it and will not compile until it can draw every member.
+ */
+export type WorkIconName = "terminal" | "read" | "write" | "web" | "search" | "agent" | "tool" | "think" | "note" | "alert";
+
+/**
+ * Which family of thing a tool name belongs to.
+ *
+ * Matched on the NAME rather than on the arguments, because the name is the one field every
+ * provider agrees on and every tool has. It is a heuristic and it is allowed to be: the row says the
+ * tool's name in words right beside the glyph, so the worst case of a wrong guess is a slightly
+ * misleading silhouette, not a misread transcript.
+ *
+ * Order is the whole design. `WebSearch` and `WebFetch` both contain "search"/"fetch" AND "web", and
+ * they are web things; `Glob` and `Grep` are searches. So the web family is tested first and the
+ * search family after it. Likewise `NotebookEdit` is a write before it is anything else.
+ */
+function toolIconOf(name: string): WorkIconName {
+  const n = name.toLowerCase();
+  if (/task|agent|spawn|delegate|dispatch/.test(n)) return "agent";
+  if (/web|http|url|browser|fetch|navigate/.test(n)) return "web";
+  if (/bash|shell|exec|command|terminal|powershell|process/.test(n)) return "terminal";
+  if (/write|edit|patch|apply|replace|create|insert|append|delete|remove/.test(n)) return "write";
+  if (/read|cat|view|open|show|inspect/.test(n)) return "read";
+  if (/search|grep|glob|find|list|ls|query|lookup/.test(n)) return "search";
+  return "tool";
+}
+
+/**
+ * The glyph for one work row.
+ *
+ * A failed call keeps its own icon rather than turning into a warning sign — what it WAS is the
+ * thing you are scanning the margin for, and whether it worked is already said twice on the row, by
+ * the mark at the end and by the colour of the icon itself.
+ */
+export function iconOf(entry: WorkEntry): WorkIconName {
+  if (entry.kind === "thought") return "think";
+  if (entry.kind === "event") return entry.tone === "plain" ? "note" : "alert";
+  return toolIconOf(entry.name);
+}
+
 /**
  * A result that has not been attached to its call yet — an intermediate, never rendered.
  *

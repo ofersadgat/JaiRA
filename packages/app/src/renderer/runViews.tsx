@@ -12,13 +12,15 @@
  * one card per EXECUTION, because a state that ran three times is three things that happened and a
  * single card cannot be clicked into three different transcripts.
  */
-import { useMemo, useState, type JSX } from "react";
-import type { InstanceNode, StateChild, StateView, TaskDetail } from "@jaira/shared/browser";
+import { useEffect, useMemo, useState, type JSX } from "react";
+import type { ChatPlanView, ChatSettings, InstanceNode, StateChild, StateView, TaskDetail } from "@jaira/shared/browser";
 import { Board, Column, Tile } from "./board";
 import { entriesOf, journalFor, signatureOf } from "./transcript";
 import { instanceOf as instanceOfState, nodeAt } from "./trail";
-import { ChildRuns, Transcript, durationOf } from "./transcriptView";
+import { ChildRuns, Paper, Transcript, durationOf } from "./transcriptView";
 import type { FileSurfaceProps } from "./fileTypes";
+import { Composer } from "./composer";
+import { invoke } from "./store";
 
 // Moved to `trail.ts`, which is where the tree queries live now — it also seeds a walk, and that
 // has to work for a composite, which has no session row to look one up by. Re-exported because this
@@ -184,23 +186,111 @@ export function RunConversation({
   if (detail === null) return <p className="empty">Select a run to see what it said.</p>;
   const kids = parent?.children.filter((node) => !node.superseded) ?? [];
   return (
-    <div className="run-convo scroll">
-      {/* Only when it said something. An empty block above the cards would claim the parent spoke. */}
-      {own.length > 0 ? <Transcript entries={own} /> : null}
-      {own.length > 0 && kids.length > 0 ? <div className="run-convo-rule" /> : null}
-      {kids.length === 0 && own.length === 0 ? <p className="empty">This run has not entered a child yet.</p> : null}
-      <ChildRuns
-        nodes={kids}
-        openIds={open}
-        onToggle={onToggle}
-        render={(node) => {
-          const child = sessions[node.instanceId];
-          if (child === undefined) return <p className="empty">Loading…</p>;
-          const entries = entriesOf(child, journalFor(conversation?.turns ?? [], node.stateId));
-          return <Transcript session={child} entries={entries} />;
-        }}
-      />
+    <div className="run-convo-wrap">
+      <div className="run-convo scroll">
+      <Paper>
+        {/* Only when it said something. An empty block above the cards would claim the parent spoke. */}
+        {own.length > 0 ? <Transcript entries={own} /> : null}
+        {own.length > 0 && kids.length > 0 ? <div className="run-convo-rule" /> : null}
+        {kids.length === 0 && own.length === 0 ? <p className="empty">This run has not entered a child yet.</p> : null}
+        <ChildRuns
+          nodes={kids}
+          openIds={open}
+          onToggle={onToggle}
+          render={(node) => {
+            const child = sessions[node.instanceId];
+            if (child === undefined) return <p className="empty">Loading…</p>;
+            const entries = entriesOf(child, journalFor(conversation?.turns ?? [], node.stateId));
+            return <Transcript session={child} entries={entries} />;
+          }}
+        />
+      </Paper>
+      </div>
+      {/* Pinned below the scroller, not inside it: what you are about to say does not scroll away
+          with what was already said. */}
+      <ChatComposer taskId={detail.taskId} instanceId={parent?.instanceId} project={context.project} />
     </div>
+  );
+}
+
+/**
+ * The composer, bound to the run being read.
+ *
+ * It owns the overrides and re-asks for a plan whenever they change, because the plan is what the
+ * settings strip renders and an override has to be reflected in it — picking a model must show the
+ * model picked, not the one the state inherits.
+ */
+function ChatComposer({ taskId, instanceId, project }: { taskId: string; instanceId: number | undefined; project?: string | undefined }): JSX.Element {
+  const [overrides, setOverrides] = useState<ChatSettings>({});
+  // THREE states, not two. `undefined` is "not asked yet", `null` is "asked, and there is no
+  // conversation here" — and only the second may disable the box. Collapsing them makes every first
+  // render flash a disabled composer reading that the run holds no conversation, before the channel
+  // has said anything at all.
+  const [plan, setPlan] = useState<ChatPlanView | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Bumped after a turn, to re-ask. Nothing else in the dep list moves when a message is sent — same
+  // task, same instance, same overrides — so without this the strip kept showing the plan from
+  // BEFORE the send: a stale "joins this turn", and a model chip still naming the previous answer.
+  const [sent, setSent] = useState(0);
+
+  useEffect(() => {
+    if (instanceId === undefined) {
+      setPlan(null);
+      return;
+    }
+    setPlan(undefined); // asking again — back to "not known", so a stale plan is never shown as current
+    let live = true;
+    // Failures are SWALLOWED into an absent plan rather than thrown: a state that holds no
+    // conversation is the ordinary case for a function state, not a fault worth a red banner. The
+    // box disables itself on a null plan, so it says so rather than offering a send that will fail.
+    void invoke("chat:plan", { taskId, instanceId, overrides, ...(project !== undefined ? { project } : {}) })
+      .then((next) => live && setPlan(next))
+      .catch(() => live && setPlan(null));
+    return () => {
+      live = false;
+    };
+  }, [taskId, instanceId, overrides, project, sent]);
+
+  const send = (message: string): void => {
+    if (instanceId === undefined) return;
+    setBusy(true);
+    setError(null);
+    void invoke("chat:send", { taskId, instanceId, message, overrides, ...(project !== undefined ? { project } : {}) })
+      .then((result) => setError(result.failure ?? null))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => {
+        setBusy(false);
+        setSent((n) => n + 1);
+      });
+  };
+
+  // Why sending is impossible, when it is. `null` is not a loading state to wait out — the channel
+  // answered and said this state has no session of its own, and an enabled box above that answer is
+  // an invitation to an error. `undefined` is the wait, and it disables nothing.
+  //
+  // A composite is the case: it orchestrates and says nothing, so it holds no session, while its
+  // CHILDREN each hold one. The message says what is true of the node you are on rather than of the
+  // panel, which is showing those children's transcripts.
+  const disabled =
+    instanceId === undefined
+      ? "Select a run to continue its conversation."
+      : plan === null
+        ? "No chat session exists in this state"
+        : undefined;
+
+  return (
+    <>
+      {error !== null ? <p className="cx-error">{error}</p> : null}
+      <Composer
+        plan={plan ?? null}
+        busy={busy}
+        overrides={overrides}
+        onOverrides={setOverrides}
+        onSend={send}
+        {...(disabled !== undefined ? { disabled } : {})}
+      />
+    </>
   );
 }
 

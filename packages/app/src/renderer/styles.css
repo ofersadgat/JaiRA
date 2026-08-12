@@ -13,6 +13,10 @@
   --panel: #ffffff;
   --panel-2: #eceff4;
   --line: #d4dae3;
+  /* A rule that content HANGS OFF — a transcript's indents, a card's children. Stronger than
+     --line, which separates two things that are side by side and may be almost invisible without
+     anybody minding; this one is the only thing saying what is inside what. */
+  --rule: #c2cbd9;
   --text: #1b2130;
   --dim: #5c6779;
   --accent: #2563c7;
@@ -36,6 +40,7 @@
   --panel: #161922;
   --panel-2: #1c2029;
   --line: #262b36;
+  --rule: #3b4356;
   --text: #e6e9ef;
   --dim: #8b93a7;
   --accent: #6ea8fe;
@@ -3798,80 +3803,81 @@ textarea.cfg-input {
 }
 
 /* --- the transcript ---
-   A chat: what the workflow SENT down the right, what came back down the left. Messages are bubbles
-   and take most of the width but not all of it, so the side a turn is on is legible at a glance.
-   Tool calls, thinking and journal events are NOT messages — nobody said them — so they stay full
-   width, which is also what a tool payload needs and what a bubble could not give it. */
+   A document with a chat in it. What came BACK is prose — full width, no bubble, no border —
+   because the answer is the thing the run exists to produce, and it used to be a quoted aside in a
+   column two thirds as wide as the panel it sat in. What was SENT stays a bubble on the right,
+   which is the arrangement every chat client uses and therefore the one nobody has to learn.
+
+   All of it inside one reading column, so a wide panel gives a readable measure rather than a
+   paragraph the width of a monitor. */
+/* The grey the sheet floats on. It is the app's own background rather than a colour of its own —
+   what changed is that the transcript stopped BEING that surface and started sitting on it. */
+.ts-page {
+  min-height: 100%;
+  padding: 14px 16px 22px;
+  background: var(--bg);
+}
+.ts-paper {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  /* Barely there. A page is lifted off the desk, not floating above it — anything stronger reads
+     as a modal, and this one never goes away. */
+  box-shadow: 0 1px 3px rgba(15, 20, 30, 0.06);
+  overflow: hidden;
+}
+:root[data-theme="dark"] .ts-paper {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+/* The measure is the SHEET's now, so neither block centres itself — two centred children of one
+   centred parent is how a transcript and the cards under it end up on different left edges. */
 .ts {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 10px 12px;
+  width: 100%;
+  padding: 12px 16px 22px;
   min-width: 0;
 }
+
+/* --- what was said --- */
 .ts-msg {
-  max-width: 88%;
-  padding: 7px 10px;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: var(--panel);
   min-width: 0;
 }
-.ts-left {
-  align-self: flex-start;
-  border-bottom-left-radius: 3px;
+/* The answer: a heading and two paragraphs of markdown look like a heading and two paragraphs. */
+.ts-msg-assistant {
+  margin: 10px 0 14px;
 }
-.ts-right {
+/* The instruction: right, narrow and tinted, so the two sides separate before either is read. */
+.ts-msg-user {
   align-self: flex-end;
-  border-bottom-right-radius: 3px;
-  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  max-width: 78%;
+  margin: 14px 0 10px;
 }
-/* The frame the run was given rather than a turn in it: quieter than both sides, and full width,
-   because it is context for everything below it. */
-.ts-msg-system {
-  max-width: 100%;
-  background: none;
-  border-style: dashed;
+.ts-bubble {
+  padding: 8px 13px;
+  border-radius: 16px;
+  border-bottom-right-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 13%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
 }
-.ts-who {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
+/* The frame the run was given rather than a turn in it — a system prompt, or a role we did not
+   anticipate. Quiet, full width, and marked by a rule down its left rather than a box. */
+.ts-msg-aside {
+  margin: 10px 0 14px;
+  padding: 1px 0 1px 12px;
+  border-left: 2px solid var(--rule);
+}
+.ts-tag {
+  display: block;
   margin-bottom: 3px;
-  min-width: 0;
-}
-/* The role reads on the outside edge of its own bubble, as the name over a chat message does. */
-.ts-who-right {
-  flex-direction: row-reverse;
-}
-.ts-role {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--dim);
-}
-.ts-role-assistant {
-  color: var(--accent);
-}
-/* Coloured, like the assistant's. It was `--text`, which is the colour of ordinary prose — so the
-   one label that says "this is what YOU sent" looked like a line of the transcript rather than a
-   heading over it. */
-.ts-role-user {
-  color: var(--ok);
-}
-.ts-role-system {
+  letter-spacing: 0.07em;
   color: var(--warn);
-}
-/* Right-aligned and tabular, so they line up down the page and the gap between two calls can be
-   read without arithmetic. */
-.ts-at {
-  flex: none;
-  font-size: 11px;
-  color: var(--dim);
-  font-family: ui-monospace, Consolas, monospace;
-  font-variant-numeric: tabular-nums;
 }
 .ts-text,
 .ts-text-live {
@@ -3883,11 +3889,11 @@ textarea.cfg-input {
   overflow-wrap: anywhere;
   color: var(--text);
 }
-.ts-msg-system .ts-text {
+.ts-msg-aside .ts-text {
   color: var(--dim);
 }
 .ts-msg .markdown {
-  font-size: 13px;
+  font-size: 13.5px;
   line-height: 1.65;
 }
 .ts-msg .markdown > *:first-child {
@@ -3896,82 +3902,227 @@ textarea.cfg-input {
 .ts-msg .markdown > *:last-child {
   margin-bottom: 0;
 }
+
+/* The clock, on hover. On a message it is provenance rather than content, and a permanent grey line
+   above every paragraph the model wrote is a line nobody reads and everybody sees. Work rows keep
+   theirs on the line — down there the gap between two calls is the thing being read. */
+.ts-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 0 3px;
+  font-size: 11px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+  opacity: 0;
+  transition: opacity 0.14s ease;
+}
+.ts-msg-user .ts-meta {
+  justify-content: flex-end;
+}
+.ts-msg:hover .ts-meta,
+.ts-msg:focus-within .ts-meta {
+  opacity: 1;
+}
+
+/* The answer arriving. The one piece of motion in the transcript, and it means "still going". */
 .ts-live .ts-text-live {
   color: var(--dim);
 }
-
-/* A tool call is one line until asked. An agent loop is mostly these, and forty expanded is a
-   transcript nobody reaches the end of. */
-.ts-tool {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  overflow: hidden;
+.ts-live-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--dim);
 }
-.ts-tool-line {
+.ts-pulse {
+  display: inline-flex;
+  gap: 3px;
+}
+.ts-pulse span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: ts-pulse 1.25s ease-in-out infinite;
+}
+.ts-pulse span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.ts-pulse span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+@keyframes ts-pulse {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ts-pulse span {
+    animation: none;
+    opacity: 0.55;
+  }
+}
+
+/* --- what was done ---
+   A call, a thought and a journal fact are one shape: a glyph, a name, a preview, a mark. One dense
+   line each and no border at all, so forty of them read as a column of activity you skim down the
+   left edge of rather than forty stacked boxes. */
+/* Pulled out by the width of a row's own padding, so the glyphs line up with the left edge of the
+   prose above them and the hover highlight is what steps outside the column instead. */
+.ts-work {
+  display: flex;
+  flex-direction: column;
+  margin: 6px -6px 10px;
+  min-width: 0;
+}
+.ts-row {
+  border-radius: 6px;
+  min-width: 0;
+}
+.ts-row-line {
   display: flex;
   align-items: center;
   gap: 7px;
   width: 100%;
-  padding: 5px 8px;
+  min-width: 0;
+  padding: 3px 6px;
   background: none;
   border: 0;
-  cursor: pointer;
+  border-radius: 6px;
   text-align: left;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12px;
+  font: inherit;
   color: var(--text);
+  cursor: default;
 }
-.ts-tool-line:hover {
-  background: var(--panel-2);
+.ts-row.can-open .ts-row-line {
+  cursor: pointer;
 }
-.ts-tool.open .ts-tool-line {
-  background: var(--panel-2);
-  border-bottom: 1px solid var(--line);
+.ts-row.can-open .ts-row-line:hover {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
 }
-.ts-caret {
+.ts-icon {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
   color: var(--dim);
-  font-size: 10px;
 }
-.ts-tool-name {
-  flex: none;
+.ts-icon svg {
+  display: block;
+  width: 14px;
+  height: 14px;
 }
-.ts-tool-line .grow {
-  color: var(--dim);
+/* Shrinkable, not fixed: an MCP tool is called `mcp__linear__list_issues`, and a name allowed to
+   take the whole line leaves no room for the argument that says which call this was. */
+.ts-name {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
 }
-.ts-verdict {
+/* The argument that identifies the call — a path, a command — so it is monospace, and it is the
+   part that gets cut when the line runs out of room. */
+.ts-preview {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+/* A thought and an event are English, and English set in monospace at 11px is a ransom note. */
+.ts-row.prose .ts-preview {
+  font-family: inherit;
+  font-size: 12px;
+}
+.ts-at {
   flex: none;
+  font-size: 11px;
+  color: var(--dim);
+  font-family: ui-monospace, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
 }
-.ts-verdict.ok {
+.ts-chev {
+  flex: none;
+  display: inline-flex;
+  width: 14px;
+  color: var(--tok-hint);
+}
+.ts-chev svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+  transition: transform 0.18s ease;
+}
+.ts-row.open > .ts-row-line .ts-chev svg,
+.ts-fold[aria-expanded="true"] .ts-chev svg,
+.ts-card.open > .ts-card-head .ts-chev svg {
+  transform: rotate(180deg);
+}
+.ts-mark {
+  flex: none;
+  display: inline-flex;
+  width: 14px;
   color: var(--ok);
 }
-.ts-verdict.bad {
+.ts-mark svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+}
+/* Tone colours the glyph and the words. The mark at the end says the same thing a second time, on
+   purpose: colour is never the only carrier of whether a call failed. */
+/* Quieter than a call, but still content — a thought and a transition are things that HAPPENED, and
+   --tok-hint is the colour of something that loses to the line it sits on. Only the glyph goes
+   that far down. */
+.ts-tone-muted .ts-name,
+.ts-tone-muted .ts-preview {
+  color: var(--dim);
+}
+.ts-tone-muted .ts-icon {
+  color: var(--tok-hint);
+}
+.ts-tone-warn .ts-icon,
+.ts-tone-warn .ts-preview {
+  color: var(--warn);
+}
+.ts-tone-bad .ts-icon,
+.ts-tone-bad .ts-name,
+.ts-tone-bad .ts-preview,
+.ts-tone-bad .ts-mark {
   color: var(--bad);
 }
-/* BOTH halves, labelled — what it was called with, and what came back. One or the other is what
-   printed `null` under a line whose record kept only the other. */
-.ts-payloads {
-  display: flex;
-  flex-direction: column;
+
+/* What opens underneath, hung off a rule in line with the glyph above it. It was a filled panel,
+   which at three levels of nesting is a grey box inside a grey box inside a grey box. */
+.ts-row-body {
+  margin: 1px 0 6px 28px;
+  padding-left: 12px;
+  border-left: 1px solid var(--rule);
 }
 .ts-payload {
   margin: 0;
-  padding: 7px 9px;
-  background: var(--panel-2);
+  padding: 4px 0 6px;
   font-family: ui-monospace, Consolas, monospace;
   font-size: 11.5px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--dim);
-  overflow-x: auto;
   max-height: 340px;
+  overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-.ts-payloads > .ts-payload + .ts-payload {
-  border-top: 1px solid var(--line);
 }
 .ts-payload-label {
   display: block;
@@ -3984,47 +4135,14 @@ textarea.cfg-input {
 }
 /* "Nothing was recorded" is an answer. `null` is what a viewer prints when it has not got one. */
 .ts-payload-empty {
+  padding: 4px 0 6px;
+  font-size: 11.5px;
   font-style: italic;
-  color: var(--tok-hint);
-}
-
-/* Not what the model said — what it was working through on the way to saying it. Folded, and
-   quieter than a message, so a long chain of reasoning costs one line until it is wanted. */
-.ts-think {
-  border: 1px dashed var(--line);
-  border-radius: 6px;
-  overflow: hidden;
-}
-.ts-think-line {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  padding: 4px 8px;
-  background: none;
-  border: 0;
-  cursor: pointer;
-  text-align: left;
-  font-size: 12px;
-  color: var(--dim);
-}
-.ts-think-line:hover {
-  background: var(--panel-2);
-}
-.ts-think-label {
-  flex: none;
-  font-style: italic;
-}
-.ts-think-line .grow {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--tok-hint);
 }
 .ts-think-text {
   margin: 0;
-  padding: 7px 10px;
-  border-top: 1px dashed var(--line);
+  padding: 4px 0 6px;
   font-family: inherit;
   font-size: 12.5px;
   line-height: 1.6;
@@ -4034,24 +4152,26 @@ textarea.cfg-input {
   color: var(--dim);
 }
 
-/* A journal fact is not something anybody said, so it is a strip rather than a message. */
-.ts-event {
+/* The older half of a long stretch of work, behind one line. A run still going is read from its
+   live edge backwards, so it is the OLD rows that fold. */
+.ts-fold {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 9px;
+  gap: 7px;
+  width: 100%;
+  padding: 3px 6px;
+  background: none;
+  border: 0;
   border-radius: 6px;
+  text-align: left;
   font-size: 12px;
-  background: var(--panel-2);
+  font-weight: 600;
   color: var(--dim);
+  cursor: pointer;
 }
-.ts-event.ts-warn {
-  background: color-mix(in srgb, var(--warn) 14%, transparent);
-  color: var(--warn);
-}
-.ts-event.ts-bad {
-  background: color-mix(in srgb, var(--bad) 14%, transparent);
-  color: var(--bad);
+.ts-fold:hover {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--text);
 }
 
 /* --- run cards --- */
@@ -4059,35 +4179,31 @@ textarea.cfg-input {
 .ts-cards {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
+  width: 100%;
+  /* 10 rather than 16: a head's own 6px of padding makes up the difference, so a card title starts
+     exactly where the prose above it does and the hover highlight is what overhangs. */
+  padding: 6px 10px 18px;
+  min-width: 0;
 }
 .ts-card {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  overflow: hidden;
-}
-.ts-card.live {
-  border-color: var(--accent);
+  border-radius: 8px;
+  min-width: 0;
 }
 .ts-card-head {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 7px 10px;
+  min-width: 0;
+  padding: 5px 6px;
   background: none;
   border: 0;
-  cursor: pointer;
+  border-radius: 6px;
   text-align: left;
-  min-width: 0;
+  cursor: pointer;
 }
 .ts-card-head:hover {
-  background: var(--panel-2);
-}
-.ts-card.open .ts-card-head {
-  background: var(--panel-2);
-  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
 }
 .ts-dot {
   flex: none;
@@ -4115,15 +4231,14 @@ textarea.cfg-input {
   min-width: 0;
   font-family: ui-monospace, Consolas, monospace;
   font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .ts-sig-name {
   color: var(--text);
+  font-weight: 600;
 }
 .ts-sig-label {
   color: var(--dim);
+  font-weight: 400;
   font-family: system-ui, -apple-system, Segoe UI, sans-serif;
 }
 .ts-sig-args {
@@ -4138,8 +4253,30 @@ textarea.cfg-input {
   color: var(--dim);
   font-variant-numeric: tabular-nums;
 }
-.ts-card-body .ts {
-  padding: 8px 10px;
+/* A rule down the left of the children, not a box around them — the indent already says "inside",
+   and a border at every level is a fifth of the width spent saying it again. */
+.ts-card-body {
+  margin: 1px 0 4px 12px;
+  padding-left: 14px;
+  border-left: 1px solid var(--rule);
+  min-width: 0;
+}
+.ts-card.live > .ts-card-body {
+  border-left-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+}
+.ts-card.live > .ts-card-head .ts-sig-name {
+  color: var(--accent);
+}
+/* Nested, the column has already been set by the outermost transcript — measuring it again here
+   would centre a child's words inside its parent's and step the left edge in at every level. */
+.ts-card-body .ts,
+.ts-card-body .ts-cards {
+  max-width: none;
+  margin: 0;
+  padding: 2px 0 6px;
+}
+.ts-card-body .ts-cards {
+  margin: 0 -6px;
 }
 
 /* --- a composite's two readings --- */
@@ -4190,4 +4327,613 @@ textarea.cfg-input {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+/* --- the composer ---
+   ONE surface: the box, a row of settings under it, and the button that sends. Three stacked panels
+   read as three unrelated controls that happen to sit near each other, and what you are composing is
+   one thing. It shares the SHEET's measure, because the thing you type into belongs to the page you
+   are reading. */
+.run-convo-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.cx {
+  padding: 10px 16px 14px;
+  background: var(--bg);
+}
+/* A padded RING rather than a border: focus brightens it without the contents shifting by a pixel,
+   which is what a 1px border changing colour would do. */
+.cx-frame {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1px;
+  border-radius: 22px;
+  background: var(--line);
+  transition: background 0.15s ease;
+}
+.cx-frame:focus-within {
+  background: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+.cx-shell {
+  display: flex;
+  flex-direction: column;
+  border-radius: 21px;
+  background: var(--panel);
+}
+/* No border of its own — the shell IS the border, and a second one inside it is the boxed-form look
+   this replaced. */
+.cx-text {
+  border: 0;
+  background: none;
+  resize: none;
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.55;
+  padding: 13px 15px 6px;
+  color: var(--text);
+  min-height: 54px;
+  max-height: 40vh;
+  field-sizing: content;
+}
+.cx-text:focus {
+  outline: none;
+}
+.cx-text::placeholder {
+  color: var(--tok-hint);
+}
+
+/* Under the box, inside the shell: what this message will run as, then the button that sends it.
+   Reading order matches decision order. */
+.cx-foot {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px 7px 8px;
+  min-width: 0;
+}
+
+/* --- one chip per question ---
+   Each opens on its OWN. One panel holding every setting meant changing the model made you look at
+   permissions and tools as well, and moved the composer a hundred pixels to answer one question. */
+.cx-chip-wrap {
+  position: relative;
+  min-width: 0;
+}
+.cx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 210px;
+  min-width: 0;
+  padding: 3px 9px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: var(--dim);
+  cursor: pointer;
+}
+.cx-chip:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.cx-chip.on {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--text);
+}
+/* A value somebody chose for this message, rather than one the workflow supplied. The difference
+   matters the next time the workflow changes, so it is visible without opening anything. */
+.cx-chip.own {
+  color: var(--accent);
+}
+.cx-chip-icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--tok-hint);
+}
+.cx-chip.own .cx-chip-icon {
+  color: var(--accent);
+}
+.cx-chip-icon svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+}
+
+/* Opens UPWARD: the composer is pinned to the bottom of the panel, so a menu hanging down would be
+   off-screen every time. */
+.cx-pop {
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 0;
+  z-index: 30;
+  /* Wide enough for THREE columns. It was 340px, which fit two — so a route with a middle tier
+     rendered its third column outside the popover and read as though it had not populated. */
+  min-width: 250px;
+  max-width: min(560px, 78vw);
+  width: max-content;
+  padding: 10px 12px 11px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--lift);
+}
+.cx-pop-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+.cx-pop-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+.cx-origin {
+  font-size: 10.5px;
+  color: var(--tok-hint);
+}
+.cx-origin.cx-own {
+  color: var(--accent);
+}
+.cx-origin.cx-unset {
+  font-style: italic;
+}
+.cx-reset {
+  margin-left: auto;
+  padding: 1px 7px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--panel-2);
+  font-size: 10.5px;
+  color: var(--dim);
+  cursor: pointer;
+}
+.cx-reset:hover {
+  color: var(--text);
+}
+.cx-input {
+  width: 100%;
+  font: inherit;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-2);
+  color: var(--text);
+}
+.cx-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+/* A picker is a LIST, not a row of pills.
+   Pills read as tags — several small things you might collect — and these are one choice out of a
+   closed set, where the differences are worth a sentence each. So: full-width rows, a primary line
+   and a muted second one, and tints rather than borders to say where you are. */
+.cx-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0 -4px;
+}
+.cx-opts button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--dim);
+  text-align: left;
+  cursor: pointer;
+}
+.cx-opts button:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
+}
+/* The one in force. A tint rather than an outline: an outline on a full-width row draws a box around
+   something that is already the only highlighted thing in the list. */
+.cx-opts button.on {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--text);
+}
+.cx-opts .cx-chip-icon {
+  flex: none;
+  color: var(--tok-hint);
+}
+.cx-opts button.on .cx-chip-icon {
+  color: var(--accent);
+}
+.cx-opts .cx-chip-icon svg {
+  width: 14px;
+  height: 14px;
+}
+/* Primary line and the sentence under it — the shape t3code's model rows use, and for its reason:
+   the name identifies the option and the second line is why you would pick it. */
+.cx-opt-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+.cx-opt-name {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+.cx-opt-hint {
+  font-size: 10.5px;
+  line-height: 1.3;
+  color: var(--tok-hint);
+}
+.cx-opts button.on .cx-opt-hint {
+  color: var(--dim);
+}
+/* The tick sits at the END, so the names all start at the same x and the column reads as a list. */
+.cx-opt-tick {
+  margin-left: auto;
+  flex: none;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.cx-hint {
+  max-width: 320px;
+  margin: 7px 0 0;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--tok-hint);
+}
+
+/* A tool row: the grant on the left, the mode on the right. One line, because they are two decisions
+   about one thing and two lists made you hold a name in your head to cross-reference them. */
+.cx-tool {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 7px;
+}
+.cx-tool:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.cx-tool.on {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+}
+/* Both halves are `.cx-opts button` already; these only divide the width between them. The grant
+   takes what is left so a long tool name truncates rather than pushing the mode off the row. */
+.cx-tool .cx-tool-grant {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cx-tool .cx-tool-mode {
+  flex: none;
+  width: auto;
+  gap: 5px;
+  padding: 4px 6px;
+  font-size: 11px;
+  color: var(--tok-hint);
+}
+.cx-tool .cx-tool-mode:hover {
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+/* The mode says what it MEANS in colour as well as in words — `deny` is the one worth catching
+   without reading, and `allow` is the one worth noticing you granted. */
+.cx-tool .cx-mode-deny,
+.cx-tool .cx-mode-deny .cx-chip-icon {
+  color: var(--bad, #d9534f);
+}
+.cx-tool .cx-mode-allow,
+.cx-tool .cx-mode-allow .cx-chip-icon {
+  color: var(--ok, #4c9a5e);
+}
+.cx-tool .cx-more {
+  opacity: 0.5;
+}
+
+/* The mode picker for ONE tool. Anchored to its row and floating above the popover's own scroll, so
+   opening it never resizes the panel underneath — the same reason the cascade has a fixed height. */
+.cx-submenu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 190px;
+  margin-top: 2px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 28%);
+}
+.cx-submenu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--dim);
+  text-align: left;
+  cursor: pointer;
+}
+.cx-submenu button:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
+}
+.cx-submenu button.on {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--text);
+}
+.cx-submenu .cx-chip-icon {
+  flex: none;
+  color: var(--tok-hint);
+}
+.cx-submenu .cx-chip-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* An expression has no value without a run-time scope, and saying so beats printing a default that
+   is not what the call would use. */
+.cx-warn {
+  min-width: 0;
+  padding-left: 4px;
+  font-size: 11px;
+  color: var(--warn);
+}
+/* Three behaviours wear one button — join a turn already running, wait for one to finish, or start a
+   turn of its own — and only the first two are worth a word. */
+.cx-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  font-size: 11px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.cx-live-wait {
+  color: var(--dim);
+}
+/* A circle the height of the row. It is one action that always means the same thing, so it is a
+   glyph rather than a word. */
+.cx-send {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  border: 0;
+  background: var(--accent);
+  color: var(--panel);
+  cursor: pointer;
+}
+.cx-send svg {
+  width: 16px;
+  height: 16px;
+}
+.cx-send:disabled {
+  background: var(--panel-2);
+  color: var(--tok-hint);
+  cursor: default;
+}
+.cx-error {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad);
+  font-size: 12px;
+}
+
+/* --- the route → model cascade ---
+   findmyprompt's miller columns: hover a route to reveal its models, click one to take it. Two
+   columns rather than that one's three — it cascades over a full catalog and this lists only what the
+   project names, which a family tier would split into one-item lists. */
+.cx-cascade {
+  display: flex;
+  margin: 0 -4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+  max-height: 210px;
+}
+.cx-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  width: 148px;
+  padding: 3px;
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+}
+.cx-col-last {
+  flex: 0 1 auto;
+  min-width: 190px;
+  border-right: 0;
+  background: color-mix(in srgb, var(--panel-2) 45%, transparent);
+}
+/* The same metrics the option rows use — see .cx-opts button. A menu whose two halves are sized
+   differently reads as two components that happen to touch. */
+.cx-col button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--dim);
+  text-align: left;
+  cursor: pointer;
+}
+/* The same tints the option rows use, so the cascade and the pickers read as one component. */
+.cx-col button:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
+}
+.cx-col button.on {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
+}
+.cx-col button.live {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+}
+.cx-col .cx-chip-icon svg {
+  width: 12px;
+  height: 12px;
+}
+/* Pushed to the edge — it points at the column it opens, so it belongs against it. */
+.cx-more {
+  margin-left: auto;
+  color: var(--tok-hint);
+  font-size: 11px;
+}
+.cx-tick {
+  flex: none;
+  width: 10px;
+  color: var(--ok);
+  font-size: 11px;
+}
+.cx-col-last .cx-opt-name {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+/* Modality filters — what a model can be GIVEN and what it can PRODUCE, the two questions that rule
+   one out before anything else does. Icon buttons rather than rows of words: these are the least
+   interesting thing on the row and the most repeated, and four words twice over crowds out the
+   columns the menu exists for. */
+.cx-filters {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.cx-filter {
+  position: relative;
+}
+.cx-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+}
+.cx-filter-btn:hover {
+  color: var(--text);
+}
+.cx-filter-btn.on {
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: var(--text);
+}
+.cx-filter-label {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tok-hint);
+}
+.cx-filter-btn.on .cx-filter-label {
+  color: var(--accent);
+}
+.cx-filter-any {
+  font-size: 10.5px;
+}
+.cx-filter .cx-chip-icon svg {
+  width: 11px;
+  height: 11px;
+}
+/* Below its button — this one hangs inside a popover that already opened upward, so a second upward
+   menu would land off the top of the panel. */
+.cx-filter-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  min-width: 128px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  box-shadow: var(--lift);
+}
+.cx-filter-pop button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font-size: 11.5px;
+  color: var(--dim);
+  text-align: left;
+  cursor: pointer;
+}
+.cx-filter-pop button:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text);
+}
+.cx-filter-pop button.on {
+  color: var(--text);
+}
+
+/* FIXED height. A menu that grows and shrinks as you move down the first column moves the thing you
+   are pointing at, and this one sits above a box someone is typing in. */
+.cx-cascade {
+  height: 208px;
+}
+.cx-col {
+  flex: none;
+}
+/* Where the conversation actually IS, as opposed to where the pointer is. Two different questions,
+   and conflating them loses the second the moment you hover anything — which is exactly when you
+   want to compare against it. */
+
+
+/* On the popover's OWN header line, hard right — the row that already says "Model". Positioned out
+   of flow rather than made a child of that row, because the row is rendered by the generic chip and
+   the filters belong only to this one; threading a slot through for a single case would put the
+   cascade's state in the chip. `.cx-pop-head` reserves the space so nothing collides with them. */
+.cx-pop-head {
+  min-height: 20px;
+  padding-right: 132px;
+}
+/* Anchored to the POPOVER, not to the head — the cascade renders this row as a sibling of the head,
+   so the head is not its positioned ancestor. Top and right match the popover's own padding, which
+   is what lands it on the "Model" line. */
+.cx-filters-row {
+  position: absolute;
+  top: 9px;
+  right: 12px;
+  margin: 0;
 }

@@ -667,7 +667,7 @@ function mergeAgentBlock(
  * rest are EXECUTORS — a coding agent answering the prompt itself. What a prefix selects is "who
  * answers", and the honest surface for that is one namespace (DESIGN §8.3).
  */
-export const MODEL_ROUTE_KEYS = ["anthropic", "openrouter", "local", "embedded"] as const;
+export const MODEL_ROUTE_KEYS = ["anthropic", "openai", "openrouter", "local", "embedded"] as const;
 
 /** Which of a route's fields belong to it, so a misplaced one is refused rather than ignored. */
 const ROUTE_FIELDS: Record<string, readonly string[]> = {

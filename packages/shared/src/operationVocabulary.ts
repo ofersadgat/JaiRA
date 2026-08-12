@@ -145,3 +145,189 @@ export const PERMISSION_PROFILES = ["read-only", "plan", "full"] as const;
 export function fieldAppliesTo(field: { kinds?: readonly string[] }, kind: "prompt" | "function"): boolean {
   return field.kinds === undefined || field.kinds.includes(kind);
 }
+
+// --- continuing a conversation by hand ----------------------------------------
+//
+// The composer edits an operation, so its vocabulary is the operation's. These live HERE rather than
+// beside the runtime that consumes them because the renderer needs them too and this package is the
+// one both can see — `@jaira/shared` depends only on `@declarative-ai/json`, which is also why the
+// shapes are restated in plain terms instead of imported from `llm` and `hw`.
+
+/**
+ * How hard the model should think.
+ *
+ * `xhigh` is above `high` and exists because a transport we drive has a tier the three-value
+ * vocabulary cannot name. A provider that tops out lower CLAMPS rather than refusing, since asking
+ * for more thought than a model offers is satisfied by giving it all of it.
+ */
+export const REASONING_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+/** An effort LEVEL and/or a token BUDGET — models differ in which they accept, so both are carried. */
+export interface ReasoningDecl {
+  effort?: ReasoningEffort;
+  budgetTokens?: number;
+}
+
+export type PermissionMode = (typeof PERMISSION_MODES)[number];
+
+/** The authored permission baseline: a profile, a default, and per-tool overrides. */
+export interface PermissionsDecl {
+  profile?: string;
+  default?: PermissionMode;
+  tools?: Record<string, PermissionMode>;
+}
+
+/** A tool a caller may be granted, and whether it can change anything. */
+export interface ToolChoice {
+  name: string;
+  readOnly: boolean;
+}
+
+/**
+ * A named starting point for the per-tool modes — a PRESET, not a setting of its own.
+ *
+ * This is the composer's whole permission model, and it is deliberately not the engine's `profile`.
+ * A profile is a scope FILTER resolved at call time: it runs ahead of the mode, refuses anything it
+ * excludes, and — for a name nothing recognises — refuses everything. A preset is the opposite kind
+ * of thing. It is spent the moment it is clicked: it writes a mode for every tool and then has no
+ * further say, so what runs is the map, which is also what the reader can see and edit.
+ *
+ * Two consequences worth stating, because they are why it is built this way:
+ *
+ *  - Nothing unresolvable can be sent. The composer never writes a profile NAME, so it cannot write
+ *    one no registry knows — which is exactly how a permission control came to deny every tool call
+ *    while displaying the word the reader had picked.
+ *  - Editing one tool does not silently discard the rest. The map keeps every other mode and the
+ *    preset simply stops matching, which is what {@link presetOf} reports as `custom`.
+ *
+ * `plan` is not among them. Plan mode is an escalation — read-only until the agent presents a plan
+ * and a human approves the exit — and the exit gate is registered by the engine for the states IT
+ * runs, not by the chat path. Offered here it would be `read-only` under a name that promises a door
+ * out that nobody has hung.
+ */
+export interface PermissionPreset {
+  id: string;
+  label: string;
+  hint: string;
+  /** The mode this preset assigns a tool. Asked of the TOOL, so a newly registered one is covered. */
+  modeFor: (tool: ToolChoice) => PermissionMode;
+}
+
+export const PERMISSION_PRESETS: readonly PermissionPreset[] = [
+  { id: "ask", label: "ask first", hint: "stop and ask before every call", modeFor: () => "ask" },
+  {
+    id: "read-only",
+    label: "read-only",
+    hint: "reading goes ahead, anything that writes is refused",
+    modeFor: (tool) => (tool.readOnly ? "allow" : "deny"),
+  },
+  { id: "auto", label: "auto", hint: "each call decided by the approver", modeFor: () => "smart" },
+  { id: "full", label: "full access", hint: "anything, without asking", modeFor: () => "allow" },
+];
+
+/** The modes a preset assigns over a given tool set — what clicking it writes. */
+export function presetModes(preset: PermissionPreset, tools: readonly ToolChoice[]): Record<string, PermissionMode> {
+  const out: Record<string, PermissionMode> = {};
+  for (const tool of tools) out[tool.name] = preset.modeFor(tool);
+  return out;
+}
+
+/**
+ * Which preset a per-tool map corresponds to, or `undefined` for one that is nobody's.
+ *
+ * The label on the chip, and the reason a preset can be a starting point rather than a mode: edit one
+ * tool and this stops matching, so the control reads `custom` instead of going on naming a preset
+ * whose modes are no longer in force.
+ *
+ * Only the tools OFFERED are compared. A map carrying a mode for something this project no longer
+ * registers is stale rather than custom, and letting a dead key hold the label at `custom` forever
+ * would make the presets un-selectable-looking for no reason the reader could see.
+ */
+export function presetOf(
+  modes: Record<string, PermissionMode> | undefined,
+  tools: readonly ToolChoice[],
+): PermissionPreset | undefined {
+  if (modes === undefined || tools.length === 0) return undefined;
+  return PERMISSION_PRESETS.find((preset) => tools.every((tool) => modes[tool.name] === preset.modeFor(tool)));
+}
+
+/**
+ * The knobs the composer turns, on top of what the state already inherits.
+ *
+ * `tools` is the WHOLE list rather than an addition, because the operation format merges it by
+ * replacement and `[]` is how an inherited tool is dropped. A composer showing an empty box beside an
+ * operation that inherits `bash` would be offering to add a tool the call already has — and taking it
+ * away if the person sent without touching it.
+ */
+export interface ChatSettings {
+  model?: string;
+  reasoning?: ReasoningDecl;
+  tools?: readonly string[];
+  permissions?: PermissionsDecl;
+}
+
+/**
+ * Where one setting's value came from.
+ *
+ * "gpt-5, inherited from `plan/draft`" and "gpt-5, because you picked it" are different facts, and a
+ * control that cannot tell them apart cannot offer to reset itself. `unset` is a third answer, not a
+ * missing one: nothing was inherited, so the composer shows the project default rather than a value.
+ */
+export type SettingOrigin = "inherited" | "override" | "unset";
+
+/** A setting the state declared as an expression, which has no value without a run-time scope. */
+export interface UnresolvedSetting {
+  field: string;
+  expr: string;
+}
+
+/**
+ * What pressing Enter will actually do.
+ *
+ * Three different things wear one button, and a person cannot see which from the box alone:
+ *
+ *  - `idle` — nothing is running here; the message starts a turn of its own.
+ *  - `steerable` — a call is mid-turn and the transport can take input, so the message joins THAT
+ *    turn and the agent answers in its own stream. No child is recorded.
+ *  - `busy` — a call is mid-turn and cannot be interrupted, so sending waits for it to finish
+ *    first. The delay is the behaviour, not a hang.
+ */
+export type ChatLiveState = "idle" | "steerable" | "busy";
+
+/** What the composer renders: the settings a message would run under, and where each came from. */
+export interface ChatPlanView {
+  settings: ChatSettings;
+  origin: Record<keyof ChatSettings, SettingOrigin>;
+  /** The state whose operation supplied the inherited half. Absent ⇒ nothing did. */
+  from?: string;
+  /**
+   * Shown rather than defaulted away. A composer that printed the project default beside a state
+   * whose model is `{"expr": …}` would state something false about what the call will do, and the
+   * person would have no way to tell.
+   */
+  unresolved: UnresolvedSetting[];
+  /** What Enter will do right now — see {@link ChatLiveState}. */
+  live: ChatLiveState;
+  /**
+   * What will ACTUALLY run when nothing is changed — resolved, and never blank.
+   *
+   * Distinct from {@link ChatSettings}, which says what was DECLARED. "No model" is a true statement
+   * about a workflow file and a useless one to a person about to press Enter; these are the values
+   * that answer what they were really asking. Where nothing can be known, the string names the thing
+   * that decides — "the model's default", "claude-cli decides" — rather than inventing a value.
+   */
+  effective: { model?: string; reasoning: string; permissions: string };
+  /**
+   * What this machine can actually offer — the choices a control is allowed to present.
+   *
+   * ROUTES rather than models: the id is {route}/{model}, and the route names who answers. Switching
+   * runner and switching model are the same edit to one string, which is why the control is one
+   * control; it is still called "model" to the reader, because that is the word for what they are
+   * choosing.
+   *
+   * Tools are what the registry holds for this project. Offering a name it cannot resolve would be a
+   * checkbox that fails at send time.
+   */
+  available: { routes: string[]; tools: ToolChoice[]; models: Array<{ id: string; input: string[]; output: string[] }> };
+}

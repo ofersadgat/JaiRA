@@ -11,7 +11,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isPermissionDenied, PermissionLedger, withPermission, type Approver } from "@declarative-ai/permissions";
 import type { ExecServices, Tool } from "@declarative-ai/exec";
 import { compilePolicy, type PolicyAuditEntry } from "../src/policy";
-import { createBashTool, registerTools } from "../src/tools";
+import { createBashTool, JAIRA_TOOLS, registerTools } from "../src/tools";
+import { registerFileTools } from "../src/fileTools";
 import { newRegistry } from "../src/wiring";
 
 let dir: string;
@@ -139,4 +140,43 @@ describe("the whole gate: tool call → policy → verdict", () => {
     // The scope is the whole reason a user is not asked on every call (§10.2).
     expect(asks).toBe(1);
   }, 60_000);
+});
+
+describe("JAIRA_TOOLS — the gateable set, and what each one may do", () => {
+  /**
+   * Everything JaiRA registers under its own policy — BOTH calls.
+   *
+   * The pairing is the point. `registerTools` supplies `bash` alone and the file tools come from
+   * `registerFileTools`, so a caller doing only the first has a registry that is two-thirds of what
+   * the composer offers. That was live in `sendChatMessage`, where ticking `read_file` reached
+   * `gateTools` and threw `tool 'read_file' is not registered` — the loud failure that call is
+   * designed to raise for a name nobody registered, raised instead for a missing line.
+   */
+  const registered = () => {
+    const registry = newRegistry();
+    registerTools(registry, { execEnv: undefined, exec: undefined as never });
+    registerFileTools(registry, { vars: { taskId: "t", worktree: dir } } as never);
+    return registry;
+  };
+
+  it("restates every registered tool's `readOnly` exactly", () => {
+    // The table is a RESTATEMENT: it exists so a caller describing choices — a permission preset
+    // assigning a mode per tool — need not construct a shell and an artifact store to ask whether a
+    // tool writes. A restatement can drift, and this is the assertion that stops it. Nothing else
+    // would notice: a `read_file` marked writable would simply be refused under the read-only preset,
+    // quietly, in whichever project happened to pick it.
+    const registry = registered();
+    for (const declared of JAIRA_TOOLS) {
+      const built = registry.tools.get(declared.name);
+      expect(built, `JAIRA_TOOLS names '${declared.name}', which nothing registers`).toBeDefined();
+      expect(built!.readOnly, `'${declared.name}' readOnly`).toBe(declared.readOnly);
+    }
+  });
+
+  it("names every tool JaiRA registers — the set is the WHOLE gateable one", () => {
+    // The other direction. A tool registered and left out of this table is one the composer never
+    // offers and no preset ever assigns a mode to, which reads as "JaiRA cannot gate it" when the
+    // truth is that somebody forgot a line.
+    expect([...registered().tools.keys()].sort()).toEqual(JAIRA_TOOLS.map((t) => t.name).sort());
+  });
 });

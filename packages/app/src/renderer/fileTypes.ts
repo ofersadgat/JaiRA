@@ -110,6 +110,14 @@ export interface FileSurfaceContext {
   tree: FileTree | null;
   executors: ExecutorInfo[];
   /** The selected task, and its conversation — what a leaf state's viewer shows. */
+  /**
+   * Which project the selected task lives in — the scope every task-scoped channel needs.
+   *
+   * Absent ⇒ the focused one. A channel called WITHOUT it answers `no project is open` whenever the
+   * task belongs to the shared or system project, and those are reached routinely: the focus never
+   * points at either. The same omission blanked the conversation panel mid-read once already.
+   */
+  project?: string | undefined;
   selected: string | null;
   conversation: ConversationView | null;
   /**

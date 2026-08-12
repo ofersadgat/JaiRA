@@ -32,6 +32,7 @@ import {
   type WorkflowBundle,
   type WorkflowMetrics,
 } from "@declarative-ai/hw";
+import { register, type LiveCalls } from "./liveHandles";
 import { createPromptExecutor, PromptRouterExecutor } from "@declarative-ai/promptop";
 import { createModelRouter, type ModelRouterOptions } from "@declarative-ai/llm";
 import { SchemaValidator } from "@declarative-ai/validate";
@@ -247,22 +248,67 @@ export interface WorkflowRunConfig {
   session?: { sessions: SessionStore<JsonValue>; records: RecordStore };
 }
 
+/** The two halves of one store: where a call's payload lands, and what reads it back. */
+export interface SessionStores {
+  sessions: SessionStore<JsonValue>;
+  records: RecordStore;
+}
+
+/**
+ * Put an executor under the session layers.
+ *
+ * The pairing and the ORDER are the point, and they belong in one place because both are correctness
+ * properties that a caller composing them by hand gets to invent independently:
+ *
+ *  - `withSessionPosition` OUTSIDE `withRecord`: the session layer resolves the position a call will
+ *    claim, and the record layer claims it by writing the stub. Inverted, a record would be written
+ *    before anything decided where it belongs.
+ *  - Both OUTSIDE whatever the executor already is, which is what keeps a memo inside them — the only
+ *    legal place for it, since an outer memoize refuses a session layer outright and a hit would
+ *    replay a stale position.
+ *
+ * It is exec's position layer rather than promptop's `withSession` because a caller states a RESOLVED
+ * POSITION on `ctx.session` rather than putting a session id in the op's config, and `withSession`
+ * reads the op config — composed here it would find nothing and do nothing.
+ *
+ * Note what this does NOT do: it is not how a conversation is continued. Continuation is the caller
+ * resolving a position and handing it over on `ctx.session` (hw does it in `servicesFor`). These
+ * layers only enforce what happens to one — fork if the position was taken, and record what the call
+ * appended.
+ */
+export function withSessionLayers(
+  stores: SessionStores,
+  executor: Executor<ExecServices, WorkflowMetrics>,
+  options: {
+    /**
+     * Engage only for a call something PLACED in a conversation — `ctx.session` present.
+     *
+     * Off by default, and the two callers genuinely differ. `withRecord` records every call it sees,
+     * keyed by content hash when there is no position, so wrapping a dispatcher unconditionally would
+     * start writing every pure helper and every embedded call into the store that holds the run's
+     * transcripts. The prompt path is left unconditional because that is what it has always done:
+     * hw's embedded callee (a call is "a COMPUTATION embedded in a binding, not a turn in the
+     * enclosing state's conversation") reaches it with no session and is recorded by content hash
+     * today. Unifying the two is a behaviour change, and not one this refactor is entitled to make.
+     */
+    onlyWhenPlaced?: boolean;
+  } = {},
+): Executor<ExecServices, WorkflowMetrics> {
+  const layered = withSessionPosition({ sessions: stores.sessions }, withRecord({ records: stores.records }, executor));
+  if (options.onlyWhenPlaced !== true) return layered as Executor<ExecServices, WorkflowMetrics>;
+  return {
+    capabilities: executor.capabilities,
+    metrics: executor.metrics,
+    ...(executor.capabilitiesFor !== undefined
+      ? { capabilitiesFor: (op: Operation<InlineFamily>) => executor.capabilitiesFor!(op) }
+      : {}),
+    start: (op: Operation<InlineFamily>, ctx: ExecServices) =>
+      (ctx.session !== undefined ? (layered as Executor<ExecServices, WorkflowMetrics>) : executor).start(op, ctx),
+  };
+}
+
 export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowExecResult> {
-  // `withSessionPosition` OUTSIDE `withRecord`: the session layer resolves the position a
-  // call will claim, and the record layer claims it by writing the stub. Inverted, a
-  // record would be written before anything decided where it belongs.
-  //
-  // exec's position layer rather than promptop's `withSession`, because the engine states
-  // a RESOLVED POSITION on `ctx.session` rather than putting a session id in the op's config.
-  // `withSession` reads the op config, so composed here it would find nothing and do nothing.
-  //
-  const prompt =
-    cfg.session !== undefined
-      ? withSessionPosition(
-          { sessions: cfg.session.sessions },
-          withRecord({ records: cfg.session.records }, cfg.prompt),
-        )
-      : cfg.prompt;
+  const prompt = cfg.session !== undefined ? withSessionLayers(cfg.session, cfg.prompt) : cfg.prompt;
   // ORDERING, since it looks inverted against SESSIONS.md §6's `withMemoize(withSessionPosition(...))`:
   // the memo sits INSIDE both session layers, and that is the only legal place for it. An outer
   // memoize refuses a session layer outright — `withSessionPosition` forces `sessionResume: true` into
@@ -322,31 +368,14 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
  * conversation.
  *
  * `ctx.session` is exactly that signal: hw resolves one for a prompt op and for a runtime that
- * declares `sessionResume`, and for nothing else. Wrapping unconditionally would be wrong in a way
- * that is easy to miss — `withRecord` records every call it sees, keyed by content hash when there is
- * no position, so every pure helper and every embedded call would start writing rows into the store
- * that holds the run's transcripts.
- *
- * `withSessionPosition` already no-ops without a request; this branch is what keeps `withRecord`
- * from doing the opposite.
+ * declares `sessionResume`, and for nothing else — see {@link withSessionLayers} on why this one is
+ * gated and the prompt path is not.
  */
 function sessionedDispatcher(
   dispatcher: Executor<ExecServices, WorkflowMetrics>,
-  session: { sessions: SessionStore<JsonValue>; records: RecordStore },
+  session: SessionStores,
 ): Executor<ExecServices, WorkflowMetrics> {
-  const sessioned = withSessionPosition(
-    { sessions: session.sessions },
-    withRecord({ records: session.records }, dispatcher),
-  );
-  return {
-    capabilities: dispatcher.capabilities,
-    metrics: dispatcher.metrics,
-    ...(dispatcher.capabilitiesFor !== undefined
-      ? { capabilitiesFor: (op: Operation<InlineFamily>) => dispatcher.capabilitiesFor!(op) }
-      : {}),
-    start: (op: Operation<InlineFamily>, ctx: ExecServices) =>
-      (ctx.session !== undefined ? sessioned : dispatcher).start(op, ctx),
-  };
+  return withSessionLayers(session, dispatcher, { onlyWhenPlaced: true });
 }
 
 /** Collapse a result into the task-status vocabulary. */
@@ -490,6 +519,15 @@ export interface TurnDelta {
 export function withTurnStream(
   sink: (delta: TurnDelta) => void,
   inner: Executor<ExecServices, WorkflowMetrics>,
+  /**
+   * Where to register the call while it runs, so a person can talk back to it.
+   *
+   * The same interception, surfacing one more thing from it. A second wrapper would have read the
+   * same `ctx.session` off the same call and wrapped the same handle to learn when it settled —
+   * "observe a live turn and tell the app about it" is one job, and the deltas were only ever the
+   * first half of it. See {@link LiveCalls}.
+   */
+  live?: LiveCalls,
 ): Executor<ExecServices, WorkflowMetrics> {
   const executor = inner;
   return {
@@ -530,7 +568,7 @@ export function withTurnStream(
           // A stream that ends badly must not fail the call it was narrating.
         }
       })();
-      return handle;
+      return live === undefined ? handle : register(live, ctx, handle);
     },
   };
 }

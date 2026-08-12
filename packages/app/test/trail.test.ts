@@ -89,6 +89,20 @@ describe("pruning a trail against the run it describes", () => {
     expect(prunedTrail(trail, [])).toEqual([]);
   });
 
+  it("cuts a step whose id was REISSUED to a different state", () => {
+    // A re-run does not merely invalidate instance ids, it hands them out again — so `#3` in the new
+    // run is a live node under some other state. Checking existence alone kept the crumb, kept its
+    // old label, and walked into somebody else's run.
+    const rerun = [
+      node({
+        instanceId: 1,
+        stateId: "plan",
+        children: [node({ instanceId: 3, stateId: "plan/goals", children: [node({ instanceId: 4, stateId: "plan/critique/read" })] })],
+      }),
+    ];
+    expect(prunedTrail(trail, rerun)).toEqual([trail[0]]);
+  });
+
   it("compares by the instances named, which is what decides whether a patch is worth making", () => {
     expect(sameTrail(trail, [...trail])).toBe(true);
     expect(sameTrail(trail, trail.slice(0, 2))).toBe(false);

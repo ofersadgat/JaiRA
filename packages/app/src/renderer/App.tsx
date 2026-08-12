@@ -328,6 +328,9 @@ export default function App(): JSX.Element {
     config: state.config,
     tree: state.tree,
     executors: state.executors,
+    // The scope every task-scoped channel needs. Omitted, a task in the shared or system project
+    // answers `no project is open`, because the focus never points at either.
+    ...(state.selectedProject !== null ? { project: state.selectedProject } : {}),
     selected: state.selected,
     conversation: state.conversation,
     detail,

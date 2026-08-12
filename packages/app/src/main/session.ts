@@ -16,6 +16,7 @@
  */
 import type { FSWatcher } from "node:fs";
 import type { Project } from "@jaira/persistence";
+import { LiveCalls } from "@jaira/runtime";
 import type { ApprovalHub, ApprovalRequest, InteractionHub } from "@jaira/runtime";
 import type { SyncDirection, WorkflowLayer } from "@jaira/shared";
 
@@ -92,6 +93,13 @@ export class ProjectSession {
 
   /** Runs in flight, by task id. */
   readonly live = new Map<string, LiveRun>();
+  /**
+   * Model CALLS in flight, by session id — a finer grain than {@link live}, and a different question.
+   *
+   * A run is live for minutes; the call inside it is what a person can actually talk to, and only
+   * while it is taking its turn. See `withLiveCalls`.
+   */
+  readonly liveCalls = new LiveCalls();
   readonly hub: InteractionHub;
   /** requestId → taskId, for a request whose registration could not name one. */
   readonly requestTask = new Map<string, string>();

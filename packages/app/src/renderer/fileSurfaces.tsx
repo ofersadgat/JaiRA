@@ -22,7 +22,7 @@ import {
 import { Badge } from "./board";
 import { CompositeView } from "./runViews";
 import { entriesOf, journalFor } from "./transcript";
-import { Transcript } from "./transcriptView";
+import { Paper, Transcript } from "./transcriptView";
 import { docKey, useDraftBox } from "./drafts";
 import { EditorActions } from "./editorChrome";
 import { registerFileSurface, type FileSurfaceProps } from "./fileTypes";
@@ -244,11 +244,13 @@ function LeafPanel({ context }: FileSurfaceProps): JSX.Element {
         ) : null}
       </div>
       <div className="leaf-convo scroll">
-        <Transcript
-          session={session}
-          entries={entries}
-          empty={selected === null ? "Select a run to see what it said." : undefined}
-        />
+        <Paper>
+          <Transcript
+            session={session}
+            entries={entries}
+            empty={selected === null ? "Select a run to see what it said." : undefined}
+          />
+        </Paper>
         {waiting ? (
           // Pinned rather than in the flow: it is the one turn that is not history, and scrolling
           // away from the thing blocking the run is exactly the wrong behaviour.
