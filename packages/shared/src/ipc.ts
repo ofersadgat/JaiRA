@@ -648,10 +648,16 @@ export interface IpcContract {
    *
    * Separate from sending because the composer renders the moment a run is selected, and a control
    * that only learned its value by sending would be one nobody could trust before committing to it.
+   *
+   * `null` is "there is no conversation here", and it is an ANSWER rather than a failure: a
+   * composite orchestrates and says nothing, which is the ordinary shape of half the states in a
+   * workflow. It is the channel's job to say so plainly — main used to throw, so every selected
+   * composite wrote a stack trace to the log for a condition the composer then rendered as a
+   * perfectly calm disabled box.
    */
   "chat:plan": {
     request: { taskId: string; instanceId: number; project?: string; overrides?: ChatSettings };
-    response: ChatPlanView;
+    response: ChatPlanView | null;
   };
   /**
    * Send one message into the conversation an instance ran, as a child of that instance.

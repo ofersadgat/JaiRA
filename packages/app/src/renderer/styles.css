@@ -4386,6 +4386,24 @@ textarea.cfg-input {
   color: var(--tok-hint);
 }
 
+/* --- the composer with nothing to say into ---
+   A disabled composer greys as ONE SURFACE, and it takes two rules because the global
+   `textarea:disabled` above wins on specificity: a type plus a pseudo-class outranks `.cx-text`'s
+   single class, so the box painted `--panel-2` on its own. Two things were wrong with that and both
+   are what you see: the fill is a SQUARE, so it covered the shell's 21px rounding and the ring
+   around it went missing at the corners; and `.cx-foot` is not a textarea, so the toolbar under it
+   stayed panel-white beside a grey box.
+
+   So the SHELL carries the colour — it is the element with the rounding — and the textarea is put
+   back to transparent on top of it. The chips need nothing: they are already `background: none`, so
+   they sit on whichever surface is behind them. */
+.cx.off .cx-shell {
+  background: var(--panel-2);
+}
+.cx.off .cx-text:disabled {
+  background: none;
+}
+
 /* Under the box, inside the shell: what this message will run as, then the button that sends it.
    Reading order matches decision order. */
 .cx-foot {

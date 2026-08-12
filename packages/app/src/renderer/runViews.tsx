@@ -241,9 +241,10 @@ function ChatComposer({ taskId, instanceId, project }: { taskId: string; instanc
     }
     setPlan(undefined); // asking again — back to "not known", so a stale plan is never shown as current
     let live = true;
-    // Failures are SWALLOWED into an absent plan rather than thrown: a state that holds no
-    // conversation is the ordinary case for a function state, not a fault worth a red banner. The
-    // box disables itself on a null plan, so it says so rather than offering a send that will fail.
+    // The channel ANSWERS `null` for a state that holds no conversation — the ordinary case for a
+    // composite — so that is a value here rather than a rejection. The `catch` stays for the rest:
+    // a genuinely broken read still disables the box rather than leaving it enabled over an error,
+    // because a send that is going to fail should not be offered.
     void invoke("chat:plan", { taskId, instanceId, overrides, ...(project !== undefined ? { project } : {}) })
       .then((next) => live && setPlan(next))
       .catch(() => live && setPlan(null));

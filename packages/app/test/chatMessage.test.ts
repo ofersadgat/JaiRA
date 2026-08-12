@@ -59,10 +59,24 @@ async function ranTask(): Promise<{ taskId: string; instanceId: number }> {
   return { taskId, instanceId: row.instanceId };
 }
 
+/**
+ * A plan that must exist, for the tests about what one CONTAINS.
+ *
+ * `chatPlan` answers `null` for a state that holds no conversation, so every reader now has to say
+ * which of the two questions it is asking. These are asking about a state that certainly speaks, and
+ * a `null` here would mean the fixture broke rather than the assertion below being wrong — so it
+ * fails with that, instead of with `Cannot read property 'origin' of null` twelve lines later.
+ */
+function planOf(request: Parameters<AppService["chatPlan"]>[0]): NonNullable<ReturnType<AppService["chatPlan"]>> {
+  const plan = service.chatPlan(request);
+  if (plan === null) throw new Error(`instance ${request.instanceId} unexpectedly holds no conversation`);
+  return plan;
+}
+
 describe("the settings a message would run under", () => {
   it("are the ones the run actually used, read from its pinned snapshot", async () => {
     const { taskId, instanceId } = await ranTask();
-    const plan = service.chatPlan({ taskId, instanceId });
+    const plan = planOf({ taskId, instanceId });
     // Inherited rather than defaulted: the state that wrote the transcript names the model, and a
     // continuation calling something else would make the record two agents pretending to be one.
     expect(plan.origin.model).toBe("inherited");
@@ -72,7 +86,7 @@ describe("the settings a message would run under", () => {
 
   it("lets the composer override one without losing the rest", async () => {
     const { taskId, instanceId } = await ranTask();
-    const plan = service.chatPlan({ taskId, instanceId, overrides: { model: "picked/model" } });
+    const plan = planOf({ taskId, instanceId, overrides: { model: "picked/model" } });
     expect(plan.settings.model).toBe("picked/model");
     expect(plan.origin.model).toBe("override");
   });
@@ -81,7 +95,7 @@ describe("the settings a message would run under", () => {
     // `readOnly` per tool is how `read-only` assigns a mode without knowing tool names — so a tool
     // added later is classified by what it does rather than by somebody remembering a list.
     const { taskId, instanceId } = await ranTask();
-    const offered = service.chatPlan({ taskId, instanceId }).available.tools;
+    const offered = planOf({ taskId, instanceId }).available.tools;
     expect(offered).toEqual(
       expect.arrayContaining([
         { name: "bash", readOnly: false },
@@ -94,8 +108,7 @@ describe("the settings a message would run under", () => {
   it("names the permission posture after the per-tool MAP, which is what reaches the executor", async () => {
     const { taskId, instanceId } = await ranTask();
     const posture = (permissions?: Parameters<typeof service.chatPlan>[0]["overrides"]) =>
-      service.chatPlan({ taskId, instanceId, ...(permissions !== undefined ? { overrides: permissions } : {}) }).effective
-        .permissions;
+      planOf({ taskId, instanceId, ...(permissions !== undefined ? { overrides: permissions } : {}) }).effective.permissions;
 
     // Nothing set: every tool falls to the ledger's own last resort.
     expect(posture()).toBe("ask first");
@@ -106,15 +119,37 @@ describe("the settings a message would run under", () => {
     expect(posture({ permissions: { tools: { ...readOnly, bash: "ask" } } })).toBe("custom");
   });
 
-  it("refuses a COMPOSITE rather than planning a conversation it has no position for", async () => {
+  it("ANSWERS null for a COMPOSITE rather than failing at being asked", async () => {
     // A composite orchestrates and says nothing: no session, no position. Its ancestors are
     // composites too — a state that speaks has no children to be an ancestor of — so there is
     // nothing to walk out to. Saying so is what lets the composer disable itself instead of
     // offering a send that fails.
+    //
+    // `null` and NOT a throw, which is the fix this asserts. Planning is a question, and "there is
+    // no conversation here" is one of its two ordinary answers — a workflow is half composites, so
+    // throwing wrote a stack trace into the main log every time one was selected, for a condition
+    // the composer was already rendering calmly as a disabled box.
     const { taskId } = await ranTask();
     const root = service.taskDetail(taskId).instances[0]!;
     expect(root.children.length).toBeGreaterThan(0); // it really is a composite
-    expect(() => service.chatPlan({ taskId, instanceId: root.instanceId })).toThrow(/not part of any conversation/);
+    expect(service.chatPlan({ taskId, instanceId: root.instanceId })).toBeNull();
+  });
+
+  it("still answers null, not a plan, for an instance this run does not have", async () => {
+    // The renderer holds an instance id from a projection main may have re-read since, so a
+    // selection one refresh stale lands here routinely. Ordinary, therefore not an error.
+    const { taskId } = await ranTask();
+    expect(service.chatPlan({ taskId, instanceId: 999_999 })).toBeNull();
+  });
+
+  it("keeps SENDING a refusal, because a typed message deserves a reason", async () => {
+    // The other half of the same change. Asking whether you can type here may answer no; pressing
+    // Enter and being told nothing would leave the message to vanish silently.
+    const { taskId } = await ranTask();
+    const root = service.taskDetail(taskId).instances[0]!;
+    await expect(
+      service.sendChatMessage({ taskId, instanceId: root.instanceId, message: "hello", fake: happyRules() }),
+    ).rejects.toThrow(/not part of any conversation/);
   });
 });
 
@@ -173,7 +208,7 @@ describe("sending a message", () => {
     expect(second.instanceId).toBe(first.instanceId);
     expect(second.iteration).toBe(1);
     // And the plan for the reply is the HOST's plan — same state, same inherited settings.
-    expect(service.chatPlan({ taskId, instanceId: first.instanceId }).from).toBe(service.chatPlan({ taskId, instanceId }).from);
+    expect(planOf({ taskId, instanceId: first.instanceId }).from).toBe(planOf({ taskId, instanceId }).from);
   });
 
   it("does not move the task's status — a conversation is not a second execution", async () => {
@@ -189,7 +224,7 @@ describe("sending a message", () => {
     // ticking a file tool — offered by the very same plan — threw `not registered` and the turn never
     // ran. Granting all three is the assertion that the two halves of the registry are both wired.
     const { taskId, instanceId } = await ranTask();
-    const offered = service.chatPlan({ taskId, instanceId }).available.tools.map((t) => t.name);
+    const offered = planOf({ taskId, instanceId }).available.tools.map((t) => t.name);
     const sent = await service.sendChatMessage({
       taskId,
       instanceId,

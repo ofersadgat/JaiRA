@@ -1829,6 +1829,9 @@ export class AppService {
 
   // --- continuing a conversation by hand ---------------------------------------
   //
+  // `NoConversationHere` (below the class) separates the two things that can go wrong here: this
+  // instance is quiet, versus this installation is broken. Only the first is an ANSWER.
+  //
   // A person typing into a run's transcript. The message runs as a prompt op under a child of the
   // instance being read — inheriting that state's model, tools and permissions from the run's PINNED
   // snapshot — and takes no part in the state machine: nothing binds to it, no transition fires from
@@ -1841,9 +1844,24 @@ export class AppService {
    * the moment a run is selected — and a control that only learned its value by sending a message
    * would be a control nobody could trust before they had already committed to using it.
    */
-  chatPlan(request: { taskId: string; instanceId: number; project?: string; overrides?: ChatSettings }): ChatPlanView {
+  chatPlan(request: { taskId: string; instanceId: number; project?: string; overrides?: ChatSettings }): ChatPlanView | null {
     const open = this.session(request.project);
-    const context = this.chatContextOf(request.taskId, request.instanceId, request.project);
+    let context;
+    try {
+      context = this.chatContextOf(request.taskId, request.instanceId, request.project);
+    } catch (e) {
+      // NULL, not a throw. This channel asks a QUESTION — "can I type here, and under what
+      // settings?" — and "no" is one of its two answers. A composite orchestrates and says nothing,
+      // so it holds no conversation; that is the ordinary shape of half the states in a workflow,
+      // not a fault. Throwing made the composer's own catch turn it into the same disabled box while
+      // main logged a stack trace per selected run, which is a log nobody can use and an error
+      // nobody can act on.
+      //
+      // Only that class of answer is swallowed. A missing snapshot is the installation being broken
+      // rather than this instance being quiet, and it still throws — see {@link NoConversationHere}.
+      if (e instanceof NoConversationHere) return null;
+      throw e;
+    }
     const sessionId = sessionOf(context.position);
     // Which of the three things Enter does. Read at plan time rather than pushed: the composer
     // re-asks whenever the settings change, and a stale answer here is one wrong word rather than a
@@ -2186,7 +2204,7 @@ export class AppService {
     const project = open.project;
     const runs = project.runtime.listRuns(taskId);
     const run = runs[runs.length - 1];
-    if (run === undefined) throw new Error(`task '${taskId}' has never run`);
+    if (run === undefined) throw new NoConversationHere(`task '${taskId}' has never run`);
     const task = project.runtime.get(taskId);
     const bundle = bundleFor(project, task?.snapshotHash ?? run.snapshotHash, run.snapshotHash);
     if (bundle === undefined) throw new Error(`the snapshot for run ${run.id} is missing`);
@@ -2194,7 +2212,9 @@ export class AppService {
     const { events, atMs } = eventsOf(project.events.list(taskId, { runId: run.id }));
     const tree = projectRun(events, undefined, atMs);
     const found = AppService.findInstance(tree.instances, instanceId);
-    if (found === undefined) throw new Error(`run ${run.id} has no instance ${instanceId}`);
+    // Ordinary rather than a fault: the renderer holds an instance id from a projection main may
+    // have re-read since, so a selection that is one refresh stale lands here routinely.
+    if (found === undefined) throw new NoConversationHere(`run ${run.id} has no instance ${instanceId}`);
 
     // Nearest first: the clicked instance, then its ancestors.
     const path = found.path.map((node) => bundle.states[node.stateId]);
@@ -2218,7 +2238,9 @@ export class AppService {
       // no position; and its ancestors are composites too, since a state that speaks has no children
       // to be an ancestor OF. Its panel shows its children's transcripts, and which of three
       // conversations a message belongs to is not a question this can answer on the reader's behalf.
-      throw new Error(`instance ${instanceId} is not part of any conversation — no state on its path runs a prompt`);
+      throw new NoConversationHere(
+        `instance ${instanceId} is not part of any conversation — no state on its path runs a prompt`,
+      );
     }
     const host = found.path[hostAt]!;
     const chatId = CHAT_INSTANCE_BASE + host.instanceId;
@@ -2255,7 +2277,9 @@ export class AppService {
       .reverse()
       .find((h) => h.instanceId === CHAT_INSTANCE_BASE + hostInstanceId || h.instanceId === hostInstanceId);
     if (mine === undefined) {
-      throw new Error(`instance ${hostInstanceId} ran no model call, so there is no conversation to continue`);
+      throw new NoConversationHere(
+        `instance ${hostInstanceId} ran no model call, so there is no conversation to continue`,
+      );
     }
     return `${mine.sessionId}@${mine.seq + 1}`;
   }
@@ -3774,6 +3798,21 @@ export class AppService {
     return this.requireProject().paths.projectDir;
   }
 }
+
+/**
+ * "There is nothing to continue here" — as distinct from "this went wrong".
+ *
+ * The two used to be one `Error`, so the only caller that can tell them apart could not: `chatPlan`
+ * asks a question whose answer is legitimately no, and it had to either swallow a missing snapshot
+ * along with it or report a composite as a failure. It chose the second, and every click on a
+ * composite wrote a stack trace into the main process log.
+ *
+ * Thrown for the four ordinary quiets — a task that has never run, an instance that is not in this
+ * run's projection, a path with no state that speaks, and a state that reached no model call.
+ * Everything else stays an ordinary `Error` and keeps being one for both callers: `chatSend` still
+ * reports all of it, because a message someone typed and pressed Enter on deserves a reason.
+ */
+class NoConversationHere extends Error {}
 
 type SecretTargetOf = SetSecretRequest["target"];
 type JairaConfigOf = ReturnType<typeof parseConfig>;

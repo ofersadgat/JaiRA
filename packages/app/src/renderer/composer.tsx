@@ -688,7 +688,10 @@ export function Composer({
   };
 
   return (
-    <div className="cx">
+    // The disabled state is a fact about the WHOLE composer, not about the box you type in. Marked
+    // here so the shell greys as one surface — see `.cx.off` in the stylesheet for what went wrong
+    // when only the textarea knew.
+    <div className={`cx${disabled !== undefined ? " off" : ""}`}>
       {/* A padded RING rather than a border, so focus brightens it without the contents shifting. */}
       <div className="cx-frame">
         <div className="cx-shell">
