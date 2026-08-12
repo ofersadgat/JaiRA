@@ -14,6 +14,73 @@
 import type { JSX, ReactNode } from "react";
 import type { BoardCard, BoardView } from "@jaira/shared/browser";
 
+/**
+ * The four things a card in a column can be DOING, in the order work moves through them.
+ *
+ * A column says WHERE a task is; a lane says whether anything is happening to it there. Those are
+ * different questions and a column answered only the first, so a state holding two live runs, five
+ * finished ones and a queue read as one stack of eight — the two you had to look at were wherever
+ * the sort had left them.
+ *
+ * `paused` is the one worth naming: a run parked on a question, blocked on its inputs, or stopped
+ * part-way is not running and is not finished, and it is the only one of the four that is waiting on
+ * a PERSON. Left in with `running` it was invisible, which is the opposite of what it needs to be.
+ */
+export const LANES = ["running", "paused", "not-started", "finished"] as const;
+export type Lane = (typeof LANES)[number];
+
+export const LANE_LABEL: Record<Lane, string> = {
+  running: "Running",
+  paused: "Paused",
+  "not-started": "Not started",
+  finished: "Finished",
+};
+
+/**
+ * Which lane a card belongs in.
+ *
+ * Read off the TASK's status at both ends and the ACTIVE INSTANCE's in the middle, because that is
+ * where each answer actually lives: whether a task has started or ended is a fact about the task,
+ * and what it is doing while it runs is a fact about the state it is sitting in — a running task
+ * parked on a question has task status `running` and says so nowhere else.
+ */
+export function laneOf(card: BoardCard): Lane {
+  if (card.status === "queued") return "not-started";
+  if (card.status === "completed" || card.status === "failed" || card.status === "canceled") return "finished";
+  // Stopped part-way and resumable, which is a pause somebody has to end — not a failure.
+  if (card.status === "interrupted") return "paused";
+  const at = card.activeStatus;
+  return at === "waiting_for_user" || at === "blocked" ? "paused" : "running";
+}
+
+/** When a run ended, falling back to the task row's clock for a card the journal cannot date. */
+export function endedAtOf(card: BoardCard): number {
+  return card.endedAt ?? card.updatedAt;
+}
+
+/**
+ * The cards of one column, split into lanes, empty ones dropped.
+ *
+ * The FINISHED lane is re-ordered, newest first. Everywhere else the board's own order is the order
+ * the projection produced and means something; a pile of ended runs has no such order, and the only
+ * question anybody asks of one is "what happened last" — which put the answer at the bottom of a
+ * list that grows forever.
+ */
+export function lanesOf(cards: readonly BoardCard[]): { lane: Lane; cards: BoardCard[] }[] {
+  const by = new Map<Lane, BoardCard[]>();
+  for (const card of cards) {
+    const lane = laneOf(card);
+    const list = by.get(lane);
+    if (list === undefined) by.set(lane, [card]);
+    else list.push(card);
+  }
+  by.get("finished")?.sort((a, b) => endedAtOf(b) - endedAtOf(a));
+  return LANES.flatMap((lane) => {
+    const found = by.get(lane);
+    return found === undefined ? [] : [{ lane, cards: found }];
+  });
+}
+
 const BADGE: Record<string, string> = {
   running: "▶",
   waiting_for_user: "⏸",
@@ -145,6 +212,78 @@ export function Column({
   );
 }
 
+/**
+ * A column's cards, under a heading per lane.
+ *
+ * Headings only where there is something under them, and none at all when every card in the column
+ * is in the same lane — a "Running" rule over a column of four running tasks is a line that says
+ * what the four badges below it already say. The sections earn their space by being a DIVISION, so
+ * they appear exactly when there is something to divide.
+ */
+export function Lanes({
+  cards,
+  render,
+}: {
+  cards: readonly BoardCard[];
+  render: (card: BoardCard) => ReactNode;
+}): JSX.Element {
+  const lanes = lanesOf(cards);
+  // One lane: no heading, because a rule saying "Finished" over a column of nothing but finished
+  // cards says what every badge under it says. The lane's OWN cards, not the ones passed in — a
+  // column that is all finished is the commonest case there is, and it is the one whose order the
+  // lane fixed.
+  if (lanes.length <= 1) return <>{(lanes[0]?.cards ?? []).map(render)}</>;
+  return (
+    <>
+      {lanes.map(({ lane, cards: inLane }) => (
+        <div key={lane} className={`lane lane-${lane}`}>
+          <h5>
+            <span className="grow">{LANE_LABEL[lane]}</span>
+            <span className="count">{inLane.length}</span>
+          </h5>
+          {inLane.map(render)}
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** The units an age is rounded to, largest first. Seconds is the floor, so the list ends there. */
+const AGES: readonly { unit: string; ms: number }[] = [
+  { unit: "day", ms: 86_400_000 },
+  { unit: "hour", ms: 3_600_000 },
+  { unit: "minute", ms: 60_000 },
+  { unit: "second", ms: 1000 },
+];
+
+/**
+ * How long ago a run ended, to ONE unit — "3 minutes ago", "2 days ago".
+ *
+ * Relative because that is the question actually being asked of a finished card: not when it ended
+ * but how stale it is, and "14:22" makes you work that out from the clock on the wall. One unit and
+ * no remainder, because a card's footer has room for a fact and not for a duration.
+ *
+ * PAST A WEEK it becomes a date. Beyond that the relative form stops being the easier reading — "23
+ * days ago" is a subtraction somebody has to undo to know which day that was — and the exact moment
+ * is on the tooltip either way.
+ */
+export function endedLabel(at: number, now: number = Date.now()): string {
+  // A clock that has drifted, or a record written a moment ahead of this render. Not an error worth
+  // showing as one — the run has just ended, and that is what it says.
+  const age = Math.max(0, now - at);
+  if (age >= 7 * 86_400_000) {
+    const when = new Date(at);
+    return when.getFullYear() === new Date(now).getFullYear()
+      ? when.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+      : when.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  }
+  for (const { unit, ms } of AGES) {
+    const n = Math.floor(age / ms);
+    if (n >= 1) return `${n} ${unit}${n === 1 ? "" : "s"} ago`;
+  }
+  return "just now";
+}
+
 export function Card({
   card,
   selected,
@@ -164,15 +303,36 @@ export function Card({
       status={status}
       title={card.title}
       selected={selected}
-      tip={onDrill ? "double-click to walk into this state" : (card.activeStateId ?? card.status)}
+      // A finished card's tooltip is the exact moment it ended — the footer rounds to one unit, and
+      // "2 days ago" is the reading you want until the moment it is not.
+      tip={
+        card.endedAt !== undefined
+          ? `${card.status} · ${new Date(card.endedAt).toLocaleString()}`
+          : onDrill
+            ? "double-click to open this run"
+            : (card.activeStateId ?? card.status)
+      }
       trailing={onDrill ? <span className="drill">↳</span> : undefined}
       // The status in words as well as in the stripe: a colour is a reminder, not a label, and the
       // state a task is sitting in is the thing you came to the board to read.
+      //
+      // A run that is OVER reports WHEN instead. Where it is stopped being the question the moment it
+      // stopped moving, and "which of these four finished runs is the one from this morning" is a
+      // question a column of identical grey cards could not answer at all.
       meta={
-        <>
-          <span className="ellip">{card.activeStateId ?? card.status}</span>
-          {card.activeStateId !== undefined ? <span className="card-status">{status.replace(/_/g, " ")}</span> : null}
-        </>
+        card.endedAt !== undefined ? (
+          <>
+            <span className="ellip">{card.status}</span>
+            <span className="card-status" title={new Date(card.endedAt).toLocaleString()}>
+              {endedLabel(card.endedAt)}
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="ellip">{card.activeStateId ?? card.status}</span>
+            {card.activeStateId !== undefined ? <span className="card-status">{status.replace(/_/g, " ")}</span> : null}
+          </>
+        )
       }
       onSelect={onSelect}
       onDrill={onDrill}
@@ -198,6 +358,7 @@ export function Board({
   trays = true,
   onSelectTask,
   onDrill,
+  onOpenTask,
 }: {
   board: BoardView;
   selected: string | null;
@@ -205,10 +366,30 @@ export function Board({
   trays?: boolean;
   onSelectTask: (taskId: string) => void;
   onDrill: (stateId: string) => void;
+  /**
+   * Double-clicking a CARD, where that means something other than drilling its state.
+   *
+   * The two halves of a drill are different questions. A column is a place and opening one shows
+   * every task in it; a card is one run, and opening it should show THAT run — which is what the
+   * Tasks view does, by putting it on the address. Absent in the Files view, where a card falls back
+   * to following the task's own path down a level.
+   */
+  onOpenTask?: ((card: BoardCard) => void) | undefined;
 }): JSX.Element {
+  /** What double-clicking this card does: open the run, else follow its path one level down. */
+  const drillOf = (card: BoardCard): (() => void) | undefined => {
+    if (onOpenTask !== undefined) return () => onOpenTask(card);
+    const target = drillTargetOf(board, card);
+    return target === undefined ? undefined : () => onDrill(target);
+  };
+  // The root listing WRAPS. Its columns are whole workflows — siblings with no order, and no task
+  // ever moves between them — so there is no left-to-right reading to preserve and a tenth workflow
+  // belongs on a second row rather than off the right-hand edge. A level BELOW a root is a sequence
+  // the engine advances through, and wrapping that would break the one thing the order means.
+  const roots = board.level === "";
   return (
     <div className="board-body">
-      <div className="columns">
+      <div className={`columns${roots ? " wrap" : ""}`}>
         {board.columns.map((column, index) => (
           <Column
             key={column.key}
@@ -219,90 +400,74 @@ export function Board({
             tip={`double-click to open ${column.stateId}`}
             onOpen={() => onDrill(column.stateId)}
           >
-            {column.cards.map((card) => (
-              <Card
-                key={card.taskId}
-                card={card}
-                selected={card.taskId === selected}
-                onSelect={() => onSelectTask(card.taskId)}
-                {...(drillTargetOf(board, card) !== undefined
-                  ? { onDrill: () => onDrill(drillTargetOf(board, card)!) }
-                  : {})}
-              />
-            ))}
+            <Lanes
+              cards={column.cards}
+              render={(card) => {
+                const drill = drillOf(card);
+                return (
+                  <Card
+                    key={card.taskId}
+                    card={card}
+                    selected={card.taskId === selected}
+                    onSelect={() => onSelectTask(card.taskId)}
+                    {...(drill !== undefined ? { onDrill: drill } : {})}
+                  />
+                );
+              }}
+            />
           </Column>
         ))}
         {board.columns.length === 0 ? <p className="empty">This state has no children.</p> : null}
       </div>
 
+      {/* The one tray left. "Finished / not started" is gone: a task that ended still ran somewhere,
+          and the projection now files it in the column it came to rest in — a card belongs under a
+          PLACE, and the lane inside that column is what says it is done. See `BoardView.finished`. */}
       {trays && board.atLevel.length > 0 ? (
-        <div className="tray">
-          <h4>At this level</h4>
-          <div className="tray-cards">
-            {board.atLevel.map((card) => (
-              <Card
-                key={card.taskId}
-                card={card}
-                selected={card.taskId === selected}
-                onSelect={() => onSelectTask(card.taskId)}
-              />
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {trays && board.finished.length > 0 ? (
-        <div className="tray">
-          <h4>Finished / not started</h4>
-          <div className="tray-cards">
-            {board.finished.map((card) => (
-              <Card
-                key={card.taskId}
-                card={card}
-                selected={card.taskId === selected}
-                onSelect={() => onSelectTask(card.taskId)}
-              />
-            ))}
-          </div>
-        </div>
+        <Tray
+          label="At this level"
+          cards={board.atLevel}
+          selected={selected}
+          onSelectTask={onSelectTask}
+          {...(onOpenTask !== undefined ? { onOpenTask } : {})}
+        />
       ) : null}
     </div>
   );
 }
 
-/**
- * The path bar.
- *
- * A file-explorer path, not a label: every segment but the last is a way back out, and the root
- * entry is always reachable because a board you cannot leave is a trap.
- */
-export function PathBar({
-  breadcrumb,
-  onGo,
-  children,
+/** A row of cards that belong to no column, laned like the columns are. */
+function Tray({
+  label,
+  cards,
+  selected,
+  onSelectTask,
+  onOpenTask,
 }: {
-  breadcrumb: string[];
-  onGo: (level: string | null) => void;
-  children?: React.ReactNode;
+  label: string;
+  cards: readonly BoardCard[];
+  selected: string | null;
+  onSelectTask: (taskId: string) => void;
+  onOpenTask?: ((card: BoardCard) => void) | undefined;
 }): JSX.Element {
   return (
-    <header className="path-bar">
-      <button className="crumb" onClick={() => onGo(null)} title="every workflow root">
-        ⌂ all workflows
-      </button>
-      {breadcrumb.map((crumb, i) => {
-        const last = i === breadcrumb.length - 1;
-        return (
-          <span key={crumb} className="crumb-part">
-            <span className="crumb-sep">›</span>
-            <button className={last ? "crumb last" : "crumb"} onClick={last ? undefined : () => onGo(crumb)}>
-              {crumb.split("/").pop()}
-            </button>
-          </span>
-        );
-      })}
-      <span className="spacer" />
-      {children}
-    </header>
+    <div className="tray">
+      <h4>{label}</h4>
+      <div className="tray-cards">
+        <Lanes
+          cards={cards}
+          render={(card) => (
+            <Card
+              key={card.taskId}
+              card={card}
+              selected={card.taskId === selected}
+              onSelect={() => onSelectTask(card.taskId)}
+              {...(onOpenTask !== undefined ? { onDrill: () => onOpenTask(card) } : {})}
+            />
+          )}
+        />
+      </div>
+    </div>
   );
 }
+

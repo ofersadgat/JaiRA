@@ -778,8 +778,9 @@ code {
    The root used to be a bordered pill, which made the one segment drawn differently also the only
    one that could not be clicked.
 
-   Every rule here is scoped to `.doc-bar` on purpose: `.crumb` and `.crumb.last` are shared with the
-   Tasks view's own path bar, and an unscoped rule would either lose to it or change it. */
+   Every rule here is scoped to `.doc-bar` on purpose: `.crumb` and `.crumb.last` are the unscoped
+   primitives near the board rules, and an unscoped rule here would either lose to them or change
+   them for everyone. */
 .doc-bar {
   display: flex;
   align-items: center;
@@ -842,6 +843,25 @@ code {
 .doc-bar .crumb-run.last {
   background: var(--panel-2);
   border-radius: 5px;
+}
+/* A project: the checkout everything else in the address is inside. Set in the reading font like a
+   run, because it carries a name a person chose rather than an identifier — and weighted, because it
+   is the one crumb that is always there. */
+.doc-bar .crumb-project,
+.doc-bar .crumb-project.last {
+  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+  font-size: 12px;
+  max-width: 240px;
+  color: var(--text);
+  font-weight: 600;
+}
+.doc-bar button.crumb-project:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+/* A bar with nothing behind its background to click. The Files bar means "describe the open file";
+   the Tasks bar means nothing, and a pointer over it would promise otherwise. */
+.doc-bar.inert {
+  cursor: default;
 }
 .doc-label {
   flex: 0 1 auto;
@@ -1935,16 +1955,10 @@ button.sm {
   font-size: 11px;
 }
 
-/* --- board --- */
-.path-bar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 14px;
-  flex: none;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
-}
+/* --- board ---
+   The crumb primitives, unscoped: both address bars are `.doc-bar` now (see `crumbs.tsx`), and these
+   are the base the rules up there refine. They were shared with a second, plainer path bar the Tasks
+   view drew per board group, which is what the one address at the top of the window replaced. */
 .crumb {
   background: none;
   border: none;
@@ -2013,6 +2027,13 @@ button.crumb-sep.open {
   gap: 10px;
   align-items: flex-start;
 }
+/* The root listing: columns are whole workflows, which are siblings with no order and which no task
+   ever moves between. Nothing is lost by putting the tenth one on a second row, and a board you have
+   to scroll sideways to finish reading is a board you do not read. */
+.columns.wrap {
+  flex-wrap: wrap;
+  row-gap: 12px;
+}
 .column {
   flex: 1 0 210px;
   max-width: 320px;
@@ -2080,6 +2101,70 @@ button.crumb-sep.open {
 }
 .column > .empty {
   padding: 2px 4px 8px;
+}
+
+/* --- lanes: what the cards in one column are DOING (board.tsx) ---------------
+   A column says WHERE a task is; a lane says whether anything is happening to it
+   there. Quieter than the column heading above them — these divide one track,
+   they do not add tracks — and drawn only where there is more than one, because
+   a "Running" rule over four running cards says what four badges already say.
+
+   The rule sits on the LEFT of the label rather than under it: the heading is a
+   marker in a stack of cards, and a full-width line reads as the top of a new
+   column. */
+.lane h5 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 6px;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted);
+}
+.lane h5::before {
+  content: "";
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.lane h5 .count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+/* The lane a person has to act on. It is the only one of the four that is waiting on somebody, so
+   it is the only one that gets a colour — the rest are states of the machine. */
+.lane-paused h5 {
+  color: var(--warn, #b7791f);
+}
+.lane-running h5 {
+  color: var(--dim);
+}
+/* Done and never-started are both "nothing is happening", and they sit at the bottom of the stack
+   where they are read last. Dimmed so a long tail of finished work does not out-shout two live
+   cards above it. */
+.lane-finished,
+.lane-not-started {
+  opacity: 0.72;
+}
+.lane-finished:hover,
+.lane-not-started:hover {
+  opacity: 1;
+}
+/* A tray wraps its cards across the page, so each lane takes a full row of it and wraps inside. */
+.tray-cards .lane {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tray-cards .lane h5 {
+  flex: 1 0 100%;
+  margin: 0;
 }
 
 .card {
@@ -2420,6 +2505,18 @@ button.crumb-sep.open {
 }
 
 /* --- task detail --- */
+/* A task read as its CONVERSATION fills the column: the transcript scrolls inside it and the
+   composer stays pinned under, which is the arrangement the Files view's run panel already has. The
+   detail reading is an ordinary document and lets the column scroll around it instead. */
+.detail.task-context {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.detail.task-context > header {
+  flex: none;
+}
 .detail header .sub {
   color: var(--dim);
   font-size: 11px;
@@ -3802,26 +3899,31 @@ textarea.cfg-input {
    The Tasks view is a thing you DRILL INTO, so each group gets the real board —
    columns and cards — rather than a summary of one. Grouped vertically because a
    board's columns are the children of one workflow state: two projects' columns
-   side by side would be columns of different things. */
+   side by side would be columns of different things.
+
+   A header per section, minus the first: the address bar over the column is the
+   header of the section you are scrolled to, and at the top of the column that is
+   the first project — so its own header would be the same row twice, one under the
+   other. The others scroll up out of view as you reach them and the bar takes over
+   from each in turn. Deliberately NOT sticky: a header pinned under the bar would
+   put the duplication back for every section rather than only the first. */
 .tasks-view .col.mid { overflow: auto; display: flex; flex-direction: column; min-height: 0; }
-.board-group { display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid var(--line); }
-/* A collapsed group is a header and nothing else, so several fit on screen at once. */
-.board-group.shut { flex: none; }
-.board-group-head {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  padding: 6px 10px;
-  cursor: pointer;
-  user-select: none;
-  font-size: 12px;
-  background: var(--head, transparent);
-}
-.board-group-head:hover { background: var(--hover); }
-.board-group-head .twist { flex: none; width: 10px; color: var(--muted); }
-/* JaiRA's own project reads as background rather than as your work. */
-.board-group-head .system { color: var(--muted); font-style: italic; }
-.board-group:not(.shut) { flex: 1 1 auto; }
+.board-group { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; border-bottom: 1px solid var(--line); }
+/* The section header is the ADDRESS BAR ITSELF, standing on that project — same component, so it is
+   identical rather than merely similar, and scrolling past a section reads as the bar above taking
+   that row's place. It has to have a top border here: in the title bar there is a window edge above
+   it, and down the column there is a board. */
+.board-group > .doc-bar { border-top: 1px solid var(--line); }
+/* LISTING every project: the column is one list, so it is the thing that scrolls and each board
+   grows to its own height — which is what makes "scroll on to the next project" a move you can make
+   at all. NARROWED to one, the board goes back to owning the height and scrolling inside itself,
+   which is what a board wants when it is the only thing on screen. */
+.tasks-view:not(.narrowed) .board-group { flex: none; }
+.tasks-view:not(.narrowed) .board-body { overflow: visible; }
+/* Room to scroll past the end, so the LAST group can reach the top of the column and become the
+   section the bar is naming. A full column's worth, because that is exactly how far the last group's
+   top has to travel. */
+.board-tail { flex: none; height: 100%; }
 
 
 /* --- the Debug view (debugPane.tsx) -------------------------------------------

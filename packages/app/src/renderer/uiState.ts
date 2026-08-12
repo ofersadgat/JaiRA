@@ -112,8 +112,6 @@ export const FOLD_DEFAULTS: Record<string, boolean> = {
  */
 export const SHUT = {
   folders: "files.folders",
-  /** The Tasks view's per-project board groups, keyed by project directory. */
-  projects: "tasks.projects",
 } as const;
 
 /**

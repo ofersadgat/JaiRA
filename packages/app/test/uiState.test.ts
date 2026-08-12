@@ -87,8 +87,10 @@ describe("collapsed branches", () => {
   });
 
   it("keeps the trees apart", () => {
-    const ui = toggleShut(emptyUiState(), SHUT.projects, "/repo");
-    expect(shutOf(ui, SHUT.projects).has("/repo")).toBe(true);
+    // Two ids, one of which nothing renders — the store is keyed by id, and a second tree must not
+    // read the first one's rows however it is spelled.
+    const ui = toggleShut(emptyUiState(), "some.other.tree", "/repo");
+    expect(shutOf(ui, "some.other.tree").has("/repo")).toBe(true);
     expect(shutOf(ui, SHUT.folders).size).toBe(0);
   });
 

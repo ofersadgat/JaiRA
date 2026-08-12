@@ -68,8 +68,10 @@ describe("AppService reads", () => {
     expect(board.level).toBe("feature/plan");
     expect(board.label).toBe("Planning");
     expect(board.columns.map((c) => c.key)).toEqual(["goals", "context", "critique"]);
-    // A queued task has no active path yet.
-    expect(board.finished).toHaveLength(1);
+    // A queued task has entered no child yet, so it is AT the level it will begin at rather than in
+    // one of its columns — and rather than in a tray named for a status.
+    expect(board.atLevel).toHaveLength(1);
+    expect(board.finished).toEqual([]);
     expect(board.columns.every((c) => c.cards.length === 0)).toBe(true);
   });
 
@@ -111,10 +113,12 @@ describe("AppService.startTask (scripted)", () => {
     expect(detail.activePath).toEqual([]);
     expect(detail.timeline.length).toBeGreaterThan(5);
 
-    // Board: a completed task leaves the columns and lands in finished.
+    // Board: a completed task STAYS on the board, in the column its run came to rest in. It used to
+    // fall out of the columns into a tray, which filed the card under a status rather than a place.
     const board = service.board();
+    expect(board.columns[2]!.cards.map((c) => c.taskId)).toEqual([taskId]);
+    // And it is in the census of what has ended here, which is the same card, not a second place.
     expect(board.finished.map((c) => c.taskId)).toEqual([taskId]);
-    expect(board.columns.flatMap((c) => c.cards)).toEqual([]);
   });
 
   it("refuses to start the same task twice concurrently", async () => {
@@ -162,7 +166,7 @@ describe("AppService live human gate", () => {
     expect(card.hasSubBoard).toBe(true);
     // …and the sub-board places it in the human_review column.
     const sub = service.board("feature/plan/critique");
-    expect(sub.breadcrumb).toEqual(["feature/plan", "feature/plan/critique"]);
+    expect(sub.breadcrumb.map((c) => c.stateId)).toEqual(["feature/plan", "feature/plan/critique"]);
     expect(sub.columns.find((c) => c.key === "human_review")!.cards.map((c) => c.taskId)).toEqual([taskId]);
 
     service.submitInteraction(pending.requestId, { decision: "block" });

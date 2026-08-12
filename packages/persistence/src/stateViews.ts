@@ -39,7 +39,7 @@ import type {
   WorkflowLayer,
 } from "@jaira/shared";
 import type { Project } from "./project";
-import { breadcrumbOf, projectBoard, type TaskProjection, type WorkflowShape } from "./projection";
+import { boardPathOf, breadcrumbOf, endedAtOf, projectBoard, type TaskProjection, type WorkflowShape } from "./projection";
 import { isStateFile } from "./snapshots";
 import { workflowShape } from "./shape";
 import { bundleFor, latestRun, taskSummaries, type ViewOptions } from "./views";
@@ -332,7 +332,7 @@ export function baseStateView(
         : {
             level: stateId,
             ...(stringOf(doc?.["label"]) !== undefined ? { label: stringOf(doc?.["label"])! } : {}),
-            breadcrumb: [stateId],
+            breadcrumb: [{ stateId }],
             columns: children.map((child) => ({ key: child.key, stateId: child.stateId, cards: [] })),
             atLevel: [],
             finished: [],
@@ -519,6 +519,11 @@ export function boardForState(
  * Not a `projectBoard` call, because there is no state above these — the roots are siblings with no
  * parent and no order. `atLevel` stays empty for the same reason: there is no level for a task to be
  * at.
+ *
+ * EVERY task lands in a column, whatever it is doing. A task cannot move between workflows, so the
+ * column it belongs to is decided by the one fact about it that never changes, and a finished run
+ * sorted out of its own workflow into a tray was a card filed under a status rather than a place —
+ * which is what the lanes inside a column are for.
  */
 export function rootsBoard(project: Project, browser: WorkflowBrowser, options?: StateViewOptions): BoardView {
   const summaries = taskSummaries(project);
@@ -537,9 +542,21 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
   // own project is the case that does not fit: its workflows are SYNTHESIZED and pinned as snapshots
   // (`beginTaskRun`'s `bundle` option), so there is no file to derive a root from — and a board built
   // from files alone showed nothing at all for a project whose whole content is runs.
+  //
+  // A task that names no workflow at all gets one keyed by its TITLE. There is nothing else to group
+  // it by, and the alternative is the tray this listing no longer has: a task with no readable
+  // workflow is still a task, and a column of one is a truthful board.
+  const keyOf = (summary: { workflow: string; title: string }): string =>
+    summary.workflow.length > 0 ? summary.workflow : summary.title;
   for (const summary of summaries) {
-    if (summary.workflow.length === 0 || byRoot.has(summary.workflow)) continue;
-    const column = { key: summary.workflow, stateId: summary.workflow, cards: [] as BoardCard[] };
+    const key = keyOf(summary);
+    if (byRoot.has(key)) continue;
+    const column = {
+      key,
+      stateId: summary.workflow,
+      ...(summary.workflow.length === 0 ? { label: summary.title } : {}),
+      cards: [] as BoardCard[],
+    };
     columns.push(column);
     byRoot.set(column.key, column);
   }
@@ -553,30 +570,33 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
       ? workflowShape(bundle, interactive !== undefined ? { interactiveFunctions: interactive } : {})
       : undefined;
     const run = latestRun(project, summary.taskId, shape);
-    const path = run.activePath;
+    // Where it is, or where it stopped — one rule, so a card does not change column the moment its
+    // run ends. See `boardPathOf`.
+    const path = boardPathOf(run);
     const deepest = path[path.length - 1];
+    const live = run.activePath.length > 0;
+    const over = summary.status === "completed" || summary.status === "failed" || summary.status === "canceled";
+    // When it ended, for a run that has. See `BoardCard.endedAt` — the task row's own clock moves for
+    // anything that touches the record, and this is the journal's answer.
+    const ended = over ? endedAtOf(run) : undefined;
     const card: BoardCard = {
+      ...(ended !== undefined ? { endedAt: ended } : {}),
       taskId: summary.taskId,
       title: summary.title,
       status: summary.status,
       workflow: summary.workflow,
-      ...(deepest !== undefined ? { activeStateId: deepest.stateId } : {}),
+      ...(live && deepest !== undefined ? { activeStateId: deepest.stateId } : {}),
       activePath: path,
       // Every root has children worth walking into, so a card here is always a drill.
       hasSubBoard: path.length > 0,
       ...(summary.labels !== undefined ? { labels: summary.labels } : {}),
       updatedAt: summary.updatedAt,
     };
-    const terminal = summary.status === "completed" || summary.status === "failed" || summary.status === "canceled";
-    const column = byRoot.get(summary.workflow);
-    if (terminal || path.length === 0) {
-      // A terminal task still belongs to its workflow — it is listed in the column so the root
-      // listing stays a complete census, and `finished` carries it for the tray.
-      finished.push(card);
-      continue;
-    }
-    if (column) column.cards.push(card);
-    else finished.push(card);
+    // Always found: the loop above made a column for every workflow the summaries name, whether or
+    // not a file backs it.
+    byRoot.get(keyOf(summary))?.cards.push(card);
+    // The census — see `projectBoard`. These cards are in their columns too.
+    if (over) finished.push(card);
   }
 
   return { level: "", label: "All workflows", breadcrumb: [], columns, atLevel: [], finished };
@@ -634,7 +654,7 @@ function transitionsOf(def: unknown, stateId: string, ancestors: ReadonlySet<str
 /** The ancestors of a state within one workflow, for deciding whether a transition loops. */
 function ancestorsOf(shape: WorkflowShape, rootId: string, stateId: string): Set<string> {
   const trail = breadcrumbOf(shape, rootId, stateId);
-  return new Set(trail.slice(0, -1));
+  return new Set(trail.slice(0, -1).map((crumb) => crumb.stateId));
 }
 
 /**
@@ -713,7 +733,13 @@ export function stateView(
   // A leaf has no columns to hold its tasks, so they are listed directly. Taken from the same
   // projection the board uses, which is what keeps the two renderings from disagreeing.
   const hasChildren = children.length > 0;
-  const tasksHere = board ? [...board.atLevel, ...board.columns.flatMap((c) => c.cards)] : [];
+  // "Here" is the present tense, so the ended runs are filtered out of it — they are in the columns
+  // now (see `BoardView.finished`), and a list of what is at this state should not answer with what
+  // finished here last week. `tasksRecent` is that question, and takes them from the census.
+  const ended = new Set((board?.finished ?? []).map((c) => c.taskId));
+  const tasksHere = board
+    ? [...board.atLevel, ...board.columns.flatMap((c) => c.cards)].filter((c) => !ended.has(c.taskId))
+    : [];
   const tasksRecent = board ? [...board.finished].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8) : [];
 
   const refs = new Set<string>();

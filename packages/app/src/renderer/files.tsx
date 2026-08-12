@@ -31,6 +31,7 @@ import type {
 } from "@jaira/shared/browser";
 import { isTextMime } from "@jaira/shared/browser";
 import { Badge } from "./board";
+import { CrumbBar, alternatives, runCrumbs, shortRunName, type Crumb } from "./crumbs";
 import { TaskPanel } from "./detail";
 import { resolveFileSurface, type FileSurfaceContext } from "./fileTypes";
 import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem } from "./menu";
@@ -716,43 +717,6 @@ function stateIdsOf(tree: FileTree | null): ReadonlySet<string> {
 }
 
 /**
- * One crumb of the address bar.
- *
- * `go` is what clicking it does; a crumb with none is either where you are standing or a segment
- * that names nothing openable. The two KINDS are drawn differently because they are different
- * things: the file's own hierarchy is fixed by which document is open, and the runs after it are a
- * walk you can take back.
- */
-export interface Crumb {
-  text: string;
-  /**
-   * Which family it belongs to, which is what it LOOKS like.
-   *
-   * Three, and they are three different kinds of thing rather than three levels of importance: a
-   * `folder` is a place on disk, a `state` is a level of the workflow hierarchy, a `run` is one
-   * execution. Every member of a family looks identical to every other — including the layer root,
-   * which is a folder like any other and had a pill of its own for no reason except that it happened
-   * to be first.
-   */
-  kind: "folder" | "state" | "run";
-  /** The full story, for the tooltip: which instance, which state it ran, where on disk. */
-  title?: string;
-  go?: () => void;
-  /**
-   * The other things that could be at this level — what the `›` before this crumb drops down.
-   *
-   * The Explorer move: a separator is not decoration, it is the join between two levels, and the
-   * question it can answer is "what else is in the one on the left". For a path crumb that is the
-   * containing directory's entries; for a run it is the sibling runs, which is the board one level
-   * up without going back to it; for the ROOT it is the other roots, and the way to another project.
-   *
-   * Absent when there is no OTHER — a menu whose one entry names where you already are is a control
-   * that does nothing, so the chevron stays a plain glyph. See {@link alternatives}.
-   */
-  options?: MenuItem[];
-}
-
-/**
  * The directory the workflow hierarchy lives in.
  *
  * The one place a path stops being folders and starts being state ids: `workflows/debug/plan.json`
@@ -808,17 +772,6 @@ export interface CrumbInput {
 }
 
 /**
- * A level's menu, or nothing when there is nowhere else to go.
- *
- * The list always CONTAINS where you are — that is what the mark is for, and a list that dropped it
- * would make you count the path to see which one you were on. But a list that is ONLY where you are
- * is a chevron that opens to tell you what the crumb beside it already says.
- */
-function alternatives(options: MenuItem[]): MenuItem[] | undefined {
-  return options.some((option) => option.checked !== true) ? options : undefined;
-}
-
-/**
  * What is in one directory of one layer: subdirectories first, then files, each by name.
  *
  * Directories first because that is the order every file manager has used for thirty years, and the
@@ -852,42 +805,6 @@ export function entryItem(node: FileNode, current: string, input: Pick<CrumbInpu
     return { label: id.split("/").pop() ?? id, checked, onSelect: () => input.onOpenState(id) };
   }
   return { label: node.name, checked, onSelect: () => input.onOpenFile(node.layer, node.path) };
-}
-
-/**
- * A run's name with the part the path already says taken off the front.
- *
- * The Run panel names a task after the state and a count — `debug/hello_world #2` — so under a path
- * reading `debug › hello_world` the useful half is `#2`, and the rest is the two crumbs to its left
- * repeated. Anything that does NOT start with the state id is left alone: `Fix the parser` is a name
- * somebody chose, and shortening it would be inventing an abbreviation.
- */
-export function shortRunName(title: string, stateId: string | undefined): string {
-  if (stateId === undefined || !title.startsWith(stateId)) return title;
-  const rest = title.slice(stateId.length).trim();
-  return rest.length > 0 ? rest : title;
-}
-
-/**
- * How a run reads in the path: which TASK at the base, its own name below that.
- *
- * The rule is POSITIONAL, and it has to be. The first step is the open file's own state — that state
- * is the crumb immediately before it, by construction — so whatever the run is CALLED there is
- * another word for a level the path already has: `hello_world › Hello-world self-test` spends a
- * segment saying nothing twice and reads as if the second were a state of its own. What is new about
- * that crumb is WHICH RUN, and the run is identified by its task.
- *
- * It is emphatically NOT the instance id. Instance ids restart at 1 on every run, so the root
- * instance of every task is `#1` — the base crumb read `#1` no matter which run you picked, which is
- * indistinguishable from a selection that did not happen. The instance id survives as the fallback
- * for a run with no task title to use, and in the tooltip, where it is precise and not alone.
- *
- * Below the base the state is not in the path at all, so the run's name is the only thing that says
- * which of the parent's children this is — `Say hello`, and `#7` when it has no name.
- */
-function runCrumbOf(step: TrailStep, index: number, taskTitle: string | undefined, stateId: string | undefined): string {
-  if (index > 0) return step.name ?? `#${step.instanceId}`;
-  return taskTitle === undefined ? `#${step.instanceId}` : shortRunName(taskTitle, stateId);
 }
 
 /**
@@ -967,46 +884,21 @@ export function crumbsOf(input: CrumbInput): Crumb[] {
   // that is what makes `isDir` worth carrying.
   void isDir;
 
-  trail.forEach((step, i) => {
-    const last = i === trail.length - 1;
-    // The BASE's alternatives are the other runs of this state — which are other tasks, since one
-    // task's newest pass is what the base stands for. Deeper, they are the sibling runs under the
-    // same parent, which is the board one level up without having to go back to it.
-    const parent = i === 0 ? undefined : nodeAt(instances, trail[i - 1]!.instanceId);
-    const options = alternatives(
-      i === 0
-        ? runs.map((card) => ({
-            // Shortened exactly as the crumb it would become, so picking `#2` out of this list puts
-            // `#2` on the bar rather than something that has to be recognised as the same run.
-            label: shortRunName(card.title, stateId),
-            note: card.activeStateId ?? card.status,
-            checked: card.taskId === selectedTask,
-            onSelect: () => input.onSelectTask(card.taskId),
-          }))
-        : [...(parent?.children ?? [])]
-            .filter((child) => !child.superseded)
-            .sort((a, b) => a.startedAt - b.startedAt)
-            .map((child) => {
-              const sibling = stepOf(child);
-              return {
-                label: sibling.name ?? `#${child.instanceId}`,
-                note: child.status.replace(/_/g, " "),
-                checked: child.instanceId === step.instanceId,
-                onSelect: () => input.onWalkTo(i, child),
-              };
-            }),
-    );
-    out.push({
-      text: runCrumbOf(step, i, input.taskTitle, stateId),
-      kind: "run",
-      title:
-        i === 0 && input.taskTitle !== undefined
-          ? `${input.taskTitle} — run #${step.instanceId} of ${step.stateId}`
-          : `run #${step.instanceId} of ${step.stateId}`,
-      ...(last ? {} : { go: () => input.onWalkBack(i) }),
-      ...(options !== undefined ? { options } : {}),
-    });
-  });
+  // The tail: one crumb per run walked into. The same builder the Tasks address uses — from the run
+  // down, the two views are the same address reached two ways. See `runCrumbs`.
+  out.push(
+    ...runCrumbs({
+      trail,
+      instances,
+      runs,
+      selectedTask,
+      ...(stateId !== undefined ? { stateId } : {}),
+      ...(input.taskTitle !== undefined ? { taskTitle: input.taskTitle } : {}),
+      onWalkBack: input.onWalkBack,
+      onWalkTo: input.onWalkTo,
+      onSelectTask: input.onSelectTask,
+    }),
+  );
   return out;
 }
 
@@ -1034,81 +926,34 @@ function DocBar({
   /** The right-hand end of the bar — what mode the panel below is in, when it has one. */
   children?: React.ReactNode;
 }): JSX.Element {
-  // Which chevron is open, so the same click closes it and the glyph can turn to face down.
-  const [menu, setMenu] = useState<(MenuAnchor & { at: number }) | null>(null);
   const errors = state === null ? 0 : state.issues.filter((i) => i.severity === "error").length;
   const warnings = state === null ? 0 : state.issues.length - errors;
-  const crumbs = crumbsOf(input);
   return (
-    <header className="doc-bar" onClick={onInspect} title={LAYER_LABEL[input.layer]}>
-      {crumbs.map((crumb, i) => (
-        <span key={`${i}:${crumb.kind}:${crumb.text}`} className="crumb-part">
-          {/* The separator is the join between two levels, so it is where "what ELSE is at this
-              level" belongs — Explorer's move, and the reason it turns to face down when open. A
-              level with no alternatives keeps a plain glyph rather than an empty menu. */}
-          {crumb.options === undefined ? (
-            // The root has nothing to its left, so its chevron would be a separator between the bar
-            // and the window. It keeps the menu and loses the glyph.
-            i === 0 ? null : <span className="crumb-sep">›</span>
-          ) : (
-            <button
-              className={`crumb-sep${menu?.at === i ? " open" : ""}${i === 0 ? " first" : ""}`}
-              title="what else is at this level"
-              aria-haspopup="menu"
-              onClick={(e) => {
-                e.stopPropagation();
-                const box = e.currentTarget.getBoundingClientRect();
-                setMenu(menu?.at === i ? null : { at: i, x: box.left, y: box.bottom + 2, items: crumb.options! });
-              }}
-            >
-              {menu?.at === i ? "⌄" : "›"}
-            </button>
-          )}
-          {crumb.go === undefined ? (
-            <span
-              className={`crumb crumb-${crumb.kind} ${i === crumbs.length - 1 ? "last" : "inert"}`}
-              title={crumb.title}
-            >
-              {crumb.text}
+    <CrumbBar
+      crumbs={crumbsOf(input)}
+      title={LAYER_LABEL[input.layer]}
+      onClick={onInspect}
+      trailing={
+        <>
+          {/*
+            The state's human name, at the RIGHT-HAND end with the rest of what is true about the
+            open file. It sat directly after the crumbs, where — with no `›` in front of it — it read
+            as one more segment of the path, which is the one thing it must not look like: it names
+            the file, not a level you can go to. The task a run belongs to is not here at all; that
+            is the context panel's subject, and one identity in two places is how the two come to
+            disagree.
+          */}
+          {state?.label ? (
+            <span className="sub ellip doc-label" title={state.label}>
+              {state.label}
             </span>
-          ) : (
-            <button
-              className={`crumb crumb-${crumb.kind}`}
-              title={crumb.title ?? (crumb.kind === "run" ? "back to this run" : "open this state")}
-              onClick={(e) => {
-                e.stopPropagation();
-                crumb.go?.();
-              }}
-            >
-              {crumb.text}
-            </button>
-          )}
-        </span>
-      ))}
-      <span className="grow" />
-      {/*
-        The state's human name, at the RIGHT-HAND end with the rest of what is true about the open
-        file. It sat directly after the crumbs, where — with no `›` in front of it — it read as one
-        more segment of the path, which is the one thing it must not look like: it names the file,
-        not a level you can go to. The task a run belongs to is not here at all; that is the context
-        panel's subject, and one identity in two places is how the two come to disagree.
-      */}
-      {state?.label ? (
-        <span className="sub ellip doc-label" title={state.label}>
-          {state.label}
-        </span>
-      ) : null}
-      {errors > 0 ? <span className="chip chip-bad">{errors} error</span> : null}
-      {warnings > 0 ? <span className="chip chip-warn">{warnings} warning</span> : null}
-      {/* Controls, not navigation: the bar's own click means "describe this file", and a toggle that
-          also did that would be a toggle you cannot press without a side effect. */}
-      {children !== undefined ? (
-        <span className="doc-bar-tools" onClick={(e) => e.stopPropagation()}>
-          {children}
-        </span>
-      ) : null}
-      {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
-    </header>
+          ) : null}
+          {errors > 0 ? <span className="chip chip-bad">{errors} error</span> : null}
+          {warnings > 0 ? <span className="chip chip-warn">{warnings} warning</span> : null}
+        </>
+      }
+      {...(children !== undefined ? { tools: children } : {})}
+    />
   );
 }
 

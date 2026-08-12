@@ -5,7 +5,7 @@
  * swaps its inspector onto it the moment you click a card. One component, so the two never drift
  * into describing the same task differently.
  */
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import type { ConversationView, InstanceNode, TaskDetail } from "@jaira/shared/browser";
 import { Badge } from "./board";
 
@@ -30,6 +30,61 @@ function Tree({ nodes }: { nodes: InstanceNode[] }): JSX.Element {
 }
 
 /**
+ * What a task IS: its name, where it came from, and the two buttons that operate it.
+ *
+ * Its own component because it is the one part of the panel that every reading of a task needs —
+ * the details below it and the conversation that replaces them are both about a task you have to be
+ * able to name and to cancel, and a header duplicated once per reading is a header that stops
+ * agreeing with itself.
+ */
+export function TaskHead({
+  detail,
+  onStart,
+  onCancel,
+  onOpenState,
+  children,
+}: {
+  detail: TaskDetail;
+  onStart: () => void;
+  onCancel: () => void;
+  onOpenState?: (stateId: string) => void;
+  /** Anything the reading wants beside the buttons — the toggle between two of them. */
+  children?: ReactNode;
+}): JSX.Element {
+  const deepest = detail.activePath[detail.activePath.length - 1];
+  return (
+    <header>
+      <h2>
+        <Badge status={detail.status} /> {detail.title}
+      </h2>
+      <div className="sub">
+        {detail.taskId} · {detail.workflow}
+        {detail.snapshotHash ? ` · snapshot ${detail.snapshotHash.slice(0, 12)}` : ""}
+      </div>
+      {detail.branch ? (
+        // Branch binding + the worktree the run executes in (DESIGN §9.2).
+        <div className="sub" title={detail.worktreePath ?? ""}>
+          ⎇ {detail.branch}
+          {detail.worktreePath ? ` · ${detail.worktreePath}` : " · worktree pending"}
+        </div>
+      ) : null}
+      <div className="actions">
+        <button onClick={onStart}>{detail.runs.length > 0 ? "Re-run" : "Start"}</button>
+        <button onClick={onCancel} className="ghost">
+          Cancel
+        </button>
+        {onOpenState && deepest ? (
+          <button className="ghost" onClick={() => onOpenState(deepest.stateId)} title={deepest.stateId}>
+            Open state ↗
+          </button>
+        ) : null}
+        {children}
+      </div>
+    </header>
+  );
+}
+
+/**
  * One task: what it is, where it is, and what it is doing.
  *
  * `onOpenState` is the link back to authoring — it is how "this run is stuck in a state I need to
@@ -48,38 +103,24 @@ export function TaskPanel({
   onCancel: () => void;
   onOpenState?: (stateId: string) => void;
 }): JSX.Element {
-  const latest = detail.runs[detail.runs.length - 1];
-  const deepest = detail.activePath[detail.activePath.length - 1];
   return (
     <div className="detail">
-      <header>
-        <h2>
-          <Badge status={detail.status} /> {detail.title}
-        </h2>
-        <div className="sub">
-          {detail.taskId} · {detail.workflow}
-          {detail.snapshotHash ? ` · snapshot ${detail.snapshotHash.slice(0, 12)}` : ""}
-        </div>
-        {detail.branch ? (
-          // Branch binding + the worktree the run executes in (DESIGN §9.2).
-          <div className="sub" title={detail.worktreePath ?? ""}>
-            ⎇ {detail.branch}
-            {detail.worktreePath ? ` · ${detail.worktreePath}` : " · worktree pending"}
-          </div>
-        ) : null}
-        <div className="actions">
-          <button onClick={onStart}>{detail.runs.length > 0 ? "Re-run" : "Start"}</button>
-          <button onClick={onCancel} className="ghost">
-            Cancel
-          </button>
-          {onOpenState && deepest ? (
-            <button className="ghost" onClick={() => onOpenState(deepest.stateId)} title={deepest.stateId}>
-              Open state ↗
-            </button>
-          ) : null}
-        </div>
-      </header>
+      <TaskHead detail={detail} onStart={onStart} onCancel={onCancel} {...(onOpenState ? { onOpenState } : {})} />
+      <TaskDetailSections detail={detail} stream={stream} />
+    </div>
+  );
+}
 
+/**
+ * Everything the panel says about a task under its header — the facts, as opposed to the words.
+ *
+ * Split from {@link TaskPanel} so the Tasks view can put them behind a toggle beside the
+ * conversation without a second copy of five sections drifting away from this one.
+ */
+export function TaskDetailSections({ detail, stream }: { detail: TaskDetail; stream: string[] }): JSX.Element {
+  const latest = detail.runs[detail.runs.length - 1];
+  return (
+    <>
       {detail.activePath.length > 0 ? (
         <section>
           <h3>Active path</h3>
@@ -121,7 +162,7 @@ export function TaskPanel({
           <pre className="outputs">{JSON.stringify(latest.outputs, null, 2)}</pre>
         </section>
       ) : null}
-    </div>
+    </>
   );
 }
 

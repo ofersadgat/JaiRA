@@ -15,6 +15,7 @@
 import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
 import type { ChatPlanView, ChatSettings, InstanceNode, StateChild, StateView, TaskDetail } from "@jaira/shared/browser";
 import { Board, Column, Tile } from "./board";
+import { TaskDetailSections, TaskHead } from "./detail";
 import { entriesOf, journalFor, signatureOf } from "./transcript";
 import { instanceOf as instanceOfState, nodeAt } from "./trail";
 import { Transcript, durationOf } from "./transcriptView";
@@ -56,12 +57,14 @@ function RunTile({
   index,
   total,
   selected,
+  onSelect,
   onOpen,
 }: {
   node: InstanceNode;
   index: number;
   total: number;
   selected: boolean;
+  onSelect: () => void;
   onOpen: () => void;
 }): JSX.Element {
   const sig = signatureOf(node);
@@ -71,7 +74,7 @@ function RunTile({
       status={node.status}
       title={sig.label ?? sig.name}
       selected={selected}
-      tip={`${node.stateId} · ${new Date(node.startedAt).toLocaleString()}`}
+      tip={`${node.stateId} · ${new Date(node.startedAt).toLocaleString()} — double-click to walk in`}
       // Only when there is more than one. A lone card numbered "1 of 1" is a question raised and
       // immediately answered.
       trailing={total > 1 ? <span className="chip">{index + 1}</span> : undefined}
@@ -83,7 +86,11 @@ function RunTile({
           <span className="card-status">{node.status.replace(/_/g, " ")}</span>
         </>
       }
-      onSelect={onOpen}
+      // One click marks it, two walk into it — the same pair of gestures the task board uses, and the
+      // reason it has to be the same pair is that these are the same board one level apart. A single
+      // click that navigated meant you could not point at a card without leaving the page it was on.
+      onSelect={onSelect}
+      onDrill={onOpen}
     >
       {sig.params.length > 0 ? (
         <div className="card-args">
@@ -111,12 +118,16 @@ export function RunBoard({
   declared,
   parent,
   openInstance,
+  onSelect,
   onOpen,
 }: {
   /** The state's declared children, in run order — the columns, whether or not anything ran. */
   declared: readonly StateChild[];
   parent: InstanceNode | undefined;
   openInstance: number | null;
+  /** One click: mark it. */
+  onSelect: (node: InstanceNode) => void;
+  /** Two: walk into it. */
   onOpen: (node: InstanceNode) => void;
 }): JSX.Element {
   const byChild = useMemo(() => runsByChild(parent), [parent]);
@@ -140,6 +151,7 @@ export function RunBoard({
                   index={i}
                   total={runs.length}
                   selected={node.instanceId === openInstance}
+                  onSelect={() => onSelect(node)}
                   onOpen={() => onOpen(node)}
                 />
               ))}
@@ -316,6 +328,113 @@ function ChatComposer({ taskId, instanceId, project }: { taskId: string; instanc
   );
 }
 
+/**
+ * One run, in the middle column of the Tasks view — the mirror of {@link CompositeView}.
+ *
+ * Same two readings of the same thing, reached without a file. `CompositeView` starts from a
+ * `StateView` because the Files view got there by opening a document; here the address arrived by
+ * drilling a board, and the only state on it is the one the trail's tail already names. So the
+ * declared children come from `trailState` — fetched by every walk — rather than from a document
+ * nobody opened.
+ *
+ * Clicking a card WALKS IN, which is what makes the address grow a segment instead of the view
+ * quietly redrawing one level down with no record of where it was.
+ */
+export function RunView({ context }: { context: FileSurfaceProps["context"] }): JSX.Element {
+  const { detail, trail, trailState, onWalkInto } = context;
+  const tail = trail?.at(-1);
+  const node = tail === undefined ? undefined : nodeAt(detail?.instances ?? [], tail.instanceId);
+  const declared = trailState?.children ?? [];
+  const [ownMode, setOwnMode] = useState<RunMode>("board");
+  const mode = context.runMode ?? ownMode;
+  const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
+
+  const openRun = (child: InstanceNode): void => {
+    if (onWalkInto !== undefined) return onWalkInto(child);
+    setOpen(new Set([child.instanceId]));
+  };
+
+  // A run that declared no children and entered none is a LEAF of the walk: there is no board to
+  // draw for it, so its conversation is the only reading, whatever the toggle says.
+  const board = mode === "board" && (declared.length > 0 || (node?.children.length ?? 0) > 0);
+
+  if (node === undefined) return <p className="empty">This task has not run here yet.</p>;
+  return (
+    <div className="composite">
+      {board ? (
+        <RunBoard
+          declared={declared}
+          parent={node}
+          openInstance={open.size === 1 ? [...open][0]! : null}
+          onSelect={(child) => setOpen(new Set([child.instanceId]))}
+          onOpen={openRun}
+        />
+      ) : (
+        <RunConversation parent={node} detail={detail} context={context} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The Tasks view's context panel: a task, read as its conversation.
+ *
+ * Clicking a card is a question about what that task SAID, and the panel used to answer with a form
+ * — an instance tree, a line of event types, a blob of JSON outputs. All three are facts about the
+ * run and none of them is the run, so reading one meant clicking through into the Files view to find
+ * the transcript that was there all along.
+ *
+ * The conversation is the default and the detail is behind a toggle, in that order, because the
+ * detail is what you go looking for once the conversation has told you something is wrong.
+ *
+ * `parent` is the task's ROOT instance, so every session under it is flattened into the same set of
+ * panels — see {@link RunConversation}. The Files view walks a trail and reads one level of it; here
+ * there is no walk, and the whole task is the answer.
+ */
+export function TaskContext({
+  detail,
+  stream,
+  context,
+  onStart,
+  onCancel,
+  onOpenState,
+}: {
+  detail: TaskDetail;
+  stream: string[];
+  context: FileSurfaceProps["context"];
+  onStart: () => void;
+  onCancel: () => void;
+  onOpenState?: ((stateId: string) => void) | undefined;
+}): JSX.Element {
+  const [mode, setMode] = useState<"conversation" | "detail">("conversation");
+  // The task's own root run. A task that has never run has none, and the conversation says so.
+  const root = detail.instances[0];
+
+  if (mode === "detail") {
+    return (
+      <div className="detail">
+        <TaskHead detail={detail} onStart={onStart} onCancel={onCancel} {...(onOpenState ? { onOpenState } : {})}>
+          <button className="ghost" onClick={() => setMode("conversation")}>
+            Conversation
+          </button>
+        </TaskHead>
+        <TaskDetailSections detail={detail} stream={stream} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="detail task-context">
+      <TaskHead detail={detail} onStart={onStart} onCancel={onCancel} {...(onOpenState ? { onOpenState } : {})}>
+        <button className="ghost" onClick={() => setMode("detail")}>
+          Details
+        </button>
+      </TaskHead>
+      <RunConversation parent={root} detail={detail} context={context} />
+    </div>
+  );
+}
+
 /** Which of the two readings the panel is showing. Held per state, so switching files does not reset it. */
 export type RunMode = "board" | "conversation";
 
@@ -428,6 +547,7 @@ export function CompositeView(props: FileSurfaceProps & { state: StateView }): J
             declared={at.declared}
             parent={at.node}
             openInstance={open.size === 1 ? [...open][0]! : null}
+            onSelect={(node) => setOpen(new Set([node.instanceId]))}
             onOpen={openRun}
           />
         )

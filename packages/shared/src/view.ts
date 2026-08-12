@@ -100,6 +100,16 @@ export interface BoardCard {
   hasSubBoard: boolean;
   labels?: string[];
   updatedAt: number;
+  /**
+   * When the run ENDED, from the journal — the last instance of it to terminate.
+   *
+   * Distinct from {@link updatedAt}, which is the task ROW's clock and moves for anything at all
+   * that touches the task. This is the fact a finished card reports and the key its lane is sorted
+   * by, and neither wants "when did anything last happen to this record".
+   *
+   * Absent while a run is still going, and for a task that has never run.
+   */
+  endedAt?: number;
 }
 
 /** One column of a board level: a declared child of the level's state. */
@@ -112,6 +122,21 @@ export interface BoardColumn {
 }
 
 /**
+ * One level of a board's breadcrumb: the state, and what a person calls it.
+ *
+ * The label travels WITH the id because the two answer different questions and only one of them is
+ * readable. A board draws its columns with `BoardColumn.label`, so double-clicking a column headed
+ * "Sync the workflows" and watching `states` appear on the path was the address disagreeing with the
+ * thing you had just clicked — the same state under two names, one of which was a file name.
+ *
+ * Resolved exactly as the column's is: the parent's declared override first, then the state's own.
+ */
+export interface BoardCrumb {
+  stateId: string;
+  label?: string;
+}
+
+/**
  * One board level. The root board's `level` is the workflow root; drilling into
  * a card whose active state has children yields that state's board.
  */
@@ -120,14 +145,24 @@ export interface BoardView {
   level: string;
   label?: string;
   /** Breadcrumb from the workflow root down to `level`, inclusive. */
-  breadcrumb: string[];
+  breadcrumb: BoardCrumb[];
   columns: BoardColumn[];
   /**
    * Cards whose active path reaches this level but is not inside any declared
    * child — the level's own operation is running (or it has just been entered).
    */
   atLevel: BoardCard[];
-  /** Tasks in a terminal state (completed/failed/canceled), which have no active path. */
+  /**
+   * The tasks on this board that have ENDED — completed, failed or canceled.
+   *
+   * A CENSUS and not a bucket: every card here is also in the column it came to rest in. It used to
+   * be the other way round — a terminal task had no active path, so it had no column and this was
+   * where it went — which filed a card under a status instead of under a place, and left a board
+   * with a tray at the bottom holding everything the columns had refused.
+   *
+   * What it is for now is the question a column cannot answer: which runs of this level are OVER,
+   * most recent first. See `StateView.tasksRecent`.
+   */
   finished: BoardCard[];
 }
 

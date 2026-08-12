@@ -703,7 +703,9 @@ function renderCard(card: BoardCard): string {
 
 function renderBoard(board: BoardView): string {
   const lines: string[] = [];
-  lines.push(`board: ${board.breadcrumb.join(" › ")}${board.label ? `  (${board.label})` : ""}`);
+  // Ids rather than labels: this is the headless surface, and the id is what its own `--level`
+  // flag takes. The label is on the end of the line already.
+  lines.push(`board: ${board.breadcrumb.map((c) => c.stateId).join(" › ")}${board.label ? `  (${board.label})` : ""}`);
   for (const column of board.columns) {
     lines.push(`  [${column.key}] ${column.label ?? column.stateId}${column.cards.length === 0 ? "  —" : ""}`);
     for (const card of column.cards) lines.push(renderCard(card));
@@ -712,10 +714,9 @@ function renderBoard(board: BoardView): string {
     lines.push("  (at this level)");
     for (const card of board.atLevel) lines.push(renderCard(card));
   }
-  if (board.finished.length > 0) {
-    lines.push("  (finished / not started)");
-    for (const card of board.finished) lines.push(renderCard(card));
-  }
+  // `board.finished` is not printed: it is a census of the ended runs, and every one of them is
+  // already in the column it came to rest in — see `BoardView.finished`. Printing it listed half the
+  // board twice, under a heading that named a status rather than a place.
   return lines.join("\n") + "\n";
 }
 

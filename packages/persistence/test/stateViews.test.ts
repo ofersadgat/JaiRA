@@ -80,7 +80,7 @@ describe("boardForState", () => {
 
     // `sequence` is the order the engine advances through, so it is the column order.
     expect(board?.columns.map((c) => c.key)).toEqual(["goals", "context", "critique"]);
-    expect(board?.breadcrumb).toEqual(["feature/plan"]);
+    expect(board?.breadcrumb.map((c) => c.stateId)).toEqual(["feature/plan"]);
   });
 
   it("resolves a state from ITS OWN workflow, not the newest task's", () => {

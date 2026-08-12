@@ -43,10 +43,12 @@ describe("jaira board", () => {
     const taskId = await createTask();
     const view = await board();
     expect(view.level).toBe("feature/plan");
-    expect(view.breadcrumb).toEqual(["feature/plan"]);
+    expect(view.breadcrumb.map((c) => c.stateId)).toEqual(["feature/plan"]);
     expect(view.columns.map((c) => c.key)).toEqual(["goals", "context", "critique"]);
-    // Not started yet: no active path.
-    expect(view.finished.map((c) => c.taskId)).toEqual([taskId]);
+    // Not started yet, so it has entered no child — but it is AT the level it will begin at, which
+    // is this one. It used to be filed under "finished / not started", a tray named for a status.
+    expect(view.atLevel.map((c) => c.taskId)).toEqual([taskId]);
+    expect(view.finished).toEqual([]);
   });
 
   it("shows a task parked on the human gate, then moved to finished", async () => {
@@ -88,7 +90,7 @@ describe("jaira board", () => {
     ]);
     const sub = await board(["--level", "feature/plan/critique"]);
     expect(sub.level).toBe("feature/plan/critique");
-    expect(sub.breadcrumb).toEqual(["feature/plan", "feature/plan/critique"]);
+    expect(sub.breadcrumb.map((c) => c.stateId)).toEqual(["feature/plan", "feature/plan/critique"]);
     expect(sub.columns.map((c) => c.key)).toEqual(["address_weaknesses", "human_review"]);
   });
 
@@ -98,8 +100,11 @@ describe("jaira board", () => {
     expect(res.code).toBe(0);
     expect(res.out).toMatch(/^board: feature\/plan {2}\(Planning\)/m);
     expect(res.out).toMatch(/\[goals\] Goals/);
-    expect(res.out).toMatch(/\(finished \/ not started\)/);
+    expect(res.out).toMatch(/\(at this level\)/);
     expect(res.out).toMatch(/Plan the feature/);
+    // The ended runs are in their columns now, so printing the census as well would list half the
+    // board twice — see `BoardView.finished`.
+    expect(res.out).not.toMatch(/finished \/ not started/);
   });
 
   it("reports an empty board for a project with no tasks", async () => {

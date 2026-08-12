@@ -238,7 +238,7 @@ export function boardView(project: Project, level?: string, options?: ViewOption
   const resolved = shapeFor(project, workflow, newest?.snapshotHash, options);
   if (!resolved) {
     const target = level ?? workflow;
-    return { level: target, breadcrumb: [target], columns: [], atLevel: [], finished: [] };
+    return { level: target, breadcrumb: [{ stateId: target }], columns: [], atLevel: [], finished: [] };
   }
   const { shape, rootId } = resolved;
   const target = level ?? rootId;

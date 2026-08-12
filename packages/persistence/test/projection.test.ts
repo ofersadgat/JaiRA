@@ -201,8 +201,9 @@ function task(id: string, over: Partial<TaskProjection> = {}): TaskProjection {
   };
 }
 
-function runningAt(events: EngineEvent[]): TaskProjection["run"] {
-  return projectRun(events, SHAPE);
+/** `atMs` only where a test is about WHEN something happened — the projection defaults it to zero. */
+function runningAt(events: EngineEvent[], atMs?: number[]): TaskProjection["run"] {
+  return projectRun(events, SHAPE, atMs);
 }
 
 describe("projectBoard", () => {
@@ -250,31 +251,130 @@ describe("projectBoard", () => {
     expect(sub.columns[0]!.cards[0]!.hasSubBoard).toBe(false);
   });
 
-  it("collects terminal tasks in finished and skips paths that miss the level", () => {
-    const done = task("t-done", { status: "completed", run: runningAt([entered(1, "feature/plan"), terminated(1, "feature/plan", "success")]) });
-    const elsewhere = task("t-other", { workflow: "other", run: runningAt([entered(1, "other")]) });
-    const board = projectBoard(SHAPE, "feature/plan", [done, elsewhere]);
-    expect(board.finished.map((c) => c.taskId)).toEqual(["t-done"]);
-    expect(board.columns.flatMap((c) => c.cards)).toEqual([]);
+  /**
+   * A finished run went SOMEWHERE, and the board says where.
+   *
+   * It used to say nothing: a terminal task has no active path, so it fell out of every column and
+   * into a tray at the bottom labelled with what it was not. The card is placed by where the run came
+   * to rest — see `restingPathOf` — and its status is what says it is over.
+   */
+  it("places a finished task in the column it came to rest in", () => {
+    const done = task("t-done", {
+      status: "completed",
+      run: runningAt([
+        entered(1, "feature/plan"),
+        entered(2, "feature/plan/critique", 1, "critique"),
+        terminated(2, "feature/plan/critique", "success"),
+        terminated(1, "feature/plan", "success"),
+      ]),
+    });
+    const board = projectBoard(SHAPE, "feature/plan", [done]);
+    expect(board.columns[2]!.cards.map((c) => c.taskId)).toEqual(["t-done"]);
     expect(board.atLevel).toEqual([]);
   });
 
-  it("a queued task with no events counts as finished-or-not-started, never a column", () => {
+  /** `finished` is a census of the runs that ended, and every one of them is in its column too. */
+  it("lists an ended task in finished as well as in its column", () => {
+    const done = task("t-done", { status: "completed", run: runningAt([entered(1, "feature/plan"), terminated(1, "feature/plan", "success")]) });
+    const board = projectBoard(SHAPE, "feature/plan", [done]);
+    expect(board.finished.map((c) => c.taskId)).toEqual(["t-done"]);
+    expect(board.atLevel.map((c) => c.taskId)).toEqual(["t-done"]);
+  });
+
+  it("leaves a task whose path never reached this level off the board entirely", () => {
+    const elsewhere = task("t-other", { workflow: "other", run: runningAt([entered(1, "other")]) });
+    const board = projectBoard(SHAPE, "feature/plan", [elsewhere]);
+    expect(board.columns.flatMap((c) => c.cards)).toEqual([]);
+    expect(board.atLevel).toEqual([]);
+    expect(board.finished).toEqual([]);
+  });
+
+  /**
+   * A task that has never run will BEGIN at its workflow root, so that is where it is — not in a
+   * column, because it has entered no child, and not in a tray, because it is on this board.
+   */
+  it("puts a queued task at the level that is its own workflow root", () => {
     const board = projectBoard(SHAPE, "feature/plan", [task("t-q", { status: "queued" })]);
     expect(board.columns.flatMap((c) => c.cards)).toEqual([]);
-    expect(board.finished.map((c) => c.taskId)).toEqual(["t-q"]);
+    expect(board.atLevel.map((c) => c.taskId)).toEqual(["t-q"]);
+    expect(board.finished).toEqual([]);
+  });
+
+  /**
+   * The date a finished card reports. Read from the JOURNAL rather than from the task row's clock,
+   * which moves for anything at all that touches the record.
+   */
+  it("dates a finished card by the last of its instances to terminate", () => {
+    const done = task("t-done", {
+      status: "completed",
+      updatedAt: 9_999,
+      run: runningAt(
+        [
+          entered(1, "feature/plan"),
+          entered(2, "feature/plan/critique", 1, "critique"),
+          terminated(2, "feature/plan/critique", "success"),
+          terminated(1, "feature/plan", "success"),
+        ],
+        [10, 20, 30, 40],
+      ),
+    });
+    const board = projectBoard(SHAPE, "feature/plan", [done]);
+    expect(board.columns[2]!.cards[0]!.endedAt).toBe(40);
+  });
+
+  /** A live run has terminated children behind it, and none of them is a completion date for it. */
+  it("puts no ending on a card whose run is still going", () => {
+    const going = task("t-live", {
+      run: runningAt(
+        [
+          entered(1, "feature/plan"),
+          entered(2, "feature/plan/goals", 1, "goals"),
+          terminated(2, "feature/plan/goals", "success"),
+          entered(3, "feature/plan/critique", 1, "critique"),
+        ],
+        [10, 20, 30, 40],
+      ),
+    });
+    const board = projectBoard(SHAPE, "feature/plan", [going]);
+    expect(board.columns[2]!.cards[0]!.endedAt).toBeUndefined();
+  });
+
+  it("keeps a queued task off a level below its root, where it has not arrived", () => {
+    const board = projectBoard(SHAPE, "feature/plan/critique", [task("t-q", { status: "queued" })]);
+    expect(board.columns.flatMap((c) => c.cards)).toEqual([]);
+    expect(board.atLevel).toEqual([]);
   });
 });
 
 describe("breadcrumbOf", () => {
+  const ids = (crumbs: readonly { stateId: string }[]): string[] => crumbs.map((c) => c.stateId);
+
   it("walks from the root down to the level", () => {
-    expect(breadcrumbOf(SHAPE, "feature/plan", "feature/plan")).toEqual(["feature/plan"]);
-    expect(breadcrumbOf(SHAPE, "feature/plan", "feature/plan/critique/human_review")).toEqual([
+    expect(ids(breadcrumbOf(SHAPE, "feature/plan", "feature/plan"))).toEqual(["feature/plan"]);
+    expect(ids(breadcrumbOf(SHAPE, "feature/plan", "feature/plan/critique/human_review"))).toEqual([
       "feature/plan",
       "feature/plan/critique",
       "feature/plan/critique/human_review",
     ]);
-    expect(breadcrumbOf(SHAPE, "feature/plan", "nope")).toEqual(["nope"]);
+    expect(ids(breadcrumbOf(SHAPE, "feature/plan", "nope"))).toEqual(["nope"]);
+  });
+
+  /**
+   * The name a person reads, resolved exactly as the COLUMN's is — the parent's declared override
+   * first, then the state's own. A path that spelled a state by its file name while the column you
+   * clicked to get there spelled it by its title was the address disagreeing with the board.
+   */
+  it("carries the label the board draws for each level", () => {
+    expect(breadcrumbOf(SHAPE, "feature/plan", "feature/plan/critique")).toEqual([
+      { stateId: "feature/plan", label: "Planning" },
+      { stateId: "feature/plan/critique", label: "Critique" },
+    ]);
+  });
+
+  it("leaves the label off a level nobody named, rather than inventing one", () => {
+    expect(breadcrumbOf(SHAPE, "feature/plan", "feature/plan/critique/human_review").at(-1)).toEqual({
+      stateId: "feature/plan/critique/human_review",
+    });
   });
 
   it("terminates on a cyclic shape", () => {
@@ -282,7 +382,7 @@ describe("breadcrumbOf", () => {
       a: { children: [{ key: "b", stateId: "b" }] },
       b: { children: [{ key: "a", stateId: "a" }] },
     };
-    expect(breadcrumbOf(cyclic, "a", "b")).toEqual(["a", "b"]);
-    expect(breadcrumbOf(cyclic, "a", "zzz")).toEqual(["zzz"]);
+    expect(ids(breadcrumbOf(cyclic, "a", "b"))).toEqual(["a", "b"]);
+    expect(ids(breadcrumbOf(cyclic, "a", "zzz"))).toEqual(["zzz"]);
   });
 });

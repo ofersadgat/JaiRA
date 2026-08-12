@@ -8,7 +8,8 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import type { FileTree, InstanceNode, StateView } from "@jaira/shared/browser";
-import { crumbsOf, type Crumb, type CrumbInput } from "../src/renderer/files";
+import type { Crumb } from "../src/renderer/crumbs";
+import { crumbsOf, type CrumbInput } from "../src/renderer/files";
 import { standingOn } from "../src/renderer/runViews";
 import { nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "../src/renderer/trail";
 import type { FileSurfaceContext } from "../src/renderer/fileTypes";

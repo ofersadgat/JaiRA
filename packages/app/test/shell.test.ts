@@ -69,7 +69,7 @@ describe("the Files view's surfaces", () => {
     // regression the Files view would hit the moment a project had two workflows.
     const board = service.board("feature/plan/critique");
     expect(board.level).toBe("feature/plan/critique");
-    expect(board.breadcrumb).toEqual(["feature/plan", "feature/plan/critique"]);
+    expect(board.breadcrumb.map((c) => c.stateId)).toEqual(["feature/plan", "feature/plan/critique"]);
   });
 
   it("puts one column per workflow root at the top, with no order between them", () => {

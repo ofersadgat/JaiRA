@@ -22,6 +22,7 @@ import type {
   BlockedChild,
   BoardCard,
   BoardColumn,
+  BoardCrumb,
   BoardView,
   InstanceNode,
   InstanceStatus,
@@ -229,6 +230,42 @@ export function activePathOf(roots: readonly InstanceNode[]): PathStep[] {
   }
 }
 
+/**
+ * The chain a run came to REST on: outermost-first, deepest last, live or not.
+ *
+ * {@link activePathOf} answers "where is this task now" and is empty the moment a run ends, which is
+ * the right answer to that question and the wrong one for a board — a finished task is still a task
+ * that went somewhere, and a board that only knows about live paths has nowhere to put it. So the
+ * same walk, without the liveness test: the last non-superseded instance at each level, which for a
+ * running task IS the active path and for a finished one is where it stopped.
+ *
+ * Superseded instances are skipped here as they are there. A loop's earlier iteration was replaced
+ * by a later one, and the run does not rest on it.
+ */
+export function restingPathOf(roots: readonly InstanceNode[]): PathStep[] {
+  const path: PathStep[] = [];
+  let level: readonly InstanceNode[] = roots;
+  for (;;) {
+    const node = [...level].reverse().find((n) => !n.superseded);
+    if (node === undefined) return path;
+    path.push({
+      instanceId: node.instanceId,
+      stateId: node.stateId,
+      ...(node.childKey !== undefined ? { childKey: node.childKey } : {}),
+    });
+    level = node.children;
+  }
+}
+
+/**
+ * Where a board should place this run: where it is, or where it stopped.
+ *
+ * One rule for both, so a card does not move to a different column at the moment its run ends.
+ */
+export function boardPathOf(run: ProjectedRun): PathStep[] {
+  return run.activePath.length > 0 ? run.activePath : restingPathOf(run.instances);
+}
+
 /** Flatten a forest depth-first (roots first) — handy for tests and list views. */
 export function flattenInstances(nodes: readonly InstanceNode[]): InstanceNode[] {
   const out: InstanceNode[] = [];
@@ -269,7 +306,12 @@ const TERMINAL: ReadonlySet<TaskStatus> = new Set(["completed", "failed", "cance
  */
 function cardOf(task: TaskProjection, path: PathStep[], levelIndex: number, activeStatus?: InstanceStatus): BoardCard {
   const deepest = path[path.length - 1];
+  // Only for a run that is OVER. A live run has terminated instances behind it — every child it has
+  // finished with — and reporting the newest of those as a completion date would put a date on a
+  // card that is still moving.
+  const ended = TERMINAL.has(task.status) ? endedAtOf(task.run) : undefined;
   return {
+    ...(ended !== undefined ? { endedAt: ended } : {}),
     taskId: task.taskId,
     title: task.title,
     status: task.status,
@@ -283,6 +325,22 @@ function cardOf(task: TaskProjection, path: PathStep[], levelIndex: number, acti
   };
 }
 
+/**
+ * When a run ended: the last of its instances to terminate.
+ *
+ * The MAX rather than the root's own `endedAt`, because a root that was cancelled or that failed on
+ * the way out is not guaranteed to be the last thing recorded, and "when was this over" should not
+ * depend on which node happened to be written last. Undefined while anything is still open, which is
+ * exactly the case where a card has no completion to report.
+ */
+export function endedAtOf(run: ProjectedRun): number | undefined {
+  let ended: number | undefined;
+  for (const node of flattenInstances(run.instances)) {
+    if (node.endedAt !== undefined && (ended === undefined || node.endedAt > ended)) ended = node.endedAt;
+  }
+  return ended;
+}
+
 /** Status of the deepest live instance — what a card's badge shows. */
 function activeStatusOf(run: ProjectedRun): InstanceStatus | undefined {
   const deepest = run.activePath[run.activePath.length - 1];
@@ -292,18 +350,23 @@ function activeStatusOf(run: ProjectedRun): InstanceStatus | undefined {
 
 /**
  * Project one board level: columns are the level state's declared children (in
- * declaration/sequence order), and each task is placed in the column its active
- * path enters at that level.
+ * declaration/sequence order), and each task is placed in the column its path
+ * enters at that level.
+ *
+ * PATH, not active path — see {@link boardPathOf}. A finished task used to have
+ * no active path and so no column, and every one of them piled into a tray at
+ * the bottom of the board labelled with what it was not. It went somewhere; the
+ * board says where, and the card's own status says that it is done.
  *
  * A task whose path reaches the level but no further sits in `atLevel` (the
- * level's own operation is running); a terminal task has no active path at all
- * and lands in `finished`.
+ * level's own operation is running). One that never reached the level at all is
+ * not on this board and is left off it.
  */
 export function projectBoard(
   shape: WorkflowShape,
   level: string,
   tasks: readonly TaskProjection[],
-  options?: { breadcrumb?: string[] },
+  options?: { breadcrumb?: BoardCrumb[] },
 ): BoardView {
   const levelShape = shape[level];
   const columns: BoardColumn[] = (levelShape?.children ?? []).map((child) => ({
@@ -317,44 +380,71 @@ export function projectBoard(
   const finished: BoardCard[] = [];
 
   for (const task of tasks) {
-    const path = task.run.activePath;
-    if (TERMINAL.has(task.status) || path.length === 0) {
-      finished.push(cardOf(task, path, 0));
-      continue;
-    }
+    const path = boardPathOf(task.run);
     // Where does this path sit relative to `level`?
     const at = path.findIndex((step) => step.stateId === level);
-    if (at < 0) continue; // the path doesn't pass through this level
-    const next = path[at + 1];
-    const card = cardOf(task, path, at, activeStatusOf(task.run));
-    const column = next?.childKey !== undefined ? byKey.get(next.childKey) : undefined;
-    if (column) column.cards.push(card);
-    else atLevel.push(card);
+    const card = cardOf(task, path, Math.max(at, 0), activeStatusOf(task.run));
+
+    if (path.length === 0) {
+      // Never run. It will BEGIN at its workflow root, so it is at this level exactly when this
+      // level IS that root — the honest answer for a queued task, and the one that keeps it on the
+      // board it is about to move through rather than in a tray of what the columns would not take.
+      if (task.workflow === level) atLevel.push(card);
+    } else if (at >= 0) {
+      const next = path[at + 1];
+      const column = next?.childKey !== undefined ? byKey.get(next.childKey) : undefined;
+      if (column) column.cards.push(card);
+      else atLevel.push(card);
+    }
+
+    /**
+     * The census: runs that ENDED and that went through this level.
+     *
+     * Not a bucket — a card here is usually in a column too — and not the same question as where the
+     * run came to rest, which is why it is asked of the whole instance tree rather than of the path.
+     * A run that passed through `goals` on its way to `critique` rests in `critique` and has still
+     * been to `goals`, and "what has run here" is exactly what `StateView.tasksRecent` asks.
+     */
+    if (TERMINAL.has(task.status) && flattenInstances(task.run.instances).some((n) => n.stateId === level)) {
+      finished.push(card);
+    }
   }
 
   return {
     level,
     ...(levelShape?.label !== undefined ? { label: levelShape.label } : {}),
-    breadcrumb: options?.breadcrumb ?? [level],
+    breadcrumb: options?.breadcrumb ?? [{ stateId: level, ...(levelShape?.label !== undefined ? { label: levelShape.label } : {}) }],
     columns,
     atLevel,
     finished,
   };
 }
 
-/** The breadcrumb from the workflow root down to `level`, inclusive. */
-export function breadcrumbOf(shape: WorkflowShape, rootId: string, level: string): string[] {
-  if (rootId === level) return [rootId];
+/**
+ * The breadcrumb from the workflow root down to `level`, inclusive.
+ *
+ * Each step carries the name the BOARD would draw for it, resolved the same way a column's is: the
+ * parent's declared override, then the state's own label. Without that the path spelled a state by
+ * its file name while the column you clicked to get there spelled it by its title — see
+ * {@link BoardCrumb}.
+ */
+export function breadcrumbOf(shape: WorkflowShape, rootId: string, level: string): BoardCrumb[] {
+  const crumbOf = (stateId: string, declared?: string): BoardCrumb => {
+    const label = declared ?? shape[stateId]?.label;
+    return { stateId, ...(label !== undefined ? { label } : {}) };
+  };
   const seen = new Set<string>();
-  const walk = (id: string, trail: string[]): string[] | undefined => {
-    if (id === level) return [...trail, id];
+  const walk = (id: string, trail: BoardCrumb[], declared?: string): BoardCrumb[] | undefined => {
+    const here = [...trail, crumbOf(id, declared)];
+    if (id === level) return here;
     if (seen.has(id)) return undefined;
     seen.add(id);
     for (const child of shape[id]?.children ?? []) {
-      const hit = walk(child.stateId, [...trail, id]);
+      const hit = walk(child.stateId, here, child.label);
       if (hit) return hit;
     }
     return undefined;
   };
-  return walk(rootId, []) ?? [level];
+  // A level the walk cannot reach still gets a crumb: the path names where the board says it is.
+  return walk(rootId, []) ?? [crumbOf(level)];
 }

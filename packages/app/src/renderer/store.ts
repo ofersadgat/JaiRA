@@ -327,13 +327,25 @@ export interface AppState {
    * from two projects side by side would be columns of different things. Each group keeps its own
    * drill level, because drilling into one is not a statement about the other.
    *
-   * WHICH GROUPS ARE FOLDED is not here. That is a layout preference like the pane widths, so it
-   * lives in `settings.ui.shut` under `SHUT.projects` and outlives the window; `levels` stays behind
-   * regardless, which is what makes re-opening a group land where it was rather than at its roots.
+   * There is no folding here any more. Groups used to have an accordion header apiece, and once the
+   * address bar became the header of the section you are scrolled to, that header was the same row
+   * twice — so it went, and {@link taskFocus} does what folding was for: narrowing the column to the
+   * project you are reading, reversibly, from the path rather than from a twisty.
    */
   projects: ProjectSummary[];
   boards: Record<string, BoardView | null>;
   levels: Record<string, string | null>;
+  /**
+   * Which project the Tasks view is NARROWED to, or null for the listing of all of them.
+   *
+   * The first segment of the Tasks address (see `taskBar.tsx`), and the only thing that decides how
+   * many groups the column draws. Null is a real place rather than "nothing chosen" — it is the level
+   * above every project, the same way the layer root is a place to stand in the Files view.
+   *
+   * Session-scoped on purpose, unlike {@link levels}: which board you had drilled into is where you
+   * left your work, while which project you were reading is answered again by opening one.
+   */
+  taskFocus: string | null;
   /** Which project the selected task belongs to — a task id means nothing without it. */
   selectedProject: string | null;
   /**
@@ -520,6 +532,7 @@ const EMPTY: AppState = {
   projects: [],
   boards: {},
   levels: {},
+  taskFocus: null,
   selectedProject: null,
   trail: [],
   trailState: null,
@@ -927,7 +940,12 @@ export function useApp() {
         }
       }),
     );
-    patch({ projects, boards });
+    // A narrowing that names a project this window no longer has is a filter that hides everything
+    // and says nothing — which is what closing the checkout the Tasks view was narrowed to would
+    // otherwise leave behind. Back to the listing, which always has something in it.
+    const focus = ref.current.taskFocus;
+    const gone = focus !== null && !projects.some((p) => p.project === focus);
+    patch({ projects, boards, ...(gone ? { taskFocus: null } : {}) });
   }, [patch]);
 
   const refreshLogs = useCallback(async () => {
@@ -1394,13 +1412,15 @@ export function useApp() {
       // those made a running sync indistinguishable from a button that did nothing.
       const about = (message as { project?: string }).project;
       if (message.type === "store:invalidate" && about !== undefined && about !== ref.current.projectDir) {
-        // …except JaiRA's own lists, which are nobody's project and so are nobody's to ignore.
-        if (message.scope === "tasks") {
+        // …except JaiRA's own lists, which are nobody's project and so are nobody's to ignore. The
+        // Tasks view draws a board for EVERY project, including this one, so a card of its that has
+        // moved has moved on screen.
+        if (message.scope === "tasks" || (message.scope === "board" && ref.current.view === "tasks")) {
           void refreshProjects();
-          // A shared workflow's runs land here, and the Files inspector shows them beside its Run
-          // button. Dropping this invalidate is what would leave that history one run behind.
-          void refreshSharedTasks();
         }
+        // A shared workflow's runs land here, and the Files inspector shows them beside its Run
+        // button. Dropping this invalidate is what would leave that history one run behind.
+        if (message.scope === "tasks") void refreshSharedTasks();
         return;
       }
       switch (message.type) {
@@ -1425,13 +1445,23 @@ export function useApp() {
             // The Files board is the same projection reached another way, so a card that moved has
             // to move there too.
             void refreshState(ref.current.stateId);
+            // And the Tasks view's boards, which are a THIRD reading of it — one per project, in
+            // `boards`, rebuilt only by this. Without it a card sat in whatever column it was in when
+            // the run started until the run ended: every transition in between published exactly this
+            // message, and every one of them refreshed two projections and not the one on screen.
+            //
+            // Only while that view is on screen. This message is published per JOURNAL ENTRY, and
+            // rebuilding it costs a fetch per project — worth paying to watch a card move, not worth
+            // paying to keep a screen nobody is looking at up to date. `setView` catches up on entry.
+            if (ref.current.view === "tasks") void refreshProjects();
           }
           if (message.scope === "task") {
             void refreshDetail(ref.current.selected);
-            // Whenever a run is on screen — the address bar is standing on one, or the panel is on
-            // its task. Keyed off `inspect` alone, a walk into a run left the transcript frozen at
-            // whatever it said when you walked in.
-            if (ref.current.inspect === "task" || ref.current.trail.length > 0) {
+            // Whenever a run is on screen. That is now any selected task at all: the Tasks panel
+            // reads a task AS its conversation, so the two conditions that used to gate this — the
+            // panel showing a task, the address bar standing on a run — are both narrower than the
+            // set of screens the transcript is on.
+            if (ref.current.selected !== null) {
               void refreshConversation(ref.current.selected);
               void refreshSession(ref.current.selected, ref.current.sessionInstance);
             }
@@ -1473,9 +1503,7 @@ export function useApp() {
           void refreshBoard();
           void refreshDetail(ref.current.selected);
           void refreshState(ref.current.stateId);
-          if (ref.current.inspect === "task" || ref.current.trail.length > 0) {
-            void refreshConversation(ref.current.selected);
-          }
+          if (ref.current.selected !== null) void refreshConversation(ref.current.selected);
           break;
         case "session:turn": {
           // Accumulated per position: a delta is a fragment, and the fragments of one call belong to one
@@ -1507,6 +1535,7 @@ export function useApp() {
     refreshTasks,
     refreshSharedTasks,
     refreshBoard,
+    refreshProjects,
     refreshDetail,
     refreshPending,
     refreshApprovals,
@@ -1617,13 +1646,82 @@ export function useApp() {
         void refreshTrailState(step.stateId);
       },
 
-      /** Fold a project's board away. Its level is kept, so re-opening lands where it was. */
-      toggleProject: (project: string) => setUi(toggleShut(ref.current.settings.ui, SHUT.projects, project)),
+      /**
+       * Narrow the Tasks view to one project, or back to the listing of all of them.
+       *
+       * See {@link AppState.taskFocus}. Nothing is fetched — every group's board is already loaded,
+       * because the listing draws them all.
+       */
+      focusProject: (project: string | null) => patch({ taskFocus: project }),
 
-      /** Drill into one project's board. `null` returns that group to its workflow roots. */
+      /**
+       * Drill into one project's board. `null` returns that group to its workflow roots.
+       *
+       * Also NARROWS to that project, because a drill is a statement about where you want to be: the
+       * levels below a workflow root only exist inside one project, so an address that grew them
+       * while the column was still listing every group would be a path describing one of the things
+       * on screen and not the others.
+       *
+       * And it drops the WALK. A run on the path was reached through the level you are leaving, so
+       * once that level changes the run is no longer below it — kept, the column went on showing that
+       * run while the crumbs said you had gone somewhere else, which is what made clicking the
+       * project crumb look like a button that did nothing.
+       */
       drillProject: (project: string, level: string | null) => {
-        patch({ levels: { ...ref.current.levels, [project]: level } });
+        patch({
+          levels: { ...ref.current.levels, [project]: level },
+          taskFocus: project,
+          trail: [],
+          trailState: null,
+        });
         void refreshProjects();
+      },
+
+      /**
+       * Walk into a task from the Tasks board: put ITS RUN at this level on the address.
+       *
+       * The other half of the drill. Double-clicking a COLUMN goes to that state and shows every
+       * task inside it, and double-clicking a CARD used to do the same thing — which answered a
+       * question about one run by opening the board of the state it happened to be in. This is the
+       * question the click actually asked: `.jaira › hello_world › #3`, and the middle column
+       * redraws as that run rather than as its neighbours.
+       *
+       * `level` is the state the walk begins at — the board's own level, or the card's workflow at
+       * the root listing, which is the same rule the Files view uses when it seeds a trail from an
+       * open state's board. The board is drilled to it first, so the address has a state segment for
+       * the run to hang off; without that step a card opened from the root listing would read
+       * `.jaira › #3` and name no workflow at all.
+       *
+       * A task that never entered `level` gets no trail. It has no run there to walk into, and a
+       * crumb standing on an instance that does not exist is worse than one crumb fewer.
+       */
+      openTask: (taskId: string, project: string, level: string) => {
+        if (ref.current.levels[project] !== level) {
+          patch({ levels: { ...ref.current.levels, [project]: level } });
+          void refreshProjects();
+        }
+        patch({
+          selected: taskId,
+          selectedProject: project,
+          taskFocus: project,
+          stream: [],
+          sessions: {},
+          trail: [],
+          trailState: null,
+          inspect: "path",
+        });
+        void refreshDetail(taskId, project).then((detail) => {
+          // A LATE answer for a card that is no longer the one on the path — clicking a second task
+          // while the first one's detail is still in flight. Same guard `seedTrail` carries, against
+          // the same round trip.
+          if (ref.current.selected !== taskId) return;
+          const node = instanceOf(detail?.instances ?? [], level);
+          if (node === undefined) return;
+          patch({ trail: [stepOf(node)] });
+          void refreshTrailState(node.stateId);
+        });
+        void refreshConversation(taskId, project);
+        void refreshSession(taskId, null, project, level);
       },
 
       /** Fetch one child run's transcript, for a card that has just been opened. */
@@ -1857,6 +1955,10 @@ export function useApp() {
         patch({ view, error: null });
         if (view === "settings") void refreshConfig();
         if (view === "files") void refreshTree();
+        // The per-project boards go stale while this view is not on screen — a running task's
+        // transitions are not followed there, deliberately, because following them costs a fetch per
+        // project per journal entry. Arriving is when that debt is paid. See the `board` invalidate.
+        if (view === "tasks") void refreshProjects();
         // Backfilled once on open; everything after arrives on the push.
         if (view === "logs") void refreshLogs();
         // What the pane leads with is whether the self-test is installed, so it has to be true when

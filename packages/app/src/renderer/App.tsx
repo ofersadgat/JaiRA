@@ -26,11 +26,10 @@
  * The approvals strip spans all three. A blocked tool loop is the one thing that must never scroll
  * away, and it stays visible while you are deep in the Files tree.
  */
-import { useEffect, useMemo, useState, type CSSProperties, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from "react";
 import type { ConfigLayer, PendingApproval, PendingInteraction } from "@jaira/shared/browser";
-import { Board, PathBar } from "./board";
+import { Board } from "./board";
 import { ApprovalDialog, InteractionDialog } from "./components";
-import { TaskPanel } from "./detail";
 import {
   FileAddressBar,
   FileInspector,
@@ -52,8 +51,10 @@ import { ProvidersPane } from "./providersPane";
 import { ExecutorsPane } from "./executorsPane";
 import { initialRunValues, runFieldsOf, runTargetOf } from "./runForm";
 import type { RunSurface } from "./runPanel";
+import { RunModeToggle, RunView, TaskContext } from "./runViews";
 import { Sidebar, type SidebarView } from "./sidebar";
 import { Splitter } from "./splitter";
+import { TaskAddressBar } from "./taskBar";
 import { nodeAt } from "./trail";
 import { FOLD, PANE, SHUT, SIDEBAR_RAIL, openOf, paneDefault, paneOf, shutOf } from "./uiState";
 import { History, NewTask } from "./widgets";
@@ -282,15 +283,52 @@ export default function App(): JSX.Element {
   const dirtyFiles = useMemo(() => new Set(Object.keys(state.drafts)), [state.drafts]);
 
   /**
-   * The board groups folded away, by project directory.
+   * The Files tree's folded branches.
    *
-   * Built once per render rather than inside the map over projects: `shutOf` materialises a Set, and
-   * asking it per row would build one per board on the screen to answer one question about each.
+   * Built once per render rather than inside the map over rows: `shutOf` materialises a Set, and
+   * asking it per row would build one per row on the screen to answer one question about each.
    */
-  const foldedProjects = useMemo(() => shutOf(ui, SHUT.projects), [ui]);
-
-  /** The same, for the Files tree's branches — see {@link foldedProjects}. */
   const foldedFolders = useMemo(() => shutOf(ui, SHUT.folders), [ui]);
+
+  /**
+   * Which board group the Tasks column is scrolled to, while it is showing all of them.
+   *
+   * The address bar over the column is the header of the section you are IN — see `taskBar.tsx` —
+   * and this is what tells it which that is. Measured rather than tracked in the store, because it
+   * is a fact about where a scrollbar is: nothing outside this column can change it, and nothing
+   * outside this column has a use for it.
+   */
+  const boardsRef = useRef<HTMLDivElement | null>(null);
+  const [atProject, setAtProject] = useState<string | null>(null);
+  const trackBoards = useCallback(() => {
+    const column = boardsRef.current;
+    if (column === null) return;
+    // The LAST group whose top has passed the top of the column — the one under the bar. Measured
+    // against the viewport rather than with `offsetTop`, which is relative to whichever ancestor
+    // happens to be positioned and so would silently answer a different question after a restyle.
+    const top = column.getBoundingClientRect().top;
+    let at: string | null = null;
+    for (const group of column.querySelectorAll<HTMLElement>("[data-project]")) {
+      if (group.getBoundingClientRect().top - top <= 1) at = group.dataset.project ?? null;
+    }
+    setAtProject((was) => (was === at ? was : at));
+  }, []);
+
+  // Groups arriving, folding, or being narrowed away all move the boundaries this is measuring, and
+  // none of them is a scroll — so the answer is recomputed whenever the column's contents change.
+  useEffect(trackBoards, [trackBoards, state.projects, state.boards, state.taskFocus, view]);
+
+  /**
+   * The tasks standing at the level the Tasks walk began from — the base run crumb's alternatives.
+   *
+   * The Files bar takes these from the open state's own board; here the board is the one the column
+   * is drawing, so they are its cards. Flattened across the columns because at this level they are
+   * all runs OF this level, whichever child each has gone on into.
+   */
+  const taskLevelCards = useMemo(() => {
+    const board = state.taskFocus === null ? null : state.boards[state.taskFocus];
+    return board === null || board === undefined ? [] : [...board.atLevel, ...board.columns.flatMap((c) => c.cards)];
+  }, [state.boards, state.taskFocus]);
 
   /**
    * The sidebar's two remembered numbers: how wide, and whether it is showing at all.
@@ -563,6 +601,49 @@ export default function App(): JSX.Element {
               onInspect={actions.inspectState}
             />
           ) : null}
+          {/*
+            The same row, over the other view. The Tasks column used to carry a breadcrumb PER board
+            group, stacked down the page — so "where am I" moved as you scrolled and there were as
+            many answers as you had checkouts open. One address, in the row the Files view puts its
+            own in, is what makes the two views one app.
+          */}
+          {view === "tasks" ? (
+            <TaskAddressBar
+              projects={state.projects}
+              focus={state.taskFocus}
+              at={atProject}
+              boards={state.boards}
+              trail={state.trail}
+              run={{
+                instances: detail?.instances ?? [],
+                // The other tasks standing where this walk began — the same set the Files bar offers
+                // under the base run's chevron, taken from the board rather than from a StateView.
+                runs: taskLevelCards,
+                selectedTask: state.selected,
+                ...(detail?.title !== undefined ? { taskTitle: detail.title } : {}),
+                onWalkTo: actions.walkTo,
+                onSelectTask: (taskId) => actions.select(taskId, state.selectedProject ?? undefined),
+              }}
+              onFocus={actions.focusProject}
+              onDrill={actions.drillProject}
+              onWalkBack={actions.walkBackTo}
+              onOpenProject={() => void actions.chooseProject("open")}
+              tools={
+                <>
+                  {/* Which reading of the run is on screen, in the row that says which run it is —
+                      the same place, and the same control, as the Files view's. */}
+                  {state.trail.length > 0 && state.taskFocus !== null ? (
+                    <RunModeToggle mode={runMode} onMode={setRunMode} />
+                  ) : null}
+                  {/* Only the focused project can be created into: a task belongs to a checkout, and
+                      JaiRA's own runs are started by JaiRA. */}
+                  {(state.taskFocus ?? atProject) === state.projectDir && state.projectDir !== null ? (
+                    <NewTask onCreate={actions.createTask} busy={state.busy} />
+                  ) : null}
+                </>
+              }
+            />
+          ) : null}
           <span className="title-drag" />
         </header>
 
@@ -660,61 +741,100 @@ export default function App(): JSX.Element {
 
           {view === "tasks" ? (
             <div
-              className="view tasks-view"
+              className={`view tasks-view${state.taskFocus !== null ? " narrowed" : ""}`}
               style={{ "--pane-right": `${paneOf(ui, PANE.tasksPanel)}px` } as CSSProperties}
             >
-              <div className="col mid">
+              {/*
+                A RUN is on the path, so the column shows that run — its executions as cards, or what
+                it said. The board is the level above it and the address still holds every step back
+                out to it. Exactly what the Files view shows for the same path, reached by drilling
+                instead of by opening a file: see `RunView`.
+              */}
+              {state.trail.length > 0 && state.taskFocus !== null ? (
+                <div className="col mid">
+                  <RunView context={surfaces} />
+                </div>
+              ) : (
+              <div className="col mid" ref={boardsRef} onScroll={trackBoards}>
                 {/*
                   ONE BOARD PER PROJECT, grouped — the user's checkout, and JaiRA's own runs beneath it.
                   Grouped rather than merged because a board's columns are the children of ONE workflow
                   state: columns from two projects side by side would be columns of different things.
-                  Each group carries its own breadcrumb and its own drill level, because drilling into
-                  one is not a statement about the other.
+                  Each group keeps its own drill level, because drilling into one is not a statement
+                  about the other.
+
+                  NARROWED to one group once a project is chosen in the address bar, because the path
+                  up there then describes levels that exist inside that project only — a column still
+                  listing the others would be a screen the address was half true of. Unchosen, every
+                  group is a section of one list and each header sticks under the bar as you reach it.
                 */}
                 {state.projects.length === 0 ? <p className="empty">Open a project to see its board.</p> : null}
-                {state.projects.map((p) => {
-                  const group = state.boards[p.project] ?? null;
-                  const shut = foldedProjects.has(p.project);
-                  return (
-                    <section key={p.project} className={`board-group${shut ? " shut" : ""}`}>
-                      <header className="board-group-head" onClick={() => actions.toggleProject(p.project)}>
-                        <span className="twist">{shut ? "▸" : "▾"}</span>
-                        <span className={`grow ellip ${p.kind}`} title={p.project}>
-                          {p.label}
-                        </span>
-                        <span className="sub">
-                          {p.tasks} tasks{p.running > 0 ? ` · ${p.running} running` : ""}
-                        </span>
-                      </header>
-                      {shut ? null : (
-                        <>
-                          <PathBar
-                            breadcrumb={group?.breadcrumb ?? []}
-                            onGo={(level) => actions.drillProject(p.project, level)}
-                          >
-                            {/* Only the focused project can be created into: a task belongs to a
-                                checkout, and JaiRA's own runs are started by JaiRA. */}
-                            {p.project === state.projectDir ? (
-                              <NewTask onCreate={actions.createTask} busy={state.busy} />
-                            ) : null}
-                          </PathBar>
-                          {group ? (
-                            <Board
-                              board={group}
-                              selected={state.selectedProject === p.project ? state.selected : null}
-                              numbered={group.level !== ""}
-                              onSelectTask={(taskId) => actions.select(taskId, p.project)}
-                              onDrill={(level) => actions.drillProject(p.project, level)}
-                            />
-                          ) : (
-                            <p className="empty">No board here yet.</p>
-                          )}
-                        </>
+                {state.projects
+                  .filter((p) => state.taskFocus === null || p.project === state.taskFocus)
+                  .map((p, i) => (
+                    <section key={p.project} className="board-group" data-project={p.project}>
+                      {/*
+                        A header per section, EXCEPT the first — which is the one the address bar is
+                        already naming when you are at the top of the column, and two rows saying the
+                        same project one under the other is one row too many. The rest scroll up out
+                        of view as you reach them, and the bar takes over from each in turn.
+
+                        Not shown at all when the column is narrowed to one project: then the bar is
+                        that project's header, whatever you have scrolled to.
+                      */}
+                      {i > 0 && state.taskFocus === null ? (
+                        // The SAME control, standing on this project rather than on the scrolled-to
+                        // one. Identical by construction and not by a stylesheet that has to be kept
+                        // in step, which is what makes scrolling past a section read as the bar
+                        // above taking that row's place rather than as two rows that resemble
+                        // each other.
+                        <TaskAddressBar
+                          projects={state.projects}
+                          focus={null}
+                          at={p.project}
+                          boards={state.boards}
+                          trail={[]}
+                          onFocus={actions.focusProject}
+                          onDrill={actions.drillProject}
+                          onWalkBack={actions.walkBackTo}
+                          onOpenProject={() => void actions.chooseProject("open")}
+                        />
+                      ) : null}
+                      {state.boards[p.project] ? (
+                        <Board
+                          board={state.boards[p.project]!}
+                          selected={state.selectedProject === p.project ? state.selected : null}
+                          numbered={state.boards[p.project]!.level !== ""}
+                          onSelectTask={(taskId) => actions.select(taskId, p.project)}
+                          onDrill={(level) => actions.drillProject(p.project, level)}
+                          // Double-clicking a COLUMN opens that state and every task in it;
+                          // double-clicking a CARD opens that one run. The level a run is walked into
+                          // at is the board's own, except at the root listing — where the columns are
+                          // workflows and the level below the listing is the card's own workflow.
+                          onOpenTask={(card) =>
+                            actions.openTask(
+                              card.taskId,
+                              p.project,
+                              state.boards[p.project]!.level === "" ? card.workflow : state.boards[p.project]!.level,
+                            )
+                          }
+                        />
+                      ) : (
+                        <p className="empty">No board here yet.</p>
                       )}
                     </section>
-                  );
-                })}
+                  ))}
+                {/*
+                  Room to scroll past the end.
+                  Without it the LAST group can never reach the top of the column, so it can never
+                  become the section the bar is naming — the bar would sit on the second-to-last
+                  project while you were looking at the last one. Only while there is more than one
+                  group: with one, there is nothing to scroll between and this would be a screen of
+                  blank under a single board.
+                */}
+                {state.taskFocus === null && state.projects.length > 1 ? <div className="board-tail" /> : null}
               </div>
+              )}
 
               <Splitter
                 label="Resize the task panel"
@@ -727,12 +847,20 @@ export default function App(): JSX.Element {
               />
 
               <aside className="col panel">
+                {/*
+                  What a click on a card gets you: that task's CONVERSATION. Clicking a card asks what
+                  the run said, and the panel used to answer with an instance tree and a list of event
+                  types — facts about the run, none of which is the run — so reading one meant leaving
+                  for the Files view to find the transcript. The detail is still here, behind the
+                  toggle in the header, which is the order they are wanted in.
+                */}
                 {detail ? (
-                  <TaskPanel
+                  <TaskContext
                     detail={detail}
                     stream={state.stream}
-                    onStart={() => actions.startTask(detail.taskId)}
-                    onCancel={() => actions.cancelTask(detail.taskId)}
+                    context={surfaces}
+                    onStart={() => actions.startTask(detail.taskId, undefined, state.selectedProject ?? undefined)}
+                    onCancel={() => actions.cancelTask(detail.taskId, state.selectedProject ?? undefined)}
                     onOpenState={(stateId) => {
                       actions.setView("files");
                       actions.selectState(stateId);
