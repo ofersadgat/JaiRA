@@ -25,15 +25,15 @@ import {
 
 describe("remembered pane sizes", () => {
   it("falls back to the pane's own default until something has been dragged", () => {
-    expect(paneOf(emptyUiState(), PANE.filesTree)).toBe(PANE_DEFAULTS[PANE.filesTree]);
+    expect(paneOf(emptyUiState(), PANE.shellSidebar)).toBe(PANE_DEFAULTS[PANE.shellSidebar]);
   });
 
   it("returns what was stored, and leaves the other panes alone", () => {
-    const ui = withPane(withPane(emptyUiState(), PANE.filesTree, 310), PANE.tasksPanel, 420);
-    expect(paneOf(ui, PANE.filesTree)).toBe(310);
+    const ui = withPane(withPane(emptyUiState(), PANE.shellSidebar, 310), PANE.tasksPanel, 420);
+    expect(paneOf(ui, PANE.shellSidebar)).toBe(310);
     expect(paneOf(ui, PANE.tasksPanel)).toBe(420);
-    // The layout of Files has nothing to say about the layout of Settings.
-    expect(paneOf(ui, PANE.settingsSections)).toBe(PANE_DEFAULTS[PANE.settingsSections]);
+    // Dragging the sidebar has nothing to say about the width of the inspector.
+    expect(paneOf(ui, PANE.filesInspector)).toBe(PANE_DEFAULTS[PANE.filesInspector]);
   });
 
   it("answers for a pane it has never heard of rather than throwing", () => {
@@ -43,7 +43,7 @@ describe("remembered pane sizes", () => {
 
   it("does not mutate the layout it was given", () => {
     const before = emptyUiState();
-    withPane(before, PANE.filesTree, 310);
+    withPane(before, PANE.shellSidebar, 310);
     expect(before.panes).toEqual({});
   });
 });
@@ -55,6 +55,14 @@ describe("remembered folds", () => {
     expect(openOf(emptyUiState(), FOLD.filesEditor)).toBe(true);
     expect(openOf(emptyUiState(), FOLD.settingsEffective)).toBe(false);
     expect(FOLD_DEFAULTS[FOLD.filesEditor]).toBe(true);
+  });
+
+  it("opens the sidebar for a settings file written before the sidebar existed", () => {
+    // Stored POSITIVELY — open means showing — so the absent key reads as "showing". The negative
+    // spelling would have collapsed the app's whole navigation on first launch after the upgrade,
+    // leaving one button on screen that still did anything.
+    expect(openOf(parseSettings({ theme: "light" }).ui, FOLD.shellSidebar)).toBe(true);
+    expect(openOf(emptyUiState(), FOLD.shellFiles)).toBe(true);
   });
 
   it("remembers being closed, which is the whole point of storing a boolean", () => {
@@ -109,7 +117,7 @@ describe("what survives a trip through the settings file", () => {
 
   it("opens at the defaults when the file has never heard of a layout", () => {
     const back = parseSettings({ theme: "light" }).ui;
-    expect(paneOf(back, PANE.filesTree)).toBe(PANE_DEFAULTS[PANE.filesTree]);
+    expect(paneOf(back, PANE.shellSidebar)).toBe(PANE_DEFAULTS[PANE.shellSidebar]);
     expect(openOf(back, FOLD.filesEditor)).toBe(true);
     expect(shutOf(back, SHUT.folders).size).toBe(0);
   });

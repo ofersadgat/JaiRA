@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
 import { isProject } from "@jaira/persistence";
 import { IPC_CHANNELS, PUSH_CHANNEL, type IpcChannel, type PushMessage } from "@jaira/shared";
 import { AppService, type KeychainPort } from "./service";
@@ -178,7 +178,11 @@ function registerIpc(): void {
       try {
         // Errors surface as rejections the renderer can display; the service's
         // messages are already human-facing ("unknown task 't-1'").
-        return await (handlers[channel] as (request: unknown) => unknown)(request);
+        const answer = await (handlers[channel] as (request: unknown) => unknown)(request);
+        // The one handler whose result the frame depends on: the window controls are drawn by the
+        // OS, so a theme switch has to be pushed back out to it.
+        if (channel === "settings:write") repaintTitleBar();
+        return answer;
       } catch (e) {
         // RECORDED, then RETHROWN. The renderer's contract is unchanged — it still gets the rejection
         // and still shows the message — but the failure is no longer invisible to everyone else. Every
@@ -200,12 +204,73 @@ function registerIpc(): void {
  */
 const WINDOW_BACKGROUND = { light: "#f5f6f8", dark: "#0f1115" } as const;
 
+/**
+ * How tall the strip along the top of the window is, in px.
+ *
+ * One number, and the renderer must not disagree with it: the OS draws the minimise/maximise/close
+ * buttons into a band of exactly this height, and the app reads the band back out of the
+ * `titlebar-area-*` CSS environment variables rather than repeating it — see `styles.css`.
+ */
+const TITLE_BAR_HEIGHT = 34;
+
+/**
+ * The window-controls overlay, painted to match the theme.
+ *
+ * The frame is gone (see {@link createWindow}), so these three buttons are all that is left of it,
+ * and they are drawn by the OS over the top-right of the page. That means their background is not
+ * ours to style in CSS — it is this value — and a fixed one would leave a white notch in the corner
+ * of the dark theme. `--panel`, because what sits under that corner is a panel in every view.
+ */
+function titleBarOverlay(theme: "light" | "dark"): { color: string; symbolColor: string; height: number } {
+  return {
+    color: theme === "dark" ? "#161922" : "#ffffff",
+    symbolColor: theme === "dark" ? "#8b93a7" : "#5c6779",
+    height: TITLE_BAR_HEIGHT,
+  };
+}
+
+/**
+ * Repaint the window controls after a theme switch.
+ *
+ * Called from the IPC seam rather than from the renderer over a channel of its own: the theme is
+ * already written through `settings:write`, and a second round trip that the renderer had to
+ * remember to make is a second round trip it would eventually forget. macOS draws its own traffic
+ * lights and has no overlay to set, so the call is guarded rather than platform-branched at every
+ * use.
+ */
+function repaintTitleBar(): void {
+  if (process.platform === "darwin") return;
+  if (window === undefined || window.isDestroyed()) return;
+  try {
+    window.setTitleBarOverlay(titleBarOverlay(service.readSettings().theme));
+  } catch {
+    // Only available on a window created with an overlay. Nothing here is worth failing a settings
+    // write over.
+  }
+}
+
 async function createWindow(): Promise<BrowserWindow> {
+  const theme = service.readSettings().theme;
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
-    backgroundColor: WINDOW_BACKGROUND[service.readSettings().theme],
+    backgroundColor: WINDOW_BACKGROUND[theme],
     show: false,
+    /*
+     * NO TITLE BAR, and no menu bar either (see `app.whenReady`).
+     *
+     * Both were a strip of chrome saying nothing the app does not already say better: the title bar
+     * repeated the project name that the sidebar now carries, and the menu bar held the stock
+     * Electron menu — File/Edit/View — none of whose items this app defines. What they cost was the
+     * top of the window, which is where the sidebar wants to start.
+     *
+     * `hidden` rather than `frame: false`: the window still needs to be minimised, maximised and
+     * closed, and reimplementing those three buttons per platform is how an app comes to look like
+     * an app that reimplemented them. The OS keeps drawing them, into the band `titleBarOverlay`
+     * describes, and the layout reserves that band through the `titlebar-area-*` env variables.
+     */
+    titleBarStyle: "hidden",
+    titleBarOverlay: titleBarOverlay(theme),
     webPreferences: {
       preload: PRELOAD,
       // The renderer gets no Node: its only capability is the typed bridge
@@ -247,6 +312,11 @@ function startupProject(): string | undefined {
 }
 
 void app.whenReady().then(async () => {
+  // No menu bar. Left alone, Electron installs a default File/Edit/View/Window menu whose every item
+  // is either a no-op here or something the app offers better elsewhere — and on Windows and Linux
+  // it takes a row across the top of the window to say so. Nulling it also disables the Alt key that
+  // would otherwise summon it back over the layout.
+  Menu.setApplicationMenu(null);
   registerIpc();
   const dir = startupProject();
   if (dir) {

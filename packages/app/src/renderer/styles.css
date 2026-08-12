@@ -180,21 +180,73 @@ code {
 }
 
 /* --- the shell -------------------------------------------------------------
-   One rail, three views, and a strip that spans all of them. The views are
+   One sidebar, three views, and a strip that spans all of them. The views are
    siblings rather than nested panes so that switching one cannot resize
-   another — the layout of Files has nothing to say about the layout of Tasks. */
+   another — the layout of Files has nothing to say about the layout of Tasks.
+
+   The window has no frame of its own (see `main/index.ts`), so two things it
+   used to provide have to be provided here: somewhere to grab the window, and
+   room for the three buttons the OS still draws over the page.
+
+   Both come out of the `titlebar-area-*` environment variables, which Chromium
+   fills in from the overlay Electron asked for. The fallbacks matter as much as
+   the values: in a plain browser — a test harness, a dev server — none of these
+   are defined, and the fallbacks resolve every one of them to zero inset, so the
+   layout is simply a layout with no gutter rather than one with a hole in it. */
+
+:root {
+  /* How far in from the LEFT the draggable band starts: macOS's traffic lights,
+     zero on Windows and Linux where the buttons are on the right. */
+  --wco-left: env(titlebar-area-x, 0px);
+  /* And what is left over on the RIGHT: minimise/maximise/close on Windows and
+     Linux, zero on macOS. Derived rather than given, because that is the only
+     one of the three insets Chromium does not expose directly. */
+  --wco-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+  /* The band's height — what the top row of the window has to be at least, so
+     that nothing lands underneath a window button. */
+  --wco-height: env(titlebar-area-height, 34px);
+}
 
 .app {
-  display: grid;
-  grid-template-columns: 46px 1fr;
+  display: flex;
   height: 100vh;
   overflow: hidden;
 }
 .body {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-width: 0;
   min-height: 0;
+}
+
+/* --- the top of the window ---
+   The address of what is open, and nothing else. It sits over the BODY and not
+   over the sidebar, which is the arrangement's whole point: the sidebar runs the
+   full height of the window, and everything right of it starts just below this.
+
+   The row is NOT a drag region. A drag region swallows clicks, and every crumb
+   in this bar is a place to go; the filler beside it is the handle instead, and
+   it carries the gutter the OS draws its window buttons into. */
+.title-bar {
+  display: flex;
+  align-items: stretch;
+  flex: none;
+  min-height: var(--wco-height);
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.title-bar > .doc-bar {
+  flex: 0 1 auto;
+  min-width: 0;
+  background: transparent;
+  border-bottom: 0;
+}
+.title-drag {
+  flex: 1;
+  min-width: calc(8px + var(--wco-right));
+  -webkit-app-region: drag;
+  user-select: none;
 }
 .viewport {
   flex: 1;
@@ -209,14 +261,18 @@ code {
 /* Each side pane is a variable the splitter beside it writes; the middle always takes the rest, so
    dragging one edge never starves the other. The fallbacks are the widths these were before, so a
    view still lays out if a `--pane-*` never arrives. */
+/* Two columns and a divider, in both views that have a panel: the tree that used
+   to be the first column of Files moved into the sidebar, so Files and Tasks now
+   lay out the same way. Settings is one column — its sections went to the
+   sidebar too. */
 .files-view {
-  grid-template-columns: var(--pane-left, 250px) auto minmax(0, 1fr) auto var(--pane-right, 300px);
+  grid-template-columns: minmax(0, 1fr) auto var(--pane-right, 300px);
 }
 .tasks-view {
   grid-template-columns: minmax(0, 1fr) auto var(--pane-right, 360px);
 }
 .settings-view {
-  grid-template-columns: var(--pane-left, 214px) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 /* The divider itself. Six pixels of hit area over a one-pixel line — a 1px target is a target you
@@ -264,12 +320,6 @@ code {
   min-height: 0;
   overflow: hidden;
 }
-.side {
-  background: var(--panel);
-  border-right: 1px solid var(--line);
-  padding: 12px;
-  gap: 10px;
-}
 .panel {
   background: var(--panel);
   border-left: 1px solid var(--line);
@@ -287,44 +337,202 @@ code {
   overflow-x: hidden;
 }
 
-/* --- activity rail --- */
-.rail {
-  background: var(--panel-2);
-  border-right: 1px solid var(--line);
+/* --- the sidebar ---
+   One column doing what a 46px rail and a second browse column used to do
+   between them. Its width is `--sidebar`, written by the shell from the saved
+   layout — or replaced by the rail width when it is collapsed, which is the one
+   case the divider beside it is also gone. */
+.sidebar {
+  width: var(--sidebar, 250px);
+  flex: none;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  padding: 8px 0;
-  gap: 3px;
+  min-height: 0;
+  background: var(--panel-2);
+  border-right: 1px solid var(--line);
+  overflow: hidden;
 }
-.rail button {
-  width: 34px;
-  height: 34px;
+
+/* The window's drag handle, and the only one on this side of the app. It starts
+   at y=0 because the frame no longer does, and it is inset from the left by
+   whatever the OS has already put there — the traffic lights, on macOS. */
+.side-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  height: var(--wco-height);
+  min-height: 34px;
+  padding: 0 8px;
+  padding-left: calc(8px + var(--wco-left));
+  -webkit-app-region: drag;
+  user-select: none;
+}
+/* Anything clickable in the drag region has to opt out of it, or it cannot be
+   clicked at all — the window moves instead. */
+.side-title button {
+  -webkit-app-region: no-drag;
+}
+.side-brand {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+  flex: none;
+}
+/* Which project this window is on. A control, because the only two things anyone
+   wants from it are "which one is this" and "open another". */
+.side-project {
+  flex: 0 1 auto;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: var(--text);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px;
+}
+.side-project:hover:not(:disabled) {
+  background: var(--panel);
+  border-color: transparent;
+}
+.side-project.none {
+  color: var(--dim);
+  font-style: italic;
+}
+.side-toggle {
+  width: 26px;
+  height: 26px;
   display: grid;
   place-items: center;
+  flex: none;
   border: 0;
+  padding: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--dim);
-  font-size: 15px;
-  border-radius: 6px;
-  padding: 0;
+  font-size: 11px;
+  letter-spacing: -0.05em;
 }
-.rail button:hover:not(:disabled) {
+.side-toggle:hover:not(:disabled) {
   color: var(--text);
   background: var(--panel);
+  border-color: transparent;
 }
-.rail button.on {
+
+/* The view switcher. A glyph with its name beside it — the same control the
+   rail had, minus having to learn what `⌁` meant. The nav takes the column's
+   spare height, because the row you are on may have a drawer under it that wants
+   all of it. */
+.side-nav,
+.side-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 6px 6px;
+  min-height: 0;
+}
+.side-nav {
+  flex: 1;
+}
+.side-foot {
+  flex: none;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.side-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 30px;
+  flex: none;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dim);
+  text-align: left;
+  font-size: 12.5px;
+}
+.side-row:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--panel);
+  border-color: transparent;
+}
+.side-row.on {
   color: var(--accent);
   background: var(--panel);
   box-shadow: inset 2px 0 0 var(--accent);
 }
-.rail-brand {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
+.side-glyph {
+  width: 16px;
+  flex: none;
+  text-align: center;
+  font-size: 14px;
+}
+.side-label {
+  min-width: 0;
+}
+/* The caret, at the far end of the row: which of these rows has something under
+   it, and whether it is showing. Only ever on the row you are on. */
+.side-twist {
+  flex: none;
+  font-size: 9px;
   color: var(--dim);
-  writing-mode: vertical-rl;
-  margin-bottom: 8px;
+}
+
+/* What a row opens onto. `min-height: 0` all the way down, so the tree scrolls
+   inside the column instead of pushing the footer off the bottom of it. */
+.side-drawer {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  /* Indented to the row's label, so what is inside a view reads as inside it. */
+  margin: 2px 0 4px 12px;
+  padding-left: 6px;
+  border-left: 1px solid var(--line);
+}
+
+/* The section list, which was the Settings view's own left column. */
+.side-drawer .sections {
+  overflow-y: auto;
+  padding: 2px 0 4px;
+  font-size: 12.5px;
+}
+
+/* The file browser, which was a column and is now the drawer under one row. */
+.file-browser {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 8px;
+  padding: 2px 0 4px;
+}
+
+/* --- collapsed ---
+   Back to the rail it replaced: glyphs, centred, nothing that needs a width.
+   The nav stays, which is the point — this is a fold, not a disappearance. */
+.sidebar.shut .side-title {
+  justify-content: center;
+  padding: 0 4px;
+}
+.sidebar.shut .side-nav,
+.sidebar.shut .side-foot {
+  align-items: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+.sidebar.shut .side-row {
+  width: 34px;
+  justify-content: center;
+  padding: 0;
+}
+.sidebar.shut .side-label {
+  display: none;
 }
 
 /* --- the approvals strip ---
@@ -556,7 +764,7 @@ code {
   border-top: 1px solid var(--line);
 }
 
-/* --- the middle panel's head ---
+/* --- the address bar, which is the top row of the window ---
    An address bar, not a title: the segments of a path ARE the hierarchy the open thing sits in, so
    every level above the one you are on is a place to click. Laid out like a file explorer's for
    exactly that reason — this is the same job, over the same kind of path.
@@ -2470,14 +2678,6 @@ span.issue-warn {
 .pane-title {
   font-size: 14px;
   font-weight: 600;
-}
-.project {
-  color: var(--dim);
-  font-size: 11px;
-  margin-top: auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .prune-controls {
   display: flex;

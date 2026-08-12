@@ -30,12 +30,18 @@ import { defaultUiState, type JairaUiState } from "@jaira/shared/browser";
 
 /** Splitter ids. The value is a size in px: a width, except `filesViewer`, which is a height. */
 export const PANE = {
-  filesTree: "files.tree",
+  /**
+   * The one left column, shared by every view.
+   *
+   * It replaced two — the Files tree and the Settings section list were separate columns beside a
+   * separate icon rail, so the window had two left edges and the width you dragged in one view said
+   * nothing about the other. One id, because there is now one sidebar.
+   */
+  shellSidebar: "shell.sidebar",
   filesInspector: "files.inspector",
   /** The Files view's horizontal divider — how tall the viewer opens above the editor. */
   filesViewer: "files.viewer",
   tasksPanel: "tasks.panel",
-  settingsSections: "settings.sections",
   /** The field reference beside the JSON editor. */
   schemaReference: "schema.reference",
 } as const;
@@ -47,16 +53,30 @@ export const PANE = {
  * roughly the 46% the stylesheet gave the viewer on a full-height window.
  */
 export const PANE_DEFAULTS: Record<string, number> = {
-  [PANE.filesTree]: 250,
+  [PANE.shellSidebar]: 250,
   [PANE.filesInspector]: 300,
   [PANE.filesViewer]: 320,
   [PANE.tasksPanel]: 360,
-  [PANE.settingsSections]: 214,
   [PANE.schemaReference]: 300,
 };
 
+/** How wide the sidebar is when it is collapsed: the nav glyphs and nothing else. */
+export const SIDEBAR_RAIL = 46;
+
 /** Disclosure ids — the folds worth reopening the app on. */
 export const FOLD = {
+  /**
+   * Whether the sidebar is showing, or collapsed to the strip of glyphs.
+   *
+   * Collapsed is a strip and not nothing, which is the whole difference between a fold and a
+   * disappearance: the views are reached from here, so a sidebar that closed completely would take
+   * the app's navigation with it and leave one button to get it back.
+   */
+  shellSidebar: "shell.sidebar",
+  /** The sidebar's file browser — the accordion that holds the tree. */
+  shellFiles: "shell.files",
+  /** The sidebar's other accordion: the Settings sections, while Settings is open. */
+  shellSections: "shell.sections",
   /** The Files view's lower half: "Configuration" on a state, "Source" on anything else. */
   filesEditor: "files.editor",
   /** Whether the JSON editor is showing the schema's field reference. */
@@ -73,6 +93,9 @@ export const FOLD = {
  * had failed to load the file.
  */
 export const FOLD_DEFAULTS: Record<string, boolean> = {
+  [FOLD.shellSidebar]: true,
+  [FOLD.shellFiles]: true,
+  [FOLD.shellSections]: true,
   [FOLD.filesEditor]: true,
   [FOLD.schemaReference]: false,
   [FOLD.settingsEffective]: false,

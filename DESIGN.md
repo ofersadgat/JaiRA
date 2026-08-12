@@ -2020,6 +2020,49 @@ run-record requirements of spec §10.2.
 
 ### 11.1 Views
 
+- **One sidebar, and no chrome above it**: the window has no title bar and no
+  menu bar. The menu was Electron's stock File/Edit/View, none of whose items
+  this app defines, and the title bar repeated a project name the app already
+  shows — between them they took the top of the window, which is where the
+  sidebar wants to start. The frame is `titleBarStyle: "hidden"` rather than
+  `frame: false`, because minimise/maximise/close still have to work and
+  reimplementing them per platform is how an app comes to look like an app that
+  reimplemented them; the OS keeps drawing those three, and the layout reserves
+  the band they land in through the `titlebar-area-*` CSS environment variables
+  (`--wco-left`, `--wco-right`, `--wco-height`), whose fallbacks resolve to no
+  inset at all so the same stylesheet lays out in a plain browser.
+  **The top row of the window is the ADDRESS BAR.** The document's path used to
+  be the first child of the middle column, which put it a title bar and a strip
+  of chrome down the page — a path bar with two things above it, neither of them
+  a path. It now spans everything right of the sidebar, the inspector included,
+  which is why it is assembled by the shell rather than by the panel that used to
+  own it. There is no caption beside it: "no project · workflows/plan.json" named
+  the project the sidebar names and the path the bar states properly, and a title
+  that restates its neighbours is a title nobody reads twice. What survives of it
+  is `document.title`, which the taskbar reads and no frame supplies any more.
+  The left column is now ONE column. It was two: a 46px strip of glyphs for
+  switching views, and beside it a second column that existed in two views only
+  — the file tree in Files, the section list in Settings — so the window had two
+  left edges and a width dragged in one view said nothing about the other. The
+  sidebar carries, top to bottom: the collapse button, the app's name and the
+  open project's (that row is the window's drag handle, and the only one on that
+  side; the project name is the menu that opens another); the views as named rows
+  rather than as bare glyphs; and theme and Settings pinned to the bottom,
+  because neither is navigation.
+  **A row IS the accordion for what it browses** — the file tree opens under
+  *Files*, the sections under *Settings*, indented under the row and hanging off
+  a rule. Not a separate headed section further down the column: that put the
+  word "Files" on screen twice, once as the button that goes there and once as
+  the heading over what it holds, and left the tree reading as a thing beside the
+  views rather than the inside of one. Clicking a row you are not on goes there
+  and opens it; clicking the row you are on folds it, which is the only meaning
+  left for that click. Tasks and Logs have no drawer and no caret — their content
+  IS the view, and a twisty over an empty drawer is worse than no twisty.
+  COLLAPSED it is the old rail again — glyphs only, in 46px — and deliberately
+  not gone. Every view is reached from this column, so a sidebar that closed to
+  nothing would leave one button on screen that still did anything. The divider
+  goes with it, for the reason the Files editor's does: a handle that widened a
+  collapsed column would undo the collapse without saying so.
 - **Board**: columns = visible child states of the current level, cards =
   tasks whose active path passes through that level. Root board shows
   top-level workflow states. Double-click a card whose active state has
@@ -2456,7 +2499,7 @@ run-record requirements of spec §10.2.
   one click, because pruned history is not recoverable.
 - **Debug** (§11.3): a two-state workflow this app installs and runs against
   itself, with the files, the instance tree, the events and the transcript all on
-  screen. On the rail rather than inside Settings — it is what you reach for when
+  screen. In the sidebar rather than inside Settings — it is what you reach for when
   the app is misbehaving, and burying it behind a configuration screen would make
   it hardest to find in exactly the situation it exists for.
 

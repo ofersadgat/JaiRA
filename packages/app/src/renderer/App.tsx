@@ -1,16 +1,23 @@
 /**
  * The shell (DESIGN §11.1).
  *
- * One rail, three views. The app has exactly two activities — designing the states and operating the
- * runs — and they used to compete for the same three columns, so opening any settings pane evicted
- * the task you were watching. They are separate rooms now:
+ * One sidebar, three views, and no window chrome above either. The frame's title bar and Electron's
+ * menu bar are both gone (`main/index.ts`), which is what lets the sidebar start at the top of the
+ * window rather than 60px down it; the title they were carrying is now a strip over the body, and
+ * the app's own name and the open project's are at the head of the sidebar. See `sidebar.tsx` for
+ * why that column is one column and not the two it used to be.
+ *
+ * The app has exactly two activities — designing the states and operating the runs — and they used
+ * to compete for the same three columns, so opening any settings pane evicted the task you were
+ * watching. They are separate rooms now:
  *
  *  - **Files** designs. The tree opens any file; the middle shows it as a viewer over an editor,
  *    both chosen by file type in the surface registry; the inspector describes what you last clicked.
  *  - **Tasks** operates. The same board, reached by drilling a path instead of by clicking a file,
  *    with the selected task's detail beside it.
  *  - **Settings** holds everything that was never one of the two: configuration, executors,
- *    credentials, history.
+ *    credentials, history. Its section list is an accordion in the sidebar, so it is no longer a
+ *    second left column that existed in one view only.
  *
  * Two more sit beside them and belong to neither: **Logs** is what the app said about itself, and
  * **Debug** (DESIGN §11.3) runs a two-state workflow against this installation so that "does any of
@@ -19,12 +26,13 @@
  * The approvals strip spans all three. A blocked tool loop is the one thing that must never scroll
  * away, and it stays visible while you are deep in the Files tree.
  */
-import { useMemo, useState, type CSSProperties, type JSX } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type JSX } from "react";
 import type { ConfigLayer, PendingApproval, PendingInteraction } from "@jaira/shared/browser";
 import { Board, PathBar } from "./board";
 import { ApprovalDialog, InteractionDialog } from "./components";
 import { TaskPanel } from "./detail";
 import {
+  FileAddressBar,
   FileInspector,
   FilePanel,
   FileTreePanel,
@@ -44,9 +52,10 @@ import { ProvidersPane } from "./providersPane";
 import { ExecutorsPane } from "./executorsPane";
 import { initialRunValues, runFieldsOf, runTargetOf } from "./runForm";
 import type { RunSurface } from "./runPanel";
+import { Sidebar, type SidebarView } from "./sidebar";
 import { Splitter } from "./splitter";
 import { nodeAt } from "./trail";
-import { FOLD, PANE, SHUT, openOf, paneDefault, paneOf, shutOf } from "./uiState";
+import { FOLD, PANE, SHUT, SIDEBAR_RAIL, openOf, paneDefault, paneOf, shutOf } from "./uiState";
 import { History, NewTask } from "./widgets";
 import { useApp, type SettingsSection, type View } from "./store";
 
@@ -117,15 +126,43 @@ function checkedAgo(at: number): string {
   return minutes < 60 ? `checked ${minutes} min ago` : `checked ${Math.round(minutes / 60)} h ago`;
 }
 
-const RAIL: Array<[View, string, string]> = [
-  ["files", "❏", "Files"],
-  ["tasks", "▶", "Tasks"],
-  ["logs", "≡", "Logs"],
-  // On the rail rather than inside Settings: the self-test is the thing you reach for when the app
-  // is not behaving, and burying it behind a configuration screen would make it hardest to find in
-  // exactly the situation it exists for.
-  ["debug", "⌁", "Debug"],
+const VIEWS: readonly SidebarView[] = [
+  { id: "files", glyph: "❏", label: "Files" },
+  { id: "tasks", glyph: "▶", label: "Tasks" },
+  { id: "logs", glyph: "≡", label: "Logs" },
+  // In the sidebar rather than inside Settings: the self-test is the thing you reach for when the
+  // app is not behaving, and burying it behind a configuration screen would make it hardest to find
+  // in exactly the situation it exists for.
+  { id: "debug", glyph: "⌁", label: "Debug" },
 ];
+
+/**
+ * The window's name for a project directory: its last segment.
+ *
+ * The full path is what the crumb's tooltip carries. A column 250px wide cannot show
+ * `C:/checkouts/acme/services/billing` and would show the wrong half of it if it tried — the half
+ * every project on the machine has in common.
+ */
+function projectName(dir: string | null): string {
+  if (dir === null) return "";
+  const parts = dir.split(/[\\/]/).filter((p) => p.length > 0);
+  return parts.at(-1) ?? dir;
+}
+
+/**
+ * The window's name, for the taskbar and the window switcher.
+ *
+ * `document.title` only — with no frame there is nothing else to set, and nothing on screen shows
+ * it. The strip along the top of the body used to, and the caption was removed: it named the
+ * project, which the sidebar names, and then the open path, which the address bar in that very
+ * strip states properly. Outside the window the pair is still what identifies this one, because
+ * "JaiRA" alone is what every window of this app would say.
+ */
+function windowTitle(project: string | null, view: View | "settings", doc: string | null): string {
+  const where = project === null ? "no project" : projectName(project);
+  const what = view === "files" && doc !== null ? doc : (VIEWS.find((v) => v.id === view)?.label ?? "Settings");
+  return `${where} · ${what}`;
+}
 
 /**
  * The Settings sections.
@@ -254,6 +291,22 @@ export default function App(): JSX.Element {
 
   /** The same, for the Files tree's branches — see {@link foldedProjects}. */
   const foldedFolders = useMemo(() => shutOf(ui, SHUT.folders), [ui]);
+
+  /**
+   * The sidebar's two remembered numbers: how wide, and whether it is showing at all.
+   *
+   * The fold is stored POSITIVELY — `shell.sidebar` open means the sidebar is open — so that a
+   * settings file written before this existed opens the app with the sidebar showing rather than
+   * with the window's navigation collapsed for no reason anybody could reconstruct.
+   */
+  const sidebarShut = !openOf(ui, FOLD.shellSidebar);
+  const sidebarWidth = paneOf(ui, PANE.shellSidebar);
+
+  // The window's name outside the window — see {@link windowTitle}. Nothing on screen shows it.
+  const title = windowTitle(state.projectDir, view, state.doc?.path ?? state.dir?.path ?? null);
+  useEffect(() => {
+    document.title = `${title} — JaiRA`;
+  }, [title]);
 
   // The interaction the selected task is parked on, if any — what the leaf conversation pins.
   const waiting = pending.find((p) => p.taskId === state.selected);
@@ -387,90 +440,138 @@ export default function App(): JSX.Element {
     revealIssue: reveal,
   };
 
-  return (
-    <div className="app">
-      <nav className="rail">
-        <div className="rail-brand">JAIRA</div>
-        {RAIL.map(([id, glyph, label]) => (
-          <button
-            key={id}
-            className={view === id ? "on" : undefined}
-            title={label}
-            aria-label={label}
-            aria-current={view === id ? "page" : undefined}
-            onClick={() => actions.setView(id)}
-          >
-            {glyph}
-          </button>
+  /**
+   * The sidebar's rows, with the drawer each one opens onto.
+   *
+   * Built here rather than in the sidebar because the drawers are the app's — a file tree wired to
+   * eight actions, a section list wired to one — and a navigation column that knew how to construct
+   * either would be a navigation column that had to be handed the whole store. It takes rows.
+   */
+  const rows: SidebarView[] = VIEWS.map((v) =>
+    v.id !== "files"
+      ? v
+      : {
+          ...v,
+          open: openOf(ui, FOLD.shellFiles),
+          onOpen: (open: boolean) => actions.setFold(FOLD.shellFiles, open),
+          panel: (
+            <FileTreePanel
+              tree={state.tree}
+              selected={state.doc ? { layer: state.doc.layer, path: state.doc.path } : null}
+              // Which rows have edits that are not on disk. Now that a draft outlives the editor
+              // showing it, this is the only thing that says so about a file you are not looking
+              // at — and an unsaved change nobody can see is one that gets closed with the window.
+              dirty={dirtyFiles}
+              // Which branches are folded, and where a click on a twisty goes. Both come from the
+              // saved layout rather than from the panel's own state, which is what makes the shape
+              // of the tree the thing you left it as rather than a fresh full expansion.
+              collapsed={foldedFolders}
+              onToggleCollapsed={(key) => actions.toggleShut(SHUT.folders, key)}
+              busy={state.busy}
+              hasProject={state.projectDir !== null}
+              onSelect={actions.selectFile}
+              onOpen={actions.openWorkflow}
+              onCreate={actions.createWorkflow}
+              onCreateFile={actions.createFile}
+              onMove={actions.moveWorkflow}
+              onDelete={actions.deleteWorkflow}
+              onRenameFile={actions.renameFile}
+              onDeleteFile={actions.deleteFile}
+              onReveal={actions.revealFile}
+            />
+          ),
+        },
+  );
+
+  const settingsRow: SidebarView = {
+    id: "settings",
+    glyph: "⚙",
+    label: "Settings",
+    open: openOf(ui, FOLD.shellSections),
+    onOpen: (open: boolean) => actions.setFold(FOLD.shellSections, open),
+    panel: (
+      <ul className="sections">
+        {SECTIONS.filter((s) => !s.needsProject || state.projectDir !== null).map(({ id, label }) => (
+          <li key={id} className={state.section === id ? "sel" : undefined} onClick={() => actions.setSection(id)}>
+            {label}
+          </li>
         ))}
-        <span className="spacer" />
-        {/* Theme sits on the rail, not inside Settings: it is a per-person display preference, and
-            burying it behind a view that needs an open project would make it unreachable on an empty
-            window. */}
-        <button
-          title={state.settings.theme === "dark" ? "switch to light" : "switch to dark"}
-          aria-label="Toggle theme"
-          onClick={() => actions.setTheme(state.settings.theme === "dark" ? "light" : "dark")}
-        >
-          {state.settings.theme === "dark" ? "☀" : "☾"}
-        </button>
-        <button
-          className={view === "settings" ? "on" : undefined}
-          title="Settings"
-          aria-label="Settings"
-          aria-current={view === "settings" ? "page" : undefined}
-          onClick={() => actions.setView("settings")}
-        >
-          ⚙
-        </button>
-      </nav>
+      </ul>
+    ),
+  };
+
+  return (
+    <div
+      className="app"
+      style={{ "--sidebar": `${sidebarShut ? SIDEBAR_RAIL : sidebarWidth}px` } as CSSProperties}
+    >
+      <Sidebar
+        views={rows}
+        settings={settingsRow}
+        view={view}
+        onView={(id) => actions.setView(id as View)}
+        collapsed={sidebarShut}
+        onCollapsed={(shut) => actions.setFold(FOLD.shellSidebar, !shut)}
+        project={state.projectDir}
+        projectLabel={projectName(state.projectDir)}
+        busy={state.busy}
+        theme={state.settings.theme}
+        onTheme={actions.setTheme}
+        onChooseProject={(mode) => void actions.chooseProject(mode)}
+      />
+
+      {/* No divider on a collapsed sidebar: the rail is a fixed strip of glyphs, and a handle that
+          dragged it wider would be a handle that undid the collapse without saying so. */}
+      {sidebarShut ? null : (
+        <Splitter
+          label="Resize the sidebar"
+          value={sidebarWidth}
+          reset={paneDefault(PANE.shellSidebar)}
+          min={180}
+          max={520}
+          onChange={(size) => actions.setPane(PANE.shellSidebar, size)}
+        />
+      )}
 
       <div className="body">
+        {/*
+          The top of the window: the ADDRESS of what is open, and nothing else.
+
+          It is a strip over the body and NOT over the sidebar, which is the whole point of the
+          arrangement: the sidebar runs from the top of the window to the bottom, and the columns
+          under this strip run from just below it to the bottom. It spans the inspector as well as
+          the two halves below it, which is why the bar is assembled here rather than by the panel
+          that used to own it — see `FileAddressBar`.
+
+          There was a caption in this row saying "no project · workflows/plan.json". It is gone: the
+          path already says the second half, the sidebar already says the first, and a title that
+          restates its neighbours is a title nobody reads twice. What is left of it is
+          `document.title`, which the taskbar reads and no frame supplies any more.
+
+          The filler beside it is what you grab to move the window, and it holds the gutter the OS
+          draws its own three buttons into — see `--wco-right` in the stylesheet, and
+          `titleBarOverlay` in `main/index.ts`. It is a separate element because a drag region
+          swallows clicks, and the crumbs in the bar have to stay clickable.
+        */}
+        <header className="title-bar">
+          {view === "files" ? (
+            <FileAddressBar
+              doc={state.doc}
+              dir={state.dir}
+              context={surfaces}
+              onWalkBack={actions.walkBackTo}
+              onInspect={actions.inspectState}
+            />
+          ) : null}
+          <span className="title-drag" />
+        </header>
+
         <div className="viewport">
           {view === "files" ? (
             <div
               className="view files-view"
-              style={
-                {
-                  "--pane-left": `${paneOf(ui, PANE.filesTree)}px`,
-                  "--pane-right": `${paneOf(ui, PANE.filesInspector)}px`,
-                } as CSSProperties
-              }
+              style={{ "--pane-right": `${paneOf(ui, PANE.filesInspector)}px` } as CSSProperties}
             >
-              <FileTreePanel
-                tree={state.tree}
-                selected={state.doc ? { layer: state.doc.layer, path: state.doc.path } : null}
-                // Which rows have edits that are not on disk. Now that a draft outlives the editor
-                // showing it, this is the only thing that says so about a file you are not looking
-                // at — and an unsaved change nobody can see is one that gets closed with the window.
-                dirty={dirtyFiles}
-                // Which branches are folded, and where a click on a twisty goes. Both come from the
-                // saved layout rather than from the panel's own state, which is what makes the shape
-                // of the tree the thing you left it as rather than a fresh full expansion.
-                collapsed={foldedFolders}
-                onToggleCollapsed={(key) => actions.toggleShut(SHUT.folders, key)}
-                busy={state.busy}
-                hasProject={state.projectDir !== null}
-                onSelect={actions.selectFile}
-                onOpen={actions.openWorkflow}
-                onCreate={actions.createWorkflow}
-                onCreateFile={actions.createFile}
-                onMove={actions.moveWorkflow}
-                onDelete={actions.deleteWorkflow}
-                onRenameFile={actions.renameFile}
-                onDeleteFile={actions.deleteFile}
-                onReveal={actions.revealFile}
-              />
-
-              <Splitter
-                label="Resize the file tree"
-                value={paneOf(ui, PANE.filesTree)}
-                reset={paneDefault(PANE.filesTree)}
-                min={170}
-                max={560}
-                onChange={(size) => actions.setPane(PANE.filesTree, size)}
-              />
-
               <FilePanel
                 doc={state.doc}
                 dir={state.dir}
@@ -480,9 +581,7 @@ export default function App(): JSX.Element {
                 onViewerHeight={(size) => actions.setPane(PANE.filesViewer, size)}
                 configOpen={openOf(ui, FOLD.filesEditor)}
                 onConfigOpen={(open) => actions.setFold(FOLD.filesEditor, open)}
-                onWalkBack={actions.walkBackTo}
                 onSave={actions.saveDoc}
-                onInspect={actions.inspectState}
               />
 
               <Splitter
@@ -686,48 +785,11 @@ export default function App(): JSX.Element {
           ) : null}
 
           {view === "settings" ? (
-            <div
-              className="view settings-view"
-              style={{ "--pane-left": `${paneOf(ui, PANE.settingsSections)}px` } as CSSProperties}
-            >
-              <aside className="col side">
-                <h3>Settings</h3>
-                <ul className="sections">
-                  {SECTIONS.filter((s) => !s.needsProject || state.projectDir !== null).map(({ id, label }) => (
-                    <li
-                      key={id}
-                      className={state.section === id ? "sel" : undefined}
-                      onClick={() => actions.setSection(id)}
-                    >
-                      {label}
-                    </li>
-                  ))}
-                </ul>
-                <div className="project" title={state.projectDir ?? ""}>
-                  {state.projectDir ?? "no project open"}
-                </div>
-                {/* The only way into a project from inside the app. Everything else — the startup
-                    env var, the CLI argument, the current directory — decides before the window
-                    exists, which left a running app with no project permanently stuck as one. */}
-                <div className="pane-actions">
-                  <button className="ghost" disabled={state.busy} onClick={() => actions.chooseProject("open")}>
-                    Open…
-                  </button>
-                  <button className="ghost" disabled={state.busy} onClick={() => actions.chooseProject("init")}>
-                    New…
-                  </button>
-                </div>
-              </aside>
-
-              <Splitter
-                label="Resize the settings sections"
-                value={paneOf(ui, PANE.settingsSections)}
-                reset={paneDefault(PANE.settingsSections)}
-                min={150}
-                max={420}
-                onChange={(size) => actions.setPane(PANE.settingsSections, size)}
-              />
-
+            /* One column now. The section list moved into the sidebar's accordion, and the project
+               row went with it — "which project is this" is a fact about the WINDOW, so it belongs
+               in the window's own address bar rather than restated at the foot of one view. Opening
+               another one is the chevron beside it. */
+            <div className="view settings-view">
               <div className="col mid settings-body">
                 <SettingsHeader
                   section={state.section}

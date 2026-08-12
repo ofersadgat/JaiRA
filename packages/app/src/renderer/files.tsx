@@ -587,12 +587,16 @@ export function FileTreePanel({
     return out;
   };
 
+  /*
+   * A plain block, not a column.
+   *
+   * It used to be an `<aside className="col side">` — its own column of the window, with its own
+   * heading saying "Files" over its own scrollbar. It is now one section of the sidebar's accordion,
+   * which supplies both: the heading is the accordion's, and the height is whatever the column has
+   * left. Everything below here is unchanged, because none of it ever depended on being a column.
+   */
   return (
-    <aside className="col side files-side">
-      <h3>
-        <span>Files</span>
-        <span className="count">{tree?.roots.length ?? 0} roots</span>
-      </h3>
+    <div className="file-browser">
       <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter…" />
 
       <div className="scroll">
@@ -685,7 +689,7 @@ export function FileTreePanel({
 
       {menu ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
       {ask ? <AskDialog spec={ask} onCancel={() => setAsk(null)} /> : null}
-    </aside>
+    </div>
   );
 }
 
@@ -1007,7 +1011,7 @@ export function crumbsOf(input: CrumbInput): Crumb[] {
 }
 
 /**
- * The head of the middle panel: an address bar for what is open.
+ * The top row of the window: an address bar for what is open. {@link FileAddressBar} places it.
  *
  * It used to be a title and a subtitle — the state id on one line, its layer and child count on the
  * next — which said where you were and offered no way anywhere. The path is the same information
@@ -1182,65 +1186,35 @@ function DirectoryPanel({
 }
 
 /**
- * The open file: what it IS above, what it SAYS below.
+ * The address of whatever is open, as the top row of the window.
  *
- * Both at once by default — putting the two behind a mode toggle meant every glance at a state's
- * configuration cost you sight of its runs, which is the same mistake the old settings drawer made
- * at the window level, repeated one panel down.
+ * It used to be the first child of the middle column, which put it a title bar and a strip of view
+ * chrome down the page — a path bar with two things above it, neither of them a path. It is now the
+ * top of the shell itself: the sidebar runs down the left, and the first thing across the rest of
+ * the window is where you are. The window has no other title, which is the point — "no project ·
+ * Files" was a caption restating what the path says properly.
  *
- * The lower half FOLDS, which is not that mistake returning. A mode is a place you are in and have
- * to remember leaving; this is a strip along the bottom that says what is behind it, takes one click,
- * and defaults open. What it buys is the case the split cannot serve: watching a board while the
- * form you finished with an hour ago holds the bottom third of the column.
+ * Lifted OUT of {@link FilePanel} rather than positioned differently inside it: the bar spans the
+ * viewer, the editor and the inspector beside them, and a component that owns one column cannot draw
+ * across three. What is left in the panel is the two halves the bar is about.
  *
- * Neither half is chosen here. `resolveFileSurface` answers "what renders a `text/markdown` for
- * reading" and "what renders it for editing", and this component only decides the geometry: with a
- * viewer, the panel splits; without one, the editor takes the whole column. That second case is not
- * a degraded layout — a plain text file has no rendering distinct from its contents, and half a
- * panel of nothing above it would be worse than the space.
+ * `null` when nothing is open — an address bar for no address is a row of nothing.
  */
-export function FilePanel({
+export function FileAddressBar({
   doc,
   dir,
-  busy,
   context,
-  viewerHeight,
-  onViewerHeight,
-  configOpen = true,
-  onConfigOpen,
   onWalkBack,
-  onSave,
   onInspect,
 }: {
   doc: FileSource | null;
   /** The directory open instead, when one is — exactly one of the two is ever set. */
   dir?: FileSelection | null;
-  busy: boolean;
   context: FileSurfaceContext;
-  /**
-   * How tall the viewer is, in px — the half above the divider.
-   *
-   * Held by the shell with the other pane sizes rather than here, for the reason they all are: it
-   * has to survive this panel unmounting as you click between files, and a split that reset every
-   * time you opened another prompt would be a split nobody bothered to drag.
-   */
-  viewerHeight: number;
-  onViewerHeight: (height: number) => void;
-  /**
-   * Whether the lower half is open, or folded down to the bar that restores it.
-   *
-   * A state's configuration is what you edit for a minute and then want out of the way for ten:
-   * watching a run on a board squeezed into the top third of the column is the reason this exists.
-   * Held by the shell with the pane sizes, for the same reason they are — it must survive clicking
-   * another file.
-   */
-  configOpen?: boolean;
-  onConfigOpen?: ((open: boolean) => void) | undefined;
   /** Walk the address bar back to a crumb; `-1` is the file with no run open. */
   onWalkBack?: ((index: number) => void) | undefined;
-  onSave: (text: string) => void;
   onInspect: () => void;
-}): JSX.Element {
+}): JSX.Element | null {
   // Before the early return: a hook cannot be conditional, and "no file open" is a condition.
   const known = useMemo(() => stateIdsOf(context.tree), [context.tree]);
 
@@ -1274,13 +1248,92 @@ export function FilePanel({
     onSelectTask: context.onSelectTask,
   });
 
+  // A folder is an address like any other, so it gets the same bar.
   if (doc === null) {
-    // A folder is an address like any other, so it gets the same bar — and a listing where a
-    // document would have had its viewer and editor.
+    return dir == null ? null : <DocBar input={barFor({ ...dir, isDir: true })} state={null} onInspect={onInspect} />;
+  }
+
+  const trail = context.trail ?? [];
+  // Only where there are two readings — a leaf state's viewer is its conversation, and so is a run
+  // that entered no children. Asked of the trail's TAIL, because that is what the panel is showing.
+  const tail = trail.at(-1);
+  const toggleable =
+    doc.stateId !== undefined &&
+    context.state?.board != null &&
+    (tail === undefined || tail.stateId === doc.stateId || (context.trailState?.board ?? null) !== null);
+
+  return (
+    <DocBar input={barFor(doc)} state={context.state} onInspect={onInspect}>
+      {/* Only where there are two readings to switch between. A run with no children says what it
+          said and nothing else, so a toggle on it would be one live option and one dead one. */}
+      {toggleable && context.onRunMode !== undefined ? (
+        <RunModeToggle mode={context.runMode ?? "board"} onMode={context.onRunMode} />
+      ) : undefined}
+    </DocBar>
+  );
+}
+
+/**
+ * The open file: what it IS above, what it SAYS below.
+ *
+ * Both at once by default — putting the two behind a mode toggle meant every glance at a state's
+ * configuration cost you sight of its runs, which is the same mistake the old settings drawer made
+ * at the window level, repeated one panel down.
+ *
+ * The lower half FOLDS, which is not that mistake returning. A mode is a place you are in and have
+ * to remember leaving; this is a strip along the bottom that says what is behind it, takes one click,
+ * and defaults open. What it buys is the case the split cannot serve: watching a board while the
+ * form you finished with an hour ago holds the bottom third of the column.
+ *
+ * Neither half is chosen here. `resolveFileSurface` answers "what renders a `text/markdown` for
+ * reading" and "what renders it for editing", and this component only decides the geometry: with a
+ * viewer, the panel splits; without one, the editor takes the whole column. That second case is not
+ * a degraded layout — a plain text file has no rendering distinct from its contents, and half a
+ * panel of nothing above it would be worse than the space.
+ */
+export function FilePanel({
+  doc,
+  dir,
+  busy,
+  context,
+  viewerHeight,
+  onViewerHeight,
+  configOpen = true,
+  onConfigOpen,
+  onSave,
+}: {
+  doc: FileSource | null;
+  /** The directory open instead, when one is — exactly one of the two is ever set. */
+  dir?: FileSelection | null;
+  busy: boolean;
+  context: FileSurfaceContext;
+  /**
+   * How tall the viewer is, in px — the half above the divider.
+   *
+   * Held by the shell with the other pane sizes rather than here, for the reason they all are: it
+   * has to survive this panel unmounting as you click between files, and a split that reset every
+   * time you opened another prompt would be a split nobody bothered to drag.
+   */
+  viewerHeight: number;
+  onViewerHeight: (height: number) => void;
+  /**
+   * Whether the lower half is open, or folded down to the bar that restores it.
+   *
+   * A state's configuration is what you edit for a minute and then want out of the way for ten:
+   * watching a run on a board squeezed into the top third of the column is the reason this exists.
+   * Held by the shell with the pane sizes, for the same reason they are — it must survive clicking
+   * another file.
+   */
+  configOpen?: boolean;
+  onConfigOpen?: ((open: boolean) => void) | undefined;
+  onSave: (text: string) => void;
+}): JSX.Element {
+  if (doc === null) {
+    // A listing where a document would have had its viewer and editor. The address above it is the
+    // shell's now — see {@link FileAddressBar}.
     if (dir != null) {
       return (
         <div className="col mid">
-          <DocBar input={barFor({ ...dir, isDir: true })} state={null} onInspect={onInspect} />
           <DirectoryPanel
             layer={dir.layer}
             path={dir.path}
@@ -1302,14 +1355,6 @@ export function FilePanel({
   const View = resolveFileSurface(doc.mime, "view");
   const Edit = resolveFileSurface(doc.mime, "edit");
   const props = { doc, busy, onSave, context };
-  const trail = context.trail ?? [];
-  // Only where there are two readings — a leaf state's viewer is its conversation, and so is a run
-  // that entered no children. Asked of the trail's TAIL, because that is what the panel is showing.
-  const tail = trail.at(-1);
-  const toggleable =
-    doc.stateId !== undefined &&
-    context.state?.board != null &&
-    (tail === undefined || tail.stateId === doc.stateId || (context.trailState?.board ?? null) !== null);
   // With no viewer the editor IS the panel, so there is nothing to fold it away from.
   const shut = View !== null && !configOpen;
 
@@ -1318,14 +1363,6 @@ export function FilePanel({
       className={`col mid${shut ? " config-shut" : ""}`}
       style={{ "--viewer-height": `${viewerHeight}px` } as CSSProperties}
     >
-      <DocBar input={barFor(doc)} state={context.state} onInspect={onInspect}>
-        {/* Only where there are two readings to switch between. A run with no children says what it
-            said and nothing else, so a toggle on it would be one live option and one dead one. */}
-        {toggleable && context.onRunMode !== undefined ? (
-          <RunModeToggle mode={context.runMode ?? "board"} onMode={context.onRunMode} />
-        ) : undefined}
-      </DocBar>
-
       {View ? (
         <>
           <div className="run-half">
