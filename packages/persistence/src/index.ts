@@ -23,10 +23,6 @@ export * from "./artifactStore";
 export * from "./memoCache";
 export * from "./jobs";
 export * from "./jobOwner";
-<<<<<<< HEAD
 export * from "./migrations";
 export * from "./sessionStore";
 export * from "./jobOutput";
-=======
-export * from "./sessions";
->>>>>>> claude/brave-antonelli-dbc5ac

@@ -325,33 +325,10 @@ operation last round**, so the authored type is not a plain intersection:
 type AuthoredLlmConfig = Omit<LlmConfiguration, "tools" | "sessionId"> & {
   /** Logical names, resolved through `registry.tools`. */
   tools?: string[];
-<<<<<<< HEAD
   /** The logical session id. */
   session?: string;
-=======
-  /** A session ref. `sessionId` is accepted as a synonym. */
-  session?: SessionDecl;
->>>>>>> claude/brave-antonelli-dbc5ac
 };
-
-/** DESIGN §7.3 — a name, a computed ref, an explicit "start fresh", or a literal ref. */
-type SessionDecl = string | null | { readonly id: string } | { readonly expr: string };
 ```
-
-**As built (DESIGN §7.3):** the value is no longer just a name. A string is a **session
-ref** naming a conversation *at a position* (`<branch>@<position>`, or a bare branch
-meaning its head), and it is **opaque** — hw never parses it and neither does any
-executor; only the session store reads structure, which is what lets the spelling change
-without touching a consumer. `null` is the one explicit "start fresh" marker, and
-deliberately not `""`: a template interpolating a bad reference would otherwise produce
-the empty string and silently run an isolated conversation that looked like it worked, so
-`""` is an error. The object form carries `id` as its only *enumerable* property, so the
-events journal and serialized inputs/outputs see `{ id }` and nothing more.
-
-The declaration also no longer keys the workspace or the permission ledger. Those follow a
-separate **resource key**, taken from what was DECLARED and inherited from the enclosing
-instance — because a position moves on every call, so a `"session"`-scoped approval keyed
-on it would cover exactly one operation and every fork would ask for its own worktree.
 
 **`tools` is authored-versus-resolved, not a clash.** `LlmConfiguration.tools` is
 `ToolDefinition[]` — declarations handed to the model. What an author writes is `string[]`,

@@ -224,7 +224,7 @@ const CHAT_OUTPUT: NamedParameter<InlineFamily> = { name: "text", kind: "text" }
  * The operation one typed message runs as.
  *
  * The session is bound to an exact POSITION — the end of the transcript being read — and never to a
- * name. That is the whole of the continue-or-fork behaviour: the sessions model (DESIGN §7.3) appends when the
+ * name. That is the whole of the continue-or-fork behaviour: SESSIONS.md §3 appends when the
  * position is still the head and forks when it is not, so a reply to a conversation nothing else has
  * touched continues it, and a reply to one that has moved on branches. There is no flag here for
  * that, deliberately — `fork` is left absent, because setting it would force a branch even when an

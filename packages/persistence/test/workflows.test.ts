@@ -131,8 +131,7 @@ describe("browseWorkflows", () => {
 
   it("warns when one session declares both summary and full_history", () => {
     // The planning workflow's `critique` already declares full_history; adding a
-    // summary state to the same session — inherited from the root as 'planning' —
-    // is the conflict.
+    // summary state to the same (default) session is the conflict.
     write(
       "feature/plan/goals.json",
       JSON.stringify({

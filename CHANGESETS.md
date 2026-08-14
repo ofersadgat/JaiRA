@@ -292,7 +292,7 @@ orderings, and each answers its own question:
 
 - **`state_machine_events`** orders everything within one run.
 - **The session chain** orders CONVERSATION turns — positions plus provider handles, for
-  continue/fork (DESIGN.md §7.3, the absorbed sessions model).
+  continue/fork ([SESSIONS.md](SESSIONS.md)).
 - **The changeset chain** orders the evolution of the PROPOSAL: round N+1's changeset
   `source`-references round N's (§3.1).
 

@@ -314,7 +314,6 @@ Wiring values are **bindings**, not expression strings. Each names where the val
 comes from:
 
 ```text
-<<<<<<< HEAD
 ".children.context.outputs.plan_doc"          a declared child's output
 ".children.critique.outputs"                 a child's whole output object
 ".inputs.issue"                              this state's declared input
@@ -324,17 +323,6 @@ comes from:
 { "expr": "add(.outputs.n, 1)" }             the same, spelled explicitly
 { "text": "significant" }                    a string literal
 { "json": { "a": 1 } }                       a JSON literal
-=======
-{ "child": "context", "output": "plan_doc" }   a declared child's output
-{ "child": "critique" }                        a child's whole output object
-{ "input": "issue" }                           this state's declared input
-{ "expr": "outputs.n + 1" }                    a small computation
-{ "artifact": "name" }                         a session artifact
-{ "conversation": "review", "message": 0 }     a conversation, or one message
-                                               (the name is a session ref — §4.7)
-{ "text": "significant" }                      a string literal
-{ "json": { "a": 1 } }                         a JSON literal
->>>>>>> claude/brave-antonelli-dbc5ac
 ```
 
 > Revised. Wiring was originally a bare expression string
@@ -448,18 +436,10 @@ repository.
 
 ### 4.7 Conversations
 
-> The session model — identity, continuation and branching — is specified in
-> [DESIGN.md](DESIGN.md) §7.3. What follows is the mode vocabulary, which is unchanged.
+Conversations are artifacts. A state may choose how to use prior conversation
+context.
 
-A conversation is an **append-only** stream of calls, and a session ref names one *at a
-position* — `<branch>@<position>` — so "continue from here" and "branch from here" are one
-primitive. A state that declares no session gets its OWN conversation; there is no implicit
-process-wide default. Threading across states is asked for, by naming `environment.session`
-at a common ancestor. A conversation is never rewritten: a retry FORKS (the position it
-wants is already taken), and compaction produces a NEW session with an edge back to the
-intact original.
-
-`operation.session` is the ref. `operation.conversation.mode` is how much of it to send:
+Supported conversation modes:
 
 ```text
 full_history
@@ -469,8 +449,7 @@ selected_artifacts
 ```
 
 The initial default is `full_history`, but the schema must support all modes so
-projects can move toward more controlled context selection over time. `summary` is scoped
-per session, so a session mixing it with `full_history` is summarized for both.
+projects can move toward more controlled context selection over time.
 
 ## 5. State File Format
 

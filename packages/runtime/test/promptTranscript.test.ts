@@ -1,5 +1,5 @@
 /**
- * A prompt state's CONVERSATION reaches the store (DESIGN §7.3).
+ * A prompt state's CONVERSATION reaches the store (SESSIONS.md §7).
  *
  * The bug: every prompt leaf ran in the executor's default VALUE mode, which projects the `LlmOutput`
  * down to the op's output value inside the call. `withRecord` then wrote that projection into the

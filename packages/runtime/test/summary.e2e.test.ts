@@ -8,7 +8,6 @@
  * takes rather than sitting beside it.
  */
 import { describe, expect, it } from "vitest";
-import { MapSessionStore } from "@declarative-ai/exec";
 import { loadBundle } from "@declarative-ai/hw";
 import { ScriptedFakeExecutor } from "../src/fakeExecutor";
 import { executeWorkflow } from "../src/wiring";
@@ -20,10 +19,6 @@ function twoStepFiles(mode: "summary" | "full_history"): Record<string, unknown>
   return {
     chain: {
       label: "Chain",
-      // Declared, because sharing a transcript is now something an author asks for: an undeclared
-      // state gets its own private stream (DESIGN.md §7.3), and there would be nothing for the
-      // second state's `full_history` to read.
-      environment: { session: "chain" },
       inputs: { topic: { schema: { type: "string" } } },
       outputs: { answer: { schema: { type: "string" }, binding: ".children.second.outputs.answer" } },
       children: {
@@ -60,10 +55,6 @@ async function run(mode: "summary" | "full_history"): Promise<{ prompts: string[
   const session = sessionServicesFor(bundle, async () => "SUMMARY-MARKER: they drafted something long.", {
     budgetChars: 500,
     keepRecentTurns: 0,
-    // A store in BOTH cases, as a durable run wires one: compaction is the author's decision, keeping
-    // the conversation at all is the caller's. Without this the `full_history` run would have no
-    // conversation to carry — which would look like the mode failing rather than nothing being wired.
-    inner: new MapSessionStore(),
   });
   const result = await executeWorkflow({
     bundle,
