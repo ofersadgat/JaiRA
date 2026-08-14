@@ -41,7 +41,11 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 CREATE INDEX IF NOT EXISTS runs_task ON runs(task_id, id);
 
--- Append-only journal of the engine's EngineEvent stream (DESIGN §4.2 'events').
+-- Append-only journal of the engine's EngineEvent stream. BOOTSTRAP SHAPE under the
+-- ORIGINAL name: migrations 1-3 build on 'events', and migration 4 renames it to
+-- state_machine_events (CHANGESETS.md §5.1) — so this create must keep existing for a
+-- fresh database to walk the same path an old one did. On an already-migrated database
+-- this recreates an empty shell, which openDb drops again after migrating.
 CREATE TABLE IF NOT EXISTS events (
   seq          INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id      TEXT NOT NULL,
@@ -164,6 +168,17 @@ export function openDb(file: string): JairaDb {
   // AFTER the schema, so a fresh database gets every table before a migration tries to alter one —
   // and so a step that adds a column runs against the table `SCHEMA` has just guaranteed exists.
   migrate(db);
+  // SCHEMA bootstraps the legacy `events` table for migrations 1-3 to build on; once migration 4
+  // has renamed it to state_machine_events, the shell SCHEMA just recreated is empty and dead.
+  // Guarded by emptiness, never by version alone: rows in it would mean unmigrated data, and
+  // dropping data is not this function's call.
+  const tableExists = (name: string): boolean =>
+    (db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?`).get(name) as { n: number })
+      .n > 0;
+  if (tableExists("state_machine_events") && tableExists("events")) {
+    const shell = db.prepare(`SELECT COUNT(*) AS n FROM events`).get() as { n: number };
+    if (shell.n === 0) db.exec(`DROP TABLE events`);
+  }
   return db;
 }
 

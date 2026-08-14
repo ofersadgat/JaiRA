@@ -13,6 +13,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MapSessionStore, PositionTaken, type RecordStore, type SessionStore } from "@declarative-ai/exec";
 import { openDb, type JairaDb } from "../src/db";
@@ -200,14 +201,73 @@ describe("the migration runner", () => {
     db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t', 'queued', 1, 1)`).run();
     db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at) VALUES ('t', 'h', 1)`).run();
     db.prepare(
-      `INSERT INTO events (task_id, run_id, type, payload_json, created_at) VALUES ('t', 1, 'operation.completed', ?, 1)`,
+      `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at) VALUES ('t', 1, 'operation.completed', ?, 1)`,
     ).run(JSON.stringify({ type: "operation.completed", instanceId: 1, stateId: "s", op: "prompt" }));
     db.prepare(
-      `INSERT INTO events (task_id, run_id, type, payload_json, created_at) VALUES ('t', 1, 'operation.completed', ?, 2)`,
+      `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at) VALUES ('t', 1, 'operation.completed', ?, 2)`,
     ).run(JSON.stringify({ type: "operation.completed", instanceId: 2, stateId: "s2", op: "prompt", metrics: { sessionRef: "review@3" } }));
 
-    const refs = db.prepare(`SELECT session_ref FROM events ORDER BY seq`).all() as Array<{ session_ref: string | null }>;
+    const refs = db.prepare(`SELECT session_ref FROM state_machine_events ORDER BY seq`).all() as Array<{
+      session_ref: string | null;
+    }>;
     expect(refs.map((r) => r.session_ref)).toEqual([null, "review@3"]);
+  });
+
+  it("normalises an old turn store into records plus positions, keeping every conversation readable", async () => {
+    // A database as migration 3 left it: the conversation-turn `operation_records` under the name
+    // DESIGN §4.2 had promised to the per-attempt record. Written BY HAND at version 3 — openDb would
+    // migrate it — then brought forward, and the assertion is made through the ordinary store: the
+    // migration is correct exactly when a conversation written before it reads identically after.
+    const file = join(dir, "legacy.db");
+    const legacy = new Database(file);
+    legacy.exec(`
+      PRAGMA user_version = 3;
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, parent TEXT REFERENCES sessions(id),
+        cursor INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE TABLE operation_records (
+        session_id TEXT NOT NULL, seq INTEGER NOT NULL, record_id TEXT NOT NULL,
+        task_id TEXT, run_id INTEGER, result_json TEXT, metrics_json TEXT, external_id TEXT,
+        started_at INTEGER NOT NULL, ended_at INTEGER, PRIMARY KEY (session_id, seq));
+      CREATE TABLE task_runtime (task_id TEXT PRIMARY KEY, status TEXT NOT NULL, snapshot_hash TEXT,
+        branch TEXT, worktree_path TEXT, root_instance_id INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE runs (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, snapshot_hash TEXT NOT NULL,
+        started_at INTEGER NOT NULL, ended_at INTEGER, outcome TEXT, outputs_json TEXT, failure_json TEXT);
+      CREATE TABLE events (seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, run_id INTEGER NOT NULL,
+        instance_id INTEGER, type TEXT NOT NULL, payload_json TEXT NOT NULL, created_at INTEGER NOT NULL,
+        session_ref TEXT GENERATED ALWAYS AS (json_extract(payload_json, '$.metrics.sessionRef')) VIRTUAL);
+      CREATE TABLE command_log (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, run_id INTEGER NOT NULL,
+        tool TEXT NOT NULL, command TEXT, parsed_json TEXT, decision TEXT NOT NULL, decided_by TEXT NOT NULL,
+        reason TEXT, scope TEXT, session_id TEXT, created_at INTEGER NOT NULL);
+      CREATE TABLE jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, task_id TEXT, run_id INTEGER,
+        parent_job_id INTEGER, owner_token TEXT NOT NULL, pid INTEGER, command TEXT, started_at INTEGER NOT NULL,
+        heartbeat_at INTEGER NOT NULL, cancel_requested_at INTEGER, ended_at INTEGER, outcome TEXT, cwd TEXT);
+      CREATE TABLE job_output (id INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL, stream TEXT NOT NULL,
+        seq INTEGER NOT NULL, chunk TEXT NOT NULL, dropped INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE TABLE artifacts (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, run_id INTEGER,
+        logical_path TEXT NOT NULL, physical_path TEXT, content TEXT, hash TEXT NOT NULL, bytes INTEGER NOT NULL,
+        format TEXT, instance_id INTEGER, state_id TEXT, slot TEXT, created_at INTEGER NOT NULL);
+      CREATE TABLE call_memo (key TEXT PRIMARY KEY, outcome TEXT NOT NULL, created_at INTEGER NOT NULL);
+      INSERT INTO sessions (id, parent, cursor, created_at) VALUES ('t1/3/old', NULL, 0, 1);
+      INSERT INTO operation_records (session_id, seq, record_id, task_id, run_id, result_json, external_id, started_at, ended_at)
+        VALUES ('t1/3/old', 0, 'r0', 't1', 3, '${JSON.stringify({ value: { messages: [{ role: "assistant", content: "kept" }] } }).replace(/'/g, "''")}', 'prov-9', 1, 2);
+    `);
+    legacy.close();
+
+    const migrated = openDb(file);
+    try {
+      const reader = new SqliteSessionStore(migrated, { taskId: "t1", runId: 3 }) as unknown as Store;
+      expect(await reader.messages("old")).toEqual([turn("kept")]);
+      // The provider handle rode `external_id`; the migration carries it into its own column, which
+      // is what `handleAt` resumes from.
+      expect((await reader.resolve({ ref: "old" })).providerSessionId).toBe("prov-9");
+      // The turn row became a record plus a position pointing at it.
+      expect(migrated.prepare(`SELECT COUNT(*) AS n FROM session_positions`).get()).toEqual({ n: 1 });
+      expect(
+        migrated.prepare(`SELECT status, provider_session_id FROM operation_records WHERE record_id = 'r0'`).get(),
+      ).toEqual({ status: "completed", provider_session_id: "prov-9" });
+    } finally {
+      migrated.close();
+    }
   });
 });
 
@@ -243,7 +303,7 @@ describe("stateSessions", () => {
     db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t1','queued',1,1)`).run();
     db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at) VALUES ('t1','h',1)`).run();
     const add = db.prepare(
-      `INSERT INTO events (task_id, run_id, type, payload_json, created_at) VALUES ('t1', 1, ?, ?, ?)`,
+      `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at) VALUES ('t1', 1, ?, ?, ?)`,
     );
     add.run(
       "operation.completed",
@@ -278,7 +338,7 @@ describe("pruning conversations", () => {
     const drop = db.prepare(
       `DELETE FROM sessions
         WHERE created_at < ?
-          AND id NOT IN (SELECT DISTINCT session_id FROM operation_records)
+          AND id NOT IN (SELECT DISTINCT session_id FROM session_positions)
           AND id NOT IN (SELECT parent FROM sessions WHERE parent IS NOT NULL)`,
     );
     // The parent is spared because a child points at it; without that clause this throws
@@ -292,7 +352,7 @@ describe("pruning conversations", () => {
     const drop = db.prepare(
       `DELETE FROM sessions
         WHERE created_at < ?
-          AND id NOT IN (SELECT DISTINCT session_id FROM operation_records)
+          AND id NOT IN (SELECT DISTINCT session_id FROM session_positions)
           AND id NOT IN (SELECT parent FROM sessions WHERE parent IS NOT NULL)`,
     );
     drop.run(100);

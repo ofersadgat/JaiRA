@@ -167,7 +167,7 @@ export function stateSessions(project: Project, taskId: string, runId?: number):
   // precisely "this operation ran in a conversation". That column is what migration 1 exists for.
   const rows = project.db
     .prepare(
-      `SELECT run_id, payload_json, session_ref, created_at FROM events
+      `SELECT run_id, payload_json, session_ref, created_at FROM state_machine_events
         WHERE task_id = ? AND type = 'operation.completed' AND session_ref IS NOT NULL
           ${runId === undefined ? "" : "AND run_id = ?"}
         ORDER BY seq`,

@@ -78,7 +78,7 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
 
     for (const run of candidates) {
       const events = (
-        project.db.prepare(`SELECT COUNT(*) n FROM events WHERE run_id = ?`).get(run.id) as { n: number }
+        project.db.prepare(`SELECT COUNT(*) n FROM state_machine_events WHERE run_id = ?`).get(run.id) as { n: number }
       ).n;
       const commands = (
         project.db.prepare(`SELECT COUNT(*) n FROM command_log WHERE run_id = ?`).get(run.id) as { n: number }
@@ -102,7 +102,7 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
     // One transaction: a half-pruned run would leave the journal disagreeing with
     // the run row that references it.
     project.db.transaction(() => {
-      const dropEvents = project.db.prepare(`DELETE FROM events WHERE run_id = ?`);
+      const dropEvents = project.db.prepare(`DELETE FROM state_machine_events WHERE run_id = ?`);
       const dropCommands = project.db.prepare(`DELETE FROM command_log WHERE run_id = ?`);
       // A job's captured output hangs off the job, and jobs were never pruned at all — so a run's
       // children were half-collected and the rows nobody deleted grew forever.
@@ -111,7 +111,14 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
       );
       const dropJobs = project.db.prepare(`DELETE FROM jobs WHERE run_id = ?`);
       // A conversation belongs to the run that held it (see `SessionScope`), so pruning the run
-      // prunes its transcripts — and the lineage rows they hang off with them.
+      // prunes its transcripts — and the lineage rows they hang off with them. Positions first:
+      // they reference the records, and a position whose record is gone is a claim on nothing.
+      // This also covers the UNPLACED records §5.2's unconditional recording writes (the retention
+      // question of CHANGESETS.md §10.5 lands here, in the surface that already prunes).
+      const dropPositions = project.db.prepare(
+        `DELETE FROM session_positions
+          WHERE operation_record_id IN (SELECT id FROM operation_records WHERE run_id = ?)`,
+      );
       const dropRecords = project.db.prepare(`DELETE FROM operation_records WHERE run_id = ?`);
       // A branch with no records left AND no descendant pointing at it. Both conditions matter, and
       // the first one alone is actively destructive:
@@ -128,7 +135,7 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
       const dropSessions = project.db.prepare(
         `DELETE FROM sessions
           WHERE created_at < ?
-            AND id NOT IN (SELECT DISTINCT session_id FROM operation_records)
+            AND id NOT IN (SELECT DISTINCT session_id FROM session_positions)
             AND id NOT IN (SELECT parent FROM sessions WHERE parent IS NOT NULL)`,
       );
       const dropRun = project.db.prepare(`DELETE FROM runs WHERE id = ?`);
@@ -139,6 +146,7 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
         dropCommands.run(run.runId);
         dropJobOutput.run(run.runId);
         dropJobs.run(run.runId);
+        dropPositions.run(run.runId);
         dropRecords.run(run.runId);
         dropRun.run(run.runId);
       }
@@ -159,7 +167,7 @@ export function historySize(project: Project): HistorySize {
   const one = (sql: string): number => (project.db.prepare(sql).get() as { n: number }).n;
   return {
     runs: one(`SELECT COUNT(*) n FROM runs`),
-    events: one(`SELECT COUNT(*) n FROM events`),
+    events: one(`SELECT COUNT(*) n FROM state_machine_events`),
     commands: one(`SELECT COUNT(*) n FROM command_log`),
   };
 }

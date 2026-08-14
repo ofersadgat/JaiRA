@@ -155,7 +155,7 @@ describe("integrity", () => {
 
     const orphanEvents = (
       project.db
-        .prepare(`SELECT COUNT(*) n FROM events WHERE run_id NOT IN (SELECT id FROM runs)`)
+        .prepare(`SELECT COUNT(*) n FROM state_machine_events WHERE run_id NOT IN (SELECT id FROM runs)`)
         .get() as { n: number }
     ).n;
     const orphanCommands = (

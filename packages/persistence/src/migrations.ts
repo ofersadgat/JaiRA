@@ -106,6 +106,90 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE jobs ADD COLUMN cwd TEXT;
     `,
   },
+  {
+    version: 4,
+    note: "normalised the record schema (CHANGESETS.md §5.1): lifecycle truth and payload truth split into their own tables",
+    // Two truths, two tables. The journal records THAT operations ran (`state_machine_events`, the
+    // rename of `events`); a payload store records WHAT they returned (`operation_records`, the
+    // DESIGN §4.2 table finally taking the name); and conversation membership is its own join
+    // (`session_positions`), whose primary key IS the position claim — a duplicate insert is
+    // `PositionTaken` → fork, exactly the constraint the old (session_id, seq) key enforced.
+    //
+    // The old `operation_records` was the conversation TURN store — one row per PLACED call — under
+    // a name that DESIGN §4.2 had promised to the per-attempt record. This step resolves the
+    // collision by normalising rather than renaming around it: every old turn row becomes an
+    // operation record (its rowid carried over as the new primary key, so the two INSERTs below
+    // agree without a join key) plus a position row pointing at it.
+    //
+    // `events` is renamed, not rebuilt: ALTER TABLE keeps the `session_ref` generated column from
+    // migration 1. The indexes are re-created under the new name only so a schema dump reads
+    // coherently. Note `db.ts` still BOOTSTRAPS a legacy `events` table on every open (migrations
+    // 1–3 build on it); `openDb` drops the empty shell again after migrating.
+    sql: `
+      ALTER TABLE events RENAME TO state_machine_events;
+      DROP INDEX IF EXISTS events_task;
+      DROP INDEX IF EXISTS events_run;
+      DROP INDEX IF EXISTS events_session;
+      CREATE INDEX IF NOT EXISTS state_machine_events_task ON state_machine_events(task_id, seq);
+      CREATE INDEX IF NOT EXISTS state_machine_events_run ON state_machine_events(run_id, seq);
+      CREATE INDEX IF NOT EXISTS state_machine_events_session ON state_machine_events(session_ref);
+
+      ALTER TABLE operation_records RENAME TO conversation_turns_legacy;
+      DROP INDEX IF EXISTS operation_records_id;
+      DROP INDEX IF EXISTS operation_records_run;
+
+      CREATE TABLE IF NOT EXISTS operation_records (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_id            TEXT NOT NULL,
+        task_id              TEXT,
+        run_id               INTEGER,
+        attempt              INTEGER NOT NULL DEFAULT 1,
+        status               TEXT NOT NULL DEFAULT 'open',  -- open | completed | failed
+        request_json         TEXT,
+        result_json          TEXT,
+        error_json           TEXT,
+        metrics_json         TEXT,
+        session_outcome_json TEXT,
+        provider_session_id  TEXT,
+        started_at           INTEGER NOT NULL,
+        ended_at             INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS operation_records_scope ON operation_records(task_id, run_id, record_id);
+      CREATE INDEX IF NOT EXISTS operation_records_run ON operation_records(run_id, id);
+
+      CREATE TABLE IF NOT EXISTS session_positions (
+        session_id           TEXT NOT NULL,
+        seq                  INTEGER NOT NULL,
+        operation_record_id  INTEGER NOT NULL REFERENCES operation_records(id),
+        PRIMARY KEY (session_id, seq)
+      );
+      CREATE INDEX IF NOT EXISTS session_positions_record ON session_positions(operation_record_id);
+
+      INSERT INTO operation_records
+        (id, record_id, task_id, run_id, status, result_json, metrics_json, provider_session_id, started_at, ended_at)
+        SELECT rowid, record_id, task_id, run_id,
+               CASE WHEN ended_at IS NULL THEN 'open' ELSE 'completed' END,
+               result_json, metrics_json, external_id, started_at, ended_at
+          FROM conversation_turns_legacy;
+      INSERT INTO session_positions (session_id, seq, operation_record_id)
+        SELECT session_id, seq, rowid FROM conversation_turns_legacy;
+      DROP TABLE conversation_turns_legacy;
+    `,
+  },
+  {
+    version: 5,
+    note: "expose the operation id settled events carry, so a journal row joins its operation record (CHANGESETS.md §10.6)",
+    // The same shape as migration 1's session_ref, for the same reason: hw stamps `operationId` on
+    // operation.completed/failed — the content hash of the dispatched op, which is exactly the id
+    // `withRecord` gives an UNPLACED record — and deriving the column from the payload means it can
+    // never drift from the event it came from. Placed calls join through session_ref as before;
+    // this closes the other half, and NULL is what every event written before the stamp reads as.
+    sql: `
+      ALTER TABLE state_machine_events ADD COLUMN operation_id TEXT
+        GENERATED ALWAYS AS (json_extract(payload_json, '$.operationId')) VIRTUAL;
+      CREATE INDEX IF NOT EXISTS state_machine_events_operation ON state_machine_events(operation_id);
+    `,
+  },
 ];
 
 /**

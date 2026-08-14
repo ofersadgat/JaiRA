@@ -49,7 +49,8 @@ export interface StateViewOptions extends ViewOptions {
   /**
    * Executors that would actually run — enabled *and* reachable. A state naming a function outside
    * this set gets an error, but only if the name is one JaiRA recognises as an executor at all:
-   * `review_artifact` is a UI component, not a missing runtime.
+   * `review_artifact` — or `user-approve-changeset` (CHANGESETS.md §4.1) — is a UI component, not a
+   * missing runtime.
    */
   availableExecutors?: ReadonlySet<string>;
   /** Every executor name JaiRA knows about, available or not. Absent ⇒ nothing is judged. */
@@ -700,8 +701,9 @@ export function stateView(
   const executor = envExecutor ?? (kind === "function" ? functionRef : undefined);
   const known = options.knownExecutors;
   const available = options.availableExecutors;
-  // Only a name JaiRA recognises as an executor is judged. `review_artifact` is a UI component, and
-  // calling it "unavailable" would be both wrong and unfixable.
+  // Only a name JaiRA recognises as an executor is judged. `review_artifact` and
+  // `user-approve-changeset` are UI components, and calling one "unavailable" would be both wrong
+  // and unfixable.
   const judged = executor !== undefined && known !== undefined && known.has(executor);
   const isAvailable = !judged || available?.has(executor!) === true;
 
