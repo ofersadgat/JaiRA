@@ -102,6 +102,32 @@ describe("the ordering fix — a router's defaults are applied BEFORE dispatch",
 
     expect(cli.seen[0]).toMatchObject({ temperature: 0.7, maxOutputTokens: 500, model: "claude-cli/sonnet" });
   });
+
+  it("answers capabilitiesFor for the route the default will DISPATCH to, not for the unnamed pick", async () => {
+    // The two must agree or the engine plans one call and runs another: it reads `capabilitiesFor`
+    // to decide whether the answering executor enforces policy through its own callback (raw tools +
+    // gate) or composes (wrapped tools). `withPromptDefaults` used to forward the op UNFILLED, so a
+    // state naming no model was answered for whichever route the unnamed rule picks — here the
+    // provider — while `start` filled the default and sent the work to the agent.
+    const provider = leaf();
+    const agent = leaf();
+    (agent.executor as unknown as { capabilities: Record<string, unknown> }).capabilities = {
+      memoizable: false,
+      policyEnforcement: "callback",
+    };
+    const tree: JairaPromptNode = {
+      kind: "router",
+      defaults: { model: "claude-cli/sonnet" },
+      // `anthropic` first, so the unnamed rule would pick IT — the disagreement this test pins.
+      routes: { anthropic: { kind: "agent", agent: "prov" }, "claude-cli": { kind: "agent", agent: "cli" } },
+    };
+    const prompt = buildPromptTree(tree, { agents: { prov: provider.executor, cli: agent.executor } });
+
+    expect((prompt.capabilitiesFor!(promptOp() as never) as { policyEnforcement?: string }).policyEnforcement).toBe("callback");
+    await prompt.start(promptOp() as never, {} as never).result;
+    expect(agent.seen).toHaveLength(1);
+    expect(provider.seen).toHaveLength(0);
+  });
 });
 
 describe("building each level", () => {

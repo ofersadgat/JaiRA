@@ -77,6 +77,26 @@ describe("syncWorkflowFiles", () => {
     expect(JSON.stringify(compiled)).toContain("assessment");
   });
 
+  it("authors the read-only contract where the engine can enforce it, on every state", () => {
+    // "A sync must not touch disk" lived in a comment beside the tool registry, and the registry is
+    // only half the statement: a delegated agent answering these states runs its own loop with its
+    // own built-ins, and a real run used `Bash` and `Glob` under nothing but its transport's
+    // defaults. The `read-only` profile is what the gate and every adapter act on; `read_file` is
+    // pre-approved because it is the one tool the states declare and it is read-only.
+    for (const direction of [SYNC_DOCUMENT_ID, SYNC_STATES_ID]) {
+      const bundle = loadBundle(syncWorkflowFiles(), direction);
+      // Every state that RUNS something — the composite root only sequences its children.
+      const leaves = Object.entries(bundle.states).filter(([id]) => id !== direction);
+      expect(leaves.length).toBeGreaterThanOrEqual(3);
+      for (const [id, state] of leaves) {
+        const env = (state as { environment?: { tools?: string[]; permissions?: { profile?: string; tools?: Record<string, string> } } }).environment;
+        expect(env?.tools, id).toEqual(["read_file"]);
+        expect(env?.permissions?.profile, id).toBe("read-only");
+        expect(env?.permissions?.tools?.["read_file"], id).toBe("allow");
+      }
+    }
+  });
+
   it("carries the model onto every state, so one option decides the whole run", () => {
     const bundle = loadBundle(syncWorkflowFiles({ model: "a-model" }), SYNC_DOCUMENT_ID);
     for (const id of [`${CONFORMANCE_ID}/requirements`, `${SYNC_DOCUMENT_ID}/revision`]) {

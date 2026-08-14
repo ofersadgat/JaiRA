@@ -103,6 +103,28 @@ export function createGenericCliQuery(spec: JairaGenericCliAgent, options: Gener
       };
       return;
     }
+    // The POLICY options, refused by the same rule. A generic binary has no MCP bridge to serve a
+    // declared tool over and no flag vocabulary for an allow-list, a deny-list or a permission mode —
+    // and every one of these was silently dropped here, which is precisely how an agent ends up
+    // running with its own defaults while the workflow believes it is restricted. (A narrowing
+    // `permissions.profile` never reaches this far: the adapter's `policyEnforcement: "none"` refuses
+    // it one layer up.)
+    const unenforceable = [
+      ...(opts.mcpTools !== undefined && Object.keys(opts.mcpTools).length > 0 ? [`its declared tools [${Object.keys(opts.mcpTools).join(", ")}]`] : []),
+      ...((opts.allowedTools?.length ?? 0) > 0 ? ["a tool allow-list"] : []),
+      ...((opts.disallowedTools?.length ?? 0) > 0 ? ["a tool deny-list"] : []),
+      ...(opts.permissionMode !== undefined ? [`the '${opts.permissionMode}' permission mode`] : []),
+    ];
+    if (unenforceable.length > 0) {
+      yield {
+        type: "other",
+        error:
+          `'${spec.command}' is a generic CLI with no tool bridge and no permission flags, so this state's ` +
+          `${unenforceable.join(", ")} cannot reach it — run the state on claude-cli or claude-code, which serve ` +
+          "declared tools over MCP and honour the policy, or drop the restriction",
+      };
+      return;
+    }
     const template = spec.args ?? [];
     // A model this template has nowhere to put is REFUSED, not dropped. Running whatever the binary
     // defaults to while the workflow believes it asked for something else is silent and expensive —
@@ -185,6 +207,9 @@ export function registerGenericAgents(
   for (const spec of options.agents ?? []) {
     const fn = createClaudeCodeFunction({
       capabilities: GENERIC_CLI_CAPS,
+      // The runtime half of `policyEnforcement: "none"`: there is no channel to route an approver
+      // through, so one must not be built and then silently ignored by the query.
+      approvalCallback: false,
       query: createGenericCliQuery(spec, options),
     });
     registry.functions.set(

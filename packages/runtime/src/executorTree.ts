@@ -213,17 +213,23 @@ export function withPromptDefaults(
   inner: StackedExecutor,
 ): StackedExecutor {
   const executor = inner;
+  // The SAME filling `start` does, so a question about a call is answered for the call that will
+  // actually run. `capabilitiesFor` used to forward the op untouched, which asked the router about a
+  // call with no model where `start` would dispatch one WITH the default's — two different routes
+  // whenever the default names one the unnamed rule would not pick, and the engine then read a
+  // provider's capability record for work an agent was about to do.
+  const filled = (op: Operation<InlineFamily>): Operation<InlineFamily> => {
+    if (op.kind !== "prompt") return op;
+    const config = isObject(op.config) ? (op.config as Record<string, JsonValue>) : {};
+    return { ...op, config: { ...defaults, ...config } as JsonValue };
+  };
   return {
     capabilities: executor.capabilities,
     metrics: executor.metrics,
     ...(executor.capabilitiesFor !== undefined
-      ? { capabilitiesFor: (op: Operation<InlineFamily>) => executor.capabilitiesFor!(op) }
+      ? { capabilitiesFor: (op: Operation<InlineFamily>) => executor.capabilitiesFor!(filled(op)) }
       : {}),
-    start: (op: Operation<InlineFamily>, ctx: ExecServices) => {
-      if (op.kind !== "prompt") return executor.start(op, ctx);
-      const config = isObject(op.config) ? (op.config as Record<string, JsonValue>) : {};
-      return executor.start({ ...op, config: { ...defaults, ...config } as JsonValue }, ctx);
-    },
+    start: (op: Operation<InlineFamily>, ctx: ExecServices) => executor.start(filled(op), ctx),
   };
 }
 

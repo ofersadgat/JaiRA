@@ -279,7 +279,21 @@ export function syncWorkflowFiles(options: SyncWorkflowOptions = {}): Record<str
   //
   // A tool set also turns the prompt states into a bounded tool LOOP, which is what makes the same
   // wiring work whether a provider model or a delegated agent is answering.
-  const environment = { kind: "prompt", tools: ["read_file"], ...(model !== undefined ? { model } : {}) };
+  //
+  // "Must not touch disk" is AUTHORED, not just narrated. The tool list alone never said it: a
+  // delegated agent answering these states runs its own loop with its own built-ins, and a real run
+  // did exactly that — `Bash`, `Glob`, its own `Read` — under nothing but its transport's defaults.
+  // The `read-only` profile is the vocabulary the engine and every adapter enforce: the provider path
+  // wraps the declared tools, claude is denied its write-capable built-ins up-front and gated per
+  // call, codex maps it onto `--sandbox read-only`, and a transport that can hold the agent to none
+  // of it refuses the state. `read_file` is `allow` so the one declared tool runs without a human
+  // click per read — it is read-only, which is precisely what the profile admits.
+  const environment = {
+    kind: "prompt",
+    tools: ["read_file"],
+    permissions: { profile: "read-only", tools: { read_file: "allow" } },
+    ...(model !== undefined ? { model } : {}),
+  };
   const check = conformanceWorkflowFiles(model !== undefined ? { model } : {});
 
   // The two leaves the check already defines, mounted by explicit id. Their inputs are wired the

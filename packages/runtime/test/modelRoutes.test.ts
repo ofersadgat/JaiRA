@@ -21,6 +21,7 @@ import {
 } from "@jaira/shared";
 import {
   agentPromptRouteNames,
+  agentPromptRoutes,
   normaliseAgentModel,
   modelRouterOptions,
   probeModelRoutes,
@@ -118,6 +119,16 @@ describe("what can serve a call", () => {
   it("offers no agents at all when every one of them is turned off", () => {
     const agents = { claudeCode: { enabled: false }, claudeCli: { enabled: false }, codex: { enabled: false } };
     expect(Object.keys(agentPromptRouteNames(agents))).toEqual([]);
+  });
+
+  it("a generic CLI's prompt route declares its OWN capabilities, not claude's", () => {
+    // Left to `AgentCliExecutor`'s default this route advertised `policyEnforcement: "callback"` —
+    // for a binary with no callback — so the engine handed it raw tools and believed a restricted
+    // state could run here enforced. The function-path registration always declared `"none"`; the
+    // prompt route must say the same word.
+    const routes = agentPromptRoutes({ genericCli: [{ name: "opencode", command: "opencode" }] }, {});
+    expect(routes["opencode"]!.capabilities.policyEnforcement).toBe("none");
+    expect(routes["claude-cli"]!.capabilities.policyEnforcement).toBe("callback");
   });
 });
 

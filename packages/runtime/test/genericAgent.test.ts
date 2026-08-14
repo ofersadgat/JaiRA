@@ -131,6 +131,27 @@ describe("createGenericCliQuery", () => {
     // Inventing a number would corrupt the run's roll-up.
     expect(message!.result!.costUsd).toBeUndefined();
   });
+
+  it("refuses a state's declared tools rather than dropping them — the binary has no bridge to serve them", async () => {
+    const { exec, calls } = fakeExec();
+    const messages = (await collect(
+      createGenericCliQuery(spec(), { exec })({
+        prompt: "go",
+        mcpTools: { read_file: { description: "read", inputSchema: { type: "object" }, run: async () => null } },
+      }),
+    )) as Array<{ error?: string }>;
+    expect(calls).toHaveLength(0); // refused BEFORE the binary ran, not after it worked unrestricted
+    expect(messages[0]!.error).toMatch(/read_file.*cannot reach it/s);
+  });
+
+  it("refuses a deny-list and a permission mode by the same rule", async () => {
+    const { exec, calls } = fakeExec();
+    const messages = (await collect(
+      createGenericCliQuery(spec(), { exec })({ prompt: "go", disallowedTools: ["Bash"], permissionMode: "plan" }),
+    )) as Array<{ error?: string }>;
+    expect(calls).toHaveLength(0);
+    expect(messages[0]!.error).toMatch(/deny-list.*'plan' permission mode/s);
+  });
 });
 
 describe("registerGenericAgents", () => {
