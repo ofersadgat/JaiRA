@@ -279,32 +279,19 @@ export interface SessionStores {
 export function withSessionLayers(
   stores: SessionStores,
   executor: Executor<ExecServices, WorkflowMetrics>,
-  options: {
-    /**
-     * Engage only for a call something PLACED in a conversation — `ctx.session` present.
-     *
-     * Off by default, and the two callers genuinely differ. `withRecord` records every call it sees,
-     * keyed by content hash when there is no position, so wrapping a dispatcher unconditionally would
-     * start writing every pure helper and every embedded call into the store that holds the run's
-     * transcripts. The prompt path is left unconditional because that is what it has always done:
-     * hw's embedded callee (a call is "a COMPUTATION embedded in a binding, not a turn in the
-     * enclosing state's conversation") reaches it with no session and is recorded by content hash
-     * today. Unifying the two is a behaviour change, and not one this refactor is entitled to make.
-     */
-    onlyWhenPlaced?: boolean;
-  } = {},
 ): Executor<ExecServices, WorkflowMetrics> {
-  const layered = withSessionPosition({ sessions: stores.sessions }, withRecord({ records: stores.records }, executor));
-  if (options.onlyWhenPlaced !== true) return layered as Executor<ExecServices, WorkflowMetrics>;
-  return {
-    capabilities: executor.capabilities,
-    metrics: executor.metrics,
-    ...(executor.capabilitiesFor !== undefined
-      ? { capabilitiesFor: (op: Operation<InlineFamily>) => executor.capabilitiesFor!(op) }
-      : {}),
-    start: (op: Operation<InlineFamily>, ctx: ExecServices) =>
-      (ctx.session !== undefined ? (layered as Executor<ExecServices, WorkflowMetrics>) : executor).start(op, ctx),
-  };
+  // Unconditional — `onlyWhenPlaced` retired (CHANGESETS.md §5.2). The gate existed because
+  // wrapping the dispatcher would have written every pure helper and every embedded call into the
+  // store that held the run's TRANSCRIPTS. The §5.1 schema dissolves that concern rather than
+  // answering it: the store that holds transcripts is now `session_positions`, and an unplaced call
+  // never touches it — its record lands in `operation_records` with no position and pollutes
+  // nothing. So every operation is recorded, and placement decides only whether a record also
+  // claims a seat in a conversation. What remains of the old filter is a retention question
+  // (§10.5), answered by the pruning surface.
+  return withSessionPosition(
+    { sessions: stores.sessions },
+    withRecord({ records: stores.records }, executor),
+  ) as Executor<ExecServices, WorkflowMetrics>;
 }
 
 export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowExecResult> {
@@ -364,18 +351,18 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
 }
 
 /**
- * The dispatcher with a session layer that engages only for a call the engine PLACED in a
- * conversation.
+ * The dispatcher under the same session layers as the prompt path.
  *
- * `ctx.session` is exactly that signal: hw resolves one for a prompt op and for a runtime that
- * declares `sessionResume`, and for nothing else — see {@link withSessionLayers} on why this one is
- * gated and the prompt path is not.
+ * It used to be gated on `ctx.session` (only calls the engine PLACED in a conversation were
+ * recorded); the §5.1 schema retired the gate — see {@link withSessionLayers}. A function op with no
+ * position still resolves none and claims none; it is merely recorded now, which is what makes a
+ * changeset gate's inputs and decisions recoverable (§5.3).
  */
 function sessionedDispatcher(
   dispatcher: Executor<ExecServices, WorkflowMetrics>,
   session: SessionStores,
 ): Executor<ExecServices, WorkflowMetrics> {
-  return withSessionLayers(session, dispatcher, { onlyWhenPlaced: true });
+  return withSessionLayers(session, dispatcher);
 }
 
 /** Collapse a result into the task-status vocabulary. */
@@ -491,13 +478,26 @@ export function defaultExecutorTree(
   );
 }
 
-/** One partial answer, as it is being written. */
+/** One live stream item — a fragment of the answer, or a whole event that is not answer text. */
 export interface TurnDelta {
   /** The conversation position the call is claiming, when it runs in one. */
   session?: { id: string; seq: number };
   /** The state that is speaking, recovered from the request's seed. */
   stateId?: string;
-  text: string;
+  /** A fragment of the answer being written. Exactly one of `text` / `thinking` / `item` is present. */
+  text?: string;
+  /** A fragment of the model's reasoning, while it is still thinking — never part of the answer. */
+  thinking?: string;
+  /**
+   * A whole stream item that is not answer text, in stream order with the fragments.
+   *
+   * `{ kind: "message", role, content }` is a finished turn — content carries the provider's own
+   * parts, tool calls and results included. Anything else is forwarded as
+   * `{ kind: "event", event }` with the executor's event verbatim: the viewer's contract is that
+   * EVERYTHING on the stream reaches it in order, understood or not — an event dropped here is a
+   * stretch of an hour-long run the person watching cannot account for.
+   */
+  item?: JsonValue;
 }
 
 /**
@@ -551,13 +551,39 @@ export function withTurnStream(
       void (async () => {
         try {
           for await (const event of handle.events) {
-            if (event.type !== "output_partial" || event.text.length === 0) continue;
+            // Everything on the stream is forwarded, in order. Text fragments go as `text`; a
+            // finished turn goes whole (tool calls and results ride on it); anything else —
+            // progress, command decisions, provider events, drop notices — goes opaquely, because
+            // the viewer's job is to show what happened and "we had no name for it" is not a
+            // reason a person watching an hour-long run should see a gap.
+            const delta: Omit<TurnDelta, "text" | "item"> = {
+              ...(at !== undefined ? { session: { id: at.id, seq: at.seq } } : {}),
+              ...(stateId !== undefined ? { stateId } : {}),
+            };
+            let payload: TurnDelta;
+            if (event.type === "output_partial") {
+              if (event.text.length === 0) continue;
+              payload = { ...delta, text: event.text };
+            } else if (event.type === "thinking_partial") {
+              if (event.text.length === 0) continue;
+              payload = { ...delta, thinking: event.text };
+            } else if (event.type === "message") {
+              payload = {
+                ...delta,
+                item: {
+                  kind: "message",
+                  role: event.role,
+                  content: event.content,
+                  // A subagent's turn keeps its attribution: untagged it would render into the main
+                  // thread, which is the exact confusion the tag exists to prevent.
+                  ...(event.parentToolUseId !== undefined ? { parentToolUseId: event.parentToolUseId } : {}),
+                } as JsonValue,
+              };
+            } else {
+              payload = { ...delta, item: { kind: "event", event: event as unknown as JsonValue } as JsonValue };
+            }
             try {
-              sink({
-                ...(at !== undefined ? { session: { id: at.id, seq: at.seq } } : {}),
-                ...(stateId !== undefined ? { stateId } : {}),
-                text: event.text,
-              });
+              sink(payload);
             } catch {
               // A consumer that throws costs ONE delta, not the stream. The sink is an IPC send, which
               // throws on a window that has gone away — and a single closed window used to silence

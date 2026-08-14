@@ -303,7 +303,7 @@ describe("withTurnStream", () => {
   }
 
   it("forwards each delta with the position it belongs to", async () => {
-    const seen: Array<{ text: string; session?: { id: string; seq: number }; stateId?: string }> = [];
+    const seen: Array<{ text?: string; session?: { id: string; seq: number }; stateId?: string }> = [];
     const wrapped = withTurnStream((d) => seen.push(d), streaming(["Hel", "lo"]) as never);
 
     const ctx = { session: { at: { id: "chat", seq: 3 }, seed: "wf/write:chat" } };
@@ -327,6 +327,38 @@ describe("withTurnStream", () => {
     // Still forwarded — a delta is a delta — but with no position to attribute it to.
     expect(seen).toHaveLength(1);
     expect((seen[0] as { session?: unknown }).session).toBeUndefined();
+  });
+
+  it("forwards whole turns and unknown events, not only text", async () => {
+    // The viewer's contract: EVERYTHING on the stream reaches it in order, understood or not. Tool
+    // calls ride on `message` events; anything else goes through opaquely rather than vanishing.
+    const chatty = {
+      capabilities: {},
+      metrics: { merge: (a: unknown) => a },
+      start: () => ({
+        events: (async function* () {
+          yield { type: "message", role: "assistant", content: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Read", input: {} }] } };
+          yield { type: "provider_event", payload: { type: "system", subtype: "init" } };
+          yield { type: "thinking_partial", text: "hmm, " };
+          yield { type: "output_partial", text: "hi" };
+        })(),
+        result: Promise.resolve({ value: "done", metrics: { durationMs: 0 } }),
+        cancel: async () => undefined,
+      }),
+    } as unknown as StackedExecutor;
+
+    const seen: Array<{ text?: string; thinking?: string; item?: unknown }> = [];
+    const wrapped = withTurnStream((d) => seen.push(d), chatty as never);
+    await wrapped.start(promptOp() as never, {} as never).result;
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(seen).toHaveLength(4);
+    expect(seen[0]?.item).toMatchObject({ kind: "message", role: "assistant" });
+    expect(seen[1]?.item).toMatchObject({ kind: "event", event: { type: "provider_event" } });
+    // Reasoning travels on its own field, never as answer text.
+    expect(seen[2]).toMatchObject({ thinking: "hmm, " });
+    expect(seen[2]?.text).toBeUndefined();
+    expect(seen[3]).toMatchObject({ text: "hi" });
   });
 
   it("does not fail the call when the stream ends badly", async () => {
