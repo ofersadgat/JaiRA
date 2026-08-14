@@ -42,6 +42,7 @@ import type {
   PushMessage,
   SecretCapabilities,
   SecretTarget,
+  Changeset,
   StateView,
   SyncDirection,
   TaskDetail,
@@ -352,10 +353,26 @@ export interface AppState {
    * The answer currently being written, before it is a turn.
    *
    * A record persists once, at the end of its operation — so without this a long agent run shows an
-   * empty conversation for as long as it is thinking. Cleared when the record lands, because the
-   * stored turn is the same text and better: it has its tool calls with it.
+   * empty conversation for as long as it is thinking. `text` is the fragment tail of the answer;
+   * `items` is everything else the stream carried in order — finished turns (tool calls and results
+   * ride on them) and events we may not even recognise, all rendered, because an hour-long agent
+   * run whose tools are invisible reads as an agent doing nothing. Cleared when the record lands,
+   * because the stored turn is the same content and better.
+   *
+   * `sidechains` is the same accumulation for SUBAGENT turns, keyed by the tool call that spawned
+   * each — items tagged `parentToolUseId` land here and nowhere else. Kept apart from `items`
+   * because a subagent's words are not the main thread's (see `liveItemEntries`); the doorway row
+   * and the sidechain panel are what render them, while the run is still going.
    */
-  liveTurn: { sessionId?: string; seq?: number; stateId?: string; text: string } | null;
+  liveTurn: {
+    sessionId?: string;
+    seq?: number;
+    stateId?: string;
+    text: string;
+    thinking: string;
+    items: JsonValue[];
+    sidechains: Record<string, JsonValue[]>;
+  } | null;
   /**
    * The runs walked into below the open file — the tail of the Files view's address bar.
    *
@@ -542,6 +559,8 @@ const EMPTY: AppState = {
 
 /** Keep the live log bounded — a long run would otherwise grow without limit. */
 const STREAM_LIMIT = 300;
+/** Live stream items kept per position. An agent loop emits one per turn; the tail is what is read. */
+const LIVE_ITEM_LIMIT = 500;
 /** How many diagnostics the renderer keeps. The main process holds more; this is the visible tail. */
 const LOG_LIMIT = 2000;
 /** How many lines of a sync's own narration the panel keeps. Enough for a three-state run. */
@@ -1101,8 +1120,10 @@ export function useApp() {
         const detail = await invoke("task:detail", { taskId, ...(scope !== undefined ? { project: scope } : {}) });
         // The walk is checked against the tree it walks. A retry restarts instance ids, so a trail
         // held across one would offer crumbs into a run that no longer exists — and the address bar
-        // is the one surface that must not describe a place you cannot get to.
-        const trail = prunedTrail(ref.current.trail, detail.instances);
+        // is the one surface that must not describe a place you cannot get to. A sidechain step is
+        // also checked against its host's session where one is cached; an uncached session keeps
+        // the step, because the cache empties on every run boundary and that is not evidence.
+        const trail = prunedTrail(ref.current.trail, detail.instances, (instanceId) => ref.current.sessions[instanceId]);
         patch({ detail, ...(sameTrail(trail, ref.current.trail) ? {} : { trail }) });
         return detail;
       } catch {
@@ -1421,6 +1442,15 @@ export function useApp() {
         // A shared workflow's runs land here, and the Files inspector shows them beside its Run
         // button. Dropping this invalidate is what would leave that history one run behind.
         if (message.scope === "tasks") void refreshSharedTasks();
+        // …and except the task on SCREEN. A sync or a review runs in JaiRA's own project, and the
+        // person watching its conversation is owed the same refresh cadence as any selected task —
+        // dropping these is why a watched run showed nothing until it finished, then everything at
+        // once. The refreshers scope themselves to `selectedProject`, which is exactly `about`.
+        if (about === ref.current.selectedProject && message.scope === "task" && ref.current.selected !== null) {
+          void refreshDetail(ref.current.selected);
+          void refreshConversation(ref.current.selected);
+          void refreshSession(ref.current.selected, ref.current.sessionInstance);
+        }
         return;
       }
       switch (message.type) {
@@ -1485,6 +1515,17 @@ export function useApp() {
             }
             return;
           }
+          // A record lands when its operation settles, and the cached view of that instance was
+          // fetched while the record was still OPEN — empty, or missing its newest call. Dropping it
+          // makes the conversation panel refetch (it loads whatever is missing), and the live tail
+          // goes with it: the stored turn is the same content with its tool calls attached. Without
+          // this, a transcript watched from the start stayed empty after the run finished.
+          const ev = message.event as { type?: string; instanceId?: number };
+          if ((ev.type === "operation.completed" || ev.type === "operation.failed") && typeof ev.instanceId === "number") {
+            const { [ev.instanceId]: closed, ...rest } = ref.current.sessions;
+            if (closed !== undefined) patch({ sessions: rest, liveTurn: null });
+            else patch({ liveTurn: null });
+          }
           setState((s) => ({ ...s, stream: [...s.stream, line].slice(-STREAM_LIMIT) }));
           break;
         }
@@ -1504,6 +1545,9 @@ export function useApp() {
           void refreshDetail(ref.current.selected);
           void refreshState(ref.current.stateId);
           if (ref.current.selected !== null) void refreshConversation(ref.current.selected);
+          // Every cached transcript of the finished run was fetched while it could still grow. The
+          // panel refetches what it is showing; the live tail's record has landed with it.
+          if (message.taskId === ref.current.selected) patch({ sessions: {}, liveTurn: null });
           break;
         case "session:turn": {
           // Accumulated per position: a delta is a fragment, and the fragments of one call belong to one
@@ -1511,12 +1555,39 @@ export function useApp() {
           // different state speaking and concatenating two would invent a turn neither produced.
           const live = ref.current.liveTurn;
           const same = live !== null && live.sessionId === message.sessionId && live.seq === message.seq;
+          const items = same ? [...live.items] : [];
+          const sidechains = same ? { ...live.sidechains } : {};
+          let text = same ? live.text : "";
+          let thinking = same ? live.thinking : "";
+          if (message.item !== undefined) {
+            // A SUBAGENT's turn accumulates under the call that spawned it and nowhere else — the
+            // doorway row renders it there, and folding it into `items` is the misattribution the
+            // tag exists to prevent.
+            const item = message.item as { kind?: string; role?: string; parentToolUseId?: string };
+            if (typeof item.parentToolUseId === "string") {
+              const chain = [...(sidechains[item.parentToolUseId] ?? []), message.item];
+              sidechains[item.parentToolUseId] = chain.length > LIVE_ITEM_LIMIT ? chain.slice(-LIVE_ITEM_LIMIT) : chain;
+            } else {
+              items.push(message.item);
+              // A finished assistant turn carries the same text and thinking its deltas streamed — the
+              // tails restart so nothing is shown twice, once in the turn and once as the live edge.
+              if (item.kind === "message" && item.role === "assistant") {
+                text = "";
+                thinking = "";
+              }
+            }
+          }
+          if (message.text !== undefined) text += message.text;
+          if (message.thinking !== undefined) thinking += message.thinking;
           patch({
             liveTurn: {
               ...(message.sessionId !== undefined ? { sessionId: message.sessionId } : {}),
               ...(message.seq !== undefined ? { seq: message.seq } : {}),
               ...(message.stateId !== undefined ? { stateId: message.stateId } : {}),
-              text: same ? live.text + message.text : message.text,
+              text,
+              thinking,
+              items: items.length > LIVE_ITEM_LIMIT ? items.slice(-LIVE_ITEM_LIMIT) : items,
+              sidechains,
             },
           });
           break;
@@ -1612,6 +1683,23 @@ export function useApp() {
         patch({ trail: [...ref.current.trail.slice(0, index), stepOf(node)], inspect: "path" });
         void refreshSession(ref.current.selected, node.instanceId, ref.current.selectedProject ?? undefined);
         void refreshTrailState(node.stateId);
+      },
+
+      /**
+       * Walk into a SUBAGENT CONVERSATION — a doorway row, appended to the path as a step.
+       *
+       * The step names the HOST instance (the run whose session holds the chain) plus the call id
+       * that keys it; see `TrailStep.sidechain`. The host is a piece of whatever panel the doorway
+       * was clicked in, which may be deeper than the trail's tail — that is fine, because the step
+       * carries its own host rather than assuming the tail. No `trailState`: a sidechain declares
+       * no children, so there is no board to fetch columns for.
+       */
+      walkIntoSidechain: (node: InstanceNode, call: string, name: string) => {
+        patch({
+          trail: [...ref.current.trail, { instanceId: node.instanceId, stateId: node.stateId, sidechain: call, name }],
+          trailState: null,
+          inspect: "path",
+        });
       },
 
       /**
@@ -1823,6 +1911,26 @@ export function useApp() {
       cancelTask: async (taskId: string, project?: string) => {
         try {
           await invoke("task:cancel", { taskId, ...(project !== undefined ? { project } : {}) });
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /**
+       * Review a task's worktree edits (CHANGESETS.md). The call returns as soon as the review run
+       * starts; the reviewer itself arrives as a pending interaction and pops through the ordinary
+       * gate flow — nothing here waits on a human.
+       */
+      reviewChanges: async (taskId: string, project?: string) => {
+        try {
+          await invoke("changeset:review", { taskId, ...(project !== undefined ? { project } : {}) });
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /** The sync's proposals through the same gate — see `SyncSurface.reviewChangeset`. */
+      reviewSyncChangeset: async (layer: WorkflowLayer, path: string, changeset: Changeset) => {
+        try {
+          await invoke("changeset:reviewSync", { layer, path, changeset });
         } catch (e) {
           fail(e);
         }
@@ -2130,6 +2238,10 @@ export function useApp() {
             path: doc.path,
             direction,
             text,
+            // A states sync opens its review itself: the diff UI arrives as a pending interaction
+            // from main, so it reaches the user even if this await never resolves for them — a
+            // reloaded window, an hour-long run, a different view on screen.
+            ...(direction === "states" ? { review: true } : {}),
           });
           let drafts = ref.current.drafts;
           if (result.document !== undefined) {

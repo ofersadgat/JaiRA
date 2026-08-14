@@ -42,12 +42,15 @@ export function TaskHead({
   onStart,
   onCancel,
   onOpenState,
+  onReviewChanges,
   children,
 }: {
   detail: TaskDetail;
   onStart: () => void;
   onCancel: () => void;
   onOpenState?: (stateId: string) => void;
+  /** Review the worktree's edits as a changeset (CHANGESETS.md). Offered only when there is one. */
+  onReviewChanges?: () => void;
   /** Anything the reading wants beside the buttons — the toggle between two of them. */
   children?: ReactNode;
 }): JSX.Element {
@@ -78,6 +81,13 @@ export function TaskHead({
             Open state ↗
           </button>
         ) : null}
+        {onReviewChanges && detail.worktreePath ? (
+          // The flagship changeset flow: diff the worktree against its HEAD and walk the changes
+          // through the gate. The reviewer arrives as a pending interaction moments later.
+          <button className="ghost" onClick={onReviewChanges}>
+            Review changes
+          </button>
+        ) : null}
         {children}
       </div>
     </header>
@@ -96,16 +106,24 @@ export function TaskPanel({
   onStart,
   onCancel,
   onOpenState,
+  onReviewChanges,
 }: {
   detail: TaskDetail;
   stream: string[];
   onStart: () => void;
   onCancel: () => void;
   onOpenState?: (stateId: string) => void;
+  onReviewChanges?: () => void;
 }): JSX.Element {
   return (
     <div className="detail">
-      <TaskHead detail={detail} onStart={onStart} onCancel={onCancel} {...(onOpenState ? { onOpenState } : {})} />
+      <TaskHead
+        detail={detail}
+        onStart={onStart}
+        onCancel={onCancel}
+        {...(onOpenState ? { onOpenState } : {})}
+        {...(onReviewChanges ? { onReviewChanges } : {})}
+      />
       <TaskDetailSections detail={detail} stream={stream} />
     </div>
   );

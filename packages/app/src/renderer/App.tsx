@@ -27,7 +27,7 @@
  * away, and it stays visible while you are deep in the Files tree.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from "react";
-import type { ConfigLayer, PendingApproval, PendingInteraction } from "@jaira/shared/browser";
+import type { ConfigLayer, PendingApproval, PendingInteraction, WorkflowLayer } from "@jaira/shared/browser";
 import { Board } from "./board";
 import { ApprovalDialog, InteractionDialog } from "./components";
 import {
@@ -283,6 +283,36 @@ export default function App(): JSX.Element {
   const dirtyFiles = useMemo(() => new Set(Object.keys(state.drafts)), [state.drafts]);
 
   /**
+   * What the shell can lend a changeset reviewer beyond the defaults (CHANGESETS.md §8.2): the
+   * unsaved-edit map, and a way into the editor. Supplied to BOTH hosts — the gate modal and the
+   * conversation view — because a host's reach, not the component, is what decides these exist.
+   */
+  const reviewerServices = useMemo(
+    () => ({
+      drafts: new Map(Object.entries(state.drafts)),
+      openFile: (layer: string, path: string) => {
+        actions.setView("files");
+        actions.openPath(layer as WorkflowLayer, path);
+      },
+    }),
+    [state.drafts, actions],
+  );
+
+  /**
+   * The parked changeset gate whose task's conversation is ON SCREEN — §8.1's default host. `about`
+   * joins a review run to the task whose worktree it reviews; the review task itself matches too,
+   * for a reader who followed the run into JaiRA's own project. Everything else keeps the modal.
+   */
+  const inlineGate =
+    view === "tasks" &&
+    detail !== null &&
+    pending[0] !== undefined &&
+    pending[0].component === "user-approve-changeset" &&
+    (pending[0].about === detail.taskId || pending[0].taskId === detail.taskId)
+      ? pending[0]
+      : null;
+
+  /**
    * The Files tree's folded branches.
    *
    * Built once per render rather than inside the map over rows: `shutOf` materialises a Set, and
@@ -433,6 +463,7 @@ export default function App(): JSX.Element {
     trail: state.trail,
     trailState: state.trailState,
     onWalkInto: actions.walkInto,
+    onWalkIntoSidechain: actions.walkIntoSidechain,
     onWalkTo: actions.walkTo,
     onOpenFile: actions.openPath,
     onOpenDir: actions.openDir,
@@ -469,6 +500,7 @@ export default function App(): JSX.Element {
       cancel: actions.cancelSync,
       openEdit: actions.openSyncEdit,
       openDocument: actions.openPath,
+      reviewChangeset: actions.reviewSyncChangeset,
     },
     editorTab: state.editorTab,
     onEditorTab: actions.setEditorTab,
@@ -861,10 +893,18 @@ export default function App(): JSX.Element {
                     context={surfaces}
                     onStart={() => actions.startTask(detail.taskId, undefined, state.selectedProject ?? undefined)}
                     onCancel={() => actions.cancelTask(detail.taskId, state.selectedProject ?? undefined)}
+                    onReviewChanges={() => actions.reviewChanges(detail.taskId, state.selectedProject ?? undefined)}
                     onOpenState={(stateId) => {
                       actions.setView("files");
                       actions.selectState(stateId);
                     }}
+                    {...(inlineGate !== null
+                      ? {
+                          gate: inlineGate,
+                          onGate: (value: unknown) => actions.answer(inlineGate.requestId, value),
+                          gateServices: reviewerServices,
+                        }
+                      : {})}
                   />
                 ) : (
                   <p className="empty">Select a task.</p>
@@ -1004,11 +1044,14 @@ export default function App(): JSX.Element {
           error={state.error}
           onDecide={(decision, scope) => actions.decideApproval(state.approvals[0]!.requestId, decision, scope)}
         />
-      ) : pending.length > 0 ? (
+      ) : pending.length > 0 && inlineGate === null ? (
+        // The modal is the FALLBACK host now, not the only one (CHANGESETS.md §8.1): a changeset
+        // gate whose task's conversation is on screen renders there instead — see `inlineGate`.
         <InteractionDialog
           pending={pending[0]!}
           error={state.error}
           onSubmit={(value) => actions.answer(pending[0]!.requestId, value)}
+          services={reviewerServices}
         />
       ) : null}
 

@@ -54,6 +54,12 @@ export interface ToolEntry {
    * turn and this is the only thing that connects them across two.
    */
   callId?: string;
+  /**
+   * Set when this call SPAWNED a subagent whose conversation the record kept — the key into
+   * `SessionView.sidechains`. The row becomes the doorway: the subagent's turns render behind it,
+   * never folded into the thread they did not happen in.
+   */
+  sidechain?: string;
 }
 
 /**
@@ -410,6 +416,86 @@ function pairResults(entries: Array<TranscriptEntry | ResultPart>): TranscriptEn
   return out;
 }
 
+/** The answer being written right now: the text tail, the thinking tail, and every whole stream item so far. */
+export interface LiveTail {
+  text: string;
+  /** The reasoning being written, before its block lands on the finished turn. */
+  thinking?: string;
+  /** `{kind:"message", role, content}` turns and `{kind:"event", event}` passthroughs, in order. */
+  items?: readonly JsonValue[];
+  /**
+   * SUBAGENT turns streaming by, keyed by the spawning call — the live counterpart of
+   * `SessionView.sidechains`, which does not exist until the record closes. Kept out of `items`
+   * because they are not this thread's; the doorway row and the sidechain panel are where they
+   * render, while the run is still going.
+   */
+  sidechains?: Readonly<Record<string, readonly JsonValue[]>>;
+}
+
+/**
+ * One event as entries, wherever it came from — a live `{kind:"event"}` passthrough (the executor's
+ * event, payload nested under `provider_event`) or a record's stored provider event (the payload
+ * itself). Shown rather than dropped, named as well as it can be, raw payload behind the row — with
+ * ONE named exception: `stream_event` is delta bookkeeping whose content arrives again on the
+ * finished turn, and a row per fragment would bury the conversation under it.
+ */
+export function eventEntry(event: JsonValue): TranscriptEntry[] {
+  const e = (event ?? {}) as Record<string, unknown>;
+  if (e["type"] === "progress" && typeof e["message"] === "string") {
+    return [{ kind: "event", tone: "plain", text: e["message"] as string }];
+  }
+  if (e["type"] === "events_dropped") {
+    return [{ kind: "event", tone: "warn", text: `${String(e["count"] ?? "?")} stream events were dropped before anything could show them` }];
+  }
+  const payload = e["type"] === "provider_event" ? ((e["payload"] ?? {}) as Record<string, unknown>) : e;
+  if (payload["type"] === "stream_event") return [];
+  const type = typeof payload["type"] === "string" ? (payload["type"] as string) : "event";
+  const subtype = typeof payload["subtype"] === "string" ? (payload["subtype"] as string) : undefined;
+  return [{ kind: "tool", name: subtype !== undefined ? `${type}/${subtype}` : type, summary: "", args: payload as JsonValue }];
+}
+
+/**
+ * One live stream item as entries — the same reading a stored turn gets, before the record exists.
+ *
+ * A `message` item is a finished turn and goes through {@link messageOf} exactly as a stored one
+ * would, tool calls and all. Everything else is shown rather than dropped, named as well as it can
+ * be, with the raw payload behind the row: the contract with the person watching is that the whole
+ * stream reaches the screen in order, understood or not.
+ *
+ * `within` names the sidechain being rendered, when one is. A tagged turn renders only into ITS
+ * chain and an untagged one only into the main flow — the same rule read from both sides, and the
+ * reason a subagent's words can stream live without ever being misattributed to the thread that
+ * spawned it.
+ */
+export function liveItemEntries(item: JsonValue, within?: string): Array<TranscriptEntry | ResultPart> {
+  if (item === null || typeof item !== "object" || Array.isArray(item)) {
+    return [{ kind: "tool", name: "stream", summary: "", args: item }];
+  }
+  const rec = item as Record<string, unknown>;
+  if (rec["kind"] === "message") {
+    // A turn belongs to exactly one flow: the chain its tag names, or the main thread if untagged.
+    // Anywhere else it is withheld rather than misattributed.
+    if (rec["parentToolUseId"] !== within) return [];
+    const role = typeof rec["role"] === "string" ? (rec["role"] as string) : "assistant";
+    // The content is the provider's whole message object — {role, content} with provider-shaped
+    // parts — the very shape a stored turn holds, so it is read the same way.
+    const message = (rec["content"] ?? {}) as { content?: unknown };
+    if (typeof message.content === "string") return messageOf({ role, text: message.content });
+    const parts = Array.isArray(message.content) ? message.content : [];
+    const text = parts
+      .filter((p): p is { type: string; text: string } => (p as { type?: unknown })?.type === "text" && typeof (p as { text?: unknown }).text === "string")
+      .map((p) => p.text)
+      .join("");
+    return messageOf({
+      role,
+      ...(text.length > 0 ? { text } : {}),
+      ...(parts.length > 0 ? { parts: parts as JsonValue } : {}),
+    });
+  }
+  if (rec["kind"] === "event") return eventEntry(rec["event"] as JsonValue);
+  return [{ kind: "tool", name: "stream", summary: "", args: item }];
+}
+
 /**
  * One instance's transcript: its conversation, with the journal facts that belong to it.
  *
@@ -418,14 +504,30 @@ function pairResults(entries: Array<TranscriptEntry | ResultPart>): TranscriptEn
  * A journal turn carries a `stateId` and nothing finer, so a state that ran twice shows both passes'
  * events on both cards; the alternative is showing neither, and an event attributed to the right
  * state and the wrong iteration is still the right event.
+ *
+ * `live` is the stream so far — appended after the stored turns, in stream order, with the text
+ * tail last: while the record is open the stream IS the conversation, and everything on it is
+ * rendered whether or not it has a name here. A bare string is accepted for callers that only
+ * carry the text.
  */
 export function entriesOf(
   session: SessionView | null,
   journal: readonly ConversationTurn[] = [],
-  live?: string | null,
+  live?: LiveTail | string | null,
 ): TranscriptEntry[] {
   const said: Array<TranscriptEntry | ResultPart> = [];
-  for (const turn of session?.turns ?? []) said.push(...messageOf(turn));
+  // The record's provider events, spliced where they happened — an event's index counts the turns
+  // that preceded it, so it renders before the turn it interrupted.
+  const stored = session?.events ?? [];
+  let nextEvent = 0;
+  const turns = session?.turns ?? [];
+  for (const [i, turn] of turns.entries()) {
+    for (; nextEvent < stored.length && stored[nextEvent]!.index <= i; nextEvent++) {
+      said.push(...eventEntry(stored[nextEvent]!.event));
+    }
+    said.push(...messageOf(turn));
+  }
+  for (; nextEvent < stored.length; nextEvent++) said.push(...eventEntry(stored[nextEvent]!.event));
   // Across the whole conversation, not per turn: `tool_use` and its `tool_result` are on different
   // turns in every Anthropic-shaped record, which is most of them.
   const entries: TranscriptEntry[] = pairResults(said);
@@ -437,7 +539,57 @@ export function entriesOf(
   // turns is the order they were said in. Sorting them to the front by treating absent as zero
   // would put a whole conversation before the first event it caused.
   entries.sort((a, b) => ("at" in a ? (a.at ?? 0) : 0) - ("at" in b ? (b.at ?? 0) : 0));
-  if (live !== undefined && live !== null && live.length > 0) entries.push({ kind: "live", text: live });
+  const tail: LiveTail | null = typeof live === "string" ? { text: live } : (live ?? null);
+  if (tail !== null) {
+    const streamed: Array<TranscriptEntry | ResultPart> = [];
+    for (const item of tail.items ?? []) streamed.push(...liveItemEntries(item));
+    // Paired within the stream: a live tool_result answers a live tool_use, and the record's own
+    // entries are already settled above.
+    entries.push(...pairResults(streamed));
+    // Thinking before text, because that is the order a turn happens in — the model reasons, then
+    // answers. The tail is a thought row like any settled one, growing as the deltas arrive.
+    if (tail.thinking !== undefined && tail.thinking.length > 0) entries.push({ kind: "thought", text: tail.thinking });
+    if (tail.text.length > 0) entries.push({ kind: "live", text: tail.text });
+  }
+  // A call whose subagent conversation exists becomes the doorway to it — whether the record kept
+  // the chain, or its turns are still streaming by. After the live append on purpose: while the run
+  // is going the Task call itself is a live entry, and it is a doorway the moment its chain speaks.
+  const chains = session?.sidechains ?? {};
+  const liveChains = tail?.sidechains ?? {};
+  for (const entry of entries) {
+    if (entry.kind !== "tool" || entry.callId === undefined) continue;
+    if (chains[entry.callId] !== undefined || liveChains[entry.callId] !== undefined) entry.sidechain = entry.callId;
+  }
+  return entries;
+}
+
+/**
+ * A subagent conversation's entries — the turns behind one spawning call, read exactly the way the
+ * main thread is: same pairing, same thinking rows, same everything, because it IS a conversation
+ * and differs only in who was speaking.
+ *
+ * `live` is the chain's turns still streaming by (see {@link LiveTail.sidechains}), appended after
+ * whatever the record already holds — for an open record that is everything, because the sidechains
+ * land with the record at close.
+ *
+ * A spawning call INSIDE the chain is marked as a doorway of its own: a subagent that spawned a
+ * subagent keys the nested chain by its own call id in the same flat map, so the walk can continue.
+ */
+export function sidechainEntriesOf(
+  session: SessionView | null,
+  call: string,
+  live?: readonly JsonValue[],
+): TranscriptEntry[] {
+  const said: Array<TranscriptEntry | ResultPart> = [];
+  for (const turn of session?.sidechains?.[call] ?? []) said.push(...messageOf(turn));
+  for (const item of live ?? []) said.push(...liveItemEntries(item, call));
+  const entries = pairResults(said);
+  const chains = session?.sidechains ?? {};
+  for (const entry of entries) {
+    if (entry.kind === "tool" && entry.callId !== undefined && entry.callId !== call && chains[entry.callId] !== undefined) {
+      entry.sidechain = entry.callId;
+    }
+  }
   return entries;
 }
 

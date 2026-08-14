@@ -20,7 +20,7 @@
  * trail to its base rather than extending it, and why {@link prunedTrail} exists: a re-run restarts
  * instance ids, so steps that no longer resolve are steps about a run that no longer exists.
  */
-import type { InstanceNode } from "@jaira/shared/browser";
+import type { InstanceNode, SessionView } from "@jaira/shared/browser";
 
 /** One run in the path — the instance it names, and what it is called. */
 export interface TrailStep {
@@ -37,6 +37,17 @@ export interface TrailStep {
    * another and the only honest thing left to call it.
    */
   name?: string;
+  /**
+   * Set when this step walks into a SUBAGENT CONVERSATION rather than a run — the tool call id
+   * keying `SessionView.sidechains` on the HOST instance's session, which is what `instanceId`
+   * names here. A doorway row opened as a place of its own.
+   *
+   * The instance and state are the host's because a sidechain has neither: it is turns behind one
+   * call in somebody else's session, and the host is both how those turns are fetched and what the
+   * step has to keep resolving against. Nothing walks DEEPER from such a step except another
+   * sidechain — a nested spawn in the same flat map, under the same host.
+   */
+  sidechain?: string;
 }
 
 /** Find one instance anywhere in a task's tree. */
@@ -106,11 +117,25 @@ export function instanceOf(nodes: readonly InstanceNode[], stateId: string): Ins
  * belt-and-braces. Instance ids restart, so a re-run does not merely invalidate them — it REISSUES
  * them, and `#3` in the new run is a live node under a different state. On existence alone the crumb
  * survives, keeps its old label, and walks into someone else's run.
+ *
+ * A SIDECHAIN step is additionally checked against the host's session, when the caller can produce
+ * one: the conversation it names has to still be there. `sessionOf` answering undefined means "not
+ * fetched", and the step is KEPT — the cache is dropped on every run boundary, and cutting the walk
+ * because a refetch has not landed yet would throw you out of a conversation that still exists.
+ * Only a session that is loaded and lacks the key is proof the doorway is gone.
  */
-export function prunedTrail(trail: readonly TrailStep[], nodes: readonly InstanceNode[]): TrailStep[] {
+export function prunedTrail(
+  trail: readonly TrailStep[],
+  nodes: readonly InstanceNode[],
+  sessionOf?: (instanceId: number) => SessionView | undefined,
+): TrailStep[] {
   const kept: TrailStep[] = [];
   for (const step of trail) {
     if (nodeAt(nodes, step.instanceId)?.stateId !== step.stateId) break;
+    if (step.sidechain !== undefined) {
+      const session = sessionOf?.(step.instanceId);
+      if (session !== undefined && session.sidechains?.[step.sidechain] === undefined) break;
+    }
     kept.push(step);
   }
   return kept;

@@ -21,7 +21,9 @@
  * nothing to render that its own contents do not already show.
  */
 import type { JSX } from "react";
+import type { JsonValue } from "@declarative-ai/json";
 import type {
+  Changeset,
   ConfigLayer,
   DetectSchemaResult,
   ConfigView,
@@ -88,6 +90,13 @@ export interface SyncSurface {
    * have to find in the tree is a name that mostly does not get followed.
    */
   openDocument?: (layer: WorkflowLayer, path: string) => void;
+  /**
+   * Walk the sync's proposals through the changeset gate (CHANGESETS.md) instead of the drafts
+   * map: same reviewer as a worktree review, in rounds — a comment sends the changeset back to a
+   * model for revision — merged decisions applied, the baseline moved when the final round merged
+   * everything. The reviewer arrives as a pending interaction moments after this returns.
+   */
+  reviewChangeset?: (layer: WorkflowLayer, path: string, changeset: Changeset) => void;
 }
 
 /**
@@ -160,8 +169,17 @@ export interface FileSurfaceContext {
   sessionHistory: SessionRef[];
   session: SessionView | null;
   sessionInstance: number | null;
-  /** The answer being written right now, when there is one. */
-  liveTurn: { sessionId?: string; seq?: number; stateId?: string; text: string } | null;
+  /** The answer being written right now, when there is one — text and thinking tails, every stream item. */
+  liveTurn: {
+    sessionId?: string;
+    seq?: number;
+    stateId?: string;
+    text: string;
+    thinking: string;
+    items: JsonValue[];
+    /** Subagent turns streaming by, keyed by the spawning call — see `AppState.liveTurn`. */
+    sidechains: Record<string, JsonValue[]>;
+  } | null;
   onShowSession: (instanceId: number | null) => void;
   waiting?: { component: string } | undefined;
   onSelectTask: (taskId: string) => void;
@@ -181,6 +199,13 @@ export interface FileSurfaceContext {
   trailState?: StateView | null | undefined;
   /** Walk into a run: append it to the path and show it. */
   onWalkInto?: ((node: InstanceNode) => void) | undefined;
+  /**
+   * Walk into a SUBAGENT CONVERSATION: append a sidechain step to the path and show it.
+   *
+   * `node` is the HOST — the run whose session holds the chain under `call`; `name` is what the
+   * crumb will read. See `TrailStep.sidechain` for why the step names the host rather than a run.
+   */
+  onWalkIntoSidechain?: ((node: InstanceNode, call: string, name: string) => void) | undefined;
   /**
    * Walk SIDEWAYS: replace the path from `index` down with this run.
    *

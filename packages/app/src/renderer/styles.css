@@ -2986,6 +2986,165 @@ button.layer-on {
   font-family: ui-monospace, Consolas, monospace;
   font-size: 12px;
 }
+/* --- the changeset reviewer (CHANGESETS.md §8) --- */
+/* A multi-file review needs width the gate modal was never given; the host widens for it. */
+.modal-wide {
+  max-width: min(1100px, 94vw);
+  width: min(1100px, 94vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+.modal-wide .mount-host {
+  overflow: auto;
+  min-height: 0;
+}
+.changeset-source {
+  color: var(--dim);
+  font-size: 12px;
+  margin-top: 6px;
+}
+.change-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 12px;
+  background: var(--bg);
+}
+.change-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.change-action {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  color: var(--dim);
+}
+.change-action-create { color: var(--ok); }
+.change-action-delete { color: var(--bad); }
+.change-path { font-size: 12px; }
+.change-reason {
+  color: var(--dim);
+  font-size: 12px;
+  margin-top: 4px;
+}
+.change-unshowable {
+  color: var(--warn);
+  font-size: 12px;
+  margin-top: 8px;
+}
+.inline-diff {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  margin-top: 8px;
+  max-height: 300px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.diff-ctx { color: var(--dim); }
+.diff-fold { color: var(--dim); opacity: 0.7; font-style: italic; }
+.diff-label {
+  display: block;
+  color: var(--accent, var(--dim));
+  font-size: 11px;
+  opacity: 0.9;
+}
+.diff-del {
+  background: color-mix(in srgb, var(--bad) 16%, transparent);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.diff-add {
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+}
+.change-decisions button.selected {
+  outline: 2px solid var(--accent, var(--text));
+  outline-offset: -1px;
+}
+.change-comment,
+.change-editor {
+  width: 100%;
+  margin-top: 8px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+}
+.change-files-note {
+  color: var(--dim);
+  font-size: 11px;
+  margin-top: 6px;
+  min-height: 14px;
+}
+/* §3.2 and the unsaved-draft flag, surfaced on the card before anyone merges past them. */
+.change-drift {
+  color: var(--warn);
+  font-size: 12px;
+  margin-top: 6px;
+}
+button.link.change-path {
+  font-size: 12px;
+  font-family: ui-monospace, Consolas, monospace;
+}
+/* The conversation view hosting a parked review (§8.1's default host) — the newest turn, inline. */
+.inline-gate {
+  border-top: 2px solid var(--accent);
+  margin-top: 12px;
+  padding-top: 8px;
+}
+.inline-gate h3 {
+  font-size: 13px;
+  color: var(--text);
+}
+.inline-gate .changeset-review {
+  max-height: 60vh;
+  overflow: auto;
+}
+/* The full-pane diff view (§8.3): one change in Monaco, floated over the reviewer. */
+.diff-pane {
+  position: fixed;
+  inset: 3vh 3vw;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: var(--lift);
+}
+.diff-pane-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.diff-pane-spacer {
+  flex: 1;
+}
+.diff-pane .monaco-host {
+  flex: 1;
+  min-height: 0;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.diff-pane-loading {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: var(--dim);
+}
+
 /* The policy explanation on an approval dialog — informational, not an error. */
 .reason-note {
   color: var(--warn);
@@ -4413,6 +4572,71 @@ textarea.cfg-input {
   margin: 1px 0 6px 28px;
   padding-left: 12px;
   border-left: 1px solid var(--rule);
+}
+/* A subagent's conversation inside a call's row: the same page, one rule further in. */
+.ts-sidechain {
+  margin: 4px 0 8px;
+  padding: 6px 0 2px 10px;
+  border-left: 2px solid var(--accent, var(--rule));
+}
+.ts-sidechain-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+  margin-bottom: 4px;
+}
+/* The doorway as navigation: same quiet register as the head it sits in, readable as a control. */
+.ts-sidechain-open {
+  margin-left: auto;
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ts-sidechain-open:hover {
+  text-decoration: underline;
+}
+/* The task panel's own little address into a subagent walk — one crumb per doorway, root first. */
+.sc-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--dim);
+  border-bottom: 1px solid var(--rule);
+}
+.sc-crumb-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.sc-crumbs button.sc-crumb {
+  border: none;
+  background: none;
+  padding: 1px 4px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.sc-crumbs button.sc-crumb:hover {
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  color: var(--text);
+}
+.sc-crumb.last {
+  padding: 1px 4px;
+  color: var(--text);
 }
 .ts-payload {
   margin: 0;

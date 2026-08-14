@@ -7,7 +7,7 @@
  * with the file's own state as the fallback when nothing has been walked into.
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import type { FileTree, InstanceNode, StateView } from "@jaira/shared/browser";
+import type { FileTree, InstanceNode, SessionView, StateView } from "@jaira/shared/browser";
 import type { Crumb } from "../src/renderer/crumbs";
 import { crumbsOf, type CrumbInput } from "../src/renderer/files";
 import { standingOn } from "../src/renderer/runViews";
@@ -107,6 +107,37 @@ describe("pruning a trail against the run it describes", () => {
   it("compares by the instances named, which is what decides whether a patch is worth making", () => {
     expect(sameTrail(trail, [...trail])).toBe(true);
     expect(sameTrail(trail, trail.slice(0, 2))).toBe(false);
+  });
+
+  describe("a sidechain step — a subagent conversation on the path", () => {
+    const walk: TrailStep[] = [
+      { instanceId: 1, stateId: "plan" },
+      { instanceId: 3, stateId: "plan/critique", name: "critique" },
+      { instanceId: 3, stateId: "plan/critique", sidechain: "toolu_task", name: "⑂ explore" },
+    ];
+    const sessionWith = (chains: Record<string, unknown[]>): SessionView =>
+      ({ taskId: "t", runId: 1, instanceId: 3, seq: 0, turns: [], sidechains: chains }) as unknown as SessionView;
+
+    it("keeps the step while the host resolves and its session still holds the chain", () => {
+      expect(prunedTrail(walk, tree, () => sessionWith({ toolu_task: [] }))).toEqual(walk);
+    });
+
+    it("keeps the step when the host's session is simply not fetched — absence of the cache is not evidence", () => {
+      // The session cache empties on every run boundary; cutting the walk because a refetch has not
+      // landed would throw you out of a conversation that still exists.
+      expect(prunedTrail(walk, tree)).toEqual(walk);
+      expect(prunedTrail(walk, tree, () => undefined)).toEqual(walk);
+    });
+
+    it("cuts the step when the loaded session no longer holds the chain", () => {
+      expect(prunedTrail(walk, tree, () => sessionWith({ toolu_other: [] }))).toEqual(walk.slice(0, 2));
+      expect(prunedTrail(walk, tree, () => ({ turns: [] }) as unknown as SessionView)).toEqual(walk.slice(0, 2));
+    });
+
+    it("cuts the step when its HOST no longer resolves, like any other step", () => {
+      const gone = [node({ instanceId: 1, stateId: "plan" })];
+      expect(prunedTrail(walk, gone, () => sessionWith({ toolu_task: [] }))).toEqual([walk[0]]);
+    });
   });
 });
 
@@ -322,6 +353,35 @@ describe("the address bar's crumbs", () => {
     );
     expect(crumbs.at(-1)!.text).toBe("#12");
   });
+
+  it("draws a sidechain step by the doorway's name, with no chevron of its own", () => {
+    const crumbs = crumbsOf(
+      input({
+        trail: [
+          { instanceId: 1, stateId: "plan/draft" },
+          { instanceId: 1, stateId: "plan/draft", sidechain: "toolu_task", name: "⑂ explore the repo" },
+        ],
+      }),
+    );
+    const chain = crumbs.at(-1)!;
+    // Named at the doorway it was pushed from — NOT `#1`, which is its host, the crumb before it.
+    expect(`${chain.kind}:${chain.text}`).toBe("run:⑂ explore the repo");
+    // Its siblings would be the host session's other chains, which the bar has no session to list.
+    expect(chain.options).toBeUndefined();
+    // Where you are standing does nothing; one level up it is the way back.
+    expect(chain.go).toBeUndefined();
+    const back = crumbsOf(
+      input({
+        trail: [
+          { instanceId: 1, stateId: "plan/draft" },
+          { instanceId: 1, stateId: "plan/draft", sidechain: "toolu_task", name: "⑂ explore the repo" },
+          { instanceId: 1, stateId: "plan/draft", sidechain: "toolu_inner", name: "⑂ deeper" },
+        ],
+      }),
+    );
+    back.at(-2)!.go!();
+    expect(log).toEqual(["back:1"]);
+  });
 });
 
 /**
@@ -506,5 +566,20 @@ describe("standingOn — what the viewer shows", () => {
   it("stands on nothing when the trail names an instance the task no longer has", () => {
     const at = standingOn(state, context({ trail: [{ instanceId: 99, stateId: "plan/gone", name: "gone" }] }));
     expect(at.node).toBeUndefined();
+  });
+
+  it("says when the tail is a SUBAGENT CONVERSATION, standing on its host", () => {
+    const at = standingOn(
+      state,
+      context({
+        trail: [
+          { instanceId: 3, stateId: "plan/critique", name: "critique" },
+          { instanceId: 3, stateId: "plan/critique", sidechain: "toolu_task", name: "⑂ explore" },
+        ],
+      }),
+    );
+    expect(at.sidechain).toBe("toolu_task");
+    // The host is what has to resolve — the chain lives in ITS session.
+    expect(at.node?.instanceId).toBe(3);
   });
 });

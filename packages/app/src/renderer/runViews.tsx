@@ -13,12 +13,22 @@
  * single card cannot be clicked into three different transcripts.
  */
 import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
-import type { ChatPlanView, ChatSettings, InstanceNode, StateChild, StateView, TaskDetail } from "@jaira/shared/browser";
+import type {
+  ChatPlanView,
+  ChatSettings,
+  InstanceNode,
+  PendingInteraction,
+  StateChild,
+  StateView,
+  TaskDetail,
+} from "@jaira/shared/browser";
 import { Board, Column, Tile } from "./board";
+import { ChangesetGate } from "./components";
+import type { ComponentServices } from "./changesetReview";
 import { TaskDetailSections, TaskHead } from "./detail";
-import { entriesOf, journalFor, signatureOf } from "./transcript";
-import { instanceOf as instanceOfState, nodeAt } from "./trail";
-import { Transcript, durationOf } from "./transcriptView";
+import { entriesOf, journalFor, sidechainEntriesOf, signatureOf } from "./transcript";
+import { instanceOf as instanceOfState, nodeAt, prunedTrail, type TrailStep } from "./trail";
+import { Paper, Transcript, durationOf } from "./transcriptView";
 import { bandsOf, instancesOf, piecesOf, type SessionPiece } from "./sessionBands";
 import { SessionBandsView } from "./sessionPanels";
 import type { FileSurfaceProps } from "./fileTypes";
@@ -186,13 +196,21 @@ export function RunConversation({
   parent,
   detail,
   context,
+  onOpenSidechain,
 }: {
   /** The run whose conversation this is. Undefined ⇒ nothing has run here yet. */
   parent: InstanceNode | undefined;
   detail: TaskDetail | null;
   context: FileSurfaceProps["context"];
+  /**
+   * Where "walk into this subagent conversation" goes, when this panel's host has somewhere for it.
+   * Defaults to the trail (`context.onWalkIntoSidechain`); the task panel passes its own stack.
+   * The node is the PIECE the doorway was clicked in — the host whose session holds the chain.
+   */
+  onOpenSidechain?: ((node: InstanceNode, call: string, name: string) => void) | undefined;
 }): JSX.Element {
   const { conversation, liveTurn, sessions, sessionHistory, onLoadSessions } = context;
+  const openSidechain = onOpenSidechain ?? context.onWalkIntoSidechain;
   // The history spans every run of the task and instance ids restart on each, so an unscoped join
   // would match this run's `#i2` against three older runs' as well. The instance tree is the latest
   // run's, and this is the id that goes with it.
@@ -220,18 +238,26 @@ export function RunConversation({
   const render = (piece: SessionPiece): ReactNode => {
     const view = sessions[piece.node.instanceId];
     if (view === undefined) return <p className="empty">Loading…</p>;
-    const live =
-      liveTurn === null
-        ? null
-        : piece.sessionId !== undefined
-          ? liveTurn.sessionId === piece.sessionId && liveTurn.seq === piece.seq
-            ? liveTurn.text
-            : null
-          : liveTurn.stateId === piece.node.stateId && piece.node.status === "running"
-            ? liveTurn.text
-            : null;
+    const matches =
+      liveTurn !== null &&
+      (piece.sessionId !== undefined
+        ? liveTurn.sessionId === piece.sessionId && liveTurn.seq === piece.seq
+        : liveTurn.stateId === piece.node.stateId && piece.node.status === "running");
+    // The whole tail, not just its text: the items are the tool calls and events streaming by, and
+    // they belong in this panel the moment they happen rather than when the record closes —
+    // sidechains included, which is what lets a doorway row show its subagent talking live.
+    const live = matches ? liveTurn : null;
     const entries = entriesOf(view, journalFor(conversation?.turns ?? [], piece.node.stateId), live);
-    return <Transcript session={view} entries={entries} />;
+    return (
+      <Transcript
+        session={view}
+        entries={entries}
+        live={live}
+        {...(openSidechain !== undefined
+          ? { onOpenSidechain: (call: string, name: string) => openSidechain(piece.node, call, name) }
+          : {})}
+      />
+    );
   };
 
   return (
@@ -242,6 +268,64 @@ export function RunConversation({
       {/* Pinned below the scroller, not inside it: what you are about to say does not scroll away
           with what was already said. */}
       <ChatComposer taskId={detail.taskId} instanceId={parent?.instanceId} project={context.project} />
+    </div>
+  );
+}
+
+/**
+ * A subagent conversation as a PANEL — what a sidechain step at the end of the path shows.
+ *
+ * The same reading the doorway row folds open, standing on its own page: the host instance's
+ * session is fetched the way any panel's is, the chain behind `step.sidechain` is read the way the
+ * main thread is (`sidechainEntriesOf`), and turns still streaming by are appended from the live
+ * tail. No composer — a sidechain is somebody else's conversation, already over or still being had,
+ * and there is no session of this state's to continue.
+ *
+ * Doorways INSIDE the chain walk deeper: a nested spawn keys its own chain in the same flat map,
+ * under the same host, so `onOpen` pushes another sidechain step with the same instance on it.
+ */
+export function SidechainConversation({
+  step,
+  context,
+  onOpen,
+}: {
+  /** The sidechain step being stood on. `step.sidechain` is set — that is what makes it one. */
+  step: TrailStep;
+  context: FileSurfaceProps["context"];
+  /** Where a nested doorway goes. Defaults to the trail, like the panel this mirrors. */
+  onOpen?: ((node: InstanceNode, call: string, name: string) => void) | undefined;
+}): JSX.Element {
+  const { sessions, onLoadSessions, liveTurn } = context;
+  const call = step.sidechain ?? "";
+  const view = sessions[step.instanceId] ?? null;
+  // The host node, for pushing nested steps — and the honest answer when it is gone.
+  const host = nodeAt(context.detail?.instances ?? [], step.instanceId);
+  const open = onOpen ?? context.onWalkIntoSidechain;
+
+  useEffect(() => {
+    if (sessions[step.instanceId] === undefined) onLoadSessions([step.instanceId]);
+  }, [sessions, step.instanceId, onLoadSessions]);
+
+  const liveItems = liveTurn?.sidechains[call];
+  const entries = useMemo(() => sidechainEntriesOf(view, call, liveItems), [view, call, liveItems]);
+
+  if (step.sidechain === undefined) return <p className="empty">This step is not a subagent conversation.</p>;
+  if (view === null && liveItems === undefined) return <p className="empty">Loading…</p>;
+  return (
+    <div className="run-convo-wrap">
+      <div className="run-convo scroll">
+        <Paper>
+          <Transcript
+            session={view}
+            entries={entries}
+            live={liveTurn}
+            empty="This subagent has not said anything yet."
+            {...(open !== undefined && host !== undefined
+              ? { onOpenSidechain: (nested: string, name: string) => open(host, nested, name) }
+              : {})}
+          />
+        </Paper>
+      </div>
     </div>
   );
 }
@@ -358,6 +442,16 @@ export function RunView({ context }: { context: FileSurfaceProps["context"] }): 
   // draw for it, so its conversation is the only reading, whatever the toggle says.
   const board = mode === "board" && (declared.length > 0 || (node?.children.length ?? 0) > 0);
 
+  // A sidechain tail is its own kind of place: a subagent conversation has no board and no children
+  // of its own, so the panel is that conversation whatever the toggle says.
+  if (tail?.sidechain !== undefined) {
+    return (
+      <div className="composite">
+        <SidechainConversation step={tail} context={context} />
+      </div>
+    );
+  }
+
   if (node === undefined) return <p className="empty">This task has not run here yet.</p>;
   return (
     <div className="composite">
@@ -398,6 +492,10 @@ export function TaskContext({
   onStart,
   onCancel,
   onOpenState,
+  onReviewChanges,
+  gate,
+  onGate,
+  gateServices,
 }: {
   detail: TaskDetail;
   stream: string[];
@@ -405,15 +503,42 @@ export function TaskContext({
   onStart: () => void;
   onCancel: () => void;
   onOpenState?: ((stateId: string) => void) | undefined;
+  onReviewChanges?: (() => void) | undefined;
+  /**
+   * A parked changeset gate ABOUT this task, hosted here rather than in the modal — §8.1's default
+   * host: a review is part of what happened in this conversation, and reading it here is where
+   * someone will look for it.
+   */
+  gate?: PendingInteraction | undefined;
+  onGate?: ((value: unknown) => void) | undefined;
+  gateServices?: Partial<ComponentServices> | undefined;
 }): JSX.Element {
   const [mode, setMode] = useState<"conversation" | "detail">("conversation");
   // The task's own root run. A task that has never run has none, and the conversation says so.
   const root = detail.instances[0];
+  /**
+   * The subagent conversations walked into, as a LOCAL stack — this panel has no address bar, so
+   * the steps live here rather than on the trail. Same shape, same pruning rule: the steps are
+   * `TrailStep`s and `prunedTrail` is what keeps them honest against a task that re-ran. Reset on a
+   * selection change for the same reason the trail is — instance ids name one task's run only.
+   */
+  const [chain, setChain] = useState<TrailStep[]>([]);
+  useEffect(() => setChain([]), [detail.taskId]);
+  const hops = prunedTrail(chain, detail.instances, (id) => context.sessions[id]);
+  const pushHop = (node: InstanceNode, call: string, name: string): void =>
+    setChain([...hops, { instanceId: node.instanceId, stateId: node.stateId, sidechain: call, name }]);
+  const standing = hops[hops.length - 1];
 
   if (mode === "detail") {
     return (
       <div className="detail">
-        <TaskHead detail={detail} onStart={onStart} onCancel={onCancel} {...(onOpenState ? { onOpenState } : {})}>
+        <TaskHead
+          detail={detail}
+          onStart={onStart}
+          onCancel={onCancel}
+          {...(onOpenState ? { onOpenState } : {})}
+          {...(onReviewChanges ? { onReviewChanges } : {})}
+        >
           <button className="ghost" onClick={() => setMode("conversation")}>
             Conversation
           </button>
@@ -425,12 +550,66 @@ export function TaskContext({
 
   return (
     <div className="detail task-context">
-      <TaskHead detail={detail} onStart={onStart} onCancel={onCancel} {...(onOpenState ? { onOpenState } : {})}>
+      <TaskHead
+        detail={detail}
+        onStart={onStart}
+        onCancel={onCancel}
+        {...(onOpenState ? { onOpenState } : {})}
+        {...(onReviewChanges ? { onReviewChanges } : {})}
+      >
         <button className="ghost" onClick={() => setMode("detail")}>
           Details
         </button>
       </TaskHead>
-      <RunConversation parent={root} detail={detail} context={context} />
+      {standing !== undefined ? (
+        <>
+          {/* The way back out: the panel's own little address, one crumb per doorway walked
+              through, with the conversation itself as the root. The same reading the address bar
+              gives the same walk in the middle column — smaller, because this panel is. */}
+          <div className="sc-crumbs">
+            <button type="button" className="sc-crumb" onClick={() => setChain([])}>
+              Conversation
+            </button>
+            {hops.map((hop, i) => (
+              <span key={`${hop.instanceId}:${hop.sidechain}`} className="sc-crumb-part">
+                <span className="crumb-sep">›</span>
+                {i === hops.length - 1 ? (
+                  <span className="sc-crumb last">{hop.name ?? hop.sidechain}</span>
+                ) : (
+                  <button type="button" className="sc-crumb" onClick={() => setChain(hops.slice(0, i + 1))}>
+                    {hop.name ?? hop.sidechain}
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+          <SidechainConversation step={standing} context={context} onOpen={pushHop} />
+        </>
+      ) : (
+        <RunConversation parent={root} detail={detail} context={context} onOpenSidechain={pushHop} />
+      )}
+      {gate !== undefined && onGate !== undefined ? (
+        // The newest thing in this conversation IS the review — rendered as its latest turn, not
+        // floated over it. The same ChangesetGate the modal mounts, exercised by a second host,
+        // which is what the mount contract is FOR (CHANGESETS.md §8.1).
+        <section className="inline-gate" data-testid="inline-gate">
+          <h3>Review requested</h3>
+          {gate.configError !== undefined ? (
+            <p className="reason">
+              This state&apos;s <code>{gate.component}</code> config is invalid: {gate.configError}
+            </p>
+          ) : gate.config?.component === "user-approve-changeset" ? (
+            <ChangesetGate
+              config={gate.config}
+              inputs={gate.inputs as Record<string, unknown>}
+              onSubmit={onGate}
+              about={gate.about}
+              services={gateServices}
+              mountKey={gate.requestId}
+            />
+          ) : null}
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -467,7 +646,14 @@ export function RunModeToggle({ mode, onMode }: { mode: RunMode; onMode: (mode: 
 export function standingOn(
   state: StateView,
   context: FileSurfaceProps["context"],
-): { node: InstanceNode | undefined; stateId: string; declared: readonly StateChild[]; deep: boolean } {
+): {
+  node: InstanceNode | undefined;
+  stateId: string;
+  declared: readonly StateChild[];
+  deep: boolean;
+  /** Set when the tail is a SUBAGENT CONVERSATION — `node` is then its host. See `TrailStep.sidechain`. */
+  sidechain?: string;
+} {
   const detail = context.detail;
   const tail = context.trail?.at(-1);
   if (tail === undefined) {
@@ -487,6 +673,7 @@ export function standingOn(
     // instance tree's own answer and misses only the children nothing reached.
     declared: deep ? (context.trailState?.children ?? []) : state.children,
     deep,
+    ...(tail.sidechain !== undefined ? { sidechain: tail.sidechain } : {}),
   };
 }
 
@@ -515,6 +702,17 @@ export function CompositeView(props: FileSurfaceProps & { state: StateView }): J
   const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
 
   const at = standingOn(state, context);
+
+  // Standing on a sidechain step: the view is that subagent conversation, and neither reading of a
+  // composite applies — there is no board a conversation could declare.
+  const tailStep = context.trail?.at(-1);
+  if (at.sidechain !== undefined && tailStep !== undefined) {
+    return (
+      <div className="composite">
+        <SidechainConversation step={tailStep} context={context} />
+      </div>
+    );
+  }
 
   /**
    * Clicking a card walks into it. Without a host that can — a surface rendered outside the shell —

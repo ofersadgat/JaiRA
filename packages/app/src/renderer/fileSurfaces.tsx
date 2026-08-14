@@ -20,8 +20,9 @@ import {
   type WorkflowSource,
 } from "@jaira/shared/browser";
 import { Badge } from "./board";
-import { CompositeView } from "./runViews";
+import { CompositeView, SidechainConversation } from "./runViews";
 import { entriesOf, journalFor } from "./transcript";
+import { nodeAt } from "./trail";
 import { Paper, Transcript } from "./transcriptView";
 import { docKey, useDraftBox } from "./drafts";
 import { EditorActions } from "./editorChrome";
@@ -205,10 +206,26 @@ export function YamlView({ doc }: FileSurfaceProps): JSX.Element {
 function LeafPanel({ context }: FileSurfaceProps): JSX.Element {
   const { state, selected, conversation, waiting, onSelectTask, onAnswer } = context;
   const { session, liveTurn } = context;
+  // The whole tail: text, thinking, items — and the sidechains, which are what turns a Task row
+  // into a doorway while its subagent is still talking.
   const entries = useMemo(
-    () => entriesOf(session, journalFor(conversation?.turns ?? [], state?.stateId), liveTurn?.text ?? null),
+    () => entriesOf(session, journalFor(conversation?.turns ?? [], state?.stateId), liveTurn),
     [session, conversation, state?.stateId, liveTurn],
   );
+  // The host of any doorway in THIS transcript is the instance whose session is on screen — what a
+  // sidechain step has to name for the walk to keep resolving. See `TrailStep.sidechain`.
+  const host = context.sessionInstance !== null ? nodeAt(context.detail?.instances ?? [], context.sessionInstance) : undefined;
+  const onWalkIntoSidechain = context.onWalkIntoSidechain;
+  // Standing on a sidechain step: the panel is that subagent conversation, exactly as it is for a
+  // composite — a leaf's walk is shorter, not different.
+  const tail = context.trail?.at(-1);
+  if (tail?.sidechain !== undefined) {
+    return (
+      <div className="composite">
+        <SidechainConversation step={tail} context={context} />
+      </div>
+    );
+  }
   if (state === null) return <p className="empty">No state loaded.</p>;
   return (
     <div className="leaf">
@@ -250,7 +267,11 @@ function LeafPanel({ context }: FileSurfaceProps): JSX.Element {
           <Transcript
             session={session}
             entries={entries}
+            live={liveTurn}
             empty={selected === null ? "Select a run to see what it said." : undefined}
+            {...(onWalkIntoSidechain !== undefined && host !== undefined
+              ? { onOpenSidechain: (call: string, name: string) => onWalkIntoSidechain(host, call, name) }
+              : {})}
           />
         </Paper>
         {waiting ? (

@@ -14,6 +14,7 @@ import {
   journalFor,
   messagePartsOf,
   previewOf,
+  sidechainEntriesOf,
   signatureOf,
   type ToolEntry,
   type TranscriptEntry,
@@ -139,6 +140,70 @@ describe("building the entry list", () => {
     ]);
   });
 
+  it("renders live stream items in order — whole turns, tools included, before the text tail", () => {
+    // What arrives over `session:turn` while the record is still open (the record persists only at
+    // close). A finished turn reads exactly as a stored one would; the text tail comes last.
+    const entries = entriesOf(session([{ role: "user", text: "go" }] as never), [], {
+      text: "and now…",
+      items: [
+        {
+          kind: "message",
+          role: "assistant",
+          content: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Read", input: { path: "a.txt" } }] },
+        },
+        { kind: "message", role: "user", content: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ZEPHYR" }] } },
+        { kind: "message", role: "assistant", content: { role: "assistant", content: [{ type: "text", text: "found it" }] } },
+      ],
+    });
+    expect(entries.map((e) => e.kind)).toEqual(["message", "tool", "message", "live"]);
+    // The live tool_result found its live tool_use: the row has a verdict and a payload.
+    const call = entries.find((e): e is ToolEntry => e.kind === "tool");
+    expect(call).toMatchObject({ name: "Read", ok: true, result: "ZEPHYR" });
+  });
+
+  it("shows the thinking tail as it streams, before the answer's own tail", () => {
+    // The order a turn happens in: the model reasons, then answers. Both tails grow live.
+    const entries = entriesOf(session([] as never), [], { text: "The plan is…", thinking: "check the goals first" });
+    expect(entries.map((e) => e.kind)).toEqual(["thought", "live"]);
+    expect(entries[0]).toMatchObject({ text: "check the goals first" });
+  });
+
+  it("drops stream_event delta bookkeeping instead of burying the conversation under it", () => {
+    // Tool arguments assemble one fragment per event; their content arrives readable on the
+    // finished turn, and the text/thinking deltas already travel as the tails.
+    const entries = entriesOf(session([] as never), [], {
+      text: "",
+      items: [
+        { kind: "event", event: { type: "provider_event", payload: { type: "stream_event", event: { type: "content_block_delta", delta: { type: "input_json_delta", partial_json: '{"pa' } } } } },
+      ],
+    });
+    expect(entries).toEqual([]);
+  });
+
+  it("withholds a subagent's live turn from the main flow rather than misattributing it", () => {
+    const entries = entriesOf(session([] as never), [], {
+      text: "",
+      items: [
+        { kind: "message", role: "assistant", parentToolUseId: "toolu_task", content: { role: "assistant", content: [{ type: "text", text: "subagent says" }] } },
+      ],
+    });
+    expect(entries).toEqual([]);
+  });
+
+  it("shows a stream event it does not understand rather than dropping it", () => {
+    const entries = entriesOf(session([] as never), [], {
+      text: "",
+      items: [
+        { kind: "event", event: { type: "provider_event", payload: { type: "system", subtype: "compact_boundary" } } },
+        { kind: "event", event: { type: "progress", message: "warming up" } },
+      ],
+    });
+    // Named as well as it can be, raw payload behind the row — a gap in an hour-long run is worse
+    // than an unfamiliar name.
+    expect(entries[0]).toMatchObject({ kind: "tool", name: "system/compact_boundary" });
+    expect(entries[1]).toMatchObject({ kind: "event", text: "warming up" });
+  });
+
   it("puts the live turn last, because it has not finished happening", () => {
     const entries = entriesOf(session([{ role: "user", text: "go" }] as never), [], "writing…");
     expect(entries.at(-1)).toEqual({ kind: "live", text: "writing…" });
@@ -147,6 +212,120 @@ describe("building the entry list", () => {
   it("adds nothing for an empty live delta", () => {
     expect(entriesOf(session([] as never), [], "")).toEqual([]);
     expect(entriesOf(null, [], null)).toEqual([]);
+  });
+});
+
+describe("subagent conversations", () => {
+  const view = {
+    ...session([
+      { role: "assistant", parts: [{ type: "tool_use", id: "toolu_task", name: "Task", input: { prompt: "explore" } }] },
+      { role: "user", parts: [{ type: "tool_result", tool_use_id: "toolu_task", content: "the report" }] },
+    ] as never),
+    sidechains: {
+      toolu_task: [
+        { role: "assistant", text: "I am the subagent", parts: [{ type: "text", text: "I am the subagent" }] },
+        { role: "user", parts: [{ type: "tool_result", tool_use_id: "toolu_sub", content: "sub data" }] },
+      ],
+    },
+  } as never;
+
+  it("marks the spawning call as the doorway, and keeps the subagent out of the main thread", () => {
+    const entries = entriesOf(view);
+    const task = entries.find((e): e is ToolEntry => e.kind === "tool" && e.name === "Task");
+    expect(task?.sidechain).toBe("toolu_task");
+    // Nothing the subagent said appears in the main flow.
+    expect(JSON.stringify(entries)).not.toContain("I am the subagent");
+  });
+
+  it("reads the sidechain as a conversation of its own, pairing and all", () => {
+    const sub = sidechainEntriesOf(view, "toolu_task");
+    expect(sub.some((e) => e.kind === "message" && (e as { text?: string }).text === "I am the subagent")).toBe(true);
+    // An unknown call is an empty conversation, not an error.
+    expect(sidechainEntriesOf(view, "toolu_nope")).toEqual([]);
+  });
+
+  it("marks a doorway INSIDE a sidechain, so a subagent's subagent can be walked into", () => {
+    const nested = {
+      ...session([] as never),
+      sidechains: {
+        toolu_outer: [
+          { role: "assistant", parts: [{ type: "tool_use", id: "toolu_inner", name: "Task", input: { prompt: "go deeper" } }] },
+        ],
+        toolu_inner: [{ role: "assistant", text: "deepest", parts: [{ type: "text", text: "deepest" }] }],
+      },
+    } as never;
+    const sub = sidechainEntriesOf(nested, "toolu_outer");
+    const inner = sub.find((e): e is ToolEntry => e.kind === "tool" && e.name === "Task");
+    expect(inner?.sidechain).toBe("toolu_inner");
+  });
+
+  it("marks a LIVE spawning call as the doorway before any record of the chain exists", () => {
+    // While the run is going, the Task call is itself a live item and its chain has only the live
+    // tail's turns — the doorway must open the moment the subagent first speaks.
+    const entries = entriesOf(session([] as never), [], {
+      text: "",
+      items: [
+        {
+          kind: "message",
+          role: "assistant",
+          content: { role: "assistant", content: [{ type: "tool_use", id: "toolu_live", name: "Task", input: { prompt: "explore" } }] },
+        },
+      ],
+      sidechains: {
+        toolu_live: [
+          { kind: "message", role: "assistant", parentToolUseId: "toolu_live", content: { role: "assistant", content: [{ type: "text", text: "sub here" }] } },
+        ],
+      },
+    });
+    const task = entries.find((e): e is ToolEntry => e.kind === "tool" && e.name === "Task");
+    expect(task?.sidechain).toBe("toolu_live");
+    // The subagent's words still stay out of the main flow.
+    expect(JSON.stringify(entries)).not.toContain("sub here");
+  });
+
+  it("renders a chain's live turns inside its own conversation, tools paired and all", () => {
+    const live = [
+      {
+        kind: "message",
+        role: "assistant",
+        parentToolUseId: "toolu_task",
+        content: { role: "assistant", content: [{ type: "tool_use", id: "toolu_sub2", name: "Read", input: { path: "a.txt" } }] },
+      },
+      {
+        kind: "message",
+        role: "user",
+        parentToolUseId: "toolu_task",
+        content: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_sub2", content: "AZIMUTH" }] },
+      },
+    ];
+    // Appended after whatever the record already holds — for an open record that is everything.
+    const sub = sidechainEntriesOf(view, "toolu_task", live as never);
+    const call = sub.find((e): e is ToolEntry => e.kind === "tool" && e.name === "Read");
+    expect(call).toMatchObject({ ok: true, result: "AZIMUTH" });
+    // And with no record at all, the live turns alone are the conversation.
+    const bare = sidechainEntriesOf(null, "toolu_task", live as never);
+    expect(bare.find((e): e is ToolEntry => e.kind === "tool")?.result).toBe("AZIMUTH");
+  });
+
+  it("keeps a live turn tagged for ANOTHER chain out of the one being read", () => {
+    const stray = [
+      { kind: "message", role: "assistant", parentToolUseId: "toolu_other", content: { role: "assistant", content: [{ type: "text", text: "wrong room" }] } },
+    ];
+    expect(JSON.stringify(sidechainEntriesOf(view, "toolu_task", stray as never))).not.toContain("wrong room");
+  });
+});
+
+describe("stored provider events", () => {
+  it("splices each event where it happened among the turns", () => {
+    const view = {
+      ...session([
+        { role: "user", text: "go" },
+        { role: "assistant", text: "done" },
+      ] as never),
+      events: [{ index: 1, event: { type: "system", subtype: "compact_boundary" } }],
+    } as never;
+    const entries = entriesOf(view);
+    expect(entries.map((e) => (e.kind === "tool" ? e.name : e.kind))).toEqual(["message", "system/compact_boundary", "message"]);
   });
 });
 

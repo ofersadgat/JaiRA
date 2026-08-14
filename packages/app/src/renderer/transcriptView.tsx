@@ -44,13 +44,26 @@ import { Icon } from "./icons";
 import {
   blocksOf,
   iconOf,
+  sidechainEntriesOf,
   signatureOf,
+  type LiveTail,
   type MessageEntry,
   type SignatureParam,
   type ToolEntry,
   type TranscriptEntry,
   type WorkEntry,
 } from "./transcript";
+
+/** Renders one spawning call's subagent conversation — supplied by the Transcript that has the session. */
+type SidechainOf = (call: string) => TranscriptEntry[];
+
+/**
+ * Walk into a subagent conversation — make the doorway a PLACE rather than a fold.
+ *
+ * Supplied by a host that has somewhere to put the step: the Files/Tasks walk pushes it on the
+ * trail, the task panel on its own local stack. The name is what the crumb will read.
+ */
+type OpenSidechain = (call: string, name: string) => void;
 
 /** `09:14:02`. Seconds included: the gap between two calls is the thing being read. */
 function clockOf(at: number | undefined): string {
@@ -154,16 +167,53 @@ function Row({
  * otherwise — so a call you opened to find out what it was asked answered with what it returned
  * instead, and a record that kept neither printed the word `null`.
  */
-function Tool({ entry }: { entry: ToolEntry }): JSX.Element {
+function Tool({
+  entry,
+  sidechainOf,
+  onOpenSidechain,
+}: {
+  entry: ToolEntry;
+  sidechainOf?: SidechainOf | undefined;
+  onOpenSidechain?: OpenSidechain | undefined;
+}): JSX.Element {
+  const sub = entry.sidechain !== undefined && sidechainOf !== undefined ? sidechainOf(entry.sidechain) : undefined;
+  // What the crumb will read: the call's first argument is the Task's short description, which is
+  // the one name a person chose for this subagent. The tool's own name is the honest fallback.
+  const chainName = `⑂ ${entry.summary.length > 0 ? entry.summary : entry.name}`;
   return (
     <Row
       entry={entry}
       name={entry.name}
-      preview={entry.summary}
+      preview={entry.sidechain !== undefined ? `⑂ ${entry.summary}` : entry.summary}
       tone={entry.ok === false ? "bad" : "plain"}
       mark={entry.ok === undefined ? "waiting" : entry.ok ? "ok" : "bad"}
       body={
         <>
+          {/* The subagent's conversation, first: it is what this call DID, and the arguments and
+              report below are its envelope. A conversation inside a conversation renders as one —
+              same component, one rule down the left edge — because it is one. */}
+          {entry.sidechain !== undefined && (sub !== undefined || onOpenSidechain !== undefined) ? (
+            <div className="ts-sidechain">
+              <div className="ts-sidechain-head">
+                <span>subagent conversation{sub !== undefined ? ` · ${sub.length} entries` : ""}</span>
+                {onOpenSidechain !== undefined ? (
+                  // The doorway as NAVIGATION: the same conversation, as the last element of the
+                  // address instead of a fold inside a row — which is what makes it a place you can
+                  // stand in, and walk back out of.
+                  <button
+                    type="button"
+                    className="ts-sidechain-open"
+                    onClick={() => onOpenSidechain(entry.sidechain!, chainName)}
+                  >
+                    walk in →
+                  </button>
+                ) : null}
+              </div>
+              {sub !== undefined ? (
+                <Transcript entries={sub} {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})} />
+              ) : null}
+            </div>
+          ) : null}
           <Payload label="arguments" value={entry.args} />
           {/* A call still in flight has no result, and saying so is different from showing an empty
               one — which is why this is absent rather than an empty block. */}
@@ -179,8 +229,24 @@ function Tool({ entry }: { entry: ToolEntry }): JSX.Element {
 }
 
 /** One entry of work, dispatched by kind. All three land on the same {@link Row}. */
-function Work({ entry }: { entry: WorkEntry }): JSX.Element {
-  if (entry.kind === "tool") return <Tool entry={entry} />;
+function Work({
+  entry,
+  sidechainOf,
+  onOpenSidechain,
+}: {
+  entry: WorkEntry;
+  sidechainOf?: SidechainOf | undefined;
+  onOpenSidechain?: OpenSidechain | undefined;
+}): JSX.Element {
+  if (entry.kind === "tool") {
+    return (
+      <Tool
+        entry={entry}
+        {...(sidechainOf !== undefined ? { sidechainOf } : {})}
+        {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
+      />
+    );
+  }
   if (entry.kind === "thought") {
     return (
       <Row
@@ -212,7 +278,15 @@ function foldsAt(count: number): number {
 }
 
 /** A stretch of work between two messages, with its older half foldable. */
-function WorkBlockView({ entries }: { entries: WorkEntry[] }): JSX.Element {
+function WorkBlockView({
+  entries,
+  sidechainOf,
+  onOpenSidechain,
+}: {
+  entries: WorkEntry[];
+  sidechainOf?: SidechainOf | undefined;
+  onOpenSidechain?: OpenSidechain | undefined;
+}): JSX.Element {
   const [open, setOpen] = useState(false);
   const hidden = foldsAt(entries.length);
   const shown = hidden === 0 || open ? entries : entries.slice(hidden);
@@ -230,7 +304,12 @@ function WorkBlockView({ entries }: { entries: WorkEntry[] }): JSX.Element {
           every index, so a slice-relative key hands one row's open/closed state to a different row —
           an expanded tool call's payload jumps to an unrelated line. */}
       {shown.map((entry, i) => (
-        <Work key={hidden === 0 || open ? i : hidden + i} entry={entry} />
+        <Work
+          key={hidden === 0 || open ? i : hidden + i}
+          entry={entry}
+          {...(sidechainOf !== undefined ? { sidechainOf } : {})}
+          {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
+        />
       ))}
     </div>
   );
@@ -319,20 +398,47 @@ function Pulse(): JSX.Element {
 export function Transcript({
   session,
   entries,
+  live,
   empty,
+  onOpenSidechain,
 }: {
   session?: SessionView | null;
   entries: TranscriptEntry[];
+  /**
+   * The live tail behind {@link entries}, when the record is still open — here for its SIDECHAINS,
+   * which the doorway rows render while the subagent's turns are still streaming by. The tail's own
+   * text and items are already in `entries`; this is the part `entriesOf` cannot flatten, because it
+   * belongs behind a row rather than in the flow.
+   */
+  live?: LiveTail | null | undefined;
   /** What to say when there is nothing — a function op ran no model call, which is an answer. */
   empty?: string | undefined;
+  /** Walk into a subagent conversation. Absent ⇒ the doorway only folds open in place. */
+  onOpenSidechain?: OpenSidechain | undefined;
 }): JSX.Element {
   if (entries.length === 0) {
     return <p className="empty">{empty ?? session?.empty ?? "Nothing has been said here yet."}</p>;
   }
+  // The session and the live tail are what hold the subagent conversations, so only a Transcript
+  // that was handed one can open a doorway — the recursive sub-transcript inside a row passes
+  // neither, which also bounds the inline walk.
+  const chains = session !== null && session !== undefined ? session.sidechains : undefined;
+  const sidechainOf: SidechainOf | undefined =
+    chains !== undefined || live?.sidechains !== undefined
+      ? (call) => sidechainEntriesOf(session ?? null, call, live?.sidechains?.[call])
+      : undefined;
   return (
     <div className="ts">
       {blocksOf(entries).map((block, i) => {
-        if (block.kind === "work") return <WorkBlockView key={i} entries={block.entries} />;
+        if (block.kind === "work")
+          return (
+            <WorkBlockView
+              key={i}
+              entries={block.entries}
+              {...(sidechainOf !== undefined ? { sidechainOf } : {})}
+              {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
+            />
+          );
         if (block.kind === "message") return <Message key={i} entry={block} />;
         return (
           <div key={i} className="ts-msg ts-msg-assistant ts-live">

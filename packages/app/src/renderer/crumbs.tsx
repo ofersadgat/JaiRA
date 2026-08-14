@@ -85,6 +85,9 @@ export function shortRunName(title: string, stateId: string | undefined): string
  * is, and that is what those say.
  */
 function runCrumbOf(step: TrailStep, index: number, taskTitle: string | undefined, stateId: string | undefined): string {
+  // A sidechain step is named at the doorway it was pushed from — the Task call's own description —
+  // and the instance id would name its HOST, which is the crumb before it.
+  if (step.sidechain !== undefined) return step.name ?? "⑂ subagent";
   if (index > 0) return step.name ?? `#${step.instanceId}`;
   return taskTitle === undefined ? `#${step.instanceId}` : shortRunName(taskTitle, stateId);
 }
@@ -119,6 +122,16 @@ export function runCrumbs(input: RunCrumbInput): Crumb[] {
   const { trail, instances, runs, selectedTask, stateId, taskTitle } = input;
   return trail.map((step, i) => {
     const last = i === trail.length - 1;
+    // A sidechain crumb has no chevron: its siblings would be the host session's other chains, and
+    // the host is not on hand here to list them. The name and the way back are the crumb's job.
+    if (step.sidechain !== undefined) {
+      return {
+        text: runCrumbOf(step, i, taskTitle, stateId),
+        kind: "run" as const,
+        title: `subagent conversation in run #${step.instanceId} of ${step.stateId}`,
+        ...(last ? {} : { go: () => input.onWalkBack(i) }),
+      };
+    }
     // The BASE's alternatives are the other runs of this state — which are other tasks, since one
     // task's newest pass is what the base stands for. Deeper, they are the sibling runs under the
     // same parent, which is the board one level up without having to go back to it.
