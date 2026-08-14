@@ -126,6 +126,79 @@ describe("worktrees", () => {
   });
 });
 
+describe("GitRead (CHANGESETS.md §6.1)", () => {
+  it("resolves revisions, reads blobs at a pin, and lists a tree", async () => {
+    const head = await git.head();
+    const resolved = await git.revParse("HEAD");
+    expect(resolved).toBe(head);
+    expect(await git.revParse("no-such-rev")).toBeUndefined();
+
+    // A blob at a PINNED commit reads the committed content, whatever the worktree now says —
+    // the property §1.2 ("the source is a version, not a location") rests on.
+    writeFileSync(join(dir, "repo", "README.md"), "# drifted\n", "utf8");
+    // UNTRIMMED: blob content is bytes, and a stripped trailing newline would read as a change
+    // nobody made the moment a changeset diffed against it.
+    expect(await git.show(head!, "README.md")).toBe("# repo\n");
+    expect(await git.show(head!, "missing.md")).toBeUndefined();
+
+    const listing = await git.lsTree(head!);
+    expect(listing.map((e) => e.path)).toEqual(["README.md"]);
+    expect(listing[0]?.type).toBe("blob");
+    // …and the blob is readable by the oid the listing named.
+    expect(await git.catFile(listing[0]!.oid)).toBe("# repo\n");
+  });
+
+  it("lists a subdirectory of a tree, entries prefixed with it", async () => {
+    mkdirSync(join(dir, "repo", "workflows"), { recursive: true });
+    writeFileSync(join(dir, "repo", "workflows", "plan.json"), "{}\n", "utf8");
+    await git.run(["add", "."]);
+    await git.run(["commit", "-m", "add workflows"]);
+    const head = await git.head();
+
+    const listing = await git.lsTree(head!, "workflows");
+    expect(listing.map((e) => e.path)).toEqual(["workflows/plan.json"]);
+  });
+
+  it("diffs the working tree against a base: update, delete, rename and untracked create", async () => {
+    const base = (await git.head())!;
+    // An update, a delete, a rename and an untracked new file — the worktree as an agent leaves it,
+    // nothing staged except the rename (git cannot see an unstaged rename as one).
+    writeFileSync(join(dir, "repo", "README.md"), "# changed\n", "utf8");
+    mkdirSync(join(dir, "repo", "src"), { recursive: true });
+    writeFileSync(join(dir, "repo", "src", "new.ts"), "export {};\n", "utf8");
+    writeFileSync(join(dir, "repo", "doomed.md"), "bye\n", "utf8");
+    await git.run(["add", "doomed.md"]);
+    await git.run(["commit", "-m", "add doomed"]);
+    const base2 = (await git.head())!;
+    rmSync(join(dir, "repo", "doomed.md"));
+
+    const entries = await git.diff(base2);
+    const byPath = Object.fromEntries(entries.map((e) => [e.path, e.action]));
+    expect(byPath["README.md"]).toBe("update");
+    expect(byPath["doomed.md"]).toBe("delete");
+    expect(byPath["src/new.ts"]).toBe("create");
+    // …and against the FIRST commit the same tree reads differently, because the base is part of
+    // the question.
+    const earlier = await git.diff(base);
+    expect(Object.fromEntries(earlier.map((e) => [e.path, e.action]))["doomed.md"]).toBeUndefined();
+  });
+
+  it("reports a staged rename as one", async () => {
+    writeFileSync(join(dir, "repo", "renamed.md"), "# repo\n", "utf8");
+    await git.run(["add", "renamed.md"]);
+    await git.run(["rm", "-q", "README.md"]);
+    const entries = await git.diff((await git.head())!);
+    const rename = entries.find((e) => e.action === "rename");
+    expect(rename).toMatchObject({ path: "renamed.md", oldPath: "README.md" });
+  });
+
+  it("parses status including untracked files", async () => {
+    writeFileSync(join(dir, "repo", "untracked.txt"), "x\n", "utf8");
+    const entries = await git.status();
+    expect(entries).toEqual([{ path: "untracked.txt", x: "?", y: "?" }]);
+  });
+});
+
 describe("error surfaces", () => {
   it("throws ExecError with git's own message for a bad subcommand", async () => {
     await expect(git.run(["frobnicate"])).rejects.toThrow(/'frobnicate' is not a git command|exited/);
