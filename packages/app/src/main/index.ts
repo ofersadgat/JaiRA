@@ -151,6 +151,10 @@ const handlers: Record<IpcChannel, Handler> = {
     service.validateSchema(request)) as Handler,
   "schema:detect": ((request: { text: string }) => service.detectSchema(request.text)) as Handler,
   "file:read": ((request: Parameters<typeof service.readFile>[0]) => service.readFile(request)) as Handler,
+  "uri:read": ((request: Parameters<typeof service.readUri>[0]) => service.readUri(request)) as Handler,
+  "changeset:review": ((request: Parameters<typeof service.reviewChanges>[0]) => service.reviewChanges(request)) as Handler,
+  "changeset:reviewSync": ((request: Parameters<typeof service.reviewSyncChangeset>[0]) =>
+    service.reviewSyncChangeset(request)) as Handler,
   "file:write": ((request: Parameters<typeof service.writeFile>[0]) => service.writeFile(request)) as Handler,
   "file:create": ((request: Parameters<typeof service.createFile>[0]) => service.createFile(request)) as Handler,
   "file:rename": ((request: Parameters<typeof service.renameFile>[0]) => service.renameFile(request)) as Handler,

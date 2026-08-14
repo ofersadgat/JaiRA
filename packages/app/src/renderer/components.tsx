@@ -7,7 +7,7 @@
  * main re-validates every submission, so this layer is free to be purely about
  * presentation.
  */
-import { useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import {
   displayText,
   type ChooseOptionConfig,
@@ -21,7 +21,10 @@ import {
   type PendingApproval,
   type PendingInteraction,
   type ReviewArtifactConfig,
+  type UserApproveChangesetConfig,
 } from "@jaira/shared/browser";
+import { invoke } from "./store";
+import { mountChangesetReview, rendererServices, type ComponentServices } from "./changesetReview";
 
 export interface ComponentProps<C extends ComponentConfig> {
   config: C;
@@ -198,6 +201,70 @@ function ConfirmAction({ config, onSubmit }: ComponentProps<ConfirmActionConfig>
   );
 }
 
+/**
+ * Host a component that MOUNTS ITSELF (CHANGESETS.md §8.1). The contract is a mount function, not a
+ * React element — the caller owns the node, the component owns everything inside it, and the caller
+ * can be a pane, a modal, or a second window without the component knowing. This wrapper is what
+ * lets the existing React shell be one such caller.
+ *
+ * Remounts on `mountKey`, never on the callback's identity: `mount` is an inline closure at every
+ * call site, so depending on it would tear the component down on every shell render — a reviewer
+ * losing its half-made decisions each time a stream delta arrives. The key names the REQUEST, which
+ * is the thing whose change genuinely means "different review".
+ */
+function MountHost({ mount, mountKey }: { mount: (node: HTMLElement) => () => void; mountKey: string }): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null);
+  const latest = useRef(mount);
+  latest.current = mount;
+  useEffect(() => {
+    const node = ref.current;
+    if (node === null) return undefined;
+    return latest.current(node);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mountKey]);
+  return <div className="mount-host" ref={ref} />;
+}
+
+/**
+ * The changeset gate as a hostable element — exported because it has TWO hosts (§8.1's point): the
+ * gate modal below, and the reviewed task's conversation view. `about` scopes `$WORKTREE` reads to
+ * the reviewed task; `services` lets a host with more reach (the app shell has `drafts` and
+ * `openFile`; this module has neither) supply what it can.
+ */
+export function ChangesetGate({
+  config,
+  inputs,
+  onSubmit,
+  about,
+  services,
+  mountKey,
+}: ComponentProps<UserApproveChangesetConfig> & {
+  about?: string | undefined;
+  services?: Partial<ComponentServices> | undefined;
+  /** The request id — what makes this a DIFFERENT review. See {@link MountHost}. */
+  mountKey: string;
+}): JSX.Element {
+  return (
+    <MountHost
+      mountKey={mountKey}
+      mount={(node) =>
+        mountChangesetReview(node, {
+          config,
+          inputs,
+          services: {
+            ...rendererServices(
+              (channel, request) => invoke(channel, request),
+              about !== undefined ? { taskId: about } : {},
+            ),
+            ...(services ?? {}),
+          },
+          onSubmit,
+        })
+      }
+    />
+  );
+}
+
 /** Fallback for a gate whose function is not one of the built-ins. */
 function RawJson({ onSubmit }: { onSubmit: (value: unknown) => void }): JSX.Element {
   const [text, setText] = useState("");
@@ -233,10 +300,13 @@ export function InteractionDialog({
   pending,
   error,
   onSubmit,
+  services,
 }: {
   pending: PendingInteraction;
   error?: string | null;
   onSubmit: (value: unknown) => void;
+  /** Extra reach for components that mount themselves — see {@link ChangesetGate}. */
+  services?: Partial<ComponentServices>;
 }): JSX.Element {
   const config = pending.config;
   const inputs = pending.inputs as Record<string, unknown>;
@@ -259,14 +329,29 @@ export function InteractionDialog({
         return <FillForm config={config} inputs={inputs} onSubmit={onSubmit} />;
       case "confirm_action":
         return <ConfirmAction config={config} inputs={inputs} onSubmit={onSubmit} />;
+      case "user-approve-changeset":
+        return (
+          <ChangesetGate
+            config={config}
+            inputs={inputs}
+            onSubmit={onSubmit}
+            about={pending.about}
+            services={services}
+            mountKey={pending.requestId}
+          />
+        );
       default:
         return <RawJson onSubmit={onSubmit} />;
     }
   })();
 
+  // A multi-file review is far too big for the gate modal (CHANGESETS.md §11's rejected modal
+  // reviewer) — the same host widens for it, which is the caller exercising the room §8.1 gives it.
+  const wide = config?.component === "user-approve-changeset";
+
   return (
     <div className="modal-backdrop">
-      <div className="modal" data-testid="interaction">
+      <div className={wide ? "modal modal-wide" : "modal"} data-testid="interaction">
         <h3>{config?.prompt ?? pending.component}</h3>
         <div className="sub">
           {pending.component} · {pending.taskId}
