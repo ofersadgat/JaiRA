@@ -13,6 +13,7 @@
  * and no agent process can reach this surface.
  */
 import type { JsonValue } from "@declarative-ai/json";
+import type { Changeset } from "./changeset";
 import type { ComponentConfig } from "./components";
 import type { AvailabilitySnapshot, ExecutorInfo, ProbeResult, SecretTarget } from "./executors";
 import type { JairaSettings } from "./settings";
@@ -145,6 +146,15 @@ export interface SubmitInteractionRequest {
 export interface PendingInteraction {
   requestId: string;
   taskId: string;
+  /**
+   * The task this request is ABOUT, when that is a different task than the one that parked it.
+   *
+   * A changeset review runs as its own task in JaiRA's project (see `changeset:review`), but the
+   * thing being reviewed is another task's worktree — and the conversation view of THAT task is
+   * where §8.1 says the reviewer should live. This is the join that lets it: absent means the
+   * request is about the task that parked it, which is every other component.
+   */
+  about?: string;
   /** The registered function name — `choose_option`, `review_artifact`, … */
   component: string;
   /** Resolved inputs, including the state's authored `config` surface. */
@@ -487,19 +497,33 @@ export interface WorkflowSyncRequest {
    * while the author is looking at a changed one would answer a question nobody asked.
    */
   text?: string;
+  /**
+   * Open the changeset review as soon as a states sync produces a proposal.
+   *
+   * The review runs as its own task and parks on the gate, so the diff UI arrives as a pending
+   * interaction the moment the sync lands — surviving a renderer that reloaded or navigated away
+   * during a run that can take an hour. The report and the drafts still return as before; this is
+   * the difference between "the proposal exists somewhere" and the reviewer being on screen.
+   */
+  review?: boolean;
+  /** Scripted gate answers for the auto-opened review (tests/demos) — see {@link ReviewSyncRequest}. */
+  interactions?: Record<string, JsonValue[]>;
   /** Scripted prompt rules (the `--fake` surface), for demos and tests. */
   fake?: JsonValue;
 }
 
 /**
- * One proposed state file, whole.
+ * One proposed file, whole — a state file under `workflows/`, or a prompt file under `prompts/`
+ * (the sync is told to keep reusable prompt text there, in category subfolders, rather than
+ * inlining it in state files).
  *
  * Whole rather than a patch: the file is what gets written, a partial edit would have to be applied
  * by something that understood the document, and a draft is text. `applicable` is false for a
  * proposal that cannot be handed over as-is — see {@link WorkflowSyncEdit.blocked}.
  */
 export interface WorkflowSyncEdit {
-  stateId: string;
+  /** The state id, when the file is a state file — derived from the path. Absent for a prompt file. */
+  stateId?: string;
   layer: WorkflowLayer;
   /** Relative to the layer root — where the draft is keyed and where a save would land. */
   path: string;
@@ -543,11 +567,88 @@ export interface WorkflowSyncResult extends WorkflowSyncReport {
   workflows: string[];
   /** The rewritten description. Present for `direction: "document"`. */
   document?: { text: string; changes: Array<{ summary: string; requirements: string[] }> };
-  /** The proposed state files. Present for `direction: "states"`. */
+  /** The proposed files — states and prompts. Present for `direction: "states"`. */
   edits?: WorkflowSyncEdit[];
+  /**
+   * The same proposals as ONE changeset (CHANGESETS.md §1) — the applicable edits lowered against
+   * the tree as it stands, `source` pinned by content hash. This is what makes a sync's proposal
+   * reviewable by the same mechanism that reviews an agent's worktree, instead of a bespoke panel.
+   * Present for `direction: "states"` when anything is applicable.
+   */
+  changeset?: Changeset;
+  /** The auto-opened review's task, when the request asked for one and there was a changeset to review. */
+  reviewTaskId?: string;
   /** Anything the run wants said that is not an edit — a gap it could not close on its own. */
   notes: string[];
   costUsd?: number;
+}
+
+/**
+ * Read one addressable value (CHANGESETS.md §8.5): `file:` under an anchor, a `git:` blob in the
+ * project's own repository, or a `db://` value a recorded operation returned. One generalised read
+ * channel — and anchor-guarded the way artifact destinations already are, because a
+ * renderer-reachable channel that resolves arbitrary `file:` URIs is a sandbox escape.
+ */
+export interface ReadUriRequest {
+  /** `$PROJECT/…`, `$JAIRA/…`, `$WORKTREE/…` (needs `taskId`), `file:…`, `git:<sha>:<path>`, `db://…`. */
+  uri: string;
+  project?: ProjectRef;
+  /** Resolves `$WORKTREE` and scopes a `db://` session id to the run that wrote it. */
+  taskId?: string;
+  runId?: number;
+}
+
+export interface UriContent {
+  uri: string;
+  mime: string;
+  text: string;
+  /** Set when a `file:` URI carried a content hash and the tree no longer matches it (§3.2 drift). */
+  drifted?: boolean;
+}
+
+/**
+ * Review a task's worktree edits as a changeset (CHANGESETS.md) — produce the diff against a base,
+ * run the built-in review workflow over it, and let the ordinary interaction flow present the gate.
+ * The response returns as soon as the run starts; the reviewer arrives as a pending interaction.
+ */
+export interface ReviewChangesRequest {
+  /** The task whose worktree is reviewed. It must have one. */
+  taskId: string;
+  /** The revision the diff is taken against. Default HEAD — the agent's uncommitted work. */
+  base?: string;
+  /** Run the LOOPING review (comments go to a model for revision) instead of the single round. */
+  loop?: boolean;
+  project?: ProjectRef;
+  /** Scripted gate answers (tests/demos) — same shape as {@link StartTaskRequest.interactions}. */
+  interactions?: Record<string, JsonValue[]>;
+  /** Scripted prompt rules for the loop's respond state (tests/demos). */
+  fake?: JsonValue;
+}
+
+export interface ReviewChangesResult {
+  /** The review run's own task, in JaiRA's project — where the round is recorded (§4.4, §5.3). */
+  reviewTaskId: string;
+  runId: number;
+  /** How many changes the produced changeset carries. */
+  changes: number;
+}
+
+/**
+ * Review a SYNC's proposals through the same gate (CHANGESETS.md's "one mechanism, one UI"): the
+ * changeset a `workflow:sync` returned, walked through the LOOPING reviewer — a `comment` decision
+ * sends the changeset back to a model that revises it against the description, and the revision
+ * returns to the gate — with merged decisions applied into the layer root, and the sync baseline
+ * moved when the final round merged everything.
+ */
+export interface ReviewSyncRequest {
+  layer: WorkflowLayer;
+  /** The description the sync ran for — what the baseline is keyed by. */
+  path: string;
+  /** The changeset the sync produced ({@link WorkflowSyncResult.changeset}). */
+  changeset: Changeset;
+  /** Scripted gate answers (tests/demos). */
+  interactions?: Record<string, JsonValue[]>;
+  fake?: JsonValue;
 }
 
 /** Store a credential. The value goes to the main process and is never read back out. */
@@ -732,6 +833,12 @@ export interface IpcContract {
   "schema:detect": { request: { text: string }; response: DetectSchemaResult };
   /** Read any file under a layer root as text. Refuses types that are not text. */
   "file:read": { request: ReadFileRequest; response: FileSource };
+  /** Read one addressable value — see {@link ReadUriRequest}. Refused rather than guessed at. */
+  "uri:read": { request: ReadUriRequest; response: UriContent };
+  /** Review a task's worktree edits as a changeset — see {@link ReviewChangesRequest}. */
+  "changeset:review": { request: ReviewChangesRequest; response: ReviewChangesResult };
+  /** Review a sync's proposed files through the same gate — see {@link ReviewSyncRequest}. */
+  "changeset:reviewSync": { request: ReviewSyncRequest; response: ReviewChangesResult };
   /** Write any file under a layer root. Unparsed — see {@link WriteFileRequest}. */
   "file:write": { request: WriteFileRequest; response: FileSource };
   /** Create a plain file or a directory under a layer root, addressed by path. */
@@ -811,6 +918,9 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "schema:validate",
   "schema:detect",
   "file:read",
+  "uri:read",
+  "changeset:review",
+  "changeset:reviewSync",
   "file:write",
   "file:create",
   "file:rename",
@@ -891,7 +1001,18 @@ export type PushMessage =
       sessionId?: string;
       seq?: number;
       stateId?: string;
-      text: string;
+      /** A fragment of the answer's text. Exactly one of `text` / `thinking` / `item` is present. */
+      text?: string;
+      /** A fragment of the model's reasoning as it thinks — shown live, never part of the answer. */
+      thinking?: string;
+      /**
+       * A whole stream item that is not answer text, in stream order with the fragments:
+       * `{kind:"message", role, content}` for a finished turn (tool calls and results ride on the
+       * content), `{kind:"event", event}` for anything else the executor emitted, verbatim. The
+       * viewer renders every one, understood or not — the stream IS the conversation while the
+       * record is still open.
+       */
+      item?: JsonValue;
     };
 
 export const PUSH_CHANNEL = "jaira:push";

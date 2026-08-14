@@ -20,6 +20,9 @@
     "access": "public"
   },
   "dependencies": {
-    "@declarative-ai/json": "file:../../../declarative-ai/packages/json"
+    "@declarative-ai/json": "file:../../../declarative-ai/packages/json",
+    "jsonc-parser": "^3.3.1",
+    "monaco-editor": "^0.56.0",
+    "yaml": "^2.9.0"
   }
 }

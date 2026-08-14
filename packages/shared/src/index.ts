@@ -17,3 +17,5 @@ export * from "./components";
 export * from "./conversation";
 export * from "./slotTypes";
 export * from "./references";
+export * from "./changeset";
+export * from "./diffStrategies";

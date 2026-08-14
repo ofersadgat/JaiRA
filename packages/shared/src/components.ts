@@ -18,6 +18,7 @@
  * §8.2's human-review state declares.
  */
 import type { JsonValue } from "@declarative-ai/json";
+import { changesetOf, checkDecisions, DECISION_KINDS, type Changeset } from "./changeset";
 
 export const COMPONENT_NAMES = [
   "choose_option",
@@ -25,6 +26,9 @@ export const COMPONENT_NAMES = [
   "edit_markdown",
   "fill_form",
   "confirm_action",
+  // The changeset gate (CHANGESETS.md §4.1) — spelled as the design names it, kebab and all,
+  // because the name is the registered function a workflow's `operation.function` must match.
+  "user-approve-changeset",
 ] as const;
 
 export type ComponentName = (typeof COMPONENT_NAMES)[number];
@@ -92,12 +96,32 @@ export interface ConfirmActionConfig {
   cancelLabel: string;
 }
 
+/**
+ * The changeset gate (CHANGESETS.md §4.1): takes a changeset, returns every change it was given,
+ * each with a decision. Unlike the other components its result is validated against its INPUT — a
+ * decision anchors to a change id, and the set must be complete — which is why
+ * {@link validateComponentResult} takes the resolved inputs for this component alone.
+ */
+export interface UserApproveChangesetConfig {
+  component: "user-approve-changeset";
+  prompt: string;
+  /** Which of the state's inputs holds the changeset to review. */
+  changeset: string;
+  /**
+   * What the tree currently holds — `proposal` for a worktree an agent already edited, `base` for a
+   * sync whose edits exist only as data. Decides which decisions are no-ops when applied (§4.1's
+   * files column), and how the UI phrases them.
+   */
+  tree: "base" | "proposal";
+}
+
 export type ComponentConfig =
   | ChooseOptionConfig
   | ReviewArtifactConfig
   | EditMarkdownConfig
   | FillFormConfig
-  | ConfirmActionConfig;
+  | ConfirmActionConfig
+  | UserApproveChangesetConfig;
 
 // --- parsing the authored config ---------------------------------------------
 
@@ -217,6 +241,18 @@ export function parseComponentConfig(component: ComponentName, raw: unknown): Co
         confirmLabel: str(config["confirmLabel"], "confirm_action.confirmLabel", "Confirm"),
         cancelLabel: str(config["cancelLabel"], "confirm_action.cancelLabel", "Cancel"),
       };
+    case "user-approve-changeset": {
+      const tree = config["tree"] ?? "proposal";
+      if (tree !== "base" && tree !== "proposal") {
+        throw new ConfigError(`user-approve-changeset.tree must be "base" or "proposal"`);
+      }
+      return {
+        component,
+        prompt,
+        changeset: str(config["changeset"], "user-approve-changeset.changeset", "changeset"),
+        tree,
+      };
+    }
   }
 }
 
@@ -232,6 +268,8 @@ function defaultPrompt(component: ComponentName): string {
       return "Fill in the form";
     case "confirm_action":
       return "Confirm this action";
+    case "user-approve-changeset":
+      return "Review the proposed changes";
   }
 }
 
@@ -246,13 +284,45 @@ const bad = (errors: string): ResultCheck => ({ ok: false, errors });
  * process, so a renderer bug — or anything else reaching the IPC channel — cannot
  * push an out-of-contract value (an undeclared decision, a missing field) into a
  * workflow's outputs.
+ *
+ * `inputs` is consulted by `user-approve-changeset` alone: its contract is not a fixed shape but
+ * "every change you were shown, decided" — which only the changeset the state resolved can judge.
+ * Without inputs the check degrades to shape-only, which a caller that has them should not accept.
  */
-export function validateComponentResult(config: ComponentConfig, value: unknown): ResultCheck {
+export function validateComponentResult(
+  config: ComponentConfig,
+  value: unknown,
+  inputs?: Record<string, unknown>,
+): ResultCheck {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return bad(`${config.component} result must be an object`);
   }
   const result = value as Record<string, unknown>;
   switch (config.component) {
+    case "user-approve-changeset": {
+      let changeset: Changeset | undefined;
+      if (inputs !== undefined) {
+        try {
+          changeset = changesetOf(inputs[config.changeset]);
+        } catch (e) {
+          return bad(`the state's '${config.changeset}' input is not a changeset: ${(e as Error).message}`);
+        }
+        const checked = checkDecisions(changeset, value);
+        return checked.ok ? { ok: true } : bad(checked.errors);
+      }
+      // Shape-only, for a caller with no inputs in hand.
+      const raw = result["decisions"];
+      if (!Array.isArray(raw)) return bad("result.decisions must be an array");
+      for (let i = 0; i < raw.length; i++) {
+        const row = raw[i] as Record<string, unknown> | null;
+        if (row === null || typeof row !== "object") return bad(`decisions[${i}] must be an object`);
+        if (typeof row["id"] !== "string") return bad(`decisions[${i}].id must be a string`);
+        if (typeof row["decision"] !== "string" || !(DECISION_KINDS as readonly string[]).includes(row["decision"])) {
+          return bad(`decisions[${i}].decision must be one of: ${DECISION_KINDS.join(", ")}`);
+        }
+      }
+      return { ok: true };
+    }
     case "choose_option":
     case "review_artifact": {
       const decision = result["decision"];

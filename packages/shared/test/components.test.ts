@@ -17,15 +17,17 @@ const parse = (name: Parameters<typeof parseComponentConfig>[0], raw: unknown): 
   parseComponentConfig(name, raw);
 
 describe("component names", () => {
-  it("covers the SPEC §8.1 set", () => {
+  it("covers the SPEC §8.1 set, plus the changeset gate (CHANGESETS.md §4.1)", () => {
     expect([...COMPONENT_NAMES]).toEqual([
       "choose_option",
       "review_artifact",
       "edit_markdown",
       "fill_form",
       "confirm_action",
+      "user-approve-changeset",
     ]);
     expect(isComponentName("choose_option")).toBe(true);
+    expect(isComponentName("user-approve-changeset")).toBe(true);
     expect(isComponentName("nope")).toBe(false);
   });
 });
@@ -101,6 +103,34 @@ describe("parseComponentConfig", () => {
     expect(() => parse("fill_form", { fields: [{ name: "x", type: "date" }] })).toThrow(/type must be one of/);
     expect(() => parse("fill_form", { fields: [{ name: "x", type: "enum" }] })).toThrow(/enum must be a non-empty array/);
     expect(() => parse("choose_option", { options: [{ value: "a", tone: "loud" }] })).toThrow(/tone must be/);
+  });
+});
+
+describe("user-approve-changeset (CHANGESETS.md §4.1)", () => {
+  const changeset = {
+    source: "git:abcd1234",
+    changes: [{ id: "c1", path: "a.txt", action: "update", before: "a", after: "b" }],
+  };
+
+  it("normalizes its config with the doc's defaults: slot 'changeset', tree 'proposal'", () => {
+    expect(parse("user-approve-changeset", {})).toEqual({
+      component: "user-approve-changeset",
+      prompt: "Review the proposed changes",
+      changeset: "changeset",
+      tree: "proposal",
+    });
+    expect(() => parse("user-approve-changeset", { tree: "sideways" })).toThrow(/base.*proposal/);
+  });
+
+  it("validates a result against the CHANGESET it was asked about, not just a shape", () => {
+    const config = parse("user-approve-changeset", {});
+    const ok = validateComponentResult(config, { decisions: [{ id: "c1", decision: "merged" }] }, { changeset });
+    expect(ok.ok).toBe(true);
+    // A decision about a change never proposed, and a partial answer, are both refused.
+    const ghost = validateComponentResult(config, { decisions: [{ id: "ghost", decision: "merged" }] }, { changeset });
+    expect(ghost.ok).toBe(false);
+    const empty = validateComponentResult(config, { decisions: [] }, { changeset });
+    expect(empty.ok).toBe(false);
   });
 });
 

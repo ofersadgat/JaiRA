@@ -667,6 +667,17 @@ export interface SessionView {
   status?: "success" | "error";
   costUsd?: number;
   turns: SessionTurn[];
+  /**
+   * Subagent conversations, keyed by the tool call that spawned each — a `Task` call's turns, read
+   * the same way `turns` is. The viewer renders the spawning call as a link into them rather than
+   * folding them into the thread they did not happen in.
+   */
+  sidechains?: Record<string, SessionTurn[]>;
+  /**
+   * Provider events the record kept — session init, compaction, rate-limit windows — each pinned to
+   * how many turns preceded it, so the viewer can interleave them where they happened.
+   */
+  events?: Array<{ index: number; event: JsonValue }>;
   /** Set when the state ran in no conversation at all — a function op, or a run before this existed. */
   empty?: string;
 }

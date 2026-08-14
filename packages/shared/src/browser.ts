@@ -25,3 +25,5 @@ export * from "./executorTree";
 export * from "./configSchema";
 export * from "./slotTypes";
 export * from "./references";
+export * from "./changeset";
+export * from "./diffStrategies";
