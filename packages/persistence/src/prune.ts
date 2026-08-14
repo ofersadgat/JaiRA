@@ -20,6 +20,7 @@
  */
 import type { HistorySize, PruneResult } from "@jaira/shared";
 import type { Project } from "./project";
+import { SessionStreams } from "./sessions";
 
 // The view models live in `@jaira/shared` so the renderer can name them too.
 export type { HistorySize, PrunePlanEntry, PruneResult } from "@jaira/shared";
@@ -162,6 +163,75 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
   return { runs, events: totals.events, commands: totals.commands, skippedTasks, dryRun };
 }
 
+/**
+ * Prune the conversation streams a set of terminal tasks owns (DESIGN.md §7.3).
+ *
+ * SEPARATE from {@link pruneHistory}, and deliberately not folded into it, because a session is not
+ * run history. A session outlives the run that produced it — a later run of the same task, or another
+ * task entirely, can continue or branch from it, since a session id is a CAPABILITY: hold one and you
+ * may use it. That also raises the stakes, because pruning is then the only thing in the system that
+ * can make a held id unresolvable, and nothing else stands behind it.
+ *
+ * Whole LINEAGES, not individual branches. A fork stores only what it appended, so deleting a parent
+ * takes the first fourteen messages of a conversation that still exists. Pruning from a lineage root
+ * downward is the only unit that never orphans a prefix.
+ *
+ * The same safety rule as run history applies first: a non-terminal task is untouchable at any age,
+ * because it is resumable and its conversations are what it would resume into.
+ */
+export function pruneSessions(project: Project, options: PruneOptions = {}): SessionPruneResult {
+  const before = options.before ?? Date.now();
+  const dryRun = options.dryRun === true;
+  const streams = new SessionStreams(project.db);
+
+  const lineages: SessionPruneResult["lineages"] = [];
+  const skippedTasks: PruneResult["skippedTasks"] = [];
+
+  for (const task of project.runtime.list()) {
+    if (NON_TERMINAL.has(task.status)) {
+      skippedTasks.push({
+        taskId: task.taskId,
+        status: task.status,
+        reason: `task is ${task.status}; its conversations are what a resume would continue`,
+      });
+      continue;
+    }
+    for (const root of streams.rootsFor(task.taskId)) {
+      if (root.createdAt >= before) continue;
+      const lineage = streams.lineageFrom(root.id);
+      lineages.push({
+        taskId: task.taskId,
+        sessionId: root.id,
+        label: root.label,
+        branches: lineage.length,
+        messages: lineage.reduce((n, b) => n + streams.materialize(b.id).length, 0),
+      });
+    }
+  }
+
+  const totals = lineages.reduce(
+    (acc, l) => ({ branches: acc.branches + l.branches, messages: acc.messages + l.messages }),
+    { branches: 0, messages: 0 },
+  );
+
+  if (!dryRun && lineages.length > 0) {
+    project.db.transaction(() => {
+      for (const lineage of lineages) streams.prune(lineage.sessionId);
+    })();
+  }
+
+  return { lineages, branches: totals.branches, messages: totals.messages, skippedTasks, dryRun };
+}
+
+/** What {@link pruneSessions} plans or did. */
+export interface SessionPruneResult {
+  lineages: Array<{ taskId: string; sessionId: string; label: string; branches: number; messages: number }>;
+  branches: number;
+  messages: number;
+  skippedTasks: PruneResult["skippedTasks"];
+  dryRun: boolean;
+}
+
 /** Rows currently stored, for a "before you prune" summary. */
 export function historySize(project: Project): HistorySize {
   const one = (sql: string): number => (project.db.prepare(sql).get() as { n: number }).n;
@@ -170,4 +240,14 @@ export function historySize(project: Project): HistorySize {
     events: one(`SELECT COUNT(*) n FROM state_machine_events`),
     commands: one(`SELECT COUNT(*) n FROM command_log`),
   };
+}
+
+/**
+ * Conversation rows currently stored, for the same "before you prune" summary.
+ *
+ * Worth reporting separately, and worth watching: a real agentic session runs to megabytes of file
+ * contents and command output, so this is the number most likely to dominate a project's database.
+ */
+export function sessionSize(project: Project): { sessions: number; messages: number } {
+  return new SessionStreams(project.db).size();
 }

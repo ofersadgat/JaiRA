@@ -413,9 +413,15 @@ Every field is optional **in the file**; what the file leaves out, the
 | `system` | optional | System prompt. |
 | `model`, `temperature`, `maxOutputTokens`, … | optional | The LLM call surface, **inline** on the op — not nested under a `config` bag. |
 | `input` | optional | Parameter map (§4.3). Absent ⇒ the state's declared `inputs` are in scope. |
+<<<<<<< HEAD
 | `outputs` | optional | What the call RETURNS, by name (§4.4) — and the structured-output contract the model is held to. |
 | `output` | optional | The single lowered slot (§4.4). Say it directly when the whole return is one value — a list, a blob. Absent ⇒ built from `outputs`, or from the state's produced outputs. |
 | `session` | optional | Logical session this call joins. Absent ⇒ `"default"`. |
+=======
+| `output` | optional | Output slot (§4.4). Absent ⇒ built from the state's produced outputs. |
+| `session` | optional | The conversation this call joins: a **name**, a **session ref**, or **`null`** (fresh). Absent ⇒ its own fresh stream (§5.1). |
+| `fork` | optional | Always branch rather than continuing (§5.1). |
+>>>>>>> claude/brave-antonelli-dbc5ac
 | `tools` | optional | Tool names the call may use mid-loop (§5.1). |
 | `conversation` | optional | How much transcript to carry (§5.1). |
 | `permissions` | optional | Authored permission baseline (§5.1). |
@@ -428,9 +434,15 @@ Every field is optional **in the file**; what the file leaves out, the
 | `function` | **required** | Registry name (§4.2 lists what JaiRA registers). |
 | `args` | optional | The function's authored arguments; rides as the op's bound `config` input. The one **untyped** position in the format. |
 | `input` | optional | Parameter map (§4.3). Absent ⇒ the state's declared `inputs` are in scope. |
+<<<<<<< HEAD
 | `outputs` | optional | What the call RETURNS, by name (§4.4). |
 | `output` | optional | The single lowered slot (§4.4). A delegated agent needs `kind: "blob"`. Absent ⇒ built from `outputs`, or from the state's produced outputs. |
 | `session` | optional | Logical session this call joins. Absent ⇒ `"default"`. |
+=======
+| `output` | optional | Output slot (§4.4). Absent ⇒ built from the state's produced outputs. A delegated agent needs `kind: "blob"`. |
+| `session` | optional | The conversation this call joins: a **name**, a **session ref**, or **`null`** (fresh). Absent ⇒ its own fresh stream (§5.1). |
+| `fork` | optional | Always branch rather than continuing (§5.1). |
+>>>>>>> claude/brave-antonelli-dbc5ac
 | `tools` | optional | Tool names the call may use mid-loop (§5.1). |
 | `conversation` | optional | How much transcript to carry (§5.1). |
 | `permissions` | optional | Authored permission baseline (§5.1). |
@@ -537,7 +549,7 @@ counts tokens, not money — so its runs land in the roll-up with `costSource:
 
 Sessions: `codex exec resume` continues a conversation natively, so two states sharing
 a `session` name share one codex thread. There is no fork primitive, so a *branch* is
-replayed as a rendered transcript — lossy, and recorded as such (SESSIONS.md §6).
+replayed as a rendered transcript — lossy, and recorded as such (DESIGN §7.3).
 
 ### 4.3 ⚠️ `operation.input` is a **parameter map**, not a binding map
 
@@ -674,6 +686,7 @@ fields — they say how the call runs rather than what it is, but every one of t
 is a per-call decision, so they are written in the same block and inherited by
 the same rule.
 
+<<<<<<< HEAD
 - **`session`** — the logical session owning the conversation transcript,
   workspace and permissions. Operations sharing an id share a conversation.
   ⚠️ Absent ⇒ a FRESH stream private to this operation — not a shared `"default"`
@@ -682,6 +695,43 @@ the same rule.
   you ask for by naming it. The run's shared *workspace* is unaffected, being a
   separate concern. There is one spelling: `sessionId` is refused, not accepted
   as a synonym.
+=======
+- **`session`** — the conversation this call joins. Three spellings:
+
+  | Written | Means |
+  | --- | --- |
+  | `"planning"` | a **name**. States sharing it share one append-only stream. |
+  | `{"expr": "inputs.thread"}` | a **session ref**, computed — an exact position in a stream, to continue or branch from. Opaque: nothing outside the session store parses it. The one spelling *evaluated* rather than read; see §5.3 for the two-hop wiring it needs. |
+  | `null` | start a **fresh** stream, overriding whatever the chain supplied. |
+
+  **Absent means its own fresh stream, not a shared default.** There is no
+  implicit `"default"` session: an undeclared operation gets a private
+  conversation, because a process-wide shared transcript is what drives unbounded
+  context growth. Threading across states (SPEC §4.7) is something you *ask for*,
+  by naming a session once at the root and letting §5 carry it down.
+
+  **`""` is an error, never "fresh".** A prompt template interpolating a bad
+  reference would otherwise produce an empty string and silently run an isolated
+  conversation that looks like it worked. `null` is the only explicit fresh marker,
+  and it is checked at load time.
+
+  **`sessionId` is accepted as a synonym**, so an `LlmConfiguration`-shaped block
+  pastes in unchanged; declaring both with different values is an error.
+
+  ⚠️ **`session` no longer keys the workspace or the permission ledger.** Those
+  belong to a *resource bundle*, which is inherited from the enclosing state and
+  keyed on the **name** that was declared — so a fork, a retry and a loop iteration
+  all keep one worktree and one set of approvals, none of them having changed what
+  the author declared. Declaring a *name* on a subtree is what gives that subtree
+  its own bundle; a ref and `null` change the conversation and leave the bundle
+  alone.
+- **`fork`** — always branch, rather than continuing when the position is still
+  the head of its stream. Declared where a session is *consumed*, because a
+  position marker should not encode an intent about how a later caller will use
+  it. Absent and `false` mean the same thing: continue if you can, branch if
+  someone else already appended there. `true` is for deliberate divergence — fan
+  three variants out of one point — which cannot be inferred from stream state.
+>>>>>>> claude/brave-antonelli-dbc5ac
 - **`tools`** — logical tool names the operation may call mid-loop, resolved
   through `registry.tools`. JaiRA registers `bash`. **Listing a tool here is what
   puts an agent's commands under the policy at all.**
@@ -695,7 +745,9 @@ the same rule.
   ⚠️ `summary` is **per session, not per state**: one session has one transcript,
   so a session mixing `summary` and `full_history` is summarized for both. The
   lint surface warns — and it reads the *effective* mode, so an inherited one is
-  caught too.
+  caught too. The warning is about **named** sessions only: a state that declares
+  none has a private stream nothing else writes to, so it has no one to conflict
+  with.
 - **`permissions`** — the definition-authored baseline, beneath the project
   policy: per-tool modes (`allow`/`deny`/`ask`/`smart`), a `default` for unlisted
   tools, and a `profile` (`read-only` | `plan` | `full`).
@@ -742,7 +794,7 @@ required — a prompt workflow runs on a machine that has only an agent installe
 
 | Field | Merge |
 | --- | --- |
-| `kind`, `function`, `system`, `session` | nearest wins |
+| `kind`, `function`, `system`, `session`, `fork` | nearest wins |
 | `prompt` | **replaced whole** — a layer supplying a prompt supplies all of it |
 | `model`, `temperature`, … | nearest wins, per field: root sets `model`, a child adds `temperature`, both survive |
 | `args` | **deep merge** per key |
@@ -751,6 +803,12 @@ required — a prompt workflow runs on a machine that has only an agent installe
 | `tools`, `conversation.artifacts` | **replaced** — `"tools": []` is how you drop an inherited tool |
 | `conversation` | merged per field |
 | `permissions` | merged, with `permissions.tools` merged per tool name |
+
+`session` is the one field where **`null` is a value, not an absence**: a child
+writing `"session": null` overrides an ancestor's name and starts fresh, while a
+child that simply omits the key inherits it. (`sessionId` is normalized to
+`session` *before* merging, or a child's `sessionId: null` would sit alongside an
+ancestor's `session` instead of overriding it.)
 
 `schema` and `binding` are replaced rather than merged because merging them
 produces nonsense: `".children.a.outputs.x"` merged with `".inputs.b"` is not a binding
@@ -767,6 +825,107 @@ execution-environment fields are *not* kind-specific — a gate under a
 ⚠️ A `.children.<key>…` binding in an `environment` block names a child key that only
 exists in the declaring state. It is meaningless once inherited; use
 `{ input: … }`, which resolves in whatever state consumes it.
+
+### 5.3 Worked: sharing, continuing and starting a conversation
+
+Four things you will actually want, in order of how often you want them.
+
+**Share one conversation across a subtree — declare a name once.** This is the
+common case, and the only one that needs no data flow: the `environment` chain
+carries the name down, every descendant joins the same append-only stream, and
+they run in one workspace with one set of approvals.
+
+```jsonc
+// feature/plan.json — the root of the subtree that should share a thread
+{
+  "environment": { "kind": "prompt", "model": "anthropic/claude-sonnet-5", "session": "planning" },
+  "children": { "goals": {}, "context": {}, "critique": {} },
+  "sequence": ["goals", "context", "critique"]
+}
+
+// feature/plan/goals.json — says nothing about sessions, and joins "planning"
+{ "operation": { "prompt": "Extract goals from {{inputs.issue}}." } }
+
+// feature/plan/critique.json — same, and sees what goals and context said
+{ "operation": { "prompt": "Name the three weakest assumptions so far." } }
+```
+
+**Continue one exact conversation from elsewhere — pass a ref.** Use this when
+the states are not in one subtree, or when you want to continue from a specific
+point rather than "wherever that name is now". `operation.outputs.session` is the
+position a call **ended** at (§9), so it is exactly "after me".
+
+It takes two hops, because two different scopes are involved. The **parent**
+wires the ref into the consumer's input — only the parent can see both children —
+and the **consumer** names that input in its `session`:
+
+```jsonc
+// review.json — the parent, which can see both children
+{
+  "children": {
+    "plan":   { "state": "planner" },
+    "critique": {
+      "state": "critic",
+      "inputs": { "thread": { "expr": "children.plan.operation.outputs.session" } }
+    }
+  },
+  "sequence": ["plan", "critique"]
+}
+
+// critic.json — joins the planner's conversation, without sharing its name
+{
+  "inputs": { "thread": { "schema": {} } },
+  "operation": {
+    "kind": "prompt",
+    "session": { "expr": "inputs.thread" },
+    "prompt": "Critique the plan you just produced."
+  }
+}
+```
+
+`{"expr": …}` is the one `session` spelling **evaluated** rather than read, and it
+has to be: a ref does not exist until the operation that produced it has run, so a
+static value could never carry one. An expression that resolves to nothing is a
+**failure**, not a fresh conversation — the author asked to continue something
+specific, and quietly starting a different one yields a run that looks successful
+and remembers nothing.
+
+**Branch instead of continuing — the same ref plus `fork`.** A fork sees the
+prefix and writes somewhere else, so the trunk is untouched. Fan three variants
+out of one planning conversation:
+
+```jsonc
+// critic.json — same wiring, one extra field
+"operation": {
+  "kind": "prompt",
+  "session": { "expr": "inputs.thread" },
+  "fork": true,
+  "prompt": "Argue the opposite case."
+}
+```
+
+`fork` goes on the state that **consumes** the ref, never on the one that produced
+it: a position marker should not encode what a later caller intends to do with it.
+
+**Start a fresh conversation — omit `session`, or write `null`.**
+
+```jsonc
+// nothing declared, and no ancestor declared one: this state's own private stream
+"operation": { "kind": "prompt", "prompt": "Summarize this file." }
+
+// under a root that declared "planning", but this one should not see it
+"operation": { "kind": "prompt", "session": null, "prompt": "Summarize this file." }
+```
+
+The two differ only in intent — both give the state a stream nothing else writes
+to. Write `null` when an ancestor declared a name and you mean to opt out, since
+that reads as a decision rather than an omission. `""` is an error, never "fresh":
+a template interpolating a bad reference would otherwise produce an empty string
+and run in silent isolation.
+
+⚠️ `session: null` opts out of the **conversation**, not the workspace. The
+worktree and the approvals come from the declared name and are inherited, so a
+fresh conversation still runs where its parent runs.
 
 ---
 
@@ -1008,6 +1167,7 @@ instance's data apart from a name resolved along the path:
 
 | Namespace | Available in | Contents |
 | --- | --- | --- |
+<<<<<<< HEAD
 | `.inputs.*` | both | this instance's resolved inputs |
 | `.outputs.*` | both | outputs produced so far |
 | `.children.<key>.outputs.*` | both | a child's outputs |
@@ -1027,6 +1187,69 @@ instance's data apart from a name resolved along the path:
 searched along `config.workflows.path` — and fails to load if no document is there. The
 error names the fix, but the rule is worth learning once rather than meeting as a
 diagnostic: **a leading dot is data, a bare name is a document.**
+=======
+| `inputs.*` | both | this instance's resolved inputs |
+| `outputs.*` | both | outputs produced so far |
+| `operation.*` | both | this state's own call — see below |
+| `children.<key>.outputs.*` | both | a child's outputs |
+| `children.<key>.outcome` | both | `success` \| `error` \| `canceled` \| `timeout` |
+| `children.<key>.operation.*` | both | a child's call — see below |
+| `artifacts.*` | both | artifacts registered this run |
+| `conversations.*` | both | transcripts by session id |
+| `run.iteration` | guards only | transitions taken by this instance |
+| `run.cursor` | guards only | the child key the cursor is at — see below |
+| `run.position` | guards only | its index in `sequence`; `-1` before any child runs |
+| `limits.*` | guards only | this state's declared limits |
+>>>>>>> claude/brave-antonelli-dbc5ac
+
+### The `operation.*` namespace
+
+A state's operation is addressable in its own right — `operation.*` for this
+state's call, `children.<key>.operation.*` for a child's. It is where what the
+*engine* knows about the call lives, as opposed to what the call produced (which
+is `outputs.*`, where it always was).
+
+| Field | On | Meaning |
+| --- | --- | --- |
+| `outcome` | any op | `success` \| `error` \| `timeout` \| `canceled` |
+| `cost` | any op | USD the call spent — a **failed** call still costs money, and still reports it |
+| `usage` | any op | the measurement record (duration, token counts, child rollups) |
+| `model` | any op | the model the call was actually made with |
+| `outputs.session` | **prompt only** | the conversation position the call **ended** at, as `{ id }` |
+
+The namespace is **typed by the operation's kind**, so
+`children.gate.operation.outputs.session` written against a `ui` gate is a
+load-time authoring error rather than a binding that silently resolves to
+nothing. A state with no operation has no `operation.*` at all.
+
+`operation.outputs.session` is the **end** position, and there is deliberately no
+start marker. You append *at* a position but do not know where the call finished
+until the provider resolves, so the end is the only value that exists by the time
+an expression reads it — and it is what consumers want, since "append after me"
+and "fork after me" both mean *after*:
+
+```jsonc
+// the PARENT wires the position into the consumer's input...
+"children": { "critique": { "state": "critic",
+  "inputs": { "thread": { "expr": "children.plan.operation.outputs.session" } } } }
+
+// ...and the consumer continues that conversation, or branches from it
+{ "session": { "expr": "inputs.thread" } }
+{ "session": { "expr": "inputs.thread" }, "fork": true }
+```
+
+Two hops, because two scopes: `children.plan.*` is visible only to the parent,
+and `session` is resolved against the state that declares it. §5.3 works this
+through end to end.
+
+Recovery needs no start marker either: restart the state, and its binding
+re-resolves to the position the failed attempt started from — which has since
+been appended to, so the retry forks from exactly the right place.
+
+⚠️ Authored forking is **per operation**. If one agentic call appends forty
+entries to a transcript, a workflow cannot branch at entry twenty; the store
+addresses finer positions so a human can scrub a transcript in the UI, but the
+expression language exposes operation boundaries only.
 
 **Operators:** `===` `!==` `==` `!=` `<` `<=` `>` `>=` `&&` `||` `!` `? :`, with
 JavaScript semantics. There is **no arithmetic syntax** — no `+`, `-`, `*`, `/` — so
@@ -1694,3 +1917,18 @@ Every one of these fails **silently or misleadingly**:
     the JSON wins. Two files whose names differ only past a dot
     (`user.json`, `user.address.json`) make `$/types/user.address` ambiguous —
     also a warning, longest match wins.
+19. **Omitting `session` gives that state its own private conversation.** It is
+    not a shared default, and nothing warns: the state simply does not see what
+    the previous one said, and reads as a model that forgot rather than a workflow
+    that never threaded. Name a session at the root if you want threading.
+20. **A `session` ref does not give a subtree its own worktree or approvals.**
+    Those follow the declared *name* and are inherited; only naming a session on a
+    subtree gives it its own bundle. Two branches of one conversation share a
+    checkout — a fork branches the conversation, not the filesystem.
+21. **`fork` goes on the state that consumes a ref, not on the one that produced
+    it.** Written on the producer it does nothing, because a position marker does
+    not encode how a later caller intends to use it.
+22. **`summary` is per session, not per state.** One state asking for it summarizes
+    the conversation for every state sharing that session, including the ones that
+    asked for `full_history`. The lint warns for named sessions; it cannot warn
+    for a private one, because a private one has nothing to conflict with.

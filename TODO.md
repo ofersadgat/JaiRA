@@ -49,6 +49,7 @@ assumption breaks.
 - [ ] **Subtasks are a link only** (§12, §15 Q9/Q10 — the MVP position).
       `TaskMeta.parentTaskId` is stored and nothing reads it: no board grouping, no
       `waiting_for_event` state, no parent/child rollup.
+<<<<<<< HEAD
 - [ ] **§4.2 tables: `operations` landed as `operation_records`, the rest demoted or
       dead** (updated 2026-08-12, CHANGESETS.md §5.1). `command_log` landed with
       phase 6, `artifacts` with §7.6, `jobs` with §4.2a; the per-attempt operation
@@ -58,6 +59,14 @@ assumption breaks.
       possible future caches — the journal is the truth, projections are views — and
       `conversations` is DEAD, superseded by the sessions model. What remains open here
       is only step-level resume caching, which needs `@declarative-ai/hw` support.
+=======
+- [ ] **§4.2 tables are partly deferred** (§1b item 2). `command_log` landed with
+      phase 6, `artifacts` with §7.6, `jobs` with §4.2a and `sessions` +
+      `operation_records` with the session model (DESIGN §7.3, replacing the drafted `conversations`);
+      `instances`, `operations` and `transitions` still do not exist — the board and detail views
+      are projected from the `events` journal instead. They land with step-level
+      resume, which needs `@declarative-ai/hw` support.
+>>>>>>> claude/brave-antonelli-dbc5ac
 - [ ] **Workflow migration for a running task is out of scope** (§5.3). The escape
       hatch is "restart the task on current workflows"; there is no UI for it, and
       nothing detects a task pinned to a snapshot the current format cannot read —
@@ -269,7 +278,11 @@ What remains:
   - [ ] Compose the stack in JaiRA and pass it. The wrapper LEVEL is a real choice, not
         an accident: llm-aware wrappers (`withRateLimit`/`withBudget`/`withSession`, which
         live in `promptop`) belong on the prompt executor at the leaf, where `withRetry`
-        already is; op-level wrappers go above dispatch. **Memoize at the prompt leaf** —
+        already is; op-level wrappers go above dispatch. `withRecord`/`withSessionPosition`
+        are the exception and live in `exec`, not `promptop` — hw cannot depend on
+        `promptop`, and recording an execution is not llm-specific anyway. The order is
+        fixed: `withSession(withRecord(core))`, because the record has to store the
+        conversation before `withSession` projects it down to the op's output value. **Memoize at the prompt leaf** —
         that is where the cost and the latency are, and it keys on the RENDERED prompt op,
         which is the identity worth reusing. Memoizing over the dispatcher instead would
         key the whole composite; legitimate, but a bigger claim. Known gap either way: a
@@ -407,6 +420,7 @@ Two things the live runs settled that are worth not re-deriving:
 - [ ] **Summary mode compacts per SESSION, not per state.** One session has one
       conversation, so a session mixing `summary` and `full_history` is summarized for
       both; the workflow browser warns, and nothing finer is possible without an engine
+<<<<<<< HEAD
       change.
 - [ ] **Summary mode never fires for a state that declares no session.** The opt-in set
       holds authored NAMES, and `conversationModesOf` maps an undeclared session to
@@ -420,3 +434,13 @@ Two things the live runs settled that are worth not re-deriving:
 - [ ] **Pruning does not touch artifacts or conversations.** DESIGN §12 lists
       "conversation artifacts"; there are no such tables yet (see the §4.2 entry above),
       so pruning covers `runs`, `events` and `command_log` only.
+=======
+      change. Only NAMED sessions can collide — a state that declares none gets its own
+      private conversation (DESIGN §7.3).
+- [ ] **Pruning does not touch artifacts.** DESIGN §12 lists "conversation artifacts";
+      no artifact file is written for a conversation yet (§7.5), so pruning covers `runs`,
+      `events`, `command_log` and — since the session rework (DESIGN §7.3) — session lineage. Sessions
+      prune by DEPTH, deepest first, because a descendant holds a foreign key into its
+      parent and `created_at` ties within a millisecond ordered a root ahead of its own
+      children.
+>>>>>>> claude/brave-antonelli-dbc5ac

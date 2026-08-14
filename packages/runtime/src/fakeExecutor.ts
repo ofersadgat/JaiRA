@@ -108,9 +108,11 @@ export class ScriptedFakeExecutor implements Executor<ExecServices, WorkflowMetr
     if (rule.error !== undefined) return failed(rule.error);
     // Token counts belong to the model payload (`LlmOutput`), which stops at the
     // prompt executor — a workflow measurement is duration plus spend.
+    const answer = typeof rule.output === "string" ? rule.output : JSON.stringify(rule.output ?? null);
     return {
       value: rule.output ?? null,
       metrics: { durationMs: 1, costUsd: rule.cost ?? 0.01, costSource: "table" },
+<<<<<<< HEAD
       // The conversation this call added, on the DECLARED session channel.
       //
       // A real prompt executor's payload is an `LlmOutput` that already carries the
@@ -126,5 +128,13 @@ export class ScriptedFakeExecutor implements Executor<ExecServices, WorkflowMetr
         ],
       },
     } as ExecResult<ResolvedValue, WorkflowMetrics>;
+=======
+      // The conversation delta, on the declared channel. A REAL prompt executor's payload is an
+      // `LlmOutput` that already carries the messages; this fake's value is the projection, so it has
+      // to say what it added — otherwise a scripted run silently builds no conversation at all, and
+      // every session behaviour would look broken only under the fake.
+      session: { messages: [{ role: "user", content: op.user }, { role: "assistant", content: answer }] },
+    } as unknown as ExecResult<ResolvedValue, WorkflowMetrics>;
+>>>>>>> claude/brave-antonelli-dbc5ac
   }
 }

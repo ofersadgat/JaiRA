@@ -1,5 +1,5 @@
 /**
- * Conversations that survive the process (SESSIONS.md §9).
+ * Conversations that survive the process (DESIGN §7.3).
  *
  * Every run has always built one of these and thrown it away: `sessionServicesFor` constructs a
  * `MapSessionStore`, the engine writes every model call into it complete, and the process exits. The

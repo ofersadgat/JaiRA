@@ -296,7 +296,7 @@ export function withSessionLayers(
 
 export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowExecResult> {
   const prompt = cfg.session !== undefined ? withSessionLayers(cfg.session, cfg.prompt) : cfg.prompt;
-  // ORDERING, since it looks inverted against SESSIONS.md §6's `withMemoize(withSessionPosition(...))`:
+  // ORDERING, since it looks inverted against the sessions model's (DESIGN §7.3) `withMemoize(withSessionPosition(...))`:
   // the memo sits INSIDE both session layers, and that is the only legal place for it. An outer
   // memoize refuses a session layer outright — `withSessionPosition` forces `sessionResume: true` into
   // `capabilitiesFor`, and `withMemoize` answers that with `SESSION_REFUSAL` on every op — because a

@@ -1,5 +1,5 @@
 /**
- * Conversations that outlive the process (SESSIONS.md §9) — and, since CHANGESETS.md §5.1, the
+ * Conversations that outlive the process (DESIGN §7.3) — and, since CHANGESETS.md §5.1, the
  * per-attempt operation record store those conversations are a PROJECTION of.
  *
  * Every run already built one of these — `sessionServicesFor` constructs a `MapSessionStore` and the
