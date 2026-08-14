@@ -9,6 +9,7 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { loadBundle, validateBundle } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/exec";
+import { registerCliChangesetReviewer } from "./changesetReviewer";
 import {
   beginTaskRun,
   boardView,
@@ -70,8 +71,16 @@ import {
   enabledAdapters,
   enabledGenericAgents,
   registerAgentRuntimes,
+  registerChangesetFunctions,
   registerCommandFunction,
   registerGenericAgents,
+  USER_APPROVE_CHANGESET,
+  worktreeChangeset,
+  changesetReviewFiles,
+  changesetReviewLoopFiles,
+  CHANGESET_REVIEW_ID,
+  CHANGESET_REVIEW_LOOP_ID,
+  withinWorkspace,
   registerTools,
   samePathKey,
   ScriptedFunctions,
@@ -107,6 +116,8 @@ const USAGE = `usage:
   jaira board [--level <stateId>] [--json] [--project <dir>]
   jaira worktree list [--project <dir>]
   jaira worktree remove <taskId> [--force] [--project <dir>]
+  jaira changeset review [--task <taskId> | --dir <path>] [--base <rev>] [--loop]
+            [--interactions <json|@file>] [--fake <json|@file>] [--project <dir>]
   jaira prune [--older-than <days>] [--keep-runs <n>] [--apply] [--project <dir>]
   jaira workflow list [--json] [--project <dir>]
   jaira workflow lint [--json] [--project <dir>]
@@ -160,6 +171,15 @@ async function dispatch(argv: string[], io: CliIo): Promise<number> {
           return cmdWorktreeRemove(wtRest, io);
         default:
           throw new UsageError(`unknown worktree subcommand '${sub ?? ""}'`);
+      }
+    }
+    case "changeset": {
+      const [sub, ...csRest] = rest;
+      switch (sub) {
+        case "review":
+          return cmdChangesetReview(csRest, io);
+        default:
+          throw new UsageError(`unknown changeset subcommand '${sub ?? ""}'`);
       }
     }
     case "task": {
@@ -323,6 +343,14 @@ function buildRunEnvironment(
     wiring.interactions.register(registry);
     for (const name of functionNamesOf(bundle)) wiring.interactions.registerWildcard(registry, name);
   }
+  // The changeset application step and its status helper (CHANGESETS.md §4.2), same as the app.
+  registerChangesetFunctions(registry);
+  // The terminal reviewer (§8.4): the same registered function, answered at a CLI prompt — the hub
+  // is process-local, so this needs no new channel. Only when nothing scripted it and a person is
+  // actually attached; headless, an unanswerable gate should fail the state, not hang the run.
+  if (!registry.functions.has(USER_APPROVE_CHANGESET) && process.stdin.isTTY === true && process.stdout.isTTY === true) {
+    registerCliChangesetReviewer(registry);
+  }
   // How prompt states reach whatever answers them — the provider routes with their credentials
   // resolved, the named presets a state selects with `configRef`, and the agent executors a model
   // prefix can name. A scripted run gets none of it: the fake answers everything.
@@ -438,45 +466,140 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
   });
   if (values.root === undefined) throw new UsageError("run requires --root <stateId>");
   const projectDir = projectDirOf(values, io);
-
-  // Ad-hoc runs read live workflows (no snapshot, no task) — the phase-1
-  // debugging surface. Durable runs go through `jaira task …`.
-  let config: JairaConfig;
-  let workflowsDir: string;
-  if (values.workflows !== undefined) {
-    workflowsDir = resolve(io.cwd, values.workflows);
-    config = tryProjectConfig(projectDir) ?? defaultConfig();
-  } else {
-    const project = openWithRecoveryNote(projectDir, io);
-    config = project.config;
-    workflowsDir = project.paths.workflowsDir;
-    project.close();
-  }
-
-  const files = readWorkflowFiles(workflowsDir);
-  if (Object.keys(files).length === 0) throw new Error(`no workflow state files under ${workflowsDir}`);
-  const bundle = loadBundle(files, values.root, standaloneLoadOptions(workflowsDir));
-  const report = validateBundle(bundle);
-  if (report.errors.length > 0) {
-    const detail = report.errors.map((e) => `${e.stateId} ${e.path}: ${e.message}`).join("\n  ");
-    throw new Error(`workflow validation failed:\n  ${detail}`);
-  }
-
   const wiring = runWiringOf(values, io.cwd);
   const inputs = values.inputs !== undefined ? recordValue("inputs", jsonValue("inputs", values.inputs, io.cwd)) : {};
-  const { registry, prompt, session, summaryModes } = buildRunEnvironment(bundle, config, wiring, undefined, projectDir);
-  warnSummaryConflicts(summaryModes, io);
-  assertCapabilities(registry, bundle, config);
-  const result = await executeWorkflow({
-    bundle,
-    inputs,
-    registry,
-    prompt,
-    session,
-    ...(io.abortSignal !== undefined ? { abortSignal: io.abortSignal } : {}),
+
+  // The STANDALONE mode (`--workflows <dir>`) stays in-memory: it points at a bare directory of
+  // state files, which has no `.jaira/` database to record into. Everything else is durable below.
+  if (values.workflows !== undefined) {
+    const workflowsDir = resolve(io.cwd, values.workflows);
+    const config = tryProjectConfig(projectDir) ?? defaultConfig();
+    const files = readWorkflowFiles(workflowsDir);
+    if (Object.keys(files).length === 0) throw new Error(`no workflow state files under ${workflowsDir}`);
+    const bundle = loadBundle(files, values.root, standaloneLoadOptions(workflowsDir));
+    const report = validateBundle(bundle);
+    if (report.errors.length > 0) {
+      const detail = report.errors.map((e) => `${e.stateId} ${e.path}: ${e.message}`).join("\n  ");
+      throw new Error(`workflow validation failed:\n  ${detail}`);
+    }
+    const { registry, prompt, session, summaryModes } = buildRunEnvironment(bundle, config, wiring, undefined, projectDir);
+    warnSummaryConflicts(summaryModes, io);
+    assertCapabilities(registry, bundle, config);
+    const result = await executeWorkflow({
+      bundle,
+      inputs,
+      registry,
+      prompt,
+      session,
+      ...(io.abortSignal !== undefined ? { abortSignal: io.abortSignal } : {}),
+    });
+    io.stdout(JSON.stringify(resultReport(result), null, 2) + "\n");
+    return statusOfResult(result) === "completed" ? 0 : 1;
+  }
+
+  // DURABLE, exactly like the UI: an ad-hoc run mints a task and drives it through the same
+  // machinery `task start` uses — a run row, the journal, run-scoped conversations, the job claim,
+  // artifacts. "Ad-hoc" now means only that nobody had to name it first; the invariant it upholds
+  // is that everything durable has a run.
+  const project = openWithRecoveryNote(projectDir, io);
+  try {
+    // Validate against the LIVE files before minting anything: a broken workflow should fail here,
+    // not leave a task pinned to a snapshot nothing can run.
+    const files = readWorkflowFiles(project.paths.workflowsDir);
+    if (Object.keys(files).length === 0) throw new Error(`no workflow state files under ${project.paths.workflowsDir}`);
+    const bundle = loadBundle(files, values.root, standaloneLoadOptions(project.paths.workflowsDir));
+    const report = validateBundle(bundle);
+    if (report.errors.length > 0) {
+      const detail = report.errors.map((e) => `${e.stateId} ${e.path}: ${e.message}`).join("\n  ");
+      throw new Error(`workflow validation failed:\n  ${detail}`);
+    }
+    const task = createTask(project, {
+      title: `run · ${values.root}`,
+      workflow: values.root,
+      ...(Object.keys(inputs).length > 0 ? { inputs } : {}),
+      labels: ["adhoc"],
+    });
+    return await runTaskNow(project, task.id, wiring, io);
+  } finally {
+    project.close();
+  }
+}
+
+/**
+ * Review worktree edits as a changeset at the terminal (CHANGESETS.md §8.4) — the same registered
+ * function the app's reviewer answers, over the same workflow, applied to the same worktree.
+ *
+ * `--task` reviews a task's worktree; `--dir` any checkout; neither reviews the project itself. The
+ * gate is answered by `--interactions` when scripted, or one change at a time at the prompt when a
+ * terminal is attached — headless with neither, the state fails honestly rather than hanging.
+ */
+async function cmdChangesetReview(argv: string[], io: CliIo): Promise<number> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      task: { type: "string" },
+      dir: { type: "string" },
+      base: { type: "string" },
+      loop: { type: "boolean" },
+      project: { type: "string" },
+      interactions: { type: "string" },
+      fake: { type: "string" },
+      "repair-turns": { type: "string" },
+    },
   });
-  io.stdout(JSON.stringify(resultReport(result), null, 2) + "\n");
-  return statusOfResult(result) === "completed" ? 0 : 1;
+  const projectDir = projectDirOf(values, io);
+  const project = openWithRecoveryNote(projectDir, io);
+  try {
+    let worktree: string;
+    if (values.task !== undefined) {
+      const row = project.runtime.get(values.task);
+      if (row?.worktreePath === undefined) {
+        throw new Error(`task '${values.task}' has no worktree — only a branch-bound task's edits can be reviewed`);
+      }
+      worktree = row.worktreePath;
+    } else {
+      worktree = values.dir !== undefined ? resolve(io.cwd, values.dir) : projectDir;
+    }
+
+    const git = gitFor(project, worktree);
+    const base = values.base ?? "HEAD";
+    const changeset = await worktreeChangeset(git, base, (path) => {
+      const file = withinWorkspace(worktree, path);
+      return file !== undefined && existsSync(file) ? readFileSync(file, "utf8") : undefined;
+    });
+    if (changeset.changes.length === 0) {
+      io.stdout(`nothing to review: ${worktree} matches ${base}\n`);
+      return 0;
+    }
+
+    const rootId = values.loop === true ? CHANGESET_REVIEW_LOOP_ID : CHANGESET_REVIEW_ID;
+    const bundle = loadBundle(
+      values.loop === true ? changesetReviewLoopFiles({ tree: "proposal" }) : changesetReviewFiles({ tree: "proposal" }),
+      rootId,
+    );
+    const wiring = runWiringOf(values, io.cwd);
+    const { registry, prompt, session } = buildRunEnvironment(bundle, project.config, wiring, undefined, projectDir);
+    // buildRunEnvironment registered the apply/status/revise family and, when a terminal is
+    // attached and nothing scripted it, the terminal reviewer. Nothing to answer the gate is a
+    // refusal HERE, before any work — not a hung run.
+    if (!registry.functions.has(USER_APPROVE_CHANGESET)) {
+      throw new Error("nothing can answer the gate: attach a terminal, or script it with --interactions");
+    }
+    io.stdout(`reviewing ${changeset.changes.length} change(s) in ${worktree} against ${base}\n`);
+    const result = await executeWorkflow({
+      bundle,
+      inputs: { changeset: changeset as never },
+      registry,
+      prompt,
+      session,
+      workspace: { root: worktree },
+      ...(io.abortSignal !== undefined ? { abortSignal: io.abortSignal } : {}),
+    });
+    io.stdout(JSON.stringify(resultReport(result), null, 2) + "\n");
+    return statusOfResult(result) === "completed" ? 0 : 1;
+  } finally {
+    project.close();
+  }
 }
 
 function tryProjectConfig(projectDir: string): JairaConfig | undefined {
@@ -540,6 +663,20 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
   if (taskId === undefined) throw new UsageError("task start requires a task id");
   const wiring = runWiringOf(values, io.cwd);
   const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  try {
+    return await runTaskNow(project, taskId, wiring, io);
+  } finally {
+    project.close();
+  }
+}
+
+/**
+ * Drive one task's run to completion, DURABLY — the shared engine of `task start` and `run`
+ * (which mints an ad-hoc task first, so a hand-invoked run records everything a UI-started one
+ * does: a run row, the journal, scoped conversations, the job claim, artifacts). The caller owns
+ * the project's lifecycle.
+ */
+async function runTaskNow(project: Project, taskId: string, wiring: RunWiring, io: CliIo): Promise<number> {
   // Declared out here so `finally` can release the claim however the run ends.
   let owner: RunOwner | undefined;
   try {
@@ -654,10 +791,9 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
     );
     return status === "completed" ? 0 : 1;
   } finally {
-    // Release before closing the database: the claim and any child still recorded
+    // Release before the caller closes the database: the claim and any child still recorded
     // as running must be closed, or the next open reports phantom orphans.
     owner?.release();
-    project.close();
   }
 }
 

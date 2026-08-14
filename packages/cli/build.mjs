@@ -30,6 +30,10 @@ await build({
   // Keeps @license/@preserve headers from the bundled sources in the output.
   legalComments: "eof",
   external: Object.keys(pkg.dependencies),
+  // jsonc-parser's `main` is a UMD build whose internal `require("./impl/…")` calls survive into an
+  // ESM bundle and throw at import time ("Dynamic require is not supported"). Its `module` entry is
+  // real ESM. Alias just that package rather than flipping mainFields for every dependency.
+  alias: { "jsonc-parser": "jsonc-parser/lib/esm/main.js" },
   define: { "process.env.NODE_ENV": '"production"' },
   logLevel: "info",
 });

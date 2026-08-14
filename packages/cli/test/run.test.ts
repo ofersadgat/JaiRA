@@ -71,12 +71,17 @@ describe("jaira run (headless planning workflow)", () => {
       ],
       cli,
     );
-    expect(cli.err()).toBe("");
+    // DURABLE now: an ad-hoc run mints a task and announces its run like `task start` does — the
+    // status line is information, not an error.
+    expect(cli.err()).toMatch(/^task t-\S+ run 1: workflow 'feature\/plan' snapshot /);
     expect(code).toBe(0);
     const report = JSON.parse(cli.out()) as Record<string, unknown>;
     const outputs = report["outputs"] as Record<string, unknown>;
     expect(outputs["outcome"]).toBe("blocked");
     expect((outputs["critique"] as Record<string, unknown>)["human_decision"]).toBe("block");
+    // …and the run is on the record: a task id and run id in the report, exactly as the UI leaves.
+    expect(report["taskId"]).toMatch(/^t-/);
+    expect(report["runId"]).toBe(1);
   });
 
   it("fails the state when an interactive function is reached unregistered", async () => {
