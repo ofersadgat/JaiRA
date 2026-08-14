@@ -37,10 +37,20 @@ path** says what within it. Either half may be empty.
 | `$/types/markdown` | `$` is shorthand for `$JAIRA` |
 | `$JAIRA/lib/prompts.review` | a named root — `$JAIRA`, `$PROJECT` |
 | `/opt/workflows/review`, `file:/opt/…` | absolute |
+| `git:<sha>`, `git:<sha>:<path>` | a commit / one blob — **immutable** (CHANGESETS.md §2) |
+| `db://operation_records/<session>@<seq>.<pointer>` | a value a recorded operation returned — immutable, machine-local (CHANGESETS.md §2) |
 
 A **bare** file path hangs off the field's default root, `$JAIRA/workflows`. The leading dot
 is what distinguishes "a property of this file" from "a sibling file":
 `documentation.children.x` names the `documentation` file; `.children.x` names this one.
+
+The two added schemes exist for the changeset chain (CHANGESETS.md §1.2): a changeset's `source`
+names **where a change starts from, at a specific point in time**, and a path is not enough —
+text at a path changes. A `git:` blob is the only genuinely immutable address in the system, so it
+is also the only one cacheable without an invalidation story; a `db://` address is stable because
+`(session_id, seq)` is the primary key of `session_positions`, resolving through the join to the
+operation record that holds the payload. A `file:` form may carry `#sha256=<hex>` — verifiable,
+not resolvable: the hash detects drift but cannot recover the content once the tree moves.
 
 Anything else — `https:`, `git+ssh:`, an unknown `$VAR` — is refused rather than guessed at.
 
@@ -63,6 +73,10 @@ reference is *parsed* rather than a reference that parses cleanly and fails late
 
 For an **extensionless** reference the probe order is `.json`, then `.yaml`/`.yml`, then the
 name as written.
+
+For the `git:` scheme, "the directory listing" is a **tree listing**: longest match runs
+against `ls-tree` over the pinned tree rather than against the filesystem (CHANGESETS.md §2).
+Everything else about the rule is unchanged.
 
 Three consequences, and the diagnostics that cover them, are in §9.
 

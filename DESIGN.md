@@ -913,48 +913,67 @@ human needs to read or edit it casually, it lives in the JSON file.
 
 ### 4.2 SQLite Schema (core tables)
 
+> **Rewritten 2026-08-12 (CHANGESETS.md §5.1) to journal-as-truth.** The system
+> has an irreducible pair — the journal records *that* operations ran, a payload
+> store records *what they returned* — and everything else is a projection of
+> those two. The earlier claim here that "the materialized tables are the resume
+> source" said the opposite of what is true and is reversed below.
+
 ```sql
-task_runtime   (task_id PK, status, snapshot_hash, branch, worktree_path,
-                root_instance_id, created_at, updated_at)
-instances      (id PK, task_id, state_id, child_key, parent_instance_id,
-                status, superseded, iteration, sequence_cursor,
-                inputs_json, outputs_json, outcome,
-                started_at, ended_at)
-operations     (id PK, instance_id, kind,            -- ui | agent | skill
-                status, provider, attempt,           -- attempt = repair-loop counter
-                request_json, result_json, error_json,
-                provider_session_id, started_at, ended_at)
-transitions    (id PK, instance_id, iteration, to_target, when_expr, taken_at)
-events         (seq PK AUTOINCREMENT, task_id, instance_id, type,
-                payload_json, created_at)            -- append-only journal
-artifacts      (id PK, task_id, run_id, logical_path, physical_path, content,
-                hash, bytes, format, instance_id, state_id, slot, created_at)
-                -- BUILT (§7.6): logical_path is what the producer said it wrote,
-                -- physical_path where the bytes went. UNIQUE(task_id, logical_path).
-jobs           (id PK, kind, task_id, run_id, parent_job_id, owner_token, pid,
-                command, started_at, heartbeat_at, cancel_requested_at,
-                ended_at, outcome)   -- BUILT (§4.2a): process claims + children
-conversations  (id PK, task_id, provider, provider_session_id, mode,
-                transcript_artifact_id, created_at)
-command_log    (id PK, operation_id, raw_command, parsed_intent_json,
-                decision,                            -- allowed | blocked | approved | denied
-                decided_by, created_at)              -- policy | user
+task_runtime         (task_id PK, status, snapshot_hash, branch, worktree_path,
+                      root_instance_id, created_at, updated_at)
+state_machine_events (seq PK AUTOINCREMENT, task_id, run_id, instance_id, type,
+                      payload_json, created_at)
+                      -- BUILT (rename of 'events', CHANGESETS.md §5.1): the append-only
+                      -- EngineEvent journal. LIFECYCLE TRUTH, and nothing else rides in it:
+                      -- instance.*, operation.* (metrics, no payload), transition.taken,
+                      -- child.superseded.
+operation_records    (id PK AUTOINCREMENT, record_id, task_id, run_id, attempt,
+                      status,                       -- open | completed | failed
+                      request_json, result_json, error_json, metrics_json,
+                      session_outcome_json, provider_session_id,
+                      started_at, ended_at)
+                      -- BUILT: the per-attempt operation record this section always promised,
+                      -- finally under the name. One row per attempt, EVERY operation — the
+                      -- dispatcher records unconditionally (CHANGESETS.md §5.2).
+session_positions    (session_id, seq, operation_record_id,
+                      PRIMARY KEY (session_id, seq))
+                      -- BUILT: conversation membership. The primary key IS the position claim;
+                      -- a duplicate insert is PositionTaken → fork, never a race.
+artifacts            (id PK, task_id, run_id, logical_path, physical_path, content,
+                      hash, bytes, format, instance_id, state_id, slot, created_at)
+                      -- BUILT (§7.6): logical_path is what the producer said it wrote,
+                      -- physical_path where the bytes went. UNIQUE(task_id, logical_path).
+jobs                 (id PK, kind, task_id, run_id, parent_job_id, owner_token, pid,
+                      command, started_at, heartbeat_at, cancel_requested_at,
+                      ended_at, outcome)   -- BUILT (§4.2a): process claims + children
+command_log          (id PK, task_id, run_id, tool, command, parsed_json,
+                      decision,                     -- allowed | blocked | approved | denied
+                      decided_by, reason, scope, session_id, created_at)  -- policy | user
 ```
 
 Notes:
 
-- `instances.child_key` is the key in the parent's `children` map, distinct
-  from `state_id` — the same state file can be mounted under multiple keys
-  (spec §10.4 fan-out example).
-- `children.<key>.outputs` resolution = most recent non-`superseded` instance
-  with that `child_key` under the current parent instance.
-- **Sequence-reset clearing (spec §3.3) marks instances `superseded` rather
-  than deleting them.** History is preserved (spec §13); expression resolution
-  ignores superseded instances, which implements "clears the recorded results."
-- The `events` journal is the audit trail and debugging record. The
-  materialized tables (`instances`, `operations`, …) are the resume source;
-  every engine step appends its events and updates materialized rows in **one
-  transaction**, so they can never disagree.
+- **The journal is the truth; projections are views.** The instance tree the
+  board draws, transitions, sequence cursors — all recomputed from
+  `state_machine_events` (`projection.ts`). `instances` and `transitions` as
+  TABLES are demoted to *possible future caches* for step-level resume, not
+  schema: adding them back would be an optimization, and they would be derived,
+  never authoritative.
+- **Neither table is derivable from the other.** `operation.completed` carries
+  metrics and no payload, so the journal cannot answer "what did it return";
+  the record store does not order lifecycle, so it cannot answer "what happened
+  around it".
+- `conversations` is **struck** — superseded by the sessions model
+  (SESSIONS.md): a conversation IS the records claiming positions under one
+  `session_id`, ordered by `seq`, with lineage in the `sessions` table. A
+  separate conversations table would be a second store of the same truth.
+- A record with no `session_positions` row is an UNPLACED call — a pure helper,
+  an embedded expression call. It pollutes no transcript; retention is the
+  pruning surface's question (CHANGESETS.md §10.5).
+- Sequence-reset clearing (spec §3.3) is `child.superseded` in the journal;
+  expression resolution ignores superseded instances, which implements "clears
+  the recorded results." History is preserved (spec §13).
 
 ### 4.2a The `jobs` Table — Process Claims and Liveness (decided and built 2026-07-28)
 

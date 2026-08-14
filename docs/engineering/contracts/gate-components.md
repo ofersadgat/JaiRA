@@ -12,7 +12,7 @@ since: proposed — extends the five shipped components (DESIGN §1f)
 
 # Gate components
 
-The five built-in UI components a `FunctionOp` can name, and what each returns.
+The six built-in UI components a `FunctionOp` can name, and what each returns.
 A gate's result lands directly on the state's declared outputs, with no adapter
 in between, so **the result shape is the contract**.
 
@@ -53,10 +53,41 @@ all.
 | `edit_markdown` | `{ content }` |
 | `confirm_action` | `{ confirmed }` |
 | `fill_form` | a flat object of its fields |
+| `user-approve-changeset` | `{ decisions: [{ id, decision, comment?, content? }] }` |
 
 `fill_form` reads a JSON-Schema **subset**: `string` · `number` · `boolean` ·
 `enum`, with `optional`, `default`, `multiline`. Not arbitrary schemas — that is
 what a form can honestly render.
+
+### `user-approve-changeset` (CHANGESETS.md §4.1)
+
+Config: `{ prompt?, changeset?, tree? }` — `changeset` names the input slot
+holding the changeset (default `"changeset"`), `tree` says what the tree under
+review currently holds (`"proposal"` for a worktree an agent edited, `"base"`
+for a sync whose edits exist only as data). It returns **every change it was
+given, each with a decision** — `merged` / `reverted` / `comment` are what the
+UI offers, `approved` / `denied` exist so a workflow can separate the judgement
+from the application. `content` rides only a `merged` decision: the user's own
+edit, the one non-derivable part of the outcome.
+
+Two things make it unlike the other five:
+
+- **Its result is validated against its input.** A decision anchors to a change
+  id and the set must be complete, so `validateComponentResult` takes the
+  resolved inputs for this component alone.
+- **It mounts itself** (CHANGESETS.md §8.1). The contract is
+  `mount(node, ctx): () => void`, not a React element — the host owns the node
+  (the app widens the gate host for it; the CLI renders it on the terminal,
+  `packages/cli/src/changesetReviewer.ts`), and everything the component needs
+  arrives on an explicit `services` object (§8.2). Built-ins only for now: a
+  third-party mount is a code-execution path into the renderer, and the trust
+  model for that is not designed.
+
+The non-interactive halves are ordinary registered functions:
+`apply-changeset` (the pure application step, §4.2) and
+`changeset-review-status` (derives `settled` until higher-order expressions
+exist, EXPRESSIONS.md §3.5). The loop policy is authored transitions on the
+`changeset/review` workflow, never component code (§4.3).
 
 ## Shape — proposed additions
 

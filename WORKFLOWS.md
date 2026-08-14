@@ -1306,10 +1306,21 @@ and two buttons.
 - **Rewrite the description** — from the workflows as they are. Used when the
   workflows are what changed.
 - **Propose workflow changes** — from what the description asks for. Used when
-  the description is what changed.
+  the description is what changed. The proposal is whole *files*: state files
+  under `workflows/`, and the prompt files under `prompts/` they reference.
 
 Both run the check first and act on its findings, so an edit is traceable to the
 requirement that motivated it, and the report is shown beside the proposal.
+
+**Prompts go in `prompts/`, and the proposal is told so.** A non-trivial prompt
+is proposed as its own markdown file, referenced from the state with
+`{"$ref": "$/prompts/<name>.md"}`, and grouped into subfolders as categories
+emerge (`prompts/review/critique.md`). The instruction is emphatic on purpose:
+a model's path of least resistance is to inline, and an inlined prompt is
+invisible to the next workflow that needs the same instruction — where a file
+under `prompts/` is a library entry the next proposal is told to look for and
+reuse before writing a near-duplicate. Only a one-line prompt that does nothing
+but glue its bound inputs together may stay inline.
 
 **Nothing is written.** The rewritten description arrives as an unsaved draft in
 the editor below the panel; proposed state files arrive as drafts against their
@@ -1340,13 +1351,25 @@ Judging a machine-global document against whichever checkout happened to be open
 would make its status change per window, and would scatter one document's
 baseline across every project on the machine.
 
-A proposed state file is refused rather than offered when its id points outside
-`workflows/`, when the state is authored as YAML (the proposal is JSON, and
-writing it would leave one file in two syntaxes), and when another description
-owns it (§11.3). All three are reported in the panel with the file they would
-have touched. Anything the run could not express as a state file at all — a
-human gate needing a function this project has not registered — comes back as a
-note instead of an invented state.
+A proposed file is refused rather than offered when its path escapes the layer
+root or names anything other than `workflows/` or `prompts/`, when the state it
+names is authored as YAML (the proposal is JSON, and writing it would leave one
+file in two syntaxes), and when another description owns that state (§11.3 —
+prompt files have no owner; reuse across descriptions is the point of the
+folder). All are reported in the panel with the file they would have touched.
+Anything the run could not express as a file at all — a human gate needing a
+function this project has not registered — comes back as a note instead of an
+invented state.
+
+**Review as changeset.** The applicable proposals are also lowered into one
+changeset (CHANGESETS.md §1) — `before` read from the tree as it stands, the
+source pinned by content hash — and the panel offers to walk it through the
+same review gate an agent's worktree gets, in rounds: merge or revert settles a
+change, a `comment` sends the whole changeset back to a model that revises the
+commented files under the same authoring rules the proposal was written under
+(the description included), and the revision returns to the gate. Merged
+decisions are applied into the layer root, and the sync baseline moves exactly
+when the final round merged everything.
 
 ### 11.3 A description per workflow, and how they nest
 

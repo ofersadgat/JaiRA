@@ -230,6 +230,14 @@ lazy forms. Two things worth recording about how they turned out:
 property (implicit optional chaining, what an expression means), while `select` REFUSES, because a
 named child output that is not there is an authoring error.
 
+**Bracket indexing (added 2026-08-12): `xs[-1]` is parser SUGAR for `at(xs, -1)`** — the exact AST
+the call form parses to, so lowering, inference, static analysis and the interpreter cannot treat
+the two differently, and negative indices count from the end because `at`'s already did. Two
+consequences worth recording: `[` and `]` joined the expression-only character class in
+`reference.ts`, so a bracket-bearing FILENAME stopped being addressable (it now fails loudly as an
+unparseable expression rather than resolving to nothing); and an operation reference is still only
+meaningful called — `$/prompts/review[-1]` is refused, not indexed.
+
 ---
 
 ## 2a. The operator set is a registry — design

@@ -49,11 +49,15 @@ assumption breaks.
 - [ ] **Subtasks are a link only** (§12, §15 Q9/Q10 — the MVP position).
       `TaskMeta.parentTaskId` is stored and nothing reads it: no board grouping, no
       `waiting_for_event` state, no parent/child rollup.
-- [ ] **§4.2 tables are partly deferred** (§1b item 2). `command_log` landed with
-      phase 6, `artifacts` with §7.6 and `jobs` with §4.2a; `instances`, `operations`,
-      `transitions` and `conversations` still do not exist — the board and detail views
-      are projected from the `events` journal instead. They land with step-level
-      resume, which needs `@declarative-ai/hw` support.
+- [ ] **§4.2 tables: `operations` landed as `operation_records`, the rest demoted or
+      dead** (updated 2026-08-12, CHANGESETS.md §5.1). `command_log` landed with
+      phase 6, `artifacts` with §7.6, `jobs` with §4.2a; the per-attempt operation
+      record now exists as `operation_records` (request/result/error, status, attempt),
+      with `session_positions` as the conversation-membership join and the journal
+      renamed `state_machine_events`. `instances` and `transitions` are DEMOTED to
+      possible future caches — the journal is the truth, projections are views — and
+      `conversations` is DEAD, superseded by the sessions model. What remains open here
+      is only step-level resume caching, which needs `@declarative-ai/hw` support.
 - [ ] **Workflow migration for a running task is out of scope** (§5.3). The escape
       hatch is "restart the task on current workflows"; there is no UI for it, and
       nothing detects a task pinned to a snapshot the current format cannot read —
