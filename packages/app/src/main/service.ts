@@ -21,7 +21,8 @@ import {
   writeFileSync,
   type FSWatcher,
 } from "node:fs";
-import { basename, dirname, join, relative, resolve as resolvePath, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
+import { createHash } from "node:crypto";
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
 import { InMemoryPersistence, loadBundle, type LoadedState, type WorkflowBundle } from "@declarative-ai/hw";
 import type { ExecServices, MemoCache } from "@declarative-ai/exec";
@@ -32,6 +33,7 @@ import {
   baseSource,
   baseStateView,
   beginTaskRun,
+  gitFor,
   boardForState,
   boardView,
   browseBaseWorkflows,
@@ -141,21 +143,33 @@ import {
   type ChatTurnResult,
   withTurnStream,
   syncOutcomeOf,
+  syncRespondPrompt,
   syncRootId,
   syncWorkflowFiles,
   verdictOfFindings,
+  editsChangeset,
+  registerChangesetFunctions,
+  withinWorkspace,
+  worktreeChangeset,
+  changesetReviewFiles,
+  changesetReviewLoopFiles,
+  CHANGESET_REVIEW_ID,
+  CHANGESET_REVIEW_LOOP_ID,
+  USER_APPROVE_CHANGESET,
   type ApprovalRequest,
   type ExecObserver,
   type FakeRule,
   type HubRequest,
   type PolicyAuditEntry,
-  type StateEdit,
+  type SyncEdit,
 } from "@jaira/runtime";
 import {
   defaultSettings,
   descriptionRootOf,
   isComponentName,
   isTextMime,
+  changesetOf,
+  parseChangesetSource,
   jairaBasePaths,
   SYSTEM_DIR_NAME,
   systemProjectDir,
@@ -214,6 +228,11 @@ import type {
   PushMessage,
   MoveWorkflowRequest,
   ReadFileRequest,
+  ReadUriRequest,
+  ReviewChangesRequest,
+  ReviewChangesResult,
+  ReviewSyncRequest,
+  UriContent,
   ReadWorkflowRequest,
   RenameFileRequest,
   SecretCapabilities,
@@ -1012,6 +1031,15 @@ export class AppService {
       component: request.component,
       inputs: request.inputs,
     };
+    // A changeset gate parked by a REVIEW task is about the task whose worktree it reviews — the
+    // join the review task's labels carry (`["jaira", "changeset-review", <target>]`), and what
+    // lets the reviewer render in the reviewed task's conversation (§8.1's default host).
+    if (request.component === USER_APPROVE_CHANGESET && pending.taskId !== "") {
+      const labels = owner?.project.tasks.tryRead(pending.taskId)?.labels ?? [];
+      const at = labels.indexOf("changeset-review");
+      const about = at >= 0 ? labels[at + 1] : undefined;
+      if (about !== undefined && about !== pending.taskId) pending.about = about;
+    }
     // Parse the authored config here, once, so the renderer receives a normalized
     // contract instead of re-deriving it — and so a malformed state file surfaces
     // as a parse error on the request rather than an empty dialog.
@@ -1025,13 +1053,14 @@ export class AppService {
     return pending;
   }
 
-  /** The parsed contract for a parked request, when it has one. */
-  private configOf(requestId: string): ComponentConfig | undefined {
+  /** The parsed contract for a parked request, when it has one — with the request's own inputs,
+   *  because `user-approve-changeset` is validated against the changeset it was asked about. */
+  private configOf(requestId: string): { config: ComponentConfig; inputs: Record<string, JsonValue> } | undefined {
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
     const request = owner?.hub.list().find((r) => r.requestId === requestId);
     if (!request || !isComponentName(request.component)) return undefined;
     try {
-      return parseComponentConfig(request.component, request.inputs["config"]);
+      return { config: parseComponentConfig(request.component, request.inputs["config"]), inputs: request.inputs };
     } catch {
       return undefined;
     }
@@ -1295,12 +1324,16 @@ export class AppService {
       // blank panel: the call happened, and it added nothing anybody can read.
       return { ...base, empty: "this state added nothing to the conversation it was given" };
     }
+    const sidechains = sidechainsOf(record.value);
+    const events = recordEventsOf(record.value, inherited.length);
     return {
       ...base,
       ...(record.externalId !== undefined ? { providerSessionId: record.externalId } : {}),
       ...(row.status !== undefined ? { status: row.status } : {}),
       ...(row.costUsd !== undefined ? { costUsd: row.costUsd } : {}),
       turns,
+      ...(sidechains !== undefined ? { sidechains } : {}),
+      ...(events !== undefined ? { events } : {}),
     };
   }
 
@@ -1587,6 +1620,10 @@ export class AppService {
       // A state can also run a command directly, without delegating to an agent; it
       // gates itself with the same policy (DESIGN §10.1).
       registerCommandFunction(registry, { execEnv: config.execEnvironment, exec });
+      // The changeset application step and its status helper (CHANGESETS.md §4.2). The GATE is not
+      // here: `user-approve-changeset` is interactive and reaches the registry only through the
+      // hub, like every other component — which is the §4.1 guarantee.
+      registerChangesetFunctions(registry);
     }
 
     const started = beginTaskRun(project, taskId, {
@@ -1691,7 +1728,9 @@ export class AppService {
         runId: started.runId,
         ...(delta.session !== undefined ? { sessionId: delta.session.id, seq: delta.session.seq } : {}),
         ...(delta.stateId !== undefined ? { stateId: delta.stateId } : {}),
-        text: delta.text,
+        ...(delta.text !== undefined ? { text: delta.text } : {}),
+        ...(delta.thinking !== undefined ? { thinking: delta.thinking } : {}),
+        ...(delta.item !== undefined ? { item: delta.item } : {}),
       });
     }, prompt, open.liveCalls);
 
@@ -2398,10 +2437,10 @@ export class AppService {
    * is a second, independent gate.
    */
   submitInteraction(requestId: string, value: JsonValue): { requestId: string } {
-    const config = this.configOf(requestId);
-    if (config) {
-      const check = validateComponentResult(config, value);
-      if (!check.ok) throw new Error(`invalid ${config.component} response: ${check.errors}`);
+    const contract = this.configOf(requestId);
+    if (contract) {
+      const check = validateComponentResult(contract.config, value, contract.inputs);
+      if (!check.ok) throw new Error(`invalid ${contract.config.component} response: ${check.errors}`);
     }
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
     if (owner === undefined || !owner.hub.submit(requestId, value)) {
@@ -2903,6 +2942,105 @@ export class AppService {
   }
 
   /**
+   * One generalised read channel (CHANGESETS.md §8.5): `file:` and the `$…` anchors, `git:` blobs,
+   * `db://` recorded values — the addresses a changeset's chain speaks, resolvable by the renderer.
+   *
+   * Anchor-guarded the way artifact destinations are ({@link withinWorkspace} is the same refusal
+   * `artifactPath.ts` makes for `"dir": "../../escape"`): a path resolves only under `$PROJECT`,
+   * `$JAIRA`, or a task's `$WORKTREE`, and a `git:` blob only in the project's own repository. A
+   * renderer-reachable channel that resolves arbitrary `file:` URIs is a sandbox escape, so
+   * anything else — and anything unrecognised — is refused rather than guessed at.
+   */
+  async readUri(request: ReadUriRequest): Promise<UriContent> {
+    const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
+    if (session === undefined) throw new Error("no project is open");
+    const project = session.project;
+    const uri = request.uri.trim();
+
+    const guarded = (root: string, rel: string): UriContent => {
+      const file = withinWorkspace(root, rel);
+      if (file === undefined) throw new Error(`'${uri}' escapes its anchor — refused`);
+      const mime = mimeOfPath(rel.replace(/\\/g, "/"));
+      if (!isTextMime(mime)) throw new Error(`'${uri}' is ${mime}, which is not text`);
+      if (!existsSync(file) || statSync(file).isDirectory()) throw new Error(`'${uri}' does not name a readable file`);
+      return { uri, mime, text: readFileSync(file, "utf8") };
+    };
+
+    const anchored = /^\$(PROJECT|JAIRA|WORKTREE)\/(.+)$/.exec(uri);
+    if (anchored !== null) {
+      const [, anchor, rel] = anchored;
+      if (anchor === "PROJECT") return guarded(project.paths.projectDir, rel!);
+      if (anchor === "JAIRA") return guarded(project.paths.jairaDir, rel!);
+      const worktree = request.taskId !== undefined ? project.runtime.get(request.taskId)?.worktreePath : undefined;
+      if (worktree === undefined) throw new Error(`'$WORKTREE' needs a task with a worktree — pass taskId`);
+      return guarded(worktree, rel!);
+    }
+
+    if (uri.startsWith("git:")) {
+      const source = parseChangesetSource(uri);
+      if (source.scheme !== "git" || source.path === undefined) {
+        throw new Error(`'${uri}' names a commit, not a blob — read git:<sha>:<path>`);
+      }
+      // The project's OWN repository — §1.1's longest-match becomes ls-tree for this scheme, but a
+      // read of one blob needs no listing at all.
+      const git = gitFor(project, project.paths.projectDir);
+      const text = await git.show(source.rev, source.path);
+      if (text === undefined) throw new Error(`'${uri}' does not resolve in this project's repository`);
+      return { uri, mime: mimeOfPath(source.path), text };
+    }
+
+    if (uri.startsWith("db://")) {
+      const source = parseChangesetSource(uri);
+      if (source.scheme !== "db") throw new Error(`'${uri}' is not a db:// address`);
+      if (source.table !== "operation_records") {
+        throw new Error(`'${uri}' addresses table '${source.table}' — only operation_records is addressable`);
+      }
+      const store = new SqliteSessionStore(project.db, {
+        ...(request.taskId !== undefined ? { taskId: request.taskId } : {}),
+        ...(request.runId !== undefined ? { runId: request.runId } : {}),
+      });
+      let value: unknown;
+      if ("recordId" in source) {
+        // The content-id form (§10.6): the id a settled operation event carries, resolvable whether
+        // or not the call ever claimed a conversation seat. Rooted at {request, result} because
+        // §5.3 puts a gate's changeset in the REQUEST.
+        const record = store.record(source.recordId);
+        if (record === undefined) throw new Error(`'${uri}' names a record this scope has not written`);
+        value = record;
+      } else {
+        const row = store.at(source.session, source.seq);
+        if (row === undefined) throw new Error(`'${uri}' names a position no record has claimed`);
+        value = { result: row.value };
+      }
+      for (const step of source.pointer) {
+        value = value !== null && typeof value === "object" ? (value as Record<string, unknown>)[step] : undefined;
+      }
+      if (value === undefined) throw new Error(`'${uri}' resolves a record, but '${source.pointer.join(".")}' is not in it`);
+      return { uri, mime: "application/json", text: JSON.stringify(value, null, 2) };
+    }
+
+    if (uri.startsWith("file:")) {
+      const source = parseChangesetSource(uri);
+      if (source.scheme !== "file") throw new Error(`'${uri}' is not a file: address`);
+      // Absolute, but still confined: the path must land under one of the anchors this project owns.
+      const worktree = request.taskId !== undefined ? project.runtime.get(request.taskId)?.worktreePath : undefined;
+      const roots = [project.paths.projectDir, project.paths.jairaDir, ...(worktree !== undefined ? [worktree] : [])];
+      const inside = roots
+        .map((root) => ({ root, rel: relative(root, source.path) }))
+        .find(({ rel }) => rel !== "" && !rel.startsWith("..") && !isAbsolute(rel));
+      if (inside === undefined) throw new Error(`'${uri}' is outside every anchor this project owns — refused`);
+      const content = guarded(inside.root, inside.rel);
+      if (source.sha256 !== undefined) {
+        const now = createHash("sha256").update(content.text).digest("hex");
+        if (now !== source.sha256) return { ...content, drifted: true };
+      }
+      return content;
+    }
+
+    throw new Error(`unrecognised uri '${uri}' — expected $PROJECT/, $JAIRA/, $WORKTREE/, file:, git: or db:// (refused rather than guessed at)`);
+  }
+
+  /**
    * Write any file under a layer root.
    *
    * Unparsed, deliberately — see {@link WriteFileRequest}. A state file saved through here would
@@ -3318,6 +3456,25 @@ export class AppService {
     const edits = this.placeEdits(outcome.edits ?? [], scope.ownership, source.layer);
     const applicable = edits.filter((e) => e.applicable);
     const identical = (outcome.edits ?? []).length - edits.length;
+    // The same proposals, lowered into ONE changeset (CHANGESETS.md §1): the sync stops being its
+    // own review mechanism and becomes a producer of the value the reviewer takes. `before` is the
+    // tree as it stands, and the source pins it by content hash — drift is then detectable (§3.2).
+    const layerByPath = new Map(applicable.map((e) => [e.path, e.layer] as const));
+    const changeset =
+      applicable.length > 0
+        ? await editsChangeset(
+            request.layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject().paths.jairaDir,
+            applicable.map((e) => ({ path: e.path, action: e.action, text: e.text, reason: e.reason })),
+            (path: string) => {
+              try {
+                const file = this.layerFile(path, layerByPath.get(path) ?? request.layer);
+                return existsSync(file) ? readFileSync(file, "utf8") : undefined;
+              } catch {
+                return undefined;
+              }
+            },
+          )
+        : undefined;
     if (applicable.length > 0) {
       this.beginPendingSync(
         "states",
@@ -3328,15 +3485,191 @@ export class AppService {
     } else if (edits.length === 0) {
       this.commitSyncRecord("states", request.path, request.layer);
     }
+    // The review, opened by the sync itself when asked to. The reviewer arrives as a pending
+    // interaction — from MAIN, not from whichever renderer state happened to await this channel —
+    // so a window that reloaded or wandered off during an hour-long run still gets the diff UI the
+    // moment there is something to decide. Failure to open it is reported as a note, never as a
+    // failed sync: the proposal exists and the panel's own button can still start a review.
+    let reviewTaskId: string | undefined;
+    if (request.review === true && changeset !== undefined) {
+      try {
+        const review = await this.reviewSyncChangeset({
+          layer: request.layer,
+          path: request.path,
+          changeset,
+          ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
+          ...(request.fake !== undefined ? { fake: request.fake } : {}),
+        });
+        reviewTaskId = review.reviewTaskId;
+      } catch (e) {
+        notes.push(`the changeset review could not be opened: ${(e as Error).message}`);
+      }
+    }
     return {
       ...common,
       edits,
+      ...(changeset !== undefined ? { changeset } : {}),
+      ...(reviewTaskId !== undefined ? { reviewTaskId } : {}),
       notes: [
         ...notes,
         ...(identical > 0 ? [`${identical} proposed file(s) were already identical to what is on disk`] : []),
         ...(edits.length === 0 ? ["the workflows already run what the description asks for"] : []),
       ],
     };
+  }
+
+  /**
+   * Review a task's worktree edits as a changeset (CHANGESETS.md's flagship flow) — the paragraph
+   * that motivated the design: the edits exist, are perfectly readable by `git diff`, and nothing
+   * read them.
+   *
+   * Produces the changeset from the worktree against `base` (default HEAD — the agent's
+   * uncommitted work), then runs the built-in review workflow with the WORKTREE as the run's
+   * workspace, so a settled review's `apply-changeset` writes exactly there. Recorded in JaiRA's
+   * own project the way a sync is, labelled with the task it is about: a review is JaiRA's
+   * operation on the task's work, not a second run of the task's workflow.
+   *
+   * NOT awaited past the start, unlike a sync: the very next thing this run does is park on the
+   * gate, and the renderer answers it through the ordinary interaction flow — the reviewer UI pops
+   * from `interaction:requested` like any other component. Blocking the channel until a human
+   * finishes reading a multi-file diff would hang the renderer that has to show it.
+   */
+  async reviewChanges(request: ReviewChangesRequest): Promise<ReviewChangesResult> {
+    const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
+    if (session === undefined) throw new Error("no project is open");
+    const row = session.project.runtime.get(request.taskId);
+    const worktree = row?.worktreePath;
+    if (worktree === undefined) {
+      throw new Error(`task '${request.taskId}' has no worktree — only a branch-bound task's edits can be reviewed`);
+    }
+    const git = gitFor(session.project, worktree);
+    const changeset = await worktreeChangeset(git, request.base ?? "HEAD", (path) => {
+      const file = withinWorkspace(worktree, path);
+      if (file === undefined || !existsSync(file)) return undefined;
+      return readFileSync(file, "utf8");
+    });
+    if (changeset.changes.length === 0) {
+      throw new Error(`the worktree matches ${request.base ?? "HEAD"} — there is nothing to review`);
+    }
+
+    // Recorded in JaiRA's own project, like a sync — and refused rather than run unrecorded, for
+    // the same reason (§5.3: the record is what pins the changeset once the worktree moves on).
+    const system = this.sessionOf(SYSTEM_SESSION);
+    if (system === undefined) {
+      throw new Error(`JaiRA's own project could not be opened, so a review cannot be recorded: ${this.roleError.system}`);
+    }
+    const meta = session.project.tasks.tryRead(request.taskId);
+    const rootId = request.loop === true ? CHANGESET_REVIEW_LOOP_ID : CHANGESET_REVIEW_ID;
+    const bundle = loadBundle(
+      request.loop === true ? changesetReviewLoopFiles({ tree: "proposal" }) : changesetReviewFiles({ tree: "proposal" }),
+      rootId,
+    );
+    const task = createTask(system.project, {
+      title: `Review changes · ${meta?.title ?? request.taskId}`,
+      workflow: rootId,
+      inputs: { changeset: changeset as unknown as JsonValue },
+      labels: ["jaira", "changeset-review", request.taskId],
+    });
+    const started = await this.startRun(system, task.id, {
+      config: session.project.config,
+      secrets: this.secretResolver(session),
+      bundle,
+      workspace: { root: worktree, isWorktree: true },
+      capabilities: (registry) => registerChangesetFunctions(registry),
+      ...(request.fake !== undefined ? { fake: request.fake } : {}),
+      ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
+    });
+    this.log({
+      level: "info",
+      source: "review",
+      message: `reviewing ${changeset.changes.length} change(s) in ${request.taskId}'s worktree against ${request.base ?? "HEAD"}`,
+      project: system.key,
+      taskId: task.id,
+      runId: started.runId,
+    });
+    return { reviewTaskId: task.id, runId: started.runId, changes: changeset.changes.length };
+  }
+
+  /**
+   * Review a sync's proposals through the changeset gate — the "one mechanism" half of
+   * CHANGESETS.md's opening claim, closing the loop the drafts map opened: same reviewer, same
+   * decisions, same application step as a worktree review, with the LAYER ROOT as the workspace and
+   * `tree: "base"` because the proposals exist only as data.
+   *
+   * The LOOPING review (flow 1, `changeset/review-loop`), not the single round: a `comment`
+   * decision sends the changeset back to a model that revises it — under the same state-file and
+   * prompts-folder rules the proposal was written under, against the same description
+   * ({@link syncRespondPrompt}) — and the revision comes back to the gate. Merged and reverted
+   * decisions settle the round exactly as before.
+   *
+   * The sync baseline moves in a continuation, when the run finishes with EVERY change of the final
+   * round merged — a partially-accepted proposal leaves the drift standing, which is true: the
+   * workflows still do not run what the description asks for.
+   */
+  async reviewSyncChangeset(request: ReviewSyncRequest): Promise<ReviewChangesResult> {
+    const changeset = changesetOf(request.changeset);
+    if (changeset.changes.length === 0) throw new Error("the proposal has no changes to review");
+    const root = request.layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject().paths.jairaDir;
+
+    const system = this.sessionOf(SYSTEM_SESSION);
+    if (system === undefined) {
+      throw new Error(`JaiRA's own project could not be opened, so a review cannot be recorded: ${this.roleError.system}`);
+    }
+    // The description the proposal exists to satisfy, for the respond rounds. Read from disk: the
+    // draft the sync itself read is the renderer's, and by the time a comment comes back the disk
+    // copy is the closest thing to a stable truth this side of the IPC boundary.
+    let spec = "";
+    try {
+      const file = this.layerFile(request.path, request.layer);
+      if (existsSync(file)) spec = readFileSync(file, "utf8");
+    } catch {
+      // Outside the root or unreadable — the reviewer still works; respond just loses the document.
+    }
+    const bundle = loadBundle(
+      changesetReviewLoopFiles({
+        tree: "base",
+        prompt: "Review the sync's proposed files",
+        respondPrompt: syncRespondPrompt(spec),
+      }),
+      CHANGESET_REVIEW_LOOP_ID,
+    );
+    const task = createTask(system.project, {
+      title: `Review sync proposals · ${request.path}`,
+      workflow: CHANGESET_REVIEW_LOOP_ID,
+      inputs: { changeset: changeset as unknown as JsonValue },
+      labels: ["jaira", "sync-review", request.layer],
+    });
+    // The TARGET's configuration, exactly as the sync itself resolves it — see {@link runSync}.
+    const target = request.layer === "base" ? this.sessionOf(SHARED_SESSION) : this.sessionOf();
+    const started = await this.startRun(system, task.id, {
+      config: target?.project.config ?? this.effectiveConfig(),
+      secrets: this.secretResolver(target),
+      bundle,
+      workspace: { root, isWorktree: false },
+      capabilities: (registry) => registerChangesetFunctions(registry),
+      ...(request.fake !== undefined ? { fake: request.fake } : {}),
+      ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
+    });
+    // The continuation, not the caller, moves the baseline: the gate parks on a human, and this
+    // channel must return before they answer. A failure here is the run's own to report.
+    void (async () => {
+      try {
+        await system.live.get(task.id)?.done;
+        const run = system.project.runtime.listRuns(task.id).at(-1);
+        if (run?.outcome !== "success" || run.outputsJson === undefined) return;
+        // The loop terminates successfully only through `apply`, so `applied` present IS "the
+        // review settled"; `decisions` are the FINAL round's — the ones the application acted on.
+        const outputs = JSON.parse(run.outputsJson) as { applied?: string[]; decisions?: Array<{ decision?: string }> };
+        const decisions = outputs.decisions ?? [];
+        if (outputs.applied !== undefined && decisions.length > 0 && decisions.every((d) => d.decision === "merged")) {
+          this.commitSyncRecord("states", request.path, request.layer);
+        }
+        this.publish({ type: "store:invalidate", scope: "workflows" });
+      } catch {
+        // The review run's own failure is already visible on its task; the baseline simply stays.
+      }
+    })();
+    return { reviewTaskId: task.id, runId: started.runId, changes: changeset.changes.length };
   }
 
   /** Abort a sync in flight. False when there was nothing running. */
@@ -3353,14 +3686,17 @@ export class AppService {
   }
 
   /**
-   * Where each proposed state file goes, and whether it can be handed over as a draft.
+   * Where each proposed file goes, and whether it can be handed over as a draft.
    *
-   * Three things are decided here rather than by the model, because all three are questions about
-   * this project rather than about the workflow:
+   * A proposal is a FILE now — a state file under `workflows/`, or a prompt file under `prompts/`
+   * (the sync tells the model to keep reusable prompt text there rather than inline it). Four
+   * things are decided here rather than by the model, because all four are questions about this
+   * project rather than about the workflow:
    *
-   *  - **Containment.** A state id arrives from a language model by way of the renderer, and
-   *    `../../.ssh/config` is a perfectly good relative path. {@link workflowFile} is the same check
-   *    every other write rests on.
+   *  - **Containment.** A path arrives from a language model by way of the renderer, and
+   *    `../../.ssh/config` is a perfectly good relative path. {@link workflowFile} /
+   *    {@link layerFile} are the same checks every other write rests on — and only the two
+   *    directories a sync is entitled to write are accepted at all.
    *  - **The existing file.** A state authored as `.jsonc` keeps its suffix; one authored as YAML is
    *    reported and NOT offered, because handing JSON to a `.yaml` file would silently produce a
    *    state file in two syntaxes at once.
@@ -3371,9 +3707,11 @@ export class AppService {
    *    past the boundary is a model that inferred what it could not see — and applying it would let
    *    a parent document silently rewrite what a more specific one is the authority on. Reported
    *    rather than dropped, because it usually means the OTHER description is what needs changing.
+   *    Prompt files have no owner: a prompt is a library entry, and reuse across descriptions is
+   *    the point of the folder.
    */
   private placeEdits(
-    edits: readonly StateEdit[],
+    edits: readonly SyncEdit[],
     ownership: DescriptionOwnership,
     layer: WorkflowLayer,
   ): WorkflowSyncEdit[] {
@@ -3383,8 +3721,8 @@ export class AppService {
     for (const edit of edits) {
       // A blocked edit still names the file it would have touched, so the panel can say WHICH file
       // it declined to write rather than only that something was refused.
-      const blocked = (path: string, reason: string): WorkflowSyncEdit => ({
-        stateId: edit.stateId,
+      const blocked = (path: string, reason: string, stateId?: string): WorkflowSyncEdit => ({
+        ...(stateId !== undefined ? { stateId } : {}),
         layer,
         path,
         action: edit.action,
@@ -3394,42 +3732,61 @@ export class AppService {
         applicable: false,
         blocked: reason,
       });
-      try {
-        this.workflowFile(edit.stateId, layer);
-      } catch (e) {
-        out.push(blocked(`workflows/${edit.stateId}.json`, (e as Error).message));
+      const place = (path: string, stateId?: string): void => {
+        const file = this.layerFile(path, layer);
+        const exists = existsSync(file);
+        if (exists && hashText(readFileSync(file, "utf8")) === hashText(edit.text)) return;
+        out.push({
+          ...(stateId !== undefined ? { stateId } : {}),
+          layer,
+          path,
+          // What the model called it is a claim about the project, and the project is right here.
+          action: exists ? "update" : "create",
+          text: edit.text,
+          reason: edit.reason,
+          requirements: edit.requirements,
+          applicable: true,
+        });
+      };
+      const raw = edit.path.replace(/\\/g, "/");
+      if (raw.startsWith("prompts/")) {
+        try {
+          this.layerFile(raw, layer);
+        } catch (e) {
+          out.push(blocked(raw, (e as Error).message));
+          continue;
+        }
+        place(raw);
         continue;
       }
-      const owner = ownerOf(edit.stateId);
+      if (!raw.startsWith("workflows/")) {
+        out.push(blocked(raw, "a sync may only propose files under workflows/ or prompts/"));
+        continue;
+      }
+      const stateId = raw.slice("workflows/".length).replace(/\.(json|jsonc|ya?ml)$/i, "");
+      try {
+        this.workflowFile(stateId, layer);
+      } catch (e) {
+        out.push(blocked(`workflows/${stateId}.json`, (e as Error).message, stateId));
+        continue;
+      }
+      const owner = ownerOf(stateId);
       if (owner !== undefined) {
         out.push(
           blocked(
-            this.existingStateFile(edit.stateId, layer) ?? `workflows/${edit.stateId}.json`,
+            this.existingStateFile(stateId, layer) ?? `workflows/${stateId}.json`,
             `\`${owner.document}\` describes this state — change that document instead`,
+            stateId,
           ),
         );
         continue;
       }
-      const existing = this.existingStateFile(edit.stateId, layer);
+      const existing = this.existingStateFile(stateId, layer);
       if (existing !== undefined && /\.ya?ml$/i.test(existing)) {
-        out.push(blocked(existing, "this state is authored as YAML, and the proposal is JSON"));
+        out.push(blocked(existing, "this state is authored as YAML, and the proposal is JSON", stateId));
         continue;
       }
-      const path = existing ?? `workflows/${edit.stateId}.json`;
-      const file = this.layerFile(path, layer);
-      const exists = existsSync(file);
-      if (exists && hashText(readFileSync(file, "utf8")) === hashText(edit.text)) continue;
-      out.push({
-        stateId: edit.stateId,
-        layer,
-        path,
-        // What the model called it is a claim about the project, and the project is right here.
-        action: exists ? "update" : "create",
-        text: edit.text,
-        reason: edit.reason,
-        requirements: edit.requirements,
-        applicable: true,
-      });
+      place(existing ?? `workflows/${stateId}.json`, stateId);
     }
     return out;
   }
@@ -3918,23 +4275,51 @@ export function ownMessages(messages: readonly JsonValue[], inherited: readonly 
  * every viewer wants it; the rest is passed through structured, because pairing a tool call with its
  * result is the viewer's job and flattening it here would make that impossible.
  */
+function turnOf(raw: JsonValue): SessionTurn {
+  const message = (raw ?? {}) as { role?: unknown; content?: unknown };
+  const role = typeof message.role === "string" ? message.role : "assistant";
+  if (typeof message.content === "string") return { role, text: message.content };
+  const parts = Array.isArray(message.content) ? message.content : [];
+  const text = parts
+    .filter((p): p is { type: string; text: string } => (p as { type?: unknown })?.type === "text" && typeof (p as { text?: unknown }).text === "string")
+    .map((p) => p.text)
+    .join("");
+  return {
+    role,
+    ...(text.length > 0 ? { text } : {}),
+    ...(parts.length > 0 ? { parts: parts as JsonValue } : {}),
+  };
+}
+
 function turnsOf(value: JsonValue | undefined, inherited: readonly JsonValue[] = []): SessionTurn[] {
-  const messages = ownMessages(messagesOfRecord(value), inherited);
-  return messages.map((raw) => {
-    const message = (raw ?? {}) as { role?: unknown; content?: unknown };
-    const role = typeof message.role === "string" ? message.role : "assistant";
-    if (typeof message.content === "string") return { role, text: message.content };
-    const parts = Array.isArray(message.content) ? message.content : [];
-    const text = parts
-      .filter((p): p is { type: string; text: string } => (p as { type?: unknown })?.type === "text" && typeof (p as { text?: unknown }).text === "string")
-      .map((p) => p.text)
-      .join("");
-    return {
-      role,
-      ...(text.length > 0 ? { text } : {}),
-      ...(parts.length > 0 ? { parts: parts as JsonValue } : {}),
-    };
-  });
+  return ownMessages(messagesOfRecord(value), inherited).map(turnOf);
+}
+
+/** The record's subagent conversations, as turns — `LlmOutput.sidechains`, read the way `turns` is. */
+function sidechainsOf(value: JsonValue | undefined): Record<string, SessionTurn[]> | undefined {
+  const raw = (value as { value?: { sidechains?: unknown } } | undefined)?.value?.sidechains;
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: Record<string, SessionTurn[]> = {};
+  for (const [call, messages] of Object.entries(raw as Record<string, unknown>)) {
+    if (Array.isArray(messages)) out[call] = (messages as JsonValue[]).map(turnOf);
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * The record's provider events, indices shifted past the inherited prefix — an event's `index`
+ * counts the record's OWN messages, and the view's turns start after what the state was handed.
+ */
+function recordEventsOf(value: JsonValue | undefined, inheritedCount: number): Array<{ index: number; event: JsonValue }> | undefined {
+  const raw = (value as { value?: { providerEvents?: unknown } } | undefined)?.value?.providerEvents;
+  if (!Array.isArray(raw)) return undefined;
+  const out: Array<{ index: number; event: JsonValue }> = [];
+  for (const row of raw) {
+    const e = row as { index?: unknown; event?: unknown };
+    if (typeof e?.index !== "number" || e.event === undefined) continue;
+    out.push({ index: Math.max(0, e.index - inheritedCount), event: e.event as JsonValue });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /**

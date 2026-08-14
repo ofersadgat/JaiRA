@@ -87,16 +87,18 @@ function Edits({ edits, onOpen }: { edits: WorkflowSyncEdit[]; onOpen?: (edit: W
       </h3>
       {edits.length === 0 ? <p className="empty">Nothing to change.</p> : null}
       {edits.map((edit) => (
-        <div key={`${edit.path}:${edit.stateId}`} className={`sync-edit${edit.applicable ? "" : " blocked"}`}>
+        // A state file reads as its state id; a prompt file has no state to be, so it reads as its
+        // path — which is exactly the name the proposal wants it thought of by.
+        <div key={edit.path} className={`sync-edit${edit.applicable ? "" : " blocked"}`}>
           <div className="sync-edit-head">
             <span className={`chip${edit.action === "create" ? " chip-ok" : ""}`}>{edit.action}</span>
             {edit.applicable && onOpen ? (
               <button className="link grow ellip" onClick={() => onOpen(edit)} title={edit.path}>
-                {edit.stateId}
+                {edit.stateId ?? edit.path}
               </button>
             ) : (
               <span className="grow ellip" title={edit.path}>
-                {edit.stateId}
+                {edit.stateId ?? edit.path}
               </span>
             )}
             {edit.requirements.length > 0 ? <span className="sub">{edit.requirements.join(", ")}</span> : null}
@@ -258,6 +260,20 @@ export function WorkflowSyncPanel(props: FileSurfaceProps): JSX.Element {
               onClick={() => setPreferred({ for: result, view: showing === "report" ? "preview" : "report" })}
             >
               {showing === "report" ? "Preview" : "Report"}
+            </button>
+          ) : null}
+          {result?.changeset !== undefined && sync?.reviewChangeset !== undefined ? (
+            // The same proposals through the changeset gate (CHANGESETS.md's "one mechanism"): the
+            // reviewer pops as a pending interaction, merged decisions are applied, and the sync
+            // baseline moves when the whole proposal was merged. The drafts flow stays beside it —
+            // hand-editing a proposal in place is what drafts are for.
+            <button
+              className="ghost"
+              disabled={running || busy}
+              title="Decide each proposed file — merge, revert, or comment — and apply the merged ones"
+              onClick={() => sync.reviewChangeset!(doc.layer, doc.path, result.changeset!)}
+            >
+              Review as changeset
             </button>
           ) : null}
         </div>

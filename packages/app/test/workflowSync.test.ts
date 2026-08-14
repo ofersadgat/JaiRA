@@ -8,8 +8,9 @@
  *  - **It knows which side moved.** That is the whole reason there is a recorded baseline, and the
  *    reason it advances on ACCEPTANCE rather than on the run: a proposal produced and discarded left
  *    both sides where they were.
- *  - **It does not trust what the model returns.** A state id is a path, it arrives from a language
- *    model, and `../../..` is a perfectly good relative path.
+ *  - **It does not trust what the model returns.** A proposal names a path, it arrives from a
+ *    language model, and `../../..` is a perfectly good relative path — and only `workflows/` and
+ *    `prompts/` are directories a sync is entitled to propose into at all.
  *
  * `fake` scripts all three states, so none of this needs a provider.
  */
@@ -18,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { hashText, initProject, stateHashes } from "@jaira/persistence";
-import { specPlanningFiles, syncRules, writeWorkflowFiles, type ConformanceFinding } from "@jaira/runtime";
+import { specPlanningFiles, syncRules, USER_APPROVE_CHANGESET, writeWorkflowFiles, type ConformanceFinding } from "@jaira/runtime";
 import { WORKFLOW_DESCRIPTION, WORKFLOW_DESCRIPTION_PATH } from "@jaira/shared";
 import { AppService } from "../src/main/service";
 
@@ -220,8 +221,10 @@ describe("runSync towards the document", () => {
 });
 
 describe("runSync towards the states", () => {
+  // The model proposes FILES now (path-based), and for a state file the app derives the id back
+  // from the path — which is what these helpers exercise.
   const edit = (stateId: string, text: string) => ({
-    stateId,
+    path: `workflows/${stateId}.json`,
     action: "create" as const,
     text,
     reason: "R2 asks for a human gate",
@@ -276,9 +279,75 @@ describe("runSync towards the states", () => {
     expect(result.edits?.[0]?.blocked).toMatch(/YAML/);
   });
 
+  it("places a proposed prompt file under prompts/, category subfolder and all", async () => {
+    const result = await syncStates([
+      { path: "prompts/review/critique.md", action: "create" as const, text: "Critique the plan.\n", reason: "R2 wants a review prompt", requirements: ["R2"] },
+    ]);
+    // A prompt file is a file, not a state: no state id, no ownership question, just a draft at the
+    // path the model chose for it.
+    expect(result.edits?.[0]).toMatchObject({ path: "prompts/review/critique.md", layer: "project", action: "create", applicable: true });
+    expect(result.edits?.[0]?.stateId).toBeUndefined();
+    // Still a proposal — nothing is written until the person reading it saves it.
+    expect(existsSync(join(dir, ".jaira", "prompts", "review", "critique.md"))).toBe(false);
+  });
+
+  it("refuses a proposal outside workflows/ and prompts/, naming the rule", async () => {
+    const result = await syncStates([
+      { path: "lib/helper.md", action: "create" as const, text: "x", reason: "", requirements: [] },
+    ]);
+    expect(result.edits?.[0]).toMatchObject({ applicable: false });
+    expect(result.edits?.[0]?.blocked).toMatch(/workflows\/ or prompts\//);
+  });
+
+  it("refuses a prompt path that escapes the layer root", async () => {
+    const result = await syncStates([
+      { path: "prompts/../../escape.md", action: "create" as const, text: "x", reason: "", requirements: [] },
+    ]);
+    expect(result.edits?.[0]).toMatchObject({ applicable: false });
+    expect(result.edits?.[0]?.blocked).toMatch(/not inside/);
+  });
+
   it("keeps what could not be written as a state file, instead of inventing one", async () => {
     const result = await syncStates([], ["a human gate needs a function this project has registered"]);
     expect(result.notes).toContain("a human gate needs a function this project has registered");
+  });
+
+  it("opens the diff review itself when asked, and a merged review writes the file", async () => {
+    const result = await service.runSync({
+      layer: "project",
+      path: WORKFLOW_DESCRIPTION_PATH,
+      direction: "states",
+      // The renderer passes this for every states sync: the reviewer arrives as a pending
+      // interaction from MAIN, so it reaches a window that reloaded or navigated away during a
+      // run that can take an hour — which is exactly when the blocking channel's result is lost.
+      review: true,
+      interactions: { [USER_APPROVE_CHANGESET]: [{ decisions: [{ id: "c1", decision: "merged" }] } as never] },
+      fake: fake({ edits: [edit("feature/plan/gate", '{"label":"Approve the plan"}')] }) as never,
+    });
+    expect(result.reviewTaskId).toBeDefined();
+
+    // The review runs as its own task and is not awaited by the sync channel; the merged decision
+    // is applied by its continuation.
+    const file = join(dir, ".jaira", "workflows", "feature", "plan", "gate.json");
+    const deadline = Date.now() + 8000;
+    while (!existsSync(file)) {
+      if (Date.now() > deadline) throw new Error("the merged review never wrote the file");
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(readFileSync(file, "utf8")).toBe('{"label":"Approve the plan"}');
+  });
+
+  it("does not open a review when nothing was applicable", async () => {
+    const current = readFileSync(join(dir, ".jaira", "workflows", "feature", "plan", "critique.json"), "utf8");
+    const result = await service.runSync({
+      layer: "project",
+      path: WORKFLOW_DESCRIPTION_PATH,
+      direction: "states",
+      review: true,
+      fake: fake({ edits: [edit("feature/plan/critique", current)] }) as never,
+    });
+    // An identical proposal produces no changeset, so there is nothing to park a reviewer on.
+    expect(result.reviewTaskId).toBeUndefined();
   });
 
   it("records the baseline when every proposed file has been saved", async () => {
@@ -450,7 +519,7 @@ describe("nested descriptions", () => {
       fake: fake({
         edits: [
           {
-            stateId: "feature/plan/critique/human_review",
+            path: "workflows/feature/plan/critique/human_review.json",
             action: "update",
             text: '{"label":"Approve the plan"}',
             reason: "R2 asks for a human gate",
@@ -574,7 +643,7 @@ describe("the shared root, with no project open", () => {
       fake: fake({
         edits: [
           {
-            stateId: "feature/plan/gate",
+            path: "workflows/feature/plan/gate.json",
             action: "create" as const,
             text: '{"label":"Approve the plan"}',
             reason: "R2 asks for a human gate",
