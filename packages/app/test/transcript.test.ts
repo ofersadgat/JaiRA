@@ -198,9 +198,9 @@ describe("building the entry list", () => {
         { kind: "event", event: { type: "progress", message: "warming up" } },
       ],
     });
-    // Named as well as it can be, raw payload behind the row — a gap in an hour-long run is worse
-    // than an unfamiliar name.
-    expect(entries[0]).toMatchObject({ kind: "tool", name: "system/compact_boundary" });
+    // Named as well as it can be, the whole payload behind the row — a gap in an hour-long run is
+    // worse than an unfamiliar name.
+    expect(entries[0]).toMatchObject({ kind: "event", text: "context compacted", detail: { type: "system" } });
     expect(entries[1]).toMatchObject({ kind: "event", text: "warming up" });
   });
 
@@ -322,10 +322,10 @@ describe("stored provider events", () => {
         { role: "user", text: "go" },
         { role: "assistant", text: "done" },
       ] as never),
-      events: [{ index: 1, event: { type: "system", subtype: "compact_boundary" } }],
+      providerEvents: [{ index: 1, event: { type: "system", subtype: "compact_boundary" } }],
     } as never;
     const entries = entriesOf(view);
-    expect(entries.map((e) => (e.kind === "tool" ? e.name : e.kind))).toEqual(["message", "system/compact_boundary", "message"]);
+    expect(entries.map((e) => (e.kind === "event" ? e.text : e.kind))).toEqual(["message", "context compacted", "message"]);
   });
 });
 
@@ -419,6 +419,98 @@ describe("folding a flat list into messages and the work between them", () => {
 
   it("leaves the live turn on its own — it is being said, not done", () => {
     expect(blocksOf([tool("a"), { kind: "live", text: "half an answ" }]).map((b) => b.kind)).toEqual(["work", "live"]);
+  });
+});
+
+describe("weaving the agent's native session lines into the conversation", () => {
+  // The shape a real Claude session file has, reduced: the prompt user line (which never rides the
+  // stream), attachments injected before the first answer, the toolUseResult riding a tool-result
+  // envelope, and unstamped bookkeeping at the tail.
+  const withNative = (turns: unknown[], native: Array<{ index: number; line: unknown }>): SessionView =>
+    ({ ...session(turns as never), native }) as unknown as SessionView;
+  const line = (index: number, line: unknown): { index: number; line: unknown } => ({ index, line });
+
+  const turns = [
+    { role: "assistant", parts: [{ type: "tool_use", id: "tu1", name: "Read", input: { file_path: "a.ts" } }] },
+    { role: "user", parts: [{ type: "tool_result", tool_use_id: "tu1", content: "ok" }] },
+    { role: "assistant", text: "done" },
+  ];
+  const native = [
+    line(0, { type: "queue-operation", operation: "enqueue" }),
+    line(0, { type: "user", uuid: "u1", message: undefined }), // the prompt's envelope — input, no turn
+    line(1, { type: "attachment", uuid: "a1", attachment: { type: "skill_listing", skills: ["x"] } }),
+    line(1, { type: "assistant", uuid: "s1" }),
+    line(2, { type: "user", uuid: "u2", toolUseResult: { stdout: "rich", stderr: "" } }),
+    line(3, { type: "last-prompt", lastPrompt: "the prompt again" }),
+    line(3, { type: "ai-title", aiTitle: "Reading a.ts" }),
+    line(3, { type: "assistant", uuid: "s2" }),
+  ];
+
+  it("shows the lines the stream never carried, at their place in the conversation", () => {
+    const entries = entriesOf(withNative(turns, native));
+    expect(entries.map((e) => (e.kind === "event" ? e.text : e.kind))).toEqual([
+      "queued: enqueue",
+      "context: skill_listing",
+      "tool",
+      'titled "Reading a.ts"',
+      "message",
+    ]);
+    // The attachment opens to the full line; the title IS its whole fact and does not.
+    const events = entries.filter((e): e is Extract<TranscriptEntry, { kind: "event" }> => e.kind === "event");
+    expect(events[1]!.detail).toMatchObject({ attachment: { type: "skill_listing" } });
+    expect(events[2]!.detail).toBeUndefined();
+  });
+
+  it("lands the toolUseResult on the paired call — the agent's own record beside the wire result", () => {
+    const [tool] = entriesOf(withNative(turns, native)).filter((e): e is ToolEntry => e.kind === "tool");
+    expect(tool).toMatchObject({ name: "Read", result: "ok", detail: { stdout: "rich" } });
+  });
+
+  it("never renders last-prompt — it duplicates the conversation's own first message", () => {
+    const entries = entriesOf(withNative(turns, native));
+    expect(entries.some((e) => e.kind === "event" && e.text.includes("prompt again"))).toBe(false);
+  });
+
+  it("keeps an unknown line type visible rather than filtering it — the vocabulary is the agent's", () => {
+    const entries = entriesOf(withNative(turns, [line(0, { type: "file-history-snapshot", snapshot: {} })]));
+    expect(entries[0]).toMatchObject({ kind: "event", text: "file-history-snapshot", detail: { type: "file-history-snapshot" } });
+  });
+
+  it("drops an envelope that matches no turn instead of derailing the weave", () => {
+    // An assistant envelope with no turn left to pair: the annotation is lost, the events after it
+    // are not, and nothing is misattributed.
+    const entries = entriesOf(withNative([{ role: "assistant", text: "hi" }], [
+      line(0, { type: "assistant", uuid: "s1" }),
+      line(1, { type: "assistant", uuid: "s-extra" }),
+      line(1, { type: "ai-title", aiTitle: "T" }),
+    ]));
+    expect(entries.map((e) => (e.kind === "event" ? e.text : e.kind))).toEqual(["message", 'titled "T"']);
+  });
+
+  it("changes nothing when the record kept no native lines", () => {
+    expect(entriesOf(session(turns as never)).map((e) => e.kind)).toEqual(["tool", "message"]);
+  });
+
+  it("interleaves pinned provider events by their index — init first, compaction where it happened", () => {
+    const view = {
+      ...session(turns as never),
+      providerEvents: [
+        { index: 0, event: { type: "system", subtype: "init", model: "opus" } },
+        { index: 2, event: { type: "system", subtype: "compact_boundary" } },
+        { index: 3, event: { type: "system", subtype: "rate_limit" } },
+      ],
+    } as unknown as SessionView;
+    const entries = entriesOf(view);
+    expect(entries.map((e) => (e.kind === "event" ? e.text : e.kind))).toEqual([
+      "session started",
+      "tool",
+      "context compacted",
+      "message",
+      "system: rate_limit",
+    ]);
+    // Opaque by contract: the row names what it can, and opens to the whole payload.
+    const init = entries.find((e) => e.kind === "event" && e.text === "session started");
+    expect(init).toMatchObject({ detail: { model: "opus" } });
   });
 });
 

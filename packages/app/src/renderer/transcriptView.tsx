@@ -222,6 +222,9 @@ function Tool({
           ) : (
             <Payload label="result" value={entry.result} />
           )}
+          {/* The agent's OWN record of the execution, when the native capture kept one — richer than
+              the wire result and shown beside it, never instead of it. */}
+          {entry.detail !== undefined ? <Payload label="record" value={entry.detail} /> : null}
         </>
       }
     />
@@ -259,8 +262,17 @@ function Work({
       />
     );
   }
-  // An event is a fact, not a call: no name to bold, no verdict to give, nothing to open.
-  return <Row entry={entry} preview={entry.text} tone={entry.tone === "plain" ? "muted" : entry.tone} prose />;
+  // An event is a fact, not a call: no name to bold, no verdict to give — and nothing to open,
+  // unless the fact is a compression of a fuller line (a native attachment, a queued operation).
+  return (
+    <Row
+      entry={entry}
+      preview={entry.text}
+      tone={entry.tone === "plain" ? "muted" : entry.tone}
+      prose
+      {...(entry.detail !== undefined ? { body: <Payload label="detail" value={entry.detail} /> } : {})}
+    />
+  );
 }
 
 /**

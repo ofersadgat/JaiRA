@@ -131,6 +131,7 @@ import {
   ScriptedFunctions,
   sessionServicesFor,
   statusOfResult,
+  withNativeCapture,
   chatOperationOf,
   chatPlanFor,
   holdsConversation,
@@ -1325,7 +1326,8 @@ export class AppService {
       return { ...base, empty: "this state added nothing to the conversation it was given" };
     }
     const sidechains = sidechainsOf(record.value);
-    const events = recordEventsOf(record.value, inherited.length);
+    const providerEvents = recordEventsOf(record.value, inherited.length);
+    const native = nativeOf(record.value);
     return {
       ...base,
       ...(record.externalId !== undefined ? { providerSessionId: record.externalId } : {}),
@@ -1333,7 +1335,8 @@ export class AppService {
       ...(row.costUsd !== undefined ? { costUsd: row.costUsd } : {}),
       turns,
       ...(sidechains !== undefined ? { sidechains } : {}),
-      ...(events !== undefined ? { events } : {}),
+      ...(providerEvents !== undefined ? { providerEvents } : {}),
+      ...(native !== undefined ? { native } : {}),
     };
   }
 
@@ -1747,6 +1750,15 @@ export class AppService {
     const { modes: _summaryModes, ...session } = sessionServicesFor(started.bundle, promptSummarizer(prompt), {
       inner: new SqliteSessionStore(project.db, { taskId, runId: started.runId }),
     });
+    // A delegated agent's record is its stream, and its stream is not its whole story: the agent's
+    // own session file holds the context injections, `toolUseResult` records and line threading that
+    // never ride the wire — and the file is the agent's, prunable on its schedule. Captured into the
+    // record at each close, keyed by the workspace the agent ran in.
+    session.records = withNativeCapture(session.records, {
+      cwd: workspace.root,
+      onError: (e: Error) =>
+        this.log({ level: "warn", source: "engine", message: `native session capture failed: ${e.message}`, project: open.key, taskId }),
+    });
 
     // Policy for this run: authored project rules compiled to an ExecPolicy, with
     // every decision audited and `require_approval` routed to the inbox (§10.2).
@@ -2102,11 +2114,25 @@ export class AppService {
       ...this.promptWiring(config, { fake, secrets, memoCache: new SqliteMemoCache(project.db) }),
       tree: this.defaultTree(config, context.bundle, fake, secrets).prompt,
     });
+    // The workspace root is READ, never ensured: a bound task's worktree path is recorded, and
+    // `ensureWorkspace` would CREATE one — which is the one thing this path promises not to do, since
+    // a conversation is not a second execution. An unbound task, or a bound one whose worktree has
+    // been removed, falls back to the project directory, which is where its run read from anyway.
+    const recordedWorktree = project.runtime.get(request.taskId)?.worktreePath;
+    const workspaceRoot =
+      recordedWorktree !== undefined && existsSync(recordedWorktree) ? recordedWorktree : project.paths.projectDir;
     // The WIRED executor, not a bare one. Summarizing through `buildPromptExecutor()` with no options
     // is a router with no tree, no routes and no keys, so a conversation in `summary` mode would
     // compact through something that cannot reach a provider.
     const stores = sessionServicesFor(context.bundle, promptSummarizer(prompt), {
       inner: new SqliteSessionStore(project.db, { taskId: request.taskId, runId: context.runId }),
+    });
+    // The same capture `startRun` wires: a chat turn is a real delegated call, and its record would
+    // otherwise be the one kind missing the agent's own session lines.
+    stores.records = withNativeCapture(stores.records, {
+      cwd: workspaceRoot,
+      onError: (e: Error) =>
+        this.log({ level: "warn", source: "engine", message: `native session capture failed: ${e.message}`, project: open.key, taskId: request.taskId }),
     });
     const executor = withSessionLayers(stores, prompt);
 
@@ -2122,13 +2148,8 @@ export class AppService {
     // The same artifact wiring the run used, so a file this turn writes lands where that run's files
     // landed rather than somewhere only this conversation knows about.
     //
-    // The workspace root is READ, never ensured: a bound task's worktree path is recorded, and
-    // `ensureWorkspace` would CREATE one — which is the one thing this path promises not to do, since
-    // a conversation is not a second execution. An unbound task, or a bound one whose worktree has
-    // been removed, falls back to the project directory, which is where its run read from anyway.
-    const recordedWorktree = project.runtime.get(request.taskId)?.worktreePath;
-    const workspaceRoot =
-      recordedWorktree !== undefined && existsSync(recordedWorktree) ? recordedWorktree : project.paths.projectDir;
+    // `workspaceRoot` is resolved above, where the session capture needed it first — the same
+    // read-never-ensure rule stated there.
     const artifacts = artifactWiring({
       destination: config.artifacts.destination,
       artifactDir: config.artifacts.dir,
@@ -4325,6 +4346,19 @@ function recordEventsOf(value: JsonValue | undefined, inheritedCount: number): A
     const e = row as { index?: unknown; event?: unknown };
     if (typeof e?.index !== "number" || e.event === undefined) continue;
     out.push({ index: Math.max(0, e.index - inheritedCount), event: e.event as JsonValue });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+/** The agent's captured session-file lines — `nativeLines` on the stored payload, in file order. */
+function nativeOf(value: JsonValue | undefined): Array<{ index: number; line: JsonValue }> | undefined {
+  const raw = (value as { value?: { nativeLines?: unknown } } | undefined)?.value?.nativeLines;
+  if (!Array.isArray(raw)) return undefined;
+  const out: Array<{ index: number; line: JsonValue }> = [];
+  for (const row of raw) {
+    const e = row as { index?: unknown; line?: unknown };
+    if (typeof e?.index !== "number" || e.line === undefined) continue;
+    out.push({ index: e.index, line: e.line as JsonValue });
   }
   return out.length > 0 ? out : undefined;
 }

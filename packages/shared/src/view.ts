@@ -674,10 +674,19 @@ export interface SessionView {
    */
   sidechains?: Record<string, SessionTurn[]>;
   /**
-   * Provider events the record kept — session init, compaction, rate-limit windows — each pinned to
-   * how many turns preceded it, so the viewer can interleave them where they happened.
+   * The provider events the record pinned among its messages — session init, compaction
+   * boundaries, rate-limit windows — opaque payloads with no neutral home, `index` counting the
+   * turns that preceded each, so the viewer can interleave them where they happened. Distinct from
+   * {@link native}: these rode the STREAM and were recorded live; the native lines never rode it.
    */
-  events?: Array<{ index: number; event: JsonValue }>;
+  providerEvents?: Array<{ index: number; event: JsonValue }>;
+  /**
+   * Lines of the agent's OWN session file that never rode the stream — its context injections
+   * (`attachment` lines), structured tool-execution records (`toolUseResult` on message envelopes),
+   * and bookkeeping (`queue-operation`, `ai-title`) — captured into the record at operation close,
+   * in file order. Absent for a record closed before capture existed, or a transport with no file.
+   */
+  native?: Array<{ index: number; line: JsonValue }>;
   /** Set when the state ran in no conversation at all — a function op, or a run before this existed. */
   empty?: string;
 }

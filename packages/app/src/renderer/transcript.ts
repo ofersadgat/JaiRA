@@ -60,6 +60,12 @@ export interface ToolEntry {
    * never folded into the thread they did not happen in.
    */
   sidechain?: string;
+  /**
+   * The agent's OWN record of the execution — the native file's `toolUseResult`, when the record
+   * captured it. Richer than {@link result}, which is the wire form the model saw: this is what the
+   * agent kept for itself (split stdout/stderr, file metadata, structured patches).
+   */
+  detail?: JsonValue;
 }
 
 /**
@@ -75,12 +81,17 @@ export interface ThoughtEntry {
   text: string;
 }
 
-/** Something the journal recorded that nobody said: a gate, a policy call, a failure, a transition. */
+/** Something recorded that nobody said: a journal fact (a gate, a policy call, a failure, a
+ *  transition), a pinned provider event, or a native session line (a context injection, a piece of
+ *  the agent's bookkeeping). */
 export interface EventEntry {
   kind: "event";
   at?: number;
   tone: "plain" | "warn" | "bad";
   text: string;
+  /** The full line behind the fact, when {@link text} is a compression of it. Absent means the text
+   *  IS the whole fact, and the row has nothing to open. */
+  detail?: JsonValue;
 }
 
 /** The answer being written right now, before it is a turn. */
@@ -195,6 +206,8 @@ export interface ResultPart {
    * string `exit 1` looks like a perfectly good result to anything reading only the payload.
    */
   failed?: boolean;
+  /** The native `toolUseResult` for this result's turn, riding along to land on the paired call. */
+  detail?: JsonValue;
 }
 
 export type MessagePart = ToolEntry | ThoughtEntry | ResultPart;
@@ -348,10 +361,15 @@ function eventOf(turn: ConversationTurn): EventEntry | undefined {
  * calls. Reasoning is lifted above the message rather than left in part order because the message is
  * assembled from every text part at once, so there is no single position left to interleave it at.
  */
-function messageOf(turn: SessionTurn, at?: number): Array<TranscriptEntry | ResultPart> {
+function messageOf(turn: SessionTurn, at?: number, toolRecord?: JsonValue): Array<TranscriptEntry | ResultPart> {
   const entries: Array<TranscriptEntry | ResultPart> = [];
   const hasText = turn.text !== undefined && turn.text.length > 0;
   const parts = messagePartsOf(turn.parts);
+  // The native `toolUseResult` is one record per user turn, so it can only be placed when the turn
+  // holds exactly one result — ambiguity drops the annotation rather than guessing which call it
+  // describes.
+  const results = parts.filter((part): part is ResultPart => part.kind === "result");
+  if (toolRecord !== undefined && results.length === 1) results[0]!.detail = toolRecord;
   const stamp = <T extends { at?: number }>(entry: T): T => (at !== undefined ? { ...entry, at } : entry);
 
   for (const part of parts) if (part.kind === "thought") entries.push(stamp(part));
@@ -403,10 +421,18 @@ function pairResults(entries: Array<TranscriptEntry | ResultPart>): TranscriptEn
     // available and the right one for a provider that answers in order.
     const call = entry.callId !== undefined ? byId.get(entry.callId) : unanswered[0];
     if (call === undefined) {
-      out.push({ kind: "tool", name: "result", summary: "", ok: !failed(entry), result: entry.result });
+      out.push({
+        kind: "tool",
+        name: "result",
+        summary: "",
+        ok: !failed(entry),
+        result: entry.result,
+        ...(entry.detail !== undefined ? { detail: entry.detail } : {}),
+      });
       continue;
     }
     call.result = entry.result;
+    if (entry.detail !== undefined) call.detail = entry.detail;
     // Absent, not false: a call still in flight has no verdict, and rendering one as a failure is
     // the kind of wrong that gets acted on.
     call.ok = !failed(entry);
@@ -434,10 +460,11 @@ export interface LiveTail {
 
 /**
  * One event as entries, wherever it came from — a live `{kind:"event"}` passthrough (the executor's
- * event, payload nested under `provider_event`) or a record's stored provider event (the payload
- * itself). Shown rather than dropped, named as well as it can be, raw payload behind the row — with
- * ONE named exception: `stream_event` is delta bookkeeping whose content arrives again on the
- * finished turn, and a row per fragment would bury the conversation under it.
+ * event, payload nested under `provider_event`) or a record's pinned provider event (the payload
+ * itself). Shown rather than dropped: the two everyone recognises get said in words, the rest keep
+ * the provider's own name, and every row opens to the whole payload — with ONE named exception:
+ * `stream_event` is delta bookkeeping whose content arrives again on the finished turn, and a row
+ * per fragment would bury the conversation under it.
  */
 export function eventEntry(event: JsonValue): TranscriptEntry[] {
   const e = (event ?? {}) as Record<string, unknown>;
@@ -449,9 +476,79 @@ export function eventEntry(event: JsonValue): TranscriptEntry[] {
   }
   const payload = e["type"] === "provider_event" ? ((e["payload"] ?? {}) as Record<string, unknown>) : e;
   if (payload["type"] === "stream_event") return [];
-  const type = typeof payload["type"] === "string" ? (payload["type"] as string) : "event";
-  const subtype = typeof payload["subtype"] === "string" ? (payload["subtype"] as string) : undefined;
-  return [{ kind: "tool", name: subtype !== undefined ? `${type}/${subtype}` : type, summary: "", args: payload as JsonValue }];
+  const detail = payload as JsonValue;
+  const type = typeof payload["type"] === "string" ? (payload["type"] as string) : "provider event";
+  const subtype = typeof payload["subtype"] === "string" ? (payload["subtype"] as string) : "";
+  if (subtype === "init") return [{ kind: "event", tone: "plain", text: "session started", detail }];
+  if (subtype === "compact_boundary") return [{ kind: "event", tone: "plain", text: "context compacted", detail }];
+  return [{ kind: "event", tone: "plain", text: subtype.length > 0 ? `${type}: ${subtype}` : type, detail }];
+}
+
+// --- native session lines -----------------------------------------------------
+
+/**
+ * What the agent's own session file said around the conversation — `SessionView.native`, captured at
+ * operation close because the file itself is the agent's and prunable.
+ *
+ * Two kinds of line reach here. A message ENVELOPE (`type: "user" | "assistant"`, body already in
+ * the record's turns) is a position marker: it is paired with its turn by role, in order, and its
+ * `toolUseResult` — the agent's structured record of a tool execution — lands on that turn's tool
+ * line. Everything else (`attachment`, `queue-operation`, `ai-title`, whatever the agent adds next)
+ * becomes an event row at its woven position.
+ *
+ * Paired by ROLE AND ORDER rather than by the stored index, deliberately: the file has message
+ * lines the stream never carried (the prompt itself), so index arithmetic against the turns is off
+ * by one the moment a run begins, and drifts further every time the agent's vocabulary grows. Role
+ * pairing degrades instead of derailing — an envelope that matches no turn is dropped, and the
+ * worst case is an annotation lost, never a conversation reordered.
+ */
+function nativeRecordOf(raw: JsonValue): Record<string, JsonValue> | undefined {
+  return raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, JsonValue>) : undefined;
+}
+
+/** The envelope's role, when the line is a main-chain message envelope. */
+function envelopeRoleOf(line: Record<string, JsonValue> | undefined): "user" | "assistant" | undefined {
+  if (line === undefined || line["isSidechain"] === true) return undefined;
+  return line["type"] === "user" || line["type"] === "assistant" ? (line["type"] as "user" | "assistant") : undefined;
+}
+
+/**
+ * Whether this envelope has a turn in the record to pair with.
+ *
+ * An assistant line always does. A user line does only when it carries a tool result — the PROMPT
+ * user line (and a mid-run steering message) is input, and input never rides the stream back, so
+ * there is no turn for it and pairing it with the next tool-result turn would shift every
+ * annotation after it by one.
+ */
+function pairsWithTurn(line: Record<string, JsonValue>, role: "user" | "assistant"): boolean {
+  return role === "assistant" || line["toolUseResult"] !== undefined;
+}
+
+/** How a non-message native line reads as a row. `undefined` means it is not worth one. */
+function nativeEventOf(raw: JsonValue): EventEntry | undefined {
+  const line = nativeRecordOf(raw);
+  // A line that would not parse was captured as the raw string — a fact about the file, shown as one.
+  if (line === undefined) return { kind: "event", tone: "warn", text: "unreadable native line", detail: raw };
+  const type = typeof line["type"] === "string" ? line["type"] : "unknown line";
+  // Bookkeeping that duplicates what the transcript already shows: the prompt is the conversation's
+  // own first message. Stored faithfully, told never.
+  if (type === "last-prompt") return undefined;
+  if (type === "attachment") {
+    const attachment = nativeRecordOf(line["attachment"] ?? null);
+    const sub = typeof attachment?.["type"] === "string" ? (attachment["type"] as string) : "";
+    return { kind: "event", tone: "plain", text: sub.length > 0 ? `context: ${sub}` : "context", detail: raw };
+  }
+  if (type === "queue-operation") {
+    const op = typeof line["operation"] === "string" ? (line["operation"] as string) : "operation";
+    return { kind: "event", tone: "plain", text: `queued: ${op}`, detail: raw };
+  }
+  if (type === "ai-title") {
+    // The whole fact fits on the line, so there is nothing to open.
+    return typeof line["aiTitle"] === "string" ? { kind: "event", tone: "plain", text: `titled "${line["aiTitle"]}"` } : undefined;
+  }
+  // A type this reader has no name for is shown rather than hidden — the vocabulary is the agent's,
+  // and it grows; a filter here would quietly shrink the transcript every time it did.
+  return { kind: "event", tone: "plain", text: type, detail: raw };
 }
 
 /**
@@ -516,16 +613,54 @@ export function entriesOf(
   live?: LiveTail | string | null,
 ): TranscriptEntry[] {
   const said: Array<TranscriptEntry | ResultPart> = [];
-  // The record's provider events, spliced where they happened — an event's index counts the turns
-  // that preceded it, so it renders before the turn it interrupted.
-  const stored = session?.events ?? [];
+  // The record's pinned provider events, spliced where they happened — an event's index counts the
+  // turns that preceded it, so it renders before the turn it interrupted. Unlike the native lines
+  // below, these were measured against exactly the messages the turns came from: the index IS the seam.
+  const stored = session?.providerEvents ?? [];
   let nextEvent = 0;
+  // The agent's own session-file lines, woven by role and order — see the native section above for
+  // why the stored index cannot be trusted the way the pinned events' can.
+  const native = session?.native ?? [];
+  let cursor = 0;
+  /**
+   * Emit the native lines that precede this turn, up to and including its own envelope; hand back
+   * the envelope's `toolUseResult` so it lands on the turn's tool line.
+   */
+  const drainFor = (turn: SessionTurn): JsonValue | undefined => {
+    while (cursor < native.length) {
+      const raw = native[cursor]!.line;
+      const line = nativeRecordOf(raw);
+      const role = envelopeRoleOf(line);
+      if (role === undefined) {
+        const event = nativeEventOf(raw);
+        if (event !== undefined) said.push(event);
+        cursor += 1;
+        continue;
+      }
+      if (!pairsWithTurn(line!, role)) {
+        cursor += 1;
+        continue;
+      }
+      if (role !== turn.role) return undefined; // an envelope for a later turn — leave it queued
+      cursor += 1;
+      return line!["toolUseResult"];
+    }
+    return undefined;
+  };
   const turns = session?.turns ?? [];
   for (const [i, turn] of turns.entries()) {
     for (; nextEvent < stored.length && stored[nextEvent]!.index <= i; nextEvent++) {
       said.push(...eventEntry(stored[nextEvent]!.event));
     }
-    said.push(...messageOf(turn));
+    said.push(...messageOf(turn, undefined, drainFor(turn)));
+  }
+  // Whatever the file said after the last turn — a title, bookkeeping. Envelopes that never found a
+  // turn are dropped here: an annotation lost beats a conversation misattributed.
+  for (; cursor < native.length; cursor += 1) {
+    const raw = native[cursor]!.line;
+    if (envelopeRoleOf(nativeRecordOf(raw)) !== undefined) continue;
+    const event = nativeEventOf(raw);
+    if (event !== undefined) said.push(event);
   }
   for (; nextEvent < stored.length; nextEvent++) said.push(...eventEntry(stored[nextEvent]!.event));
   // Across the whole conversation, not per turn: `tool_use` and its `tool_result` are on different

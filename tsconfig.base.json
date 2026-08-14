@@ -13,6 +13,18 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node"],
+    // `@jaira/*` resolves to THIS checkout's sources. Without it, resolution walks to the repository
+    // root's `node_modules`, whose workspace junctions point at the main checkout — so type-checking
+    // inside a git worktree compared this checkout's packages against ANOTHER checkout's, and every
+    // cross-package change failed with phantom "has no exported member" errors. Paths are relative
+    // to this file, so each checkout (main or worktree) reads its own.
+    "baseUrl": ".",
+    "paths": {
+      "@jaira/shared/browser": ["./packages/shared/src/browser.ts"],
+      "@jaira/shared": ["./packages/shared/src/index.ts"],
+      "@jaira/runtime": ["./packages/runtime/src/index.ts"],
+      "@jaira/persistence": ["./packages/persistence/src/index.ts"]
+    }
   }
 }
