@@ -49,7 +49,7 @@ import {
   type SecretOrigin,
 } from "@jaira/shared";
 import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, agentSpawn } from "./agents";
-import { AGENT_GENERIC_CLI, createGenericCliQuery } from "./genericAgent";
+import { AGENT_GENERIC_CLI, createGenericCliQuery, GENERIC_CLI_CAPS } from "./genericAgent";
 import { defaultResolve, enabledAdapters, enabledGenericAgents } from "./executors";
 import type { Exec } from "./exec";
 import type { ExecEnv } from "./paths";
@@ -211,11 +211,18 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
   }
   for (const spec of enabledGenericAgents(agents)) {
     // A generic CLI has no adapter of its own — it IS the `AgentQuery` JaiRA builds for it, which is
-    // the same seam the built-ins are driven through.
+    // the same seam the built-ins are driven through. Its CAPABILITIES are its own, though, and they
+    // must be stated: left to `AgentCliExecutor`'s default this route advertised `policyEnforcement:
+    // "callback"` — claude's record, for a binary with no callback — and a capability gate reading
+    // the route believed a restricted state could run here enforced. `GENERIC_CLI_CAPS` is the same
+    // honest record the function-path registration has always declared, and `approvalCallback: false`
+    // is its runtime half: there is no channel to route an approver through, so one must not be built.
     bind(
       spec.name ?? AGENT_GENERIC_CLI,
       new AgentCliExecutor({
         label: spec.name ?? AGENT_GENERIC_CLI,
+        capabilities: GENERIC_CLI_CAPS,
+        approvalCallback: false,
         query:
           query ??
           createGenericCliQuery(spec, {

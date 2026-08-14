@@ -3282,6 +3282,13 @@ export class AppService {
    * `write_file` and `bash` are deliberately absent. A sync returns text for a person to accept; one
    * that could touch disk would be a model with commit rights. This is a parameter to `startRun`
    * rather than something the run assembles, so the refusal is stated where it is enforced.
+   *
+   * The registry is HALF the statement. It bounds what a provider-served loop can call; a DELEGATED
+   * agent answering the same states runs its own loop with its own built-ins, which no registry
+   * reaches. The other half is authored on the workflow itself: the sync states carry
+   * `permissions: { profile: "read-only" }` (`syncWorkflowFiles`), which the engine hands the agent
+   * transport as its gate — claude loses its write-capable built-ins up-front, codex runs
+   * `--sandbox read-only`, and a transport that can enforce neither refuses the state.
    */
   private syncCapabilities(
     registry: ReturnType<typeof newRegistry>,

@@ -685,6 +685,11 @@ the same rule.
 - **`tools`** — logical tool names the operation may call mid-loop, resolved
   through `registry.tools`. JaiRA registers `bash`. **Listing a tool here is what
   puts an agent's commands under the policy at all.**
+  ⚠️ On a delegated agent it is a *grant*, not a fence: the agent keeps its own
+  built-ins (`Bash`, `Read`, …) beside the tools you declare, and a declared
+  `read_file` does not take its `Bash` away. The fence is `permissions.profile`
+  (below) — a sync-style "may read, must not write" state declares **both** the
+  tool and the profile.
 - **`conversation.mode`** — `full_history` | `summary` | `fresh` |
   `selected_artifacts` (the last takes `artifacts: [names]`).
   ⚠️ `summary` is **per session, not per state**: one session has one transcript,
@@ -692,7 +697,31 @@ the same rule.
   lint surface warns — and it reads the *effective* mode, so an inherited one is
   caught too.
 - **`permissions`** — the definition-authored baseline, beneath the project
-  policy.
+  policy: per-tool modes (`allow`/`deny`/`ask`/`smart`), a `default` for unlisted
+  tools, and a `profile` (`read-only` | `plan` | `full`).
+
+  **`profile` is how a restriction survives delegation**, and each transport
+  enforces it through the channel it actually has:
+
+  | Transport | What a `read-only` profile does |
+  | --- | --- |
+  | provider route | the declared tools are permission-wrapped; a mutating tool is denied on its way through |
+  | `claude-code` / `claude-cli` | the agent's write-capable built-ins (`Bash`, `Edit`, `Write`, `Task`, …) go on `--disallowedTools` up front; everything else answers to the permission callback, where an unclassifiable tool escalates rather than passing |
+  | `codex-cli` | `--sandbox read-only` — the sandbox is its only channel, and the mapping is exact |
+  | `generic-cli` | **refused**: it enforces nothing (`policyEnforcement: "none"`), so running would be a restriction in the workflow and none in the process |
+
+  A `plan` profile maps to claude's own `--permission-mode plan` (and codex's
+  read-only sandbox) instead of the deny list — plan mode still reads with those
+  tools, and denying them would be a different restriction than the one authored.
+  The sync workflow is the worked example: its states declare
+  `"tools": ["read_file"], "permissions": {"profile": "read-only", "tools": {"read_file": "allow"}}` —
+  the tool so a clipped digest can be re-read, the profile so "returns text for a
+  person to accept and must not touch disk" is enforced rather than narrated, and
+  the `allow` so the one declared tool runs without a human click per read.
+  ⚠️ The enforcement rides on the run's approval wiring: a run with no approver
+  builds no gate, and a delegated agent then runs under its transport's own
+  defaults — the documented "without an approver, tools are handed over
+  unguarded" rule, unchanged.
 - **`configRef`** — the name of a preset in `config.models.presets`, merged
   UNDER this operation's own fields and OVER the project defaults. It is for the
   settings a model call has and a state should not have to repeat —
@@ -1650,7 +1679,9 @@ Every one of these fails **silently or misleadingly**:
 12. Models must be route-prefixed (`anthropic/claude-sonnet-5`).
 13. `contentMediaType` is what makes a slot an artifact; there is no
     `"type": "artifact"`.
-14. `tools` is what subjects an agent's commands to the policy.
+14. `tools` is what subjects an agent's commands to the policy — and it is a
+    grant, not a fence: a delegated agent keeps its own built-ins beside it. A
+    state that must not write declares `permissions.profile: "read-only"` too.
 15. A `generic-cli` state is refused outright while the policy can escalate to a
     human — which `policy.builtins: false` alone does not settle: a `default` or a
     rule of `require_approval` keeps it escalating.
