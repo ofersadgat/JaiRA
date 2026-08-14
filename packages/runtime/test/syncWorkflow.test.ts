@@ -17,6 +17,7 @@ import {
   SYNC_DOCUMENT_ID,
   SYNC_STATES_ID,
   syncOutcomeOf,
+  syncRespondPrompt,
   syncRootId,
   syncRules,
   syncWorkflowFiles,
@@ -85,6 +86,16 @@ describe("syncWorkflowFiles", () => {
     }
   });
 
+  it("tells the proposal state that prompt text belongs in prompts/, as reusable files", () => {
+    // The emphasis is the feature: the model's path of least resistance is to inline a prompt, and
+    // an inlined prompt is invisible to the next workflow that needs the same instruction.
+    const state = syncWorkflowFiles()[`${SYNC_STATES_ID}/edits`] as { operation: { prompt: string } };
+    expect(state.operation.prompt).toContain('{"$ref": "$/prompts/<name>.md"}');
+    expect(state.operation.prompt).toContain("REUSED");
+    // Subfolders for categories, spelled with an example so a category is something a model can copy.
+    expect(state.operation.prompt).toContain("prompts/review/critique.md");
+  });
+
   it("exposes the report beside the proposal", () => {
     // A proposal with no evidence next to it is a document that changed for reasons of its own.
     const outputs = loadBundle(syncWorkflowFiles(), SYNC_DOCUMENT_ID).states[SYNC_DOCUMENT_ID]?.outputs ?? {};
@@ -119,29 +130,52 @@ describe("syncOutcomeOf", () => {
     expect(() => syncOutcomeOf({ ...report, document: "   ", changes: [] }, "document")).toThrow(/no document/);
   });
 
-  it("reads proposed state files", () => {
+  it("reads proposed files — states and prompts alike", () => {
     const outcome = syncOutcomeOf(
       {
         ...report,
-        edits: [{ stateId: "plan/goals", action: "create", text: '{"label":"Goals"}', reason: "R1 needs it", requirements: ["R1"] }],
+        edits: [
+          { path: "workflows/plan/goals.json", action: "create", text: '{"label":"Goals"}', reason: "R1 needs it", requirements: ["R1"] },
+          { path: "prompts/planning/goals.md", action: "create", text: "Extract the goals.\n", reason: "R1's prompt", requirements: ["R1"] },
+        ],
         notes: ["a human gate needs a registered function"],
       },
       "states",
     );
-    expect(outcome.edits).toHaveLength(1);
-    expect(outcome.edits?.[0]?.stateId).toBe("plan/goals");
+    expect(outcome.edits).toHaveLength(2);
+    expect(outcome.edits?.map((e) => e.path)).toEqual(["workflows/plan/goals.json", "prompts/planning/goals.md"]);
     expect(outcome.notes).toEqual(["a human gate needs a registered function"]);
   });
 
   it("refuses an edit with no file in it", () => {
     expect(() =>
-      syncOutcomeOf({ ...report, edits: [{ stateId: "plan", action: "update", text: "", reason: "", requirements: [] }] }, "states"),
-    ).toThrow(/no state id or no file/);
+      syncOutcomeOf({ ...report, edits: [{ path: "workflows/plan.json", action: "update", text: "", reason: "", requirements: [] }] }, "states"),
+    ).toThrow(/no path or no file/);
   });
 
   it("refuses a report that is not one", () => {
     // The same defensive parse the check makes: this is where an answer becomes an edit.
     expect(() => syncOutcomeOf({ verdict: "maybe" }, "document")).toThrow(/verdict/);
+  });
+});
+
+describe("syncRespondPrompt", () => {
+  it("carries the description and the authoring rules into the review loop's respond round", () => {
+    const prompt = syncRespondPrompt("# The flow\n\nGoals, then a plan.\n");
+    expect(prompt).toContain("# The flow");
+    // The same rules the proposal was written under — a revision that forgot where prompts live
+    // would answer a comment by inlining what the proposal had just moved into a file.
+    expect(prompt).toContain('{"$ref": "$/prompts/<name>.md"}');
+    expect(prompt).toContain("{{.inputs.changeset}}");
+    expect(prompt).toContain("{{.inputs.decisions}}");
+  });
+
+  it("defuses template braces in the embedded description", () => {
+    // A description that QUOTES a slot ({{.inputs.issue}} in a documented example) must not become
+    // a slot of this prompt — the round would fail on an input that does not exist.
+    const prompt = syncRespondPrompt("Bind it as {{.inputs.issue}} here.");
+    expect(prompt).not.toContain("{{.inputs.issue}}");
+    expect(prompt).toContain("{ {.inputs.issue}}");
   });
 });
 

@@ -11,8 +11,9 @@
  *
  *  - {@link SYNC_DOCUMENT_ID} — rewrite the description so it says what the workflows do. Used when
  *    the workflows are what changed.
- *  - {@link SYNC_STATES_ID} — propose state files that close the gaps the document describes. Used
- *    when the description is what changed.
+ *  - {@link SYNC_STATES_ID} — propose the FILES that close the gaps the document describes: state
+ *    files under `workflows/`, and the prompt files under `prompts/` they reference. Used when the
+ *    description is what changed.
  *
  * Both mount the conformance leaves unchanged (WORKFLOWS.md §11.1) rather than re-asking the same
  * two questions in new words. That reuse is not only economy: the requirements and findings are what
@@ -21,7 +22,10 @@
  * would have printed, produced by the same prompts.
  *
  * Neither direction writes anything. The states here return TEXT, and what happens to that text is
- * the caller's decision (in the app: an unsaved draft, in the editor, marked in the tree).
+ * the caller's decision. For the states direction the caller lowers the proposals into a CHANGESET
+ * (CHANGESETS.md §1) and walks it through the review gate — the same reviewer a worktree gets — and
+ * {@link syncRespondPrompt} is the respond half of that loop: a comment sends the changeset back to
+ * a model that revises it under the same authoring rules the proposal was written under.
  */
 import type { JsonValue } from "@declarative-ai/exec";
 // The wire vocabulary, not a copy of it: the app's IPC contract and these workflows must mean the
@@ -58,9 +62,14 @@ export interface DocumentProposal {
   changes: DocumentChange[];
 }
 
-/** One proposed state file, whole. `stateId` is a path under `workflows/`, minus the suffix. */
-export interface StateEdit {
-  stateId: string;
+/**
+ * One proposed file, whole. `path` is layer-root-relative, forward slashes — a state file
+ * (`workflows/<state id>.json`) or a prompt file (`prompts/<name>.md`, in a category subfolder when
+ * one fits). Path-addressed rather than state-addressed, deliberately: a proposal that can only
+ * name states can never move a prompt into `prompts/`, and reusable prompts are the point.
+ */
+export interface SyncEdit {
+  path: string;
   action: "create" | "update";
   text: string;
   reason: string;
@@ -69,7 +78,7 @@ export interface StateEdit {
 
 export interface SyncOutcome extends ConformanceReport {
   document?: DocumentProposal;
-  edits?: StateEdit[];
+  edits?: SyncEdit[];
   /** Anything the run could not express as an edit — a gap that needs a person. */
   notes: string[];
 }
@@ -104,13 +113,17 @@ const EDITS_SCHEMA = {
   items: {
     type: "object",
     properties: {
-      stateId: { type: "string", description: "the state's id, which is its path under workflows/ without the suffix" },
+      path: {
+        type: "string",
+        description:
+          "where the file lives under the layer root: workflows/<state id>.json for a state file, prompts/<name>.md for a prompt",
+      },
       action: { type: "string", enum: ["create", "update"] },
-      text: { type: "string", description: "the COMPLETE state file, as JSON" },
+      text: { type: "string", description: "the COMPLETE file" },
       reason: { type: "string", description: "what in the description this closes" },
       requirements: { ...strings, description: "the requirement ids it answers" },
     },
-    required: ["stateId", "action", "text", "reason", "requirements"],
+    required: ["path", "action", "text", "reason", "requirements"],
     additionalProperties: false,
   },
 };
@@ -133,7 +146,8 @@ const STATE_FILE_RULES = `A state file is one JSON object. The fields that matte
 - \`label\`, \`description\` — for people.
 - \`inputs\` / \`outputs\` — declared slots: \`{"name": {"schema": {...}}}\`. An output may carry a
   \`binding\` naming where its value comes from (\`.children.<key>.outputs.<name>\`).
-- \`operation\` — \`{"prompt": "…"}\` for a model call, or
+- \`operation\` — \`{"prompt": …}\` for a model call, with the prompt text loaded from a file by
+  reference (\`{"prompt": {"$ref": "$/prompts/<name>.md"}}\`) or inline as a string; or
   \`{"kind": "function", "function": "<registered name>"}\` for everything else. Absent for a state
   that only groups its children.
 - \`children\` — \`{"<key>": {"inputs": {…}}}\`. The key names the child state
@@ -152,6 +166,31 @@ Rules you must not break:
   name produces a workflow that fails at the moment it reaches that state.
 - Every input a child needs must be bound by the mount, and every binding must name something that
   exists.`;
+
+/**
+ * Where prompt text belongs — stated wherever the sync writes files, and emphasized because a
+ * model's path of least resistance is to inline, and an inlined prompt is invisible to the next
+ * workflow that needs the same instruction. The reference grammar (REFERENCES.md §1) makes
+ * `$/prompts/<name>.md` a first-class spelling, so the sync is the state that decides whether a new
+ * prompt becomes a reusable file or a string sealed inside one state.
+ */
+const PROMPT_FILE_RULES = `Where prompt text goes — this matters:
+
+- Put every non-trivial prompt in its own markdown file under \`prompts/\`, and have the state
+  reference it: \`"prompt": {"$ref": "$/prompts/<name>.md"}\`. A prompt in its own file can be read,
+  edited and REUSED by the next state that needs the same instruction; one inlined in a state file
+  cannot.
+- Before writing a new prompt file, look for an existing file under \`prompts/\` that already says
+  what the state needs, and reference it instead of writing a near-duplicate.
+- Group prompts into subfolders by what they are for — \`prompts/review/critique.md\`,
+  \`prompts/planning/goals.md\`, referenced as \`$/prompts/review/critique.md\`. Put a new prompt
+  beside the prompts it belongs with, and start a subfolder when a category emerges rather than
+  letting the top level become a pile.
+- A prompt file is a proposed file like any other: return it whole, with
+  \`"path": "prompts/<subfolder>/<name>.md"\`, in the same proposal as the state file that
+  references it — a \`$ref\` to a file nobody proposed is a state that fails to load.
+- Only a trivial prompt — one sentence that does no more than glue its bound inputs together — may
+  stay inline in the state file.`;
 
 const REVISE_PROMPT = `You are updating a document in which a person described, in English, the workflow they wanted —
 so that it describes the workflows as they are now actually implemented.
@@ -212,21 +251,25 @@ English.
 The document is the truth here. The workflows have fallen behind it: they were built before it was
 written, or it was revised and they were not.
 
-For each requirement that is not satisfied, write the state files that would satisfy it.
+For each requirement that is not satisfied, write the files that would satisfy it. A file is a
+state file under \`workflows/\` or a prompt file under \`prompts/\`; each is returned WHOLE, at the
+path it belongs at.
 
 ${STATE_FILE_RULES}
+
+${PROMPT_FILE_RULES}
 
 How to work:
 
 - Change as little as possible. Prefer editing an existing state over adding one; prefer adding one
   child to rewriting a workflow.
-- Return the COMPLETE file for every state you touch, not a fragment. For an \`update\`, start from
+- Return the COMPLETE file for every path you touch, not a fragment. For an \`update\`, start from
   the authored file in the digest and change what has to change — everything you leave out is
   deleted.
 - Adding a state is not enough on its own: whatever should reach it has to mount it as a child and
   place it in \`sequence\`, so return the parent too.
-- Say, per edit, which requirement it answers and what in the document it closes.
-- Some things cannot be fixed by writing a state file — a human gate needs a function this project
+- Say, per file, which requirement it answers and what in the document it closes.
+- Some things cannot be fixed by writing a file — a human gate needs a function this project
   has registered, a step may need a tool that does not exist. Put those in \`notes\` and do NOT
   invent a state that pretends to do them.
 - Requirements already \`satisfied\` need no edit. Extras are not failures: leave behaviour the
@@ -235,7 +278,7 @@ How to work:
 Some states are marked **described elsewhere**, and neither they nor anything beneath them is yours
 to change. You have their contract and not their states, so any file you wrote for one would be
 written blind — and it would overwrite work that another document is the authority on. Do not return
-an edit whose \`stateId\` is such a state or sits under one; it will be refused. If closing a
+an edit whose path names such a state or one beneath it; it will be refused. If closing a
 requirement genuinely needs a change in there, put it in \`notes\`, name the owning document, and say
 what that document would have to ask for. Changing how such a state is MOUNTED — its inputs, its
 place in \`sequence\`, a transition into it — is yours, because the mount lives in a state you own.
@@ -351,7 +394,8 @@ export function syncWorkflowFiles(options: SyncWorkflowOptions = {}): Record<str
 
     [SYNC_STATES_ID]: {
       label: "Sync the workflows",
-      description: "Propose the state files that would make the workflows match workflow.md.",
+      description:
+        "Propose the files — state files, and the prompts they reference — that would make the workflows match workflow.md.",
       environment,
       inputs: { spec: markdown, implementation: markdown },
       outputs: {
@@ -375,7 +419,7 @@ export function syncWorkflowFiles(options: SyncWorkflowOptions = {}): Record<str
     },
 
     [`${SYNC_STATES_ID}/edits`]: {
-      label: "Propose state files",
+      label: "Propose files",
       inputs: {
         spec: markdown,
         implementation: markdown,
@@ -417,11 +461,11 @@ export function syncOutcomeOf(value: unknown, direction: SyncDirection): SyncOut
 
   const edits = arrayOf(outputs["edits"]).map((raw, i) => {
     const row = record(raw);
-    const stateId = typeof row["stateId"] === "string" ? row["stateId"] : "";
+    const path = typeof row["path"] === "string" ? row["path"] : "";
     const text = typeof row["text"] === "string" ? row["text"] : "";
-    if (stateId === "" || text === "") throw new Error(`the sync returned an edit with no state id or no file (edits[${i}])`);
+    if (path === "" || text === "") throw new Error(`the sync returned an edit with no path or no file (edits[${i}])`);
     return {
-      stateId,
+      path,
       action: row["action"] === "create" ? ("create" as const) : ("update" as const),
       text,
       reason: typeof row["reason"] === "string" ? row["reason"] : "",
@@ -429,6 +473,46 @@ export function syncOutcomeOf(value: unknown, direction: SyncDirection): SyncOut
     };
   });
   return { ...report, edits, notes };
+}
+
+/**
+ * The respond prompt for a sync proposal's review loop (CHANGESETS.md §3.3, flow 1).
+ *
+ * The generic loop answers comments knowing nothing beyond the changeset itself. A sync's revision
+ * is writing state files, so it needs the same vocabulary and the same prompts-folder rules the
+ * proposal was written under — and the description the proposal exists to satisfy, because "address
+ * this comment" is meaningless without the truth the file is being held to.
+ *
+ * `{{` in the embedded description is widened to `{ {`, because a description that quotes a
+ * template slot (`{{.inputs.issue}}` in a documented example) would otherwise become a slot of THIS
+ * prompt and fail the round on an input that does not exist.
+ */
+export function syncRespondPrompt(spec: string): string {
+  const safe = spec.replaceAll("{{", "{ {");
+  return `You proposed files to bring a set of implemented workflows in step with the description below, and a
+reviewer answered some of the changes with comments instead of accepting them. Answer the comments by
+revising your proposal.
+
+${STATE_FILE_RULES}
+
+${PROMPT_FILE_RULES}
+
+The description the proposal must satisfy:
+
+${safe}
+
+The changeset you proposed:
+
+{{.inputs.changeset}}
+
+The reviewer's decisions — every change, decided; the \`comment\` ones are yours to answer:
+
+{{.inputs.decisions}}
+
+For each commented change, return the COMPLETE revised file for that path — the whole file, not a
+fragment or a diff, because everything you leave out is deleted. Leave changes the reviewer merged
+or reverted alone. If a comment asks for something you cannot express as a file, say so in notes
+rather than inventing content.`;
 }
 
 /**
@@ -444,7 +528,7 @@ export function syncRules(script: {
   findings: ConformanceFinding[];
   extras?: ConformanceExtra[];
   document?: DocumentProposal;
-  edits?: StateEdit[];
+  edits?: SyncEdit[];
   notes?: string[];
 }): Array<{ promptIncludes: string; output: JsonValue }> {
   return [
