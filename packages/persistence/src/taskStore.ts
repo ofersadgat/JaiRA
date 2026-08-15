@@ -3,7 +3,7 @@
  * Human-readable and hand-editable while the task is not running; the SQLite
  * side references tasks by id only and never duplicates these fields.
  */
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseTaskMeta, readJsonFile, type TaskMeta } from "@jaira/shared";
 
@@ -23,6 +23,11 @@ export class TaskFileStore {
     const meta = this.tryRead(taskId);
     if (!meta) throw new Error(`no task file for '${taskId}' in ${this.tasksDir}`);
     return meta;
+  }
+
+  /** Idempotent: deleting a file that is already gone is the outcome asked for, not an error. */
+  remove(taskId: string): void {
+    rmSync(this.file(taskId), { force: true });
   }
 
   tryRead(taskId: string): TaskMeta | undefined {

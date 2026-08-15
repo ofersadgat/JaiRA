@@ -117,6 +117,9 @@ const handlers: Record<IpcChannel, Handler> = {
   "task:start": ((request: Parameters<typeof service.startTask>[0]) => service.startTask(request)) as Handler,
   "task:cancel": ((request: { taskId: string; project?: string }) =>
     service.cancelTask(request.taskId, request.project)) as Handler,
+  "task:rerun": ((request: Parameters<typeof service.rerunTask>[0]) => service.rerunTask(request)) as Handler,
+  "task:delete": ((request: { taskId: string; project?: string }) =>
+    service.deleteTask(request.taskId, request.project)) as Handler,
   "board:view": ((request: { level?: string; project?: string } | undefined) => service.board(request ?? {})) as Handler,
   "board:roots": ((request: { project?: string } | undefined) => service.boardRoots(request ?? {})) as Handler,
   "files:tree": (() => service.filesTree()) as Handler,

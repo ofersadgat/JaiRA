@@ -143,6 +143,58 @@ describe("AppService.startTask (scripted)", () => {
   });
 });
 
+describe("AppService.rerunTask and deleteTask", () => {
+  const approve = { interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" } as JsonValue] } };
+
+  it("reruns a failed task in place — same task, fresh run", async () => {
+    const taskId = newTask();
+    await service.startTask({ taskId, fake: [{ error: "provider exploded" }] });
+    await until(() => finished(taskId), "the failing run to finish");
+
+    const started = await service.rerunTask({ taskId, fake: happyRules(), ...approve });
+    expect(started.taskId).toBe(taskId);
+    await until(() => pushes.filter((m) => m.type === "run:finished").length === 2, "the rerun to finish");
+    expect(service.taskDetail(taskId).status).toBe("completed");
+  });
+
+  it("reruns a completed task as a fresh copy, since a finished lifecycle cannot restart", async () => {
+    const taskId = newTask();
+    await service.startTask({ taskId, fake: happyRules(), ...approve });
+    await until(() => finished(taskId), "the first run to finish");
+
+    const started = await service.rerunTask({ taskId, fake: happyRules(), ...approve });
+    expect(started.taskId).not.toBe(taskId);
+    await until(() => finished(started.taskId), "the copy's run to finish");
+
+    // The copy carries the original's identity — title, workflow, inputs — under its own id.
+    const copy = service.taskDetail(started.taskId);
+    expect(copy).toMatchObject({ title: "Plan the feature", workflow: "feature/plan", status: "completed" });
+    expect(service.listTasks().map((t) => t.taskId).sort()).toEqual([taskId, started.taskId].sort());
+    // The original is untouched: still one run, still completed.
+    expect(service.taskDetail(taskId).runs).toHaveLength(1);
+  });
+
+  it("refuses to delete a running task, then deletes it once it has finished", async () => {
+    const taskId = newTask();
+    await service.startTask({ taskId, fake: blockedRules() });
+    await until(() => service.pendingInteractions().length === 1, "the gate to park");
+    // Parked on a human is still running, and running is the one undeletable status.
+    await expect(service.deleteTask(taskId)).rejects.toThrow(/cancel it before deleting/);
+
+    service.submitInteraction(service.pendingInteractions()[0]!.requestId, { decision: "block" });
+    await until(() => finished(taskId), "the run to finish");
+
+    await service.deleteTask(taskId);
+    expect(service.listTasks()).toHaveLength(0);
+    expect(() => service.taskDetail(taskId)).toThrow(/unknown task/);
+    expect(pushes).toContainEqual({ type: "store:invalidate", scope: "board", project: dir });
+  });
+
+  it("delete of an unknown task says so", async () => {
+    await expect(service.deleteTask("t-nowhere000")).rejects.toThrow(/unknown task/);
+  });
+});
+
 describe("AppService live human gate", () => {
   it("parks on the gate, shows it as pending, and completes once the UI answers", async () => {
     const taskId = newTask();

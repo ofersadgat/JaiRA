@@ -1916,6 +1916,81 @@ export function useApp() {
         }
       },
       /**
+       * Run a task again. The response's task id is the one that actually started — a finished
+       * task reruns as a fresh copy (see "task:rerun") — so the selection follows it: the card the
+       * user is now watching is the run that is happening, not the record it was made from.
+       */
+      rerunTask: async (taskId: string, project?: string) => {
+        patch({ busy: true, error: null, stream: [] });
+        try {
+          const started = await invoke("task:rerun", { taskId, ...(project !== undefined ? { project } : {}) });
+          patch({ busy: false, selected: started.taskId, selectedProject: project ?? ref.current.selectedProject });
+          await Promise.all([refreshTasks(), refreshBoard(), refreshDetail(started.taskId, project)]);
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /**
+       * Delete tasks for good. The confirmation happened in the UI; by here the only job left is
+       * to not keep showing what no longer exists — a deleted task that is also the selection would
+       * otherwise leave the panel describing a record the next fetch cannot find.
+       *
+       * A LIST rather than one id, because the board's multi-select deletes a set in one gesture and
+       * a refresh per member would redraw the board once per deletion. Sequential on purpose: each
+       * delete may remove a git worktree, and racing several `git worktree remove` against one
+       * repository is a lock contest git sometimes loses.
+       */
+      deleteTasks: async (taskIds: readonly string[], project?: string) => {
+        patch({ busy: true, error: null });
+        try {
+          for (const taskId of taskIds) {
+            await invoke("task:delete", { taskId, ...(project !== undefined ? { project } : {}) });
+          }
+          if (ref.current.selected !== null && taskIds.includes(ref.current.selected)) {
+            patch({
+              selected: null,
+              detail: null,
+              stream: [],
+              sessions: {},
+              sessionHistory: [],
+              session: null,
+              sessionInstance: null,
+              conversation: null,
+              trail: [],
+              trailState: null,
+              inspect: "path",
+            });
+          }
+          patch({ busy: false });
+          await Promise.all([refreshTasks(), refreshBoard()]);
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /** The set-menu's Re-run: each member in turn, with one refresh at the end. */
+      rerunTasks: async (taskIds: readonly string[], project?: string) => {
+        patch({ busy: true, error: null, stream: [] });
+        try {
+          for (const taskId of taskIds) {
+            await invoke("task:rerun", { taskId, ...(project !== undefined ? { project } : {}) });
+          }
+          patch({ busy: false });
+          await Promise.all([refreshTasks(), refreshBoard()]);
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /** The set-menu's Cancel. Like the single cancel, the pushes carry the redraw. */
+      cancelTasks: async (taskIds: readonly string[], project?: string) => {
+        try {
+          for (const taskId of taskIds) {
+            await invoke("task:cancel", { taskId, ...(project !== undefined ? { project } : {}) });
+          }
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /**
        * Review a task's worktree edits (CHANGESETS.md). The call returns as soon as the review run
        * starts; the reviewer itself arrives as a pending interaction and pops through the ordinary
        * gate flow — nothing here waits on a human.

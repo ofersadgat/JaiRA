@@ -11,7 +11,7 @@
  * part in it: a guard that jumps backwards is control flow, and letting it reorder the columns would
  * turn the board's shape into something you cannot read left to right.
  */
-import type { JSX, ReactNode } from "react";
+import type { JSX, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import type { BoardCard, BoardView } from "@jaira/shared/browser";
 
 /**
@@ -138,6 +138,7 @@ export function Tile({
   children,
   onSelect,
   onDrill,
+  onMenu,
 }: {
   /** Colours the stripe and picks the badge glyph. Absent ⇒ neither, for a card of something with
       no state of its own to report. */
@@ -151,14 +152,23 @@ export function Tile({
   tip?: string;
   /** Anything between the head and the footer. The run board puts its call arguments here. */
   children?: ReactNode;
-  onSelect: () => void;
+  /** The event rides along for callers that read its modifiers — the Tasks board's multi-select. */
+  onSelect: (e: ReactMouseEvent) => void;
   onDrill?: (() => void) | undefined;
+  /** Right-click, where the card has verbs to offer. The Tasks view opens its menu here. */
+  onMenu?: ((e: ReactMouseEvent) => void) | undefined;
 }): JSX.Element {
   return (
     <div
       className={`card${status !== undefined ? ` card-${status}` : ""}${selected === true ? " card-selected" : ""}`}
       onClick={onSelect}
       onDoubleClick={onDrill}
+      // A shift-click is a range-select gesture here, and the browser's own reading of it — extend
+      // the text selection from wherever the last click was — would smear a highlight across every
+      // card in between. Swallowed at mousedown, which is where that behaviour starts; a plain drag
+      // still selects text within a card.
+      onMouseDown={(e) => (e.shiftKey ? e.preventDefault() : undefined)}
+      {...(onMenu !== undefined ? { onContextMenu: onMenu } : {})}
       {...(tip !== undefined ? { title: tip } : {})}
     >
       <div className="card-head">
@@ -289,11 +299,13 @@ export function Card({
   selected,
   onSelect,
   onDrill,
+  onMenu,
 }: {
   card: BoardCard;
   selected: boolean;
-  onSelect: () => void;
+  onSelect: (e: ReactMouseEvent) => void;
   onDrill?: () => void;
+  onMenu?: (e: ReactMouseEvent) => void;
 }): JSX.Element {
   // The card's own status — the one the board is actually about, which for a task inside a workflow
   // is where it is NOW rather than what the task as a whole is doing.
@@ -336,6 +348,7 @@ export function Card({
       }
       onSelect={onSelect}
       onDrill={onDrill}
+      onMenu={onMenu}
     />
   );
 }
@@ -354,17 +367,25 @@ export function Card({
 export function Board({
   board,
   selected,
+  selectedSet,
   numbered = true,
   trays = true,
   onSelectTask,
   onDrill,
   onOpenTask,
+  onTaskMenu,
 }: {
   board: BoardView;
   selected: string | null;
+  /**
+   * A multi-selection, when the caller keeps one. Takes over from `selected` entirely — the two are
+   * one highlight, not two, and the caller that owns a set puts the single selection in it too.
+   */
+  selectedSet?: ReadonlySet<string> | undefined;
   numbered?: boolean;
   trays?: boolean;
-  onSelectTask: (taskId: string) => void;
+  /** The click event rides along so a caller can read shift/ctrl for range and toggle selection. */
+  onSelectTask: (taskId: string, e: ReactMouseEvent) => void;
   onDrill: (stateId: string) => void;
   /**
    * Double-clicking a CARD, where that means something other than drilling its state.
@@ -375,6 +396,8 @@ export function Board({
    * to following the task's own path down a level.
    */
   onOpenTask?: ((card: BoardCard) => void) | undefined;
+  /** Right-clicking a card. The caller owns the menu — the board only says which card, and where. */
+  onTaskMenu?: ((card: BoardCard, x: number, y: number) => void) | undefined;
 }): JSX.Element {
   /** What double-clicking this card does: open the run, else follow its path one level down. */
   const drillOf = (card: BoardCard): (() => void) | undefined => {
@@ -382,6 +405,8 @@ export function Board({
     const target = drillTargetOf(board, card);
     return target === undefined ? undefined : () => onDrill(target);
   };
+  const isSelected = (card: BoardCard): boolean =>
+    selectedSet !== undefined ? selectedSet.has(card.taskId) : card.taskId === selected;
   // The root listing WRAPS. Its columns are whole workflows — siblings with no order, and no task
   // ever moves between them — so there is no left-to-right reading to preserve and a tenth workflow
   // belongs on a second row rather than off the right-hand edge. A level BELOW a root is a sequence
@@ -408,9 +433,10 @@ export function Board({
                   <Card
                     key={card.taskId}
                     card={card}
-                    selected={card.taskId === selected}
-                    onSelect={() => onSelectTask(card.taskId)}
+                    selected={isSelected(card)}
+                    onSelect={(e) => onSelectTask(card.taskId, e)}
                     {...(drill !== undefined ? { onDrill: drill } : {})}
+                    {...(onTaskMenu !== undefined ? { onMenu: menuHandler(card, onTaskMenu) } : {})}
                   />
                 );
               }}
@@ -428,12 +454,25 @@ export function Board({
           label="At this level"
           cards={board.atLevel}
           selected={selected}
+          selectedSet={selectedSet}
           onSelectTask={onSelectTask}
           {...(onOpenTask !== undefined ? { onOpenTask } : {})}
+          {...(onTaskMenu !== undefined ? { onTaskMenu } : {})}
         />
       ) : null}
     </div>
   );
+}
+
+/** A right-click, translated to "this card, at this point" — the shape the menu's owner wants. */
+function menuHandler(
+  card: BoardCard,
+  onTaskMenu: (card: BoardCard, x: number, y: number) => void,
+): (e: ReactMouseEvent) => void {
+  return (e) => {
+    e.preventDefault();
+    onTaskMenu(card, e.clientX, e.clientY);
+  };
 }
 
 /** A row of cards that belong to no column, laned like the columns are. */
@@ -441,14 +480,18 @@ function Tray({
   label,
   cards,
   selected,
+  selectedSet,
   onSelectTask,
   onOpenTask,
+  onTaskMenu,
 }: {
   label: string;
   cards: readonly BoardCard[];
   selected: string | null;
-  onSelectTask: (taskId: string) => void;
+  selectedSet?: ReadonlySet<string> | undefined;
+  onSelectTask: (taskId: string, e: ReactMouseEvent) => void;
   onOpenTask?: ((card: BoardCard) => void) | undefined;
+  onTaskMenu?: ((card: BoardCard, x: number, y: number) => void) | undefined;
 }): JSX.Element {
   return (
     <div className="tray">
@@ -460,9 +503,10 @@ function Tray({
             <Card
               key={card.taskId}
               card={card}
-              selected={card.taskId === selected}
-              onSelect={() => onSelectTask(card.taskId)}
+              selected={selectedSet !== undefined ? selectedSet.has(card.taskId) : card.taskId === selected}
+              onSelect={(e) => onSelectTask(card.taskId, e)}
               {...(onOpenTask !== undefined ? { onDrill: () => onOpenTask(card) } : {})}
+              {...(onTaskMenu !== undefined ? { onMenu: menuHandler(card, onTaskMenu) } : {})}
             />
           )}
         />

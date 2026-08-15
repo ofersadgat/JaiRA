@@ -190,3 +190,52 @@ export function cancelTask(project: Project, taskId: string, nowMs = Date.now())
     project.runtime.setStatus(taskId, "canceled", nowMs);
   })();
 }
+
+/**
+ * Delete a task outright: every run's journal, its runtime row, and its JSON file.
+ *
+ * Distinct from pruning (SPEC §13), which trims old runs while keeping the task: this removes the
+ * task itself, and with it every row that hangs off one. A `running` task is refused — its journal
+ * is the live engine's resume source, and the caller that wants it gone cancels it first. Any other
+ * status may go, including `interrupted`: pruning protects a resumable task because the *user* may
+ * still want it, and deleting is the user saying they do not.
+ *
+ * Session lineage rows are deliberately left behind. A session with no records is also what another
+ * run's in-flight fork looks like (see the prune's age-bounded cleanup), and an orphaned lineage row
+ * costs one row until the next prune collects it — the wrong deletion here truncates someone else's
+ * conversation.
+ */
+export function deleteTask(project: Project, taskId: string): void {
+  const row = project.runtime.get(taskId);
+  if (!row) throw new Error(`unknown task '${taskId}'`);
+  if (row.status === "running") {
+    throw new Error(`task '${taskId}' is running; cancel it before deleting it`);
+  }
+  // One transaction, children before parents: events and jobs reference runs, runs reference the
+  // runtime row, and foreign keys are ON. Jobs are matched by task OR by run — a process job records
+  // both, but only one is guaranteed — and their captured output goes first because it references
+  // them. The self-referencing parent_job_id is safe in one statement: SQLite checks immediate
+  // foreign keys at statement end, so a parent and its child leave together.
+  project.db.transaction(() => {
+    const runs = `SELECT id FROM runs WHERE task_id = ?`;
+    const jobs = `SELECT id FROM jobs WHERE task_id = ? OR run_id IN (${runs})`;
+    project.db.prepare(`DELETE FROM state_machine_events WHERE task_id = ?`).run(taskId);
+    project.db.prepare(`DELETE FROM command_log WHERE task_id = ?`).run(taskId);
+    project.db.prepare(`DELETE FROM job_output WHERE job_id IN (${jobs})`).run(taskId, taskId);
+    project.db.prepare(`DELETE FROM jobs WHERE task_id = ? OR run_id IN (${runs})`).run(taskId, taskId);
+    project.db
+      .prepare(
+        `DELETE FROM session_positions
+          WHERE operation_record_id IN (SELECT id FROM operation_records WHERE task_id = ?)`,
+      )
+      .run(taskId);
+    project.db.prepare(`DELETE FROM operation_records WHERE task_id = ?`).run(taskId);
+    project.db.prepare(`DELETE FROM artifacts WHERE task_id = ?`).run(taskId);
+    project.db.prepare(`DELETE FROM runs WHERE task_id = ?`).run(taskId);
+    project.db.prepare(`DELETE FROM task_runtime WHERE task_id = ?`).run(taskId);
+  })();
+  // The file after the rows: a crash between the two leaves a task file with no runtime row, which
+  // `list` still shows and a re-created row could adopt — recoverable, unlike the reverse order,
+  // where the rows would describe a task no file can name.
+  project.tasks.remove(taskId);
+}

@@ -2087,6 +2087,32 @@ run-record requirements of spec §10.2.
   top-level workflow states. Double-click a card whose active state has
   children → sub-board (breadcrumb navigation back up). Card badges: status
   (running/waiting_for_user/blocked/failed), pending-approval indicator.
+- **A card's verbs are on its right-click** (Tasks view): Open — the double-click,
+  named — then Re-run, Cancel, Copy task id, Delete. Cards multi-select with the
+  gestures a file explorer taught everyone: shift-click extends from the anchor
+  through everything between (in the order the board draws — columns left to right,
+  lanes within each, the tray last, from the same `lanesOf` the render uses, so the
+  range cannot disagree with the screen), ctrl/cmd-click toggles one card in or out,
+  and right-clicking inside the set offers it the same verbs, each labelled with the
+  count it will actually touch — an ineligible member is skipped and the note says
+  so. The set is view-local and scoped to one project, because a task id is a rowid
+  in one database and every verb takes a project; the store's `selected` stays the
+  single task the panel describes, always the last card touched. Two of the verbs
+  are IPC verbs of their own rather than sugar over `task:start`:
+  - `task:rerun` starts a startable task (queued/interrupted/failed, §4.3's set — the
+    engine's rule, not the UI's) and DUPLICATES a finished one: same title, workflow,
+    inputs and branch under a fresh id, because a completed lifecycle cannot restart
+    and "Re-run" quietly meaning "make another task" is worth saying out loud — the
+    menu labels it "Re-run as a new task", and the response names the task that
+    actually ran.
+  - `task:delete` removes a task outright — every run's journal rows, its jobs and
+    artifacts, its worktree (forced: the human confirmed, and this is the one caller
+    for whom uncommitted work is not a reason to stop), and its JSON file. Refused
+    while the task runs anywhere, found the same way cancel finds it (a live engine
+    here, or the job table's heartbeat). Distinct from §13's pruning, which trims old
+    runs while keeping the task; delete appears only in this menu and behind a typed
+    confirmation, because destroying history is not a verb that belongs one mis-click
+    from a card's face.
 - **Task detail** (side panel): active path, instance tree with statuses,
   live runner event stream, artifacts list (markdown preview), conversation
   viewer, run history timeline (from `events`), cancel/retry controls.

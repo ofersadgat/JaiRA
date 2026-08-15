@@ -27,9 +27,10 @@
  * away, and it stays visible while you are deep in the Files tree.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from "react";
-import type { ConfigLayer, PendingApproval, PendingInteraction, WorkflowLayer } from "@jaira/shared/browser";
-import { Board } from "./board";
+import type { BoardCard, ConfigLayer, PendingApproval, PendingInteraction, WorkflowLayer } from "@jaira/shared/browser";
+import { Board, lanesOf } from "./board";
 import { ApprovalDialog, InteractionDialog } from "./components";
+import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem } from "./menu";
 import {
   FileAddressBar,
   FileInspector,
@@ -359,6 +360,221 @@ export default function App(): JSX.Element {
     const board = state.taskFocus === null ? null : state.boards[state.taskFocus];
     return board === null || board === undefined ? [] : [...board.atLevel, ...board.columns.flatMap((c) => c.cards)];
   }, [state.boards, state.taskFocus]);
+
+  /**
+   * The Tasks board's selection — one task, or a set of them.
+   *
+   * The SET lives here rather than in the store because it is a fact about this board's cards on
+   * this screen: the store's `selected` stays the single task the panel describes (always the last
+   * card touched), and this remembers which others are gathered around it. Scoped to ONE project —
+   * a task id is a rowid in one database, and every verb the set can be offered takes a project —
+   * so touching another project's board starts a new selection rather than quietly building a set
+   * no action could be applied to.
+   *
+   * `anchor` is where a shift-range measures from: the last plainly-clicked card, file-explorer
+   * style.
+   */
+  const [picked, setPicked] = useState<{ project: string; ids: readonly string[]; anchor: string } | null>(null);
+  const pickedSet = useMemo(() => (picked === null ? null : new Set(picked.ids)), [picked]);
+  // A selection made somewhere other than the board — the logs view, a run link — replaces the set,
+  // which would otherwise keep highlighting cards the panel is no longer about.
+  useEffect(() => {
+    setPicked((was) => (was !== null && state.selected !== null && !was.ids.includes(state.selected) ? null : was));
+  }, [state.selected]);
+
+  /**
+   * One project's cards in the order the board DRAWS them — columns left to right, each split into
+   * lanes, then the at-this-level tray — which is the order "everything in between" means to the
+   * person shift-clicking. Built from the same `lanesOf` the board renders with, so the range can
+   * never disagree with what is on screen.
+   */
+  const boardCardsOf = useCallback(
+    (project: string): BoardCard[] => {
+      const b = state.boards[project];
+      if (b === undefined || b === null) return [];
+      return [
+        ...b.columns.flatMap((c) => lanesOf(c.cards).flatMap((l) => l.cards)),
+        ...lanesOf(b.atLevel).flatMap((l) => l.cards),
+      ];
+    },
+    [state.boards],
+  );
+
+  /** A click on a card: plain selects, ctrl/cmd toggles membership, shift extends from the anchor. */
+  const pickTask = useCallback(
+    (project: string, taskId: string, e?: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
+      const same = picked !== null && picked.project === project ? picked : null;
+      if (e?.shiftKey === true && same !== null) {
+        const order = boardCardsOf(project).map((c) => c.taskId);
+        const a = order.indexOf(same.anchor);
+        const b = order.indexOf(taskId);
+        if (a >= 0 && b >= 0) {
+          // The range REPLACES the set (explorer semantics), and the anchor stays put so a second
+          // shift-click re-measures from the same end rather than from wherever the first landed.
+          setPicked({ project, ids: order.slice(Math.min(a, b), Math.max(a, b) + 1), anchor: same.anchor });
+          actions.select(taskId, project);
+          return;
+        }
+      }
+      if ((e?.ctrlKey === true || e?.metaKey === true) && same !== null) {
+        const had = same.ids.includes(taskId);
+        const ids = had ? same.ids.filter((id) => id !== taskId) : [...same.ids, taskId];
+        if (ids.length === 0) {
+          setPicked(null);
+          return;
+        }
+        setPicked({ project, ids, anchor: had ? same.anchor : taskId });
+        // The panel follows the last card TOUCHED — for a removal, the last one still standing.
+        actions.select(had ? ids[ids.length - 1]! : taskId, project);
+        return;
+      }
+      setPicked({ project, ids: [taskId], anchor: taskId });
+      actions.select(taskId, project);
+    },
+    [actions, boardCardsOf, picked],
+  );
+
+  /**
+   * The Tasks board's right-click menu, and the one confirmation inside it.
+   *
+   * The menu is the card's VERBS — open, run again, cancel, delete — which all existed before it
+   * did, as a double-click, a button on the panel, or nothing at all. Right-click is where people
+   * look for them, and it is the only place "delete" appears: destroying history is not a verb that
+   * belongs one mis-click from a card's face.
+   *
+   * Right-clicking INSIDE a multi-selection offers the set the same verbs, each labelled with the
+   * count it will actually touch — a verb a member is ineligible for skips that member and the note
+   * says so, because "Re-run 3 tasks" doing something to two of them is how trust in a menu dies.
+   * Right-clicking outside the selection collapses it to the clicked card first, explorer-style.
+   */
+  const [taskMenu, setTaskMenu] = useState<MenuAnchor | null>(null);
+  const [taskAsk, setTaskAsk] = useState<AskSpec | null>(null);
+  const openTaskMenu = useCallback(
+    (project: string, card: BoardCard, x: number, y: number) => {
+      const plural = (k: number): string => `${k} task${k === 1 ? "" : "s"}`;
+      const set =
+        picked !== null && picked.project === project && picked.ids.length > 1 && picked.ids.includes(card.taskId)
+          ? picked.ids
+          : null;
+
+      if (set !== null) {
+        const byId = new Map(boardCardsOf(project).map((c) => [c.taskId, c] as const));
+        const cards = set.map((id) => byId.get(id)).filter((c): c is BoardCard => c !== undefined);
+        const n = cards.length;
+        const notRunning = cards.filter((c) => c.status !== "running");
+        const cancelable = cards.filter(
+          (c) => c.status === "queued" || c.status === "running" || c.status === "interrupted",
+        );
+        setTaskMenu({
+          x,
+          y,
+          items: [
+            {
+              label: `Re-run ${plural(notRunning.length)}`,
+              disabled: notRunning.length === 0,
+              ...(notRunning.length < n ? { note: "running skipped" } : {}),
+              onSelect: () =>
+                void actions.rerunTasks(
+                  notRunning.map((c) => c.taskId),
+                  project,
+                ),
+            },
+            {
+              label: `Cancel ${plural(cancelable.length)}`,
+              disabled: cancelable.length === 0,
+              ...(cancelable.length < n ? { note: "finished skipped" } : {}),
+              onSelect: () =>
+                void actions.cancelTasks(
+                  cancelable.map((c) => c.taskId),
+                  project,
+                ),
+            },
+            {
+              label: "Copy task ids",
+              separator: true,
+              onSelect: () => void navigator.clipboard?.writeText(cards.map((c) => c.taskId).join("\n")),
+            },
+            {
+              label: `Delete ${plural(notRunning.length)}…`,
+              separator: true,
+              danger: true,
+              disabled: notRunning.length === 0,
+              ...(notRunning.length < n ? { note: "running skipped" } : {}),
+              onSelect: () =>
+                setTaskAsk({
+                  title: `Delete ${plural(notRunning.length)}?`,
+                  note: "This deletes each task, every run it made, and its worktree — uncommitted work included. None of it comes back.",
+                  confirmLabel: "Delete",
+                  danger: true,
+                  onConfirm: () => {
+                    setTaskAsk(null);
+                    setPicked(null);
+                    void actions.deleteTasks(
+                      notRunning.map((c) => c.taskId),
+                      project,
+                    );
+                  },
+                }),
+            },
+          ],
+        });
+        return;
+      }
+
+      // Selecting first, so the panel beside the menu describes the card the menu is about — the
+      // same answer a plain click gives, and the confirmation dialog then names a task whose detail
+      // is on screen.
+      setPicked({ project, ids: [card.taskId], anchor: card.taskId });
+      actions.select(card.taskId, project);
+      const running = card.status === "running";
+      const terminal = card.status === "completed" || card.status === "failed" || card.status === "canceled";
+      // Opening a card follows the same level rule as double-clicking it — see the Board's
+      // `onOpenTask` below.
+      const level = state.boards[project]?.level ?? "";
+      const items: MenuItem[] = [
+        {
+          label: "Open",
+          onSelect: () => actions.openTask(card.taskId, project, level === "" ? card.workflow : level),
+        },
+        {
+          // The same distinctions the task panel's button draws, plus the one it cannot: a FINISHED
+          // task reruns as a fresh copy ("task:rerun"), and the label says so rather than letting
+          // "Re-run" quietly mean "make another task".
+          label: card.status === "queued" ? "Start" : terminal ? "Re-run as a new task" : "Re-run",
+          disabled: running,
+          ...(terminal ? { note: "fresh copy" } : {}),
+          onSelect: () => void actions.rerunTask(card.taskId, project),
+        },
+        {
+          label: "Cancel",
+          // A terminal task has nothing left to cancel; the item stays, disabled, so the menu keeps
+          // one shape and the reason a verb is unavailable is visible where it would have been.
+          disabled: terminal,
+          onSelect: () => void actions.cancelTask(card.taskId, project),
+        },
+        { label: "Copy task id", separator: true, onSelect: () => void navigator.clipboard?.writeText(card.taskId) },
+        {
+          label: "Delete…",
+          separator: true,
+          danger: true,
+          disabled: running,
+          onSelect: () =>
+            setTaskAsk({
+              title: `Delete "${card.title}"?`,
+              note: "This deletes the task, every run it made, and its worktree — uncommitted work included. None of it comes back.",
+              confirmLabel: "Delete",
+              danger: true,
+              onConfirm: () => {
+                setTaskAsk(null);
+                void actions.deleteTasks([card.taskId], project);
+              },
+            }),
+        },
+      ];
+      setTaskMenu({ x, y, items });
+    },
+    [actions, boardCardsOf, picked, state.boards],
+  );
 
   /**
    * The sidebar's two remembered numbers: how wide, and whether it is showing at all.
@@ -836,8 +1052,9 @@ export default function App(): JSX.Element {
                         <Board
                           board={state.boards[p.project]!}
                           selected={state.selectedProject === p.project ? state.selected : null}
+                          selectedSet={picked !== null && picked.project === p.project ? pickedSet! : undefined}
                           numbered={state.boards[p.project]!.level !== ""}
-                          onSelectTask={(taskId) => actions.select(taskId, p.project)}
+                          onSelectTask={(taskId, e) => pickTask(p.project, taskId, e)}
                           onDrill={(level) => actions.drillProject(p.project, level)}
                           // Double-clicking a COLUMN opens that state and every task in it;
                           // double-clicking a CARD opens that one run. The level a run is walked into
@@ -850,6 +1067,7 @@ export default function App(): JSX.Element {
                               state.boards[p.project]!.level === "" ? card.workflow : state.boards[p.project]!.level,
                             )
                           }
+                          onTaskMenu={(card, x, y) => openTaskMenu(p.project, card, x, y)}
                         />
                       ) : (
                         <p className="empty">No board here yet.</p>
@@ -1054,6 +1272,9 @@ export default function App(): JSX.Element {
           services={reviewerServices}
         />
       ) : null}
+
+      {taskMenu !== null ? <ContextMenu anchor={taskMenu} onClose={() => setTaskMenu(null)} /> : null}
+      {taskAsk !== null ? <AskDialog spec={taskAsk} onCancel={() => setTaskAsk(null)} /> : null}
 
       {state.error ? (
         <div className="toast" onClick={actions.dismissError}>

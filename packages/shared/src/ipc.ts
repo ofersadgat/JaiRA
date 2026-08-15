@@ -714,6 +714,18 @@ export interface IpcContract {
   "task:start": { request: StartTaskRequest; response: { taskId: string; runId: number } };
   "task:cancel": { request: { taskId: string; project?: ProjectRef }; response: { taskId: string } };
   /**
+   * Run a task again. A startable task (queued / interrupted / failed) simply starts; a finished one
+   * (completed / canceled) cannot re-enter its own lifecycle, so it is duplicated — same title,
+   * workflow, inputs and branch, a fresh id — and the COPY starts. The response names the task that
+   * actually ran, which is why it can differ from the one asked about.
+   */
+  "task:rerun": { request: StartTaskRequest; response: { taskId: string; runId: number } };
+  /**
+   * Delete a task outright — its runs, its journal, its worktree, its file. Refused while it is
+   * running (here or in another process); everything else may go, and none of it comes back.
+   */
+  "task:delete": { request: { taskId: string; project?: ProjectRef }; response: { taskId: string } };
+  /**
    * One board level. `level` is any state id — not only one on the newest task's workflow — so the
    * Files view can open the board of whatever the tree has selected.
    */
@@ -900,6 +912,8 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "task:create",
   "task:start",
   "task:cancel",
+  "task:rerun",
+  "task:delete",
   "board:view",
   "board:roots",
   "files:tree",

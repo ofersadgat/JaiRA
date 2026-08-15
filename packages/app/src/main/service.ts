@@ -52,6 +52,8 @@ import {
   stateSessions,
   cancelTask,
   createTask,
+  deleteTask,
+  removeWorktree,
   finishTaskRun,
   historySize,
   initProject,
@@ -168,6 +170,7 @@ import {
   defaultSettings,
   descriptionRootOf,
   isComponentName,
+  isStartableStatus,
   isTextMime,
   changesetOf,
   parseChangesetSource,
@@ -2369,6 +2372,64 @@ export class AppService {
   /** Cancel a task: abort a live run here, or record a terminal status. */
   cancelTask(taskId: string, project?: string): { taskId: string } {
     return this.cancelTaskIn(this.session(project), taskId);
+  }
+
+  /**
+   * Run a task again ("task:rerun").
+   *
+   * A startable task simply starts — for `interrupted` and `failed` that is the pinned-snapshot
+   * re-run `beginTaskRun` already defines. A FINISHED task cannot re-enter its own lifecycle
+   * (`isStartableStatus` is the engine's rule, not a UI nicety: its journal is a complete record of
+   * a run that ended), so rerunning one means a fresh task with the same title, workflow, inputs and
+   * branch. The copy is what starts, and the response names it.
+   */
+  async rerunTask(request: StartRunRequest): Promise<{ taskId: string; runId: number }> {
+    const open = this.session(request.project);
+    const row = open.project.runtime.get(request.taskId);
+    if (row === undefined) throw new Error(`unknown task '${request.taskId}'`);
+    if (row.status === "running") throw new Error(`task '${request.taskId}' is already running`);
+    let target = request.taskId;
+    if (!isStartableStatus(row.status)) {
+      const meta = open.project.tasks.read(request.taskId);
+      const copy = createTask(open.project, {
+        title: meta.title,
+        workflow: meta.workflow,
+        ...(meta.description !== undefined ? { description: meta.description } : {}),
+        ...(meta.labels !== undefined ? { labels: meta.labels } : {}),
+        ...(meta.inputs !== undefined ? { inputs: meta.inputs } : {}),
+        ...(meta.branch !== undefined ? { branch: meta.branch } : {}),
+        ...(meta.parentTaskId !== undefined ? { parentTaskId: meta.parentTaskId } : {}),
+      });
+      target = copy.id;
+      this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
+    }
+    return this.startTask({ ...request, taskId: target });
+  }
+
+  /**
+   * Delete a task outright ("task:delete") — its rows, its file, and its worktree.
+   *
+   * Refused while the task runs anywhere: a live run in this process holds an engine over the
+   * journal being deleted, and one in another process is found the same way cancel finds it, by the
+   * job table's heartbeat. The worktree goes FIRST and with `force` — the renderer has already asked
+   * the human, and this is the one caller for whom "uncommitted work" is not a reason to stop — so a
+   * failure to remove it leaves the task intact and reportable rather than rows gone and a worktree
+   * orphaned.
+   */
+  async deleteTask(taskId: string, project?: string): Promise<{ taskId: string }> {
+    const session = this.session(project);
+    if (session.live.has(taskId) || session.project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
+      throw new Error(`task '${taskId}' is running — cancel it before deleting it`);
+    }
+    if (session.project.runtime.get(taskId)?.worktreePath !== undefined) {
+      const result = await removeWorktree(session.project, taskId, { force: true });
+      if (!result.removed) throw new Error(`could not remove the task's worktree: ${result.reason}`);
+    }
+    deleteTask(session.project, taskId);
+    this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+    // Both projections: the lists, and the board whose column the card just left.
+    this.publishFor(session, { type: "store:invalidate", scope: "board" });
+    return { taskId };
   }
 
   /**

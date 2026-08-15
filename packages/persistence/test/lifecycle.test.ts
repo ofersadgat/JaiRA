@@ -6,6 +6,7 @@ import {
   beginTaskRun,
   cancelTask,
   createTask,
+  deleteTask,
   finishTaskRun,
   initProject,
   isProject,
@@ -148,6 +149,61 @@ describe("task lifecycle", () => {
     expect(p.runtime.listRuns(meta.id)[0]?.outcome).toBe("canceled");
     expect(() => cancelTask(p, meta.id)).toThrow(/already canceled/);
     expect(() => beginTaskRun(p, meta.id)).toThrow(/canceled/);
+  });
+
+  it("deletes a finished task: rows, journal, jobs, artifacts, and the JSON file", () => {
+    const p = open();
+    const meta = createTask(p, { title: "T", workflow: "wf", inputs: { x: "hi" } });
+    const started = beginTaskRun(p, meta.id);
+    // One row in everything that hangs off a task, so the cascade is actually exercised.
+    p.events.recorder(meta.id, started.runId).record({ type: "instance.entered", instanceId: 1, stateId: "wf", inputs: {} }, Date.now());
+    p.commands.record({ taskId: meta.id, runId: started.runId, tool: "bash", command: "ls", decision: "allowed", decidedBy: "policy" });
+    const jobId = p.jobs.claimRun({ taskId: meta.id, runId: started.runId, ownerToken: "tok", nowMs: Date.now() });
+    p.db
+      .prepare(`INSERT INTO job_output (job_id, stream, seq, chunk, created_at) VALUES (?, 'stdout', 0, 'hi', ?)`)
+      .run(jobId, Date.now());
+    p.db
+      .prepare(`INSERT INTO artifacts (task_id, run_id, logical_path, hash, bytes, created_at) VALUES (?, ?, 'out.txt', 'h', 2, ?)`)
+      .run(meta.id, started.runId, Date.now());
+    finishTaskRun(p, meta.id, started.runId, "completed");
+
+    deleteTask(p, meta.id);
+
+    expect(p.runtime.get(meta.id)).toBeUndefined();
+    expect(p.tasks.tryRead(meta.id)).toBeUndefined();
+    for (const table of ["runs", "state_machine_events", "command_log", "jobs", "job_output", "artifacts"]) {
+      const n = (p.db.prepare(`SELECT COUNT(*) n FROM ${table}`).get() as { n: number }).n;
+      expect({ table, n }).toEqual({ table, n: 0 });
+    }
+    expect(p.db.pragma("foreign_key_check")).toEqual([]);
+  });
+
+  it("refuses to delete a running task, and leaves it intact", () => {
+    const p = open();
+    const meta = createTask(p, { title: "T", workflow: "wf" });
+    beginTaskRun(p, meta.id);
+    expect(() => deleteTask(p, meta.id)).toThrow(/running/);
+    expect(p.runtime.get(meta.id)?.status).toBe("running");
+    expect(p.tasks.tryRead(meta.id)).toBeDefined();
+  });
+
+  it("deletes an interrupted task — pruning protects it, deleting is the user declining to resume", () => {
+    let p = open();
+    const meta = createTask(p, { title: "T", workflow: "wf" });
+    beginTaskRun(p, meta.id);
+    p.close(); // crash: never finished
+    project = undefined;
+    p = open();
+    expect(p.runtime.get(meta.id)?.status).toBe("interrupted");
+
+    deleteTask(p, meta.id);
+    expect(p.runtime.get(meta.id)).toBeUndefined();
+    expect(p.runtime.listRuns(meta.id)).toHaveLength(0);
+  });
+
+  it("delete is an error for an unknown task", () => {
+    const p = open();
+    expect(() => deleteTask(p, "t-nowhere000")).toThrow(/unknown task/);
   });
 
   it("rejects duplicate ids and unknown workflows", () => {
