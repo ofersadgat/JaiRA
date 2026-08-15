@@ -562,6 +562,12 @@ export interface WorkflowSyncReport {
 }
 
 export interface WorkflowSyncResult extends WorkflowSyncReport {
+  /**
+   * The sync run's own task, in JaiRA's project. Hand it back as
+   * {@link ReviewSyncRequest.parentTaskId} when opening a review of this result, so the review run
+   * is recorded as originating from this sync.
+   */
+  taskId: string;
   direction: SyncDirection;
   /** The workflow roots the run judged, so the report can say what it read. */
   workflows: string[];
@@ -646,6 +652,12 @@ export interface ReviewSyncRequest {
   path: string;
   /** The changeset the sync produced ({@link WorkflowSyncResult.changeset}). */
   changeset: Changeset;
+  /**
+   * The sync task the changeset came from ({@link WorkflowSyncResult.taskId}). Recorded on the
+   * review task, which is what lets the root listing file the review under the sync workflow it
+   * originated from instead of listing `changeset/review-loop` as a workflow of its own.
+   */
+  parentTaskId?: string;
   /** Scripted gate answers (tests/demos). */
   interactions?: Record<string, JsonValue[]>;
   fake?: JsonValue;

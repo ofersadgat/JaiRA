@@ -1928,9 +1928,14 @@ export function useApp() {
         }
       },
       /** The sync's proposals through the same gate — see `SyncSurface.reviewChangeset`. */
-      reviewSyncChangeset: async (layer: WorkflowLayer, path: string, changeset: Changeset) => {
+      reviewSyncChangeset: async (layer: WorkflowLayer, path: string, changeset: Changeset, parentTaskId?: string) => {
         try {
-          await invoke("changeset:reviewSync", { layer, path, changeset });
+          await invoke("changeset:reviewSync", {
+            layer,
+            path,
+            changeset,
+            ...(parentTaskId !== undefined ? { parentTaskId } : {}),
+          });
         } catch (e) {
           fail(e);
         }

@@ -521,10 +521,12 @@ export function boardForState(
  * parent and no order. `atLevel` stays empty for the same reason: there is no level for a task to be
  * at.
  *
- * EVERY task lands in a column, whatever it is doing. A task cannot move between workflows, so the
- * column it belongs to is decided by the one fact about it that never changes, and a finished run
- * sorted out of its own workflow into a tray was a card filed under a status rather than a place —
- * which is what the lanes inside a column are for.
+ * EVERY task lands in a column, whatever it is doing. A task cannot move between workflows and its
+ * parentage is fixed at creation, so the column it belongs to is decided by facts that never
+ * change, and a finished run sorted out of its own workflow into a tray was a card filed under a
+ * status rather than a place — which is what the lanes inside a column are for. A task spawned by
+ * another task files under its ancestor's column: the flow the person started, not the machinery
+ * it ran through.
  */
 export function rootsBoard(project: Project, browser: WorkflowBrowser, options?: StateViewOptions): BoardView {
   const summaries = taskSummaries(project);
@@ -549,13 +551,35 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
   // workflow is still a task, and a column of one is a truthful board.
   const keyOf = (summary: { workflow: string; title: string }): string =>
     summary.workflow.length > 0 ? summary.workflow : summary.title;
+
+  // A task spawned BY another task — a sync's review round, a worktree review — belongs to the flow
+  // it originated from, so it files under its TOPMOST ancestor's column rather than presenting its
+  // own workflow as a top-level one. `parentTaskId` is the recorded fact this walk follows; without
+  // it, every subsidiary run's workflow became a column of its own the moment its runs existed,
+  // which is how `changeset/review-loop` ended up beside the sync workflows it was serving. The
+  // walk stops where the records do: a parent this project holds no row for (a review of another
+  // project's task) leaves the child where it stands, and a cycle — corrupt records, nothing else
+  // writes one — stops rather than spins.
+  const byTaskId = new Map(summaries.map((s) => [s.taskId, s]));
+  const homeOf = (summary: (typeof summaries)[number]): (typeof summaries)[number] => {
+    let current = summary;
+    const seen = new Set<string>([current.taskId]);
+    while (current.parentTaskId !== undefined) {
+      const parent = byTaskId.get(current.parentTaskId);
+      if (parent === undefined || seen.has(parent.taskId)) break;
+      seen.add(parent.taskId);
+      current = parent;
+    }
+    return current;
+  };
   for (const summary of summaries) {
-    const key = keyOf(summary);
+    const home = homeOf(summary);
+    const key = keyOf(home);
     if (byRoot.has(key)) continue;
     const column = {
       key,
-      stateId: summary.workflow,
-      ...(summary.workflow.length === 0 ? { label: summary.title } : {}),
+      stateId: home.workflow,
+      ...(home.workflow.length === 0 ? { label: home.title } : {}),
       cards: [] as BoardCard[],
     };
     columns.push(column);
@@ -593,9 +617,9 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
       ...(summary.labels !== undefined ? { labels: summary.labels } : {}),
       updatedAt: summary.updatedAt,
     };
-    // Always found: the loop above made a column for every workflow the summaries name, whether or
-    // not a file backs it.
-    byRoot.get(keyOf(summary))?.cards.push(card);
+    // Always found: the loop above made a column for every flow the summaries resolve to, whether
+    // or not a file backs it.
+    byRoot.get(keyOf(homeOf(summary)))?.cards.push(card);
     // The census — see `projectBoard`. These cards are in their columns too.
     if (over) finished.push(card);
   }

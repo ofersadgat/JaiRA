@@ -72,6 +72,36 @@ describe("rootsBoard", () => {
     expect(board.breadcrumb).toEqual([]);
     expect(board.atLevel).toEqual([]);
   });
+
+  it("files a task spawned by another under its ancestor's column, not its own workflow's", () => {
+    // A sync spawns a review, the review spawns a revision: the whole chain is one flow the person
+    // started, and none of its machinery workflows should surface as a top-level column.
+    const sync = createTask(project, { title: "run the sync", workflow: "feature/plan" });
+    const review = createTask(project, {
+      title: "review the proposals",
+      workflow: "changeset/review-loop",
+      parentTaskId: sync.id,
+    });
+    createTask(project, { title: "revise the proposals", workflow: "changeset/respond", parentTaskId: review.id });
+
+    const board = rootsBoard(project, browseWorkflows(project));
+
+    expect(board.columns.map((c) => c.stateId)).toEqual(["feature/plan"]);
+    const column = board.columns[0]!;
+    expect(column.cards.map((c) => c.title).sort()).toEqual(["review the proposals", "revise the proposals", "run the sync"]);
+    // The card still says what it RAN — only its filing follows the origin.
+    expect(column.cards.find((c) => c.title === "review the proposals")?.workflow).toBe("changeset/review-loop");
+  });
+
+  it("leaves a task whose parent this project does not hold where it stands", () => {
+    // A worktree review records the reviewed task's id, which lives in ANOTHER project's store. The
+    // walk stops where the records do, so the review keeps its own column rather than vanishing.
+    createTask(project, { title: "review another project's task", workflow: "changeset/review", parentTaskId: "t-elsewhere00" });
+
+    const board = rootsBoard(project, browseWorkflows(project));
+
+    expect(board.columns.map((c) => c.stateId).sort()).toEqual(["changeset/review", "feature/plan"]);
+  });
 });
 
 describe("boardForState", () => {

@@ -44,6 +44,14 @@ designed.** What shipped, and where it landed:
   And `chmod` APPLIES: a change carries git's modes, `FileWrite` carries the resulting mode, and
   the application step sets it (a no-op on Windows, faithful on POSIX) — §1.1's fifth action is no
   longer representable-but-inert.
+- PARENTAGE (2026-08-14): a review task records the task it was spawned for — `parentTaskId` on the
+  review of a sync's proposals (the sync task, threaded through `WorkflowSyncResult.taskId` →
+  `ReviewSyncRequest.parentTaskId` so the panel's button parents exactly as the auto-opened review
+  does) and on a worktree review (the reviewed task, which usually lives in another project's
+  store). The Tasks view's root listing files a parented task under its topmost same-project
+  ancestor's column, so `changeset/review-loop` runs appear inside the sync flow they served rather
+  than as a top-level workflow beside it. Rows written before the record existed have no parent to
+  resolve and keep their own column.
 
 Three deviations, each recorded where it bites:
 

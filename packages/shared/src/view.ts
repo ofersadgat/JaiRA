@@ -568,6 +568,13 @@ export interface TaskSummary {
   workflow: string;
   labels?: string[];
   snapshotHash?: string;
+  /**
+   * The task this one was spawned FOR — a sync's review round, a worktree review. What lets the
+   * root listing file a subsidiary run under the flow it originated from rather than presenting its
+   * workflow as a top-level one. May name a task in another project's store, in which case it
+   * simply does not resolve here.
+   */
+  parentTaskId?: string;
   createdAt: string;
   updatedAt: number;
 }

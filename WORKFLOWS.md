@@ -41,8 +41,12 @@ One **state** per file, JSON or YAML. A state's **id** is its path under
 
 A **workflow** is a root state plus the transitive closure of the states it
 declares as children. The root is whatever you name — `jaira task create
---workflow feature/plan` — and the workflow browser treats any state no other
-state declares as a child as a root.
+--workflow feature/plan` — and the workflow browser treats any state as a root
+when no other state declares it as a child *and* its id is not nested under
+another state's id. A state owns the namespace under its own id (§6), so a file
+under `feature/plan/` is a substate of `feature/plan` whether or not it is wired
+in yet; one that nothing reaches is reported as unreachable, not listed as a
+workflow of its own.
 
 The tree convention (a child's id should be a descendant path of its parent's) is
 a **warning**, not a rule, so a shared library state can be mounted anywhere.

@@ -95,8 +95,11 @@ export interface SyncSurface {
    * map: same reviewer as a worktree review, in rounds — a comment sends the changeset back to a
    * model for revision — merged decisions applied, the baseline moved when the final round merged
    * everything. The reviewer arrives as a pending interaction moments after this returns.
+   *
+   * `parentTaskId` is the sync run the changeset came from (`WorkflowSyncResult.taskId`), so the
+   * review is recorded as a round of that sync rather than a workflow of its own.
    */
-  reviewChangeset?: (layer: WorkflowLayer, path: string, changeset: Changeset) => void;
+  reviewChangeset?: (layer: WorkflowLayer, path: string, changeset: Changeset, parentTaskId?: string) => void;
 }
 
 /**

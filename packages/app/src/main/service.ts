@@ -3457,6 +3457,10 @@ export class AppService {
     const verdict = verdictOfFindings(outcome.findings);
 
     const common = {
+      // The sync run's own task. The panel passes it back as `parentTaskId` when the person opens
+      // the review by hand, so a review started from the button is parented exactly as one the sync
+      // auto-opened.
+      taskId: task.id,
       direction: request.direction,
       workflows: digest.roots,
       requirements: outcome.requirements,
@@ -3525,6 +3529,7 @@ export class AppService {
           layer: request.layer,
           path: request.path,
           changeset,
+          parentTaskId: task.id,
           ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
           ...(request.fake !== undefined ? { fake: request.fake } : {}),
         });
@@ -3597,6 +3602,10 @@ export class AppService {
       workflow: rootId,
       inputs: { changeset: changeset as unknown as JsonValue },
       labels: ["jaira", "changeset-review", request.taskId],
+      // The task whose worktree this reviews. Usually a task in ANOTHER project's store — recorded
+      // all the same, because the record is the fact; a board that cannot resolve it simply leaves
+      // this run where it stands.
+      parentTaskId: request.taskId,
     });
     const started = await this.startRun(system, task.id, {
       config: session.project.config,
@@ -3666,6 +3675,10 @@ export class AppService {
       workflow: CHANGESET_REVIEW_LOOP_ID,
       inputs: { changeset: changeset as unknown as JsonValue },
       labels: ["jaira", "sync-review", request.layer],
+      // The sync run this proposal came from. Recorded so the root listing can file this run under
+      // the sync workflow's column instead of presenting `changeset/review-loop` as a top-level
+      // workflow of its own — the review is a round OF the sync, and the record is what says so.
+      ...(request.parentTaskId !== undefined ? { parentTaskId: request.parentTaskId } : {}),
     });
     // The TARGET's configuration, exactly as the sync itself resolves it — see {@link runSync}.
     const target = request.layer === "base" ? this.sessionOf(SHARED_SESSION) : this.sessionOf();

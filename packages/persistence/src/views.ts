@@ -53,6 +53,7 @@ export function taskSummaries(project: Project): TaskSummary[] {
       workflow: meta?.workflow ?? "",
       ...(meta?.labels !== undefined ? { labels: meta.labels } : {}),
       ...(row.snapshotHash !== undefined ? { snapshotHash: row.snapshotHash } : {}),
+      ...(meta?.parentTaskId !== undefined ? { parentTaskId: meta.parentTaskId } : {}),
       createdAt: meta?.createdAt ?? new Date(row.createdAt).toISOString(),
       updatedAt: row.updatedAt,
     };

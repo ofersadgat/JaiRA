@@ -271,7 +271,7 @@ export function WorkflowSyncPanel(props: FileSurfaceProps): JSX.Element {
               className="ghost"
               disabled={running || busy}
               title="Decide each proposed file — merge, revert, or comment — and apply the merged ones"
-              onClick={() => sync.reviewChangeset!(doc.layer, doc.path, result.changeset!)}
+              onClick={() => sync.reviewChangeset!(doc.layer, doc.path, result.changeset!, result.taskId)}
             >
               Review as changeset
             </button>

@@ -11,10 +11,12 @@
  *    reported as a diagnostic against a file instead. (This is why it does not
  *    reuse `readWorkflowFiles`, which is right to throw for execution.)
  *  - **Roots are derived, not declared.** A state file is a workflow root when no
- *    other state names it as a child, which matches how `jaira task create
- *    --workflow <rootStateId>` is used. If mutual references leave no root at all,
- *    the states are reported as unreachable rather than silently yielding an empty
- *    browser.
+ *    other state names it as a child AND its id is not nested under another
+ *    state's id — a state owns the namespace under its own id (WORKFLOWS.md §6),
+ *    so a file inside one is a substate however it got there. This matches how
+ *    `jaira task create --workflow <rootStateId>` is used. If mutual references
+ *    leave no root at all, the states are reported as unreachable rather than
+ *    silently yielding an empty browser.
  *
  * Linting is `validateBundle` with `strict: true` — the mode its own docs reserve
  * for a lint/CI surface, where every `functionRef` is expected to resolve. The
@@ -296,7 +298,19 @@ function browseLayers(
       }
     }
   }
-  const roots = [...byStateId.keys()].filter((id) => !referenced.has(id)).sort();
+  // A state nested under another state's id is a SUBSTATE whether or not anything wires it in yet:
+  // a state owns the namespace under its own id (WORKFLOWS.md §6 — with no `children` block the
+  // directory alone mounts what lives there). Being unreferenced does not promote it: a file
+  // authored under `feature/plan/` that `feature/plan` does not (yet) declare is a child-in-waiting,
+  // and listing it as a workflow of its own put substates on the top-level board. It lands in
+  // `unreachable` instead, which is the honest description of its situation.
+  const underState = (id: string): boolean => {
+    for (let cut = id.lastIndexOf("/"); cut > 0; cut = id.lastIndexOf("/", cut - 1)) {
+      if (byStateId.has(id.slice(0, cut))) return true;
+    }
+    return false;
+  };
+  const roots = [...byStateId.keys()].filter((id) => !referenced.has(id) && !underState(id)).sort();
 
   const covered = new Set<string>();
   const workflows: WorkflowEntry[] = roots.map((rootId) => {

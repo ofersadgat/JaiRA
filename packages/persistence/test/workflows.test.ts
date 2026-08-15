@@ -5,7 +5,7 @@
  * another window, so the browser is asked to describe a directory that is
  * frequently, temporarily broken. Every kind of breakage must come back as data.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -100,6 +100,30 @@ describe("browseWorkflows", () => {
     expect(issue.message).toMatch(/nowhere\/at\/all/);
     // And the healthy workflow is unaffected.
     expect(browser.workflows.find((w) => w.rootId === "feature/plan")!.issues).toEqual([]);
+  });
+
+  it("keeps an unwired substate out of the roots — nested under a state is nested, referenced or not", () => {
+    // `feature/plan` declares goals/context/critique and nothing else. A file authored beside them
+    // is a child-in-waiting, not a workflow — promoting it put substates on the top-level board.
+    write("feature/plan/orphaned_step.json", JSON.stringify({ label: "Orphaned" }));
+    const browser = browseWorkflows(project);
+    expect(browser.workflows.map((w) => w.rootId)).toEqual(["feature/plan"]);
+    expect(browser.unreachable).toEqual(["feature/plan/orphaned_step"]);
+  });
+
+  it("does not mistake directory-inferred children for roots", () => {
+    // No `children` block: the directory decides (WORKFLOWS.md §6). The browser's reference scan
+    // cannot see those edges, so only the nesting rule keeps the children off the root listing —
+    // and the loader's inference is what keeps them out of `unreachable`.
+    mkdirSync(join(project.paths.workflowsDir, "standalone"), { recursive: true });
+    write("standalone.json", JSON.stringify({ label: "Standalone" }));
+    write("standalone/first.json", JSON.stringify({ label: "First", operation: { kind: "prompt", prompt: "go", model: "m" } }));
+    write("standalone/second.json", JSON.stringify({ label: "Second", operation: { kind: "prompt", prompt: "go", model: "m" } }));
+    const browser = browseWorkflows(project);
+    expect(browser.workflows.map((w) => w.rootId)).toEqual(["feature/plan", "standalone"]);
+    const standalone = browser.workflows.find((w) => w.rootId === "standalone")!;
+    expect(standalone.states).toEqual(["standalone", "standalone/first", "standalone/second"]);
+    expect(browser.unreachable).toEqual([]);
   });
 
   it("reports states left unreachable when references form a cycle", () => {
