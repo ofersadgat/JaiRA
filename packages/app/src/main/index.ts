@@ -130,6 +130,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "project:list": (() => service.listProjects()) as Handler,
   "session:history": ((request: Parameters<typeof service.sessionHistory>[0]) => service.sessionHistory(request)) as Handler,
   "session:view": ((request: Parameters<typeof service.sessionView>[0]) => service.sessionView(request)) as Handler,
+  "session:live": ((request: Parameters<typeof service.sessionLive>[0]) => service.sessionLive(request)) as Handler,
   "chat:plan": ((request: Parameters<typeof service.chatPlan>[0]) => service.chatPlan(request)) as Handler,
   "chat:send": ((request: Parameters<typeof service.sendChatMessage>[0]) => service.sendChatMessage(request)) as Handler,
   "log:list": ((request: Parameters<typeof service.listLogs>[0]) => service.listLogs(request)) as Handler,
@@ -141,6 +142,9 @@ const handlers: Record<IpcChannel, Handler> = {
   "approval:pending": (() => service.pendingApprovals()) as Handler,
   "approval:submit": ((request: { requestId: string; decision: "allow" | "deny"; scope?: never }) =>
     service.submitApproval(request.requestId, request.decision, request.scope)) as Handler,
+  "question:pending": (() => service.pendingQuestions()) as Handler,
+  "question:submit": ((request: { requestId: string; answers?: Record<string, string | string[]> }) =>
+    service.submitQuestion(request.requestId, request.answers)) as Handler,
   "workflow:browse": (() => service.browseWorkflows()) as Handler,
   "workflow:read": ((request: Parameters<typeof service.readWorkflow>[0]) => service.readWorkflow(request)) as Handler,
   "workflow:write": ((request: Parameters<typeof service.writeWorkflow>[0]) => service.writeWorkflow(request)) as Handler,

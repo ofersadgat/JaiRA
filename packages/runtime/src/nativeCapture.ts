@@ -33,7 +33,7 @@ import type { JsonValue, RecordStore } from "@declarative-ai/exec";
 type Settled = Parameters<RecordStore["close"]>[1];
 
 /** The captured delta: the main file's kept lines, and each subagent file's, keyed like `sidechains`. */
-interface Captured {
+export interface Captured {
   nativeLines?: NativeLine[];
   nativeSidechains?: Record<string, { agentId: string; meta?: JsonValue; lines: NativeLine[] }>;
 }
@@ -82,6 +82,49 @@ function enriched(settled: Settled, captured: Captured): Settled {
 }
 
 /**
+ * Read one provider session's native files — the main conversation and each subagent's.
+ *
+ * Extracted from the close decorator because RECOVERY needs exactly the same read: a call the
+ * process died inside never reached a close, but its file is on disk and its handle is on the
+ * record (streamed there while it ran). The two callers differ only in when they ask.
+ *
+ * `sinceMs` is the resumed-session cut: the file spans a whole conversation while a record spans
+ * one call, so only lines stamped inside the call are kept — earlier ones belong to the records
+ * that captured them at their own closes.
+ */
+export async function captureNativeSession(
+  providerSessionId: string,
+  options: { cwd: string; sinceMs?: number; read?: AgentSessionReader; readSidechains?: NativeCaptureOptions["readSidechains"] },
+): Promise<Captured> {
+  const read = options.read ?? readNativeSession;
+  const readSidechains = options.readSidechains ?? readNativeSidechains;
+  const captured: Captured = {};
+  const cut = options.sinceMs !== undefined ? { sinceMs: options.sinceMs } : {};
+  const native = nativeLinesOf(await read(providerSessionId, options.cwd), cut);
+  if (native.length > 0) captured.nativeLines = native;
+  // The subagents' files, keyed the way `sidechains` already is. The same cut applies per file: a
+  // subagent spawned by an EARLIER call in a resumed session folds to nothing here, because that
+  // call's own close captured it.
+  const chains: NonNullable<Captured["nativeSidechains"]> = {};
+  for (const chain of await readSidechains(providerSessionId, options.cwd)) {
+    const lines = nativeLinesOf(chain.lines, { ...cut, sidechain: true });
+    if (lines.length === 0) continue;
+    chains[chain.toolUseId ?? `agent-${chain.agentId}`] = {
+      agentId: chain.agentId,
+      ...(chain.meta !== undefined ? { meta: chain.meta } : {}),
+      lines,
+    };
+  }
+  if (Object.keys(chains).length > 0) captured.nativeSidechains = chains;
+  return captured;
+}
+
+/** True when a capture found nothing — stored as NOTHING rather than as an empty claim. */
+export function isEmptyCapture(captured: Captured): boolean {
+  return captured.nativeLines === undefined && captured.nativeSidechains === undefined;
+}
+
+/**
  * Wrap a record store so every close of a call that ended in a provider session captures that
  * session's native file into the stored payload.
  *
@@ -91,8 +134,6 @@ function enriched(settled: Settled, captured: Captured): Settled {
  * own closes.
  */
 export function withNativeCapture(inner: RecordStore, options: NativeCaptureOptions): RecordStore {
-  const read = options.read ?? readNativeSession;
-  const readSidechains = options.readSidechains ?? readNativeSidechains;
   return {
     open: (stub) => inner.open(stub),
     // Presence is part of the contract — `bySession` absent MEANS the store cannot read, and a stub
@@ -101,33 +142,21 @@ export function withNativeCapture(inner: RecordStore, options: NativeCaptureOpti
     close: async (id, settled) => {
       const providerSessionId = settled.sessionOutcome?.providerSessionId;
       if (providerSessionId === undefined) return inner.close(id, settled);
-      const captured: Captured = {};
+      let captured: Captured;
       try {
-        const startMs = settled.metrics?.startMs;
-        const cut = startMs !== undefined ? { sinceMs: startMs } : {};
-        const native = nativeLinesOf(await read(providerSessionId, options.cwd), cut);
-        if (native.length > 0) captured.nativeLines = native;
-        // The subagents' files, keyed the way `sidechains` already is. The same cut applies per
-        // file: a subagent spawned by an EARLIER call in a resumed session folds to nothing here,
-        // because that call's own close captured it.
-        const chains: NonNullable<Captured["nativeSidechains"]> = {};
-        for (const chain of await readSidechains(providerSessionId, options.cwd)) {
-          const lines = nativeLinesOf(chain.lines, { ...cut, sidechain: true });
-          if (lines.length === 0) continue;
-          chains[chain.toolUseId ?? `agent-${chain.agentId}`] = {
-            agentId: chain.agentId,
-            ...(chain.meta !== undefined ? { meta: chain.meta } : {}),
-            lines,
-          };
-        }
-        if (Object.keys(chains).length > 0) captured.nativeSidechains = chains;
+        captured = await captureNativeSession(providerSessionId, {
+          cwd: options.cwd,
+          ...(settled.metrics?.startMs !== undefined ? { sinceMs: settled.metrics.startMs } : {}),
+          ...(options.read !== undefined ? { read: options.read } : {}),
+          ...(options.readSidechains !== undefined ? { readSidechains: options.readSidechains } : {}),
+        });
       } catch (e) {
         options.onError?.(e as Error);
         return inner.close(id, settled);
       }
       // An empty capture is stored as NOTHING rather than as `nativeLines: []` — a transport with no
       // native file (codex, a fake) would otherwise stamp every record with an empty claim.
-      return inner.close(id, captured.nativeLines === undefined && captured.nativeSidechains === undefined ? settled : enriched(settled, captured));
+      return inner.close(id, isEmptyCapture(captured) ? settled : enriched(settled, captured));
     },
   };
 }

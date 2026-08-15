@@ -84,4 +84,47 @@ describe("a read-only prompt state reaches the CLI agent restricted", () => {
     // The mid-run floor is armed: everything the deny list cannot name goes through the callback.
     expect(opts.canUseTool).toBeDefined();
   });
+
+  it("routes AskUserQuestion to the askUser seam and carries the answers back — never to the approver", async () => {
+    // The same real chain, one seam further: `executeWorkflow`'s `askUser` must reach the adapter's
+    // native callback, or the question falls to the gate as an unclassifiable tool — a human asked to
+    // APPROVE being asked, and an allow that resolves the question with "." and no answers.
+    const { seen, query } = capturingQuery();
+    const approved: string[] = [];
+    const registry = newRegistry();
+    registry.tools.set("read_file", {
+      description: "read a file",
+      inputSchema: { type: "object" },
+      readOnly: true,
+      run: async () => "contents",
+    });
+    const result = await executeWorkflow({
+      bundle: loadBundle(files, "digest"),
+      inputs: {},
+      registry,
+      prompt: buildPromptExecutor({
+        routes: agentPromptRoutes({}, { query }),
+        tree: { kind: "agent", agent: "claude-cli" },
+      }),
+      approve: (req) => {
+        approved.push(req.tool);
+        return { decision: "deny", scope: "once" };
+      },
+      askUser: async (req) => ({ [req.questions[0]!.question]: "luxon" }),
+    });
+    expect(result.value).toMatchObject({ report: "all quiet" });
+
+    const input = {
+      questions: [
+        { question: "Which library?", header: "Library", options: [{ label: "date-fns", description: "small" }, { label: "luxon", description: "batteries" }] },
+      ],
+    };
+    const decision = await seen[0]!.canUseTool!(
+      { toolName: "AskUserQuestion", input: input as never },
+      { signal: new AbortController().signal },
+    );
+    expect(decision).toEqual({ allow: true, updatedInput: { ...input, answers: { "Which library?": "luxon" } } });
+    // The approval path never saw it: the question was answered, not authorized.
+    expect(approved).toEqual([]);
+  });
 });

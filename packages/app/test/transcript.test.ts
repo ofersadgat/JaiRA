@@ -168,6 +168,68 @@ describe("building the entry list", () => {
     expect(entries[0]).toMatchObject({ text: "check the goals first" });
   });
 
+  it("marks the thinking LIVE while no answer has started — the 'still thinking' state", () => {
+    // Thinking with an empty answer tail is the state itself: the row pulses and counts up from
+    // `startedAt`, which is the difference between a model working and a model stalled.
+    const entries = entriesOf(session([] as never), [], { text: "", thinking: "hm", thinkingStartedAt: 1000 });
+    expect(entries).toEqual([{ kind: "thought", text: "hm", live: true, startedAt: 1000 }]);
+  });
+
+  it("stops the pulse and states the duration once the answer begins", () => {
+    const entries = entriesOf(session([] as never), [], {
+      text: "The plan is…",
+      thinking: "hm",
+      thinkingStartedAt: 1000,
+      textStartedAt: 3500,
+    });
+    // No longer live — thinking ENDED when the first word arrived — and it took 2.5 s.
+    expect(entries[0]).toMatchObject({ kind: "thought", durationMs: 2500 });
+    expect((entries[0] as { live?: boolean }).live).toBeUndefined();
+  });
+
+  it("says a call was cut off, so a transcript that stops is not read as one that finished", () => {
+    const view = { ...session([{ role: "assistant", text: "as far as it got" }] as never), status: "interrupted" as const };
+    const entries = entriesOf(view);
+    expect(entries.at(-1)).toMatchObject({ kind: "event", tone: "warn", text: expect.stringMatching(/process ended before/) });
+  });
+
+  it("keeps an untimed entry in the place it was produced rather than sorting it to the front", () => {
+    // Turns carry clocks now (`messageTimes`), so treating an absent one as zero would file every
+    // tool row, thought and native line above the conversation it belongs to.
+    const entries = entriesOf(
+      session([
+        { role: "user", text: "go", at: 1000 },
+        {
+          role: "assistant",
+          parts: [{ type: "tool_use", id: "c1", name: "Read", input: { path: "a.ts" } }] as never,
+          at: 2000,
+        },
+        { role: "assistant", text: "done", at: 3000 },
+      ] as never),
+      [],
+      { text: "still writing" },
+    );
+    expect(entries.map((e) => e.kind)).toEqual(["message", "tool", "message", "live"]);
+  });
+
+  it("carries a stored turn's time and thought duration onto its rows", () => {
+    // The record's `messageTimes` reach the turn (service-side); here they reach the entries — the
+    // thought row states the wait, the message row carries the clock.
+    const entries = entriesOf(
+      session([
+        {
+          role: "assistant",
+          text: "done",
+          parts: [{ type: "thinking", thinking: "let me check" }] as never,
+          at: 5000,
+          thoughtMs: 1200,
+        },
+      ] as never),
+    );
+    expect(entries[0]).toMatchObject({ kind: "thought", durationMs: 1200, at: 5000 });
+    expect(entries[1]).toMatchObject({ kind: "message", at: 5000 });
+  });
+
   it("drops stream_event delta bookkeeping instead of burying the conversation under it", () => {
     // Tool arguments assemble one fragment per event; their content arrives readable on the
     // finished turn, and the text/thinking deltas already travel as the tails.

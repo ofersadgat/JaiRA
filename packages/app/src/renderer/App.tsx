@@ -27,9 +27,9 @@
  * away, and it stays visible while you are deep in the Files tree.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from "react";
-import type { BoardCard, ConfigLayer, PendingApproval, PendingInteraction, WorkflowLayer } from "@jaira/shared/browser";
+import type { BoardCard, ConfigLayer, PendingApproval, PendingInteraction, PendingQuestion, WorkflowLayer } from "@jaira/shared/browser";
 import { Board, lanesOf } from "./board";
-import { ApprovalDialog, InteractionDialog } from "./components";
+import { ApprovalDialog, InteractionDialog, QuestionDialog } from "./components";
 import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem } from "./menu";
 import {
   FileAddressBar,
@@ -197,15 +197,26 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; layered: boolean; ne
 function InboxStrip({
   pending,
   approvals,
+  questions,
   onSelect,
 }: {
   pending: PendingInteraction[];
   approvals: PendingApproval[];
+  questions: PendingQuestion[];
   onSelect: (taskId: string) => void;
 }): JSX.Element | null {
-  const total = pending.length + approvals.length;
+  const total = pending.length + approvals.length + questions.length;
   if (total === 0) return null;
   const shown = [
+    // Questions first: the agent addressed the person directly, and its loop is parked on the reply.
+    ...questions.slice(0, 2).map((item) => ({
+      key: item.requestId,
+      badge: "badge-waiting_for_user",
+      glyph: "❓",
+      text: item.questions[0]?.question ?? "the agent has a question",
+      title: item.questions.map((q) => q.question).join(" · "),
+      taskId: item.taskId,
+    })),
     ...approvals.slice(0, 2).map((item) => ({
       key: item.requestId,
       badge: "badge-blocked",
@@ -1253,10 +1264,19 @@ export default function App(): JSX.Element {
           ) : null}
         </div>
 
-        <InboxStrip pending={pending} approvals={state.approvals} onSelect={actions.select} />
+        <InboxStrip pending={pending} approvals={state.approvals} questions={state.questions} onSelect={actions.select} />
       </div>
 
-      {state.approvals.length > 0 ? (
+      {state.questions.length > 0 ? (
+        // The agent ASKED — that outranks everything else waiting, because it is the one item the
+        // person was explicitly addressed by.
+        <QuestionDialog
+          key={state.questions[0]!.requestId}
+          pending={state.questions[0]!}
+          error={state.error}
+          onSubmit={(answers) => actions.answerQuestion(state.questions[0]!.requestId, answers)}
+        />
+      ) : state.approvals.length > 0 ? (
         <ApprovalDialog
           pending={state.approvals[0]!}
           error={state.error}

@@ -177,6 +177,18 @@ export class RuntimeStore {
         this.db
           .prepare(`UPDATE runs SET ended_at = ?, outcome = 'interrupted' WHERE task_id = ? AND ended_at IS NULL`)
           .run(nowMs, id);
+        // The task's operation records left 'open' by the crash settle with it. 'open' means "a live
+        // process is streaming into this row" — the state signal every record reader now keys on —
+        // and no such process exists. The streamed partial in result_json is deliberately KEPT: those
+        // turns really were exchanged before the process died, and a settled-failed row is exactly
+        // how an errored call's surviving turns are already represented.
+        this.db
+          .prepare(
+            `UPDATE operation_records SET status = 'failed', ended_at = ?,
+                    error_json = COALESCE(error_json, ?)
+              WHERE task_id = ? AND status = 'open'`,
+          )
+          .run(nowMs, JSON.stringify({ reason: "interrupted: the process ended before this call settled" }), id);
       }
     });
     recover();

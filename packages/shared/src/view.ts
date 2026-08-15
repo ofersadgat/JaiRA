@@ -604,8 +604,12 @@ export interface SessionRef {
    * an envelope around it. Absent for a run journaled before this was projected.
    */
   startedAt?: number;
-  /** Present once the operation settled. */
-  status?: "success" | "error";
+  /**
+   * How the call ended. Present once it settled — and  is the case that never did: the
+   * process died inside it, so no terminal event was ever written and the verdict comes from its
+   * own record row instead.
+   */
+  status?: "success" | "error" | "interrupted";
   costUsd?: number;
   /** What the call consumed and what that number is worth — see {@link RunMetrics}. */
   metrics?: RunMetrics;
@@ -654,6 +658,16 @@ export interface SessionTurn {
   text?: string;
   /** Tool calls and their results, kept structured so a viewer can pair and collapse them. */
   parts?: JsonValue;
+  /**
+   * When the turn ARRIVED, host clock. Recorded beside the messages rather than inside them
+   * (`messageTimes`), because a message is the provider's own object and a replay sends it back
+   * verbatim. Absent for a record written before turns were timed.
+   */
+  at?: number;
+  /** When the turn STARTED — its first streamed fragment, thinking included. */
+  startedAt?: number;
+  /** How long the model spent thinking before it began answering — the "thought for 12 s" number. */
+  thoughtMs?: number;
 }
 
 /**
@@ -671,7 +685,7 @@ export interface SessionView {
   seq: number;
   /** The agent's own session handle, when it had one — what lets its native transcript be found. */
   providerSessionId?: string;
-  status?: "success" | "error";
+  status?: "success" | "error" | "interrupted";
   costUsd?: number;
   turns: SessionTurn[];
   /**

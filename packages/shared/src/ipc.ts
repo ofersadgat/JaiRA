@@ -136,6 +136,48 @@ export interface SubmitApprovalRequest {
   scope?: ApprovalScope;
 }
 
+/** One choice a {@link PendingQuestion}'s question offers. */
+export interface QuestionOption {
+  label: string;
+  /** What choosing this means — trade-offs, implications. */
+  description?: string;
+}
+
+/** One question a running agent asked. */
+export interface AgentQuestion {
+  /** The complete question, e.g. "Which library should we use?" */
+  question: string;
+  /** Short chip label (e.g. "Library"). */
+  header?: string;
+  options: QuestionOption[];
+  /** True ⇒ several options may be chosen; the answer is then a list of labels. */
+  multiSelect?: boolean;
+}
+
+/**
+ * A pending mid-run QUESTION (`AskUserQuestion`) — the third kind of inbox item.
+ *
+ * Distinct from {@link PendingApproval} the way that is distinct from {@link PendingInteraction}:
+ * an approval authorizes a tool call, where here the call IS the question and the human's answer is
+ * its payload. Routing questions through the approval channel asked the person to approve being
+ * asked, and never showed them the question.
+ */
+export interface PendingQuestion {
+  requestId: string;
+  questions: AgentQuestion[];
+  taskId?: string;
+  at: number;
+}
+
+export interface SubmitQuestionRequest {
+  requestId: string;
+  /**
+   * Question text → the chosen option label(s), or free text. A multi-select answers with a list.
+   * Absent ⇒ DISMISSED: the agent is told to use its own judgment and continue.
+   */
+  answers?: Record<string, string | string[]>;
+}
+
 /** Answer to a pending interactive request (DESIGN §7.1). */
 export interface SubmitInteractionRequest {
   requestId: string;
@@ -769,6 +811,16 @@ export interface IpcContract {
     response: SessionView;
   };
   /**
+   * The task's LIVE turn so far — everything `session:turn` has streamed for the call in flight,
+   * re-readable. The record lands only when the operation settles, so while a run works the stream
+   * is the only holder of its conversation; without this, a viewer that navigated away and back
+   * found the accumulated tail gone and the stored view empty. `null` ⇒ nothing is streaming.
+   */
+  "session:live": {
+    request: { taskId: string; project?: string };
+    response: LiveTurnSnapshot | null;
+  };
+  /**
    * The settings a hand-typed message WOULD run under, before one is sent.
    *
    * Separate from sending because the composer renders the moment a run is selected, and a control
@@ -817,6 +869,8 @@ export interface IpcContract {
   "interaction:submit": { request: SubmitInteractionRequest; response: { requestId: string } };
   "approval:pending": { request: void; response: PendingApproval[] };
   "approval:submit": { request: SubmitApprovalRequest; response: { requestId: string } };
+  "question:pending": { request: void; response: PendingQuestion[] };
+  "question:submit": { request: SubmitQuestionRequest; response: { requestId: string } };
   "workflow:browse": { request: void; response: WorkflowBrowser };
   "workflow:read": { request: ReadWorkflowRequest; response: WorkflowSource };
   "workflow:write": { request: WriteWorkflowRequest; response: WorkflowSource };
@@ -924,6 +978,7 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "project:list",
   "session:history",
   "session:view",
+  "session:live",
   "chat:plan",
   "chat:send",
   "log:list",
@@ -933,6 +988,8 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "interaction:submit",
   "approval:pending",
   "approval:submit",
+  "question:pending",
+  "question:submit",
   "workflow:browse",
   "workflow:read",
   "workflow:write",
@@ -966,6 +1023,35 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "secret:capabilities",
   "secret:set",
 ];
+
+/**
+ * The live turn main is holding for a task — the same accumulation a from-the-start watcher builds
+ * out of `session:turn` pushes, re-readable by a viewer that arrived late (or left and came back).
+ * One per task, replaced when a different position starts speaking, cleared when the record lands —
+ * exactly the renderer's own `liveTurn` semantics, held where navigation cannot lose it.
+ */
+export interface LiveTurnSnapshot {
+  sessionId?: string;
+  seq?: number;
+  stateId?: string;
+  /** The agent's own session id, sniffed off the stream's envelopes — stamped onto the open record
+   *  row so an interrupted call stays resumable/resyncable. */
+  providerSessionId?: string;
+  /** When the current answer tail started (host clock). Absent ⇒ no text streaming. */
+  textStartedAt?: number;
+  /** When the current thinking tail started. Present with an empty answer tail = "still thinking". */
+  thinkingStartedAt?: number;
+  /** How many deltas are folded in — pushes carrying `n` at or below this are already here. */
+  n: number;
+  /** The answer's text tail. */
+  text: string;
+  /** The reasoning tail. */
+  thinking: string;
+  /** Whole stream items so far, in order — the same shapes `session:turn.item` carries. */
+  items: JsonValue[];
+  /** Subagent turns streaming by, keyed by the spawning call id. */
+  sidechains: Record<string, JsonValue[]>;
+}
 
 // --- push channels -----------------------------------------------------------
 
@@ -1002,6 +1088,8 @@ export type PushMessage =
   | { type: "interaction:resolved"; requestId: string }
   | { type: "approval:requested"; pending: PendingApproval }
   | { type: "approval:resolved"; requestId: string; decision: "allow" | "deny" }
+  | { type: "question:requested"; pending: PendingQuestion }
+  | { type: "question:resolved"; requestId: string }
   | {
       type: "run:finished";
       taskId: string;
@@ -1039,6 +1127,12 @@ export type PushMessage =
        * record is still open.
        */
       item?: JsonValue;
+      /**
+       * This delta's position in main's live-turn log — {@link LiveTurnSnapshot.n} is the count
+       * already folded into a snapshot, so a viewer that just seeded from one skips every push with
+       * `n` at or below it instead of applying the same fragment twice.
+       */
+      n?: number;
     };
 
 export const PUSH_CHANNEL = "jaira:push";

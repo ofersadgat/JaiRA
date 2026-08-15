@@ -36,7 +36,7 @@
  * with its children's cards underneath — and that arrangement is gone, because it grouped by state
  * where the thing being read is grouped by conversation. See `sessionBands.ts`.
  */
-import { useState, type JSX, type ReactNode } from "react";
+import { useEffect, useState, type JSX, type ReactNode } from "react";
 import type { InstanceNode, SessionView } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { Markdown } from "./markdown";
@@ -49,6 +49,7 @@ import {
   type LiveTail,
   type MessageEntry,
   type SignatureParam,
+  type ThoughtEntry,
   type ToolEntry,
   type TranscriptEntry,
   type WorkEntry,
@@ -109,6 +110,7 @@ function Row({
   tone,
   mark,
   prose,
+  note,
   body,
 }: {
   entry: WorkEntry;
@@ -125,6 +127,13 @@ function Row({
    * English, and English set in monospace at 11px is a ransom note.
    */
   prose?: boolean;
+  /**
+   * A small annotation between the preview and the clock — "thought for 12 s", a live pulse.
+   *
+   * On the LINE rather than in the body, because it answers the question the row is skimmed for.
+   * It sits before the timestamp so the right edge stays a single column of clocks.
+   */
+  note?: ReactNode;
   /** What opens underneath. Absent means the row does not open at all. */
   body?: ReactNode;
 }): JSX.Element {
@@ -137,6 +146,7 @@ function Row({
       </span>
       {name !== undefined ? <span className="ts-name">{name}</span> : null}
       <span className="ts-preview ellip">{preview}</span>
+      {note !== undefined ? <span className="ts-note">{note}</span> : null}
       <span className="ts-at">{clockOf(entry.at)}</span>
       <span className="ts-chev">{canOpen ? <Icon name="chevron" /> : null}</span>
       <span className="ts-mark">
@@ -231,6 +241,60 @@ function Tool({
   );
 }
 
+/**
+ * A wall clock that ticks while something is live, and not otherwise.
+ *
+ * A second is the right resolution for "thought for 12 s" and the wrong cost for a transcript with
+ * forty settled rows in it — so the interval exists only while `live` is true, and a row that has
+ * stopped thinking stops re-rendering with it.
+ */
+function useElapsed(startedAt: number | undefined, live: boolean): number | undefined {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!live || startedAt === undefined) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [live, startedAt]);
+  return startedAt === undefined ? undefined : Math.max(0, now - startedAt);
+}
+
+/**
+ * One block of reasoning — and how long it took, which is the question actually being asked of it.
+ *
+ * A finished block states its duration ("thought for 12.4 s"); a block still being written counts
+ * up beside a pulse, because a model that has been thinking for ninety seconds and one that has
+ * stalled look identical without a number that moves. The duration is the turn's
+ * thinking-start → answer-start, so it is the wait a person actually experienced, not the length of
+ * the text that came out of it.
+ */
+function Thought({ entry }: { entry: ThoughtEntry }): JSX.Element {
+  const live = entry.live === true;
+  const elapsed = useElapsed(entry.startedAt, live);
+  const shown = live ? elapsed : entry.durationMs;
+  const took = shown !== undefined ? `thought for ${durationOf(shown)}` : undefined;
+  return (
+    <Row
+      entry={entry}
+      name="thinking"
+      preview={entry.text.replace(/\s+/g, " ").trim()}
+      tone="muted"
+      prose
+      {...(live || took !== undefined
+        ? {
+            note: (
+              <span className={live ? "ts-think-live" : "ts-think-took"}>
+                {live ? <Pulse /> : null}
+                {took ?? "thinking…"}
+              </span>
+            ),
+          }
+        : {})}
+      body={<pre className="ts-think-text">{entry.text}</pre>}
+    />
+  );
+}
+
 /** One entry of work, dispatched by kind. All three land on the same {@link Row}. */
 function Work({
   entry,
@@ -250,18 +314,7 @@ function Work({
       />
     );
   }
-  if (entry.kind === "thought") {
-    return (
-      <Row
-        entry={entry}
-        name="thinking"
-        preview={entry.text.replace(/\s+/g, " ").trim()}
-        tone="muted"
-        prose
-        body={<pre className="ts-think-text">{entry.text}</pre>}
-      />
-    );
-  }
+  if (entry.kind === "thought") return <Thought entry={entry} />;
   // An event is a fact, not a call: no name to bold, no verdict to give — and nothing to open,
   // unless the fact is a compression of a fuller line (a native attachment, a queued operation).
   return (

@@ -17,8 +17,9 @@
 import type { FSWatcher } from "node:fs";
 import type { Project } from "@jaira/persistence";
 import { LiveCalls } from "@jaira/runtime";
-import type { ApprovalHub, ApprovalRequest, InteractionHub } from "@jaira/runtime";
+import type { ApprovalHub, ApprovalRequest, InteractionHub, QuestionHub } from "@jaira/runtime";
 import type { SyncDirection, WorkflowLayer } from "@jaira/shared";
+import { LiveTurnLog } from "./liveTurns";
 
 /** A run this session started and has not yet settled. */
 export interface LiveRun {
@@ -84,6 +85,7 @@ export interface ProjectSessionOptions {
   project: Project;
   hub: InteractionHub;
   approvals: ApprovalHub;
+  questions: QuestionHub;
 }
 
 export class ProjectSession {
@@ -114,6 +116,13 @@ export class ProjectSession {
   readonly approvalRun = new Map<string, { taskId: string; runId: number }>();
   /** Requests seen, kept until resolved so the audit entry can name the command. */
   readonly approvalsSeen = new Map<string, ApprovalRequest>();
+  /** Mid-run questions (`AskUserQuestion`) — the call IS the question, so not an approval. */
+  readonly questions: QuestionHub;
+  /**
+   * The live turn each running task is streaming — main's copy of the renderer's `liveTurn`, held
+   * where navigation cannot lose it and served back over `session:live`. See {@link LiveTurnLog}.
+   */
+  readonly liveTurns = new LiveTurnLog();
 
   /**
    * The workflows watchers and their shared debounce timer (§11.1 re-lint).
@@ -135,6 +144,7 @@ export class ProjectSession {
     this.project = options.project;
     this.hub = options.hub;
     this.approvals = options.approvals;
+    this.questions = options.questions;
   }
 
   get dir(): string {
@@ -156,6 +166,9 @@ export class ProjectSession {
     this.watchers = [];
     this.hub.rejectAll(reason);
     this.approvals.denyAll();
+    // A parked question parks the agent's tool loop just as hard — dismissed, the agent proceeds
+    // on its own judgment, which is the honest answer from a project that is going away.
+    this.questions.dismissAll();
     // A sync in flight is one of the live runs below, so aborting it needs nothing special here. What
     // does go is the proposal it was about to produce, which belongs to a project that is going away.
     this.syncTask = undefined;

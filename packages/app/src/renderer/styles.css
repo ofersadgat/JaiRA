@@ -2973,6 +2973,47 @@ button.layer-on {
   width: auto;
   justify-self: start;
 }
+/* --- the agent-question dialog (AskUserQuestion) --- */
+.question-block {
+  margin-top: 14px;
+}
+.question-text {
+  margin: 0 0 8px;
+  color: var(--text);
+}
+.question-text .chip {
+  margin-right: 6px;
+}
+.question-options {
+  display: grid;
+  gap: 8px;
+}
+/* An option is a CHOICE, not a verdict — a card with room for its consequences, not an Allow/Deny. */
+.question-option {
+  display: block;
+  text-align: left;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.question-option:hover {
+  border-color: var(--accent, var(--text));
+}
+.question-option.selected {
+  border-color: var(--accent, var(--text));
+  box-shadow: inset 0 0 0 1px var(--accent, var(--text));
+}
+.question-option-label {
+  display: block;
+  color: var(--text);
+}
+.question-option-desc {
+  display: block;
+  color: var(--dim);
+  margin-top: 2px;
+  white-space: normal;
+}
 /* The artifact preview inside review_artifact. */
 .artifact {
   background: var(--bg);
@@ -4507,6 +4548,27 @@ textarea.cfg-input {
 .ts-row.prose .ts-preview {
   font-family: inherit;
   font-size: 12px;
+}
+/* The annotation between the preview and the clock — "thought for 12 s", the live pulse. Never
+   shrinks: it is a handful of characters, and the preview beside it is the part with room to give. */
+.ts-note {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+/* Live counts up, so it earns a little more presence than the settled figure beside it. */
+.ts-think-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent);
+}
+.ts-think-took {
+  color: var(--dim);
 }
 .ts-at {
   flex: none;

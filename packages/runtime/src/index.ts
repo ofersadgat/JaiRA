@@ -23,6 +23,7 @@ export * from "./git";
 export * from "./command";
 export * from "./policy";
 export * from "./approval";
+export * from "./questions";
 export * from "./agents";
 export * from "./tools";
 export * from "./summary";

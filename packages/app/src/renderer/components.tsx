@@ -20,6 +20,7 @@ import {
   type ApprovalScope,
   type PendingApproval,
   type PendingInteraction,
+  type PendingQuestion,
   type ReviewArtifactConfig,
   type UserApproveChangesetConfig,
 } from "@jaira/shared/browser";
@@ -409,6 +410,114 @@ export function ApprovalDialog({
         <div className="options">
           <button className="danger" onClick={() => onDecide("deny", "once")}>
             Deny
+          </button>
+        </div>
+        {error ? <p className="reason">{error}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A running agent's question (`AskUserQuestion`) — the third dialog, and deliberately NOT the
+ * approval one: nothing here is being authorized. The agent asked something and the options are its
+ * own; the answer travels back as the tool's input, so the choices are labels, not verdicts.
+ *
+ * One question with a single choice submits on click — the common case reads as one tap. Multiple
+ * questions (or a multi-select, or a typed "other") collect first and submit together, because a
+ * batch is one tool call and half an answer is not a thing the wire can carry.
+ */
+export function QuestionDialog({
+  pending,
+  error,
+  onSubmit,
+}: {
+  pending: PendingQuestion;
+  error?: string | null;
+  /** `undefined` dismisses: the agent is told to use its own judgment and continue. */
+  onSubmit: (answers: Record<string, string | string[]> | undefined) => void;
+}): JSX.Element {
+  const [picked, setPicked] = useState<Record<string, string[]>>({});
+  const [other, setOther] = useState<Record<string, string>>({});
+
+  const answerOf = (question: string): string | string[] | undefined => {
+    const typed = (other[question] ?? "").trim();
+    if (typed.length > 0) return typed;
+    const chosen = picked[question] ?? [];
+    if (chosen.length === 0) return undefined;
+    const multi = pending.questions.find((q) => q.question === question)?.multiSelect === true;
+    return multi ? chosen : chosen[0]!;
+  };
+  const complete = pending.questions.every((q) => answerOf(q.question) !== undefined);
+  const submit = (): void => {
+    const answers: Record<string, string | string[]> = {};
+    for (const q of pending.questions) {
+      const answer = answerOf(q.question);
+      if (answer !== undefined) answers[q.question] = answer;
+    }
+    onSubmit(answers);
+  };
+  // The one-tap case: a single single-select question with nothing typed answers on the click.
+  const immediate = pending.questions.length === 1 && pending.questions[0]!.multiSelect !== true;
+
+  const toggle = (q: { question: string; multiSelect?: boolean }, label: string): void => {
+    if (immediate && (other[q.question] ?? "").trim().length === 0) {
+      onSubmit({ [q.question]: label });
+      return;
+    }
+    setPicked((prev) => {
+      const had = prev[q.question] ?? [];
+      const next = q.multiSelect === true ? (had.includes(label) ? had.filter((l) => l !== label) : [...had, label]) : [label];
+      return { ...prev, [q.question]: next };
+    });
+  };
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal" data-testid="question">
+        <h3>{pending.questions.length === 1 ? "The agent has a question" : "The agent has questions"}</h3>
+        {pending.taskId !== undefined ? <div className="sub">{pending.taskId}</div> : null}
+        {pending.questions.map((q) => (
+          <div key={q.question} className="question-block">
+            <p className="question-text">
+              {q.header !== undefined && q.header.length > 0 ? <span className="chip">{q.header}</span> : null} {q.question}
+            </p>
+            <div className="question-options">
+              {q.options.map((option) => (
+                <button
+                  key={option.label}
+                  className={`question-option${(picked[q.question] ?? []).includes(option.label) ? " selected" : ""}`}
+                  title={option.description ?? ""}
+                  onClick={() => toggle(q, option.label)}
+                >
+                  <span className="question-option-label">{option.label}</span>
+                  {option.description !== undefined && option.description.length > 0 ? (
+                    <small className="question-option-desc">{option.description}</small>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+            <label className="field">
+              <small>Other</small>
+              <input
+                value={other[q.question] ?? ""}
+                placeholder="Type your own answer…"
+                onChange={(e) => setOther((prev) => ({ ...prev, [q.question]: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (other[q.question] ?? "").trim().length > 0 && complete) submit();
+                }}
+              />
+            </label>
+          </div>
+        ))}
+        <div className="options">
+          {!immediate || Object.values(other).some((t) => t.trim().length > 0) ? (
+            <button disabled={!complete} onClick={submit}>
+              Answer
+            </button>
+          ) : null}
+          <button className="danger" onClick={() => onSubmit(undefined)}>
+            Let the agent decide
           </button>
         </div>
         {error ? <p className="reason">{error}</p> : null}

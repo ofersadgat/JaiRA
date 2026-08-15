@@ -322,9 +322,244 @@ describe("stateSessions", () => {
       // seq is one BACK from the reported end: the record was written at the position the call started
       // from, and the layer reports the end because that is what a caller cannot otherwise learn — a
       // call that had to fork ended somewhere it did not begin.
-      { runId: 1, instanceId: 2, stateId: "wf/first", sessionId: "chat", seq: 0, at: 10 },
-      { runId: 1, instanceId: 4, stateId: "wf/second", sessionId: "chat", seq: 1, at: 12 },
+      { runId: 1, instanceId: 2, stateId: "wf/first", sessionId: "chat", seq: 0, at: 10, outcome: "success" },
+      { runId: 1, instanceId: 4, stateId: "wf/second", sessionId: "chat", seq: 1, at: 12, outcome: "success" },
     ]);
+  });
+
+  it("lists a FAILED call too — it ran, it said things, and its transcript is in the store", () => {
+    // Reading only completions is why an errored state's conversation was unreachable from the panel
+    // that lists them. It is listable at all because `operation.failed` now carries the metrics a
+    // post-dispatch failure has, and `session_ref` is derived from them.
+    db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t2','failed',1,1)`).run();
+    db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at) VALUES ('t2','h',1)`).run();
+    const add = db.prepare(
+      `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at) VALUES ('t2', ?, ?, ?, ?)`,
+    );
+    const runId = (db.prepare(`SELECT id FROM runs WHERE task_id = 't2'`).get() as { id: number }).id;
+    add.run(runId, "operation.failed", JSON.stringify({ instanceId: 2, stateId: "wf/x", metrics: { sessionRef: "chat@1" } }), 10);
+    // A failure that never dispatched carries no metrics, so no position — nothing ran to show.
+    add.run(runId, "operation.failed", JSON.stringify({ instanceId: 3, stateId: "wf/y", failure: { reason: "no inputs" } }), 11);
+
+    expect(stateSessions({ db } as never, "t2")).toEqual([
+      { runId, instanceId: 2, stateId: "wf/x", sessionId: "chat", seq: 0, at: 10, outcome: "error" },
+    ]);
+  });
+});
+
+/**
+ * The call a CRASH left with no terminal event at all.
+ *
+ * Neither half of the system can answer alone: the journal has the instance and state but no
+ * completion, and the record has the position but knows nothing about which state ran it. Pairing
+ * them in START order is sound because both lists are in start order — and a mismatch means no rows
+ * rather than a guess, because a conversation attributed to the wrong state is worse than a missing
+ * one.
+ */
+describe("stateSessions — a run the process died inside", () => {
+  const crashedRun = (): number => {
+    db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t3','interrupted',1,1)`).run();
+    db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at, ended_at, outcome) VALUES ('t3','h',1,9,'interrupted')`).run();
+    return (db.prepare(`SELECT id FROM runs WHERE task_id = 't3'`).get() as { id: number }).id;
+  };
+  const started = (runId: number, instanceId: number, stateId: string, at: number): void => {
+    db.prepare(
+      `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at) VALUES ('t3', ?, 'operation.started', ?, ?)`,
+    ).run(runId, JSON.stringify({ instanceId, stateId, op: "prompt" }), at);
+  };
+  const record = (runId: number, recordId: string, status = "failed"): void => {
+    const info = db
+      .prepare(
+        `INSERT INTO operation_records (record_id, task_id, run_id, status, started_at) VALUES (?, 't3', ?, ?, 5)`,
+      )
+      .run(recordId, runId, status);
+    const cut = recordId.lastIndexOf(":");
+    db.prepare(`INSERT INTO session_positions (session_id, seq, operation_record_id) VALUES (?, ?, ?)`).run(
+      recordId.slice(0, cut),
+      Number(recordId.slice(cut + 1)),
+      info.lastInsertRowid,
+    );
+  };
+
+  it("recovers the in-flight call from its own record, and says it was interrupted", () => {
+    const runId = crashedRun();
+    started(runId, 7, "wf/thinking", 20);
+    record(runId, "chat:3");
+    expect(stateSessions({ db } as never, "t3")).toEqual([
+      { runId, instanceId: 7, stateId: "wf/thinking", sessionId: "chat", seq: 3, at: 20, outcome: "interrupted" },
+    ]);
+  });
+
+  it("pairs several in-flight calls in start order, which both lists share", () => {
+    const runId = crashedRun();
+    started(runId, 7, "wf/a", 20);
+    started(runId, 8, "wf/b", 21);
+    record(runId, "chat:0");
+    record(runId, "other:0");
+    expect(stateSessions({ db } as never, "t3").map((s) => [s.instanceId, s.sessionId])).toEqual([
+      [7, "chat"],
+      [8, "other"],
+    ]);
+  });
+
+  it("says nothing rather than guessing when the two lists disagree", () => {
+    const runId = crashedRun();
+    started(runId, 7, "wf/a", 20);
+    started(runId, 8, "wf/b", 21);
+    record(runId, "chat:0"); // one record, two in-flight calls — which is which?
+    expect(stateSessions({ db } as never, "t3")).toEqual([]);
+  });
+
+  it("leaves a settled call out of the in-flight set", () => {
+    const runId = crashedRun();
+    started(runId, 7, "wf/done", 20);
+    db.prepare(
+      `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at) VALUES ('t3', ?, 'operation.completed', ?, ?)`,
+    ).run(runId, JSON.stringify({ instanceId: 7, stateId: "wf/done", metrics: { sessionRef: "chat@1" } }), 22);
+    started(runId, 8, "wf/dying", 23);
+    record(runId, "chat:1", "completed"); // the settled one — excluded by status
+    record(runId, "chat:2");
+    expect(stateSessions({ db } as never, "t3")).toEqual([
+      { runId, instanceId: 7, stateId: "wf/done", sessionId: "chat", seq: 0, at: 22, outcome: "success" },
+      { runId, instanceId: 8, stateId: "wf/dying", sessionId: "chat", seq: 2, at: 23, outcome: "interrupted" },
+    ]);
+  });
+});
+
+/**
+ * Streamed partials — the live turn's durable copy (the crash-survival half of the live view).
+ *
+ * The row's `status` is THE state signal now, not the presence of a value: an open row may carry a
+ * streamed partial, and every reader that answers "did this turn happen?" must ask the column. The
+ * suite pins both directions — a partial is readable where the reader knowingly wants it
+ * (`transcript`/`at`, status exposed) and invisible where it must never leak (materialized history,
+ * `bySession`), and a settle can neither be clobbered by a late flush nor clobber a partial it
+ * cannot better.
+ */
+describe("streamed partials on open records", () => {
+  const store = () => new SqliteSessionStore(db) as unknown as Store & SqliteSessionStore;
+  const partial = (texts: string[]) => ({ value: { messages: texts.map(turn) } }) as never;
+
+  it("streams into the open row, visible with its status — and out of materialized history", async () => {
+    const s = store();
+    await append(s, "chat", "r1", "settled");
+    const at = await s.resolve({ ref: "chat" });
+    await s.open({ id: "r2", source: undefined as never, session: at.at, startMs: 1 });
+    s.streamPartial("chat", at.at.seq, partial(["half", "written"]), "prov-3");
+    // The provider handle lands EARLY — what makes an interrupted call resumable at all.
+    expect(db.prepare(`SELECT provider_session_id FROM operation_records WHERE record_id = 'r2'`).get()).toEqual({
+      provider_session_id: "prov-3",
+    });
+
+    // The knowing readers see it, labelled: the viewer's channel.
+    const rows = s.transcript("chat");
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({ status: "open", value: { value: { messages: [turn("half"), turn("written")] } } });
+    // History must not: a half-written turn replayed into a provider is a conversation that never
+    // happened. Value presence would say yes here; the state field says no.
+    expect(await s.messages("chat")).toEqual([turn("settled")]);
+    expect((s.bySession("chat") as Array<{ result?: unknown }>)[1]!.result).toBeUndefined();
+  });
+
+  it("lets the settle replace the partial, and refuses a late flush after it", async () => {
+    const s = store();
+    const at = await s.resolve({ ref: "conv" });
+    await s.open({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
+    s.streamPartial("conv", 0, partial(["early"]));
+    await s.close("r1", { sessionOutcome: { messages: [turn("the whole answer")] } });
+    // A debounce timer firing after the record settled matches no open row — the status guard.
+    s.streamPartial("conv", 0, partial(["stale"]));
+
+    expect(await s.messages("conv")).toEqual([turn("the whole answer")]);
+    expect(s.transcript("conv")[0]).toMatchObject({ status: "completed" });
+  });
+
+  it("keeps the partial when an ERRORED settle brings nothing better", async () => {
+    const s = store();
+    const at = await s.resolve({ ref: "err" });
+    await s.open({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
+    s.streamPartial("err", 0, partial(["what got said"]));
+    // An agent's error settle: `{error, value:{finishReason}}` — no messages, no session outcome.
+    await s.close("r1", { result: { error: { classification: "permanent", reason: "boom" }, value: { finishReason: "error" } } as never });
+
+    // The turns really were exchanged; a failed record keeping them is how errored calls already
+    // represent turns that "may exist remotely". They now count as history too — settled, not open.
+    expect(s.transcript("err")[0]).toMatchObject({ status: "failed", value: { value: { messages: [turn("what got said")] } } });
+    expect(await s.messages("err")).toEqual([turn("what got said")]);
+  });
+
+  it("lets an errored settle that DOES carry the conversation win over the partial", async () => {
+    const s = store();
+    const at = await s.resolve({ ref: "err2" });
+    await s.open({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
+    s.streamPartial("err2", 0, partial(["early copy"]));
+    await s.close("r1", {
+      result: { error: { classification: "permanent", reason: "boom" } } as never,
+      sessionOutcome: { messages: [turn("authoritative")] },
+    });
+    expect(await s.messages("err2")).toEqual([turn("authoritative")]);
+  });
+
+  it("writes nothing where no open row claims the position", () => {
+    const s = store();
+    expect(() => s.streamPartial("nowhere", 3, partial(["x"]))).not.toThrow();
+    expect(s.transcript("nowhere")).toEqual([]);
+  });
+});
+
+/**
+ * What a crash leaves recoverable — the handle plus the cut, which is all a native capture needs.
+ *
+ * The handle is on the row only because it is streamed there while the call runs: a call that died
+ * before its close would otherwise have none, and a session file cannot be found without one.
+ */
+describe("recovering an interrupted call's own transcript", () => {
+  const scoped = () => new SqliteSessionStore(db, { taskId: "t1", runId: 1 });
+
+  const crashed = (over: { status?: string; handle?: string | null; result?: string | null } = {}): number => {
+    const info = db
+      .prepare(
+        `INSERT INTO operation_records (record_id, task_id, run_id, status, provider_session_id, result_json, started_at)
+         VALUES ('s:0', 't1', 1, ?, ?, ?, 900)`,
+      )
+      .run(over.status ?? "failed", over.handle === undefined ? "prov-1" : over.handle, over.result ?? null);
+    return Number(info.lastInsertRowid);
+  };
+
+  it("offers the handle and the start time — the cut that keeps a resumed session's earlier lines out", () => {
+    crashed();
+    expect(scoped().recoverable("t1")).toEqual([{ id: expect.any(Number), providerSessionId: "prov-1", startedAt: 900 }]);
+  });
+
+  it("passes over a row with no handle, a live row, and one already captured", () => {
+    crashed({ handle: null }); // nothing to find the file with
+    crashed({ status: "open" }); // still running — a live process owns it
+    crashed({ result: JSON.stringify({ value: { nativeLines: [{ index: 0, line: {} }] } }) }); // done already
+    expect(scoped().recoverable("t1")).toEqual([]);
+  });
+
+  it("folds a recovered capture into the payload, beside what the crash had already saved", () => {
+    const id = crashed({ result: JSON.stringify({ value: { messages: [turn("streamed")] } }) });
+    const s = scoped();
+    s.foldNativeCapture(id, { nativeLines: [{ index: 0, line: { type: "attachment" } }] } as never);
+
+    const row = db.prepare(`SELECT result_json FROM operation_records WHERE id = ?`).get(id) as { result_json: string };
+    // The partial the flush saved survives; the fuller capture joins it where the reader looks.
+    expect(JSON.parse(row.result_json)).toEqual({
+      value: { messages: [turn("streamed")], nativeLines: [{ index: 0, line: { type: "attachment" } }] },
+    });
+    // …and it is no longer offered: a second open re-reads no files.
+    expect(s.recoverable("t1")).toEqual([]);
+  });
+
+  it("leaves a payload it cannot honestly extend alone", () => {
+    // A scripted value or a bare string has nowhere to put lines — wrapping it in a shape nothing
+    // reads would corrupt the record to add an annotation.
+    const id = crashed({ result: JSON.stringify({ value: "just text" }) });
+    scoped().foldNativeCapture(id, { nativeLines: [{ index: 0, line: {} }] } as never);
+    expect(JSON.parse((db.prepare(`SELECT result_json FROM operation_records WHERE id = ?`).get(id) as { result_json: string }).result_json)).toEqual({
+      value: "just text",
+    });
   });
 });
 

@@ -45,7 +45,7 @@ import {
   type MemoCache,
   type RecordStore,
 } from "@declarative-ai/exec";
-import type { Approver, ExecPolicy } from "@declarative-ai/permissions";
+import type { Approver, AskUser, ExecPolicy } from "@declarative-ai/permissions";
 import {
   DEFAULT_EXECUTOR,
   resolveExecutorTree,
@@ -233,6 +233,12 @@ export interface WorkflowRunConfig {
   policy?: ExecPolicy;
   approve?: Approver;
   /**
+   * Where a running agent's mid-run QUESTIONS go — `AskUserQuestion`, put to the person driving the
+   * run rather than to the approval gate. Absent ⇒ unattended: the adapter tells the agent to use
+   * its own judgment instead of parking on a question nobody will see.
+   */
+  askUser?: AskUser;
+  /**
    * The conversation seams: where positions resolve, and where records are written.
    *
    * Both, always, or neither. The engine READS the transcript for its preamble and for
@@ -346,6 +352,7 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     ...(cfg.workspace !== undefined ? { workspace: cfg.workspace } : {}),
     ...(cfg.policy !== undefined ? { policy: cfg.policy } : {}),
     ...(cfg.approve !== undefined ? { approve: cfg.approve } : {}),
+    ...(cfg.askUser !== undefined ? { askUser: cfg.askUser } : {}),
   };
   return executor.start(workflowStartOp(cfg.inputs), ctx).result;
 }
@@ -484,6 +491,10 @@ export interface TurnDelta {
   session?: { id: string; seq: number };
   /** The state that is speaking, recovered from the request's seed. */
   stateId?: string;
+  /** When this delta reached the host, host clock. The transports stamp nothing, so this is the
+   *  finest time granularity the system has — what "started thinking at" and "answered at" are
+   *  measured from. */
+  at?: number;
   /** A fragment of the answer being written. Exactly one of `text` / `thinking` / `item` is present. */
   text?: string;
   /** A fragment of the model's reasoning, while it is still thinking — never part of the answer. */
@@ -559,6 +570,7 @@ export function withTurnStream(
             const delta: Omit<TurnDelta, "text" | "item"> = {
               ...(at !== undefined ? { session: { id: at.id, seq: at.seq } } : {}),
               ...(stateId !== undefined ? { stateId } : {}),
+              at: Date.now(),
             };
             let payload: TurnDelta;
             if (event.type === "output_partial") {

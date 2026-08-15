@@ -79,6 +79,20 @@ export interface ThoughtEntry {
   kind: "thought";
   at?: number;
   text: string;
+  /**
+   * How long the model spent thinking, when the record timed it — the "thought for 12 s" number,
+   * measured from the first thinking fragment to the first word of the answer.
+   */
+  durationMs?: number;
+  /**
+   * The thinking has STARTED and not stopped: the block is still being written. Its own state
+   * rather than an inference from `durationMs` being absent — an untimed old record is not a model
+   * that is still thinking, and rendering one as the other would leave a permanent live pulse in a
+   * transcript from last week.
+   */
+  live?: boolean;
+  /** When the live thinking began, so the row can count up while it runs. */
+  startedAt?: number;
 }
 
 /** Something recorded that nobody said: a journal fact (a gate, a policy call, a failure, a
@@ -365,6 +379,9 @@ function messageOf(turn: SessionTurn, at?: number, toolRecord?: JsonValue): Arra
   const entries: Array<TranscriptEntry | ResultPart> = [];
   const hasText = turn.text !== undefined && turn.text.length > 0;
   const parts = messagePartsOf(turn.parts);
+  // The turn's own clock, when the record timed it — `at` is the caller's override (the live path
+  // stamps nothing), so a stored time is used only where none was passed in.
+  at = at ?? turn.at;
   // The native `toolUseResult` is one record per user turn, so it can only be placed when the turn
   // holds exactly one result — ambiguity drops the annotation rather than guessing which call it
   // describes.
@@ -372,7 +389,16 @@ function messageOf(turn: SessionTurn, at?: number, toolRecord?: JsonValue): Arra
   if (toolRecord !== undefined && results.length === 1) results[0]!.detail = toolRecord;
   const stamp = <T extends { at?: number }>(entry: T): T => (at !== undefined ? { ...entry, at } : entry);
 
-  for (const part of parts) if (part.kind === "thought") entries.push(stamp(part));
+  // The thinking, above the answer it preceded. The turn's `thoughtMs` lands on the FIRST thought
+  // row: it measures thinking-start → answer-start for the whole turn, so attaching it to every
+  // block would report one duration several times.
+  let firstThought = true;
+  for (const part of parts) {
+    if (part.kind !== "thought") continue;
+    const timed = firstThought && turn.thoughtMs !== undefined ? { ...part, durationMs: turn.thoughtMs } : part;
+    firstThought = false;
+    entries.push(stamp(timed));
+  }
   // A turn that is nothing but tool calls contributes no message — an empty assistant bubble above
   // three tool lines is a bubble that says only that the model spoke, which the lines already do.
   if (hasText || parts.length === 0) {
@@ -447,6 +473,14 @@ export interface LiveTail {
   text: string;
   /** The reasoning being written, before its block lands on the finished turn. */
   thinking?: string;
+  /**
+   * When the reasoning tail began (host clock). Present with an EMPTY {@link LiveTail.text} it is
+   * the "still thinking" state itself — the model has started reasoning and has not begun to
+   * answer — which is what lets the row count up rather than merely pulse.
+   */
+  thinkingStartedAt?: number;
+  /** When the answer tail began — the moment thinking stopped being the live state. */
+  textStartedAt?: number;
   /** `{kind:"message", role, content}` turns and `{kind:"event", event}` passthroughs, in order. */
   items?: readonly JsonValue[];
   /**
@@ -670,10 +704,25 @@ export function entriesOf(
     const event = eventOf(turn);
     if (event !== undefined) entries.push(event);
   }
-  // Stable: entries with no timestamp keep the order they were produced in, which for a session's
-  // turns is the order they were said in. Sorting them to the front by treating absent as zero
-  // would put a whole conversation before the first event it caused.
-  entries.sort((a, b) => ("at" in a ? (a.at ?? 0) : 0) - ("at" in b ? (b.at ?? 0) : 0));
+  /**
+   * Interleave the two sources by time, WITHOUT letting an unstamped entry jump the queue.
+   *
+   * An untimed entry inherits the last stamp seen before it, so it keeps the position it was
+   * produced in rather than sorting to the front. Treating absent as zero was harmless only while
+   * nothing in a session's own turns carried a clock; now that they do (`messageTimes`), a run's
+   * tool rows, its native lines and its thought blocks would all have sorted above the conversation
+   * they belong to — the exact inversion this comment used to warn about, arriving from the other
+   * side. The sort is stable, so equal keys keep insertion order and a burst inside one millisecond
+   * still reads in the order it happened.
+   */
+  let carried = 0;
+  const keys = new Map<TranscriptEntry, number>();
+  for (const entry of entries) {
+    const at = "at" in entry ? entry.at : undefined;
+    if (at !== undefined) carried = at;
+    keys.set(entry, carried);
+  }
+  entries.sort((a, b) => (keys.get(a) ?? 0) - (keys.get(b) ?? 0));
   const tail: LiveTail | null = typeof live === "string" ? { text: live } : (live ?? null);
   if (tail !== null) {
     const streamed: Array<TranscriptEntry | ResultPart> = [];
@@ -682,9 +731,36 @@ export function entriesOf(
     // entries are already settled above.
     entries.push(...pairResults(streamed));
     // Thinking before text, because that is the order a turn happens in — the model reasons, then
-    // answers. The tail is a thought row like any settled one, growing as the deltas arrive.
-    if (tail.thinking !== undefined && tail.thinking.length > 0) entries.push({ kind: "thought", text: tail.thinking });
+    // answers. The tail is a thought row like any settled one, growing as the deltas arrive — and
+    // marked LIVE while the answer has not started, which is precisely "still thinking". Once text
+    // begins the thinking is over: the row keeps the duration it took and stops pulsing.
+    if (tail.thinking !== undefined && tail.thinking.length > 0) {
+      const thinking = tail.thinkingStartedAt;
+      const answering = tail.text.length > 0;
+      entries.push({
+        kind: "thought",
+        text: tail.thinking,
+        ...(answering ? {} : { live: true }),
+        ...(thinking !== undefined ? { startedAt: thinking } : {}),
+        ...(answering && thinking !== undefined && tail.textStartedAt !== undefined
+          ? { durationMs: Math.max(0, tail.textStartedAt - thinking) }
+          : {}),
+      });
+    }
     if (tail.text.length > 0) entries.push({ kind: "live", text: tail.text });
+  }
+  // How the call ENDED, when it did not end well — last, because it is the thing that happened
+  // after everything above it. A transcript that simply stops is indistinguishable from one that
+  // was cut off, and the difference is exactly what a reader of a crashed run is trying to
+  // establish: whether what they are looking at is all there was.
+  if (session?.status === "interrupted") {
+    entries.push({
+      kind: "event",
+      tone: "warn",
+      text: "the process ended before this call finished — everything above is what had been recorded",
+    });
+  } else if (session?.status === "error") {
+    entries.push({ kind: "event", tone: "bad", text: "this call failed" });
   }
   // A call whose subagent conversation exists becomes the doorway to it — whether the record kept
   // the chain, or its turns are still streaming by. After the live append on purpose: while the run

@@ -61,6 +61,37 @@ describe("RuntimeStore", () => {
     expect(store.get("t-queued")?.status).toBe("queued");
     expect(store.get("t-done")?.status).toBe("completed");
   });
+
+  it("recovery settles the crashed task's open records, keeping their streamed partials", () => {
+    // 'open' means "a live process is streaming into this row" — the state signal the record readers
+    // key on — and after a crash no such process exists. The partial result_json survives the flip:
+    // those turns really were exchanged before the process died.
+    const store = new RuntimeStore(db);
+    store.insert("t-crash", 1000);
+    store.setStatus("t-crash", "running", 1001);
+    store.beginRun("t-crash", "h", 1001);
+    store.insert("t-live", 1000);
+    store.setStatus("t-live", "running", 1001);
+    db.prepare(
+      `INSERT INTO operation_records (record_id, task_id, run_id, status, result_json, started_at)
+       VALUES ('s:0', 't-crash', 1, 'open', '{"value":{"messages":[{"role":"assistant","content":"partial"}]}}', 1001)`,
+    ).run();
+    db.prepare(
+      `INSERT INTO operation_records (record_id, task_id, run_id, status, started_at)
+       VALUES ('s:0', 't-live', 2, 'open', 1001)`,
+    ).run();
+
+    store.recoverInterrupted(2000, (taskId) => taskId === "t-live");
+
+    expect(db.prepare(`SELECT status, ended_at, result_json, error_json FROM operation_records WHERE task_id = 't-crash'`).get()).toEqual({
+      status: "failed",
+      ended_at: 2000,
+      result_json: '{"value":{"messages":[{"role":"assistant","content":"partial"}]}}',
+      error_json: JSON.stringify({ reason: "interrupted: the process ended before this call settled" }),
+    });
+    // A task another process still drives is left alone — records included.
+    expect(db.prepare(`SELECT status FROM operation_records WHERE task_id = 't-live'`).get()).toEqual({ status: "open" });
+  });
 });
 
 describe("SqliteEventLog", () => {

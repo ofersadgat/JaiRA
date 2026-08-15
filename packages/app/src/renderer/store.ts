@@ -37,6 +37,7 @@ import type {
   JairaSettings,
   JairaTheme,
   PendingApproval,
+  PendingQuestion,
   PendingInteraction,
   ProbeResult,
   PushMessage,
@@ -125,6 +126,8 @@ export interface AppState {
   pending: PendingInteraction[];
   /** Per-command approvals awaiting a decision (DESIGN §10.2). */
   approvals: PendingApproval[];
+  /** Mid-run questions a running agent asked (`AskUserQuestion`) — answered, never approved. */
+  questions: PendingQuestion[];
   /** Live event lines for the selected task, newest last. */
   stream: string[];
   /** How much history is stored, for the pruning panel. */
@@ -368,8 +371,17 @@ export interface AppState {
     sessionId?: string;
     seq?: number;
     stateId?: string;
+    /**
+     * The last delta folded in, in main's per-task numbering. A `session:live` seed reports how
+     * many deltas it already holds, so a push at or below this is skipped rather than applied
+     * twice; absent on a tail built purely from pushes before any seed carried a number.
+     */
+    n?: number;
     text: string;
     thinking: string;
+    /** When the tails began — what makes "still thinking, for 12 s" a number rather than a pulse. */
+    textStartedAt?: number;
+    thinkingStartedAt?: number;
     items: JsonValue[];
     sidechains: Record<string, JsonValue[]>;
   } | null;
@@ -507,6 +519,7 @@ const EMPTY: AppState = {
   detail: null,
   pending: [],
   approvals: [],
+  questions: [],
   stream: [],
   history: null,
   prune: null,
@@ -1012,9 +1025,51 @@ export function useApp() {
           ...(wanted !== null ? { instanceId: wanted } : {}),
           ...at,
         });
-        // The live tail goes when the record lands: the stored turn is the same text with its tool
-        // calls attached, so keeping both would show the answer twice.
-        patch({ sessionHistory: history, session, sessionInstance: wanted, liveTurn: null });
+        // The live tail is re-seeded from MAIN, not wiped. Wiping it here is how a watched run went
+        // blank on every navigation: the record lands only when the operation settles, so while a
+        // call is in flight the tail IS the conversation — and this refresh runs on every task
+        // invalidate. Main keeps the same accumulation (`session:live`); `null` there means nothing
+        // is streaming, which is exactly when dropping the tail is right (the stored turn is the
+        // same content with its tool calls attached, and keeping both would show the answer twice).
+        let live: Awaited<ReturnType<typeof invoke<"session:live">>> = null;
+        try {
+          live = await invoke("session:live", { taskId, ...at });
+        } catch {
+          live = null;
+        }
+        // A tail already AHEAD of the snapshot stays: pushes folded in while the snapshot was in
+        // flight would be lost by reverting to it, and `n` says which of the two has seen more.
+        const current = ref.current.liveTurn;
+        const keep =
+          live !== null &&
+          current !== null &&
+          current.sessionId === live.sessionId &&
+          current.seq === live.seq &&
+          (current.n ?? -1) >= live.n;
+        patch({
+          sessionHistory: history,
+          session,
+          sessionInstance: wanted,
+          ...(keep
+            ? {}
+            : {
+                liveTurn:
+                  live === null
+                    ? null
+                    : {
+                        ...(live.sessionId !== undefined ? { sessionId: live.sessionId } : {}),
+                        ...(live.seq !== undefined ? { seq: live.seq } : {}),
+                        ...(live.stateId !== undefined ? { stateId: live.stateId } : {}),
+                        n: live.n,
+                        text: live.text,
+                        thinking: live.thinking,
+                        ...(live.textStartedAt !== undefined ? { textStartedAt: live.textStartedAt } : {}),
+                        ...(live.thinkingStartedAt !== undefined ? { thinkingStartedAt: live.thinkingStartedAt } : {}),
+                        items: live.items,
+                        sidechains: live.sidechains,
+                      },
+              }),
+        });
         return wanted;
       } catch {
         patch({ sessionHistory: [], session: null, sessionInstance: null });
@@ -1259,6 +1314,14 @@ export function useApp() {
     }
   }, [patch, fail]);
 
+  const refreshQuestions = useCallback(async () => {
+    try {
+      patch({ questions: await invoke("question:pending", undefined) });
+    } catch (e) {
+      fail(e);
+    }
+  }, [patch, fail]);
+
   const refreshHistory = useCallback(async () => {
     // Same rule as {@link refreshTasks}: run history belongs to a project, so with none open there is
     // nothing to size.
@@ -1385,6 +1448,7 @@ export function useApp() {
       refreshBoard(),
       refreshPending(),
       refreshApprovals(),
+      refreshQuestions(),
       refreshHistory(),
       // Again, now that a project layer exists to lay over the base one.
       refreshConfig(),
@@ -1400,6 +1464,7 @@ export function useApp() {
     refreshBoard,
     refreshPending,
     refreshApprovals,
+    refreshQuestions,
     refreshHistory,
     refreshSettings,
     refreshConfig,
@@ -1537,6 +1602,10 @@ export function useApp() {
         case "approval:resolved":
           void refreshApprovals();
           break;
+        case "question:requested":
+        case "question:resolved":
+          void refreshQuestions();
+          break;
         case "run:finished":
           void refreshProjects();
           void refreshTasks();
@@ -1555,10 +1624,18 @@ export function useApp() {
           // different state speaking and concatenating two would invent a turn neither produced.
           const live = ref.current.liveTurn;
           const same = live !== null && live.sessionId === message.sessionId && live.seq === message.seq;
+          // Already folded in — the tail was seeded from a `session:live` snapshot that had seen
+          // this delta. Applying it again would show the fragment twice.
+          if (same && message.n !== undefined && live.n !== undefined && message.n <= live.n) break;
           const items = same ? [...live.items] : [];
           const sidechains = same ? { ...live.sidechains } : {};
           let text = same ? live.text : "";
           let thinking = same ? live.thinking : "";
+          // The tail CLOCKS, kept in step with the tails themselves — set when a tail starts,
+          // cleared when the finished turn restarts it. Main folds the identical rule (`LiveTurnLog`);
+          // both must agree, because either can be the one holding the tail on screen.
+          let textStartedAt = same ? live.textStartedAt : undefined;
+          let thinkingStartedAt = same ? live.thinkingStartedAt : undefined;
           if (message.item !== undefined) {
             // A SUBAGENT's turn accumulates under the call that spawned it and nowhere else — the
             // doorway row renders it there, and folding it into `items` is the misattribution the
@@ -1574,18 +1651,32 @@ export function useApp() {
               if (item.kind === "message" && item.role === "assistant") {
                 text = "";
                 thinking = "";
+                textStartedAt = undefined;
+                thinkingStartedAt = undefined;
               }
             }
           }
-          if (message.text !== undefined) text += message.text;
-          if (message.thinking !== undefined) thinking += message.thinking;
+          // Stamped from the item's own `at` where it has one (main enriches every item), falling
+          // back to the arrival clock — a delta with neither is a fragment we can still time.
+          const stampedAt = (message.item as { at?: number } | undefined)?.at ?? Date.now();
+          if (message.text !== undefined) {
+            if (text.length === 0 && message.text.length > 0) textStartedAt = stampedAt;
+            text += message.text;
+          }
+          if (message.thinking !== undefined) {
+            if (thinking.length === 0 && message.thinking.length > 0) thinkingStartedAt = stampedAt;
+            thinking += message.thinking;
+          }
           patch({
             liveTurn: {
               ...(message.sessionId !== undefined ? { sessionId: message.sessionId } : {}),
               ...(message.seq !== undefined ? { seq: message.seq } : {}),
               ...(message.stateId !== undefined ? { stateId: message.stateId } : {}),
+              ...(message.n !== undefined ? { n: message.n } : {}),
               text,
               thinking,
+              ...(textStartedAt !== undefined ? { textStartedAt } : {}),
+              ...(thinkingStartedAt !== undefined ? { thinkingStartedAt } : {}),
               items: items.length > LIVE_ITEM_LIMIT ? items.slice(-LIVE_ITEM_LIMIT) : items,
               sidechains,
             },
@@ -1610,6 +1701,7 @@ export function useApp() {
     refreshDetail,
     refreshPending,
     refreshApprovals,
+    refreshQuestions,
     refreshHistory,
     refreshConfig,
     refreshTree,
@@ -2022,6 +2114,17 @@ export function useApp() {
       decideApproval: async (requestId: string, decision: "allow" | "deny", scope: ApprovalScope = "once") => {
         try {
           await invoke("approval:submit", { requestId, decision, scope });
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /**
+       * Answer a running agent's question — or dismiss it (`answers` absent), which tells the agent
+       * to use its own judgment and continue.
+       */
+      answerQuestion: async (requestId: string, answers?: Record<string, string | string[]>) => {
+        try {
+          await invoke("question:submit", { requestId, ...(answers !== undefined ? { answers } : {}) });
         } catch (e) {
           fail(e);
         }

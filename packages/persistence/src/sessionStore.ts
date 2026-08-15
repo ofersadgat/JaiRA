@@ -78,6 +78,13 @@ interface Branch {
 interface Row {
   seq: number;
   recordId: string;
+  /**
+   * The row's lifecycle, verbatim from the `status` column — THE state signal, now that an open
+   * row can carry a value. Presence of `value` used to double as "the call settled" purely because
+   * `result_json` stayed NULL until close; streamed partials (see {@link SqliteSessionStore.streamPartial})
+   * end that, so every reader that cares whether a turn HAPPENED must ask this field, never the value.
+   */
+  status: "open" | "completed" | "failed";
   value?: JsonValue;
   externalId?: string;
 }
@@ -191,16 +198,24 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // newest first.
     const row = this.db
       .prepare(
-        `SELECT id FROM operation_records
+        `SELECT id, result_json FROM operation_records
           WHERE record_id = ? AND task_id IS ? AND run_id IS ?
           ORDER BY (status = 'open') DESC, id DESC LIMIT 1`,
       )
-      .get(id, this.scope.taskId ?? null, this.scope.runId ?? null) as { id: number } | undefined;
+      .get(id, this.scope.taskId ?? null, this.scope.runId ?? null) as { id: number; result_json: string | null } | undefined;
     if (row === undefined) return;
     // Stored VERBATIM — the result as it settled, the session outcome as reported. What a record
     // MEANS as a conversation turn is the read side's question now (projectValue), which is what
     // "the payload-wins projection moves to the read side" (§5.1) says.
     const error = (settled.result as { error?: unknown } | undefined)?.error;
+    // An ERRORED settle keeps the streamed partial when it arrives with nothing better. The turns a
+    // call streamed before it died were really exchanged — the same reason a failed call is a record
+    // at all ("its turns may already exist remotely") — and an agent's error result is
+    // `{error, value: {finishReason}}`, which would replace them with nothing. A SUCCESS settle
+    // always wins outright: its payload or its session outcome is the complete, authoritative
+    // version of what the partial was an early copy of, and merging the partial in would put a copy
+    // of the messages where `projectValue`'s payload-wins rule would prefer them.
+    const result = error !== undefined ? preservePartial(settled.result as JsonValue, settled.sessionOutcome, row.result_json) : settled.result;
     this.db
       .prepare(
         `UPDATE operation_records
@@ -210,7 +225,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
           WHERE id = ?`,
       )
       .run(
-        settled.result === undefined ? null : JSON.stringify(settled.result),
+        result === undefined ? null : JSON.stringify(result),
         error === undefined ? null : JSON.stringify(error),
         settled.metrics === undefined ? null : JSON.stringify(settled.metrics),
         settled.sessionOutcome === undefined ? null : JSON.stringify(settled.sessionOutcome),
@@ -221,21 +236,55 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       );
   }
 
+  /**
+   * Stream a call's PARTIAL value into the open row at a position — the durable copy of the live
+   * turn, refreshed on a debounce while the call runs.
+   *
+   * The `status = 'open'` guard is the whole safety story: `close()` settles the row and flips the
+   * status in one statement, so a flush racing the settle (a debounce timer firing after the result
+   * landed) matches nothing and writes nothing — the settled result is never clobbered by a stale
+   * partial. Targeting the NEWEST open row at the position mirrors `close()`'s own choice for
+   * retried ids.
+   *
+   * Only `result_json` moves. Status, timestamps and the provider handle stay the settle's to
+   * write, which is what keeps "open" meaning exactly "a live process is streaming into this row".
+   */
+  streamPartial(sessionId: string, seq: number, value: JsonValue, providerSessionId?: string): void {
+    // The provider handle is stamped EARLY when the stream carried one — it rides nearly every
+    // envelope, and waiting for the settle is why a crashed call used to have no handle to resume
+    // or resync from. First writer wins (COALESCE on the existing value); the settle's own
+    // COALESCE then prefers its authoritative id over ours.
+    this.db
+      .prepare(
+        `UPDATE operation_records SET result_json = ?, provider_session_id = COALESCE(provider_session_id, ?)
+          WHERE status = 'open' AND id = (
+            SELECT p.operation_record_id FROM session_positions p
+              JOIN operation_records r ON r.id = p.operation_record_id
+             WHERE p.session_id = ? AND p.seq = ? AND r.status = 'open'
+             ORDER BY r.id DESC LIMIT 1)`,
+      )
+      .run(JSON.stringify(value), providerSessionId ?? null, this.k(sessionId), seq);
+  }
+
   bySession(session: string, upTo?: number): StoredRecord[] {
     return this.rowsOf(session, upTo).map((row) => ({
       id: row.recordId,
       source: undefined as never,
       startMs: 0,
-      ...(row.value !== undefined ? { result: row.value as never } : {}),
+      // The STATE field decides, not value presence: an open row may now carry a streamed partial,
+      // and "a session's records" is a history read — a turn that has not settled is not in it.
+      ...(row.status !== "open" && row.value !== undefined ? { result: row.value as never } : {}),
     }));
   }
 
   // --- Reads the app adds ------------------------------------------------------
 
-  /** One conversation's records, oldest first — lineage included, exactly as `messages` walks it. */
-  transcript(ref: string): Array<{ seq: number; recordId: string; value?: JsonValue; externalId?: string }> {
+  /** One conversation's records, oldest first — lineage included, exactly as `messages` walks it.
+   *  Rows carry `status`: an `open` row's value is a streamed PARTIAL, and a caller that treats it
+   *  as a settled turn is making the mistake the field exists to prevent. */
+  transcript(ref: string): Row[] {
     const [id, seq] = split(ref);
-    const out: Array<{ seq: number; recordId: string; value?: JsonValue; externalId?: string }> = [];
+    const out: Row[] = [];
     for (const [branch, bound] of this.chain(id, seq ?? this.head(id))) {
       const start = this.cursorOf(branch);
       for (const row of this.rowsOf(branch)) {
@@ -274,6 +323,51 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     };
   }
 
+  /**
+   * Records a crashed run left behind that could still be recovered from the agent's own files.
+   *
+   * The pair a recovery needs and nothing else: the provider handle (streamed onto the row while
+   * the call ran — see {@link SqliteSessionStore.streamPartial} — which is the whole reason a call
+   * that never reached a close has one) and the start time, which is the cut that keeps a resumed
+   * session's earlier lines out.
+   *
+   * Narrowed to rows that have a handle and no capture yet, so a second open after a successful
+   * recovery finds nothing and re-reads no files.
+   */
+  recoverable(taskId: string): Array<{ id: number; providerSessionId: string; startedAt: number }> {
+    return this.db
+      .prepare(
+        `SELECT id, provider_session_id, started_at FROM operation_records
+          WHERE task_id = ? AND status = 'failed' AND provider_session_id IS NOT NULL
+            AND (result_json IS NULL OR result_json NOT LIKE '%"nativeLines"%')`,
+      )
+      .all(taskId)
+      .map((row) => {
+        const r = row as { id: number; provider_session_id: string; started_at: number };
+        return { id: r.id, providerSessionId: r.provider_session_id, startedAt: r.started_at };
+      });
+  }
+
+  /**
+   * Fold a recovered capture into a record that never got one — the crash counterpart of the close
+   * decorator's enrichment.
+   *
+   * The lines join the payload's `value`, exactly where `withNativeCapture` puts them, so the
+   * transcript reader finds them where it already looks. A row whose payload is not record-shaped
+   * (a scripted value, a bare string) is left alone rather than wrapped in a shape nothing reads.
+   */
+  foldNativeCapture(recordRowId: number, captured: Record<string, JsonValue>): void {
+    const row = this.db.prepare(`SELECT result_json FROM operation_records WHERE id = ?`).get(recordRowId) as
+      | { result_json: string | null }
+      | undefined;
+    if (row === undefined) return;
+    const existing = row.result_json === null ? {} : (JSON.parse(row.result_json) as { value?: unknown });
+    const value = existing.value;
+    if (value !== undefined && (value === null || typeof value !== "object" || Array.isArray(value))) return;
+    const merged = { ...existing, value: { ...((value ?? {}) as object), ...captured } };
+    this.db.prepare(`UPDATE operation_records SET result_json = ? WHERE id = ?`).run(JSON.stringify(merged), recordRowId);
+  }
+
   // --- Internals ---------------------------------------------------------------
 
   /** Stamp the per-attempt row. The request is pinned here — nothing recomputes it (§5.3). */
@@ -300,7 +394,13 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   /** Walk the lineage, taking each ancestor's records below the cursor its child took. */
   private materialize(id: string, upTo: number): JsonValue[] {
     const out: JsonValue[] = [];
-    for (const row of this.transcript(join(id, upTo))) out.push(...messagesOfRecord(row.value));
+    // Settled rows only — the state field, not value presence. A streamed partial on an open row is
+    // the live view's business; materialized history feeds provider REPLAY and inherited context,
+    // and a half-written turn replayed into a provider is a conversation that never happened.
+    for (const row of this.transcript(join(id, upTo))) {
+      if (row.status === "open") continue;
+      out.push(...messagesOfRecord(row.value));
+    }
     return out;
   }
 
@@ -418,7 +518,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   private rowsOf(session: string, upTo?: number): Row[] {
     const rows = this.db
       .prepare(
-        `SELECT p.seq AS seq, r.record_id AS record_id, r.result_json AS result_json,
+        `SELECT p.seq AS seq, r.record_id AS record_id, r.status AS status, r.result_json AS result_json,
                 r.session_outcome_json AS session_outcome_json, r.provider_session_id AS provider_session_id
            FROM session_positions p JOIN operation_records r ON r.id = p.operation_record_id
           WHERE p.session_id = ? ${upTo === undefined ? "" : "AND p.seq < ?"} ORDER BY p.seq`,
@@ -426,6 +526,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       .all(...(upTo === undefined ? [this.k(session)] : [this.k(session), upTo])) as Array<{
       seq: number;
       record_id: string;
+      status: "open" | "completed" | "failed";
       result_json: string | null;
       session_outcome_json: string | null;
       provider_session_id: string | null;
@@ -438,6 +539,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       return {
         seq: row.seq,
         recordId: row.record_id,
+        status: row.status,
         ...(value !== undefined ? { value } : {}),
         ...(row.provider_session_id !== null ? { externalId: row.provider_session_id } : {}),
       };
@@ -466,4 +568,42 @@ function projectValue(result: JsonValue | undefined, sessionOutcome: JsonValue |
 export function messagesOfRecord(value: JsonValue | undefined): JsonValue[] {
   const messages = (value as { value?: { messages?: JsonValue[] } } | undefined)?.value?.messages;
   return Array.isArray(messages) ? messages : [];
+}
+
+/**
+ * An ERRORED settle's result, with the streamed partial folded in when the settle brought nothing
+ * better — see the call site in `close()`.
+ *
+ * "Nothing better" is checked on BOTH channels `projectValue` reads: a result already carrying
+ * `value.messages` is the authoritative conversation, and a session outcome carrying `messages` will
+ * win the projection anyway — folding the partial under either would shadow or duplicate the real
+ * thing. Only when neither has the turns does the partial's early copy become the record's, which is
+ * exactly the interrupted/crashed case it was streamed for.
+ */
+function preservePartial(
+  settledResult: JsonValue | undefined,
+  sessionOutcome: { messages?: unknown } | undefined,
+  existingJson: string | null,
+): JsonValue | undefined {
+  if (existingJson === null) return settledResult;
+  const settled = settledResult as { value?: { messages?: unknown } } | undefined;
+  if (settled?.value?.messages !== undefined) return settledResult;
+  if (sessionOutcome?.messages !== undefined) return settledResult;
+  const partial = JSON.parse(existingJson) as {
+    value?: { messages?: JsonValue[]; messageTimes?: JsonValue; sidechains?: JsonValue; partial?: JsonValue };
+  } | null;
+  const messages = Array.isArray(partial?.value?.messages) ? partial.value.messages : [];
+  // Worth keeping when the stream left ANY evidence — finished turns, or the tails of the one it
+  // was writing when it died. Both are what the interruption was holding.
+  if (messages.length === 0 && partial?.value?.partial === undefined) return settledResult;
+  return {
+    ...((settledResult ?? {}) as object),
+    value: {
+      ...((settled?.value ?? {}) as object),
+      messages,
+      ...(partial?.value?.messageTimes !== undefined ? { messageTimes: partial.value.messageTimes } : {}),
+      ...(partial?.value?.sidechains !== undefined ? { sidechains: partial.value.sidechains } : {}),
+      ...(partial?.value?.partial !== undefined ? { partial: partial.value.partial } : {}),
+    },
+  } as JsonValue;
 }

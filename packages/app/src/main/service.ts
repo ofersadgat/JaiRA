@@ -134,6 +134,8 @@ import {
   sessionServicesFor,
   statusOfResult,
   withNativeCapture,
+  captureNativeSession,
+  isEmptyCapture,
   chatOperationOf,
   chatPlanFor,
   holdsConversation,
@@ -159,11 +161,13 @@ import {
   CHANGESET_REVIEW_ID,
   CHANGESET_REVIEW_LOOP_ID,
   USER_APPROVE_CHANGESET,
+  QuestionHub,
   type ApprovalRequest,
   type ExecObserver,
   type FakeRule,
   type HubRequest,
   type PolicyAuditEntry,
+  type QuestionRequest,
   type SyncEdit,
 } from "@jaira/runtime";
 import {
@@ -197,6 +201,7 @@ import {
   presetOf,
 } from "@jaira/shared";
 import { Diagnostics } from "./diagnostics";
+import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
 import { ProjectSession, type SyncHolder } from "./session";
 import type {
   ApprovalScope,
@@ -224,8 +229,10 @@ import type {
   JairaOperationNode,
   HistorySize,
   JairaSettings,
+  LiveTurnSnapshot,
   PendingApproval,
   PendingInteraction,
+  PendingQuestion,
   ProbeResult,
   PruneRequest,
   PruneResult,
@@ -277,6 +284,13 @@ export interface AppServiceOptions {
   /** Deterministic request ids in tests. */
   nextInteractionId?: () => string;
   nextApprovalId?: () => string;
+  nextQuestionId?: () => string;
+  /**
+   * Read a crashed call's native session files at recovery. Default: the real
+   * `~/.claude/projects` reader — a seam for the same reason every other file-I/O boundary here has
+   * one, since the alternative is a test that has to lay out an agent's config directory.
+   */
+  captureNative?: typeof captureNativeSession;
   /**
    * Debounce for the workflows watcher, ms. An editor writes a file in several
    * syscalls, so re-linting on every raw event would lint half-written files.
@@ -474,6 +488,16 @@ function docKey(layer: WorkflowLayer, path: string): string {
   return `${layer}:${path}`;
 }
 
+/** A question as the renderer sees it (the hub's request, minus the session key). */
+function pendingQuestionOf(request: QuestionRequest): PendingQuestion {
+  return {
+    requestId: request.requestId,
+    questions: request.questions as PendingQuestion["questions"],
+    ...(request.taskId !== undefined ? { taskId: request.taskId } : {}),
+    at: request.at,
+  };
+}
+
 /** An approval as the renderer sees it (the hub's request, minus internals). */
 function pendingApprovalOf(request: ApprovalRequest): PendingApproval {
   return {
@@ -522,6 +546,7 @@ export class AppService {
    */
   private interactionSeq = 0;
   private approvalSeq = 0;
+  private questionSeq = 0;
   private readonly requestOwner = new Map<string, string>();
   /**
    * The JSON-editor schema machinery, built on first use.
@@ -664,7 +689,7 @@ export class AppService {
    * Built per session rather than once, so a gate in one project cannot be answered by a request id
    * minted in another — and so closing a project rejects only its own parked calls.
    */
-  private hubsFor(key: string): { hub: InteractionHub; approvals: ApprovalHub } {
+  private hubsFor(key: string): { hub: InteractionHub; approvals: ApprovalHub; questions: QuestionHub } {
     const hub = new InteractionHub({
       onRequest: (request) => this.publishInteraction(key, request),
       onResolved: (requestId) => {
@@ -705,7 +730,20 @@ export class AppService {
       // The same spelling the hub's own default uses, so ids are unchanged for anything reading them.
       nextId: this.options.nextApprovalId ?? (() => `approval-${++this.approvalSeq}`),
     });
-    return { hub, approvals };
+    // Mid-run questions (`AskUserQuestion`) — the third inbox channel. Same ownership discipline as
+    // the other two: the owner is recorded at request so an answer can be routed by request id alone.
+    const questions = new QuestionHub({
+      onRequest: (request) => {
+        this.requestOwner.set(request.requestId, key);
+        this.publish({ type: "question:requested", pending: pendingQuestionOf(request) });
+      },
+      onResolved: (requestId) => {
+        this.requestOwner.delete(requestId);
+        this.publish({ type: "question:resolved", requestId });
+      },
+      nextId: this.options.nextQuestionId ?? (() => `question-${++this.questionSeq}`),
+    });
+    return { hub, approvals, questions };
   }
 
   /**
@@ -778,11 +816,76 @@ export class AppService {
       ...(project.recovered.length > 0 ? { detail: { recovered: project.recovered } } : {}),
     });
     if (this.options.watchWorkflows !== false) this.watchWorkflows(session);
-    if (project.recovered.length > 0) this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+    if (project.recovered.length > 0) {
+      this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+      // Not awaited: the agent's files are on disk and are not going anywhere, while the window
+      // opening behind this call is. It publishes its own invalidate when it finds something.
+      void this.recoverNativeSessions(session);
+    }
     // A project brings its own config layer, so what was available a moment ago is not what is
     // available now: it can name different routes, different credentials, and different executors.
     if (this.options.probeOnStart === true) this.kickAvailability();
     return { dir: project.paths.projectDir, recovered: project.recovered };
+  }
+
+  /**
+   * Recover what a crashed run's DELEGATED calls actually said, from the agent's own session files.
+   *
+   * The streamed partial in the record is bounded by the last flush; the agent's file is not
+   * bounded at all — it holds every turn, the `toolUseResult` records, the context injections, the
+   * threading. A call that died mid-flight never reached the close that normally captures it, so
+   * this is that capture, run once at the open that discovered the interruption.
+   *
+   * It is possible only because the provider handle now reaches the row WHILE the call runs (see
+   * `streamPartial`): a crashed call used to have no handle at all, and a session file cannot be
+   * found without one. The cwd is the run's own workspace, read exactly as the chat path reads it —
+   * never ensured, because recovering a record must not create a worktree.
+   *
+   * Best-effort throughout, per the capture's own rule: a file that will not read leaves the record
+   * exactly as the crash left it, which is still the streamed partial.
+   */
+  private async recoverNativeSessions(session: ProjectSession): Promise<void> {
+    const { project } = session;
+    let recoveredAny = false;
+    for (const taskId of project.recovered) {
+      const store = new SqliteSessionStore(project.db);
+      let rows: ReturnType<SqliteSessionStore["recoverable"]>;
+      try {
+        rows = store.recoverable(taskId);
+      } catch {
+        continue;
+      }
+      if (rows.length === 0) continue;
+      const worktree = project.runtime.get(taskId)?.worktreePath;
+      const cwd = worktree !== undefined && existsSync(worktree) ? worktree : project.paths.projectDir;
+      const capture = this.options.captureNative ?? captureNativeSession;
+      for (const row of rows) {
+        try {
+          const captured = await capture(row.providerSessionId, { cwd, sinceMs: row.startedAt });
+          if (isEmptyCapture(captured)) continue;
+          store.foldNativeCapture(row.id, captured as unknown as Record<string, JsonValue>);
+          recoveredAny = true;
+          this.log({
+            level: "info",
+            source: "engine",
+            message: `recovered the agent's own transcript for an interrupted call in ${taskId}`,
+            project: session.key,
+            taskId,
+          });
+        } catch (e) {
+          this.log({
+            level: "warn",
+            source: "engine",
+            message: `recovering a native session failed: ${(e as Error).message}`,
+            project: session.key,
+            taskId,
+          });
+        }
+      }
+    }
+    // Only when something changed: the panels re-read on this, and an open that recovered nothing
+    // must not make every viewer refetch to learn that.
+    if (recoveredAny) this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
   }
 
   /**
@@ -1249,10 +1352,19 @@ export class AppService {
           ...(metrics !== undefined ? { metrics } : {}),
         });
       } else if (row.event.type === "operation.failed") {
-        costs.set(`${row.runId}:${row.event.instanceId}`, { status: "error" });
+        // A failed call's SPEND, which used to be dropped on the floor: a post-dispatch failure
+        // carries the metrics of the call it made (upstream), and an agent that billed a dollar
+        // before failing spent it just as surely as one that succeeded.
+        const failed = row.event as { instanceId?: number; metrics?: { costUsd?: number } };
+        const metrics = runMetricsOf(failed.metrics as never);
+        costs.set(`${row.runId}:${failed.instanceId}`, {
+          status: "error",
+          ...(typeof failed.metrics?.costUsd === "number" ? { costUsd: failed.metrics.costUsd } : {}),
+          ...(metrics !== undefined ? { metrics } : {}),
+        });
       }
     }
-    // `stateSessions` returns completions in journal order, so the n-th row of an instance is the
+    // `stateSessions` returns settled calls in journal order, so the n-th row of an instance is the
     // n-th call it made — which is what pairs it with the n-th start.
     const taken = new Map<string, number>();
     return stateSessions(session.project, request.taskId, request.runId).map((s) => {
@@ -1260,6 +1372,11 @@ export class AppService {
       const nth = taken.get(key) ?? 0;
       taken.set(key, nth + 1);
       const startedAt = starts.get(key)?.[nth];
+      // The ROW's own verdict wins over the journal roll-up. An interrupted call has no terminal
+      // event, so `costs` holds nothing for it, and a failed one is now distinguished at the source
+      // rather than inferred — see `StateSession.outcome`.
+      const settled = costs.get(key);
+      const status = s.outcome === "interrupted" ? "interrupted" : s.outcome === "error" ? "error" : settled?.status;
       return {
         runId: s.runId,
         instanceId: s.instanceId,
@@ -1268,7 +1385,8 @@ export class AppService {
         seq: s.seq,
         at: s.at,
         ...(startedAt !== undefined ? { startedAt } : {}),
-        ...(costs.get(key) ?? {}),
+        ...(settled ?? {}),
+        ...(status !== undefined ? { status } : {}),
       };
     });
   }
@@ -1323,6 +1441,18 @@ export class AppService {
     // What this state actually said is its record minus that, and only that belongs on screen.
     const inherited = store.messages(`${row.sessionId}@${row.seq}`);
     const turns = turnsOf(record.value, inherited);
+    // An interrupted call's TAILS — the fragment it was writing when the process died, preserved by
+    // the streamed partial. Rendered as one trailing turn through the ordinary machinery (a
+    // `thinking` part becomes a thought row), never folded into `messages` where it could be
+    // mistaken for a turn somebody finished.
+    const tails = (record.value as { value?: { partial?: { text?: string; thinking?: string } } } | undefined)?.value?.partial;
+    if (tails !== undefined && (tails.text !== undefined || tails.thinking !== undefined)) {
+      turns.push({
+        role: "assistant",
+        ...(tails.text !== undefined ? { text: tails.text } : {}),
+        ...(tails.thinking !== undefined ? { parts: [{ type: "thinking", thinking: tails.thinking }] as never } : {}),
+      });
+    }
     if (turns.length === 0 && inherited.length > 0) {
       // The record was nothing but the history it was handed. Rare, and an answer rather than a
       // blank panel: the call happened, and it added nothing anybody can read.
@@ -1727,16 +1857,35 @@ export class AppService {
     // it; hw does not drain the prompt handle's events, so this is the single consumer that contract
     // asks for. Composed INSIDE the session layers below, which is what lets a delta name the position
     // it belongs to instead of being attributed by guesswork.
+    // The live turn's DURABLE copy: the accumulated partial streams into the open record row on a
+    // throttle, so a crash loses at most one flush window of finished turns. The store is scoped
+    // exactly as the run's own record store is — same task, same run — which is what makes the
+    // position key match the row `withRecord` claimed.
+    const liveStore = new SqliteSessionStore(project.db, { taskId, runId: started.runId });
+    const liveFlush = new LiveTurnFlusher(() => {
+      const snap = open.liveTurns.snapshot(taskId);
+      if (snap === null || snap.sessionId === undefined || snap.seq === undefined) return;
+      const partial = partialRecordValue(snap);
+      if (partial !== null) liveStore.streamPartial(snap.sessionId, snap.seq, partial, snap.providerSessionId);
+    });
     const streaming = withTurnStream((delta) => {
+      // Folded into main's live-turn log FIRST, so the number the push carries is the count a
+      // `session:live` snapshot taken now would report — the merge protocol that lets a viewer seed
+      // from the snapshot and skip the pushes already folded into it. The published item is the
+      // log's ENRICHED copy (timestamps, thought duration), so viewer, snapshot and persisted
+      // partial all hold the same stamps.
+      const { n, item } = open.liveTurns.apply(taskId, delta);
+      liveFlush.note();
       this.publish({
         type: "session:turn",
         taskId,
         runId: started.runId,
+        n,
         ...(delta.session !== undefined ? { sessionId: delta.session.id, seq: delta.session.seq } : {}),
         ...(delta.stateId !== undefined ? { stateId: delta.stateId } : {}),
         ...(delta.text !== undefined ? { text: delta.text } : {}),
         ...(delta.thinking !== undefined ? { thinking: delta.thinking } : {}),
-        ...(delta.item !== undefined ? { item: delta.item } : {}),
+        ...(item !== undefined ? { item } : {}),
       });
     }, prompt, open.liveCalls);
 
@@ -1814,6 +1963,12 @@ export class AppService {
           persistence: {
             record: (event, atMs) => {
               recorder.record(event, atMs);
+              // The record lands when the operation settles — the stored view now holds everything
+              // the live tail held, so the tail goes BEFORE the event that makes viewers refetch.
+              // Kept in step with the renderer, which drops its own copy on the same two events.
+              if (event.type === "operation.completed" || event.type === "operation.failed") {
+                open.liveTurns.clear(taskId);
+              }
               this.publishFor(open, {
                 type: "engine:event",
                 taskId,
@@ -1827,6 +1982,8 @@ export class AppService {
           },
           policy,
           approve,
+          // Mid-run questions go to the person, not to the approval gate — see `QuestionHub`.
+          askUser: open.questions.asker({ taskId }),
           session,
           workspace: {
             root: workspace.root,
@@ -1894,6 +2051,8 @@ export class AppService {
         output.flush();
         owner?.release();
         open.live.delete(taskId);
+        open.liveTurns.drop(taskId);
+        liveFlush.dispose();
         this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
         this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
         settle();
@@ -2223,7 +2382,15 @@ export class AppService {
          *    command ran in whatever directory the app was launched from. The run's own root — read,
          *    never ensured (see above).
          */
-        services: { tools, gate, workspace: { root: workspaceRoot }, policy, approve } as ExecServices,
+        services: {
+          tools,
+          gate,
+          workspace: { root: workspaceRoot },
+          policy,
+          approve,
+          // A chat turn can reach an agent that asks — same question channel as a run's.
+          askUser: open.questions.asker({ taskId: request.taskId }),
+        } as ExecServices,
       },
       {
         instance: {
@@ -2469,6 +2636,8 @@ export class AppService {
       for (const [requestId, run] of session.approvalRun) {
         if (run.taskId === taskId) session.approvals.decide(requestId, "deny", "once");
       }
+      // And so does a parked question — dismissed, not errored: nobody is going to answer it.
+      session.questions.dismissFor(taskId);
       run.abort.abort();
     } else if (session.project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
       // Another process is driving it. Raise the flag its heartbeat polls — cross-
@@ -2503,6 +2672,32 @@ export class AppService {
       throw new Error(`no pending approval '${requestId}'`);
     }
     return { requestId };
+  }
+
+  /** Mid-run questions awaiting the person — `AskUserQuestion`, parked by a running agent. */
+  pendingQuestions(): PendingQuestion[] {
+    return [...this.sessions.values()].flatMap((s) => s.questions.list().map(pendingQuestionOf));
+  }
+
+  /**
+   * Answer a parked question — or dismiss it (`answers` absent), which tells the agent to use its
+   * own judgment and continue. Routed by owner, exactly as approvals are.
+   */
+  submitQuestion(requestId: string, answers?: Record<string, string | string[]>): { requestId: string } {
+    const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
+    if (owner === undefined || !owner.questions.answer(requestId, answers)) {
+      throw new Error(`no pending question '${requestId}'`);
+    }
+    return { requestId };
+  }
+
+  /**
+   * The live turn a task is streaming right now — everything `session:turn` has carried for the
+   * call in flight, re-readable by a viewer that navigated away and back. `null` ⇒ nothing is
+   * streaming, which after the record lands is the ordinary answer.
+   */
+  sessionLive(request: { taskId: string; project?: string }): LiveTurnSnapshot | null {
+    return this.session(request.project).liveTurns.snapshot(request.taskId);
   }
 
   pendingInteractions(): PendingInteraction[] {
@@ -4393,8 +4588,31 @@ function turnOf(raw: JsonValue): SessionTurn {
   };
 }
 
+/**
+ * The record's per-message times (`messageTimes`), aligned to its OWN messages.
+ *
+ * Written parallel to `messages` while the call streamed, so the alignment is by index — and the
+ * offset matters: `ownMessages` drops the inherited prefix, so the n-th own turn is the
+ * `(dropped + n)`-th stamp. A record with no times (written before turns were timed, or by a
+ * transport that never streamed) yields nothing rather than zeros.
+ */
 function turnsOf(value: JsonValue | undefined, inherited: readonly JsonValue[] = []): SessionTurn[] {
-  return ownMessages(messagesOfRecord(value), inherited).map(turnOf);
+  const all = messagesOfRecord(value);
+  const own = ownMessages(all, inherited);
+  const raw = (value as { value?: { messageTimes?: unknown } } | undefined)?.value?.messageTimes;
+  const times = Array.isArray(raw) ? (raw as Array<{ at?: number; startedAt?: number; thoughtMs?: number }>) : [];
+  const dropped = all.length - own.length;
+  return own.map((message, i) => {
+    const turn = turnOf(message);
+    const time = times[dropped + i];
+    if (time === undefined) return turn;
+    return {
+      ...turn,
+      ...(typeof time.at === "number" ? { at: time.at } : {}),
+      ...(typeof time.startedAt === "number" ? { startedAt: time.startedAt } : {}),
+      ...(typeof time.thoughtMs === "number" ? { thoughtMs: time.thoughtMs } : {}),
+    };
+  });
 }
 
 /** The record's subagent conversations, as turns — `LlmOutput.sidechains`, read the way `turns` is. */

@@ -141,6 +141,15 @@ export interface StateSession {
   /** Where THIS operation's record sits in it. One position back from where the call ended. */
   seq: number;
   at: number;
+  /**
+   * How the call ENDED — and `interrupted` is the one that cannot come from the journal at all.
+   *
+   * A completed call and a failed one each wrote a terminal event; a call the process died inside
+   * wrote neither, and is recovered from its own record row instead (see
+   * {@link interruptedSessions}). Absent means the journal predates the distinction, which reads as
+   * the success it always did.
+   */
+  outcome?: "success" | "error" | "interrupted";
 }
 
 /**
@@ -166,15 +175,22 @@ export function stateSessions(project: Project, taskId: string, runId?: number):
   // Queried through the `session_ref` generated column rather than by folding the whole journal: the
   // rows wanted are a small fraction of a run's events, the column is indexed, and NOT NULL on it is
   // precisely "this operation ran in a conversation". That column is what migration 1 exists for.
+  //
+  // BOTH settled kinds. A failed call ran, said things, and cost money — its transcript is in the
+  // record store exactly as a successful one's is, and reading only completions is why an errored
+  // state's conversation was unreachable from the panel that lists them. It appears here at all
+  // because `operation.failed` now carries the metrics a post-dispatch failure has (upstream), and
+  // `session_ref` is derived from them.
   const rows = project.db
     .prepare(
-      `SELECT run_id, payload_json, session_ref, created_at FROM state_machine_events
-        WHERE task_id = ? AND type = 'operation.completed' AND session_ref IS NOT NULL
+      `SELECT run_id, type, payload_json, session_ref, created_at FROM state_machine_events
+        WHERE task_id = ? AND type IN ('operation.completed', 'operation.failed') AND session_ref IS NOT NULL
           ${runId === undefined ? "" : "AND run_id = ?"}
         ORDER BY seq`,
     )
     .all(...(runId === undefined ? [taskId] : [taskId, runId])) as Array<{
     run_id: number;
+    type: string;
     payload_json: string;
     session_ref: string;
     created_at: number;
@@ -194,7 +210,95 @@ export function stateSessions(project: Project, taskId: string, runId?: number):
       // otherwise learn — a call that had to fork ended somewhere it did not begin.
       seq: position.seq - 1,
       at: row.created_at,
+      outcome: row.type === "operation.failed" ? "error" : "success",
     });
+  }
+  out.push(...interruptedSessions(project, taskId, runId));
+  // One list in time order, however each row was found — the panel reads a run top to bottom, and a
+  // recovered call belongs where it happened rather than appended after everything that outlived it.
+  return out.sort((a, b) => a.at - b.at);
+}
+
+/**
+ * The calls a CRASH left with no terminal event — recovered by pairing the journal against the
+ * record store, because neither half can answer alone.
+ *
+ * A process that dies mid-call writes no `operation.completed` and no `operation.failed`, so the
+ * journal join every other row here uses does not exist. What survives is an `operation.started`
+ * event with the instance and state on it, and an operation record holding the position — and,
+ * since recovery settles them, the outcome.
+ *
+ * ## Why pairing in ORDER is sound rather than a guess
+ *
+ * Both lists are in START order: the engine emits `operation.started` immediately before dispatch,
+ * and `withRecord` inserts the record immediately after, so the n-th unterminated start is the n-th
+ * record left behind — under concurrency too, since both orders are the same order. The lists are
+ * required to be the same LENGTH before anything is paired: a mismatch means an operation started
+ * without recording (a pre-dispatch failure is excluded by being terminated, but the invariant is
+ * upstream's to keep, not ours to assume), and the honest answer to an ambiguous pairing is no rows
+ * at all. A conversation attributed to the wrong state is worse than one that is merely missing.
+ */
+function interruptedSessions(project: Project, taskId: string, runId?: number): StateSession[] {
+  // Read through `project.db` like the query above it, rather than through the runtime and event
+  // STORES: everything here is one join over three tables, and depending on the wrappers would make
+  // this the only projection in the file that cannot run against a bare database handle.
+  const runs = project.db
+    .prepare(
+      `SELECT id FROM runs WHERE task_id = ? AND outcome = 'interrupted' ${runId === undefined ? "" : "AND id = ?"} ORDER BY id`,
+    )
+    .all(...(runId === undefined ? [taskId] : [taskId, runId])) as Array<{ id: number }>;
+  const out: StateSession[] = [];
+  for (const run of runs) {
+    // Which instances started an operation that never settled — the calls that were in flight.
+    const events = project.db
+      .prepare(
+        `SELECT type, payload_json, created_at FROM state_machine_events
+          WHERE task_id = ? AND run_id = ?
+            AND type IN ('operation.started', 'operation.completed', 'operation.failed')
+          ORDER BY seq`,
+      )
+      .all(taskId, run.id) as Array<{ type: string; payload_json: string; created_at: number }>;
+    const started = new Map<number, { stateId: string; at: number }>();
+    for (const row of events) {
+      const event = JSON.parse(row.payload_json) as { instanceId?: number; stateId?: string };
+      if (event.instanceId === undefined) continue;
+      if (row.type === "operation.started") {
+        started.set(event.instanceId, { stateId: event.stateId ?? "", at: row.created_at });
+      } else {
+        started.delete(event.instanceId);
+      }
+    }
+    if (started.size === 0) continue;
+    // The records those calls left — placed ones only, since an unplaced call has no conversation
+    // to list. Ordered by insertion, which is start order.
+    const records = project.db
+      .prepare(
+        `SELECT r.record_id AS record_id, r.status AS status FROM operation_records r
+           JOIN session_positions p ON p.operation_record_id = r.id
+          WHERE r.task_id = ? AND r.run_id = ? AND r.status != 'completed'
+          ORDER BY r.id`,
+      )
+      .all(taskId, run.id) as Array<{ record_id: string; status: string }>;
+    if (records.length !== started.size) continue; // ambiguous — see the header
+    const inFlight = [...started.entries()];
+    for (const [i, record] of records.entries()) {
+      // `<sessionId>:<seq>` — the id `withRecord` gives a placed record, which is the position
+      // itself. Split on the LAST colon: a session id may contain one (a seeded `review:draft`).
+      const cut = record.record_id.lastIndexOf(":");
+      if (cut <= 0) continue;
+      const seq = Number(record.record_id.slice(cut + 1));
+      if (!Number.isInteger(seq)) continue;
+      const [instanceId, where] = inFlight[i]!;
+      out.push({
+        runId: run.id,
+        instanceId,
+        stateId: where.stateId,
+        sessionId: record.record_id.slice(0, cut),
+        seq,
+        at: where.at,
+        outcome: "interrupted",
+      });
+    }
   }
   return out;
 }
