@@ -11,7 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ExecServices, Tool } from "@declarative-ai/exec";
-import { createGlobTool, createGrepTool, globToRegExp, registerSearchTools } from "../src/searchTools";
+import { globToRegExp } from "@jaira/shared";
+import { createGlobTool, createGrepTool, registerSearchTools } from "../src/searchTools";
 import { newRegistry } from "../src/wiring";
 
 let dir: string;
@@ -33,31 +34,6 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 const ctx = (): ExecServices => ({ workspace: { root: dir } }) as ExecServices;
 const call = async (tool: Tool, input: unknown, c: ExecServices = ctx()) =>
   (await (tool.run as (i: unknown, x: unknown) => Promise<Record<string, unknown>>)(input, c)) ?? {};
-
-describe("globToRegExp", () => {
-  it("keeps `*` inside one segment and lets `**` cross them", () => {
-    // The one distinction that makes writing a glob worth more than writing a substring.
-    expect(globToRegExp("src/*.ts").test("src/a.ts")).toBe(true);
-    expect(globToRegExp("src/*.ts").test("src/deep/c.ts")).toBe(false);
-    expect(globToRegExp("src/**/*.ts").test("src/deep/c.ts")).toBe(true);
-  });
-
-  it("lets `**/` match zero directories, which is what everyone means by it", () => {
-    expect(globToRegExp("**/*.ts").test("top.ts")).toBe(true);
-    expect(globToRegExp("**/*.ts").test("src/deep/c.ts")).toBe(true);
-  });
-
-  it("treats a dot as a literal rather than as any character", () => {
-    expect(globToRegExp("*.ts").test("axts")).toBe(false);
-  });
-
-  it("reads a brace group as alternation", () => {
-    const m = globToRegExp("src/*.{ts,txt}");
-    expect(m.test("src/a.ts")).toBe(true);
-    expect(m.test("src/b.txt")).toBe(true);
-    expect(m.test("src/c.md")).toBe(false);
-  });
-});
 
 describe("glob", () => {
   const tool = () => createGlobTool();

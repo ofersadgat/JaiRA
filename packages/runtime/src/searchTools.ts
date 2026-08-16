@@ -19,6 +19,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import type { ExecServices, JsonValue, Tool } from "@declarative-ai/exec";
+import { globToRegExp } from "@jaira/shared";
 import { withinWorkspace } from "./artifactPath";
 import { isDeniedPath } from "./policy";
 
@@ -45,56 +46,6 @@ const MAX_VISIT = 20_000;
 const MAX_MATCHES = 200;
 /** Files bigger than this are not searched — a grep through a bundled artifact finds only noise. */
 const MAX_GREP_BYTES = 2_000_000;
-
-/**
- * Translate a glob into a regular expression.
- *
- * `**` crosses directory separators and `*` does not, which is the one distinction that makes
- * `src/*.ts` mean something different from `src/**\/*.ts` — the whole reason a caller writes a glob
- * rather than a substring. Written by scanning rather than by chained `replace` calls, because the
- * replacements interfere: turning `*` into `[^/]*` first leaves `**` as two of them.
- */
-export function globToRegExp(pattern: string): RegExp {
-  let out = "";
-  for (let i = 0; i < pattern.length; i++) {
-    const c = pattern[i]!;
-    if (c === "*") {
-      if (pattern[i + 1] === "*") {
-        // `**/` also matches ZERO directories, so `**/*.ts` finds `a.ts` at the root — which is what
-        // everyone means by it and what a naive `.*/` would miss.
-        if (pattern[i + 2] === "/") {
-          out += "(?:.*/)?";
-          i += 2;
-        } else {
-          out += ".*";
-          i += 1;
-        }
-      } else {
-        out += "[^/]*";
-      }
-      continue;
-    }
-    if (c === "?") {
-      out += "[^/]";
-      continue;
-    }
-    if (c === "{") {
-      out += "(?:";
-      continue;
-    }
-    if (c === "}") {
-      out += ")";
-      continue;
-    }
-    if (c === ",") {
-      // Only inside a brace group is a comma an alternation; elsewhere it is a character in a name.
-      out += out.includes("(?:") ? "|" : ",";
-      continue;
-    }
-    out += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-  }
-  return new RegExp(`^${out}$`);
-}
 
 /** Every file under `root`, workspace-relative with forward slashes, bounded and pruned. */
 function walk(root: string, limit: number): { files: string[]; truncated: boolean } {

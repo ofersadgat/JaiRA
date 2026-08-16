@@ -21,3 +21,4 @@ export * from "./changeset";
 export * from "./diffStrategies";
 export * from "./valueViews";
 export * from "./toolVocabulary";
+export * from "./scopes";
