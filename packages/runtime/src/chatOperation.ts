@@ -48,7 +48,7 @@ import type { InlineFamily, NamedParameter, PromptOp } from "@declarative-ai/exe
 import type { JsonValue } from "@declarative-ai/json";
 import type { ChatPlanView, ChatSettings, PermissionsDecl, SettingOrigin, UnresolvedSetting } from "@jaira/shared";
 import type { ReasoningSpec } from "@declarative-ai/llm";
-import { claudePermissionSettings, planAgentTools } from "./tools";
+import { claudePermissionSettings, compileClaudeScopeRules, planAgentTools } from "./tools";
 
 
 /**
@@ -330,7 +330,16 @@ function agentToolWiring(settings: ChatSettings): {
 } {
   if (settings.tools === undefined) return { environment: {}, config: {} };
   const plan = planAgentTools(settings.tools, settings.implementations ?? {});
-  const rules = claudePermissionSettings({ ask: plan.askNatives });
+  // The scope table, compiled into the agent's own rules, so its built-ins are bounded UP FRONT
+  // rather than one callback at a time. Our gate stays underneath for what rules cannot express.
+  const scoped = settings.permissions?.scopes === undefined
+    ? { allow: [], ask: [], deny: [] }
+    : compileClaudeScopeRules(settings.permissions.scopes);
+  const rules = claudePermissionSettings({
+    allow: scoped.allow,
+    ask: [...plan.askNatives, ...scoped.ask],
+    deny: scoped.deny,
+  });
   return {
     environment: { tools: plan.inject },
     config: Object.keys(rules).length > 0 ? { providerOptions: rules as unknown as JsonValue } : {},

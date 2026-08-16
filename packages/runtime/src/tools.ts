@@ -24,13 +24,18 @@ import {
 } from "@declarative-ai/exec";
 import { createToolGate, isPermissionDenied, PermissionLedger, withPermission } from "@declarative-ai/permissions";
 import {
+  absolutize,
+  isAbsolutePath,
   logicalOfNative,
+  normalizePath,
+  resolveScopes,
   scopeModeOf,
   TOOL_PROFILES,
   TOOL_SPEC_BY_NAME,
   TOOL_SPECS,
   type PermissionsDecl,
   type Scope,
+  type ScopeOptions,
   type ToolImplementation,
 } from "@jaira/shared";
 import { registerFileTools, READ_FILE, WRITE_FILE, type FileToolOptions } from "./fileTools";
@@ -39,8 +44,9 @@ import { registerWebTools, type WebToolOptions } from "./webTools";
 import type { Approver, ExecPolicy, PermissionMode, ToolGate } from "@declarative-ai/permissions";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { NodeExec, type Exec } from "./exec";
-import { isDeniedPath } from "./policy";
-import { interpreterFor, type ExecEnv } from "./paths";
+import { commandWords, isDeniedPath } from "./policy";
+import { parseCommand } from "./command";
+import { dialectFor, interpreterFor, type ExecEnv } from "./paths";
 
 export interface ToolOptions {
   exec?: Exec;
@@ -256,12 +262,19 @@ export function gateTools(options: {
   authored?: PermissionsDecl | undefined;
   /** What a relative scope glob and a relative call path are resolved against. */
   workspaceRoot?: string | undefined;
+  /**
+   * The executor's own scope table — the FLOOR, which the operation's `scopes` narrows within.
+   *
+   * Composed as two narrowings rather than merged: a state that allows what the floor denies is
+   * still denied, which is what "a state may narrow, never widen" has to mean.
+   */
+  scopeFloor?: readonly Scope[] | undefined;
 }): { tools: Record<string, Tool>; gate: ToolGate } {
   const ledger = new PermissionLedger({ baseline: options.policy?.baseline ?? {} });
   if (options.authored?.profile !== undefined) ledger.seedProfile(options.sessionId, options.authored.profile);
   // With no approver wired, an `ask` denies — the same unattended default the approval hub takes.
   const approve: Approver = options.approve ?? (() => ({ decision: "deny", scope: "once" }));
-  const scopeNarrowing = scopeNarrowingFor(options.authored?.scopes, options.workspaceRoot);
+  const scopeNarrowing = scopeNarrowingFor(options.authored?.scopes, options.workspaceRoot, undefined, options.scopeFloor);
   /** One gate over the SAME ledger, so a decision made at either end is remembered at both. */
   const gate = createToolGate({
     ledger,
@@ -380,10 +393,12 @@ export function claudeAskSettings(tools: readonly string[]): Record<string, Json
  * care — a name in both is denied, which is the answer that should win.
  */
 export function claudePermissionSettings(rules: {
+  allow?: readonly string[];
   ask?: readonly string[];
   deny?: readonly string[];
 }): Record<string, JsonValue> {
   const permissions: Record<string, unknown> = {};
+  if (rules.allow !== undefined && rules.allow.length > 0) permissions["allow"] = [...rules.allow];
   if (rules.ask !== undefined && rules.ask.length > 0) permissions["ask"] = [...rules.ask];
   if (rules.deny !== undefined && rules.deny.length > 0) permissions["deny"] = [...rules.deny];
   if (Object.keys(permissions).length === 0) return {};
@@ -506,14 +521,156 @@ export function claudeReplacements(): Record<string, string> {
 export function scopeNarrowingFor(
   scopes: readonly Scope[] | undefined,
   workspaceRoot: string | undefined,
+  execEnv: ExecEnv = "windows",
+  floor?: readonly Scope[] | undefined,
 ): ((tool: { name: string }, input: FunctionInputs) => PermissionMode | undefined) | undefined {
-  if (scopes === undefined || scopes.length === 0) return undefined;
+  const both = [...(floor ?? []), ...(scopes ?? [])];
+  if (both.length === 0) return undefined;
+  const options = { ...(workspaceRoot !== undefined ? { root: workspaceRoot } : {}) };
   return (tool, input) => {
     // By LOGICAL name, whichever implementation called: a gate asked about the agent's own `Glob`
     // resolves the table written for `glob`. Without this the two spellings would be two policies.
     const name = TOOL_SPEC_BY_NAME.has(tool.name) ? tool.name : (logicalOfNative(tool.name) ?? tool.name);
-    return scopeModeOf(scopes, TOOL_SPEC_BY_NAME.get(name), name, input, {
-      ...(workspaceRoot !== undefined ? { root: workspaceRoot } : {}),
-    });
+
+    // A SHELL COMMAND is about more than one place, and the ordinary extractor cannot see them: its
+    // paths are inside a string. See `commandSubjects` — the cwd it runs in plus every path it
+    // names, strictest winning, with `cd` moving the directory for what follows it.
+    if (name === "bash") {
+      const args = (input ?? {}) as { command?: unknown; cwd?: unknown };
+      if (typeof args.command === "string" && workspaceRoot !== undefined) {
+        const cwd = typeof args.cwd === "string" && args.cwd !== "" ? absolutize(args.cwd, workspaceRoot) : workspaceRoot;
+        const subjects = commandSubjects(args.command, cwd, execEnv);
+        // A line nothing could parse is already `ask` under the policy's own rule; resolving its cwd
+        // alone would be a quieter answer than the one the parser already gives.
+        const mode = strictest2(floor, scopes, name, subjects.paths, options);
+        return subjects.unparsed ? strictestOf(mode, "ask") : mode;
+      }
+    }
+    // Each layer resolved on its own and the stricter kept — see `layeredScopeMode`. Merging the two
+    // tables into one list would let a state's specific entry outrank the floor's, which is exactly
+    // the widening the floor exists to forbid.
+    const spec = TOOL_SPEC_BY_NAME.get(name);
+    const hasFloor = floor !== undefined && floor.length > 0;
+    const fromFloor = hasFloor ? scopeModeOf(floor, spec, name, input, options) : undefined;
+    const fromState =
+      scopes === undefined || scopes.length === 0
+        ? undefined
+        : scopeModeOf(scopes, spec, name, input, { ...options, unmatched: hasFloor ? "silent" : "deny" });
+    if (fromFloor === undefined) return fromState;
+    if (fromState === undefined) return fromFloor;
+    return strictestOf(fromFloor, fromState);
   };
+}
+
+/** The strictest verdict across two layers for a set of paths — the `bash` case of the above. */
+function strictest2(
+  floor: readonly Scope[] | undefined,
+  scopes: readonly Scope[] | undefined,
+  tool: string,
+  paths: readonly string[],
+  options: ScopeOptions,
+): PermissionMode {
+  const modes: PermissionMode[] = [];
+  const hasFloor = floor !== undefined && floor.length > 0;
+  if (hasFloor) modes.push(resolveScopes(floor, tool, paths, options) as PermissionMode);
+  if (scopes !== undefined && scopes.length > 0) {
+    modes.push(resolveScopes(scopes, tool, paths, { ...options, unmatched: hasFloor ? "silent" : "deny" }) as PermissionMode);
+  }
+  return modes.reduce((a, b) => strictestOf(a, b), "allow" as PermissionMode);
+}
+
+/** `deny` ▸ `ask` ▸ `smart` ▸ `allow`, for the one place here that composes two modes. */
+function strictestOf(a: PermissionMode, b: PermissionMode): PermissionMode {
+  const rank: Record<PermissionMode, number> = { allow: 0, smart: 1, ask: 2, deny: 3 };
+  return rank[a] >= rank[b] ? a : b;
+}
+
+/**
+ * The places a shell command is about — its working directory, and every path it names.
+ *
+ * The sandbox for a command is where it RUNS, so the cwd is always in the set rather than a fallback
+ * when no path is named: a command naming one innocuous file while running somewhere it should not
+ * be is still running somewhere it should not be. Every path argument joins it, and the caller takes
+ * the strictest — `cp code/app/x infra/x` is an `infra/**` call however permissive the source is.
+ *
+ * `cd` MOVES the working directory for the commands after it on the line. The parser already splits
+ * a line into its commands, so this walks them in order and carries the directory along; `cd infra
+ * && rm -rf .` is judged at `infra/`, which is the whole reason to track it.
+ *
+ * Extraction is best-effort BY CONSTRUCTION, and the failure direction is what makes that
+ * acceptable: an argument that looks like a path is treated as one, and a line the parser cannot
+ * model at all is already `ask` under the existing "unparsable ⇒ ask" rule. A missed path costs a
+ * prompt, never a silent pass.
+ */
+export function commandSubjects(
+  command: string,
+  cwd: string,
+  execEnv: ExecEnv = "windows",
+): { paths: string[]; unparsed: boolean } {
+  const parsed = parseCommand(command, dialectFor(execEnv));
+  if (parsed.unparsed) return { paths: [cwd], unparsed: true };
+  const paths = new Set<string>([cwd]);
+  let here = cwd;
+  for (const one of parsed.commands) {
+    const words = commandWords(one);
+    if (one.program === "cd" || one.program === "pushd") {
+      const target = words[0];
+      if (target !== undefined) here = resolveAgainst(here, target);
+      paths.add(here);
+      continue;
+    }
+    paths.add(here);
+    for (const word of words) {
+      // A path is an argument that names a place: one with a separator, or an absolute one. A bare
+      // word is far more often a subcommand, a branch name or a pattern, and treating those as paths
+      // would resolve `git push origin main` against `./origin` and `./main`.
+      if (word.includes("/") || word.includes("\\") || isAbsolutePath(word)) paths.add(resolveAgainst(here, word));
+    }
+  }
+  return { paths: [...paths], unparsed: false };
+}
+
+/** One argument, resolved against the directory the command runs in. */
+function resolveAgainst(cwd: string, value: string): string {
+  return isAbsolutePath(value) ? normalizePath(value) : absolutize(value, cwd);
+}
+
+/**
+ * A scope table, compiled into the agent's OWN permission rules.
+ *
+ * Verified against `claude 2.1.142`: its rules are path-scoped — `deny: ["Read(outside/**)"]` refuses
+ * a read outside and lets the neighbouring one through. So a table need not be enforced one callback
+ * at a time; it can be handed over, and the agent bounds its own built-ins up front. Our callback
+ * stays underneath for everything the rule syntax cannot express — `bash` above all, whose paths
+ * live inside a string.
+ *
+ * PRECEDENCE IS `deny > ask > allow`, which is why every rule emitted here is scoped. A bare
+ * `ask: ["Read"]` would beat a specific `allow: ["Read(work/**)"]` and turn a narrow table into a
+ * blanket prompt — the trap that made a first live test read as "path rules do not work".
+ *
+ * Only tools with a native name and a path argument compile: a rule can only name what the agent
+ * calls it, and can only scope what its arguments carry.
+ */
+export function compileClaudeScopeRules(
+  scopes: readonly Scope[],
+  options: { root?: string | undefined } = {},
+): { allow: string[]; ask: string[]; deny: string[] } {
+  const out = { allow: [] as string[], ask: [] as string[], deny: [] as string[] };
+  for (const scope of scopes) {
+    if (scope.path === undefined || scope.path === "") continue;
+    const glob = absolutize(scope.path, options.root);
+    for (const spec of TOOL_SPECS) {
+      const native = spec.natives?.claude;
+      if (native === undefined || (spec.pathArgs ?? []).length === 0) continue;
+      const mode = scope.tools?.[spec.name] ?? scope.default;
+      // `smart` inspects the call, so it cannot be a rule — it has to reach our callback to be
+      // decided at all. Emitting it as `ask` would be a lie about who decides.
+      if (mode === undefined || mode === "smart") continue;
+      const rule = `${native}(${glob})`;
+      if (mode === "allow") out.allow.push(rule);
+      else if (mode === "ask") out.ask.push(rule);
+      else out.deny.push(rule);
+    }
+  }
+  return out;
 }

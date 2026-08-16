@@ -61,6 +61,16 @@ export interface ScopeOptions {
    * two files differ only in case — rarer, and it errs toward the stricter entry.
    */
   caseSensitive?: boolean | undefined;
+  /**
+   * What a path NO scope matches resolves to. Default `"deny"` — the sandbox property.
+   *
+   * `"silent"` answers `undefined` instead, and it exists for the second of two LAYERS. A lone table
+   * is a sandbox: what it does not name is refused, which is the whole default policy. A table
+   * layered under a floor is a NARROWING, and there "says nothing about this path" has to mean no
+   * opinion rather than refusal — otherwise a state adding one `deny` for `infra/` would refuse
+   * every other path in the project, having meant to add a rule rather than replace the sandbox.
+   */
+  unmatched?: "deny" | "silent" | undefined;
 }
 
 // --- globs -------------------------------------------------------------------
@@ -238,15 +248,21 @@ function compile(scopes: readonly Scope[], key: "path" | "url", options: ScopeOp
  * Inheritance survives because a scope that says nothing is still skipped: a scope naming `edit`
  * with no `default` leaves `read_file` to resolve at its parent.
  */
-function resolveIn(compiled: readonly Compiled[], tool: string, value: string): ToolMode {
+function resolveIn(
+  compiled: readonly Compiled[],
+  tool: string,
+  value: string,
+  unmatched: "deny" | "silent",
+): ToolMode | undefined {
   for (const entry of compiled) {
     if (!entry.matches(value)) continue;
     const own = entry.scope.tools;
     if (own !== undefined && Object.hasOwn(own, tool)) return own[tool]!;
     if (entry.scope.default !== undefined) return entry.scope.default;
   }
-  // Nothing said anything about this place — the sandbox property.
-  return "deny";
+  // Nothing said anything about this place — the sandbox property, unless this table is a narrowing
+  // layered under one (see `ScopeOptions.unmatched`).
+  return unmatched === "silent" ? undefined : "deny";
 }
 
 /**
@@ -264,7 +280,7 @@ export function resolveScope(
 ): ToolMode {
   // Case is handled by the compiled matcher's flag, not by folding the value — folding here as well
   // would be a second mechanism for one rule, and the two could disagree about a locale.
-  return resolveIn(compile(scopes, "path", options), tool, absolutize(path, options.root));
+  return resolveIn(compile(scopes, "path", options), tool, absolutize(path, options.root), options.unmatched ?? "deny") as ToolMode;
 }
 
 /**
@@ -280,7 +296,7 @@ export function resolveUrlScope(
   url: string,
   options: ScopeOptions = {},
 ): ToolMode {
-  return resolveIn(compile(scopes, "url", options), tool, url);
+  return resolveIn(compile(scopes, "url", options), tool, url, options.unmatched ?? "deny") as ToolMode;
 }
 
 /**
@@ -382,4 +398,36 @@ export function scopeModeOf(
     ...subjects.urls.map((url) => resolveUrlScope(scopes, tool, url, options)),
   ];
   return strictest(...modes);
+}
+
+/**
+ * Two layers, composed as a floor and a narrowing.
+ *
+ * The executor's table is the FLOOR — an operator's statement about what anything running under it
+ * may touch — and a state's table narrows within it. A state can never widen: the two are resolved
+ * separately and the stricter answer wins, so a state that allows `write_file` under a floor that
+ * denies it is still denied, exactly as a state cannot widen past its profile.
+ *
+ * Either may be absent. With no floor a state's table stands alone; with no state table the floor
+ * governs; with neither there is no narrowing at all and nothing pays for the feature.
+ */
+export function layeredScopeMode(
+  floor: readonly Scope[] | undefined,
+  narrowed: readonly Scope[] | undefined,
+  tool: string,
+  path: string,
+  options: ScopeOptions = {},
+): ToolMode | undefined {
+  const hasFloor = floor !== undefined && floor.length > 0;
+  const hasNarrowing = narrowed !== undefined && narrowed.length > 0;
+  const modes: ToolMode[] = [];
+  // The FLOOR is the sandbox, so what it does not name is refused.
+  if (hasFloor) modes.push(resolveScope(floor, tool, path, options));
+  if (hasNarrowing) {
+    // The narrowing is a sandbox only when it is alone. Under a floor it may add rules without
+    // being read as replacing the sandbox — see `ScopeOptions.unmatched`.
+    const mode = resolveScope(narrowed, tool, path, { ...options, unmatched: hasFloor ? "silent" : "deny" });
+    if (mode !== undefined) modes.push(mode);
+  }
+  return modes.length === 0 ? undefined : strictest(...modes);
 }

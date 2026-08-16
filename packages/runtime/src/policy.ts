@@ -29,6 +29,8 @@
 import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, SmartVerdict } from "@declarative-ai/permissions";
 import { describeCommand, parseCommand, type CommandDialect, type ParsedCommand } from "./command";
 import { dialectFor, type ExecEnv } from "./paths";
+import type { Scope } from "@jaira/shared";
+import { scopeNarrowingFor } from "./tools";
 
 /** What a rule does when it matches — DESIGN §10.1's vocabulary. */
 export type PolicyAction = "allow" | "deny" | "require_approval";
@@ -249,6 +251,16 @@ export interface CompilePolicyOptions {
   execEnv?: ExecEnv;
   /** Called for every decision — the audit trail (DESIGN §10.2's `command_log`). */
   onDecision?: (entry: PolicyAuditEntry) => void;
+  /**
+   * WHERE anything under this policy may act — the executor's scope floor.
+   *
+   * Compiled onto `ExecPolicy.scopeOf`, which the engine hands to every gate and every wrapped tool,
+   * and which a host tool may read off `ctx.policy` to filter what it ENUMERATES. Absent ⇒ no
+   * narrowing at all, and a project that has authored no scopes pays nothing.
+   */
+  scopes?: readonly Scope[];
+  /** What a relative glob and a relative call path resolve against. */
+  workspaceRoot?: string;
 }
 
 export interface PolicyAuditEntry {
@@ -330,7 +342,9 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
     if (mode === "smart" && smart[tool] === undefined) smart[tool] = (req) => verdictFor(tool, req);
   }
 
-  return { baseline, smart };
+  // The scope floor, as the callback every consumer of a policy already knows how to read.
+  const scopeOf = scopeNarrowingFor(options.scopes, options.workspaceRoot, options.execEnv);
+  return { baseline, smart, ...(scopeOf !== undefined ? { scopeOf } : {}) };
 }
 
 /** A human-readable line for an approval prompt. */

@@ -24,6 +24,7 @@
  * That pair is why the settings screen can show the whole tree expanded while the file stays a few
  * lines: the screen renders the RESOLVED tree, and a write goes to the overlay.
  */
+import type { Scope } from "./scopes";
 import type { JsonValue } from "@declarative-ai/json";
 import type { JairaExecutorSteps } from "./executorStack";
 
@@ -40,6 +41,18 @@ export interface JairaExecutorNodeBase {
    * at the top could only make the coarser one.
    */
   steps?: JairaExecutorSteps;
+  /**
+   * WHERE anything running under this node may act — the scope table's floor (see `scopes.ts`).
+   *
+   * On the executor rather than in a key of its own because what an executor is allowed to touch is
+   * a property of that executor: it inherits down the tree like every other node setting, and the
+   * screen that configures an executor becomes the screen that bounds it. An operator writes
+   * `/mnt/c/work/**` once and no workflow authored later can reach outside it.
+   *
+   * A state's `environment.permissions.scopes` narrows this; it can never widen it, for the same
+   * reason a state cannot widen past its profile.
+   */
+  scopes?: Scope[];
 }
 
 /**

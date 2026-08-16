@@ -208,6 +208,7 @@ import { Diagnostics } from "./diagnostics";
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
 import { ProjectSession, type SyncHolder } from "./session";
 import type {
+  Scope,
   ApprovalScope,
   BoardView,
   ComponentConfig,
@@ -2002,6 +2003,11 @@ export class AppService {
     const policy = compilePolicy(config.policy, {
       execEnv: config.execEnvironment,
       onDecision: auditPolicy,
+      // The executor's scope floor, compiled onto `ExecPolicy.scopeOf`. The engine hands it to every
+      // gate and every wrapped tool, and a tool that ENUMERATES reads it off `ctx.policy` to withhold
+      // what an open would refuse. Absent ⇒ no narrowing, and nothing pays for the feature.
+      ...(scopeFloorOf(config) !== undefined ? { scopes: scopeFloorOf(config)! } : {}),
+      workspaceRoot: workspace.root,
     });
     const approve = open.approvals.approver({ taskId });
 
@@ -2489,7 +2495,11 @@ export class AppService {
      *
      * The message's own choice wins over the project's: it is the narrower, later statement.
      */
-    const compiled = compilePolicy(config.policy, { execEnv: config.execEnvironment });
+    const compiled = compilePolicy(config.policy, {
+      execEnv: config.execEnvironment,
+      ...(scopeFloorOf(config) !== undefined ? { scopes: scopeFloorOf(config)! } : {}),
+      ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+    });
     const authoredModes = plan.settings.permissions?.tools;
     const policy: ExecPolicy =
       authoredModes === undefined
@@ -5173,3 +5183,22 @@ function postureOf(
   return profile === "full" ? modes : `${profile} · ${modes}`;
 }
 
+
+/**
+ * The scope floor an executor declares — §7's "the screen that configures an executor bounds it".
+ *
+ * Read off the executor TREE rather than a key of its own, because what an executor may touch is a
+ * property of that executor and inherits down its nodes like every other node setting. The topmost
+ * declaration wins here; a per-route narrowing is the tree's own business and reaches the gate the
+ * same way once the engine resolves which route answered.
+ *
+ * `undefined` when nobody declared one, which is what keeps a project that has never heard of scopes
+ * paying nothing at all.
+ */
+function scopeFloorOf(config: JairaConfigOf): readonly Scope[] | undefined {
+  for (const node of Object.values(config.executors ?? {})) {
+    const scopes = (node as { scopes?: Scope[] }).scopes;
+    if (Array.isArray(scopes) && scopes.length > 0) return scopes;
+  }
+  return undefined;
+}

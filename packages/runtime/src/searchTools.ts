@@ -74,6 +74,22 @@ function walk(root: string, limit: number): { files: string[]; truncated: boolea
   return { files, truncated: false };
 }
 
+/**
+ * Whether this call's own scope table would refuse to open a path.
+ *
+ * A refusal at the CALL is not enough for a tool whose answer IS a listing. `grep` at the root under
+ * a table that denies `infra/**` is allowed — the root is allowed — and would then return the
+ * matching lines from `infra/`, which is exactly what the scope exists to withhold; a later
+ * `read_file` being refused is no comfort once the content is in the transcript.
+ *
+ * So the two walking tools apply the table to their RESULTS. Read off `ctx.policy.scopeOf`, the same
+ * narrowing the gate consults, so a listing and an open agree by construction.
+ */
+function refuses(ctx: ExecServices | undefined, tool: string, path: string): boolean {
+  const scopeOf = ctx?.policy?.scopeOf;
+  return scopeOf !== undefined && scopeOf({ name: tool, readOnly: true }, { path } as never) === "deny";
+}
+
 /** The workspace root for this call, or the reason there is none. */
 function rootOf(options: SearchToolOptions, ctx?: ExecServices): string | undefined {
   return ctx?.workspace?.root ?? options.cwd;
@@ -131,7 +147,12 @@ export function createGlobTool(options: SearchToolOptions = {}): Tool {
         return { error: `'${pattern}' is not a usable pattern: ${(e as Error).message}` };
       }
       const { files, truncated } = walk(scope.dir, MAX_VISIT);
-      const matched = files.filter((file) => matcher.test(file)).sort();
+      const matched = files
+        .filter((file) => matcher.test(file))
+        // SILENTLY. "12 results were withheld" tells the model exactly where to aim, which is the
+        // one thing a withheld listing must not do. The count belongs in the journal.
+        .filter((file) => !refuses(ctx, GLOB, join(scope.dir, file)))
+        .sort();
       return {
         // Relative to the SCOPE, which is what the caller named — a path it can hand straight back
         // to `read_file` only if the two agree about where they start from.
@@ -198,6 +219,9 @@ export function createGrepTool(options: SearchToolOptions = {}): Tool {
       for (const file of files) {
         if (only !== undefined && !only.test(file)) continue;
         const full = join(scope.dir, file);
+        // See `refuses`: a search that reports matches from a denied directory has leaked the very
+        // content the scope withholds, whatever a later open would have been told.
+        if (refuses(ctx, GREP, full)) continue;
         try {
           if (statSync(full).size > MAX_GREP_BYTES) continue;
           const text = readFileSync(full, "utf8");
