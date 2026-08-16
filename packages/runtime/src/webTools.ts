@@ -19,7 +19,20 @@ import type { ExecServices, JsonValue, Tool } from "@declarative-ai/exec";
 export const WEB_FETCH = "web_fetch";
 export const WEB_SEARCH = "web_search";
 
-/** How a search provider is reached. Absent ⇒ `web_search` says so rather than pretending. */
+/**
+ * The keyless default: DuckDuckGo's HTML endpoint.
+ *
+ * A search tool that needs configuration before it works is a tool most workflows will never turn
+ * on, and "grant web_search" would mean "grant a permission and then discover it fails". So there is
+ * a provider out of the box.
+ *
+ * Scraped, and that is a real cost stated plainly: this is HTML meant for a browser, so a markup
+ * change breaks it in a way an API would not. It degrades honestly — no results rather than wrong
+ * ones — and {@link WebSearchConfig} is the robust path for anyone who has a key.
+ */
+const DUCKDUCKGO = "https://html.duckduckgo.com/html/?q={query}";
+
+/** How a search provider is reached. Absent ⇒ the keyless default above. */
 export interface WebSearchConfig {
   /**
    * The endpoint, with `{query}` where the query goes.
@@ -183,29 +196,45 @@ export function createWebSearchTool(options: WebToolOptions = {}): Tool {
     readOnly: true,
     run: async (input, ctx?: ExecServices): Promise<JsonValue> => {
       const config = options.search;
-      if (config === undefined || config.endpoint.trim() === "") {
-        return { error: "no search provider is configured — set `config.tools.search.endpoint` (with `{query}` in it) to use web_search" };
-      }
+      const configured = config !== undefined && config.endpoint.trim() !== "";
       const args = (input ?? {}) as { query?: unknown };
       const query = typeof args.query === "string" ? args.query.trim() : "";
       if (query === "") return { error: "no query given" };
 
-      const url = config.endpoint.replace("{query}", encodeURIComponent(query));
+      const endpoint = configured ? config!.endpoint : DUCKDUCKGO;
+      const url = endpoint.replace("{query}", encodeURIComponent(query));
       const refusal = refuseUrl(url);
-      if (refusal !== undefined) return { error: `the configured search endpoint is unusable: ${refusal}` };
-      const headers: Record<string, string> = { accept: "application/json" };
-      if (config.apiKey !== undefined && config.apiKey !== "") headers[config.headerName ?? "authorization"] = config.apiKey;
+      if (refusal !== undefined) return { error: `the search endpoint is unusable: ${refusal}` };
+
+      // The SCOPE check for a search is about its endpoint, not its query: a query is not a place.
+      // Done here rather than through `urlArgs` because the endpoint is configuration — it never
+      // appears in the call's arguments, so the generic extractor cannot see it.
+      if (ctx?.policy?.scopeOf?.({ name: WEB_SEARCH, readOnly: true }, { url } as never) === "deny") {
+        return { error: `searching is not permitted from this workflow` };
+      }
+
+      const headers: Record<string, string> = configured
+        ? { accept: "application/json" }
+        : // The HTML endpoint answers a bare request with a consent interstitial rather than results.
+          { accept: "text/html", "user-agent": "Mozilla/5.0 (compatible; JaiRA)" };
+      if (configured && config!.apiKey !== undefined && config!.apiKey !== "") {
+        headers[config!.headerName ?? "authorization"] = config!.apiKey;
+      }
 
       const got = await get(options, url, headers, ctx?.abortSignal);
       if ("error" in got) return got;
       if (got.status >= 400) return { error: `the search provider answered ${got.status}` };
+      if (!configured) {
+        const results = duckDuckGoResults(got.body);
+        return { query, results: results as unknown as JsonValue, count: results.length };
+      }
       let body: unknown;
       try {
         body = JSON.parse(got.body);
       } catch {
         return { error: "the search provider did not answer with JSON" };
       }
-      const results = resultsAt(body, config.resultsPath).slice(0, 20).map((row) => {
+      const results = resultsAt(body, config!.resultsPath).slice(0, 20).map((row) => {
         const r = (row ?? {}) as Record<string, unknown>;
         const pick = (...keys: string[]): string => {
           for (const key of keys) if (typeof r[key] === "string") return r[key] as string;
@@ -222,4 +251,66 @@ export function createWebSearchTool(options: WebToolOptions = {}): Tool {
 export function registerWebTools(registry: { tools: Map<string, Tool> }, options: WebToolOptions = {}): void {
   registry.tools.set(WEB_FETCH, createWebFetchTool(options));
   registry.tools.set(WEB_SEARCH, createWebSearchTool(options));
+}
+
+/** One search result, in the shape every provider is normalised into. */
+interface SearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+/**
+ * Results out of DuckDuckGo's HTML page.
+ *
+ * Two things about that page make a parser necessary rather than optional. Its result links are
+ * REDIRECTS — `//duckduckgo.com/l/?uddg=<the real url, percent-encoded>` — so handing them back
+ * unwrapped would give a model a tracker to fetch instead of the page it asked for. And the titles
+ * and snippets carry markup (`<b>` around the matched terms), which has to come off before the text
+ * is worth reading.
+ *
+ * Deliberately tolerant. Anything it cannot parse is skipped rather than failing the call, so a
+ * markup change costs results instead of an error — the honest degradation for a scraper.
+ */
+export function duckDuckGoResults(html: string, limit = 20): SearchResult[] {
+  const out: SearchResult[] = [];
+  // Each result is an anchor with `result__a`, optionally followed by a snippet before the next one.
+  const blocks = html.split(/class="result__a"/).slice(1);
+  for (const block of blocks) {
+    if (out.length >= limit) break;
+    const href = /href="([^"]+)"/.exec(block.slice(0, 400)) ?? /^[^>]*href="([^"]+)"/.exec(block);
+    const title = /^[^>]*>([\s\S]*?)<\/a>/.exec(block);
+    const snippet = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/.exec(block);
+    const url = href === null ? undefined : unwrapDuckDuckGo(decodeEntities(href[1]!));
+    if (url === undefined || title === null) continue;
+    out.push({
+      title: stripTags(title[1]!),
+      url,
+      snippet: snippet === null ? "" : stripTags(snippet[1]!),
+    });
+  }
+  return out;
+}
+
+/** The real destination behind a `duckduckgo.com/l/?uddg=…` redirect, or the link as given. */
+function unwrapDuckDuckGo(href: string): string | undefined {
+  const target = /[?&]uddg=([^&]+)/.exec(href);
+  if (target !== null) {
+    try {
+      return decodeURIComponent(target[1]!);
+    } catch {
+      return undefined;
+    }
+  }
+  // A protocol-relative link is still a link; anything else is page furniture.
+  if (href.startsWith("//")) return `https:${href}`;
+  return href.startsWith("http") ? href : undefined;
+}
+
+function decodeEntities(text: string): string {
+  return text.replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#x27;/gi, "'");
+}
+
+function stripTags(text: string): string {
+  return decodeEntities(text.replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
 }

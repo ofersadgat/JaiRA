@@ -343,7 +343,9 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   }
 
   // The scope floor, as the callback every consumer of a policy already knows how to read.
-  const scopeOf = scopeNarrowingFor(options.scopes, options.workspaceRoot, options.execEnv);
+  // `perCall`: built even with no floor, because a STATE may author `permissions.scopes` and the
+  // engine hands that block to this callback at the moment of decision.
+  const scopeOf = scopeNarrowingFor(undefined, options.workspaceRoot, options.execEnv, options.scopes, true);
   return { baseline, smart, ...(scopeOf !== undefined ? { scopeOf } : {}) };
 }
 

@@ -89,11 +89,12 @@ describe("web_fetch", () => {
 });
 
 describe("web_search", () => {
-  it("says what is missing when no provider is configured", async () => {
-    // The one shape this tool will not take: grantable, approvable, and always failing.
-    expect(await call(createWebSearchTool(), { query: "anything" })).toMatchObject({
-      error: expect.stringMatching(/no search provider is configured/) as unknown as string,
-    });
+  it("works with no provider configured — see `webSearch.test.ts` for the default", async () => {
+    // It used to refuse until an endpoint was set, which made granting the tool a promise it could
+    // not keep. Injected `fetch` on purpose: a suite that reached the real network would be testing
+    // somebody else's uptime, and the version of this assertion that did took eleven seconds.
+    const { impl } = fakeFetch("<html></html>");
+    expect(await call(createWebSearchTool({ fetch: impl }), { query: "anything" })).toMatchObject({ count: 0 });
   });
 
   it("puts the query in the endpoint and the key in a header", async () => {

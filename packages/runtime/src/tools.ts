@@ -41,7 +41,7 @@ import {
 import { registerFileTools, READ_FILE, WRITE_FILE, type FileToolOptions } from "./fileTools";
 import { registerSearchTools } from "./searchTools";
 import { registerWebTools, type WebToolOptions } from "./webTools";
-import type { Approver, ExecPolicy, PermissionMode, ToolGate } from "@declarative-ai/permissions";
+import type { Approver, ExecPolicy, PermissionMode, ScopeNarrowing, ToolGate } from "@declarative-ai/permissions";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { NodeExec, type Exec } from "./exec";
 import { commandWords, isDeniedPath } from "./policy";
@@ -523,11 +523,19 @@ export function scopeNarrowingFor(
   workspaceRoot: string | undefined,
   execEnv: ExecEnv = "windows",
   floor?: readonly Scope[] | undefined,
-): ((tool: { name: string }, input: FunctionInputs) => PermissionMode | undefined) | undefined {
+  /** Build the callback even with no static table, because a state may author one per call. */
+  perCall = false,
+): ScopeNarrowing | undefined {
   const both = [...(floor ?? []), ...(scopes ?? [])];
-  if (both.length === 0) return undefined;
+  // Built even with nothing here, when a caller may still supply a per-state table at call time.
+  if (both.length === 0 && !perCall) return undefined;
   const options = { ...(workspaceRoot !== undefined ? { root: workspaceRoot } : {}) };
-  return (tool, input) => {
+  return (tool, input, authored) => {
+    // A state's OWN table, handed over by the engine at the moment of decision. Layered under the
+    // floor exactly as a statically-supplied one is — a state narrows, never widens.
+    const stateScopes = authored?.scopes !== undefined && authored.scopes.length > 0
+      ? ([...(scopes ?? []), ...authored.scopes] as readonly Scope[])
+      : scopes;
     // By LOGICAL name, whichever implementation called: a gate asked about the agent's own `Glob`
     // resolves the table written for `glob`. Without this the two spellings would be two policies.
     const name = TOOL_SPEC_BY_NAME.has(tool.name) ? tool.name : (logicalOfNative(tool.name) ?? tool.name);
@@ -542,7 +550,7 @@ export function scopeNarrowingFor(
         const subjects = commandSubjects(args.command, cwd, execEnv);
         // A line nothing could parse is already `ask` under the policy's own rule; resolving its cwd
         // alone would be a quieter answer than the one the parser already gives.
-        const mode = strictest2(floor, scopes, name, subjects.paths, options);
+        const mode = strictest2(floor, stateScopes, name, subjects.paths, options);
         return subjects.unparsed ? strictestOf(mode, "ask") : mode;
       }
     }
@@ -553,9 +561,9 @@ export function scopeNarrowingFor(
     const hasFloor = floor !== undefined && floor.length > 0;
     const fromFloor = hasFloor ? scopeModeOf(floor, spec, name, input, options) : undefined;
     const fromState =
-      scopes === undefined || scopes.length === 0
+      stateScopes === undefined || stateScopes.length === 0
         ? undefined
-        : scopeModeOf(scopes, spec, name, input, { ...options, unmatched: hasFloor ? "silent" : "deny" });
+        : scopeModeOf(stateScopes, spec, name, input, { ...options, unmatched: hasFloor ? "silent" : "deny" });
     if (fromFloor === undefined) return fromState;
     if (fromState === undefined) return fromFloor;
     return strictestOf(fromFloor, fromState);
