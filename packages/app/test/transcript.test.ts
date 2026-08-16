@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 import type { ConversationTurn, InstanceNode, SessionView } from "@jaira/shared/browser";
 import {
+  agentTitleOf,
   blocksOf,
   entriesOf,
   iconOf,
@@ -275,6 +276,25 @@ describe("building the entry list", () => {
     expect(entriesOf(session([] as never), [], "")).toEqual([]);
     expect(entriesOf(null, [], null)).toEqual([]);
   });
+
+  it("puts a message that has been sent ABOVE the answer it provoked", () => {
+    // The seam: everything the record holds, then what was just typed, then what is streaming back.
+    // Appended after the tail instead, the question sat under the thinking it had caused until the
+    // turn landed and the record put it back in order.
+    const entries = entriesOf(
+      session([{ role: "user", text: "one" }, { role: "assistant", text: "first answer" }] as never),
+      [],
+      { text: "still", thinking: "what did they mean" },
+      "two",
+    );
+    expect(entries.map((e) => (e.kind === "message" ? `${e.role}: ${e.text}` : e.kind))).toEqual([
+      "user: one",
+      "assistant: first answer",
+      "user: two",
+      "thought",
+      "live",
+    ]);
+  });
 });
 
 describe("subagent conversations", () => {
@@ -514,13 +534,25 @@ describe("weaving the agent's native session lines into the conversation", () =>
       "queued: enqueue",
       "context: skill_listing",
       "tool",
-      'titled "Reading a.ts"',
       "message",
     ]);
-    // The attachment opens to the full line; the title IS its whole fact and does not.
+    // The attachment opens to the full line.
     const events = entries.filter((e): e is Extract<TranscriptEntry, { kind: "event" }> => e.kind === "event");
     expect(events[1]!.detail).toMatchObject({ attachment: { type: "skill_listing" } });
-    expect(events[2]!.detail).toBeUndefined();
+  });
+
+  it("never renders ai-title — it is the conversation's NAME, and the agent repeats it verbatim", () => {
+    const entries = entriesOf(withNative(turns, native));
+    expect(entries.some((e) => e.kind === "event" && e.text.includes("Reading a.ts"))).toBe(false);
+    // Not lost, though: it is read off the record by the thing that names the conversation.
+    expect(agentTitleOf(withNative(turns, native))).toBe("Reading a.ts");
+  });
+
+  it("takes the LAST title the agent wrote — it revises, and the newest is what it believes", () => {
+    const revised = [...native, line(3, { type: "ai-title", aiTitle: "Reading a.ts" }), line(3, { type: "ai-title", aiTitle: "Fixing a.ts" })];
+    expect(agentTitleOf(withNative(turns, revised))).toBe("Fixing a.ts");
+    // A record with no native lines at all simply has no title to offer.
+    expect(agentTitleOf(session(turns as never))).toBeUndefined();
   });
 
   it("lands the toolUseResult on the paired call — the agent's own record beside the wire result", () => {
@@ -544,9 +576,9 @@ describe("weaving the agent's native session lines into the conversation", () =>
     const entries = entriesOf(withNative([{ role: "assistant", text: "hi" }], [
       line(0, { type: "assistant", uuid: "s1" }),
       line(1, { type: "assistant", uuid: "s-extra" }),
-      line(1, { type: "ai-title", aiTitle: "T" }),
+      line(1, { type: "queue-operation", operation: "enqueue" }),
     ]));
-    expect(entries.map((e) => (e.kind === "event" ? e.text : e.kind))).toEqual(["message", 'titled "T"']);
+    expect(entries.map((e) => (e.kind === "event" ? e.text : e.kind))).toEqual(["message", "queued: enqueue"]);
   });
 
   it("changes nothing when the record kept no native lines", () => {

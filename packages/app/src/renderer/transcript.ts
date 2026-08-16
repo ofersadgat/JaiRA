@@ -32,6 +32,16 @@ export interface MessageEntry {
   text?: string;
   /** Tool calls and results carried on the turn, kept structured — see {@link toolPartsOf}. */
   parts?: JsonValue;
+  /**
+   * Which TURN of the session this message came from, when it came from a stored one.
+   *
+   * The entries are a weave — journal facts, native lines and live fragments are in here too — so
+   * the position of a message in this list says nothing about its position in the conversation. The
+   * one surface that needs that number is the Chat view, which can only offer "edit this message"
+   * for a message it can name a position for (`ChatThreadView.points`). Absent for anything the
+   * record did not supply: a live fragment has no turn yet, and a journal entry never will.
+   */
+  turn?: number;
 }
 
 /** One tool call and its result, paired. Collapsed to a line until asked. */
@@ -375,7 +385,13 @@ function eventOf(turn: ConversationTurn): EventEntry | undefined {
  * calls. Reasoning is lifted above the message rather than left in part order because the message is
  * assembled from every text part at once, so there is no single position left to interleave it at.
  */
-function messageOf(turn: SessionTurn, at?: number, toolRecord?: JsonValue): Array<TranscriptEntry | ResultPart> {
+function messageOf(
+  turn: SessionTurn,
+  at?: number,
+  toolRecord?: JsonValue,
+  /** Which turn of the session this is — carried onto the message entry. See {@link MessageEntry.turn}. */
+  index?: number,
+): Array<TranscriptEntry | ResultPart> {
   const entries: Array<TranscriptEntry | ResultPart> = [];
   const hasText = turn.text !== undefined && turn.text.length > 0;
   const parts = messagePartsOf(turn.parts);
@@ -407,6 +423,7 @@ function messageOf(turn: SessionTurn, at?: number, toolRecord?: JsonValue): Arra
       role: turn.role,
       ...(at !== undefined ? { at } : {}),
       ...(turn.text !== undefined ? { text: turn.text } : {}),
+      ...(index !== undefined ? { turn: index } : {}),
     });
   }
   for (const part of parts) {
@@ -576,13 +593,33 @@ function nativeEventOf(raw: JsonValue): EventEntry | undefined {
     const op = typeof line["operation"] === "string" ? (line["operation"] as string) : "operation";
     return { kind: "event", tone: "plain", text: `queued: ${op}`, detail: raw };
   }
-  if (type === "ai-title") {
-    // The whole fact fits on the line, so there is nothing to open.
-    return typeof line["aiTitle"] === "string" ? { kind: "event", tone: "plain", text: `titled "${line["aiTitle"]}"` } : undefined;
-  }
+  // The agent's NAME for the conversation, which is not something that happened in it. It is also
+  // re-emitted verbatim at every checkpoint — 57 identical lines in one observed file — so as a row
+  // it was the same sentence stamped through the transcript at random intervals. The fact is not
+  // lost: {@link agentTitleOf} reads it, and the Chat view puts it where a name belongs, on the
+  // conversation.
+  if (type === "ai-title") return undefined;
   // A type this reader has no name for is shown rather than hidden — the vocabulary is the agent's,
   // and it grows; a filter here would quietly shrink the transcript every time it did.
   return { kind: "event", tone: "plain", text: type, detail: raw };
+}
+
+/**
+ * What the AGENT called this conversation, when its session file said so.
+ *
+ * The LAST such line wins: the agent re-emits its title as the conversation goes and may revise it,
+ * so the newest is the one it currently believes. Read off the record rather than pushed at rename
+ * time, which is what makes it self-healing — a conversation whose run finished while nobody was
+ * looking gets its name the next time somebody opens it.
+ */
+export function agentTitleOf(session: SessionView | null | undefined): string | undefined {
+  let title: string | undefined;
+  for (const { line } of session?.native ?? []) {
+    const record = nativeRecordOf(line);
+    if (record?.["type"] !== "ai-title") continue;
+    if (typeof record["aiTitle"] === "string" && record["aiTitle"].trim() !== "") title = record["aiTitle"].trim();
+  }
+  return title;
 }
 
 /**
@@ -640,11 +677,18 @@ export function liveItemEntries(item: JsonValue, within?: string): Array<Transcr
  * tail last: while the record is open the stream IS the conversation, and everything on it is
  * rendered whether or not it has a name here. A bare string is accepted for callers that only
  * carry the text.
+ *
+ * `pending` is a message that has been SENT and is not in the record yet (see `ChatThread`). It is
+ * placed here rather than by the caller because only this function knows where the seam is: between
+ * everything settled and everything streaming. Appended to the end — which is what the Chat view
+ * used to do — it sat UNDER the thinking and the half-written answer it had provoked, and stayed
+ * there until the turn landed and the record put it back where it belonged.
  */
 export function entriesOf(
   session: SessionView | null,
   journal: readonly ConversationTurn[] = [],
   live?: LiveTail | string | null,
+  pending?: string,
 ): TranscriptEntry[] {
   const said: Array<TranscriptEntry | ResultPart> = [];
   // The record's pinned provider events, spliced where they happened — an event's index counts the
@@ -686,7 +730,7 @@ export function entriesOf(
     for (; nextEvent < stored.length && stored[nextEvent]!.index <= i; nextEvent++) {
       said.push(...eventEntry(stored[nextEvent]!.event));
     }
-    said.push(...messageOf(turn, undefined, drainFor(turn)));
+    said.push(...messageOf(turn, undefined, drainFor(turn), i));
   }
   // Whatever the file said after the last turn — a title, bookkeeping. Envelopes that never found a
   // turn are dropped here: an annotation lost beats a conversation misattributed.
@@ -723,6 +767,10 @@ export function entriesOf(
     keys.set(entry, carried);
   }
   entries.sort((a, b) => (keys.get(a) ?? 0) - (keys.get(b) ?? 0));
+  // After everything the record holds and before anything still arriving: it was said first, and the
+  // stream below it is the answer to it. No `turn` — the record does not hold this message yet, so
+  // there is no position to offer an edit at.
+  if (pending !== undefined) entries.push({ kind: "message", role: "user", text: pending });
   const tail: LiveTail | null = typeof live === "string" ? { text: live } : (live ?? null);
   if (tail !== null) {
     const streamed: Array<TranscriptEntry | ResultPart> = [];

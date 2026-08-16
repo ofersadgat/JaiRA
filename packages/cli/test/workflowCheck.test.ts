@@ -142,11 +142,15 @@ describe("jaira workflow check", () => {
     expect(missingDoc.err).toContain("workflow.md");
   });
 
-  it("refuses to judge a project whose workflows do not load", async () => {
+  it("warns about workflows that do not load, and checks them anyway", async () => {
+    // This used to refuse, because a conformance answer over partial evidence reads as a clean bill
+    // of health. The digest no longer goes partial silently — an unloadable root is rendered from
+    // its files and labelled — so the check runs, and the warning is what keeps the answer from
+    // being mistaken for a clean one.
     writeFileSync(join(jairaPaths(dir).workflowsDir, "scratch.json"), "{ half-written", "utf8");
     const res = await cli(["workflow", "check", "--fake", fake([satisfied("R1", ["x"])], "conforms")]);
-    expect(res.code).toBe(1);
-    expect(res.err).toContain("cannot check conformance");
+    expect(res.code).toBe(0);
+    expect(res.err).toContain("workflows that do not load");
     expect(res.err).toContain("scratch.json");
     expect(res.err).toContain("jaira workflow lint");
   });

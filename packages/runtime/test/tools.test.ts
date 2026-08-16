@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isPermissionDenied, PermissionLedger, withPermission, type Approver } from "@declarative-ai/permissions";
 import type { ExecServices, Tool } from "@declarative-ai/exec";
 import { compilePolicy, type PolicyAuditEntry } from "../src/policy";
-import { createBashTool, JAIRA_TOOLS, registerTools } from "../src/tools";
+import { createBashTool, JAIRA_TOOLS, registerAllTools, registerTools } from "../src/tools";
 import { registerFileTools } from "../src/fileTools";
 import { newRegistry } from "../src/wiring";
 
@@ -154,8 +154,13 @@ describe("JAIRA_TOOLS — the gateable set, and what each one may do", () => {
    */
   const registered = () => {
     const registry = newRegistry();
-    registerTools(registry, { execEnv: undefined, exec: undefined as never });
-    registerFileTools(registry, { vars: { taskId: "t", worktree: dir } } as never);
+    // ONE call, because four was the bug — see `registerAllTools`. This assertion is the thing that
+    // notices when a tool joins the vocabulary and nothing builds it.
+    registerAllTools(registry, {
+      execEnv: undefined,
+      exec: undefined as never,
+      files: { vars: { taskId: "t", worktree: dir } } as never,
+    });
     return registry;
   };
 

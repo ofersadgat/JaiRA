@@ -113,6 +113,22 @@ function Piece({ piece, render }: { piece: SessionPiece; render: (piece: Session
 }
 
 /**
+ * Whether the whole view is ONE operation — in which case none of the chrome above is earned.
+ *
+ * The chrome rule (see `transcriptView.tsx`) is that a card marks the boundary between one operation
+ * and the next. A view holding a single piece has no next, so its card is a fold, a status dot and a
+ * call signature wrapped around the only thing on the page — and it reads as a CHILD of what you are
+ * looking at rather than as what you are looking at. Walking into a leaf run and being shown its
+ * transcript inside a collapsible box headed with its own name is exactly that misread.
+ *
+ * Only the piece is dropped, never the sheet: the session name in the gutter is a different fact and
+ * still worth having, because a leaf that continued its parent's conversation says so there.
+ */
+function isSolo(bands: readonly SessionBand[]): boolean {
+  return bands.length === 1 && bands[0]!.segments.length === 1 && bands[0]!.segments[0]!.pieces.length === 1;
+}
+
+/**
  * One session's panel: its name in the grey above it, then what it said.
  *
  * The name is OUTSIDE the sheet, not a bar across the top of it. A panel is a page, and what a page
@@ -126,11 +142,14 @@ function Piece({ piece, render }: { piece: SessionPiece; render: (piece: Session
 function Sheet({
   segment,
   named = true,
+  bare = false,
   render,
 }: {
   segment: SessionSegment;
   /** False when something else already names this session — see the tab row in {@link Band}. */
   named?: boolean;
+  /** True when this piece is the whole view and needs no card around it — see {@link isSolo}. */
+  bare?: boolean;
   render: (piece: SessionPiece) => ReactNode;
 }): JSX.Element {
   return (
@@ -153,9 +172,15 @@ function Sheet({
           <TearBar kind="resumed" sessionId={segment.sessionId} />
         ) : null}
         <div className="sb-body">
-          {segment.pieces.map((piece) => (
-            <Piece key={`${piece.node.instanceId}:${piece.seq ?? "—"}`} piece={piece} render={render} />
-          ))}
+          {segment.pieces.map((piece) =>
+            bare ? (
+              <div key={`${piece.node.instanceId}:${piece.seq ?? "—"}`} className="sb-bare">
+                {render(piece)}
+              </div>
+            ) : (
+              <Piece key={`${piece.node.instanceId}:${piece.seq ?? "—"}`} piece={piece} render={render} />
+            ),
+          )}
         </div>
         {segment.paused && segment.sessionId !== undefined ? (
           <TearBar kind="paused" sessionId={segment.sessionId} />
@@ -177,7 +202,16 @@ function tabNameOf(segment: SessionSegment): string {
  * one conversation from start to finish, and a layout toggle over a thing that has one arrangement is
  * a control that can only be wrong.
  */
-function Band({ band, render }: { band: SessionBand; render: (piece: SessionPiece) => ReactNode }): JSX.Element {
+function Band({
+  band,
+  bare = false,
+  render,
+}: {
+  band: SessionBand;
+  /** Passed through to the sheet — see {@link isSolo}. Only ever true for a one-segment band. */
+  bare?: boolean;
+  render: (piece: SessionPiece) => ReactNode;
+}): JSX.Element {
   const [layout, setLayout] = useState<BandLayout | null>(null);
   const [tab, setTab] = useState(0);
   const chosen = layout ?? defaultLayout(band);
@@ -186,7 +220,7 @@ function Band({ band, render }: { band: SessionBand; render: (piece: SessionPiec
   if (solo) {
     return (
       <div className="sb-band">
-        <Sheet segment={band.segments[0]!} render={render} />
+        <Sheet segment={band.segments[0]!} bare={bare} render={render} />
       </div>
     );
   }
@@ -257,11 +291,12 @@ export function SessionBandsView({
   empty?: string;
 }): JSX.Element {
   if (bands.length === 0) return <p className="empty">{empty ?? "This run has not said anything yet."}</p>;
+  const bare = isSolo(bands);
   return (
     <div className="sb">
       <ZigDefs />
       {bands.map((band, i) => (
-        <Band key={`${band.startedAt}:${i}`} band={band} render={render} />
+        <Band key={`${band.startedAt}:${i}`} band={band} bare={bare} render={render} />
       ))}
     </div>
   );

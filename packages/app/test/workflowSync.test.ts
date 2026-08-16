@@ -291,6 +291,27 @@ describe("runSync towards the states", () => {
     expect(existsSync(join(dir, ".jaira", "prompts", "review", "critique.md"))).toBe(false);
   });
 
+  /**
+   * The bare state id, folded in. This is not a hypothetical: a real run proposed fourteen files,
+   * every one of them named by state id (`feature/documentation.json`), and every one was refused —
+   * so the sync reported that it had found nothing to change after an hour of work.
+   */
+  it("places a proposal that names the state id rather than the path under it", async () => {
+    const result = await syncStates([
+      { ...edit("feature/plan/gate", '{"label":"Approve the plan"}'), path: "feature/plan/gate.json" },
+    ]);
+    expect(result.edits?.[0]).toMatchObject({
+      stateId: "feature/plan/gate",
+      path: "workflows/feature/plan/gate.json",
+      applicable: true,
+    });
+  });
+
+  it("takes a bare state id with no suffix at all as a state file", async () => {
+    const result = await syncStates([{ ...edit("feature/plan/gate", "{}"), path: "feature/plan/gate" }]);
+    expect(result.edits?.[0]).toMatchObject({ stateId: "feature/plan/gate", path: "workflows/feature/plan/gate.json" });
+  });
+
   it("refuses a proposal outside workflows/ and prompts/, naming the rule", async () => {
     const result = await syncStates([
       { path: "lib/helper.md", action: "create" as const, text: "x", reason: "", requirements: [] },
@@ -549,13 +570,32 @@ describe("runSync refusals", () => {
     ).rejects.toThrow(/nothing to sync/);
   });
 
-  it("refuses to judge workflows it could not read in full", async () => {
+  it("runs against workflows that do not load, rather than refusing over them", async () => {
     writeFileSync(join(dir, ".jaira", "workflows", "broken.json"), "{not json", "utf8");
-    // A conformance answer over partial evidence reads as a clean bill of health, and here it would
-    // become a rewritten document describing workflows the run never saw.
-    await expect(
-      service.runSync({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH, direction: "document", fake: fake() as never }),
-    ).rejects.toThrow(/does not load/);
+    // This used to refuse, on the reasoning that partial evidence reads as a clean bill of health.
+    // It had the case backwards: a workflow that does not load is the one somebody most wants a sync
+    // to help fix, and refusing meant the surface that could have named the broken file greyed its
+    // own button out instead. The evidence is no longer partial-and-silent — the digest renders an
+    // unloadable root from its files and labels it — so the run proceeds and the breakage is in
+    // scope for the proposal.
+    const result = await service.runSync({
+      layer: "project",
+      path: WORKFLOW_DESCRIPTION_PATH,
+      direction: "states",
+      fake: fake({
+        edits: [
+          {
+            path: "workflows/broken.json",
+            action: "update" as const,
+            text: '{"label":"Repaired"}',
+            reason: "the file does not parse",
+            requirements: ["R2"],
+          },
+        ],
+      }) as never,
+    });
+    expect(result.verdict).toBe("gaps");
+    expect(result.edits?.[0]).toMatchObject({ path: "workflows/broken.json", applicable: true });
   });
 
   it("refuses a project with no workflows at all", async () => {

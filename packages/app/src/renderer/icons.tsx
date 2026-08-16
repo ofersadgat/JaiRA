@@ -24,7 +24,7 @@ import type { WorkIconName } from "./transcript";
  * runs in the direction that matters: the model decides what a row can BE, and this table fails to
  * compile if it cannot draw one of them. A view is allowed to know about the model. Not the reverse.
  */
-const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send" | "model" | "shield" | "anthropic" | "openai" | "lock" | "unlocked" | "star" | "pencil" | "plan" | "columns" | "tabs", string[]> = {
+const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send" | "clip" | "model" | "shield" | "anthropic" | "openai" | "lock" | "unlocked" | "star" | "pencil" | "plan" | "columns" | "tabs", string[]> = {
   terminal: ["M4 17l6-6-6-6", "M12 19h8"],
   read: ["M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
   write: ["M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7", "M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"],
@@ -37,6 +37,9 @@ const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send" | "mod
   alert: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 8v5", "M12 16.5h.01"],
   chevron: ["m6 9 6 6 6-6"],
   send: ["M12 19V5", "m5 12 7-7 7 7"],
+  // A paperclip, for what goes WITH a message. The one glyph everybody already reads as "attached",
+  // which is worth more here than anything cleverer.
+  clip: ["M21 11.5 12.5 20a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"],
   // A model is a box of weights you pick between; a shield is the permission posture; a spark is how
   // hard it thinks. Each sits beside its own word, never alone — see the module header.
   model: ["m12 3 8 4.5v9L12 21l-8-4.5v-9Z", "M12 12l8-4.5", "M12 12v9", "M12 12 4 7.5"],

@@ -106,6 +106,13 @@ describe("changeset:review", () => {
     // the request parked under the review task, but it is ABOUT the task whose worktree it reviews.
     expect(pending.taskId).toBe(result.reviewTaskId);
     expect(pending.about).toBe(taskId);
+    // And the other half of that join: the review is RECORDED in JaiRA's own project and is ABOUT
+    // this one, so the gate carries the project its addresses resolve against — without it the
+    // reviewer read `$WORKTREE` and `$PROJECT` against whatever happened to be focused, which is
+    // another project's files when one is open and nothing at all when none is.
+    expect(pending.project).toBe(service.current()!.dir);
+    const worktree = await service.readUri({ uri: "$WORKTREE/notes.md", taskId, project: pending.project });
+    expect(worktree.text).toBe("the agent's version\n");
 
     // The main-process re-validation: an answer about a change never proposed is refused (§4.1).
     expect(() =>

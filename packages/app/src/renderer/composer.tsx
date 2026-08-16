@@ -46,9 +46,68 @@ import {
   type PermissionMode,
   type ReasoningEffort,
   type SettingOrigin,
+  type ToolCategory,
   type ToolChoice,
+  type ToolImplementation,
+  type ToolSpec,
+  categoryModeOf,
+  TOOL_CATEGORIES,
+  TOOL_SPEC_BY_NAME,
 } from "@jaira/shared/browser";
 import { BrandIcon, Icon } from "./icons";
+
+/**
+ * A file going with the message — dropped on the composer, picked from its clip, or `@`-mentioned.
+ *
+ * `text` is the file's content when it could be read as text, `note` is why it could not. Both are
+ * absent from a file that is empty, which is a fact worth sending rather than an error.
+ */
+export interface ComposerFile {
+  /** What it is called — a bare filename from a drop, a project-relative path from a mention. */
+  name: string;
+  text?: string;
+  /** Why this file is a name and not a content — "3.4 MB, too large to inline", "not text". */
+  note?: string;
+}
+
+/** As big a file as goes in a message. Past it the name and the size are the honest content. */
+const FILE_MAX = 200_000;
+
+/**
+ * One dropped file, read.
+ *
+ * Read in the RENDERER through the File API rather than by path through main: a drop hands over the
+ * bytes, so asking main to open the path again would be a second read of a file we already have,
+ * through a channel that would then have to be allowed to read anywhere on the disk.
+ *
+ * Binary files are named, not decoded. `File.text()` on a PNG succeeds and produces replacement
+ * characters, and sending sixty kilobytes of those to a model is worse than saying "it is a PNG".
+ */
+async function fileOf(file: File): Promise<ComposerFile> {
+  if (file.size > FILE_MAX) return { name: file.name, note: `${Math.round(file.size / 1024)} KB — too large to include` };
+  const text = await file.text();
+  // A NUL byte is the oldest and most reliable "this is not text" test there is, and it costs one
+  // scan of a file we have already read.
+  if (text.includes("\u0000")) return { name: file.name, note: `${file.type || "binary"} — not text` };
+  return { name: file.name, text };
+}
+
+/**
+ * The message as it is actually sent: what was typed, then each file under a heading.
+ *
+ * Fenced, with the name on the fence, because the alternative is a model guessing where a pasted
+ * file starts and stops. The typed text comes FIRST — it is the instruction, and burying it under
+ * four attachments is how an instruction gets skimmed past.
+ */
+function withFiles(text: string, files: readonly ComposerFile[]): string {
+  if (files.length === 0) return text;
+  const blocks = files.map((file) =>
+    file.text === undefined
+      ? `Attached: ${file.name} (${file.note ?? "not included"})`
+      : `Attached: ${file.name}\n\`\`\`\n${file.text}\n\`\`\``,
+  );
+  return [text, ...blocks].filter((part) => part !== "").join("\n\n");
+}
 
 /** The half before the first slash — who answers. Empty when the id names no route. */
 function routeOf(model: string): string {
@@ -459,55 +518,60 @@ function Origin({ origin, from }: { origin: SettingOrigin; from?: string }): JSX
  * The mode stays live on an unticked row rather than greying out. It is the value the tool would run
  * under if you ticked it, and a control that blanks when you untick loses what you had set.
  */
-function ToolRow({
-  tool,
-  granted,
-  mode,
-  onGrant,
-  onMode,
-}: {
-  tool: ToolChoice;
-  granted: boolean;
-  mode: PermissionMode;
-  onGrant: () => void;
-  onMode: (next: PermissionMode) => void;
-}): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-
+/** A popover that closes on an outside click — the shape every dropdown in this menu wants. */
+function useAway<T extends HTMLElement>(open: boolean, close: () => void): React.RefObject<T | null> {
+  const box = useRef<T | null>(null);
   useEffect(() => {
     if (!open) return;
     const away = (event: MouseEvent): void => {
-      if (box.current !== null && !box.current.contains(event.target as Node)) setOpen(false);
+      if (box.current !== null && !box.current.contains(event.target as Node)) close();
     };
     document.addEventListener("mousedown", away);
     return () => document.removeEventListener("mousedown", away);
+    // `close` is a fresh closure per render and re-subscribing on each would be churn for nothing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+  return box;
+}
 
-  const meta = MODE_META[mode];
+/**
+ * The mode control: what happens when this thing is called.
+ *
+ * Shared by a tool row, a category row and the `Other` row, because all three are answering the same
+ * question about a different scope — and three spellings of one menu is how they come to offer
+ * different sets of modes.
+ */
+function ModePicker({
+  mode,
+  title,
+  onMode,
+}: {
+  /** `undefined` reads as `custom`: the things under this do not agree. See {@link categoryModeOf}. */
+  mode: PermissionMode | undefined;
+  title: string;
+  onMode: (next: PermissionMode) => void;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const box = useAway<HTMLDivElement>(open, () => setOpen(false));
+  const meta = mode === undefined ? undefined : MODE_META[mode];
   return (
-    <div className={`cx-tool${granted ? " on" : ""}`} ref={box}>
-      <button type="button" className="cx-tool-grant" title={TOOL_HINTS[tool.name] ?? tool.name} onClick={onGrant}>
-        <span className="cx-tick">{granted ? "✓" : ""}</span>
-        <span className="cx-chip-icon">
-          <Icon name={TOOL_ICONS[tool.name] ?? "tool"} />
-        </span>
-        <span className="cx-opt-text">
-          <span className="cx-opt-name ellip">{tool.name}</span>
-          <span className="cx-opt-hint ellip">{TOOL_HINTS[tool.name] ?? (tool.readOnly ? "reads only" : "can change things")}</span>
-        </span>
-      </button>
+    <div className="cx-mode-wrap" ref={box}>
       <button
         type="button"
-        className={`cx-tool-mode cx-mode-${mode}`}
+        className={`cx-tool-mode ${mode === undefined ? "cx-mode-custom" : `cx-mode-${mode}`}`}
         aria-expanded={open}
-        title={`${tool.name}: ${meta.hint}`}
-        onClick={() => setOpen((v) => !v)}
+        title={title}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
       >
-        <span className="cx-chip-icon">
-          <Icon name={meta.icon} />
-        </span>
-        <span className="ellip">{meta.label}</span>
+        {meta !== undefined ? (
+          <span className="cx-chip-icon">
+            <Icon name={meta.icon} />
+          </span>
+        ) : null}
+        <span className="ellip">{meta?.label ?? "custom"}</span>
         <span className="cx-more">›</span>
       </button>
       {open ? (
@@ -517,7 +581,8 @@ function ToolRow({
               key={value}
               type="button"
               className={value === mode ? "on" : undefined}
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 onMode(value);
                 setOpen(false);
               }}
@@ -534,6 +599,165 @@ function ToolRow({
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Whose CODE runs this tool — a SEPARATE axis from whether it may run at all.
+ *
+ * The control this replaces was a single row called "default" that meant both at once: picking it
+ * handed the agent its own tools AND gave up the gate, because there was nowhere to say one without
+ * the other. Access stays the app's under either choice; what this picks is which implementation
+ * executes. `native` gets the agent's built-in — usually better at its job, and the reason to want
+ * it. `app` gets ours — the one that writes through the artifact map, so a file lands where the
+ * project's destination says rather than where the agent put it.
+ *
+ * Shown only where there is a choice: a transport with no built-in for this job, or no agent at all,
+ * has one answer and a dropdown offering it would be a control that cannot be wrong.
+ */
+function ImplPicker({
+  value,
+  native,
+  onPick,
+}: {
+  value: ToolImplementation;
+  /** What the agent calls its own — named in the menu, since that is what its logs will say. */
+  native: string;
+  onPick: (next: ToolImplementation) => void;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const box = useAway<HTMLDivElement>(open, () => setOpen(false));
+  const options: Array<{ id: ToolImplementation; label: string; hint: string }> = [
+    { id: "app", label: "JaiRA", hint: "our implementation, through the artifact map" },
+    { id: "native", label: native, hint: "the agent's own — still gated by the mode beside it" },
+  ];
+  const picked = options.find((o) => o.id === value)!;
+  return (
+    <div className="cx-impl-wrap" ref={box}>
+      <button
+        type="button"
+        className="cx-tool-impl"
+        aria-expanded={open}
+        title={`Implementation: ${picked.hint}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+      >
+        <span className="ellip">{picked.label}</span>
+        <span className="cx-more">›</span>
+      </button>
+      {open ? (
+        <div className="cx-submenu">
+          {options.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className={option.id === value ? "on" : undefined}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPick(option.id);
+                setOpen(false);
+              }}
+            >
+              <span className="cx-tick">{option.id === value ? "✓" : ""}</span>
+              <span className="cx-opt-text">
+                <span className="cx-opt-name ellip">{option.label}</span>
+                <span className="cx-opt-hint ellip">{option.hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ToolRow({
+  tool,
+  spec,
+  granted,
+  mode,
+  impl,
+  cliRoute,
+  onGrant,
+  onMode,
+  onImpl,
+}: {
+  tool: ToolChoice;
+  /** The vocabulary entry, when this tool has one — what supplies its label, hint and native name. */
+  spec?: ToolSpec | undefined;
+  granted: boolean;
+  mode: PermissionMode;
+  impl: ToolImplementation;
+  /** Which agent is answering, if one is — what decides whether the implementation is a choice. */
+  cliRoute?: string | undefined;
+  onGrant: () => void;
+  onMode: (next: PermissionMode) => void;
+  onImpl: (next: ToolImplementation) => void;
+}): JSX.Element {
+  const native = cliRoute !== undefined ? spec?.natives?.claude : undefined;
+  return (
+    <div className={`cx-tool${granted ? " on" : ""}`}>
+      <button type="button" className="cx-tool-grant" title={spec?.hint ?? tool.name} onClick={onGrant}>
+        <span className="cx-tick">{granted ? "✓" : ""}</span>
+        <span className="cx-chip-icon">
+          <Icon name={TOOL_ICONS[tool.name] ?? "tool"} />
+        </span>
+        <span className="cx-opt-text">
+          <span className="cx-opt-name ellip">{spec?.label ?? tool.name}</span>
+          <span className="cx-opt-hint ellip">{spec?.hint ?? (tool.readOnly ? "reads only" : "can change things")}</span>
+        </span>
+      </button>
+      {native !== undefined ? <ImplPicker value={impl} native={native} onPick={onImpl} /> : null}
+      <ModePicker mode={mode} title={`${tool.name}: ${MODE_META[mode].hint}`} onMode={onMode} />
+    </div>
+  );
+}
+
+/**
+ * One category: what is under it, folded, with the setting they share.
+ *
+ * The row's mode is DERIVED and never stored — it shows what its children say, and setting it writes
+ * every child. That is what keeps one map on disk and keeps the menu from growing a precedence chain
+ * between a category, a tool and a profile, which would be three places for one answer to come from.
+ * When the children disagree the row reads `custom`, which is a statement none of the four modes can
+ * make and the reason `categoryModeOf` answers `undefined` rather than picking one.
+ */
+function CategoryRow({
+  category,
+  children,
+  granted,
+  mode,
+  open,
+  onOpen,
+  onMode,
+}: {
+  category: ToolCategory;
+  /** The tool rows, already built by the caller — this row owns the fold, not the contents. */
+  children: ReactNode;
+  granted: number;
+  total: number;
+  mode: PermissionMode | undefined;
+  open: boolean;
+  onOpen: () => void;
+  onMode: (next: PermissionMode) => void;
+}): JSX.Element {
+  return (
+    <div className={`cx-cat${open ? " open" : ""}`}>
+      <div className="cx-cat-head">
+        <button type="button" className="cx-cat-fold" aria-expanded={open} onClick={onOpen}>
+          <span className="cx-more cx-cat-chev">›</span>
+          <span className="cx-opt-text">
+            <span className="cx-opt-name ellip">{category.label}</span>
+            <span className="cx-opt-hint ellip">{category.hint}</span>
+          </span>
+          {granted > 0 ? <span className="cx-cat-count">{granted}</span> : null}
+        </button>
+        <ModePicker mode={mode} title={`${category.label}: sets every tool under it`} onMode={onMode} />
+      </div>
+      {open ? <div className="cx-cat-body">{children}</div> : null}
     </div>
   );
 }
@@ -629,7 +853,13 @@ export function Composer({
   overrides,
   onOverrides,
   onSend,
+  onStop,
   disabled,
+  placeholder,
+  value,
+  onValue,
+  mentions,
+  readMention,
 }: {
   /** What the message would run under right now — inherited, with any overrides already folded in. */
   plan: ChatPlanView | null;
@@ -638,10 +868,54 @@ export function Composer({
   overrides: ChatSettings;
   onOverrides: (next: ChatSettings) => void;
   onSend: (message: string) => void;
+  /**
+   * Stop the turn in flight. Absent ⇒ the button stays a send button and greys while busy, which is
+   * the honest shape where nothing can be stopped — a transcript beside a board has no handle on the
+   * run it is reading.
+   */
+  onStop?: (() => void) | undefined;
   /** Why sending is impossible at all — no conversation to continue, say. */
   disabled?: string;
+  /** What the empty box says. Defaults to the run-panel wording, which is where this started. */
+  placeholder?: string;
+  /**
+   * The draft, when the HOST owns it — what makes "edit this message" possible: the text of a
+   * message already sent is put in the box from outside, and the box is not the thing that decides
+   * what is in it. Absent ⇒ the composer keeps its own, which is what every other host wants.
+   */
+  value?: string;
+  onValue?: (next: string) => void;
+  /**
+   * Project paths matching a query — what `@` completes against. Absent ⇒ `@` is an ordinary
+   * character, which is correct for a composer with no project behind it.
+   */
+  mentions?: ((query: string) => Promise<string[]>) | undefined;
+  /**
+   * One mentioned file's text, for inlining. Absent ⇒ a mention stays a path, which is still useful
+   * to a conversation whose agent can read it and useless to one that cannot — so a host that has
+   * this should pass it.
+   */
+  readMention?: ((path: string) => Promise<string>) | undefined;
 }): JSX.Element {
-  const [draft, setDraft] = useState("");
+  const [own, setOwn] = useState("");
+  const draft = value ?? own;
+  const setDraft = (next: string): void => (onValue !== undefined ? onValue(next) : setOwn(next));
+  /**
+   * What is going with the message: dropped files, and mentioned ones.
+   *
+   * Held here rather than by the host because they are part of the DRAFT — they are cleared by the
+   * same send that clears the box, and a host holding them would have to be told about that.
+   */
+  const [files, setFiles] = useState<ComposerFile[]>([]);
+  /** The `@` completion: what is being typed after it, where it started, and what matched. */
+  const [mention, setMention] = useState<{ at: number; query: string; paths: string[] } | null>(null);
+  const [dropping, setDropping] = useState(false);
+  /**
+   * Which categories are unfolded. Local, and starting shut: the menu's job when it opens is to say
+   * WHAT the groups are and what each is set to, which the folded rows already do — unfolding all of
+   * them puts eight tool rows in front of somebody who came to check one word.
+   */
+  const [openCats, setOpenCats] = useState<ReadonlySet<string>>(new Set());
   const settings = plan?.settings ?? {};
   const origin = plan?.origin ?? {
     model: "unset" as const,
@@ -655,6 +929,8 @@ export function Composer({
   // preset — which is what `custom` says on the chip.
   const offered = plan?.available.tools ?? [];
   const modes = settings.permissions?.tools ?? {};
+  /** Whose code runs each tool — a second axis, kept out of `permissions` on purpose. */
+  const impls = settings.implementations ?? {};
   const preset = presetOf(modes, offered);
   // Never blank. A control with nothing in it cannot be read as "this is what will happen", which is
   // the only question this row exists to answer.
@@ -665,15 +941,75 @@ export function Composer({
   const current = settings.model ?? effective.model ?? "";
 
   const send = (): void => {
-    const message = draft.trim();
+    const message = withFiles(draft.trim(), files);
     if (message === "" || busy === true || disabled !== undefined) return;
     onSend(message);
     setDraft("");
+    setFiles([]);
+    setMention(null);
+  };
+
+  /** Take files in — from a drop, or from the picker. Both arrive as the same `File` objects. */
+  const take = (list: FileList | null): void => {
+    if (list === null) return;
+    void Promise.all([...list].map(fileOf)).then((taken) => setFiles((was) => [...was, ...taken]));
+  };
+
+  /**
+   * Watch the box for an `@`, and offer paths under the caret.
+   *
+   * Only an `@` at the start of a WORD opens the picker, so an email address in a pasted paragraph
+   * does not — and only while the run of characters after it has no space in it, which is what makes
+   * the list close by itself when the person carries on writing a sentence.
+   */
+  const track = (text: string, caret: number): void => {
+    if (mentions === undefined) return;
+    const before = text.slice(0, caret);
+    const at = before.lastIndexOf("@");
+    const opens = at === 0 || (at > 0 && /\s/.test(before[at - 1] ?? ""));
+    const query = before.slice(at + 1);
+    if (at === -1 || !opens || /\s/.test(query)) {
+      setMention(null);
+      return;
+    }
+    setMention({ at, query, paths: [] });
+    void mentions(query).then((paths) =>
+      // Still the same query: an answer for a prefix the person has already typed past would replace
+      // the list under their cursor with older results.
+      setMention((now) => (now !== null && now.at === at && now.query === query ? { ...now, paths } : now)),
+    );
+  };
+
+  /** Put a path in the box where the `@` was, and attach the file it names. */
+  const pick = (path: string): void => {
+    if (mention === null) return;
+    setDraft(`${draft.slice(0, mention.at)}@${path} ${draft.slice(mention.at + 1 + mention.query.length)}`);
+    setMention(null);
+    if (readMention === undefined) return;
+    void readMention(path).then(
+      (text) => setFiles((was) => (was.some((f) => f.name === path) ? was : [...was, { name: path, text }])),
+      (e: unknown) => setFiles((was) => [...was, { name: path, note: e instanceof Error ? e.message : "could not be read" }]),
+    );
   };
 
   // Enter sends and Shift+Enter breaks the line, which is what every chat client does — and a prompt
   // is frequently several lines, so the modifier belongs on the newline rather than on the send.
   const onKey = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    // The completion list eats the keys that are ITS keys while it is open, and nothing else — so
+    // Escape closes it rather than the panel behind it, and Enter takes the highlighted path rather
+    // than sending a message with half a mention in it.
+    if (mention !== null && mention.paths.length > 0) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMention(null);
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        pick(mention.paths[0]!);
+        return;
+      }
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       send();
@@ -691,19 +1027,64 @@ export function Composer({
     // The disabled state is a fact about the WHOLE composer, not about the box you type in. Marked
     // here so the shell greys as one surface — see `.cx.off` in the stylesheet for what went wrong
     // when only the textarea knew.
-    <div className={`cx${disabled !== undefined ? " off" : ""}`}>
+    <div
+      className={`cx${disabled !== undefined ? " off" : ""}${dropping ? " cx-drop" : ""}`}
+      // The WHOLE composer is the drop target, not the box inside it: a file aimed at a two-line
+      // textarea is a file dropped on the page behind it, which Electron answers by navigating the
+      // window to that file. `onDragOver` must preventDefault or the drop never fires at all.
+      onDragOver={(e) => {
+        if (disabled !== undefined) return;
+        e.preventDefault();
+        setDropping(true);
+      }}
+      onDragLeave={() => setDropping(false)}
+      onDrop={(e) => {
+        if (disabled !== undefined) return;
+        e.preventDefault();
+        setDropping(false);
+        take(e.dataTransfer.files);
+      }}
+    >
       {/* A padded RING rather than a border, so focus brightens it without the contents shifting. */}
       <div className="cx-frame">
         <div className="cx-shell">
+          {files.length > 0 ? (
+            <div className="cx-files">
+              {files.map((file, i) => (
+                <span key={`${file.name}:${i}`} className="cx-file" title={file.note ?? `${(file.text ?? "").length} characters`}>
+                  <Icon name="clip" />
+                  <span className="ellip">{file.name}</span>
+                  {file.note !== undefined ? <span className="sub">{file.note}</span> : null}
+                  <button className="ghost" aria-label={`Remove ${file.name}`} onClick={() => setFiles(files.filter((_, at) => at !== i))}>
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+
           <textarea
             className="cx-text"
             value={draft}
             rows={2}
-            placeholder={disabled ?? "Ask for more changes…"}
+            placeholder={disabled ?? placeholder ?? "Ask for more changes…"}
             disabled={disabled !== undefined}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              track(e.target.value, e.target.selectionStart);
+            }}
             onKeyDown={onKey}
           />
+
+          {mention !== null && mention.paths.length > 0 ? (
+            <div className="cx-mentions">
+              {mention.paths.slice(0, 8).map((path) => (
+                <button key={path} className="cx-mention ellip" onClick={() => pick(path)}>
+                  {path}
+                </button>
+              ))}
+            </div>
+          ) : null}
 
           <div className="cx-foot">
             <Chip
@@ -794,38 +1175,97 @@ export function Composer({
               from={plan?.from}
               onReset={() => clear("tools")}
             >
-              <div className="cx-opts">
-                {cliRoute !== undefined ? (
-                  // A delegated CLI arrives with its own tools and enforces them through its own
-                  // permission callback. Declaring NONE here is what leaves it to them — a different
-                  // thing from a call with no tools, and the only way to say it.
-                  <Opt
-                    on={tools.length === 0}
-                    name="default"
-                    hint={`${cliRoute}'s own tools, gated by the CLI`}
-                    onPick={() => set({ tools: [] })}
-                  />
-                ) : null}
-                {offered.map((tool) => (
-                  <ToolRow
-                    key={tool.name}
-                    tool={tool}
-                    granted={tools.includes(tool.name)}
-                    mode={modes[tool.name] ?? MODE_WHEN_UNSET}
-                    // The WHOLE list every time — see the module header on replacement.
-                    onGrant={() =>
-                      set({ tools: tools.includes(tool.name) ? tools.filter((t) => t !== tool.name) : [...tools, tool.name] })
-                    }
-                    onMode={(next) =>
-                      set({ permissions: { ...settings.permissions, tools: { ...modes, [tool.name]: next } } })
-                    }
-                  />
-                ))}
+              <div className="cx-cats">
+                {TOOL_CATEGORIES.map((category) => {
+                  const inCategory = offered.filter((tool) => TOOL_SPEC_BY_NAME.get(tool.name)?.category === category.id);
+                  if (inCategory.length === 0) {
+                    // Drawn empty rather than dropped. A category with nothing in it is a fact about
+                    // this project — no MCP server is connected — and a heading that disappears
+                    // leaves the reader wondering whether they are looking at the whole list.
+                    return (
+                      <div key={category.id} className="cx-cat cx-cat-empty">
+                        <div className="cx-cat-head">
+                          <span className="cx-opt-text">
+                            <span className="cx-opt-name ellip">{category.label}</span>
+                            <span className="cx-opt-hint ellip">nothing here</span>
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <CategoryRow
+                      key={category.id}
+                      category={category}
+                      granted={inCategory.filter((tool) => tools.includes(tool.name)).length}
+                      total={inCategory.length}
+                      mode={categoryModeOf(category.id, (name) => (modes[name] ?? MODE_WHEN_UNSET) as never) as PermissionMode | undefined}
+                      open={openCats.has(category.id)}
+                      onOpen={() =>
+                        setOpenCats((was) => {
+                          const next = new Set(was);
+                          if (next.has(category.id)) next.delete(category.id);
+                          else next.add(category.id);
+                          return next;
+                        })
+                      }
+                      // Cascades: setting a category writes every tool under it, which is what makes
+                      // the row's own value derivable next render.
+                      onMode={(next) =>
+                        set({
+                          permissions: {
+                            ...settings.permissions,
+                            tools: { ...modes, ...Object.fromEntries(inCategory.map((tool) => [tool.name, next])) },
+                          },
+                        })
+                      }
+                    >
+                      {inCategory.map((tool) => (
+                        <ToolRow
+                          key={tool.name}
+                          tool={tool}
+                          spec={TOOL_SPEC_BY_NAME.get(tool.name)}
+                          granted={tools.includes(tool.name)}
+                          mode={modes[tool.name] ?? MODE_WHEN_UNSET}
+                          impl={impls[tool.name] ?? "native"}
+                          cliRoute={cliRoute}
+                          // The WHOLE list every time — see the module header on replacement.
+                          onGrant={() =>
+                            set({ tools: tools.includes(tool.name) ? tools.filter((t) => t !== tool.name) : [...tools, tool.name] })
+                          }
+                          onMode={(next) =>
+                            set({ permissions: { ...settings.permissions, tools: { ...modes, [tool.name]: next } } })
+                          }
+                          onImpl={(next) => set({ implementations: { ...impls, [tool.name]: next } })}
+                        />
+                      ))}
+                    </CategoryRow>
+                  );
+                })}
+
+                {/* The catch-all, and NOT the same thing as a default — see `PermissionsDecl.other`.
+                    This is what answers for a name that turns up at run time and is in no table: an
+                    agent's built-in nobody modelled, a tool from someone else's MCP server. Before it
+                    existed those resolved to whatever "unset" meant, which is how twenty ungoverned
+                    reads went by under a read-only profile. */}
+                <div className="cx-cat cx-cat-other">
+                  <div className="cx-cat-head">
+                    <span className="cx-opt-text">
+                      <span className="cx-opt-name ellip">Other</span>
+                      <span className="cx-opt-hint ellip">anything not listed above</span>
+                    </span>
+                    <ModePicker
+                      mode={settings.permissions?.other ?? MODE_WHEN_UNSET}
+                      title="Anything this project has no name for"
+                      onMode={(next) => set({ permissions: { ...settings.permissions, other: next } })}
+                    />
+                  </div>
+                </div>
               </div>
               <p className="cx-hint">
                 {offered.length === 0
                   ? "This project registers no tools."
-                  : "Ticking a tool offers it; the mode beside it is what happens when it is called."}
+                  : "Ticking a tool offers it; the mode beside it is what happens when it is called. Access is always JaiRA's, whichever implementation runs."}
               </p>
             </Chip>
 
@@ -849,16 +1289,45 @@ export function Composer({
               </span>
             ) : null}
 
-            <button
-              type="button"
-              className="cx-send"
-              aria-label="Send"
-              title="Enter to send, Shift+Enter for a new line"
-              disabled={draft.trim() === "" || busy === true || disabled !== undefined}
-              onClick={send}
-            >
-              <Icon name="send" />
-            </button>
+            {/* The paperclip, next to the send button rather than in the row of settings: what goes
+                WITH the message belongs beside the message, and the chips above are about how it
+                runs. Hidden where there is no picker to open — a composer with nothing behind it. */}
+            <label className="cx-clip" title="Attach files">
+              <Icon name="clip" />
+              <input
+                type="file"
+                multiple
+                disabled={disabled !== undefined}
+                onChange={(e) => {
+                  take(e.target.files);
+                  // Cleared so attaching the SAME file twice in a row still fires a change event.
+                  e.target.value = "";
+                }}
+              />
+            </label>
+
+            {/* One button, two verbs. While a turn is in flight the only useful thing to press is
+                stop, and a greyed send button beside a spinner is a control that says "wait" where
+                a control that says "stop" belongs. Without `onStop` there is nothing to offer, and
+                it stays a send button that greys — see the prop. */}
+            {busy === true && onStop !== undefined ? (
+              <button type="button" className="cx-send cx-stop" aria-label="Stop" title="Stop this turn" onClick={onStop}>
+                <span className="cx-stop-mark" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="cx-send"
+                aria-label="Send"
+                title="Enter to send, Shift+Enter for a new line"
+                // Attachments alone are a message. A dropped file with no covering note is a
+                // perfectly ordinary thing to send, and the button used to refuse what Enter allowed.
+                disabled={(draft.trim() === "" && files.length === 0) || busy === true || disabled !== undefined}
+                onClick={send}
+              >
+                <Icon name="send" />
+              </button>
+            )}
           </div>
         </div>
       </div>

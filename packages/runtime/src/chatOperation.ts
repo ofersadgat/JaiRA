@@ -173,6 +173,12 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
   const [pickedReasoning, reasoningOrigin] = pick("reasoning", reasoning);
   const [pickedTools, toolsOrigin] = pick("tools", tools);
   const [pickedPermissions, permissionsOrigin] = pick("permissions", permissions);
+  // Whose CODE runs each tool. Nothing INHERITS one yet — an implementation choice is per-message,
+  // made in the composer — so the state's side is always absent and the origin is `override` or
+  // `unset`. Threaded through the same `pick` regardless, because the day a state authors one this
+  // is where it has to arrive, and a field the plan quietly drops is a setting that silently
+  // stops applying.
+  const [pickedImplementations, implementationsOrigin] = pick("implementations", undefined);
 
   return {
     settings: {
@@ -180,12 +186,14 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
       ...(pickedReasoning !== undefined ? { reasoning: pickedReasoning } : {}),
       ...(pickedTools !== undefined ? { tools: pickedTools } : {}),
       ...(pickedPermissions !== undefined ? { permissions: pickedPermissions } : {}),
+      ...(pickedImplementations !== undefined ? { implementations: pickedImplementations } : {}),
     },
     origin: {
       model: modelOrigin,
       reasoning: reasoningOrigin,
       tools: toolsOrigin,
       permissions: permissionsOrigin,
+      implementations: implementationsOrigin,
     },
     ...(host?.id !== undefined ? { from: host.id } : {}),
     ...(host?.operation?.kind === "prompt" && typeof host.operation.system === "string"
@@ -194,6 +202,42 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
     passthrough,
     ...(host?.environment?.conversation !== undefined ? { conversation: host.environment.conversation } : {}),
     unresolved,
+  };
+}
+
+/**
+ * One state with the composer's settings written into it — how the FIRST message of a conversation
+ * gets the settings every later message gets through {@link chatOperationOf}.
+ *
+ * That first message is not a chat turn: it is the run, so there is no operation to assemble here
+ * and nothing to bind a session to. What there is instead is the state the run will execute, and the
+ * settings belong in the same two places the loader would have put them had the author written them
+ * — `operation.config` for the call, `environment` for what it may reach — so that everything
+ * downstream (the router, the tool gate, the policy, the chat plan a later message reads back) sees
+ * one state and no special case.
+ *
+ * Written into a COPY, which the caller pins as the run's snapshot. The authored file is what a
+ * conversation was started from; it is not a place to record what one person picked for one message.
+ *
+ * `undefined` for a state with no prompt operation. There is nowhere honest to put a model on a
+ * composite, and writing one somewhere it might apply is worse than saying it did not apply.
+ */
+export function stateWithChatSettings(state: LoadedState, settings: ChatSettings): LoadedState | undefined {
+  const operation = state.operation;
+  if (operation?.kind !== "prompt") return undefined;
+  const config = { ...configOf(state) };
+  if (settings.model !== undefined) config["model"] = settings.model;
+  if (settings.reasoning !== undefined) config["reasoning"] = settings.reasoning as unknown as JsonValue;
+  return {
+    ...state,
+    operation: { ...operation, config: config as typeof operation.config },
+    environment: {
+      ...state.environment,
+      // The WHOLE list, as everywhere else — `[]` is how the composer says "no tools", and merging
+      // it with what the file declared would make that the one instruction it cannot give.
+      ...(settings.tools !== undefined ? { tools: [...settings.tools] } : {}),
+      ...(settings.permissions !== undefined ? { permissions: settings.permissions } : {}),
+    },
   };
 }
 

@@ -56,6 +56,8 @@ import {
   hostPathFor,
   persistEngineArtifacts,
   registerFileTools,
+  registerSearchTools,
+  registerWebTools,
   type ArtifactStore,
   type ExecObserver,
   defaultExecutorTree,
@@ -321,6 +323,11 @@ function buildRunEnvironment(
       inlineMaxBytes: files.artifacts.inlineMaxBytes,
     });
   }
+  // The rest of the vocabulary. Not gated on `files`: searching and fetching need no artifact
+  // store, and a CLI run that could not `glob` while the app could is exactly the divergence this
+  // surface exists to rule out.
+  registerSearchTools(registry, {});
+  registerWebTools(registry, {});
   // Agent runtimes, so a workflow with a `claude-code` state runs the same way here
   // as in the app. Without them the CLI — the documented fastest debugging surface —
   // failed such a state as "unregistered function" while the app ran it fine.
@@ -1063,17 +1070,20 @@ async function cmdWorkflowCheck(argv: string[], io: CliIo): Promise<number> {
   const project = openWithRecoveryNote(projectDir, io);
   try {
     const digest = workflowDigest(project, values.workflow !== undefined ? { roots: values.workflow } : {});
-    // A file that will not parse or a root that will not load means the digest is
-    // missing states — and a conformance answer over partial evidence is worse than
-    // no answer, because it reads as a clean bill of health.
+    // A root that will not load used to be refused here, because a conformance answer over partial
+    // evidence reads as a clean bill of health. The digest no longer goes partial SILENTLY — an
+    // unloadable root is rendered from its files and labelled `DOES NOT LOAD` in the markdown the
+    // judge reads — so the refusal now costs more than it buys: a workflow that does not load is
+    // the one whose conformance you most want reported. Warned rather than refused, so the answer
+    // is still never mistaken for a clean one.
     if (digest.unreadable.length > 0 || digest.loadErrors.length > 0) {
       const detail = [
         ...digest.unreadable.map((f) => `${f.file}: ${f.error}`),
         ...digest.loadErrors.map((e) => `${e.rootId}: ${e.error}`),
       ].join("\n  ");
-      throw new Error(
-        `cannot check conformance while a workflow does not load:\n  ${detail}\n` +
-          "  fix these first — `jaira workflow lint` reports the same set",
+      io.stderr(
+        `warning: checking against workflows that do not load:\n  ${detail}\n` +
+          "  the digest shows these as authored text only — `jaira workflow lint` reports the same set\n",
       );
     }
     if (digest.roots.length === 0) throw new Error("no workflows under .jaira/workflows/ to check");

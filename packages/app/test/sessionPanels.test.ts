@@ -93,6 +93,27 @@ describe("what a conversation draws", () => {
     expect(html.match(/sb-sheet/g)).toHaveLength(1);
   });
 
+  /**
+   * Walking into a leaf shows what it SAID, not a card containing what it said.
+   *
+   * The card is a boundary marker, and a view with one operation in it has no boundary to mark — so
+   * the fold, the status dot and the call signature were chrome around the only thing on the page,
+   * and read as a child state rather than as the run being looked at.
+   */
+  it("drops the run card when the whole view is one operation, and keeps it when there are two", () => {
+    const alone = draw(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)]);
+    expect(alone).not.toContain("ts-card");
+    expect(alone).toContain("said by #2");
+    // The gutter stays: which conversation this is remains a fact worth having.
+    expect(alone).toContain("planning");
+
+    const two = draw(parentOf([
+      { id: 2, from: 0, to: 10 },
+      { id: 3, from: 11, to: 20 },
+    ]), [ref(2, "planning", 0, 10), ref(3, "planning", 11, 20)]);
+    expect(two.match(/ts-card-head/g)).toHaveLength(2);
+  });
+
   it("offers no layout control over a band with one conversation in it", () => {
     const html = draw(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)]);
     expect(html).not.toContain("sb-layout");

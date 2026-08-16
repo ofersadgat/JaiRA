@@ -120,6 +120,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "task:rerun": ((request: Parameters<typeof service.rerunTask>[0]) => service.rerunTask(request)) as Handler,
   "task:delete": ((request: { taskId: string; project?: string }) =>
     service.deleteTask(request.taskId, request.project)) as Handler,
+  "task:rename": ((request: Parameters<typeof service.renameTask>[0]) => service.renameTask(request)) as Handler,
   "board:view": ((request: { level?: string; project?: string } | undefined) => service.board(request ?? {})) as Handler,
   "board:roots": ((request: { project?: string } | undefined) => service.boardRoots(request ?? {})) as Handler,
   "files:tree": (() => service.filesTree()) as Handler,
@@ -132,7 +133,10 @@ const handlers: Record<IpcChannel, Handler> = {
   "session:view": ((request: Parameters<typeof service.sessionView>[0]) => service.sessionView(request)) as Handler,
   "session:live": ((request: Parameters<typeof service.sessionLive>[0]) => service.sessionLive(request)) as Handler,
   "chat:plan": ((request: Parameters<typeof service.chatPlan>[0]) => service.chatPlan(request)) as Handler,
+  "chat:startPlan": ((request: Parameters<typeof service.chatStartPlan>[0]) => service.chatStartPlan(request)) as Handler,
   "chat:send": ((request: Parameters<typeof service.sendChatMessage>[0]) => service.sendChatMessage(request)) as Handler,
+  "chat:cancel": ((request: Parameters<typeof service.cancelChatTurn>[0]) => service.cancelChatTurn(request)) as Handler,
+  "chat:thread": ((request: Parameters<typeof service.chatThread>[0]) => service.chatThread(request)) as Handler,
   "log:list": ((request: Parameters<typeof service.listLogs>[0]) => service.listLogs(request)) as Handler,
   "job:list": ((request: Parameters<typeof service.listJobs>[0]) => service.listJobs(request)) as Handler,
   "job:output": ((request: Parameters<typeof service.jobOutput>[0]) => service.jobOutput(request)) as Handler,
@@ -159,6 +163,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "schema:detect": ((request: { text: string }) => service.detectSchema(request.text)) as Handler,
   "file:read": ((request: Parameters<typeof service.readFile>[0]) => service.readFile(request)) as Handler,
   "uri:read": ((request: Parameters<typeof service.readUri>[0]) => service.readUri(request)) as Handler,
+  "file:find": ((request: Parameters<typeof service.findFiles>[0]) => service.findFiles(request)) as Handler,
   "changeset:review": ((request: Parameters<typeof service.reviewChanges>[0]) => service.reviewChanges(request)) as Handler,
   "changeset:reviewSync": ((request: Parameters<typeof service.reviewSyncChangeset>[0]) =>
     service.reviewSyncChangeset(request)) as Handler,

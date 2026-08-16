@@ -21,6 +21,7 @@ import type { SchemaViolation } from "./schemas";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type {
   BoardView,
+  ChatThreadView,
   ConversationView,
   JobOutputChunk,
   JobRow,
@@ -105,6 +106,20 @@ export interface StartTaskRequest {
    * belongs to the machine rather than to a checkout.
    */
   project?: ProjectRef;
+  /**
+   * Per-run settings for the state this run STARTS at — what the composer picked before there was a
+   * conversation to pick them in.
+   *
+   * The first message of a conversation is the run (see `chatWorkflow.ts`), so without this the one
+   * message that decides what the whole thread inherits would be the only one sent under the file's
+   * settings alone, beneath a composer showing controls it did not obey.
+   *
+   * Applied by SYNTHESIZING the bundle: the root state's operation and environment are rewritten and
+   * the result is pinned as this run's snapshot, so the record says what actually ran rather than
+   * what was on disk. The authored file is never touched. Ignored — deliberately, rather than
+   * applied somewhere else — when the root state has no prompt operation of its own to rewrite.
+   */
+  overrides?: ChatSettings;
 }
 
 /**
@@ -197,6 +212,20 @@ export interface PendingInteraction {
    * request is about the task that parked it, which is every other component.
    */
   about?: string;
+  /**
+   * The project whose ANCHORS this request's file reads resolve against — what a renderer passes
+   * back as `uri:read`'s `project`.
+   *
+   * Not the project the request was parked in, which for a changeset review is always JaiRA's own:
+   * a review runs there, and the files it is about live in the reviewed task's project (a worktree
+   * review) or in the layer root the proposal targets (a sync review). Without the stamp the
+   * reviewer read `$WORKTREE`, `$JAIRA` and `$PROJECT` against whatever happened to be FOCUSED —
+   * another project's files when one was open, and `no project is open` when none was.
+   *
+   * Absent ⇒ the focused project, which is right for every request parked by a run of that
+   * project's own workflow.
+   */
+  project?: string;
   /** The registered function name — `choose_option`, `review_artifact`, … */
   component: string;
   /** Resolved inputs, including the state's authored `config` surface. */
@@ -837,15 +866,66 @@ export interface IpcContract {
     response: ChatPlanView | null;
   };
   /**
+   * The same question one screen earlier: what would a conversation started from this state run
+   * under, before there is a conversation to ask about.
+   *
+   * Not `chat:plan` with a missing task, because the two read different things — that one reads a
+   * run's pinned snapshot and the record of what has already answered, this one reads the state file
+   * as it is on disk. Never `null`: a state nobody has installed yet is a plan with nothing inherited
+   * rather than a refusal, since the Chat view writes its states on the first send.
+   */
+  "chat:startPlan": {
+    request: { stateId: string; project?: string; overrides?: ChatSettings };
+    response: ChatPlanView;
+  };
+  /**
    * Send one message into the conversation an instance ran, as a child of that instance.
    *
    * Not a run: no workspace is materialized, no job is claimed, and the task's status does not move.
    * A conversation continued by hand is a conversation, not a second execution of the workflow.
    */
   "chat:send": {
-    request: { taskId: string; instanceId: number; message: string; project?: string; overrides?: ChatSettings };
+    request: {
+      taskId: string;
+      instanceId: number;
+      message: string;
+      project?: string;
+      overrides?: ChatSettings;
+      /**
+       * Send this message INSTEAD of the one at this position, rather than after everything.
+       *
+       * What "edit and send again" means down here, and the value is an opaque handle from
+       * `chat:thread`'s `points` — the renderer never builds or parses one. The conversation is a
+       * chain of records at `<session>@<seq>`, so re-asking at an occupied position forks it: the
+       * branch keeps every turn before that message and the new one takes its place. Nothing is
+       * deleted; the abandoned branch stays in the record and simply stops being on the path, which
+       * is exactly what a reader expects an edited message to do.
+       */
+      branchAt?: string;
+    };
     response: { instanceId: number; iteration: number; sessionRef?: string; failure?: string; steered?: boolean };
   };
+  /**
+   * Stop the turn this conversation is taking, if it is taking one.
+   *
+   * A chat turn is not a run — it claims no job and moves no task status — so `task:cancel` has
+   * nothing to abort here (`sendChatMessage` deliberately registers nothing in `live`). This aborts
+   * the CALL, which lands in the journal as a canceled turn: the message stays, and what the model
+   * had said by then is what the transcript keeps.
+   */
+  "chat:cancel": { request: { taskId: string; project?: string }; response: { canceled: boolean } };
+  /**
+   * A task's conversation, whole — every turn of the chain, forks walked (see {@link ChatThreadView}).
+   *
+   * `null` for a task that holds no conversation to read: one that has never run, or whose states
+   * only orchestrate. The Chat view's own tasks always have one after their first message.
+   */
+  "chat:thread": { request: { taskId: string; project?: string }; response: ChatThreadView | null };
+  /**
+   * Rename a task. The title is metadata — nothing about the run depends on it — so this is a write
+   * to the task file and an invalidation, and it is refused for nothing.
+   */
+  "task:rename": { request: { taskId: string; title: string; project?: ProjectRef }; response: TaskSummary };
   /** The tail of what the app has said about itself. */
   "log:list": {
     request: { afterId?: number; level?: LogLevel; source?: string; project?: string; limit?: number } | void;
@@ -913,6 +993,19 @@ export interface IpcContract {
   "file:read": { request: ReadFileRequest; response: FileSource };
   /** Read one addressable value — see {@link ReadUriRequest}. Refused rather than guessed at. */
   "uri:read": { request: ReadUriRequest; response: UriContent };
+  /**
+   * Project files whose path matches a query — what an `@` in the composer completes against.
+   *
+   * The PROJECT's files, not `.jaira/`'s: `files:tree` answers the other question and is what the
+   * Files view browses. A conversation about a checkout is about its source, so this walks the
+   * working tree, skipping the directories nobody means (`.git`, `node_modules`, build output) and
+   * stopping at a bounded number of results — a mention picker is a way of finding a path you
+   * already have in mind, not a search engine.
+   */
+  "file:find": {
+    request: { query: string; project?: ProjectRef; limit?: number };
+    response: { paths: string[]; truncated: boolean };
+  };
   /** Review a task's worktree edits as a changeset — see {@link ReviewChangesRequest}. */
   "changeset:review": { request: ReviewChangesRequest; response: ReviewChangesResult };
   /** Review a sync's proposed files through the same gate — see {@link ReviewSyncRequest}. */
@@ -968,6 +1061,7 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "task:cancel",
   "task:rerun",
   "task:delete",
+  "task:rename",
   "board:view",
   "board:roots",
   "files:tree",
@@ -980,7 +1074,10 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "session:view",
   "session:live",
   "chat:plan",
+  "chat:startPlan",
   "chat:send",
+  "chat:cancel",
+  "chat:thread",
   "log:list",
   "job:list",
   "job:output",
@@ -1002,6 +1099,7 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "schema:detect",
   "file:read",
   "uri:read",
+  "file:find",
   "changeset:review",
   "changeset:reviewSync",
   "file:write",

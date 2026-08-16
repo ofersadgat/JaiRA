@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ExecServices, Tool } from "@declarative-ai/exec";
 import { MemoryArtifactStore } from "../src/artifacts";
 import { parseDestination } from "../src/artifactPath";
-import { createReadFileTool, createWriteFileTool, registerFileTools, READ_FILE, WRITE_FILE } from "../src/fileTools";
+import { createEditFileTool, createReadFileTool, createWriteFileTool, registerFileTools, EDIT_FILE, READ_FILE, WRITE_FILE } from "../src/fileTools";
 import { newRegistry } from "../src/wiring";
 
 let dir: string;
@@ -46,7 +46,7 @@ function tools(destination: string, inlineMaxBytes = 65_536) {
     },
     now: () => 1_000,
   };
-  return { write: createWriteFileTool(options), read: createReadFileTool(options) };
+  return { write: createWriteFileTool(options), read: createReadFileTool(options), edit: createEditFileTool(options) };
 }
 
 /** Built per call, since `dir` is a fresh temp directory each test. */
@@ -181,8 +181,71 @@ describe("registration", () => {
     });
     expect(registry.tools.has(WRITE_FILE)).toBe(true);
     expect(registry.tools.has(READ_FILE)).toBe(true);
+    expect(registry.tools.has(EDIT_FILE)).toBe(true);
+    expect(registry.tools.get(EDIT_FILE)!.readOnly).toBe(false);
     // `readOnly` is what the read-only and plan permission profiles gate on.
     expect(registry.tools.get(WRITE_FILE)!.readOnly).toBe(false);
     expect(registry.tools.get(READ_FILE)!.readOnly).toBe(true);
+  });
+});
+
+/**
+ * `edit` — the same file surface, with intent instead of a replacement.
+ *
+ * The distinction from `write_file` is the whole reason both exist. A write says "the file is now
+ * this", so a model that meant to change one line and returned the file whole has silently reverted
+ * everything it did not think to include. An edit says "this became that", which fails loudly when
+ * the file is not what the model believed — and being wrong about the current content is the failure
+ * that actually happens.
+ */
+describe("edit", () => {
+  it("replaces exact text and leaves the rest alone", async () => {
+    const { write, edit, read } = tools("$DEFAULT");
+    await call(write, { path: "a.ts", content: "const a = 1;\nconst b = 2;\n" });
+    expect(await call(edit, { path: "a.ts", old: "const b = 2;", new: "const b = 3;" })).toMatchObject({
+      path: "a.ts",
+      replaced: 1,
+    });
+    expect(await call(read, { path: "a.ts" })).toMatchObject({ content: "const a = 1;\nconst b = 3;\n" });
+  });
+
+  it("refuses an ambiguous match rather than picking one", async () => {
+    // Two identical fragments mean the caller has not identified the one it meant, and choosing for
+    // it is how an edit lands in the wrong function.
+    const { write, edit } = tools("$DEFAULT");
+    await call(write, { path: "a.ts", content: "x = 1;\nx = 1;\n" });
+    expect(await call(edit, { path: "a.ts", old: "x = 1;", new: "x = 2;" })).toMatchObject({
+      error: expect.stringMatching(/appears 2 times/) as unknown as string,
+    });
+    // …unless the caller says it meant all of them.
+    expect(await call(edit, { path: "a.ts", old: "x = 1;", new: "x = 2;", all: true })).toMatchObject({ replaced: 2 });
+  });
+
+  it("refuses text that is not there, and an edit that would change nothing", async () => {
+    const { write, edit } = tools("$DEFAULT");
+    await call(write, { path: "a.ts", content: "hello\n" });
+    expect(await call(edit, { path: "a.ts", old: "goodbye", new: "hi" })).toMatchObject({
+      error: expect.stringMatching(/does not contain/) as unknown as string,
+    });
+    expect(await call(edit, { path: "a.ts", old: "hello", new: "hello" })).toMatchObject({
+      error: expect.stringMatching(/identical/) as unknown as string,
+    });
+    expect(await call(edit, { path: "a.ts", old: "", new: "x" })).toMatchObject({
+      error: expect.stringMatching(/use write_file/) as unknown as string,
+    });
+  });
+
+  it("edits an artifact wherever it was PLACED, not where the agent thinks it is", async () => {
+    // The illusion `read_file` maintains has to hold here too: an edit that went straight to the
+    // filesystem would miss a virtual artifact, or create a second copy beside it.
+    const { write, edit, read } = tools("virtual:");
+    await call(write, { path: "docs/plan.md", content: "# draft\n" });
+    expect(await call(edit, { path: "docs/plan.md", old: "draft", new: "final" })).toMatchObject({ replaced: 1 });
+    expect(await call(read, { path: "docs/plan.md" })).toMatchObject({ content: "# final\n" });
+    expect(existsSync(join(dir, "docs", "plan.md"))).toBe(false);
+  });
+
+  it("is mutating, which is what a narrowing profile gates on", () => {
+    expect(tools("$DEFAULT").edit.readOnly).toBe(false);
   });
 });

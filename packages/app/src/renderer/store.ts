@@ -28,6 +28,7 @@ import type {
   FileSource,
   FileTree,
   HistorySize,
+  ChatSettings,
   InstanceNode,
   IpcChannel,
   IpcRequest,
@@ -76,6 +77,7 @@ import type { FileSelection } from "./files";
 import { instanceAt, newestRunOf, runTargetOf } from "./runForm";
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestFiles, selfTestScript } from "./debugWorkflow";
+import { CHAT_AGENT, CHAT_STATES, chatWorkflowFiles, titleOf } from "./chatWorkflow";
 import { emptyUiState, SHUT, toggleShut, withOpen, withPane } from "./uiState";
 
 /** A prune plan or result, as `history:prune` returns it. */
@@ -219,6 +221,8 @@ export interface AppState {
    * which one it read.
    */
   sync: SyncState;
+  /** The Chat view: which conversation is open, and whether its states are installed. */
+  chat: ChatState;
 
   /** The Debug view's self-test — see {@link DebugState}. */
   debug: DebugState;
@@ -497,8 +501,43 @@ function applyAvailability(patch: (next: Partial<AppState>) => void, availabilit
   });
 }
 
+/**
+ * The Chat view's own state.
+ *
+ * Small on purpose. A conversation IS a task (see `chatWorkflow.ts`), so everything about the one on
+ * screen — its detail, its instance tree, its transcript, the live turn streaming into it — is
+ * already held above under the ordinary selection, and duplicating any of it here would be two
+ * copies to keep in step. What is genuinely this view's is which conversation it is reading and
+ * whether its files are on disk yet.
+ *
+ * `taskId` is held SEPARATELY from `selected` even though opening a conversation selects it: the
+ * Tasks view selects too, and a person who goes to look at a board and comes back expects to find
+ * the conversation they left rather than the card they last clicked.
+ */
+export interface ChatState {
+  /** The open conversation, or null for the empty view. */
+  taskId: string | null;
+  /** Which project holds it — the checkout when one is open, JaiRA's own root otherwise. */
+  project: string | null;
+  /** True once the built-in conversation states have been checked for and written if missing. */
+  installed: boolean;
+  /** True while a conversation is being created and started — the first message is a run. */
+  busy: boolean;
+  /**
+   * The message that OPENED the conversation, until the record holding it exists.
+   *
+   * The first message is the run's own prompt, and a run's record lands when its call settles — so
+   * for the length of the first answer there is nothing on disk that contains what the person just
+   * typed. Held here so the thread can show it anyway. Every later message is the composer's own
+   * problem and does not come through the store.
+   */
+  opening: string | null;
+  /** The last failure, beside the composer rather than in the toast that scrolls away. */
+  error: string | null;
+}
+
 /** The destinations on the activity rail. */
-export type View = "files" | "tasks" | "logs" | "debug" | "settings";
+export type View = "files" | "tasks" | "chat" | "logs" | "debug" | "settings";
 
 /**
  * Sections of the Settings view — everything that was never one of the two activities.
@@ -539,6 +578,7 @@ const EMPTY: AppState = {
   secrets: { keychain: false },
   schemaChoice: {},
   sync: { status: null, result: null, running: false, error: null, progress: [] },
+  chat: { taskId: null, project: null, installed: false, busy: false, opening: null, error: null },
   debug: { files: [], taskId: null, busy: false, error: null },
   drafts: {},
   editorTab: {},
@@ -578,6 +618,14 @@ const LIVE_ITEM_LIMIT = 500;
 const LOG_LIMIT = 2000;
 /** How many lines of a sync's own narration the panel keeps. Enough for a three-state run. */
 const SYNC_PROGRESS_LIMIT = 60;
+/**
+ * The journal events that change a run's SHAPE — see the `engine:event` case.
+ *
+ * A run enters a state, settles a call, leaves a state. Between those the instance tree and the
+ * session history are exactly what they were, so refetching them per journal entry would be three
+ * round trips to learn nothing. These four are the entries where that stops being true.
+ */
+const STRUCTURAL_EVENTS = new Set(["instance.entered", "instance.terminated", "operation.completed", "operation.failed"]);
 /**
  * How long the layout has to stop changing before it is written to `settings.json`, in ms.
  *
@@ -1591,6 +1639,24 @@ export function useApp() {
             if (closed !== undefined) patch({ sessions: rest, liveTurn: null });
             else patch({ liveTurn: null });
           }
+          /**
+           * The RUN'S SHAPE changed — refetch what draws it.
+           *
+           * A run publishes `store:invalidate` at `board` scope per journal entry and at `task` scope
+           * only when it ENDS, so for the whole of a run the two projections the transcript is built
+           * from — the instance tree and the session history — were whatever they happened to be when
+           * you arrived. Walk into a child while it is the only one that has run, wait for its
+           * siblings to finish, walk back out, and the level above still shows one child: not a stale
+           * render, a stale fetch, and nothing on the way back up re-asks.
+           *
+           * Gated on the structural events rather than done per entry. These fire once per state
+           * entered and once per call settled — the moments the shape actually moves — while token
+           * deltas arrive on `session:turn` and must not cost three round trips each.
+           */
+          if (STRUCTURAL_EVENTS.has(ev.type ?? "")) {
+            void refreshDetail(ref.current.selected);
+            void refreshSession(ref.current.selected, ref.current.sessionInstance);
+          }
           setState((s) => ({ ...s, stream: [...s.stream, line].slice(-STREAM_LIMIT) }));
           break;
         }
@@ -1613,7 +1679,14 @@ export function useApp() {
           void refreshBoard();
           void refreshDetail(ref.current.selected);
           void refreshState(ref.current.stateId);
-          if (ref.current.selected !== null) void refreshConversation(ref.current.selected);
+          if (ref.current.selected !== null) {
+            void refreshConversation(ref.current.selected);
+            // The session HISTORY too, not only the detail beside it. It is what says which states
+            // held a conversation, so a run that finished three children while you were reading the
+            // first one left the panel able to name them (the instance tree refreshed) and unable to
+            // show what any of them said.
+            void refreshSession(ref.current.selected, ref.current.sessionInstance);
+          }
           // Every cached transcript of the finished run was fetched while it could still grow. The
           // panel refetches what it is showing; the live tail's record has landed with it.
           if (message.taskId === ref.current.selected) patch({ sessions: {}, liveTurn: null });
@@ -2038,6 +2111,11 @@ export function useApp() {
           for (const taskId of taskIds) {
             await invoke("task:delete", { taskId, ...(project !== undefined ? { project } : {}) });
           }
+          // A deleted conversation stops being the open one, or the Chat view would keep asking for
+          // a transcript nothing can answer with.
+          if (ref.current.chat.taskId !== null && taskIds.includes(ref.current.chat.taskId)) {
+            patch({ chat: { ...ref.current.chat, taskId: null, error: null } });
+          }
           if (ref.current.selected !== null && taskIds.includes(ref.current.selected)) {
             patch({
               selected: null,
@@ -2082,6 +2160,108 @@ export function useApp() {
           fail(e);
         }
       },
+      // --- conversations ---------------------------------------------------------
+      //
+      // A conversation is a task whose workflow is one of the built-in chat states, so these three
+      // verbs are the whole of what the Chat view needs the store for: which one is open, making a
+      // new one, and naming it. Sending a message is not here — it is `chat:send`, addressed to an
+      // instance the panel is already holding, and routing it through the store would put a channel
+      // call between the composer and the thread it belongs to for no gain.
+
+      /**
+       * Open a conversation — the Chat view's selection.
+       *
+       * Selects the task as well, because everything the thread renders (the detail, the instance
+       * tree, the transcript, the live tail) is fetched by the ordinary selection and re-fetched by
+       * the ordinary invalidations. What this adds is a selection the Chat view REMEMBERS: the Tasks
+       * view selects too, and coming back to a conversation you left should not find whichever card
+       * was clicked in between.
+       */
+      openConversation: (taskId: string | null, project?: string) => {
+        patch({ chat: { ...ref.current.chat, taskId, project: project ?? null, opening: null, error: null } });
+        actionsRef.current.select(taskId, project);
+      },
+
+      /**
+       * Start a conversation: install what is missing, create the task, and send the first message
+       * by running it.
+       *
+       * The first message is the RUN — the state's prompt is `{{.inputs.message}}` — which is what
+       * makes a conversation an ordinary task with an ordinary journal rather than a special case
+       * threaded through the engine. Every message after this one goes through `chat:send`.
+       *
+       * Where it runs is where the work is: the open checkout when there is one, so an agent
+       * conversation reads and writes the project you are looking at. With nothing open it goes to
+       * JaiRA's own root — the same routing every base-layer workflow uses (`runTargetOf`), and the
+       * reason a conversation can be had on an empty window at all.
+       */
+      newConversation: async (message: string, overrides: ChatSettings = {}): Promise<string | null> => {
+        const text = message.trim();
+        if (text === "") return null;
+        patch({ chat: { ...ref.current.chat, busy: true, opening: text, error: null } });
+        const project = ref.current.projectDir === null ? SHARED_SESSION : undefined;
+        try {
+          // Missing files only — never overwriting. These are ordinary editable files under the
+          // shared root, and a conversation must not silently discard somebody's changes to what a
+          // conversation IS. Written every time the view is used rather than once at startup: the
+          // shared root can be repointed, and an installation check that ran before that would be
+          // remembering a directory nobody is using any more.
+          if (!ref.current.chat.installed) {
+            const wanted = chatWorkflowFiles();
+            for (const stateId of CHAT_STATES) {
+              // Asked per state rather than off the workflow browser: the browser needs an open
+              // project and this must work on an empty window, which is exactly where somebody
+              // opens a chat first. Same probe the Debug pane makes of its own files.
+              const source = await invoke("workflow:read", { stateId, layer: "base" }).catch(() => null);
+              if (source?.exists === true) continue;
+              await invoke("workflow:write", { stateId, layer: "base", text: JSON.stringify(wanted[stateId], null, 2) });
+            }
+            patch({ chat: { ...ref.current.chat, installed: true } });
+          }
+
+          const summary = await invoke("task:create", {
+            title: titleOf(text),
+            // Always the working conversation — see `chatWorkflow.ts` on why the view stopped asking.
+            // Both states are still installed above: `chat/assistant` is what conversations already
+            // started as one continue to run under.
+            workflow: CHAT_AGENT,
+            inputs: { message: text },
+            ...(project !== undefined ? { project } : {}),
+          });
+          // Selected BEFORE it starts, so the thread is pointed at the run when its first delta
+          // arrives — selecting afterwards means watching the opening in the past tense.
+          patch({ chat: { ...ref.current.chat, taskId: summary.taskId, project: project ?? null, busy: false } });
+          actionsRef.current.select(summary.taskId, project);
+          await Promise.all([project === SHARED_SESSION ? refreshSharedTasks() : refreshTasks(), refreshBoard()]);
+          // The composer's picks ride the START, because for a conversation the first message IS the
+          // run — see `StartTaskRequest.overrides`. Every later message carries them on `chat:send`
+          // instead, which is the same settings reaching the same call by the route that call takes.
+          await invoke("task:start", {
+            taskId: summary.taskId,
+            ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
+            ...(project !== undefined ? { project } : {}),
+          });
+          return summary.taskId;
+        } catch (e) {
+          patch({ chat: { ...ref.current.chat, busy: false, error: (e as Error).message } });
+          return null;
+        }
+      },
+
+      /** Name a conversation — or any task. The title is metadata; nothing about the run depends on it. */
+      renameTask: async (taskId: string, title: string, project?: string) => {
+        try {
+          await invoke("task:rename", { taskId, title, ...(project !== undefined ? { project } : {}) });
+          await Promise.all([
+            project === SHARED_SESSION ? refreshSharedTasks() : refreshTasks(),
+            refreshBoard(),
+            refreshDetail(taskId, project),
+          ]);
+        } catch (e) {
+          fail(e);
+        }
+      },
+
       /**
        * Review a task's worktree edits (CHANGESETS.md). The call returns as soon as the review run
        * starts; the reviewer itself arrives as a pending interaction and pops through the ordinary

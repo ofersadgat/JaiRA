@@ -23,12 +23,13 @@
  * `jaira workflow check` prints. Without them the panel would be a button that rewrote your document
  * for reasons of its own; with them, each edit is traceable to the requirement that motivated it.
  */
-import { useEffect, useState, type JSX } from "react";
-import type { SyncDirection, WorkflowSyncEdit, WorkflowSyncResult } from "@jaira/shared/browser";
+import { useEffect, useMemo, useState, type JSX } from "react";
+import type { Change, SyncDirection, WorkflowSyncEdit, WorkflowSyncResult } from "@jaira/shared/browser";
 import { docKey } from "./drafts";
 import type { FileSurfaceProps } from "./fileTypes";
 import { MarkdownView } from "./markdown";
 import { agoOf, driftOf, plural, syncSentence, SYNC_HINT, SYNC_LABEL } from "./syncState";
+import { ChangesView, type ChangeOutcome } from "./valueView";
 
 const DIRECTIONS: SyncDirection[] = ["document", "states"];
 
@@ -71,42 +72,84 @@ function Findings({ result }: { result: WorkflowSyncResult }): JSX.Element {
 }
 
 /**
- * The proposed state files.
+ * The proposed files, as the diff they are.
  *
- * Every row is a link to the file it would change, because "4 files have unsaved edits" is only
- * actionable if getting to them is one click rather than a hunt through the tree. A row that could
- * not be offered says why on itself — reported and not silently dropped, since a gap the sync
- * declined to close is exactly the thing a person has to go and do by hand.
+ * This was a flat list of names with a reason under each, which reported what the model had done in
+ * the one form that could not answer the first question about it — how big is this, and did it
+ * land. It is {@link ChangesView} now: a row per file with its line counts and its outcome, opening
+ * to a real diff. `before` comes from the CHANGESET when the run built one, because that is where
+ * the tree's current text was pinned; without it a proposal is a create as far as the diff can
+ * tell, which is honest — nothing else knows what the file said.
+ *
+ * The row keeps its link to the tree. "4 files have unsaved edits" is only actionable if getting to
+ * them is one click rather than a hunt, and reading a diff is not the same intention as opening the
+ * file to edit it.
  */
-function Edits({ edits, onOpen }: { edits: WorkflowSyncEdit[]; onOpen?: (edit: WorkflowSyncEdit) => void }): JSX.Element {
+function Edits({
+  edits,
+  changeset,
+  onOpen,
+}: {
+  edits: WorkflowSyncEdit[];
+  changeset?: WorkflowSyncResult["changeset"] | undefined;
+  onOpen?: (edit: WorkflowSyncEdit) => void;
+}): JSX.Element {
+  const refused = edits.filter((edit) => !edit.applicable).length;
+  const byPath = useMemo(() => new Map(edits.map((edit) => [edit.path, edit] as const)), [edits]);
+  const changes = useMemo<Change[]>(() => {
+    const pinned = new Map((changeset?.changes ?? []).map((change) => [change.path, change] as const));
+    return edits.map((edit, i) => {
+      const from = pinned.get(edit.path);
+      return {
+        id: from?.id ?? `e${i + 1}`,
+        path: edit.path,
+        action: edit.action,
+        ...(from?.before !== undefined ? { before: from.before } : {}),
+        after: edit.text,
+        ...(edit.reason !== "" ? { reason: edit.reason } : {}),
+      };
+    });
+  }, [edits, changeset]);
+  const outcomes = useMemo(
+    () =>
+      Object.fromEntries(
+        edits.map((edit) => [edit.path, { ok: edit.applicable, ...(edit.blocked !== undefined ? { note: edit.blocked } : {}) }]),
+      ) as Record<string, ChangeOutcome>,
+    [edits],
+  );
+
   return (
     <section className="sync-section">
       <h3>
         <span>Proposed files</span>
         <span className="count">{edits.length}</span>
+        {/* Counted in the heading, not left to be discovered by scrolling. A run whose every proposal
+            was refused reported "12 proposed files" and read as a success — the number that changes
+            what the section MEANS was the one number not on it. */}
+        {refused > 0 ? <span className="count count-bad">{refused} not applied</span> : null}
       </h3>
-      {edits.length === 0 ? <p className="empty">Nothing to change.</p> : null}
-      {edits.map((edit) => (
-        // A state file reads as its state id; a prompt file has no state to be, so it reads as its
-        // path — which is exactly the name the proposal wants it thought of by.
-        <div key={edit.path} className={`sync-edit${edit.applicable ? "" : " blocked"}`}>
-          <div className="sync-edit-head">
-            <span className={`chip${edit.action === "create" ? " chip-ok" : ""}`}>{edit.action}</span>
-            {edit.applicable && onOpen ? (
-              <button className="link grow ellip" onClick={() => onOpen(edit)} title={edit.path}>
-                {edit.stateId ?? edit.path}
-              </button>
-            ) : (
-              <span className="grow ellip" title={edit.path}>
-                {edit.stateId ?? edit.path}
-              </span>
-            )}
-            {edit.requirements.length > 0 ? <span className="sub">{edit.requirements.join(", ")}</span> : null}
-          </div>
-          {edit.reason === "" ? null : <div className="sub">{edit.reason}</div>}
-          {edit.blocked === undefined ? null : <div className="notice warn">not applied — {edit.blocked}</div>}
+      {/* The whole proposal refused is a different event from a proposal with nothing in it, and the
+          rows alone do not say so — they say it twelve times, quietly, below the fold. */}
+      {refused === edits.length && refused > 0 ? (
+        <div className="notice bad">
+          The model wrote {refused === 1 ? "this file" : `all ${refused} of these files`} and JaiRA
+          declined {refused === 1 ? "it" : "them"} — nothing here was proposed for review. Each row says why.
         </div>
-      ))}
+      ) : null}
+      <ChangesView
+        changes={changes}
+        outcomes={outcomes}
+        empty="Nothing to change."
+        rowAction={(change) => {
+          const edit = byPath.get(change.path);
+          if (edit === undefined || !edit.applicable || onOpen === undefined) return null;
+          return (
+            <button className="link vv-row-open" title={`Open ${edit.stateId ?? edit.path}`} onClick={() => onOpen(edit)}>
+              Open
+            </button>
+          );
+        }}
+      />
     </section>
   );
 }
@@ -149,7 +192,13 @@ function Report({
         </section>
       ) : null}
 
-      {result.edits !== undefined ? <Edits edits={result.edits} {...(onOpenEdit ? { onOpen: onOpenEdit } : {})} /> : null}
+      {result.edits !== undefined ? (
+        <Edits
+          edits={result.edits}
+          {...(result.changeset !== undefined ? { changeset: result.changeset } : {})}
+          {...(onOpenEdit ? { onOpen: onOpenEdit } : {})}
+        />
+      ) : null}
 
       {result.notes.length > 0 ? (
         <section className="sync-section">

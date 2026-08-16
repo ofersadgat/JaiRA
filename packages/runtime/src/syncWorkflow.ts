@@ -31,6 +31,7 @@ import type { JsonValue } from "@declarative-ai/exec";
 // The wire vocabulary, not a copy of it: the app's IPC contract and these workflows must mean the
 // same thing by "document", or a button would run the other direction.
 import type { SyncDirection } from "@jaira/shared";
+import { claudeAskSettings, CLAUDE_NATIVE_READ_TOOLS } from "./tools";
 import {
   CONFORMANCE_ID,
   conformanceReportOf,
@@ -161,7 +162,10 @@ const STATE_FILE_RULES = `A state file is one JSON object. The fields that matte
 
 Rules you must not break:
 
-- A state's id IS its path. A child at \`plan/critique\` lives in \`workflows/plan/critique.json\`.
+- A state's id IS its path, and the path you return is relative to the LAYER ROOT — which means it
+  begins with \`workflows/\`. A child whose id is \`plan/critique\` is returned as
+  \`"path": "workflows/plan/critique.json"\`, never as \`"path": "plan/critique.json"\`. The digest
+  names states by id; the proposal names FILES.
 - Only name a function that this project already uses somewhere in the digest. Inventing a function
   name produces a workflow that fails at the moment it reaches that state.
 - Every input a child needs must be bound by the mount, and every binding must name something that
@@ -302,6 +306,17 @@ The implementation as it stands:
 export interface SyncWorkflowOptions {
   /** Model for every state. Absent ⇒ the project's `models.default`, as with the check. */
   model?: string;
+  /**
+   * Make a delegated Claude agent put its OWN read tools to JaiRA's gate — see {@link claudeAskSettings}.
+   *
+   * Off by default, and the default is a judgement rather than an oversight. These states are
+   * `read-only`, the transport denies the write-capable built-ins up front, and the human gate that
+   * matters in this flow is the changeset review at the end — so what asking buys is a prompt per
+   * read (twenty in a real run) for calls that could not have changed anything. On for anyone who
+   * wants every file the agent touched to have been touched with their knowledge, which is a
+   * legitimate thing to want and not something to decide on their behalf.
+   */
+  askNativeReads?: boolean;
 }
 
 /**
@@ -331,10 +346,18 @@ export function syncWorkflowFiles(options: SyncWorkflowOptions = {}): Record<str
   // call, codex maps it onto `--sandbox read-only`, and a transport that can hold the agent to none
   // of it refuses the state. `read_file` is `allow` so the one declared tool runs without a human
   // click per read — it is read-only, which is precisely what the profile admits.
+  //
+  // What the profile could NOT reach, until it was asked to: a delegated agent's own `Read`, `Glob`
+  // and `Grep`. `read-only` denies the write-capable built-ins and says nothing about the readers,
+  // and Claude Code's default policy auto-allows those without ever consulting the permission
+  // callback — so a run under this environment read twenty files with no prompt. `askNativeReads`
+  // is the switch that routes them through the gate; see {@link claudeAskSettings} for why it is a
+  // switch rather than the default.
   const environment = {
     kind: "prompt",
     tools: ["read_file"],
     permissions: { profile: "read-only", tools: { read_file: "allow" } },
+    ...(options.askNativeReads === true ? { providerOptions: claudeAskSettings(CLAUDE_NATIVE_READ_TOOLS) } : {}),
     ...(model !== undefined ? { model } : {}),
   };
   const check = conformanceWorkflowFiles(model !== undefined ? { model } : {});

@@ -229,18 +229,22 @@ function MountHost({ mount, mountKey }: { mount: (node: HTMLElement) => () => vo
 /**
  * The changeset gate as a hostable element — exported because it has TWO hosts (§8.1's point): the
  * gate modal below, and the reviewed task's conversation view. `about` scopes `$WORKTREE` reads to
- * the reviewed task; `services` lets a host with more reach (the app shell has `drafts` and
- * `openFile`; this module has neither) supply what it can.
+ * the reviewed task; `project` says which project's anchors every read resolves against (see
+ * `PendingInteraction.project` — a review is parked in JaiRA's own project and is about another's);
+ * `services` lets a host with more reach (the app shell has `drafts` and `openFile`; this module has
+ * neither) supply what it can.
  */
 export function ChangesetGate({
   config,
   inputs,
   onSubmit,
   about,
+  project,
   services,
   mountKey,
 }: ComponentProps<UserApproveChangesetConfig> & {
   about?: string | undefined;
+  project?: string | undefined;
   services?: Partial<ComponentServices> | undefined;
   /** The request id — what makes this a DIFFERENT review. See {@link MountHost}. */
   mountKey: string;
@@ -253,10 +257,10 @@ export function ChangesetGate({
           config,
           inputs,
           services: {
-            ...rendererServices(
-              (channel, request) => invoke(channel, request),
-              about !== undefined ? { taskId: about } : {},
-            ),
+            ...rendererServices((channel, request) => invoke(channel, request), {
+              ...(about !== undefined ? { taskId: about } : {}),
+              ...(project !== undefined ? { project } : {}),
+            }),
             ...(services ?? {}),
           },
           onSubmit,
@@ -337,6 +341,7 @@ export function InteractionDialog({
             inputs={inputs}
             onSubmit={onSubmit}
             about={pending.about}
+            project={pending.project}
             services={services}
             mountKey={pending.requestId}
           />

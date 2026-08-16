@@ -34,6 +34,8 @@ export * from "./genericAgent";
 export * from "./artifactPath";
 export * from "./artifacts";
 export * from "./fileTools";
+export * from "./searchTools";
+export * from "./webTools";
 export * from "./artifactSink";
 export * from "./secrets";
 export * from "./executors";

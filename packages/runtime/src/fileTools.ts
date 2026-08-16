@@ -41,6 +41,7 @@ import { isDeniedPath } from "./policy";
 
 export const WRITE_FILE = "write_file";
 export const READ_FILE = "read_file";
+export const EDIT_FILE = "edit";
 
 export interface FileToolOptions {
   /** The parsed `config.artifacts.destination`. Defaults to `$DEFAULT`. */
@@ -191,8 +192,95 @@ export function createReadFileTool(options: FileToolOptions): Tool {
   } as Tool;
 }
 
-/** Register both file tools on a registry's `tools` facet. */
+/**
+ * The current content of a logical path — the read half, without the tool around it.
+ *
+ * Split out because `edit` needs exactly what `read_file` does and for the same reason: an artifact
+ * written to a virtual destination is not on disk at the path the agent knows it by, so an edit that
+ * went straight to the filesystem would either miss it or, worse, create a second copy beside it.
+ */
+function currentContent(options: FileToolOptions, logical: string, ctx?: ExecServices): { text: string } | { error: string } {
+  const store = options.store ?? new MemoryArtifactStore();
+  const record = store.get(options.vars.taskId, logical);
+  if (record?.content !== undefined) return { text: record.content };
+  const target = record?.physicalPath ?? withinWorkspace(ctx?.workspace?.root ?? options.cwd ?? options.vars.worktree, logical);
+  if (target === undefined) return { error: `'${logical}' is outside the workspace` };
+  try {
+    return { text: readFileSync(target, "utf8") };
+  } catch (e) {
+    return { error: `could not read '${logical}': ${(e as Error).message}` };
+  }
+}
+
+/**
+ * `edit` — replace exact text in a file that already exists.
+ *
+ * The distinction from `write_file` is intent, and intent is the whole argument for having both. A
+ * write says "the file is now this", and a model that meant to change one line and returned the file
+ * whole has silently reverted everything it did not think to include. An edit says "this became
+ * that", which fails loudly when the file is not what the model believed — and being wrong about the
+ * current content is the failure mode that matters.
+ *
+ * So a match that is not unique is REFUSED rather than resolved by picking the first. Two identical
+ * fragments mean the caller has not identified the one it meant, and choosing for it is how an edit
+ * lands in the wrong function.
+ */
+export function createEditFileTool(options: FileToolOptions): Tool {
+  const destination = options.destination ?? parseDestination("$DEFAULT");
+  const store = options.store ?? new MemoryArtifactStore();
+  const now = options.now ?? Date.now;
+  return {
+    description:
+      "Replace exact text in an existing workspace file. `old` must appear exactly once unless `all` is set. Use write_file to create a file or replace one whole.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Path relative to the workspace root." },
+        old: { type: "string", description: "The exact text to replace, including its indentation." },
+        new: { type: "string", description: "What to put in its place. Empty deletes it." },
+        all: { type: "boolean", description: "Replace every occurrence instead of requiring exactly one." },
+      },
+      required: ["path", "old", "new"],
+    },
+    readOnly: false,
+    run: async (input, ctx?: ExecServices): Promise<JsonValue> => {
+      const args = (input ?? {}) as { path?: unknown; old?: unknown; new?: unknown; all?: unknown };
+      const logical = logicalKey(typeof args.path === "string" ? args.path : "");
+      const refusal = refusePath(logical);
+      if (refusal !== undefined) return { error: refusal };
+      const oldText = typeof args.old === "string" ? args.old : "";
+      const newText = typeof args.new === "string" ? args.new : "";
+      if (oldText === "") return { error: "`old` is empty — use write_file to create a file" };
+      if (oldText === newText) return { error: "`old` and `new` are identical, so this edit would change nothing" };
+
+      const read = currentContent(options, logical, ctx);
+      if ("error" in read) return { error: read.error };
+      const occurrences = read.text.split(oldText).length - 1;
+      if (occurrences === 0) return { error: `'${logical}' does not contain that text` };
+      if (occurrences > 1 && args.all !== true) {
+        return { error: `that text appears ${occurrences} times in '${logical}' — include more context, or set \`all\`` };
+      }
+      const content = args.all === true ? read.text.split(oldText).join(newText) : read.text.replace(oldText, newText);
+
+      try {
+        const { record, physicalPath } = place(options, destination, options.vars.taskId, logical, content, now());
+        if (physicalPath !== undefined) {
+          mkdirSync(dirname(physicalPath), { recursive: true });
+          writeFileSync(physicalPath, content, "utf8");
+        }
+        store.put(record);
+        return { path: logical, replaced: args.all === true ? occurrences : 1, bytes: record.bytes };
+      } catch (e) {
+        if (e instanceof DestinationError) return { error: e.message };
+        return { error: `could not write '${logical}': ${(e as Error).message}` };
+      }
+    },
+  } as Tool;
+}
+
+/** Register the file tools on a registry's `tools` facet. */
 export function registerFileTools(registry: { tools: Map<string, Tool> }, options: FileToolOptions): void {
   registry.tools.set(WRITE_FILE, createWriteFileTool(options));
   registry.tools.set(READ_FILE, createReadFileTool(options));
+  registry.tools.set(EDIT_FILE, createEditFileTool(options));
 }

@@ -100,9 +100,18 @@ export interface MonacoDiffProps {
   /** Called with the modified side's full text on every edit — §4.1's `merged.content` feed. */
   onModified?: (text: string) => void;
   readOnly?: boolean;
+  /**
+   * Two columns, or one with the removals struck through above the additions.
+   *
+   * Both are worth having and neither is right everywhere, which is why it is a prop rather than the
+   * `renderSideBySide: true` this had hard-coded. Side by side is the better reading of a rewrite
+   * and needs width; inline is the better reading of a scattered edit and is the only one that
+   * survives a narrow panel — which is where most of these are read.
+   */
+  sideBySide?: boolean;
 }
 
-export function MonacoDiffPane({ original, modified, mime, onModified, readOnly }: MonacoDiffProps): JSX.Element {
+export function MonacoDiffPane({ original, modified, mime, onModified, readOnly, sideBySide }: MonacoDiffProps): JSX.Element {
   const host = useRef<HTMLDivElement>(null);
   // The latest callback, without tearing the editor down per render: the editor is created once per
   // (original, mime) and the subscription reads through the ref.
@@ -117,7 +126,7 @@ export function MonacoDiffPane({ original, modified, mime, onModified, readOnly 
     const modifiedModel = monaco.editor.createModel(modified, language);
     const editor = monaco.editor.createDiffEditor(node, {
       automaticLayout: true,
-      renderSideBySide: true,
+      renderSideBySide: sideBySide !== false,
       originalEditable: false,
       readOnly: readOnly === true,
       minimap: { enabled: false },
@@ -143,7 +152,47 @@ export function MonacoDiffPane({ original, modified, mime, onModified, readOnly 
     // editing surface), and resetting the model on every keystroke's round-trip would fight the
     // user's cursor.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [original, mime, readOnly]);
+  }, [original, mime, readOnly, sideBySide]);
+
+  return <div className="monaco-host" ref={host} />;
+}
+
+/**
+ * One text, coloured — the read-only sibling of the diff pane.
+ *
+ * Same worker wiring, same theme following, same MIME→language map; what differs is that there is
+ * nothing to compare against. It exists because "show me the source" and "show me the source I can
+ * read" are different requests, and a two-hundred-line state file in a `<pre>` is the second one
+ * refused. Read-only throughout: this is a VIEW, and every surface that edits text in this app has
+ * an editor of its own.
+ */
+export function MonacoCodePane({ text, mime }: { text: string; mime: string }): JSX.Element {
+  const host = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const node = host.current;
+    if (node === null) return undefined;
+    const model = monaco.editor.createModel(text, monacoLanguageOf(mime));
+    const editor = monaco.editor.create(node, {
+      model,
+      automaticLayout: true,
+      readOnly: true,
+      // No cursor and no current-line highlight: those say "you are editing here", and nobody is.
+      renderLineHighlight: "none",
+      domReadOnly: true,
+      minimap: { enabled: false },
+      scrollBeyondLastLine: false,
+      overviewRulerLanes: 0,
+      theme: themeOf(),
+    });
+    const themes = new MutationObserver(() => monaco.editor.setTheme(themeOf()));
+    themes.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => {
+      themes.disconnect();
+      editor.dispose();
+      model.dispose();
+    };
+  }, [text, mime]);
 
   return <div className="monaco-host" ref={host} />;
 }

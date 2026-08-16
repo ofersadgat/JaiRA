@@ -40,6 +40,7 @@ import { useEffect, useState, type JSX, type ReactNode } from "react";
 import type { InstanceNode, SessionView } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { Markdown } from "./markdown";
+import { ValueView } from "./valueView";
 import { Icon } from "./icons";
 import {
   blocksOf,
@@ -66,6 +67,19 @@ type SidechainOf = (call: string) => TranscriptEntry[];
  */
 type OpenSidechain = (call: string, name: string) => void;
 
+/**
+ * Replacing a message that was already sent — what the Chat view lends its transcript.
+ *
+ * Two halves because they are two different pieces of knowledge and only the host has either: which
+ * turns can be replaced at all (`can`), and what to do when one is (`edit`). A transcript beside a
+ * board is handed neither and shows no edit buttons, which is correct — a run's prompt came from the
+ * workflow, and rewriting it after the fact would be a record of a run that never happened.
+ */
+export interface EditMessage {
+  can: (turn: number) => boolean;
+  edit: (turn: number, text: string) => void;
+}
+
 /** `09:14:02`. Seconds included: the gap between two calls is the thing being read. */
 function clockOf(at: number | undefined): string {
   return at === undefined || at === 0 ? "" : new Date(at).toLocaleTimeString();
@@ -79,14 +93,20 @@ export function durationOf(ms: number): string {
   return `${Math.floor(seconds / 60)} m ${seconds % 60} s`;
 }
 
-/** A payload block, or the honest statement that the record kept none. */
+/**
+ * A payload block, or the honest statement that the record kept none.
+ *
+ * Shown through {@link ValueView}, so a payload that has a better rendering than JSON gets it and
+ * keeps the JSON one press away. That is not decoration here: a structured output whose value is a
+ * set of files is the single most common large payload in this app, and it was being printed as an
+ * array of strings with `\n` in them — the whole of what a run produced, in its least readable form.
+ */
 function Payload({ label, value }: { label: string; value: JsonValue | undefined }): JSX.Element {
   if (value === undefined) return <div className="ts-payload ts-payload-empty">no {label} was recorded</div>;
   return (
-    <pre className="ts-payload">
-      <span className="ts-payload-label">{label}</span>
-      {typeof value === "string" ? value : JSON.stringify(value, null, 2)}
-    </pre>
+    <div className="ts-payload">
+      <ValueView value={value} label={label} />
+    </div>
   );
 }
 
@@ -388,15 +408,39 @@ function WorkBlockView({
  * A system prompt is neither — it is the frame the run was given, so it is quiet, full width, and
  * marked with the one label a reader would not otherwise guess.
  */
-function Message({ entry }: { entry: MessageEntry }): JSX.Element {
-  const said = entry.text !== undefined && entry.text.length > 0;
+function Message({ entry, onEdit }: { entry: MessageEntry; onEdit?: EditMessage | undefined }): JSX.Element {
+  // Only a message the host can NAME a position for is editable, which is why this asks rather than
+  // being told: the host holds the edit points, and a button offered over a message nothing can be
+  // sent in place of would be a button that fails when pressed.
+  const editable = onEdit !== undefined && entry.turn !== undefined && onEdit.can(entry.turn);
+  /**
+   * Whether this answer is being read as markdown or as what the model actually wrote.
+   *
+   * An answer is rendered by default because that is what it was written to be, and the toggle
+   * exists because rendering is a CLAIM — a fence that never closed, a heading that ate a paragraph,
+   * a table that did not parse are all invisible in the rendering and obvious in the source. It
+   * lives in the hover meta rather than in a permanent control: this is a check you make
+   * occasionally, and a button over every paragraph the model wrote is chrome that never rests.
+   */
+  const [source, setSource] = useState(false);
   const meta = (
     // Hidden until hovered. On a message the clock is provenance rather than content: worth having,
     // never worth a permanent line of grey above every paragraph the model wrote.
     <div className="ts-meta">
       <span>{clockOf(entry.at)}</span>
+      {entry.role === "assistant" && entry.text !== undefined && entry.text.length > 0 ? (
+        <button className="ghost ts-view" aria-pressed={source} onClick={() => setSource((v) => !v)}>
+          {source ? "Rendered" : "Source"}
+        </button>
+      ) : null}
+      {editable ? (
+        <button className="ghost ts-edit" onClick={() => onEdit.edit(entry.turn!, entry.text ?? "")}>
+          Edit
+        </button>
+      ) : null}
     </div>
   );
+  const said = entry.text !== undefined && entry.text.length > 0;
   if (entry.role === "user") {
     return (
       <div className="ts-msg ts-msg-user">
@@ -408,7 +452,15 @@ function Message({ entry }: { entry: MessageEntry }): JSX.Element {
   if (entry.role === "assistant") {
     return (
       <div className="ts-msg ts-msg-assistant">
-        {said ? <Markdown text={entry.text ?? ""} /> : <p className="empty">(no answer was recorded)</p>}
+        {said ? (
+          source ? (
+            <pre className="ts-text">{entry.text}</pre>
+          ) : (
+            <Markdown text={entry.text ?? ""} />
+          )
+        ) : (
+          <p className="empty">(no answer was recorded)</p>
+        )}
         {meta}
       </div>
     );
@@ -466,6 +518,7 @@ export function Transcript({
   live,
   empty,
   onOpenSidechain,
+  onEdit,
 }: {
   session?: SessionView | null;
   entries: TranscriptEntry[];
@@ -480,6 +533,8 @@ export function Transcript({
   empty?: string | undefined;
   /** Walk into a subagent conversation. Absent ⇒ the doorway only folds open in place. */
   onOpenSidechain?: OpenSidechain | undefined;
+  /** Send a message in place of one already here. Absent ⇒ no message offers an edit. */
+  onEdit?: EditMessage | undefined;
 }): JSX.Element {
   if (entries.length === 0) {
     return <p className="empty">{empty ?? session?.empty ?? "Nothing has been said here yet."}</p>;
@@ -504,7 +559,7 @@ export function Transcript({
               {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
             />
           );
-        if (block.kind === "message") return <Message key={i} entry={block} />;
+        if (block.kind === "message") return <Message key={i} entry={block} {...(onEdit !== undefined ? { onEdit } : {})} />;
         return (
           <div key={i} className="ts-msg ts-msg-assistant ts-live">
             {/* Plain text, not markdown: a half-arrived answer has half a fenced block in it, and

@@ -505,6 +505,44 @@ describe("streamed partials on open records", () => {
     expect(() => s.streamPartial("nowhere", 3, partial(["x"]))).not.toThrow();
     expect(s.transcript("nowhere")).toEqual([]);
   });
+
+  /**
+   * The clocks survive a SUCCESSFUL settle — the one field the settle cannot reproduce.
+   *
+   * A provider result carries no wall clock per message, so the per-turn times exist exactly once:
+   * in the stream that measured them. Overwriting the row with the settled result used to drop them,
+   * which is why a finished run's thinking rows had no "thought for 12 s" and a live one did.
+   */
+  const timed = (texts: string[], times: Array<Record<string, number>>) =>
+    ({ value: { messages: texts.map(turn), messageTimes: times } }) as never;
+
+  it("carries the streamed per-turn times onto a successful settle, aligned as a suffix", async () => {
+    const s = store();
+    const at = await s.resolve({ ref: "timed" });
+    await s.open({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
+    s.streamPartial("timed", 0, timed(["thought about it", "answered"], [{ at: 200, thoughtMs: 90 }, { at: 300 }]));
+    // The settle holds the message the call was made WITH as well, so the stamps line up with the
+    // TAIL of its list — padded at the front, never shifted onto the wrong turn.
+    await s.close("r1", {
+      result: { value: { messages: [{ role: "user", content: "go" }, turn("thought about it"), turn("answered")] } } as never,
+    });
+
+    const row = s.transcript("timed")[0] as { value?: { value?: { messageTimes?: unknown; messages?: unknown[] } } };
+    expect(row.value?.value?.messages).toHaveLength(3);
+    expect(row.value?.value?.messageTimes).toEqual([{}, { at: 200, thoughtMs: 90 }, { at: 300 }]);
+  });
+
+  it("drops the times rather than mislabel a turn when the roles do not line up", async () => {
+    const s = store();
+    const at = await s.resolve({ ref: "askew" });
+    await s.open({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
+    s.streamPartial("askew", 0, timed(["one", "two"], [{ at: 1 }, { at: 2 }]));
+    await s.close("r1", {
+      result: { value: { messages: [turn("one"), { role: "user", content: "not two" }] } } as never,
+    });
+    const row = s.transcript("askew")[0] as { value?: { value?: { messageTimes?: unknown } } };
+    expect(row.value?.value?.messageTimes).toBeUndefined();
+  });
 });
 
 /**

@@ -267,7 +267,12 @@ export function RunConversation({
       </div>
       {/* Pinned below the scroller, not inside it: what you are about to say does not scroll away
           with what was already said. */}
-      <ChatComposer taskId={detail.taskId} instanceId={parent?.instanceId} project={context.project} />
+      <ChatComposer
+        taskId={detail.taskId}
+        instanceId={parent?.instanceId}
+        project={context.project}
+        running={detail.status === "running"}
+      />
     </div>
   );
 }
@@ -337,7 +342,18 @@ export function SidechainConversation({
  * settings strip renders and an override has to be reflected in it — picking a model must show the
  * model picked, not the one the state inherits.
  */
-function ChatComposer({ taskId, instanceId, project }: { taskId: string; instanceId: number | undefined; project?: string | undefined }): JSX.Element {
+function ChatComposer({
+  taskId,
+  instanceId,
+  project,
+  running,
+}: {
+  taskId: string;
+  instanceId: number | undefined;
+  project?: string | undefined;
+  /** The TASK is still going — what makes the button a stop button. See {@link stop}. */
+  running?: boolean;
+}): JSX.Element {
   const [overrides, setOverrides] = useState<ChatSettings>({});
   // THREE states, not two. `undefined` is "not asked yet", `null` is "asked, and there is no
   // conversation here" — and only the second may disable the box. Collapsing them makes every first
@@ -383,18 +399,42 @@ function ChatComposer({ taskId, instanceId, project }: { taskId: string; instanc
       });
   };
 
+  /**
+   * Stop what is actually going, which is two different things — the same split the Chat view makes.
+   *
+   * While the TASK is running the thing to abort is the run, and `chat:cancel` has nothing registered
+   * to reach; a message typed into a settled run is a chat turn, which `task:cancel` knows nothing
+   * about. One button, and it has to pick.
+   *
+   * Offered even where nothing can be SENT, which is the point. A composite holds no conversation of
+   * its own, so this box is disabled over it — and it is precisely the node somebody stands on to
+   * watch a whole workflow, so "stop" there has to mean "stop the run, children and all". `task:cancel`
+   * is task-scoped, so it does: there is no per-instance abort to reach for and none is wanted.
+   */
+  const stop = (): void => {
+    if (running === true) {
+      void invoke("task:cancel", { taskId, ...(project !== undefined ? { project } : {}) }).catch((e: unknown) =>
+        setError(e instanceof Error ? e.message : String(e)),
+      );
+      return;
+    }
+    void invoke("chat:cancel", { taskId, ...(project !== undefined ? { project } : {}) }).catch(() => undefined);
+  };
+
   // Why sending is impossible, when it is. `null` is not a loading state to wait out — the channel
   // answered and said this state has no session of its own, and an enabled box above that answer is
   // an invitation to an error. `undefined` is the wait, and it disables nothing.
   //
   // A composite is the case: it orchestrates and says nothing, so it holds no session, while its
   // CHILDREN each hold one. The message says what is true of the node you are on rather than of the
-  // panel, which is showing those children's transcripts.
+  // panel, which is showing those children's transcripts — and it says what to do about it, because
+  // "no chat session exists in this state" read as a fault to somebody looking straight at three
+  // transcripts, when it is a fact about the orchestrator above them.
   const disabled =
     instanceId === undefined
       ? "Select a run to continue its conversation."
       : plan === null
-        ? "No chat session exists in this state"
+        ? "This state holds no conversation of its own — reply in one of the runs below."
         : undefined;
 
   return (
@@ -402,10 +442,13 @@ function ChatComposer({ taskId, instanceId, project }: { taskId: string; instanc
       {error !== null ? <p className="cx-error">{error}</p> : null}
       <Composer
         plan={plan ?? null}
-        busy={busy}
+        // A run in flight is busy whatever the box says: the button is the only handle on it, and a
+        // disabled composer over a running workflow used to be a panel with no way to stop it.
+        busy={busy || running === true}
         overrides={overrides}
         onOverrides={setOverrides}
         onSend={send}
+        onStop={stop}
         {...(disabled !== undefined ? { disabled } : {})}
       />
     </>
@@ -604,6 +647,7 @@ export function TaskContext({
               inputs={gate.inputs as Record<string, unknown>}
               onSubmit={onGate}
               about={gate.about}
+              project={gate.project}
               services={gateServices}
               mountKey={gate.requestId}
             />

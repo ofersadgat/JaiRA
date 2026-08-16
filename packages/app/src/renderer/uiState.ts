@@ -77,6 +77,8 @@ export const FOLD = {
   shellFiles: "shell.files",
   /** The sidebar's other accordion: the Settings sections, while Settings is open. */
   shellSections: "shell.sections",
+  /** The sidebar's conversation list, while Chat is open. */
+  shellChats: "shell.chats",
   /** The Files view's lower half: "Configuration" on a state, "Source" on anything else. */
   filesEditor: "files.editor",
   /** Whether the JSON editor is showing the schema's field reference. */
@@ -96,6 +98,7 @@ export const FOLD_DEFAULTS: Record<string, boolean> = {
   [FOLD.shellSidebar]: true,
   [FOLD.shellFiles]: true,
   [FOLD.shellSections]: true,
+  [FOLD.shellChats]: true,
   [FOLD.filesEditor]: true,
   [FOLD.schemaReference]: false,
   [FOLD.settingsEffective]: false,

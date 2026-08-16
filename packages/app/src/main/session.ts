@@ -102,9 +102,31 @@ export class ProjectSession {
    * while it is taking its turn. See `withLiveCalls`.
    */
   readonly liveCalls = new LiveCalls();
+  /**
+   * The hand-typed turns in flight, by task id — what a "stop" has to reach.
+   *
+   * Separate from {@link live} because a chat turn is deliberately not a run: it claims no job, moves
+   * no task status, and registers nothing there. Without this there was simply nothing to abort, so a
+   * message sent to an agent that then worked for four minutes could only be waited out.
+   *
+   * One per TASK rather than per conversation: a task's chat is one thread, and `sendChatMessage`
+   * already waits for a call in flight before starting another.
+   */
+  readonly chatTurns = new Map<string, AbortController>();
   readonly hub: InteractionHub;
   /** requestId → taskId, for a request whose registration could not name one. */
   readonly requestTask = new Map<string, string>();
+  /**
+   * taskId → the project this task's work is ABOUT, when that is not this session.
+   *
+   * Set for the reviews JaiRA runs on another project's behalf: a changeset review is recorded here,
+   * in the system project, while the files under review live in the reviewed task's project or in
+   * the layer root a sync proposal targets. It is what lets a parked gate tell the renderer which
+   * project to read `$WORKTREE`, `$JAIRA` and `$PROJECT` against — see `PendingInteraction.project`.
+   *
+   * In memory, like {@link requestTask}: a parked request does not outlive the process either.
+   */
+  readonly subjectProject = new Map<string, string>();
   /**
    * Function names this session routes to the renderer — its gate vocabulary. Grows as runs register
    * their bundles' functions, and is what makes a parked state read `waiting_for_user` in the views.
@@ -173,6 +195,10 @@ export class ProjectSession {
     // does go is the proposal it was about to produce, which belongs to a project that is going away.
     this.syncTask = undefined;
     this.pendingSync = undefined;
+    // A hand-typed turn is not in `live`, so it would otherwise keep talking to a provider on behalf
+    // of a project that is gone — and finish by writing to a closed database.
+    for (const turn of this.chatTurns.values()) turn.abort();
+    this.chatTurns.clear();
     const inFlight = [...this.live.values()];
     for (const run of inFlight) run.abort.abort();
     await Promise.allSettled(inFlight.map((run) => run.done));

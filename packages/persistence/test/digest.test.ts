@@ -43,6 +43,63 @@ describe("workflowDigest", () => {
     expect(digest.markdown).toContain("authored (feature/plan/goals.json):");
   });
 
+  /**
+   * A root that will not load used to contribute NOTHING — no section, no states, no files — and the
+   * error was reported only as a field a caller could refuse over. That made the digest empty in the
+   * one case it is most needed: a broken workflow is what somebody wants a sync to help them fix,
+   * and a proposal cannot fix a file it was never shown.
+   */
+  describe("a root that does not load", () => {
+    beforeEach(() => {
+      // A binding form the loader rejects — the closure cannot be built, but every file is readable.
+      writeFileSync(
+        join(project.paths.workflowsDir, "feature", "plan.json"),
+        JSON.stringify(
+          {
+            label: "Plan",
+            children: { goals: { inputs: { issue: { schema: [] } } } },
+            sequence: ["goals"],
+          },
+          null,
+          2,
+        ),
+        "utf8",
+      );
+      project.close();
+      project = openProject(dir);
+    });
+
+    it("is still rendered, from its files on disk", () => {
+      const digest = workflowDigest(project);
+
+      expect(digest.loadErrors).toHaveLength(1);
+      expect(digest.loadErrors[0]?.rootId).toBe("feature/plan");
+      // The root counts as covered, so nothing downstream reads this as "there is nothing here".
+      expect(digest.roots).toEqual(["feature/plan"]);
+      expect(digest.files.length).toBeGreaterThan(0);
+      expect(digest.markdown).toContain("DOES NOT LOAD");
+      // The authored text of the broken file itself, which is the thing a fix has to be written from.
+      expect(digest.markdown).toContain("### State `feature/plan`");
+      expect(digest.markdown).toContain('"schema": []');
+      // …and its siblings under the same root, by path rather than by closure.
+      expect(digest.markdown).toContain("### State `feature/plan/goals`");
+    });
+
+    it("names the load error where the model reading the digest will see it", () => {
+      const digest = workflowDigest(project);
+      expect(digest.markdown).toContain("unrecognized binding form");
+      // Said out loud, because path scope is narrower than a closure and a model that did not know
+      // would report a state reached through another root as missing.
+      expect(digest.markdown).toContain("a state it reaches by naming a DIFFERENT root");
+    });
+
+    it("still hashes the files it showed, so a baseline covers what was judged", () => {
+      const digest = workflowDigest(project);
+      expect(digest.files).toContain("feature/plan.json");
+      expect(digest.files).toContain("feature/plan/goals.json");
+    });
+  });
+
   it("reproduces the authored file rather than a summary of it", () => {
     // A comment is authorial intent; a re-serialized state would have lost it.
     writeFileSync(

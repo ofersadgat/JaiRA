@@ -176,6 +176,16 @@ export interface PermissionsDecl {
   profile?: string;
   default?: PermissionMode;
   tools?: Record<string, PermissionMode>;
+  /**
+   * The mode for a tool that is not in the vocabulary at all — see `toolVocabulary.ts`.
+   *
+   * NOT the same field as {@link PermissionsDecl.default}, and the difference is the whole reason a
+   * delegated agent's built-ins ran ungoverned. `default` answers for a tool we KNOW and nobody has
+   * set: "I have not decided about `write_file` yet". `other` answers for a name that turns up at
+   * run time and is in no table — an agent's own `Glob`, a tool from somebody else's MCP server.
+   * With one field those two questions had one answer, and only one of them deserves `deny`.
+   */
+  other?: PermissionMode;
 }
 
 /** A tool a caller may be granted, and whether it can change anything. */
@@ -265,7 +275,25 @@ export interface ChatSettings {
   reasoning?: ReasoningDecl;
   tools?: readonly string[];
   permissions?: PermissionsDecl;
+  /**
+   * Whose CODE runs a tool — ours, or the agent's own built-in. By logical name.
+   *
+   * A separate axis from permission, deliberately, because they are separate questions and the menu
+   * used to conflate them into one option called "default". "Let the agent use its own `Read`" and
+   * "let the agent read without asking" are not the same statement, and the old control could only
+   * express them together: picking `default` handed over the implementation AND gave up the gate.
+   *
+   * Access is ALWAYS the app's. A native implementation still answers to the mode beside it — what
+   * changes is which code executes, not who authorized it.
+   *
+   * Absent for a tool ⇒ whatever the transport does by default, which for an agent is its own
+   * built-in unless something displaces it.
+   */
+  implementations?: Record<string, ToolImplementation>;
 }
+
+/** Whose implementation runs — see {@link ChatSettings.implementations}. */
+export type ToolImplementation = "app" | "native";
 
 /**
  * Where one setting's value came from.

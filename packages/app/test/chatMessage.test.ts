@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
-import { happyRules, HUMAN_REVIEW_FUNCTION, specPlanningFiles, writeWorkflowFiles, CHAT_INSTANCE_BASE } from "@jaira/runtime";
+import { happyRules, HUMAN_REVIEW_FUNCTION, JAIRA_TOOLS, specPlanningFiles, writeWorkflowFiles, CHAT_INSTANCE_BASE } from "@jaira/runtime";
 import type { InstanceNode, PushMessage } from "@jaira/shared";
 import { AppService } from "../src/main/service";
 
@@ -112,8 +112,10 @@ describe("the settings a message would run under", () => {
 
     // Nothing set: every tool falls to the ledger's own last resort.
     expect(posture()).toBe("ask first");
-    // A preset's modes are reported by the preset's name…
-    const readOnly = { bash: "deny", read_file: "allow", write_file: "deny" } as const;
+    // A preset's modes are reported by the preset's name. Built FROM the vocabulary rather than
+    // hand-listed: a preset covers every offered tool, so a map naming three of eight is not that
+    // preset — it is a map with five tools missing, and the chip should say `custom` for it.
+    const readOnly = Object.fromEntries(JAIRA_TOOLS.map((t) => [t.name, t.readOnly ? "allow" : "deny"] as const));
     expect(posture({ permissions: { tools: { ...readOnly } } })).toBe("read-only");
     // …and one tool changed makes it nobody's preset, which is what `custom` says.
     expect(posture({ permissions: { tools: { ...readOnly, bash: "ask" } } })).toBe("custom");

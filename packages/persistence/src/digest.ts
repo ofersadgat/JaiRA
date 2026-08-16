@@ -196,9 +196,75 @@ export function digestSource(source: LayerSource, options: WorkflowDigestOptions
     return false;
   };
 
+  /**
+   * A root whose closure could not be loaded, rendered from its files on disk.
+   *
+   * This used to `continue` — the root contributed no section, no states and no files, and the
+   * error was reported only as a field the caller could refuse over. That made the digest useless
+   * for the case it is most needed in: a workflow that does not load is exactly the one somebody
+   * wants a sync to help them FIX, and a proposal cannot fix a file it was never shown.
+   *
+   * There is no bundle, so there is no `resolved:` view and no closure to walk. The scope is taken
+   * from the PATHS instead — the root's own file plus everything under its id — which is the same
+   * rule the tree uses and the only one available when references are the thing that is broken. It
+   * is narrower than a closure: a state this root reaches by naming another root (`{"state":
+   * "explore"}`) is not under it and will not appear. That is a real limit and it is stated in the
+   * section, so a reader knows the difference between "not part of this workflow" and "not shown".
+   */
+  const labelOfRoot = (rootId: string): string | undefined =>
+    browser.workflows.find((w) => w.rootId === rootId)?.label;
+
+  const renderUnloadable = (rootId: string, error: string): void => {
+    loadErrors.push({ rootId, error });
+    roots.push(rootId);
+    const mine = [...new Set([...fileOf.keys(), ...browser.files.map((f) => f.stateId)])]
+      .filter((id) => id === rootId || isUnder(id, rootId))
+      .filter((id) => !isBelowBoundary(id))
+      .sort();
+    for (const id of mine) covered.add(id);
+    const lines: string[] = [
+      `## Workflow \`${rootId}\`${labelOfRoot(rootId) !== undefined ? ` — ${labelOfRoot(rootId)}` : ""} — DOES NOT LOAD`,
+      "",
+      `This workflow could not be loaded, so no \`resolved:\` view exists for any state in it:`,
+      "",
+      `> ${error}`,
+      "",
+      "Fixing that is in scope. The states below are the files found under this root's own path;",
+      "a state it reaches by naming a DIFFERENT root is not among them, so do not conclude a step is",
+      "missing merely because you cannot see it here.",
+      "",
+      `states: ${mine.join(", ")}`,
+      "",
+    ];
+    for (const id of mine) {
+      const boundary = boundaryOf.get(id);
+      if (boundary !== undefined) {
+        bounded.add(id);
+        continue;
+      }
+      const file = fileOf.get(id) ?? browser.files.find((f) => f.stateId === id)?.file;
+      const broken = browser.files.find((f) => f.stateId === id && f.error !== undefined)?.error;
+      const authored = authoredText(source.paths.workflowsDir, file, undefined);
+      const clipped = authored.text.length > maxChars;
+      if (clipped) truncated.push(id);
+      lines.push(
+        `### State \`${id}\``,
+        "",
+        ...(broken !== undefined ? [`this file does not parse: ${broken}`, ""] : []),
+        `authored${file !== undefined ? ` (${file})` : ""}:`,
+        "",
+        "```" + authored.language,
+        clipped ? `${authored.text.slice(0, maxChars)}\n… clipped: this state is longer than the digest shows` : authored.text,
+        "```",
+        "",
+      );
+    }
+    sections.push(lines.join("\n"));
+  };
+
   for (const entry of wanted) {
     if (entry.loadError !== undefined) {
-      loadErrors.push({ rootId: entry.rootId, error: entry.loadError });
+      renderUnloadable(entry.rootId, entry.loadError);
       continue;
     }
     let bundle: WorkflowBundle;
@@ -209,7 +275,7 @@ export function digestSource(source: LayerSource, options: WorkflowDigestOptions
         workflowLoadOptions(source.paths, { ...(source.searchPath !== undefined ? { path: source.searchPath } : {}) }),
       );
     } catch (e) {
-      loadErrors.push({ rootId: entry.rootId, error: (e as Error).message });
+      renderUnloadable(entry.rootId, (e as Error).message);
       continue;
     }
     roots.push(entry.rootId);

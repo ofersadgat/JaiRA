@@ -106,6 +106,7 @@ import {
   SecretResolver,
   persistEngineArtifacts,
   registerFileTools,
+  registerSearchTools,
   createReadFileTool,
   READ_FILE,
   executeWorkflow,
@@ -114,6 +115,7 @@ import {
   registerCommandFunction,
   registerGenericAgents,
   registerTools,
+  registerWebTools,
   gateTools,
   functionNamesOf,
   InteractionHub,
@@ -138,6 +140,7 @@ import {
   isEmptyCapture,
   chatOperationOf,
   chatPlanFor,
+  stateWithChatSettings,
   holdsConversation,
   isChatInstance,
   runChatTurn,
@@ -270,7 +273,9 @@ import type {
   WriteFileRequest,
   WriteWorkflowRequest,
   InstanceNode,
+  ChatEditPoint,
   ChatPlanView,
+  ChatThreadView,
   JairaPromptNode,
   PermissionMode,
   ToolChoice,
@@ -486,6 +491,36 @@ function messageFor(error: ErrorObject): { message: string } {
  */
 function docKey(layer: WorkflowLayer, path: string): string {
   return `${layer}:${path}`;
+}
+
+/** What a state file may be called on disk — the suffixes `existingStateFile` searches. */
+const STATE_FILE_SUFFIX = /\.(json|jsonc|ya?ml)$/i;
+
+/**
+ * One proposed path, in the spelling {@link AppService.placeEdits} places from.
+ *
+ * The prompt asks for a path under `workflows/` or `prompts/` and says so twice, and models answer
+ * with the STATE ID anyway — `feature/documentation.json` rather than
+ * `workflows/feature/documentation.json`. That is not a near miss to be refused: an id is what the
+ * digest they were reading is keyed by, so the omitted prefix is the one thing about the answer that
+ * came from this app's filing rather than from the workflow. A whole run's proposals were blocked on
+ * it (fourteen files, none applicable, nothing to review), which is the worst possible shape for a
+ * mistake — the work was done and correct, and the report said the sync found nothing.
+ *
+ * So a bare path is folded into `workflows/` when it can only be a state file: a state-file suffix,
+ * or no suffix at all, which is a state id written plainly. Nothing else is widened — `lib/helper.md`
+ * is still refused, because a bare `.md` is as likely to be a description as a prompt and guessing
+ * between them would put a proposal in a directory nobody asked for. Containment is unaffected:
+ * every path still goes through `layerFile`/`workflowFile`, so `../../.ssh/config` is refused by the
+ * same check it always was — one prefix further in.
+ */
+export function syncEditPath(raw: string): string {
+  const path = raw.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (path.startsWith("workflows/") || path.startsWith("prompts/")) return path;
+  const last = path.slice(path.lastIndexOf("/") + 1);
+  const suffixed = last.includes(".");
+  if (!suffixed || STATE_FILE_SUFFIX.test(last)) return `workflows/${path}`;
+  return path;
 }
 
 /** A question as the renderer sees it (the hub's request, minus the session key). */
@@ -1138,6 +1173,10 @@ export class AppService {
       component: request.component,
       inputs: request.inputs,
     };
+    // Which project this request's file reads are about, when the session it parked in is not it.
+    // See `ProjectSession.subjectProject`: a review runs in JaiRA's own project and reads another's.
+    const subject = owner?.subjectProject.get(pending.taskId);
+    if (subject !== undefined) pending.project = subject;
     // A changeset gate parked by a REVIEW task is about the task whose worktree it reviews — the
     // join the review task's labels carry (`["jaira", "changeset-review", <target>]`), and what
     // lets the reviewer render in the reviewed task's conversation (§8.1's default host).
@@ -1629,12 +1668,37 @@ export class AppService {
     // rule on {@link startRun}. For a system task those are the shared root's, which is the pairing
     // a workflow that lives in the shared root wants.
     const open = this.session(request.project);
+    const bundle = this.overriddenBundle(open, request.taskId, request.overrides);
     return this.startRun(open, request.taskId, {
       config: open.project.config,
       secrets: this.secretResolver(open),
+      ...(bundle !== undefined ? { bundle } : {}),
       ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
       ...(request.fake !== undefined ? { fake: request.fake } : {}),
     });
+  }
+
+  /**
+   * This run's workflow with the caller's settings written into its root state — see
+   * `StartTaskRequest.overrides`.
+   *
+   * `undefined` whenever there is nothing to change, which is the common case and also every case
+   * that is not a conversation being started: no overrides, an empty override object, a workflow that
+   * will not load, or a root that has no prompt operation to write them into. The run then reads the
+   * files off disk exactly as it always has.
+   *
+   * The bundle is loaded from LIVE files rather than a snapshot on purpose — this runs before
+   * `beginTaskRun` pins one, and what it is rewriting is what that call is about to read.
+   */
+  private overriddenBundle(open: ProjectSession, taskId: string, overrides?: ChatSettings): WorkflowBundle | undefined {
+    if (overrides === undefined || Object.keys(overrides).length === 0) return undefined;
+    const meta = open.project.tasks.tryRead(taskId);
+    if (meta === undefined) return undefined;
+    const bundle = bundleFor(open.project, meta.workflow);
+    const root = bundle?.states[bundle.rootId];
+    if (bundle === undefined || root === undefined) return undefined;
+    const state = stateWithChatSettings(root, overrides);
+    return state === undefined ? undefined : { ...bundle, states: { ...bundle.states, [bundle.rootId]: state } };
   }
 
   /**
@@ -1780,13 +1844,17 @@ export class AppService {
       projectDir: project.paths.projectDir,
       jairaDir: project.paths.jairaDir,
     });
-    // Registering these is what makes JaiRA own the agent's writes at all.
+    // Registering these is what makes JaiRA own the agent's writes at all — and its reads, its
+    // searches and its fetches, which used to be capabilities only the AGENT had. A tool we do not
+    // register is a tool the gate has never heard of, and an unrecognised tool cannot be decided.
     registerFileTools(registry, {
       destination: artifacts.destination,
       store: project.artifacts,
       vars: artifacts.vars,
       inlineMaxBytes: artifacts.inlineMaxBytes,
     });
+    registerSearchTools(registry, { cwd: workspace.root });
+    registerWebTools(registry, {});
 
     // §8.2: refuse a state whose runtime cannot enforce the policy it runs under,
     // rather than letting it run unguarded.
@@ -2110,22 +2178,91 @@ export class AppService {
       defaults?: Record<string, JsonValue>;
       routes?: Record<string, JairaPromptNode>;
     };
-    // The gateable set, named once — see JAIRA_TOOLS. Each carries `readOnly`, which is what lets a
-    // preset assign a mode by asking what the tool DOES rather than by knowing its name. A CLI route
-    // also offers "default", which means its OWN tools rather than any of these.
-    const tools: ToolChoice[] = JAIRA_TOOLS.map((t) => ({ name: t.name, readOnly: t.readOnly }));
+    const tools = AppService.gateableTools();
     return {
       ...plan,
       live,
-      effective: this.effectiveOf(open, router, plan, request.taskId, context.runId, context.position, tools),
-      available: {
-        // Provider routes AND agent routes, as peers. `claude-cli` and `anthropic` are two different
-        // answers to "who answers this" — one is a program on this machine running on a subscription,
-        // the other is the API — so they are sibling rows rather than one folded into the other.
-        routes: [...new Set([...Object.keys(router.routes ?? {}), ...Object.keys(agentPromptRouteNames(open.project.config.agents))])].sort(),
+      effective: this.effectiveOf(
+        open,
+        router,
+        plan,
+        this.modelOfRecord(open, request.taskId, context.runId, context.position),
         tools,
-        models: knownModels(),
-      },
+      ),
+      available: this.availableFor(open, router, tools),
+    };
+  }
+
+  /**
+   * The gateable tool set, named once — see JAIRA_TOOLS.
+   *
+   * Each carries `readOnly`, which is what lets a preset assign a mode by asking what the tool DOES
+   * rather than by knowing its name. A CLI route also offers "default", which means its OWN tools
+   * rather than any of these.
+   */
+  private static gateableTools(): ToolChoice[] {
+    return JAIRA_TOOLS.map((t) => ({ name: t.name, readOnly: t.readOnly }));
+  }
+
+  /** What this machine can offer a composer: who can answer, what can be gated, which models exist. */
+  private availableFor(
+    open: ProjectSession,
+    router: { routes?: Record<string, JairaPromptNode> },
+    tools: readonly ToolChoice[],
+  ): ChatPlanView["available"] {
+    return {
+      // Provider routes AND agent routes, as peers. `claude-cli` and `anthropic` are two different
+      // answers to "who answers this" — one is a program on this machine running on a subscription,
+      // the other is the API — so they are sibling rows rather than one folded into the other.
+      routes: [
+        ...new Set([...Object.keys(router.routes ?? {}), ...Object.keys(agentPromptRouteNames(open.project.config.agents))]),
+      ].sort(),
+      tools: [...tools],
+      models: knownModels(),
+    };
+  }
+
+  /**
+   * The settings a conversation that has not been started yet would run under.
+   *
+   * The same question `chatPlan` answers, asked one screen earlier. It exists because the box that
+   * STARTS a conversation is a box that sends a message, and every reason the settings belong on the
+   * composer applies at least as much to the first message as to the fortieth: it is the one that
+   * decides what the whole conversation inherits, and it used to be the only one sent blind.
+   *
+   * Read off the state FILE rather than off a run, which is the only difference between this and
+   * `chatPlan` and the source of both `undefined`s below. Nothing has answered yet, so there is no
+   * recorded model to prefer over the router's; and nothing is in flight, so Enter is always `idle`.
+   *
+   * A state id nobody has installed yet is an ANSWER, not a fault — the Chat view writes its states
+   * on first send, so on a fresh machine this is asked before the file exists. `chatPlanFor` already
+   * takes an absent state (that is what a composite's path is made of), and what comes back is a plan
+   * whose every origin is `unset`: no inheritance to report, and the machine's own defaults reported
+   * around it. The composer renders exactly that, and the first message installs the file.
+   */
+  chatStartPlan(request: { stateId: string; project?: string; overrides?: ChatSettings }): ChatPlanView {
+    const open = this.session(request.project);
+    // Live files, never a snapshot: this conversation has not pinned one, and what it will run is
+    // whatever `beginTaskRun` reads a moment from now — which is this.
+    const bundle = bundleFor(open.project, request.stateId);
+    const plan = chatPlanFor([bundle?.states[request.stateId]], request.overrides ?? {});
+    // The router, built over an EMPTY bundle. `defaultExecutorTree` refuses when a workflow's prompt
+    // states name no model and nothing on this machine can answer one — a refusal that belongs to the
+    // attempt and not to the preview. Raised here it would blank the composer on precisely the
+    // machine where somebody needs to read it: the one where they have to pick a route by hand
+    // before the first message can go anywhere. The routes and defaults come from the configuration
+    // either way; the bundle only decides whether to throw.
+    const router = this.defaultTree(open.project.config, { rootId: request.stateId, states: {} }, false, this.secretResolver(open))
+      .prompt as {
+      defaults?: Record<string, JsonValue>;
+      routes?: Record<string, JairaPromptNode>;
+    };
+    const tools = AppService.gateableTools();
+    return {
+      ...plan,
+      live: "idle",
+      effective: this.effectiveOf(open, router, plan, undefined, tools),
+      available: this.availableFor(open, router, tools),
     };
   }
 
@@ -2176,17 +2313,22 @@ export class AppService {
     open: ProjectSession,
     router: { defaults?: Record<string, JsonValue>; routes?: Record<string, JairaPromptNode> },
     plan: ReturnType<typeof chatPlanFor>,
-    taskId: string,
-    runId: number,
-    position: string,
+    /**
+     * What answered the LAST turn of this conversation, when there was one — read off the record by
+     * the caller. Passed in rather than looked up here because a conversation that has not started
+     * has no record and no position to look one up by, and `undefined` is the whole of what that
+     * difference amounts to: the answer falls through to the router, exactly as it did for the first
+     * turn of every conversation that now has a history.
+     */
+    lastModel: string | undefined,
     tools: readonly ToolChoice[],
   ): ChatPlanView["effective"] {
-    // What ANSWERED this conversation last, read off the stored result. It beats everything below it:
-    // a state that named no model, or named a route that picks its own, was still answered by
-    // something, and the record is where that decision was written down.
+    // What ANSWERED this conversation last. It beats everything below it: a state that named no
+    // model, or named a route that picks its own, was still answered by something, and the record is
+    // where that decision was written down.
     const model =
       plan.settings.model ??
-      this.modelOfRecord(open, taskId, runId, position) ??
+      lastModel ??
       (() => {
         const pinned = router.defaults?.["model"];
         if (typeof pinned === "string") return pinned;
@@ -2223,20 +2365,24 @@ export class AppService {
     message: string;
     overrides?: ChatSettings;
     project?: string;
+    /** Send at this position instead of after everything — see `chat:send`'s `branchAt`. */
+    branchAt?: string;
     /** Scripted answers, exactly as {@link startTask} takes them — a demo conversation needs no provider. */
     fake?: JsonValue | FakeRule[];
   }): Promise<ChatTurnResult & { instanceId: number; iteration: number; steered?: boolean }> {
     if (request.message.trim() === "") throw new Error("a message cannot be empty");
     const open = this.session(request.project);
     const project = open.project;
-    let context = this.chatContextOf(request.taskId, request.instanceId, request.project);
+    let context = this.chatContextOf(request.taskId, request.instanceId, request.project, request.branchAt);
 
     // A call still taking its turn, in the conversation being read. Talking to THAT is different from
     // starting a turn beside it: the message joins the turn already in progress and the agent answers
     // in its own stream, so there is no child to record and no position to claim. Only some transports
     // can do it — `sessionSteering` is declared, not discovered — and `steerOf` returns nothing at all
     // when they cannot, which is why this is a branch rather than an attempt.
-    const steer = this.steerOf(open, context.position);
+    // An EDIT is never steering. Steering joins the turn in flight — which is the turn being
+    // replaced, or one after it — and "say this instead" is the opposite of "also say this".
+    const steer = request.branchAt === undefined ? this.steerOf(open, context.position) : undefined;
     if (steer !== undefined) {
       await steer.send(request.message);
       return { instanceId: context.hostInstanceId, iteration: context.iteration, steered: true };
@@ -2254,7 +2400,7 @@ export class AppService {
       const settled = await open.liveCalls.settle(sessionId, CHAT_WAIT_MS);
       // Re-read, because the head MOVED — which is the entire reason for waiting. Sending the position
       // computed before the wait would fork every time and defeat it.
-      if (settled) context = this.chatContextOf(request.taskId, request.instanceId, request.project);
+      if (settled) context = this.chatContextOf(request.taskId, request.instanceId, request.project, request.branchAt);
     }
     // NOT refused when the state named no model. Refusing rejected exactly the case the resolution
     // chain exists for: a state naming none is answered by the ROUTER, which is how its own run
@@ -2328,6 +2474,8 @@ export class AppService {
       vars: artifacts.vars,
       inlineMaxBytes: artifacts.inlineMaxBytes,
     });
+    registerSearchTools(registry, { cwd: workspaceRoot });
+    registerWebTools(registry, {});
     const approve = open.approvals.approver({ taskId: request.taskId });
     /**
      * The project policy with THIS message's per-tool modes folded into its baseline.
@@ -2357,7 +2505,21 @@ export class AppService {
 
     const { operation } = chatOperationOf(plan, { message: request.message, session: { id: context.position } });
     const recorder = project.events.recorder(request.taskId, context.runId);
-    const result = await runChatTurn(
+    /**
+     * What "stop" reaches — see {@link cancelChatTurn}.
+     *
+     * Registered against the TASK, and only for the duration of the turn. An abort lands in
+     * `runChatTurn` as an ordinary failure with `classification: "canceled"`, so the journal records
+     * a canceled turn rather than a hole: the message stays, and whatever the model had said by then
+     * is what the transcript keeps.
+     */
+    const abort = new AbortController();
+    // A second turn cannot be in flight here — the wait above settles the first — so replacing is
+    // only ever tidying up after a turn that finished without unregistering.
+    open.chatTurns.get(request.taskId)?.abort();
+    open.chatTurns.set(request.taskId, abort);
+    const result = await this.whileChatting(open, request.taskId, abort, () =>
+      runChatTurn(
       {
         executor,
         sessions: stores.sessions,
@@ -2390,6 +2552,9 @@ export class AppService {
           approve,
           // A chat turn can reach an agent that asks — same question channel as a run's.
           askUser: open.questions.asker({ taskId: request.taskId }),
+          // The same signal a run hands its calls. Without it there was nothing between "sent" and
+          // "the provider is done", however long that took.
+          abortSignal: abort.signal,
         } as ExecServices,
       },
       {
@@ -2407,12 +2572,81 @@ export class AppService {
         operation,
         position: context.position,
       },
+      ),
     );
     // `task`, not `tasks`. The renderer refreshes the conversation and the session views on `task`
     // and only the task LIST on `tasks` — so the plural left the reply invisible: the box cleared,
     // the turn ran, and the panel above stayed byte-identical until something unrelated invalidated.
     this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: request.taskId });
     return { ...result, instanceId: CHAT_INSTANCE_BASE + context.hostInstanceId, iteration: context.iteration };
+  }
+
+  /**
+   * Run a turn with its stop registered, and unregister it however the turn ends.
+   *
+   * The unregister is conditional on the entry still being THIS turn's. A stop that arrives while the
+   * turn is settling replaces nothing, but a `delete` here after the next turn registered its own
+   * controller would quietly disarm that one — a stop button that works until you use it twice.
+   */
+  private async whileChatting<T>(
+    open: ProjectSession,
+    taskId: string,
+    abort: AbortController,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await run();
+    } finally {
+      if (open.chatTurns.get(taskId) === abort) open.chatTurns.delete(taskId);
+    }
+  }
+
+  /**
+   * Stop the turn a conversation is taking.
+   *
+   * `task:cancel` cannot do this and should not learn how: a chat turn is not a run, so there is no
+   * job to release and no task row to settle — cancelling the TASK of a conversation that has been
+   * idle for an hour would mark a finished run interrupted for the sake of a message nobody sent.
+   *
+   * `false` means there was nothing to stop, which is an answer rather than a fault: the turn may
+   * have landed between the button being shown and being pressed.
+   */
+  cancelChatTurn(request: { taskId: string; project?: string }): { canceled: boolean } {
+    const open = this.session(request.project);
+    const abort = open.chatTurns.get(request.taskId);
+    if (abort === undefined) return { canceled: false };
+    abort.abort();
+    open.chatTurns.delete(request.taskId);
+    return { canceled: true };
+  }
+
+  /**
+   * Rename a task.
+   *
+   * The title is what a conversation is FOUND by, so this is a first-class verb rather than an edit
+   * of a file somebody has to know the shape of. Nothing about a run depends on it: the meta file is
+   * rewritten with the new title and every list that shows one is invalidated.
+   */
+  renameTask(request: { taskId: string; title: string; project?: string }): TaskSummary {
+    const title = request.title.trim();
+    if (title === "") throw new Error("a task needs a title");
+    const open = this.session(request.project);
+    const project = open.project;
+    const meta = project.tasks.read(request.taskId);
+    project.tasks.write({ ...meta, title });
+    const row = project.runtime.get(request.taskId);
+    if (row === undefined) throw new Error(`unknown task '${request.taskId}'`);
+    this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
+    this.publishFor(open, { type: "store:invalidate", scope: "board" });
+    return {
+      taskId: meta.id,
+      title,
+      status: row.status,
+      workflow: meta.workflow,
+      ...(meta.labels !== undefined ? { labels: meta.labels } : {}),
+      createdAt: meta.createdAt,
+      updatedAt: row.updatedAt,
+    };
   }
 
   /**
@@ -2442,6 +2676,8 @@ export class AppService {
     taskId: string,
     instanceId: number,
     projectKey?: string,
+    /** Send at this position rather than after everything — see `chat:send`'s `branchAt`. */
+    branchAt?: string,
   ): {
     bundle: WorkflowBundle;
     runId: number;
@@ -2505,7 +2741,21 @@ export class AppService {
       // From the host outward. `chatPlanFor` would find the same state in the longer list, but the
       // states BELOW the host are not ancestors of the conversation and have no business in it.
       path: path.slice(hostAt),
-      position: this.chatPositionOf(taskId, run.id, host.instanceId, projectKey),
+      position: (() => {
+        if (branchAt === undefined) return this.chatPositionOf(taskId, run.id, host.instanceId, projectKey);
+        // The handle came from `chat:thread`, which read this task's chain — but it may have been on
+        // screen a while, and a position that names nothing here must not be written into. Checked
+        // against the RUN-SCOPED store, which is the boundary that matters: a ref only resolves in
+        // it if this run's records are what it names. Not checked against the current session id —
+        // every edit forks a new branch, so turns before an earlier edit legitimately carry the id
+        // the conversation had then.
+        const store = new SqliteSessionStore(project.db, { taskId, runId: run.id });
+        const seq = Number(branchAt.slice(branchAt.lastIndexOf("@") + 1));
+        if (!Number.isInteger(seq) || store.at(sessionOf(branchAt), seq) === undefined) {
+          throw new NoConversationHere(`'${branchAt}' is not a message in this conversation`);
+        }
+        return branchAt;
+      })(),
       // The loop's next turn. `iteration` counts transitions taken, so a child that has answered
       // twice is at 1 and the message about to be sent is 2.
       iteration: chat === undefined ? 0 : chat.iteration + 1,
@@ -2534,6 +2784,97 @@ export class AppService {
       );
     }
     return `${mine.sessionId}@${mine.seq + 1}`;
+  }
+
+  /**
+   * A task's conversation, WHOLE — every turn of the chain in order, forks walked.
+   *
+   * `sessionView` is the other reading and stays the right one for a run: it answers what ONE state
+   * added to the conversation it was handed, which is what a transcript beside a board is asking. A
+   * chat asks the opposite question. Its conversation is a chain of records — the run's own call,
+   * then one per message — and reading them as separate views gives a stack of panels each showing
+   * one exchange, which is a filing cabinet rather than a conversation.
+   *
+   * So this walks the chain the store already knows how to walk (`transcript`, which follows a fork
+   * into its parent) and folds each record's OWN messages onto the end. Two things fall out of that
+   * for free: an edited message shows its branch and not the one it replaced, because the chain from
+   * the newest position runs through the fork; and the boundaries between records are exactly the
+   * points a message can be replaced AT, which is what `points` reports.
+   */
+  chatThread(request: { taskId: string; project?: string }): ChatThreadView | null {
+    const open = this.session(request.project);
+    const project = open.project;
+    const host = this.chatHostOf(request.taskId, request.project);
+    if (host === null) return null;
+    let context;
+    try {
+      context = this.chatContextOf(request.taskId, host, request.project);
+    } catch (e) {
+      // Same rule as `chatPlan`: "there is no conversation here" is an answer this channel is
+      // supposed to give, and only a broken installation is an error.
+      if (e instanceof NoConversationHere) return null;
+      throw e;
+    }
+    const store = new SqliteSessionStore(project.db, { taskId: request.taskId, runId: context.runId });
+    const rows = store.transcript(context.position);
+
+    const turns: SessionTurn[] = [];
+    const points: ChatEditPoint[] = [];
+    const sidechains: Record<string, SessionTurn[]> = {};
+    const providerEvents: Array<{ index: number; event: JsonValue }> = [];
+    const native: Array<{ index: number; line: JsonValue }> = [];
+    // What the conversation held when each record began — the previous record's whole message list,
+    // which is the same subtraction `sessionView` makes and has to stay identical to it: a record
+    // stores the full history it was called with, so adding them up unsubtracted would print the
+    // conversation N times over.
+    let inherited: JsonValue[] = [];
+    for (const [i, row] of rows.entries()) {
+      const at = turns.length;
+      turns.push(...turnsOf(row.value, inherited));
+      // The run's own call is not a message somebody typed — editing it means running the task
+      // again with different inputs, which is a different verb in a different place.
+      if (i > 0) points.push({ turn: at, at: `${sessionOf(context.position)}@${row.seq}` });
+      for (const [call, chain] of Object.entries(sidechainsOf(row.value) ?? {})) sidechains[call] = chain;
+      // Both index families count TURNS, and each record's are relative to its own — so they are
+      // shifted onto the thread by where that record started, exactly as `sessionView` shifts them
+      // past the inherited prefix.
+      for (const event of recordEventsOf(row.value, inherited.length) ?? []) {
+        providerEvents.push({ index: event.index + at, event: event.event });
+      }
+      for (const line of nativeOf(row.value) ?? []) native.push({ index: line.index + at, line: line.line });
+      inherited = messagesOfRecord(row.value);
+    }
+
+    const session: SessionView = {
+      taskId: request.taskId,
+      runId: context.runId,
+      instanceId: host,
+      stateId: context.stateId,
+      sessionId: sessionOf(context.position),
+      seq: rows.length,
+      turns,
+      ...(Object.keys(sidechains).length > 0 ? { sidechains } : {}),
+      ...(providerEvents.length > 0 ? { providerEvents } : {}),
+      ...(native.length > 0 ? { native } : {}),
+      ...(turns.length === 0 ? { empty: "this conversation has not said anything yet" } : {}),
+    };
+    return { taskId: request.taskId, runId: context.runId, instanceId: host, session, points };
+  }
+
+  /**
+   * Which instance a task's conversation belongs to — the one a message continues.
+   *
+   * Read off the session history rather than walked out of the instance tree: a state that SPOKE is
+   * one that wrote a record, and that is the same fact the history is a list of. The FIRST such
+   * instance, because a conversation's own first record is the run's, and everything after it is a
+   * turn of that same conversation. Chat children are skipped — they are the conversation, not its
+   * host, which is the distinction `chatContextOf` also draws.
+   */
+  private chatHostOf(taskId: string, projectKey?: string): number | null {
+    const history = this.sessionHistory({ taskId, project: projectKey });
+    const run = history.at(-1)?.runId;
+    const host = history.find((h) => h.runId === run && !isChatInstance(h.instanceId));
+    return host?.instanceId ?? null;
   }
 
   /** Cancel a task: abort a live run here, or record a terminal status. */
@@ -3219,6 +3560,72 @@ export class AppService {
   }
 
   /**
+   * Project files matching a query — what an `@` in the composer completes against.
+   *
+   * A walk rather than an index, and bounded twice over: at {@link FIND_VISIT} files looked at and
+   * at the caller's `limit` returned. Both bounds are the point. This runs on the main thread while
+   * somebody is typing, and a repository is an unbounded thing — an unbounded walk of one would
+   * freeze the window on the checkout it matters most in.
+   *
+   * `truncated` says the walk stopped early, so the caller can say "keep typing" instead of showing
+   * thirty results as though they were the thirty best.
+   *
+   * Skipped directories are the ones nobody means by `@`: version control, dependencies, build
+   * output, and JaiRA's own state — which the Files view browses properly and which would otherwise
+   * bury a project's own files under a hundred workflow fragments.
+   */
+  findFiles(request: { query: string; project?: string; limit?: number }): { paths: string[]; truncated: boolean } {
+    const open = this.session(request.project);
+    const root = open.project.paths.projectDir;
+    const limit = Math.min(Math.max(request.limit ?? 30, 1), 200);
+    // Subsequence matching, the way every file picker matches: `apsvc` finds `app/service.ts`. Empty
+    // matches everything, which is what makes the picker useful the moment `@` is typed.
+    const needle = request.query.trim().toLowerCase();
+    const matches = (path: string): boolean => {
+      if (needle === "") return true;
+      const haystack = path.toLowerCase();
+      let at = 0;
+      for (const ch of needle) {
+        at = haystack.indexOf(ch, at) + 1;
+        if (at === 0) return false;
+      }
+      return true;
+    };
+
+    const out: string[] = [];
+    let visited = 0;
+    let truncated = false;
+    // Breadth-first, so a shallow file — which is what a person usually means — is found before the
+    // walk spends its budget in one deep subtree.
+    const queue: string[] = [""];
+    while (queue.length > 0 && out.length < limit && !truncated) {
+      const rel = queue.shift()!;
+      let entries;
+      try {
+        entries = readdirSync(join(root, rel), { withFileTypes: true });
+      } catch {
+        continue; // unreadable directory — the rest of the tree is still worth walking
+      }
+      for (const entry of entries) {
+        if (visited >= FIND_VISIT) {
+          truncated = true;
+          break;
+        }
+        visited += 1;
+        const path = rel === "" ? entry.name : `${rel}/${entry.name}`;
+        if (entry.isDirectory()) {
+          if (!FIND_SKIP.has(entry.name) && !entry.name.startsWith(".")) queue.push(path);
+          continue;
+        }
+        if (!entry.isFile() || !matches(path)) continue;
+        out.push(path);
+        if (out.length >= limit) break;
+      }
+    }
+    return { paths: out.sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b)), truncated: truncated || queue.length > 0 };
+  }
+
+  /**
    * One generalised read channel (CHANGESETS.md §8.5): `file:` and the `$…` anchors, `git:` blobs,
    * `db://` recorded values — the addresses a changeset's chain speaks, resolvable by the renderer.
    *
@@ -3603,16 +4010,13 @@ export class AppService {
     // has to be able to say what it handed off — but not as states this run may rewrite.
     const scope = this.scopeOf(source, request.path);
     const digest = digestSource(source, scope.digestOptions);
-    // The same refusal `jaira workflow check` makes, for the same reason: a sync over partial
-    // evidence would rewrite the document to describe workflows it could not read, or propose state
-    // files against a graph it only half loaded.
-    if (digest.unreadable.length > 0 || digest.loadErrors.length > 0) {
-      const detail = [
-        ...digest.unreadable.map((f) => `${f.file}: ${f.error}`),
-        ...digest.loadErrors.map((e) => `${e.rootId}: ${e.error}`),
-      ].join("; ");
-      throw new Error(`cannot sync while a workflow does not load: ${detail}`);
-    }
+    // A workflow that does not load used to be refused here, on the reasoning that a sync over
+    // partial evidence would propose against a graph it only half read. That got the case backwards:
+    // a broken workflow is the one somebody most wants help fixing, and refusing meant the only
+    // surface that could have named the broken file instead greyed its own button out. The digest
+    // now RENDERS an unloadable root from its files on disk and says so in the markdown, so the
+    // evidence is present and labelled rather than absent — and the breakage is in scope for the
+    // proposal instead of a precondition for it.
     if (digest.roots.length === 0) {
       throw new Error(`${request.layer === "base" ? "the shared root" : "this project"} has no workflows to sync against`);
     }
@@ -3863,6 +4267,9 @@ export class AppService {
       // this run where it stands.
       parentTaskId: request.taskId,
     });
+    // The reviewed task's project, so the gate's `$WORKTREE` finds the worktree row — it is in THIS
+    // project's runtime, not the system project the review is recorded in.
+    system.subjectProject.set(task.id, session.dir);
     const started = await this.startRun(system, task.id, {
       config: session.project.config,
       secrets: this.secretResolver(session),
@@ -3938,6 +4345,10 @@ export class AppService {
     });
     // The TARGET's configuration, exactly as the sync itself resolves it — see {@link runSync}.
     const target = request.layer === "base" ? this.sessionOf(SHARED_SESSION) : this.sessionOf();
+    // And the target's ROOT is what the gate's file reads are about: these proposals are paths under
+    // the layer root, so a base-layer review reads the shared root — including when no user project
+    // is open at all, which is the case the focused-project fallback could not answer.
+    if (target !== undefined) system.subjectProject.set(task.id, target.dir);
     const started = await this.startRun(system, task.id, {
       config: target?.project.config ?? this.effectiveConfig(),
       secrets: this.secretResolver(target),
@@ -4045,7 +4456,7 @@ export class AppService {
           applicable: true,
         });
       };
-      const raw = edit.path.replace(/\\/g, "/");
+      const raw = syncEditPath(edit.path);
       if (raw.startsWith("prompts/")) {
         try {
           this.layerFile(raw, layer);
@@ -4691,6 +5102,18 @@ function runMetricsOf(metrics: unknown): RunMetrics | undefined {
  * which is a real answer, rather than silence, which is not.
  */
 const CHAT_WAIT_MS = 120_000;
+
+/**
+ * How many directory entries `findFiles` will look at before giving up and saying so.
+ *
+ * Generous for a repository, cheap for a keystroke: the walk is synchronous on the main thread, and
+ * the honest failure ("keep typing") is much better than a window that stops painting while someone
+ * types `@`.
+ */
+const FIND_VISIT = 20_000;
+
+/** Directories `@` never means: version control, dependencies, build output, and JaiRA's own state. */
+const FIND_SKIP = new Set(["node_modules", "dist", "build", "out", "target", "vendor", "coverage", "__pycache__"]);
 
 /**
  * The conversation a position names — `<session>@<seq>` without the seq.

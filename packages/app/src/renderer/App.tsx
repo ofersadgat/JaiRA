@@ -28,7 +28,9 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from "react";
 import type { BoardCard, ConfigLayer, PendingApproval, PendingInteraction, PendingQuestion, WorkflowLayer } from "@jaira/shared/browser";
+import { SHARED_SESSION } from "@jaira/shared/browser";
 import { Board, lanesOf } from "./board";
+import { ChatListPanel, ChatView, conversationsOf, type ChatSurface } from "./chatPane";
 import { ApprovalDialog, InteractionDialog, QuestionDialog } from "./components";
 import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem } from "./menu";
 import {
@@ -131,6 +133,9 @@ function checkedAgo(at: number): string {
 const VIEWS: readonly SidebarView[] = [
   { id: "files", glyph: "❏", label: "Files" },
   { id: "tasks", glyph: "▶", label: "Tasks" },
+  // The third activity, and the newest: TALKING. Files designs, Tasks operates, and this is the one
+  // you open when what you want is a conversation rather than a workflow — see `chatPane.tsx`.
+  { id: "chat", glyph: "✎", label: "Chat" },
   { id: "logs", glyph: "≡", label: "Logs" },
   // In the sidebar rather than inside Settings: the self-test is the thing you reach for when the
   // app is not behaving, and burying it behind a configuration screen would make it hardest to find
@@ -293,6 +298,39 @@ export default function App(): JSX.Element {
    * second flag to keep in step with it.
    */
   const dirtyFiles = useMemo(() => new Set(Object.keys(state.drafts)), [state.drafts]);
+
+  /**
+   * Everything the Chat view needs, assembled here like every other pane's context.
+   *
+   * The project is DERIVED rather than remembered: conversations belong to the open checkout, and to
+   * JaiRA's own root when there is none (`runTargetOf`'s rule for base-layer workflows). Deriving it
+   * means closing a project cannot leave the list pointed at a database this window is no longer
+   * reading — the list simply becomes the other one.
+   */
+  const chatProject = state.projectDir === null ? SHARED_SESSION : null;
+  const chat: ChatSurface = {
+    conversations: useMemo(
+      () => conversationsOf(state.projectDir === null ? state.sharedTasks : state.tasks),
+      [state.projectDir, state.sharedTasks, state.tasks],
+    ),
+    taskId: state.chat.taskId,
+    project: chatProject,
+    busy: state.chat.busy,
+    opening: state.chat.opening,
+    error: state.chat.error,
+    // The detail, journal and live tail are the SELECTED task's — opening a conversation selects it,
+    // so these are about the thread on screen. Guarded on that rather than assumed: a selection made
+    // in the Tasks view would otherwise lend this panel another task's transcript.
+    detail: state.selected === state.chat.taskId ? detail : null,
+    journal: state.selected === state.chat.taskId ? state.conversation : null,
+    live: state.selected === state.chat.taskId ? state.liveTurn : null,
+    hasProject: state.projectDir !== null,
+    onOpen: actions.openConversation,
+    onNew: actions.newConversation,
+    onRename: actions.renameTask,
+    onDelete: actions.deleteTasks,
+    onCancelRun: actions.cancelTask,
+  };
 
   /**
    * What the shell can lend a changeset reviewer beyond the defaults (CHANGESETS.md §8.2): the
@@ -745,7 +783,14 @@ export default function App(): JSX.Element {
    * either would be a navigation column that had to be handed the whole store. It takes rows.
    */
   const rows: SidebarView[] = VIEWS.map((v) =>
-    v.id !== "files"
+    v.id === "chat"
+      ? {
+          ...v,
+          open: openOf(ui, FOLD.shellChats),
+          onOpen: (open: boolean) => actions.setFold(FOLD.shellChats, open),
+          panel: <ChatListPanel surface={chat} />,
+        }
+      : v.id !== "files"
       ? v
       : {
           ...v,
@@ -902,6 +947,14 @@ export default function App(): JSX.Element {
                 </>
               }
             />
+          ) : null}
+          {/* The conversation's name, in the row the other views put their address in. Not a crumb
+              trail: a conversation has no path — it is one thing, with one name, and the list it
+              was picked from is beside it. */}
+          {view === "chat" ? (
+            <span className="chat-title ellip">
+              {chat.conversations.find((c) => c.taskId === chat.taskId)?.title ?? "New conversation"}
+            </span>
           ) : null}
           <span className="title-drag" />
         </header>
@@ -1139,6 +1192,16 @@ export default function App(): JSX.Element {
                   <p className="empty">Select a task.</p>
                 )}
               </aside>
+            </div>
+          ) : null}
+
+          {view === "chat" ? (
+            // One column, no inspector. A conversation has nothing beside it to describe: the
+            // thread IS the subject, and the facts a task panel would list — which state, which
+            // instance, what it cost — belong to the Tasks view, which the conversation's task is
+            // on like any other.
+            <div className="view chat-view">
+              <ChatView surface={chat} />
             </div>
           ) : null}
 

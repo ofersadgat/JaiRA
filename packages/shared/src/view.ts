@@ -712,6 +712,37 @@ export interface SessionView {
   empty?: string;
 }
 
+/**
+ * A whole CONVERSATION, rather than one call of it — what the Chat view reads.
+ *
+ * {@link SessionView} answers "what did this state add to the conversation it was in", which is the
+ * right question for a run and the wrong one for a chat: a conversation is a chain of records, each
+ * adding a message and a reply, and a reader wants the chain. So this walks it — forks included,
+ * which is what makes an edited message show its branch and not the one it replaced — and hands back
+ * one session view whose turns are the whole thread.
+ *
+ * `points` is what makes editing possible without the renderer knowing anything about positions: it
+ * says which turns began a record, and the opaque handle to send in their place.
+ */
+export interface ChatThreadView {
+  taskId: string;
+  runId: number;
+  /** The instance whose conversation this is — what `chat:send` and `chat:plan` address. */
+  instanceId: number;
+  /** The thread, shaped exactly like any other session so the same viewer renders it. */
+  session: SessionView;
+  /** Where a message may be sent INSTEAD of an existing one — see `chat:send`'s `branchAt`. */
+  points: ChatEditPoint[];
+}
+
+/** One replaceable message: which turn of the thread it is, and the position it occupies. */
+export interface ChatEditPoint {
+  /** Index into {@link ChatThreadView.session}'s turns — the first turn the record contributed. */
+  turn: number;
+  /** Opaque. It goes back to `chat:send` as `branchAt` and is parsed by nothing in the renderer. */
+  at: string;
+}
+
 /** How bad an entry is. Filtering by one means "this and worse", not "this exactly". */
 export type LogLevel = "debug" | "info" | "warn" | "error";
 

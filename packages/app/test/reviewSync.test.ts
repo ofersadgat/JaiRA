@@ -8,7 +8,7 @@
  * the revision returns to the gate for another round. Rounds without comments behave exactly as the
  * single-round gate did.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -145,5 +145,51 @@ describe("changeset:reviewSync", () => {
     // run what the description asks for, and saying otherwise would hide real drift.
     expect(readFileSync(join(dir, ".jaira", "workflows", "workflow.md"), "utf8")).toBe("# The flow\n");
     expect(service.syncStatus({ layer: "project", path: "workflows/workflow.md" }).synced).toBe(false);
+  });
+});
+
+/**
+ * Which project the parked gate is ABOUT.
+ *
+ * The reported failure: a base-layer review with no project open parked its gate, the reviewer read
+ * `$WORKTREE/…`, `$JAIRA/…`, `$PROJECT/…` to show what each file holds right now, and every one of
+ * them failed in the main process with `no project is open` — because an unscoped `uri:read` resolves
+ * the FOCUSED project, and a review runs in JaiRA's own. The stamp says which project the request's
+ * addresses belong to; for a base-layer review that is the shared root, open or not.
+ */
+describe("the project a parked review reads against", () => {
+  let home: string;
+  let base: string;
+  let bare: AppService;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "jaira-syncgate-"));
+    base = join(home, "shared");
+    mkdirSync(join(base, "workflows"), { recursive: true });
+    writeFileSync(join(base, "workflows", "workflow.md"), "# The flow\n", "utf8");
+    bare = new AppService({ watchWorkflows: false, baseDir: base });
+  });
+
+  afterEach(async () => {
+    await bare.close();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it("stamps a base-layer review with the shared root, with no project open at all", async () => {
+    expect(bare.current()).toBeNull();
+    const result = await bare.reviewSyncChangeset({ layer: "base", path: "workflows/workflow.md", changeset: PROPOSAL });
+    await until(() => bare.pendingInteractions().length === 1, "the gate to park");
+
+    const pending = bare.pendingInteractions()[0]!;
+    expect(pending.component).toBe(USER_APPROVE_CHANGESET);
+    expect(pending.taskId).toBe(result.reviewTaskId);
+    expect(pending.project).toBe(base);
+
+    // What the reviewer does with it: read what a proposed path holds right now.
+    const current = await bare.readUri({ uri: "$PROJECT/workflows/workflow.md", project: pending.project });
+    expect(current.text).toBe("# The flow\n");
+    // And what the same read did without it — the reported error, still the honest answer to an
+    // address that names no project.
+    await expect(bare.readUri({ uri: "$PROJECT/workflows/workflow.md" })).rejects.toThrow(/no project is open/);
   });
 });

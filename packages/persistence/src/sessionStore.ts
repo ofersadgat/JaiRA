@@ -215,7 +215,16 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // always wins outright: its payload or its session outcome is the complete, authoritative
     // version of what the partial was an early copy of, and merging the partial in would put a copy
     // of the messages where `projectValue`'s payload-wins rule would prefer them.
-    const result = error !== undefined ? preservePartial(settled.result as JsonValue, settled.sessionOutcome, row.result_json) : settled.result;
+    //
+    // A SUCCESS settle still takes ONE thing from the partial: the per-turn clocks. They are the only
+    // field the settle cannot reproduce — a provider result carries no wall clock per message, so the
+    // times exist exactly once, in the stream that measured them, and dropping them at the settle is
+    // why a finished run's thinking rows had no "thought for 12 s" while a live one did. Times only:
+    // the messages themselves still come from the authoritative result.
+    const result =
+      error !== undefined
+        ? preservePartial(settled.result as JsonValue, settled.sessionOutcome, row.result_json)
+        : carryMessageTimes(settled.result as JsonValue, row.result_json);
     this.db
       .prepare(
         `UPDATE operation_records
@@ -580,6 +589,57 @@ export function messagesOfRecord(value: JsonValue | undefined): JsonValue[] {
  * thing. Only when neither has the turns does the partial's early copy become the record's, which is
  * exactly the interrupted/crashed case it was streamed for.
  */
+/** A message's role, for the alignment check below. `undefined` for anything that is not one. */
+function roleOf(message: JsonValue | undefined): string | undefined {
+  const m = message as { role?: unknown } | undefined;
+  return m !== null && typeof m === "object" && typeof m.role === "string" ? m.role : undefined;
+}
+
+/**
+ * The settled result, wearing the per-turn clocks the stream measured — see the call site in `close()`.
+ *
+ * `messageTimes` is a parallel array over the record's messages (`at`, `startedAt`, `thoughtMs`),
+ * stamped by the live-turn log as deltas arrived and written into the open row by every partial
+ * flush. The settle overwrites that row with the provider's own result, which has no clocks in it at
+ * all — so on a successful call the numbers were measured, persisted, and then thrown away one
+ * statement later. "Thought for 12 s" worked while you watched and vanished when you came back.
+ *
+ * The alignment is a SUFFIX, not an index-for-index match: the stream only sees the turns the call
+ * produced, while the settled record also holds the messages it was called WITH. So the partial's
+ * `p` stamps line up with the last `p` of the settled `s`, and the array is padded at the front with
+ * blanks — which `turnsOf` reads as "this turn was not timed", the same as an old record.
+ *
+ * Checked by ROLE before it is believed. A transport that streams something other than a suffix of
+ * what it settles would otherwise label one turn with another's duration, which is worse than no
+ * label; a mismatch drops the whole carry rather than guessing at an offset.
+ */
+function carryMessageTimes(settledResult: JsonValue | undefined, existingJson: string | null): JsonValue | undefined {
+  if (existingJson === null || settledResult === undefined) return settledResult;
+  const settled = settledResult as { value?: { messages?: unknown; messageTimes?: unknown } };
+  // A result that already carries its own is authoritative — nothing to add.
+  if (settled?.value?.messageTimes !== undefined) return settledResult;
+  const messages = settled?.value?.messages;
+  if (!Array.isArray(messages) || messages.length === 0) return settledResult;
+  let partial: { value?: { messages?: unknown; messageTimes?: unknown } } | null;
+  try {
+    partial = JSON.parse(existingJson) as typeof partial;
+  } catch {
+    return settledResult;
+  }
+  const times = partial?.value?.messageTimes;
+  const streamed = partial?.value?.messages;
+  if (!Array.isArray(times) || !Array.isArray(streamed) || times.length !== streamed.length) return settledResult;
+  const offset = messages.length - streamed.length;
+  if (offset < 0) return settledResult;
+  for (const [i, message] of streamed.entries()) {
+    if (roleOf(message as JsonValue) !== roleOf(messages[i + offset] as JsonValue)) return settledResult;
+  }
+  return {
+    ...(settledResult as object),
+    value: { ...(settled.value as object), messageTimes: [...Array.from({ length: offset }, () => ({})), ...times] },
+  } as JsonValue;
+}
+
 function preservePartial(
   settledResult: JsonValue | undefined,
   sessionOutcome: { messages?: unknown } | undefined,

@@ -23,7 +23,10 @@ import {
   type Tool,
 } from "@declarative-ai/exec";
 import { createToolGate, isPermissionDenied, PermissionLedger, withPermission } from "@declarative-ai/permissions";
-import { READ_FILE, WRITE_FILE } from "./fileTools";
+import { TOOL_SPECS } from "@jaira/shared";
+import { registerFileTools, READ_FILE, WRITE_FILE, type FileToolOptions } from "./fileTools";
+import { registerSearchTools } from "./searchTools";
+import { registerWebTools, type WebToolOptions } from "./webTools";
 import type { Approver, ExecPolicy, PermissionMode, ToolGate } from "@declarative-ai/permissions";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { NodeExec, type Exec } from "./exec";
@@ -115,6 +118,27 @@ export function createBashTool(options: ToolOptions = {}): Tool {
 /** Register JaiRA's tool set on a registry's `tools` facet. */
 export function registerTools(registry: { tools: Map<string, Tool> }, options: ToolOptions = {}): void {
   registry.tools.set("bash", createBashTool(options));
+}
+
+/**
+ * Every tool in the vocabulary, registered in one call.
+ *
+ * The four registration functions exist because they need different things — a shell, an artifact
+ * store, a workspace, a search endpoint — and a caller doing three of the four gets a registry that
+ * is missing whatever the fourth supplies. That has already happened once: `sendChatMessage` called
+ * `registerTools` alone, so ticking `read_file` in the composer reached `gateTools` and threw
+ * `tool 'read_file' is not registered` — the loud failure that call raises for a name nobody
+ * registered, raised instead for a missing line. Five more tools is five more chances at the same
+ * mistake, so there is one door now.
+ */
+export function registerAllTools(
+  registry: { tools: Map<string, Tool> },
+  options: ToolOptions & { files: FileToolOptions; web?: WebToolOptions },
+): void {
+  registerTools(registry, options);
+  registerFileTools(registry, options.files);
+  registerSearchTools(registry, { ...(options.cwd !== undefined ? { cwd: options.cwd } : {}) });
+  registerWebTools(registry, options.web ?? {});
 }
 
 /** The registry name a workflow state uses to run a command directly. */
@@ -263,23 +287,69 @@ export function gateTools(options: {
 /**
  * Every tool JaiRA can put under its OWN policy, and whether each one can change anything.
  *
- * Three, and deliberately so. A delegated agent arrives with its own tool set and enforces it through
- * its native permission callback (`policyEnforcement: "callback"`); these are the ones JaiRA registers
- * and gates itself, which is what "listing a tool puts its commands under the policy at all" means.
- * A caller listing choices for a person wants exactly this, not the union with whatever an agent
- * happens to ship — those are not JaiRA's to grant or refuse.
+ * DERIVED from `TOOL_SPECS` rather than restated. It was a hand-written list of three, and being
+ * hand-written is how it came to be a list of three: `glob`, `grep`, `edit` and the two web tools
+ * were things an agent did that nothing here had a name for, so nothing here could gate them. One
+ * table now, in `shared`, because the menu that draws these and the profile that governs them need
+ * the same answer — and a second copy is a second thing to forget to update.
  *
- * `readOnly` is carried here rather than read off the built tools because the callers that need it
- * are describing choices, not making calls: a permission PRESET assigns a mode per tool by asking
- * whether the tool writes, and it should not have to construct a shell and an artifact store to find
- * out. It is a restatement, so it can drift — `tools.test.ts` asserts this table against what
- * {@link registerTools} actually builds, which is the only thing that makes a restatement safe.
+ * `tools.test.ts` asserts this against what {@link registerTools} and its siblings actually build,
+ * which is what keeps the vocabulary and the implementations from drifting apart in the other
+ * direction: a name here with nothing behind it is a permission somebody can grant and no tool can
+ * honour.
  */
-export const JAIRA_TOOLS = [
-  { name: "bash", readOnly: false },
-  { name: READ_FILE, readOnly: true },
-  { name: WRITE_FILE, readOnly: false },
-] as const satisfies readonly { name: string; readOnly: boolean }[];
+export const JAIRA_TOOLS: readonly { name: string; readOnly: boolean }[] = TOOL_SPECS.filter(
+  (spec) => spec.nativeOnly !== true,
+).map((spec) => ({ name: spec.name, readOnly: spec.readOnly }));
 
 /** Just the names — the shape most callers want. */
 export const JAIRA_TOOL_NAMES = JAIRA_TOOLS.map((t) => t.name);
+
+/**
+ * Claude Code's own built-ins, as the names its permission rules are written against.
+ *
+ * Not a tool set — these are the agent's, not ours, and JaiRA neither implements nor registers them.
+ * What this is is the LIST OF NAMES needed to say "ask me about these", which is a thing you can
+ * only say by naming them.
+ *
+ * Read-only and mutating are separated because the two are different requests. The mutating ones are
+ * already denied up front by the transport under a narrowing profile; it is the READ ones that were
+ * the surprise — a real run globbed and read twenty files under `profile: "read-only"` and nothing
+ * asked, because in its default mode Claude Code auto-allows its own read-only built-ins and never
+ * routes them to the permission callback at all.
+ */
+export const CLAUDE_NATIVE_READ_TOOLS = ["Read", "Glob", "Grep", "NotebookRead", "WebFetch", "WebSearch"] as const;
+export const CLAUDE_NATIVE_WRITE_TOOLS = ["Write", "Edit", "NotebookEdit", "Bash", "KillShell"] as const;
+
+/**
+ * The provider options that make a delegated Claude agent ASK about tools it would otherwise decide
+ * for itself — the missing half of `policyEnforcement: "callback"`.
+ *
+ * The callback was never the problem: the MCP bridge starts, `--permission-prompt-tool` is passed
+ * and still accepted, and our gate is reachable. What decides whether the gate is CONSULTED is
+ * Claude Code's own policy, and in its default mode that policy answers "yes, obviously" for every
+ * read its built-ins perform. A permission callback that is only invoked for the calls the agent
+ * already thought were worth asking about is not a gate, it is a second opinion.
+ *
+ * `permissions.ask` is the rule list that overrides it, and it reaches both transports through the
+ * `settings` escape hatch they already carry (`--settings <json>` on the CLI, the SDK's own settings
+ * bag). Verified against `claude 2.1.142`: with `{"permissions":{"ask":["Read"]}}` and no permission
+ * channel, a `-p` run that would have read a file instead answers that it needs permission.
+ *
+ * Authored on a state's `providerOptions`, so it is a per-state decision rather than a posture:
+ *
+ * ```json
+ * "providerOptions": { "claudeCode": { "settings": { "permissions": { "ask": ["Read", "Glob"] } } } }
+ * ```
+ *
+ * ⚠️ Turning this on means every one of those calls reaches JaiRA's gate — and under a NARROWING
+ * profile the gate escalates a tool it cannot classify to the human rather than deciding
+ * (`decideToolCall`: an agent's built-in carries no `readOnly` we know, and guessing either way is
+ * worse than asking). So on a `read-only` state this produces one prompt per read, which for a run
+ * that reads twenty files is twenty prompts. Making our layer answer those without a human needs the
+ * gate to be told what these tools DO — see `CLAUDE_NATIVE_READ_TOOLS`, which is the list to classify
+ * them from once there is a channel to pass it on.
+ */
+export function claudeAskSettings(tools: readonly string[]): Record<string, JsonValue> {
+  return { claudeCode: { settings: { permissions: { ask: [...tools] } } } } as unknown as Record<string, JsonValue>;
+}
