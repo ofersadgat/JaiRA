@@ -117,6 +117,7 @@ import {
   registerTools,
   registerWebTools,
   gateTools,
+  planAgentTools,
   functionNamesOf,
   InteractionHub,
   defaultExecutorTree,
@@ -2494,9 +2495,15 @@ export class AppService {
       authoredModes === undefined
         ? compiled
         : { ...compiled, baseline: { ...compiled.baseline, tools: { ...compiled.baseline?.tools, ...authoredModes } } };
+    // The tools to RESOLVE are the ones being injected, which is not the same set as the ones
+    // granted: a tool granted with a NATIVE implementation is not ours to wrap — the agent runs its
+    // own, and what makes it answerable is the ask-rule `chatOperationOf` writes plus the gate
+    // below, which decides by logical name whichever implementation called. Wrapping it here as
+    // well would build a tool nothing would ever call.
+    const wiring = planAgentTools(plan.settings.tools ?? [], plan.settings.implementations ?? {});
     const { tools, gate } = gateTools({
       registry,
-      names: plan.settings.tools ?? [],
+      names: plan.settings.tools === undefined ? [] : wiring.inject,
       sessionId: sessionOf(context.position),
       policy,
       approve,

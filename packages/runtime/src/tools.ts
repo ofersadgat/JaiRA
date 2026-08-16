@@ -23,7 +23,7 @@ import {
   type Tool,
 } from "@declarative-ai/exec";
 import { createToolGate, isPermissionDenied, PermissionLedger, withPermission } from "@declarative-ai/permissions";
-import { TOOL_SPECS } from "@jaira/shared";
+import { TOOL_SPECS, type ToolImplementation } from "@jaira/shared";
 import { registerFileTools, READ_FILE, WRITE_FILE, type FileToolOptions } from "./fileTools";
 import { registerSearchTools } from "./searchTools";
 import { registerWebTools, type WebToolOptions } from "./webTools";
@@ -351,5 +351,97 @@ export const CLAUDE_NATIVE_WRITE_TOOLS = ["Write", "Edit", "NotebookEdit", "Bash
  * them from once there is a channel to pass it on.
  */
 export function claudeAskSettings(tools: readonly string[]): Record<string, JsonValue> {
-  return { claudeCode: { settings: { permissions: { ask: [...tools] } } } } as unknown as Record<string, JsonValue>;
+  return claudePermissionSettings({ ask: tools });
+}
+
+/**
+ * The same, for a whole posture: what the agent must ask about, and what it may not have at all.
+ *
+ * Precedence inside Claude Code is `deny > ask > allow`, so the two lists compose without ordering
+ * care — a name in both is denied, which is the answer that should win.
+ */
+export function claudePermissionSettings(rules: {
+  ask?: readonly string[];
+  deny?: readonly string[];
+}): Record<string, JsonValue> {
+  const permissions: Record<string, unknown> = {};
+  if (rules.ask !== undefined && rules.ask.length > 0) permissions["ask"] = [...rules.ask];
+  if (rules.deny !== undefined && rules.deny.length > 0) permissions["deny"] = [...rules.deny];
+  if (Object.keys(permissions).length === 0) return {};
+  return { claudeCode: { settings: { permissions } } } as unknown as Record<string, JsonValue>;
+}
+
+/** What an agent should be handed, once the two axes of the tools menu are resolved. */
+export interface AgentToolPlan {
+  /**
+   * Tools to DECLARE, so ours are injected and the agent's counterpart is displaced.
+   *
+   * This is `environment.tools`. Declaring a tool is what makes `replacesNative` bite, which is why
+   * the implementation choice is expressed as membership of this list rather than as a flag the
+   * executor reads: `nativeTools` is fixed at registration and cannot vary per call, but WHICH TOOLS
+   * ARE DECLARED already does.
+   */
+  inject: string[];
+  /**
+   * Native names the agent keeps, forced to its permission callback so our gate still decides.
+   *
+   * The other half of "native means the implementation, not the access". Without these rules Claude
+   * Code's own policy auto-allows its read-only built-ins and never consults the callback at all.
+   */
+  askNatives: string[];
+  /** Native names for tools nobody granted — the agent must not have the capability. */
+  denyNatives: string[];
+}
+
+/**
+ * Resolve the tools menu's two axes into what the agent is actually handed.
+ *
+ * Three states per tool, and the whole point is that they are three rather than the two the old
+ * "default" row could express:
+ *
+ *  - **Not granted** — the agent must not have this capability, so its built-in is denied. This is
+ *    the case that used to leak: an ungranted tool was merely undeclared, the built-in stayed, and
+ *    a `read-only` state watched twenty ungoverned reads go by.
+ *  - **Granted, `app`** — declare ours; `replacesNative` displaces the built-in.
+ *  - **Granted, `native`** — declare nothing, leave the built-in, and add an ask-rule so the call
+ *    reaches our gate. The mode beside it in the menu is what then decides.
+ *
+ * `app` is the default for a granted tool with no explicit choice, because DECLARING a tool has
+ * always meant injecting ours and that is what every authored state already relies on. `native` is
+ * the opt-out, and it is the one that needs saying.
+ */
+export function planAgentTools(
+  granted: readonly string[],
+  implementations: Readonly<Record<string, ToolImplementation>> = {},
+): AgentToolPlan {
+  const plan: AgentToolPlan = { inject: [], askNatives: [], denyNatives: [] };
+  for (const spec of TOOL_SPECS) {
+    const native = spec.natives?.claude;
+    if (!granted.includes(spec.name)) {
+      if (native !== undefined) plan.denyNatives.push(native);
+      continue;
+    }
+    // A tool we cannot serve has no `app` to choose, whatever the menu recorded.
+    const choice = spec.nativeOnly === true ? "native" : (implementations[spec.name] ?? "app");
+    if (choice === "native" && native !== undefined) plan.askNatives.push(native);
+    else plan.inject.push(spec.name);
+  }
+  return plan;
+}
+
+/**
+ * Which of the agent's built-ins each of our tools stands in for — `replacesNative`.
+ *
+ * Derived from the vocabulary rather than written out, so a tool added to the table displaces the
+ * right built-in without anybody remembering a second list. Naming a built-in here puts it on
+ * `disallowedTools` whenever our counterpart is injected, which the agent checks BEFORE its
+ * allow-list — so the substitution is real rather than an offer the model declines.
+ */
+export function claudeReplacements(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const spec of TOOL_SPECS) {
+    const native = spec.natives?.claude;
+    if (native !== undefined) out[spec.name] = native;
+  }
+  return out;
 }

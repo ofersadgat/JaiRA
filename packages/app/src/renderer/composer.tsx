@@ -1227,7 +1227,7 @@ export function Composer({
                           spec={TOOL_SPEC_BY_NAME.get(tool.name)}
                           granted={tools.includes(tool.name)}
                           mode={modes[tool.name] ?? MODE_WHEN_UNSET}
-                          impl={impls[tool.name] ?? "native"}
+                          impl={impls[tool.name] ?? "app"}
                           cliRoute={cliRoute}
                           // The WHOLE list every time — see the module header on replacement.
                           onGrant={() =>

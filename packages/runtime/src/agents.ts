@@ -19,6 +19,7 @@ import { createCliAgentFunction, createCodexAgentFunction, CODEX_CAPS, type Code
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { resolveInvocation, type ExecObserver } from "./exec";
 import type { ExecEnv } from "./paths";
+import { claudeReplacements } from "./tools";
 
 /** The registry names JaiRA registers its agents under. */
 export const AGENT_SDK = "claude-code";
@@ -190,10 +191,19 @@ export function registerAgentRuntimes(
   options: AgentRuntimeOptions = {},
 ): CapabilityRegistry<WorkflowMetrics> {
   const adapters = options.adapters ?? ["sdk", "cli", "codex"];
+  // Injecting a tool without DISPLACING the agent's own is a second set of tools the model ignores.
+  // Observed on a live run: with `read_file` injected and `Read` still available, the agent reached
+  // for `Read` every time — its system prompt steers it there. So a declared tool of ours takes the
+  // built-in's place, which is what makes "JaiRA's implementation" mean anything at all; the tools
+  // NOT declared are untouched, and that is how "the agent's own" stays expressible.
+  const sdkOptions: Omit<ClaudeCodeFunctionOptions, "query"> = {
+    replacesNative: claudeReplacements(),
+    ...options.sdk,
+  };
 
   if (adapters.includes("sdk")) {
     const sdk = createClaudeCodeFunction({
-      ...options.sdk,
+      ...sdkOptions,
       ...(options.query !== undefined ? { query: options.query } : {}),
     });
     registry.functions.set(
@@ -220,7 +230,7 @@ export function registerAgentRuntimes(
         ? // A supplied query replaces the subprocess entirely, so the CLI adapter
           // becomes the SDK adapter with a different name — which is what makes the
           // registration path testable without a `claude` binary.
-          createClaudeCodeFunction({ ...options.sdk, query: options.query })
+          createClaudeCodeFunction({ ...sdkOptions, query: options.query })
         : createCliAgentFunction({
             ...options.sdk,
             ...(options.cliCommand !== undefined ? { command: options.cliCommand } : {}),
@@ -238,7 +248,7 @@ export function registerAgentRuntimes(
     // more than "unregistered function" would.
     const codex =
       options.query !== undefined
-        ? createClaudeCodeFunction({ ...options.sdk, capabilities: CODEX_CAPS, approvalCallback: false, query: options.query })
+        ? createClaudeCodeFunction({ ...sdkOptions, capabilities: CODEX_CAPS, approvalCallback: false, query: options.query })
         : createCodexAgentFunction({
             ...options.sdk,
             ...(options.codexCommand !== undefined ? { command: options.codexCommand } : {}),

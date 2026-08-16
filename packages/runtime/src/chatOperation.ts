@@ -48,6 +48,7 @@ import type { InlineFamily, NamedParameter, PromptOp } from "@declarative-ai/exe
 import type { JsonValue } from "@declarative-ai/json";
 import type { ChatPlanView, ChatSettings, PermissionsDecl, SettingOrigin, UnresolvedSetting } from "@jaira/shared";
 import type { ReasoningSpec } from "@declarative-ai/llm";
+import { claudePermissionSettings, planAgentTools } from "./tools";
 
 
 /**
@@ -276,6 +277,7 @@ const CHAT_OUTPUT: NamedParameter<InlineFamily> = { name: "text", kind: "text" }
  */
 export function chatOperationOf(plan: ChatPlan, args: { message: string; session: { id: string } }): ChatOperation {
   const { settings } = plan;
+  const tools = agentToolWiring(settings);
   return {
     operation: {
       kind: "prompt",
@@ -285,6 +287,7 @@ export function chatOperationOf(plan: ChatPlan, args: { message: string; session
         ...plan.passthrough,
         ...(settings.model !== undefined ? { model: settings.model } : {}),
         ...(settings.reasoning !== undefined ? { reasoning: settings.reasoning as unknown as JsonValue } : {}),
+        ...tools.config,
       },
       input: {},
       output: CHAT_OUTPUT,
@@ -295,8 +298,41 @@ export function chatOperationOf(plan: ChatPlan, args: { message: string; session
       // Declared, and RESOLVED by the caller through `gateTools` — which puts each one under the
       // policy with the same primitive the engine uses. Declaring them without that would be worse
       // than dropping them: the model would be told about tools nothing had gated.
-      ...(settings.tools !== undefined ? { tools: [...settings.tools] } : {}),
+      ...tools.environment,
       ...(settings.permissions !== undefined ? { permissions: settings.permissions } : {}),
     },
+  };
+}
+
+/**
+ * The tools half of a message's settings, split across the two places it has to land.
+ *
+ * The menu asks two questions per tool — may it run, and whose code runs it — and they leave by
+ * different doors. WHICH TOOLS ARE DECLARED (`environment.tools`) is what decides implementation,
+ * because declaring one injects ours and `replacesNative` then displaces the agent's counterpart;
+ * and the ask/deny rules that keep a NATIVE implementation answerable to our gate ride on
+ * `operation.config.providerOptions`, which both transports already forward to the agent's own
+ * settings.
+ *
+ * Absent `tools` means the message said nothing about them, so nothing is written — the state's own
+ * declaration stands, which is what an untouched composer should leave alone.
+ *
+ * `denyNatives` is deliberately NOT emitted here yet, though the plan computes it. Denying the
+ * built-ins of every ungranted tool is the honest reading of an unticked box, and it is also a
+ * material change to how every existing workflow behaves: the sync states declare `read_file` alone
+ * and lean on the agent's own `Glob` and `Grep` to read the tree. Turning that off is a decision
+ * about what a tool list MEANS, not a wiring detail to slip in behind a dropdown — so it waits for
+ * scoped permissions, which is where "may it act, and where" gets answered properly.
+ */
+function agentToolWiring(settings: ChatSettings): {
+  environment: { tools?: string[] };
+  config: { providerOptions?: JsonValue };
+} {
+  if (settings.tools === undefined) return { environment: {}, config: {} };
+  const plan = planAgentTools(settings.tools, settings.implementations ?? {});
+  const rules = claudePermissionSettings({ ask: plan.askNatives });
+  return {
+    environment: { tools: plan.inject },
+    config: Object.keys(rules).length > 0 ? { providerOptions: rules as unknown as JsonValue } : {},
   };
 }
