@@ -75,6 +75,16 @@ export interface ToolSpec {
   hint: string;
   natives?: NativeNames;
   /**
+   * Which of this tool's arguments name a PLACE — what a scope table is resolved against.
+   *
+   * In the table rather than beside the implementations because it is the same fact the tool's
+   * `inputSchema` states, and a permission that read it from a second list would drift from the tool
+   * the day somebody renamed an argument. A tool with none is not about a place at all.
+   */
+  pathArgs?: readonly string[];
+  /** The same, for arguments naming a URL — the web tools scope by those instead. */
+  urlArgs?: readonly string[];
+  /**
    * True when JaiRA has no implementation of its own, so `app` is not a choice that can be made.
    *
    * Listed anyway, and that is the point: a tool we cannot SERVE is still a tool we can GOVERN. The
@@ -97,6 +107,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "files",
     readOnly: true,
     hint: "read a file in the workspace",
+    pathArgs: ["path"],
     natives: { claude: "Read" },
   },
   {
@@ -105,6 +116,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "files",
     readOnly: true,
     hint: "list files matching a pattern",
+    pathArgs: ["path"],
     natives: { claude: "Glob" },
   },
   {
@@ -113,6 +125,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "files",
     readOnly: true,
     hint: "search file contents for a pattern",
+    pathArgs: ["path"],
     natives: { claude: "Grep" },
   },
   {
@@ -121,6 +134,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "files",
     readOnly: false,
     hint: "replace exact text in an existing file",
+    pathArgs: ["path"],
     natives: { claude: "Edit" },
   },
   {
@@ -129,6 +143,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "files",
     readOnly: false,
     hint: "create a file, or replace one whole",
+    pathArgs: ["path"],
     natives: { claude: "Write" },
   },
   {
@@ -137,6 +152,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "execution",
     readOnly: false,
     hint: "run shell commands, under the policy",
+    pathArgs: ["cwd"],
     natives: { claude: "Bash" },
   },
   {
@@ -145,6 +161,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "web",
     readOnly: true,
     hint: "fetch a URL and read what comes back",
+    urlArgs: ["url"],
     natives: { claude: "WebFetch" },
   },
   {

@@ -313,3 +313,73 @@ export function coversProjectPath(scopes: readonly Scope[], projectPath: string,
   const value = absolutize(projectPath, options.root);
   return compile(scopes, "path", options).some((entry) => entry.matches(value));
 }
+
+// --- resolving a CALL --------------------------------------------------------
+
+/** The places one call is about, pulled out of its arguments by the vocabulary's own declaration. */
+export interface CallSubjects {
+  paths: string[];
+  urls: string[];
+}
+
+/**
+ * What a call is ABOUT — the places its arguments name.
+ *
+ * Read from {@link ToolSpec.pathArgs} / {@link ToolSpec.urlArgs} rather than from a table of
+ * argument names kept here, so the answer cannot drift from the tool: the same declaration that says
+ * `read_file` takes a `path` is the one a permission resolves against.
+ *
+ * A path-taking tool called with NO path is about the workspace root. That is the honest reading for
+ * the ones where it is legal — `glob` and `grep` walk from the root when given no directory — and
+ * harmless for the ones where it is not, since `read_file` without a path fails on its own before
+ * touching anything. Denying instead would refuse every unscoped `glob`, which is the ordinary call.
+ *
+ * A tool the vocabulary does not know is about NOWHERE, and the caller decides what that means. It
+ * is deliberately not "the root": an unmodelled tool resolving to the workspace's own permissions
+ * would be the widest possible guess about the one call we understand least.
+ */
+export function subjectsOf(
+  spec: { pathArgs?: readonly string[]; urlArgs?: readonly string[] } | undefined,
+  input: unknown,
+  root?: string,
+): CallSubjects {
+  const out: CallSubjects = { paths: [], urls: [] };
+  if (spec === undefined) return out;
+  const args: Record<string, unknown> =
+    input !== null && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+  for (const name of spec.pathArgs ?? []) {
+    const value = args[name];
+    if (typeof value === "string" && value.trim() !== "") out.paths.push(value);
+  }
+  for (const name of spec.urlArgs ?? []) {
+    const value = args[name];
+    if (typeof value === "string" && value.trim() !== "") out.urls.push(value);
+  }
+  // About the workspace, when it names no place of its own and takes paths at all.
+  if (out.paths.length === 0 && (spec.pathArgs ?? []).length > 0 && root !== undefined) out.paths.push(root);
+  return out;
+}
+
+/**
+ * The mode a scope table gives one CALL — every place it names, strictest winning.
+ *
+ * `undefined` when the table has nothing to say about this call: no scopes at all, or a tool that
+ * names no place. That is the value the permission gate takes as "no narrowing", which is why it is
+ * distinct from `deny` — a table that does not apply must not refuse.
+ */
+export function scopeModeOf(
+  scopes: readonly Scope[] | undefined,
+  spec: { pathArgs?: readonly string[]; urlArgs?: readonly string[] } | undefined,
+  tool: string,
+  input: unknown,
+  options: ScopeOptions = {},
+): ToolMode | undefined {
+  if (scopes === undefined || scopes.length === 0) return undefined;
+  const subjects = subjectsOf(spec, input, options.root);
+  if (subjects.paths.length === 0 && subjects.urls.length === 0) return undefined;
+  const modes: ToolMode[] = [
+    ...subjects.paths.map((path) => resolveScope(scopes, tool, path, options)),
+    ...subjects.urls.map((url) => resolveUrlScope(scopes, tool, url, options)),
+  ];
+  return strictest(...modes);
+}

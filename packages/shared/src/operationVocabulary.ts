@@ -15,6 +15,7 @@
  * but they are display strings ABOUT the vocabulary — `slotTypes.ts` already carries the same kind of
  * thing for the same reason, and the schema reference panel wants exactly these words.
  */
+import type { Scope } from "./scopes";
 
 /**
  * The simple fields — one authored key, one text box.
@@ -186,6 +187,14 @@ export interface PermissionsDecl {
    * With one field those two questions had one answer, and only one of them deserves `deny`.
    */
   other?: PermissionMode;
+  /**
+   * WHERE each tool may act — see `scopes.ts`.
+   *
+   * The axis a mode alone cannot express: `write_file: "allow"` is allow-everywhere, and what anybody
+   * actually means is "under `app/`". Unmatched denies, so a table naming only the sandbox IS the
+   * sandbox and widening is the thing you have to write.
+   */
+  scopes?: Scope[];
 }
 
 /** A tool a caller may be granted, and whether it can change anything. */

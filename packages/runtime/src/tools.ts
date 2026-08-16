@@ -23,7 +23,16 @@ import {
   type Tool,
 } from "@declarative-ai/exec";
 import { createToolGate, isPermissionDenied, PermissionLedger, withPermission } from "@declarative-ai/permissions";
-import { TOOL_PROFILES, TOOL_SPECS, type ToolImplementation } from "@jaira/shared";
+import {
+  logicalOfNative,
+  scopeModeOf,
+  TOOL_PROFILES,
+  TOOL_SPEC_BY_NAME,
+  TOOL_SPECS,
+  type PermissionsDecl,
+  type Scope,
+  type ToolImplementation,
+} from "@jaira/shared";
 import { registerFileTools, READ_FILE, WRITE_FILE, type FileToolOptions } from "./fileTools";
 import { registerSearchTools } from "./searchTools";
 import { registerWebTools, type WebToolOptions } from "./webTools";
@@ -243,13 +252,16 @@ export function gateTools(options: {
   sessionId: string;
   policy?: ExecPolicy | undefined;
   approve?: Approver | undefined;
-  /** The operation's own `permissions` block: a profile, a default mode, per-tool modes. */
-  authored?: { profile?: string; default?: PermissionMode; tools?: Record<string, PermissionMode> } | undefined;
+  /** The operation's own `permissions` block: a profile, a default mode, per-tool modes, scopes. */
+  authored?: PermissionsDecl | undefined;
+  /** What a relative scope glob and a relative call path are resolved against. */
+  workspaceRoot?: string | undefined;
 }): { tools: Record<string, Tool>; gate: ToolGate } {
   const ledger = new PermissionLedger({ baseline: options.policy?.baseline ?? {} });
   if (options.authored?.profile !== undefined) ledger.seedProfile(options.sessionId, options.authored.profile);
   // With no approver wired, an `ask` denies — the same unattended default the approval hub takes.
   const approve: Approver = options.approve ?? (() => ({ decision: "deny", scope: "once" }));
+  const scopeNarrowing = scopeNarrowingFor(options.authored?.scopes, options.workspaceRoot);
   /** One gate over the SAME ledger, so a decision made at either end is remembered at both. */
   const gate = createToolGate({
     ledger,
@@ -262,6 +274,7 @@ export function gateTools(options: {
     // built-in names is what gives the gate an opinion about an agent's own tools rather than an
     // escalation — see `profileRules`.
     profiles: options.policy?.profiles ?? profileRules(),
+    ...(scopeNarrowing !== undefined ? { scopeOf: scopeNarrowing } : {}),
   });
   if (options.names.length === 0) return { tools: {}, gate };
   const out: Record<string, Tool> = {};
@@ -281,7 +294,10 @@ export function gateTools(options: {
       approve,
       ...(authoredMode !== undefined ? { authoredMode } : {}),
       ...(options.policy?.smart?.[name] !== undefined ? { smart: options.policy.smart[name] } : {}),
-      ...(options.policy?.profiles !== undefined ? { profiles: options.policy.profiles } : {}),
+      profiles: options.policy?.profiles ?? profileRules(),
+      // The SAME narrowing the gate applies. A wrapped tool and a delegated one are two routes to one
+      // decision, and a scope that bound only one of them would be a sandbox with a door in it.
+      ...(scopeNarrowing !== undefined ? { scopeOf: scopeNarrowing } : {}),
     });
   }
   return { tools: out, gate };
@@ -473,4 +489,31 @@ export function claudeReplacements(): Record<string, string> {
     if (native !== undefined) out[spec.name] = native;
   }
   return out;
+}
+
+/**
+ * The `scopeOf` a permission gate takes, built from an authored scope table.
+ *
+ * The seam upstream deliberately left open: it takes a callback rather than a table because which
+ * argument of a tool names a place — and whether that place is inside somebody's sandbox — is a
+ * question only this side can answer. Here the vocabulary answers the first half
+ * ({@link ToolSpec.pathArgs}) and `scopeModeOf` the second.
+ *
+ * `undefined` when there is no table, so a project that has authored no scopes pays nothing and
+ * behaves exactly as it did. And `undefined` PER CALL for a tool that names no place, which is what
+ * keeps the narrowing from refusing calls it has no opinion about.
+ */
+export function scopeNarrowingFor(
+  scopes: readonly Scope[] | undefined,
+  workspaceRoot: string | undefined,
+): ((tool: { name: string }, input: FunctionInputs) => PermissionMode | undefined) | undefined {
+  if (scopes === undefined || scopes.length === 0) return undefined;
+  return (tool, input) => {
+    // By LOGICAL name, whichever implementation called: a gate asked about the agent's own `Glob`
+    // resolves the table written for `glob`. Without this the two spellings would be two policies.
+    const name = TOOL_SPEC_BY_NAME.has(tool.name) ? tool.name : (logicalOfNative(tool.name) ?? tool.name);
+    return scopeModeOf(scopes, TOOL_SPEC_BY_NAME.get(name), name, input, {
+      ...(workspaceRoot !== undefined ? { root: workspaceRoot } : {}),
+    });
+  };
 }

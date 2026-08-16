@@ -2508,6 +2508,8 @@ export class AppService {
       policy,
       approve,
       ...(plan.settings.permissions !== undefined ? { authored: plan.settings.permissions } : {}),
+      // What a relative scope glob and a relative call path resolve against — see `scopeNarrowingFor`.
+      ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
     });
 
     const { operation } = chatOperationOf(plan, { message: request.message, session: { id: context.position } });
