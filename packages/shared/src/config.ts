@@ -7,6 +7,8 @@
  * is the DEFAULT model a state inherits when it names none, plus the artifact
  * root. Exec environment, policy, and agent runtimes arrive in later phases.
  */
+import type { Scope } from "./scopes";
+import { PERMISSION_MODES, type PermissionMode } from "./operationVocabulary";
 import type { JsonValue } from "@declarative-ai/json";
 import type { CredentialUse } from "./executors";
 import { EXECUTOR_STEPS, type JairaExecutorSteps } from "./executorStack";
@@ -868,7 +870,7 @@ function parseExecutorDefinitions(raw: unknown): Record<string, JairaOperationNo
 /** The top of the tree: dispatch on the kind of operation. */
 function parseOperationNode(raw: unknown, where: string): JairaOperationNode {
   const spec = plainObject(raw, where);
-  allowedFields(spec, ["kind", "description", "function", "prompt", "steps"], where);
+  allowedFields(spec, ["kind", "description", "function", "prompt", "steps", "scopes"], where);
   if (spec["kind"] !== undefined && spec["kind"] !== "operation") {
     throw new Error(`${where}.kind must be "operation" — it is the top of the tree, which dispatches prompt ops from function ops`);
   }
@@ -881,12 +883,13 @@ function parseOperationNode(raw: unknown, where: string): JairaOperationNode {
     ...(spec["function"] !== undefined ? { function: parseFunctionNode(spec["function"], `${where}.function`) } : {}),
     ...(spec["prompt"] !== undefined ? { prompt: parsePromptNode(spec["prompt"], `${where}.prompt`) } : {}),
     ...(spec["steps"] !== undefined ? { steps: parseExecutorSteps(spec["steps"], `${where}.steps`) } : {}),
+    ...(spec["scopes"] !== undefined ? { scopes: parseScopes(spec["scopes"], `${where}.scopes`) } : {}),
   };
 }
 
 function parseFunctionNode(raw: unknown, where: string): JairaOperationNode["function"] {
   const spec = plainObject(raw, where);
-  allowedFields(spec, ["kind", "rules", "steps"], where);
+  allowedFields(spec, ["kind", "rules", "steps", "scopes"], where);
   if (spec["kind"] !== undefined && spec["kind"] !== "function") throw new Error(`${where}.kind must be "function"`);
   if (spec["rules"] !== undefined) {
     for (const [i, rule] of patternList(spec["rules"], `${where}.rules`).entries()) {
@@ -899,6 +902,7 @@ function parseFunctionNode(raw: unknown, where: string): JairaOperationNode["fun
     kind: "function",
     ...(spec["rules"] !== undefined ? { rules: patternList(spec["rules"], `${where}.rules`) } : {}),
     ...(spec["steps"] !== undefined ? { steps: parseExecutorSteps(spec["steps"], `${where}.steps`) } : {}),
+    ...(spec["scopes"] !== undefined ? { scopes: parseScopes(spec["scopes"], `${where}.scopes`) } : {}),
   };
 }
 
@@ -924,12 +928,12 @@ function parsePromptNode(raw: unknown, where: string, position: "top" | "route" 
   if (kind === "leaf") {
     // Neither name is required — the route key supplies it — so both are permitted and only their
     // shape is checked. A field belonging to neither is still refused.
-    allowedFields(spec, ["provider", "agent", "model", "allow", "defaults", "steps"], where);
+    allowedFields(spec, ["provider", "agent", "model", "allow", "defaults", "steps", "scopes"], where);
     return leafFields(spec, where, undefined) as JairaPromptNode;
   }
 
   if (kind === "router") {
-    allowedFields(spec, ["kind", "defaults", "routes", "fallback", "steps"], where);
+    allowedFields(spec, ["kind", "defaults", "routes", "fallback", "steps", "scopes"], where);
     const routes: Record<string, JairaPromptNode> = {};
     for (const [prefix, entry] of Object.entries(plainObject(spec["routes"] ?? {}, `${where}.routes`))) {
       if (prefix.includes("/")) {
@@ -945,11 +949,12 @@ function parsePromptNode(raw: unknown, where: string, position: "top" | "route" 
       ...(Object.keys(routes).length > 0 ? { routes } : {}),
       ...(spec["fallback"] !== undefined ? { fallback: parsePromptNode(spec["fallback"], `${where}.fallback`) } : {}),
       ...(spec["steps"] !== undefined ? { steps: parseExecutorSteps(spec["steps"], `${where}.steps`) } : {}),
+    ...(spec["scopes"] !== undefined ? { scopes: parseScopes(spec["scopes"], `${where}.scopes`) } : {}),
     };
   }
 
   const target = kind === "provider" ? "provider" : "agent";
-  allowedFields(spec, ["kind", target, "model", "allow", "defaults", "steps"], where);
+  allowedFields(spec, ["kind", target, "model", "allow", "defaults", "steps", "scopes"], where);
   return { kind, ...leafFields(spec, where, target) } as JairaPromptNode;
 }
 
@@ -983,6 +988,7 @@ function leafFields(
       ? { defaults: plainObject(spec["defaults"], `${where}.defaults`) as Record<string, JsonValue> }
       : {}),
     ...(spec["steps"] !== undefined ? { steps: parseExecutorSteps(spec["steps"], `${where}.steps`) } : {}),
+    ...(spec["scopes"] !== undefined ? { scopes: parseScopes(spec["scopes"], `${where}.scopes`) } : {}),
   };
 }
 
@@ -1054,4 +1060,65 @@ function checkAgainstSchema(value: unknown, schema: Record<string, JsonValue>, w
     }
   }
   return spec;
+}
+
+/**
+ * `scopes` on an executor node — WHERE anything running under it may act.
+ *
+ * Validated rather than passed through, and strictly, because this is the one config block whose
+ * mistakes fail OPEN in the reader's imagination: a typo'd key is a sandbox somebody believes they
+ * have. `{"paths": …}` instead of `{"path": …}` would parse as a scope naming no place, match
+ * nothing, and — since unmatched denies — quietly refuse everything under it, which reads as "the
+ * tool is broken" rather than "the table is wrong". Refusing the key by name says which it is.
+ *
+ * `path` and `url` are exclusive: a scope is about a location in a filesystem or a location on the
+ * network, and one entry claiming both would have to be resolved twice with no rule for combining
+ * the answers.
+ */
+function parseScopes(raw: unknown, where: string): Scope[] {
+  if (!Array.isArray(raw)) throw new Error(`${where} must be an array of scopes`);
+  return raw.map((entry, i) => {
+    const at = `${where}[${i}]`;
+    const spec = plainObject(entry, at);
+    allowedFields(spec, ["path", "url", "tools", "default"], at);
+    const path = spec["path"];
+    const url = spec["url"];
+    if (path !== undefined && url !== undefined) {
+      throw new Error(`${at} names both a path and a url — a scope is about one place, and there is no rule for combining two`);
+    }
+    if (path === undefined && url === undefined) {
+      throw new Error(`${at} names no place — a scope needs a \`path\` glob or a \`url\` glob`);
+    }
+    if (path !== undefined && (typeof path !== "string" || path.trim() === "")) {
+      throw new Error(`${at}.path must be a non-empty glob`);
+    }
+    if (url !== undefined && (typeof url !== "string" || url.trim() === "")) {
+      throw new Error(`${at}.url must be a non-empty glob`);
+    }
+    if (spec["tools"] === undefined && spec["default"] === undefined) {
+      // A scope saying nothing about anything is inert, and inert is indistinguishable from a rule
+      // somebody meant to write — so it is refused rather than kept as decoration.
+      throw new Error(`${at} says nothing — give it \`tools\`, a \`default\`, or remove it`);
+    }
+    return {
+      ...(typeof path === "string" ? { path } : {}),
+      ...(typeof url === "string" ? { url } : {}),
+      ...(spec["tools"] !== undefined ? { tools: parseScopeModes(spec["tools"], `${at}.tools`) } : {}),
+      ...(spec["default"] !== undefined ? { default: parseScopeMode(spec["default"], `${at}.default`) } : {}),
+    };
+  });
+}
+
+function parseScopeModes(raw: unknown, where: string): Record<string, PermissionMode> {
+  const spec = plainObject(raw, where);
+  const out: Record<string, PermissionMode> = {};
+  for (const [tool, mode] of Object.entries(spec)) out[tool] = parseScopeMode(mode, `${where}.${tool}`);
+  return out;
+}
+
+function parseScopeMode(raw: unknown, where: string): PermissionMode {
+  if (typeof raw !== "string" || !PERMISSION_MODES.includes(raw as PermissionMode)) {
+    throw new Error(`${where} must be one of ${PERMISSION_MODES.join(", ")}`);
+  }
+  return raw as PermissionMode;
 }

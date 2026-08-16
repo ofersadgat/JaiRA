@@ -55,7 +55,7 @@ import {
   type JairaPromptNode,
 } from "@jaira/shared";
 import { ScriptedFakeExecutor, type FakeRule } from "./fakeExecutor";
-import { buildPromptTree } from "./executorTree";
+import { buildPromptTree, withSecurityFloor } from "./executorTree";
 import { agentPromptRouteNames, usableRouteKeys } from "./modelRoutes";
 import type { StackedExecutor } from "./executorStack";
 import type { SecretResolver } from "./secrets";
@@ -99,6 +99,15 @@ export const DEFAULT_REPAIR_TURNS = 2;
 export interface PromptExecutorOptions {
   /** Scripted rules ⇒ a fake prompt executor instead of a real provider. */
   fakeRules?: FakeRule[];
+  /**
+   * Call config every prompt is bounded with — see `withSecurityFloor`.
+   *
+   * JaiRA puts the scope table compiled into a delegated agent's own permission rules here, which is
+   * how a sandbox reaches the agent's BUILT-INS: it bounds them up front in the agent's own gate
+   * rather than one callback at a time, and a state cannot drop it by authoring `providerOptions` of
+   * its own.
+   */
+  securityFloor?: Record<string, JsonValue>;
   /**
    * The RESOLVED executor tree — every level, already derived from what is available.
    *
@@ -155,8 +164,14 @@ export function buildPromptExecutor(options: PromptExecutorOptions = {}): Execut
     ...(fake !== undefined ? { fakePrompt: fake } : {}),
   });
 
+  // The project's security floor, folded over every prompt call — INCLUDING a scripted one, so a
+  // fake run exercises the same wiring rather than a quieter version of it. Over rather than under
+  // the state's config: a floor a state could replace is a default with a misleading name. See
+  // `withSecurityFloor`.
+  const bounded =
+    options.securityFloor === undefined ? (fake ?? prompt) : withSecurityFloor(options.securityFloor, fake ?? prompt);
   const base = repairing(
-    fake ?? prompt,
+    bounded,
     options.repairTurns ?? DEFAULT_REPAIR_TURNS,
   );
   if (options.memo === undefined) return base;

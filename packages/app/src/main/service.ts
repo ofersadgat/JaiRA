@@ -117,6 +117,8 @@ import {
   registerTools,
   registerWebTools,
   gateTools,
+  claudePermissionSettings,
+  compileClaudeScopeRules,
   planAgentTools,
   functionNamesOf,
   InteractionHub,
@@ -1907,8 +1909,19 @@ export class AppService {
     }
 
     const fakeRules = opts.fake !== undefined ? parseFakeRules(opts.fake) : undefined;
+    // The scope floor, compiled into a delegated agent's OWN permission rules and folded over every
+    // prompt call. This is the run path's half of the rule compiler: the chat path emits the same
+    // rules per message, and without this a workflow's states bounded nothing but our own callbacks
+    // — the agent's built-ins ran under its default posture.
+    const floor = scopeFloorOf(config);
+    const scopeRules =
+      floor === undefined ? {} : claudePermissionSettings(compileClaudeScopeRules(floor, { root: workspace.root }));
+    // `claudePermissionSettings` returns the providerOptions VALUE — the key is this caller's, the
+    // same way `chatOperationOf` writes it.
+    const securityFloor = Object.keys(scopeRules).length > 0 ? { providerOptions: scopeRules as JsonValue } : undefined;
     const prompt = buildPromptExecutor({
       ...(fakeRules !== undefined ? { fakeRules } : {}),
+      ...(securityFloor !== undefined ? { securityFloor } : {}),
       ...this.promptWiring(config, {
         fake: fakeRules !== undefined,
         secrets: opts.secrets,

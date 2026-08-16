@@ -70,6 +70,15 @@ export interface TreeDeps {
   memoCache?: MemoCache;
   /** Replaces the whole prompt half — the scripted `--fake` path, which needs no provider. */
   fakePrompt?: StackedExecutor;
+  /**
+   * Call config the project bounds every prompt with — see {@link withSecurityFloor}.
+   *
+   * A FLOOR rather than a default: it is merged over a state's own config rather than under it, so a
+   * state can add to it and cannot drop it. What JaiRA puts here is the scope table compiled into a
+   * delegated agent's own permission rules, which is how a sandbox reaches the agent's built-ins
+   * instead of being enforced one callback at a time.
+   */
+  securityFloor?: Record<string, JsonValue>;
 }
 
 /** What the tree ended up being, so a caller can report a step that could not be applied. */
@@ -312,8 +321,11 @@ export function buildExecutorTree(
   deps: TreeDeps,
 ): { executor: StackedExecutor; prompt: StackedExecutor; report: TreeReport } {
   const report: TreeReport = { stacks: {} };
+  const promptTree = deps.securityFloor === undefined
+    ? undefined
+    : withSecurityFloor(deps.securityFloor, buildPromptTree(tree.prompt ?? { kind: "router" }, deps, report));
   const prompt = stacked(
-    deps.fakePrompt ?? buildPromptTree(tree.prompt ?? { kind: "router" }, deps, report),
+    promptTree ?? deps.fakePrompt ?? buildPromptTree(tree.prompt ?? { kind: "router" }, deps, report),
     // A `fakePrompt` still gets the prompt node's steps: a scripted run has little to gain from a
     // cache, but silently dropping a configured step is how a wiring bug survives every test.
     deps.fakePrompt !== undefined ? tree.prompt?.steps : undefined,
@@ -400,4 +412,59 @@ const REFUSING_CAPS: RuntimeCapabilities = {
 
 function isObject(value: unknown): value is Record<string, JsonValue> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Fold the project's security floor into every prompt call — OVER the state's own config.
+ *
+ * The opposite direction from {@link withPromptDefaults}, and the difference is the whole point. A
+ * default is a value a state may replace; a floor is one it may not. `{...defaults, ...config}` lets
+ * a state that authors `providerOptions` drop the compiled scope rules entirely — not even
+ * deliberately, since `providerOptions` merges shallowly and a state setting an unrelated provider's
+ * options would take ours with it.
+ *
+ * So this merges the other way and DEEPLY, down to the permission arrays: a state may add rules of
+ * its own, and cannot remove the ones the project bounds it with.
+ */
+export function withSecurityFloor(
+  floor: Record<string, JsonValue>,
+  inner: StackedExecutor,
+): StackedExecutor {
+  const executor = inner;
+  const filled = (op: Operation<InlineFamily>): Operation<InlineFamily> => {
+    if (op.kind !== "prompt") return op;
+    const config = isObject(op.config) ? (op.config as Record<string, JsonValue>) : {};
+    return { ...op, config: deepMergeOver(config, floor) as JsonValue };
+  };
+  return {
+    capabilities: executor.capabilities,
+    metrics: executor.metrics,
+    ...(executor.capabilitiesFor !== undefined
+      ? { capabilitiesFor: (op: Operation<InlineFamily>) => executor.capabilitiesFor!(filled(op)) }
+      : {}),
+    start: (op: Operation<InlineFamily>, ctx: ExecServices) => executor.start(filled(op), ctx),
+  };
+}
+
+/**
+ * `over` wins, object by object, and arrays UNION.
+ *
+ * Arrays union rather than replace because the arrays here are permission rule lists: a state adding
+ * `deny: ["Bash"]` and a floor adding `deny: ["Read(/etc/**)"]` both mean their entry, and the
+ * strictest posture is the one that keeps both. Replacement in either direction would silently drop
+ * one of them.
+ */
+function deepMergeOver(base: Record<string, JsonValue>, over: Record<string, JsonValue>): Record<string, JsonValue> {
+  const out: Record<string, JsonValue> = { ...base };
+  for (const [key, value] of Object.entries(over)) {
+    const existing = out[key];
+    if (Array.isArray(existing) && Array.isArray(value)) {
+      out[key] = [...new Set([...existing, ...value])] as JsonValue;
+    } else if (isObject(existing) && isObject(value)) {
+      out[key] = deepMergeOver(existing as Record<string, JsonValue>, value as Record<string, JsonValue>) as JsonValue;
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
 }
