@@ -23,7 +23,7 @@ import {
   type Tool,
 } from "@declarative-ai/exec";
 import { createToolGate, isPermissionDenied, PermissionLedger, withPermission } from "@declarative-ai/permissions";
-import { TOOL_SPECS, type ToolImplementation } from "@jaira/shared";
+import { TOOL_PROFILES, TOOL_SPECS, type ToolImplementation } from "@jaira/shared";
 import { registerFileTools, READ_FILE, WRITE_FILE, type FileToolOptions } from "./fileTools";
 import { registerSearchTools } from "./searchTools";
 import { registerWebTools, type WebToolOptions } from "./webTools";
@@ -258,7 +258,10 @@ export function gateTools(options: {
     preGated: options.names,
     ...(options.authored !== undefined ? { authored: options.authored } : {}),
     ...(options.policy?.smart !== undefined ? { smart: options.policy.smart } : {}),
-    ...(options.policy?.profiles !== undefined ? { profiles: options.policy.profiles } : {}),
+    // The vocabulary's tables, unless the caller supplied its own. Registering them under the
+    // built-in names is what gives the gate an opinion about an agent's own tools rather than an
+    // escalation — see `profileRules`.
+    profiles: options.policy?.profiles ?? profileRules(),
   });
   if (options.names.length === 0) return { tools: {}, gate };
   const out: Record<string, Tool> = {};
@@ -427,6 +430,32 @@ export function planAgentTools(
     else plan.inject.push(spec.name);
   }
   return plan;
+}
+
+/**
+ * The vocabulary's profiles, as the tables upstream now takes.
+ *
+ * Registered under the BUILT-IN names, which shadows upstream's own `read-only` / `plan` / `full` —
+ * deliberately, and it is the whole point. Upstream's are predicates over `readOnly`, so they answer
+ * for the tools we registered and say nothing about an agent's own built-ins: every such call is
+ * `unknown`, and `unknown` escalates. Under `read-only` that meant either a human interrupted once
+ * per read, or — where nothing routed the call to us — the read went by ungoverned. A table has an
+ * opinion about every name, including through `other`, so there is nothing left to escalate for want
+ * of one.
+ *
+ * The shapes line up because `ToolProfile` was designed against this seam: `tools`, `default` and
+ * `other`, with the label and hint dropped — those are the menu's business, not the gate's.
+ */
+export function profileRules(): Record<string, { tools: Record<string, PermissionMode>; default: PermissionMode; other: PermissionMode }> {
+  const out: Record<string, { tools: Record<string, PermissionMode>; default: PermissionMode; other: PermissionMode }> = {};
+  for (const profile of TOOL_PROFILES) {
+    out[profile.id] = {
+      tools: { ...profile.tools } as Record<string, PermissionMode>,
+      default: profile.default as PermissionMode,
+      other: profile.other as PermissionMode,
+    };
+  }
+  return out;
 }
 
 /**

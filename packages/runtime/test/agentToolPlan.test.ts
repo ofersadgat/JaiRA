@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { TOOL_SPECS } from "@jaira/shared";
-import { claudePermissionSettings, claudeReplacements, planAgentTools } from "../src/tools";
+import { claudePermissionSettings, claudeReplacements, planAgentTools, profileRules } from "../src/tools";
 
 describe("planAgentTools", () => {
   it("denies the built-in of a tool nobody granted", () => {
@@ -89,5 +89,39 @@ describe("claudePermissionSettings", () => {
     expect(claudePermissionSettings({ ask: ["Read"], deny: ["Write"] })).toEqual({
       claudeCode: { settings: { permissions: { ask: ["Read"], deny: ["Write"] } } },
     });
+  });
+});
+
+/**
+ * The profiles the gate actually consults.
+ *
+ * Registered under the BUILT-IN names, which shadows upstream's predicates — and that is the point.
+ * A predicate answers for the tools we registered and reports `unknown` for an agent's own built-in,
+ * and `unknown` escalates: either a human is interrupted once per read, or the call never reaches us
+ * and goes by ungoverned. A table has an opinion about every name.
+ */
+describe("profileRules", () => {
+  it("shadows the built-in names, which is how the gate stops escalating", () => {
+    const rules = profileRules();
+    expect(Object.keys(rules).sort()).toEqual(["full", "plan", "read-only"]);
+  });
+
+  it("says something about every tool, and something about the ones we do not have", () => {
+    for (const [name, table] of Object.entries(profileRules())) {
+      for (const spec of TOOL_SPECS) {
+        expect(Object.hasOwn(table.tools, spec.name), `'${name}' says nothing about '${spec.name}'`).toBe(true);
+      }
+      // `other` is the entry that did not exist, and the reason a built-in could go ungoverned.
+      expect(table.other, `'${name}' has no answer for an unknown tool`).toBeDefined();
+      expect(table.default).toBeDefined();
+    }
+  });
+
+  it("keeps read-only meaning read-only, and asks about what it cannot classify", () => {
+    const readOnly = profileRules()["read-only"]!;
+    expect(readOnly.tools["read_file"]).toBe("ask");
+    expect(readOnly.tools["write_file"]).toBe("deny");
+    expect(readOnly.tools["bash"]).toBe("deny");
+    expect(readOnly.other).toBe("ask");
   });
 });
