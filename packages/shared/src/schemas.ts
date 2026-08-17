@@ -251,6 +251,19 @@ function childSchema(): SchemaDoc {
         ...leaf(operationSchema()),
         description: "defaults for THIS mount of the child and its subtree (§6.1)",
       },
+      /**
+       * The DEFAULT home for a transition, and the reason it is worth the duplicate entry beside the
+       * state-level `transitions`: a rule on the mount is eligible only in the round that child's
+       * completion triggered. Written at state level the same rule has to name the child in its
+       * guard, hold its position against every other rule, and be re-evaluated after every unrelated
+       * completion — which is how a guard reading a child's outputs re-fires forever once that child
+       * has run.
+       */
+      transitions: leaf({
+        type: "array",
+        items: leaf(transitionSchema()),
+        description: "considered when THIS child finishes, ahead of the state's own list (§7); an unconditional `to` means 'after this child, go here'",
+      }),
     },
   };
 }

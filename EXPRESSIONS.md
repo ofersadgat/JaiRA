@@ -4,9 +4,11 @@
 (§2), an expression can CALL an operation — prompt or function — resolved along a search `path`
 (§3, §4), one grammar covers bindings and expressions alike (§14), there is one spelling per thing
 (§15), a conversation is read by ref (§16), snapshots pin the resolved
-definition (§11), failures travel as data (§5), and the built-in operation library ships
-(§3, `builtins.ts`). What remains is higher-order operations (§3.5), `.each` — which subsumes them
-(§17) — and the items in [TODO.md](TODO.md).
+definition (§11), failures travel as data (§5), the built-in operation library ships
+(§3, `builtins.ts`), and higher-order operations run (§3.5). Arithmetic gained SYNTAX on top of the
+built-ins it was already spelled with, and a property name may be quoted (§9). What remains is
+`.each` (§17) — which subsumes §3.5's spelling rather than replacing what it does — and the items in
+[TODO.md](TODO.md).
 
 Sections marked ⚠️ or "superseded" record where building contradicted the design — they are kept
 because the reasoning that was wrong is usually the reasoning someone would repeat.
@@ -309,14 +311,26 @@ Three further decisions the grammar settles:
 A call's result infers to the universal schema for now: the type is the callee's declared output,
 which is not known until the callee is resolved. Unknown, not wrong.
 
-### 3.5 Higher-order operations — designed, not built
+### 3.5 Higher-order operations — **built**
 
-`map(issues, classify)` is the remaining feature, and it is a different shape from everything else in
-§3: it needs to run an operation a number of times that is **not known until run time**.
+**Status:** built. `map`, `filter`, `flatMap` and `reduce` live where this section predicted they
+would have to — `HIGHER_ORDER_NAMES` in `lowerExpr.ts` for the op-position lowering, the fold and the
+per-element dispatch in `resolve.ts`, and the chain rebuild in `engine.ts`. `map(issues, classify)`
+and `reduce(parts, joinTwo, '')` both run.
+
+`map(issues, classify)` is a different shape from everything else in §3: it needs to run an operation
+a number of times that is **not known until run time**.
 
 **Why it cannot be a built-in.** The library in `builtins.ts` is pure and synchronous by
 construction. `map` has to dispatch, so it belongs with the engine's embedded-op machinery, not with
-`add`.
+`add` — which is exactly where it ended up.
+
+**The aggregates sit beside them, not instead of them.** `sum` `avg` `dot` `any` `all` `pluck`
+`maxBy` `minBy` `sortBy` `find` take a **key name** rather than an operation, so they stay inside the
+pure-and-synchronous rule. The difference that matters is what has to exist on disk: the op position
+here takes a REFERENCE, so folding a column with `reduce` means authoring a document for the fold,
+while `sum(pluck(xs, 'total'))` needs no file. For the numeric cases — a weighted score, a winning
+row, the margin between two — that is the whole cost, which is why both spellings are worth having.
 
 **Why it cannot be a static walk.** `runEmbeddedOps` finds the operations to run by walking the
 binding tree. For `map`, the set depends on the resolved array — one operation per element. So the

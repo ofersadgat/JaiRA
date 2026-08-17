@@ -275,7 +275,7 @@ describe("what the schema offers the editor", () => {
 
   it("walks into a declared child", () => {
     const inChild = propertiesOf(schemaById("state")!, ["children", "goals"]).map((p) => p.key);
-    expect(inChild).toEqual(["state", "inputs", "async", "environment"]);
+    expect(inChild).toEqual(["state", "inputs", "async", "environment", "transitions"]);
   });
 
   it("walks through an array to the shape of its items", () => {

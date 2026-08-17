@@ -1032,10 +1032,23 @@ searched along `config.workflows.path` — and fails to load if no document is t
 error names the fix, but the rule is worth learning once rather than meeting as a
 diagnostic: **a leading dot is data, a bare name is a document.**
 
-**Operators:** `===` `!==` `==` `!=` `<` `<=` `>` `>=` `&&` `||` `!` `? :`, with
-JavaScript semantics. There is **no arithmetic syntax** — no `+`, `-`, `*`, `/` — so
-computation is done by CALLING an operation (below). A leading `-` on a number is a
-sign, so `-1` is a literal.
+**Operators:** `===` `!==` `==` `!=` `<` `<=` `>` `>=` `&&` `||` `!` `? :` `+` `-` `*`
+`/`, with JavaScript semantics and standard precedence.
+
+Arithmetic is **sugar for the built-ins** — `a + b` is `add(a, b)`, and both parse to
+one node — so there is nothing extra to learn about how it lowers, types or waits.
+Two rules decide the two ambiguous characters:
+
+| Written | Reads as | Because |
+| --- | --- | --- |
+| `at(xs, -1)`, `xs[-1]`, `-2 + 5` | a **sign** | nothing that ends a value precedes the `-` |
+| `.n - 1`, `.n -1`, `(4) - 1` | a **subtraction** | a number, a name or a closing bracket does |
+| `$/lib/classify(x)`, `lib/review(x)` | a **reference path** | a bare NAME sits left of the `/` |
+| `.total / 2`, `len(.xs) / 2`, `6 / 3` | a **division** | nothing that could be a reference does |
+
+The one thing you cannot write is `foo / bar` for two bare names: that is the
+reference `foo/bar`. A bare name is a document and never a number, so this is the
+right way round.
 
 ### Reading a conversation
 
@@ -1094,9 +1107,10 @@ Ship with the language; a built-in name wins over the path.
 
 | | |
 | --- | --- |
-| arithmetic | `add` `sub` `mul` `div` `mod` `min` `max` `abs` `round` `floor` `ceil` |
+| arithmetic | `add` `sub` `mul` `div` `mod` `min` `max` `abs` `round` `floor` `ceil` — or their operator spellings |
 | access | `get(obj, key)` `at(array, i)` — member access takes a *literal* name, these take a computed one |
 | arrays | `len` `first` `last` `isEmpty` `slice` `sort` `unique` `reverse` `append` `range` `join` `contains` |
+| aggregates | `sum` `avg` `dot` `any` `all` `pluck(xs, key)` `maxBy(xs, key)` `minBy(xs, key)` `sortBy(xs, key)` `find(xs, key, value)` |
 | strings | `concat` `split` `trim` `lower` `upper` `replace` `startsWith` `endsWith` |
 | objects | `keys` `values` `entries` `fromEntries` `merge` `pick` `omit` |
 | json & types | `parse_json` `to_json` `typeof` `isArray` `isNull` `coalesce` |
@@ -1104,7 +1118,34 @@ Ship with the language; a built-in name wins over the path.
 
 All are pure and **total**: `div(1, 0)` is `Infinity`, `at(xs, 99)` is nothing,
 `parse_json('{')` is nothing. None throws, and none mutates — `append` returns a new
-array, which is why there is no `push`.
+array, which is why there is no `push`. One deliberate choice inside that rule:
+`avg([])` is `0`, not `NaN`, because every comparison against `NaN` is false and a
+`NaN` score would make `score < ask_below` quietly false.
+
+**The aggregates take a KEY NAME where the higher-order forms take an operation.** Both
+work; the difference is what you have to have on disk. `map`/`filter`/`reduce` apply an
+operation named by REFERENCE, so folding a column with `reduce` means authoring a
+document for the fold. `sum(pluck(xs, 'total'))` says the same thing with no file at
+all, which for the numeric cases — a weighted score, a winning row, a margin — is the
+whole cost.
+
+```jsonc
+{ "expr": "sum(pluck(.inputs.scores, 'total'))" }
+{ "expr": "maxBy(.inputs.scores, 'total').candidate_id" }
+{ "expr": "max(0, 1 - dot(.inputs.weights, .inputs.signals))" }
+```
+
+### A key an identifier cannot spell
+
+A property name after `.` may be **quoted**, which reaches the keys the identifier
+grammar cannot — a hyphen (now subtraction), a dot (the accessor itself), a space:
+
+```jsonc
+{ "expr": ".inputs.config.\"claude-cli\".model" }
+```
+
+`get(.inputs.config, 'claude-cli')` is the same read; the quoted form is the one that
+chains.
 
 ### Applying an operation to every element
 
