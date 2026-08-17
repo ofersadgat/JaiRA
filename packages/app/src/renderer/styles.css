@@ -3974,7 +3974,7 @@ textarea.cfg-input {
   cursor: pointer;
   font-size: 12px;
 }
-.session-row:hover { background: var(--hover); }
+.session-row:hover { background: var(--panel-2); }
 .session-row.sel { background: var(--sel); }
 .session-row .cost { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .session-row .dot,
@@ -4054,7 +4054,7 @@ textarea.cfg-input {
   font-size: 11.5px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-.log-row:hover { background: var(--hover); }
+.log-row:hover { background: var(--panel-2); }
 .log-at { color: var(--muted); flex: none; font-variant-numeric: tabular-nums; }
 .log-level { flex: none; width: 40px; text-transform: uppercase; font-size: 10px; }
 .log-level.log-warn { color: var(--warn, #b8860b); }
@@ -4172,7 +4172,7 @@ textarea.cfg-input {
   border-radius: 4px;
   font-size: 12px;
 }
-.debug-file:hover { background: var(--hover, var(--panel-2)); }
+.debug-file:hover { background: var(--panel-2); }
 .debug-file .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--dim); }
 .debug-file .dot.success { background: var(--ok); }
 .debug-file .dot.error { background: var(--bad); }
@@ -4213,7 +4213,7 @@ textarea.cfg-input {
   letter-spacing: 0;
   font-family: ui-monospace, Consolas, monospace;
   font-size: 11px;
-  color: var(--fg);
+  color: var(--text);
 }
 .run-field .req {
   color: var(--bad);
@@ -4274,7 +4274,7 @@ textarea.cfg-input {
   margin-bottom: 2px;
 }
 .run-target b {
-  color: var(--fg);
+  color: var(--text);
   font-weight: 600;
 }
 
@@ -6222,11 +6222,11 @@ textarea.cfg-input {
   border-left: 0;
 }
 .vv-toggle button:hover {
-  color: var(--fg);
+  color: var(--text);
   background: var(--panel-2);
 }
 .vv-toggle button.on {
-  color: var(--fg);
+  color: var(--text);
   background: var(--panel-2);
 }
 .vv-body {
@@ -6485,7 +6485,7 @@ textarea.cfg-input {
   cursor: pointer;
 }
 .cx-tool-impl:hover {
-  color: var(--fg);
+  color: var(--text);
   background: var(--panel-2);
 }
 /* The children disagree — a statement none of the four modes can make. */
