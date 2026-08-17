@@ -17,7 +17,7 @@ A module, store, service, or job. Template:
 
 | Unit | Layer | Responsibility | Implements | Status |
 | --- | --- | --- | --- | --- |
-| _none yet_ | | | | |
+| [conversation-lookup](units/conversation-lookup.md) | data | How a conversation is stored, and how a reader gets from a task id to the turns on screen | — | shipped |
 
 ## Contracts
 
