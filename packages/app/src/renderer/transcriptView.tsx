@@ -37,7 +37,7 @@
  * where the thing being read is grouped by conversation. See `sessionBands.ts`.
  */
 import { useEffect, useState, type JSX, type ReactNode } from "react";
-import type { InstanceNode, SessionView } from "@jaira/shared/browser";
+import type { InstanceNode, ServedArtifact, SessionView } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { Markdown } from "./markdown";
 import { ValueView } from "./valueView";
@@ -101,13 +101,41 @@ export function durationOf(ms: number): string {
  * set of files is the single most common large payload in this app, and it was being printed as an
  * array of strings with `\n` in them — the whole of what a run produced, in its least readable form.
  */
-function Payload({ label, value }: { label: string; value: JsonValue | undefined }): JSX.Element {
+function Payload({
+  label,
+  value,
+  artifacts,
+}: {
+  label: string;
+  value: JsonValue | undefined;
+  /** How to show one that RUNS. Absent ⇒ interactive artifacts render statically — see {@link ArtifactSurface}. */
+  artifacts?: ArtifactSurface | undefined;
+}): JSX.Element {
   if (value === undefined) return <div className="ts-payload ts-payload-empty">no {label} was recorded</div>;
   return (
     <div className="ts-payload">
-      <ValueView value={value} label={label} />
+      <ValueView
+        value={value}
+        label={label}
+        {...(artifacts !== undefined ? { serve: artifacts.serve } : {})}
+        {...(artifacts?.onPrompt !== undefined ? { onPrompt: artifacts.onPrompt } : {})}
+      />
     </div>
   );
+}
+
+/**
+ * Showing an artifact that RUNS — what a surface hands the transcript so a mockup can be interactive.
+ *
+ * Two capabilities, deliberately separate. `serve` is what makes the frame possible at all; `onPrompt`
+ * is where a message from inside it goes, and a surface may offer the first without the second — a
+ * transcript beside a board can show a working mockup while having no composer for it to talk to.
+ */
+export interface ArtifactSurface {
+  /** Grant this artifact an address a frame can load. See `ipc.ts`'s `ServeArtifactRequest`. */
+  serve: (path: string) => Promise<ServedArtifact>;
+  /** Put text in front of the user, for them to send or discard. Never sends by itself. */
+  onPrompt?: ((text: string) => void) | undefined;
 }
 
 /** How a row's glyph and name are coloured. Not the same axis as the mark at the end — see {@link Row}. */
@@ -201,10 +229,12 @@ function Tool({
   entry,
   sidechainOf,
   onOpenSidechain,
+  artifacts,
 }: {
   entry: ToolEntry;
   sidechainOf?: SidechainOf | undefined;
   onOpenSidechain?: OpenSidechain | undefined;
+  artifacts?: ArtifactSurface | undefined;
 }): JSX.Element {
   const sub = entry.sidechain !== undefined && sidechainOf !== undefined ? sidechainOf(entry.sidechain) : undefined;
   // What the crumb will read: the call's first argument is the Task's short description, which is
@@ -240,21 +270,27 @@ function Tool({
                 ) : null}
               </div>
               {sub !== undefined ? (
-                <Transcript entries={sub} {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})} />
+                <Transcript
+                  entries={sub}
+                  {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
+                  {...(artifacts !== undefined ? { artifacts } : {})}
+                />
               ) : null}
             </div>
           ) : null}
-          <Payload label="arguments" value={entry.args} />
+          <Payload label="arguments" value={entry.args} {...(artifacts !== undefined ? { artifacts } : {})} />
           {/* A call still in flight has no result, and saying so is different from showing an empty
               one — which is why this is absent rather than an empty block. */}
           {entry.ok === undefined && entry.result === undefined ? (
             <div className="ts-payload ts-payload-empty">still running</div>
           ) : (
-            <Payload label="result" value={entry.result} />
+            <Payload label="result" value={entry.result} {...(artifacts !== undefined ? { artifacts } : {})} />
           )}
           {/* The agent's OWN record of the execution, when the native capture kept one — richer than
               the wire result and shown beside it, never instead of it. */}
-          {entry.detail !== undefined ? <Payload label="record" value={entry.detail} /> : null}
+          {entry.detail !== undefined ? (
+            <Payload label="record" value={entry.detail} {...(artifacts !== undefined ? { artifacts } : {})} />
+          ) : null}
         </>
       }
     />
@@ -292,7 +328,9 @@ function Thought({ entry }: { entry: ThoughtEntry }): JSX.Element {
   const live = entry.live === true;
   const elapsed = useElapsed(entry.startedAt, live);
   const shown = live ? elapsed : entry.durationMs;
-  const took = shown !== undefined ? `thought for ${durationOf(shown)}` : undefined;
+  // Present tense while it runs. "thought for 40 s" beside a live pulse reads as a block that
+  // finished and is somehow still going; what the counter is for is saying what is happening NOW.
+  const took = shown !== undefined ? `${live ? "thinking for" : "thought for"} ${durationOf(shown)}` : undefined;
   return (
     <Row
       entry={entry}
@@ -310,7 +348,9 @@ function Thought({ entry }: { entry: ThoughtEntry }): JSX.Element {
             ),
           }
         : {})}
-      body={<pre className="ts-think-text">{entry.text}</pre>}
+      // Nothing to open when the provider withheld the reasoning: the row is the whole fact, and a
+      // disclosure onto an empty pane is a row that lies about having something behind it.
+      {...(entry.text.length > 0 ? { body: <pre className="ts-think-text">{entry.text}</pre> } : {})}
     />
   );
 }
@@ -320,10 +360,12 @@ function Work({
   entry,
   sidechainOf,
   onOpenSidechain,
+  artifacts,
 }: {
   entry: WorkEntry;
   sidechainOf?: SidechainOf | undefined;
   onOpenSidechain?: OpenSidechain | undefined;
+  artifacts?: ArtifactSurface | undefined;
 }): JSX.Element {
   if (entry.kind === "tool") {
     return (
@@ -331,6 +373,7 @@ function Work({
         entry={entry}
         {...(sidechainOf !== undefined ? { sidechainOf } : {})}
         {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
+        {...(artifacts !== undefined ? { artifacts } : {})}
       />
     );
   }
@@ -343,7 +386,9 @@ function Work({
       preview={entry.text}
       tone={entry.tone === "plain" ? "muted" : entry.tone}
       prose
-      {...(entry.detail !== undefined ? { body: <Payload label="detail" value={entry.detail} /> } : {})}
+      {...(entry.detail !== undefined
+        ? { body: <Payload label="detail" value={entry.detail} {...(artifacts !== undefined ? { artifacts } : {})} /> }
+        : {})}
     />
   );
 }
@@ -367,10 +412,12 @@ function WorkBlockView({
   entries,
   sidechainOf,
   onOpenSidechain,
+  artifacts,
 }: {
   entries: WorkEntry[];
   sidechainOf?: SidechainOf | undefined;
   onOpenSidechain?: OpenSidechain | undefined;
+  artifacts?: ArtifactSurface | undefined;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const hidden = foldsAt(entries.length);
@@ -394,6 +441,7 @@ function WorkBlockView({
           entry={entry}
           {...(sidechainOf !== undefined ? { sidechainOf } : {})}
           {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
+          {...(artifacts !== undefined ? { artifacts } : {})}
         />
       ))}
     </div>
@@ -519,6 +567,7 @@ export function Transcript({
   empty,
   onOpenSidechain,
   onEdit,
+  artifacts,
 }: {
   session?: SessionView | null;
   entries: TranscriptEntry[];
@@ -535,6 +584,14 @@ export function Transcript({
   onOpenSidechain?: OpenSidechain | undefined;
   /** Send a message in place of one already here. Absent ⇒ no message offers an edit. */
   onEdit?: EditMessage | undefined;
+  /**
+   * How an artifact that RUNS is shown, and where a message from one goes.
+   *
+   * Optional, and the absence is a real posture rather than a missing feature: a transcript rendered
+   * without it still shows every interactive artifact, statically. Granting one takes a task and a
+   * project, which a transcript has only where a surface hands them over — see `chatPane.tsx`.
+   */
+  artifacts?: ArtifactSurface | undefined;
 }): JSX.Element {
   if (entries.length === 0) {
     return <p className="empty">{empty ?? session?.empty ?? "Nothing has been said here yet."}</p>;
@@ -557,6 +614,7 @@ export function Transcript({
               entries={block.entries}
               {...(sidechainOf !== undefined ? { sidechainOf } : {})}
               {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
+              {...(artifacts !== undefined ? { artifacts } : {})}
             />
           );
         if (block.kind === "message") return <Message key={i} entry={block} {...(onEdit !== undefined ? { onEdit } : {})} />;

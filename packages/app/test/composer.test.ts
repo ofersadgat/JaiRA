@@ -65,5 +65,25 @@ describe("the composer's button", () => {
     });
     expect(html).toContain('aria-label="Stop"');
     expect(html).toContain("holds no conversation of its own");
+    // And ONLY stop: there is nowhere for a message to go, so offering to send one would be an
+    // invitation to an error.
+    expect(html).not.toContain('aria-label="Send"');
+  });
+
+  it("offers both while a turn is in flight in a conversation", () => {
+    // The message joins the turn — that is what the line above the button has been saying, and what
+    // `chat:send` has always done. One button meant the box refused what the channel underneath it
+    // was willing to do: you could stop the agent, or wait, and nothing else.
+    const html = draw({ busy: true, joinable: true, onStop: () => undefined });
+    expect(html).toContain('aria-label="Stop"');
+    expect(html).toContain('aria-label="Send"');
+    expect(html).toContain("joins the turn in flight");
+  });
+
+  it("still refuses a second send where the first is what STARTS the conversation", () => {
+    // The box on the empty Chat view. Its `busy` is a task being created, and a second send there is
+    // a second conversation rather than a second message — so `joinable` is what this turns on, not
+    // `busy` alone.
+    expect(draw({ busy: true })).toContain("disabled");
   });
 });

@@ -21,7 +21,7 @@
  * fragment is ever shown twice or dropped in the seam between fetch and subscribe.
  */
 import type { JsonValue } from "@declarative-ai/json";
-import type { LiveTurnSnapshot } from "@jaira/shared";
+import { startsThinking, type LiveTurnSnapshot } from "@jaira/shared";
 import type { TurnDelta } from "@jaira/runtime";
 
 /**
@@ -66,7 +66,7 @@ export function partialRecordValue(snapshot: LiveTurnSnapshot): JsonValue | null
   // when it died, `thinkingStartedAt` with an empty text tail IS the "still thinking" state, and
   // the viewer renders it as the trailing partial it was.
   const partial =
-    snapshot.text.length > 0 || snapshot.thinking.length > 0
+    snapshot.text.length > 0 || snapshot.thinking.length > 0 || snapshot.thinkingStartedAt !== undefined
       ? {
           ...(snapshot.text.length > 0 ? { text: snapshot.text } : {}),
           ...(snapshot.thinking.length > 0 ? { thinking: snapshot.thinking } : {}),
@@ -101,7 +101,7 @@ export class LiveTurnFlusher {
   private timer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
-    private readonly flush: () => void,
+    private readonly flushNow: () => void,
     private readonly intervalMs = 400,
   ) {}
 
@@ -111,12 +111,35 @@ export class LiveTurnFlusher {
     this.timer = setTimeout(() => {
       this.timer = undefined;
       try {
-        this.flush();
+        this.flushNow();
       } catch {
         // Durability is best-effort beside a live stream that is already reaching the viewer — a
         // failed flush must not take the delta path down with it. The next note tries again.
       }
     }, this.intervalMs);
+  }
+
+  /**
+   * Write what is held RIGHT NOW, and reset the interval.
+   *
+   * For the one moment the throttle is wrong: somebody pressing stop. The rule below — no final
+   * flush, because the settled result supersedes — holds for a call that finishes, and an interrupted
+   * one has no settled result to supersede anything: what survives is whatever the last flush wrote,
+   * which is up to an interval stale and, for a turn stopped in its first half-second, nothing at
+   * all. That is a transcript that loses the words somebody was watching arrive, which is the
+   * opposite of what the stream is for.
+   *
+   * Called BEFORE the abort, so the row is still open and `streamPartial`'s status guard still
+   * matches. After it, the record has settled and this writes nothing.
+   */
+  flush(): void {
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+    try {
+      this.flushNow();
+    } catch {
+      // Same rule as the timer path: durability beside a live stream is best-effort.
+    }
   }
 
   /** Stop the timer. No final flush: the run is settling, and the settled result supersedes. */
@@ -215,6 +238,12 @@ export class LiveTurnLog {
           entry.thinking = "";
           delete entry.textStartedAt;
           delete entry.thinkingStartedAt;
+        } else if (entry.thinkingStartedAt === undefined && entry.text.length === 0 && startsThinking(enriched)) {
+          // A WITHHELD think starts the clock here rather than on a `thinking` delta, because it
+          // sends none — see `startsThinking`. Only while nothing has been said yet: mid-answer the
+          // block has no duration worth a row, and inventing one would report "thought for 0 s"
+          // between two halves of a sentence.
+          entry.thinkingStartedAt = at;
         }
       }
     }

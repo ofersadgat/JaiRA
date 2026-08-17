@@ -162,7 +162,30 @@ export async function runChatTurn(ports: ChatTurnPorts, request: ChatTurnRequest
   emit({ type: "operation.started", ...where, op: "prompt" }, at);
 
   const resolved = await ports.sessions.resolve({ ref: request.position, seed: seedFor(instance) });
-  const result = await ports.executor.start(request.operation, { ...ports.services, session: resolved }).result;
+  /**
+   * The call, and a terminal event WHATEVER it does — including throw.
+   *
+   * A rejection is not the ordinary shape (an executor reports failures as error results, which is
+   * why the branch below exists) but it is a reachable one: a store that will not write, a wrapper
+   * that gives up, a bug. Unhandled, it left the turn journalled as started and never ended — and an
+   * unterminated turn is exactly the state that makes its position invisible, so the next message
+   * collides with the record this one already claimed and forks away from it, taking the turn off
+   * the screen.
+   *
+   * The position is known without the metrics: it is where the call was RESOLVED to, one on, which
+   * is the same arithmetic `withSessionPosition` reports when it gets the chance. Stated through the
+   * store's own `refAt` rather than concatenated, because the ref's spelling belongs to the store.
+   */
+  let result;
+  try {
+    result = await ports.executor.start(request.operation, { ...ports.services, session: resolved }).result;
+  } catch (e) {
+    const failure = { classification: "permanent" as const, reason: (e as Error).message };
+    const sessionRef = ports.sessions.refAt({ id: resolved.at.id, seq: resolved.at.seq + 1 });
+    emit({ type: "operation.failed", ...where, op: "prompt", failure, metrics: { durationMs: 0, sessionRef } as WorkflowMetrics });
+    emit({ type: "instance.terminated", ...where, outcome: "error", failure });
+    return { sessionRef, failure: failure.reason };
+  }
 
   // The join between a turn and its transcript. `withSessionPosition` stamps the position a call
   // ENDED at onto the metrics, and the projection reads it off `operation.completed` — so dropping it
@@ -173,7 +196,17 @@ export async function runChatTurn(ports: ChatTurnPorts, request: ChatTurnRequest
   // so that the second spelling fails to compile rather than compiling and widening `value`.
   if ("error" in result) {
     const failure = result.error;
-    emit({ type: "operation.failed", ...where, op: "prompt", failure });
+    // The METRICS ride on the failure too, and they are not decoration: `session_ref` is a generated
+    // column over `$.metrics.sessionRef`, so an `operation.failed` without them names no position —
+    // and a turn that names no position is invisible to `stateSessions`, which is what the app reads
+    // to find where a conversation ends.
+    //
+    // That invisibility is the whole of the interrupted-chat failure. A canceled turn still CLAIMED
+    // its position (the record row is there, holding whatever streamed before the stop), so the next
+    // message computed the same position again, collided with it, and forked — landing on a branch
+    // the panel does not read, dropping the interrupted turn out of the thread, and inheriting no
+    // provider handle, so the agent started a fresh session instead of resuming. One field.
+    emit({ type: "operation.failed", ...where, op: "prompt", failure, metrics: result.metrics });
     emit({ type: "instance.terminated", ...where, outcome: outcomeOf(failure), failure });
     return { ...(sessionRef !== undefined ? { sessionRef } : {}), failure: failure.reason };
   }

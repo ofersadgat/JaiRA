@@ -445,6 +445,10 @@ function ChatComposer({
         // A run in flight is busy whatever the box says: the button is the only handle on it, and a
         // disabled composer over a running workflow used to be a panel with no way to stop it.
         busy={busy || running === true}
+        // …and a state that holds a conversation can be TYPED INTO while it runs, which is the other
+        // half of the same fact: the message joins the call in flight where the transport takes one.
+        // `disabled` already covers the states that hold none, so this is exactly the rest.
+        joinable={disabled === undefined}
         overrides={overrides}
         onOverrides={setOverrides}
         onSend={send}

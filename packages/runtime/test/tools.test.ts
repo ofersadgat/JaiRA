@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isPermissionDenied, PermissionLedger, withPermission, type Approver } from "@declarative-ai/permissions";
 import type { ExecServices, Tool } from "@declarative-ai/exec";
 import { compilePolicy, type PolicyAuditEntry } from "../src/policy";
-import { createBashTool, JAIRA_TOOLS, registerAllTools, registerTools } from "../src/tools";
+import { createBashTool, gateTools, JAIRA_TOOLS, registerAllTools, registerTools } from "../src/tools";
 import { registerFileTools } from "../src/fileTools";
 import { newRegistry } from "../src/wiring";
 
@@ -140,6 +140,57 @@ describe("the whole gate: tool call → policy → verdict", () => {
     // The scope is the whole reason a user is not asked on every call (§10.2).
     expect(asks).toBe(1);
   }, 60_000);
+});
+
+/**
+ * The artifact tool answers to the gate like every other tool.
+ *
+ * It did not. `show_artifact` was `smart` in the compiled BASELINE, and a baseline `smart` resolves
+ * through the size approver instead of through the tool's mode — so an agent produced page after page
+ * under the ceiling without a single prompt, while `write_file` beside it stopped and asked, and the
+ * permission menu showed a mode that governed nothing.
+ *
+ * Driven through `gateTools`, which is what both the run path and the chat path actually call, so
+ * this fails if the baseline grows the entry back OR if the wiring stops consulting the ledger.
+ */
+describe("a produced artifact needs permission like anything else", () => {
+  const artifactTools = (approve: Approver, authored?: Parameters<typeof gateTools>[0]["authored"]) => {
+    const registry = newRegistry();
+    registerFileTools(registry, { vars: { taskId: "t", worktree: dir } } as never);
+    return gateTools({
+      registry,
+      names: ["show_artifact"],
+      sessionId: "s1",
+      policy: compilePolicy({}),
+      approve,
+      ...(authored !== undefined ? { authored } : {}),
+    }).tools["show_artifact"]!;
+  };
+
+  it("asks before it produces anything, however small", async () => {
+    const asked: string[] = [];
+    const tool = artifactTools((req) => {
+      asked.push(req.tool);
+      return { decision: "allow", scope: "once" };
+    });
+    await call(tool, { path: "mockup.html", content: "<p>hi</p>" }, ctx({ workspace: { root: dir } }));
+    expect(asked).toEqual(["show_artifact"]);
+  });
+
+  it("is refused when the answer is no, rather than produced anyway", async () => {
+    const tool = artifactTools(() => ({ decision: "deny", scope: "once" }));
+    const result = await call(tool, { path: "mockup.html", content: "<p>hi</p>" }, ctx({ workspace: { root: dir } }));
+    expect(isPermissionDenied(result as never)).toBe(true);
+  });
+
+  it("is decided the same way `write_file` is — which is the whole claim", async () => {
+    // Parity rather than an absolute mode: what went wrong was that two tools doing comparable
+    // things resolved through different machinery, so the fix is that they resolve through the same.
+    // Asserted against `write_file` rather than against a literal, so this keeps holding if the
+    // project default ever moves.
+    const compiled = compilePolicy({});
+    expect(compiled.baseline?.tools?.["show_artifact"]).toBe(compiled.baseline?.tools?.["write_file"]);
+  });
 });
 
 describe("JAIRA_TOOLS — the gateable set, and what each one may do", () => {

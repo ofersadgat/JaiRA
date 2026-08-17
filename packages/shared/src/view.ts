@@ -733,6 +733,36 @@ export interface ChatThreadView {
   session: SessionView;
   /** Where a message may be sent INSTEAD of an existing one — see `chat:send`'s `branchAt`. */
   points: ChatEditPoint[];
+  /**
+   * Where this conversation SPLIT, and what it said down the other side.
+   *
+   * Absent for the ordinary conversation, which is most of them: nothing here is paid for until
+   * somebody replaces a message. See {@link ChatFork}.
+   */
+  forks?: ChatFork[];
+}
+
+/**
+ * One place a conversation divided in two.
+ *
+ * A replaced message does not delete what followed it — it branches, and the branch that was left
+ * behind is intact in the record and on no path anybody reads. Reported so the view can say so: the
+ * thread runs down to {@link turn}, and from there it is two conversations that share everything
+ * above and nothing below.
+ */
+export interface ChatFork {
+  /** The turn the split happens AFTER — the last one both sides have in common. */
+  turn: number;
+  /** What was said instead, one entry per branch that was left behind. */
+  left: ChatBranch[];
+}
+
+/** One side of a {@link ChatFork} that the thread is not showing. */
+export interface ChatBranch {
+  /** The conversation id — opaque, and the only durable name the two halves share. */
+  sessionId: string;
+  /** What it said, from the split onward, in the same shape as any other thread's turns. */
+  turns: SessionTurn[];
 }
 
 /** One replaceable message: which turn of the thread it is, and the position it occupies. */

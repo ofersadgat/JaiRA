@@ -34,18 +34,23 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import type {
+  ArtifactSummary,
   ChatPlanView,
   ChatSettings,
   ChatThreadView,
   ConversationView,
+  SessionTurn,
   TaskDetail,
   TaskSummary,
 } from "@jaira/shared/browser";
 import { Composer } from "./composer";
+import { TearBar, ZigDefs } from "./sessionPanels";
 import { CHAT_AGENT, isChatWorkflow, titleOf } from "./chatWorkflow";
 import { ContextMenu, AskDialog, type AskSpec, type MenuAnchor } from "./menu";
 import { agentTitleOf, entriesOf, journalFor, type LiveTail } from "./transcript";
-import { Paper, Transcript } from "./transcriptView";
+import { Paper, Transcript, type ArtifactSurface } from "./transcriptView";
+import { ValueView } from "./valueView";
+import { Icon } from "./icons";
 import { invoke } from "./store";
 
 /** What the Chat view needs from the shell. Assembled in `App.tsx`, like every other pane's. */
@@ -75,6 +80,138 @@ export interface ChatSurface {
   onDelete: (taskIds: readonly string[], project?: string) => void;
   /** Stop the RUN — what the first message is. Later messages are turns, and `chat:cancel` stops those. */
   onCancelRun: (taskId: string, project?: string) => void;
+}
+
+/** Bytes as a person reads them — the one figure a list of artifacts wants beside each name. */
+function sizeOf(bytes: number): string {
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
+/**
+ * What this conversation PRODUCED, collected in one place.
+ *
+ * A transcript answers "what happened", and it answers it in order — which is the wrong shape for
+ * "where is the thing you made". An artifact written twenty turns ago is twenty turns up, indistinguishable
+ * from the twenty tool calls around it, and a conversation that produced four documents shows them
+ * four screens apart. This is the other reading of the same records: not when they were made, but
+ * what there is.
+ *
+ * Closed until asked for, and absent entirely when nothing has been produced — a disclosure that
+ * only ever says "0" is a permanent row of chrome charging rent for a fact nobody needed.
+ *
+ * The viewer is {@link ValueView}, with the same `serve` the transcript uses, so an interactive
+ * mockup runs here exactly as it does beside the call that made it. One renderer, not two.
+ */
+function ArtifactsPanel({
+  taskId,
+  project,
+  artifacts,
+  signal,
+}: {
+  taskId: string;
+  project: string | undefined;
+  artifacts: ArtifactSurface;
+  /** Changes when the conversation has moved on — what makes a newly produced artifact appear. */
+  signal: number;
+}): JSX.Element | null {
+  const [list, setList] = useState<ArtifactSummary[]>([]);
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [doc, setDoc] = useState<{ path: string; mime: string; text: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // The LIST is refreshed whenever the conversation moves, whether or not the panel is open: the
+  // count in the header is the only thing that tells you there is something to open.
+  useEffect(() => {
+    let live = true;
+    void invoke("artifact:list", { taskId, ...(project !== undefined ? { project } : {}) })
+      .then((rows) => {
+        if (live) setList(rows);
+      })
+      .catch(() => {
+        if (live) setList([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [taskId, project, signal]);
+
+  // The CONTENT is fetched per artifact, on selection — see `ArtifactSummary` on why the list does
+  // not carry it.
+  useEffect(() => {
+    if (selected === null) {
+      setDoc(null);
+      return;
+    }
+    let live = true;
+    setError(null);
+    void invoke("uri:read", { uri: `artifact://${taskId}/${selected}`, ...(project !== undefined ? { project } : {}) })
+      .then((content) => {
+        if (live) setDoc({ path: selected, mime: content.mime, text: content.text });
+      })
+      .catch((e: Error) => {
+        if (live) {
+          setDoc(null);
+          setError(e.message);
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [selected, taskId, project]);
+
+  if (list.length === 0) return null;
+
+  const shown = list.find((row) => row.path === selected);
+  return (
+    <div className={`chat-artifacts${open ? " open" : ""}`}>
+      <button type="button" className="chat-artifacts-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <span className="ts-chev">
+          <Icon name="chevron" />
+        </span>
+        <span>Produced</span>
+        <span className="count">{list.length}</span>
+      </button>
+
+      {open ? (
+        <div className="chat-artifacts-body">
+          <div className="chat-artifacts-list">
+            {list.map((row) => (
+              <button
+                type="button"
+                key={row.path}
+                className={`chat-artifact-row${row.path === selected ? " sel" : ""}`}
+                onClick={() => setSelected(row.path === selected ? null : row.path)}
+              >
+                <span className="grow ellip" title={row.path}>
+                  {row.path}
+                </span>
+                {/* Said plainly rather than shown as an icon: that a page can RUN is the one property
+                    of an artifact worth knowing before opening it. */}
+                {row.interactive ? <span className="chip chat-artifact-live">runs</span> : null}
+                <span className="sub">{sizeOf(row.bytes)}</span>
+              </button>
+            ))}
+          </div>
+
+          {error !== null ? <p className="reason">{error}</p> : null}
+          {shown !== undefined && doc !== null ? (
+            <div className="chat-artifact-view">
+              <ValueView
+                // The ENVELOPE, not the bare text: it is what carries the media type and the
+                // interactive claim into `viewsFor`, which is the same value the transcript renders.
+                value={{ path: shown.path, mediaType: shown.mediaType, content: doc.text, ...(shown.interactive ? { interactive: true } : {}) }}
+                serve={artifacts.serve}
+                {...(artifacts.onPrompt !== undefined ? { onPrompt: artifacts.onPrompt } : {})}
+              />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 /**
@@ -272,6 +409,87 @@ function ChatStart({ surface }: { surface: ChatSurface }): JSX.Element {
 }
 
 /**
+ * A conversation that divided in two, drawn as the division it is.
+ *
+ * Replacing a message does not delete what followed it — the store branches, and the turns that
+ * followed are intact on the other side. Nothing said so. The thread simply came back shorter, which
+ * is indistinguishable on screen from having lost them, and there was no way to read what the
+ * conversation had said instead.
+ *
+ * So the thread TEARS here, in the vocabulary the Tasks view already uses for a session cut in two
+ * (`sessionPanels.tsx`): a torn edge closes what both sides share, a torn edge opens what is below,
+ * and between them is the one control that says how many sides there are and which you are reading.
+ *
+ * Everything above the tear is common ground and is drawn once. Everything below belongs to the side
+ * that is selected — including the rest of the conversation, which is what "this one" means: pick the
+ * other and you are reading the conversation that would have been.
+ */
+export function ForkSeam({
+  branches,
+  shown,
+  onShow,
+}: {
+  /** Every side of the split, the kept one first — see {@link labelForBranch}. */
+  branches: readonly { key: string; label: string }[];
+  shown: string;
+  onShow: (key: string) => void;
+}): JSX.Element {
+  return (
+    <div className="chat-fork">
+      <TearBar kind="paused">
+        {branches.length === 2 ? "the conversation splits here" : `the conversation splits ${branches.length} ways here`}
+      </TearBar>
+      <div className="chat-fork-tabs" role="tablist">
+        {branches.map((branch) => (
+          <button
+            key={branch.key}
+            type="button"
+            role="tab"
+            aria-selected={branch.key === shown}
+            className={branch.key === shown ? "on" : undefined}
+            onClick={() => onShow(branch.key)}
+          >
+            <span className="ellip">{branch.label}</span>
+          </button>
+        ))}
+      </div>
+      <TearBar kind="resumed">{branches.find((b) => b.key === shown)?.label ?? "this conversation"}</TearBar>
+    </div>
+  );
+}
+
+/** What a side of a split is CALLED: the message that opens it, which is what was said differently. */
+function labelForBranch(turns: readonly SessionTurn[], fallback: string): string {
+  const opening = turns.find((turn) => turn.role === "user")?.text?.trim();
+  if (opening === undefined || opening === "") return fallback;
+  const line = opening.split("\n").find((l) => l.trim() !== "")?.trim() ?? fallback;
+  return line.length <= 40 ? line : `${line.slice(0, 37).trimEnd()}…`;
+}
+
+/**
+ * What a re-read is allowed to replace a thread WITH — and it is never nothing.
+ *
+ * This is the rule the whole view rests on, which is why it is a named function with a test rather
+ * than a `??` inside a callback. A read that fails or answers `null` is a statement about a FETCH,
+ * not about the conversation: the records are on disk either way, and there is no condition under
+ * which turns that were on screen a moment ago stopped having been said. So an empty answer is only
+ * ever accepted as the FIRST answer — before which there is nothing to lose — and after that the
+ * last good thread stands until a better one arrives.
+ *
+ * Every path that can answer `null` was otherwise a path that blanked the transcript: an IPC hiccup,
+ * a read racing a run that had just re-entered its snapshot, a projection one refresh stale, a
+ * position that momentarily resolved to nothing. None of those is a reason to show somebody an empty
+ * conversation.
+ *
+ * Scoped by the component's `key`, which is the task: opening another conversation mounts a new
+ * component with an empty thread, so this can never show one conversation's turns under another's
+ * name.
+ */
+export function kept(was: ChatThreadView | null, next: ChatThreadView | null): ChatThreadView | null {
+  return next ?? was;
+}
+
+/**
  * One conversation: the thread, and the box under it.
  *
  * The thread is re-read whenever anything about the task changes — the detail and the journal are
@@ -285,9 +503,16 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const [thread, setThread] = useState<ChatThreadView | null>(null);
   const [plan, setPlan] = useState<ChatPlanView | null | undefined>(undefined);
   const [overrides, setOverrides] = useState<ChatSettings>({});
-  const [sending, setSending] = useState(false);
-  /** The message in flight, shown in the thread before the record that holds it exists. */
-  const [sent, setSent] = useState<string | null>(null);
+  /**
+   * How many messages are in flight, and what they said.
+   *
+   * A COUNT and a LIST rather than a boolean and a slot, because a conversation takes more than one
+   * message at a time: a reply sent mid-turn joins the turn in flight (`ChatLiveState.steerable`) or
+   * queues behind it, so two can be outstanding at once. With one slot the second overwrote the
+   * first, and with a boolean the composer went idle the moment either of them landed.
+   */
+  const [sending, setSending] = useState(0);
+  const [sent, setSent] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   /** Which message is being replaced, when one is — see `chat:send`'s `branchAt`. */
@@ -297,10 +522,31 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   /** The agent title a rename has already been asked for — see the effect that adopts it. */
   const asked = useRef<string | null>(null);
 
+  /**
+   * The tail that was streaming, held until the record that supersedes it has arrived.
+   *
+   * A turn's words reach the screen twice: as fragments while it runs, then as the record once it
+   * lands. The handover was a gap — main drops the live turn on the settle event, the thread is
+   * re-read over IPC, and between those two the answer is on the screen in neither form. On a turn
+   * that was STOPPED it is not a flicker at all: the stored copy is a hair behind what was streamed,
+   * so a person who pressed stop watched the last thing they read disappear.
+   *
+   * Cleared in the same update as the thread it was waiting for, never on its own — two separate
+   * updates would put the turn on screen twice for a frame, which is the same bug wearing the other
+   * face.
+   */
+  const [afterglow, setAfterglow] = useState<LiveTail | null>(null);
+  useEffect(() => {
+    if (surface.live !== null) setAfterglow(surface.live);
+  }, [surface.live]);
+
   const read = useCallback(() => {
     void invoke("chat:thread", { taskId, ...(project !== undefined ? { project } : {}) })
-      .then(setThread)
-      .catch(() => setThread(null));
+      .then((next) => {
+        setThread((was) => kept(was, next));
+        setAfterglow(null);
+      })
+      .catch(() => undefined);
   }, [taskId, project]);
 
   // Re-read on anything that means the record moved. `detail` and `journal` are re-fetched by the
@@ -361,8 +607,8 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const send = (message: string): void => {
     const instanceId = thread?.instanceId;
     if (instanceId === undefined) return;
-    setSending(true);
-    setSent(message);
+    setSending((n) => n + 1);
+    setSent((was) => [...was, message]);
     setError(null);
     const at = editing?.at;
     setEditing(null);
@@ -377,17 +623,32 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
       .then((result) => setError(result.failure ?? null))
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => {
-        setSending(false);
-        // Kept until the re-read lands, so the message does not blink out of the thread in the gap
-        // between the turn settling and the record being read back.
-        void invoke("chat:thread", { taskId, ...(project !== undefined ? { project } : {}) })
-          .then((next) => {
-            setThread(next);
-            setSent(null);
-          })
-          .catch(() => setSent(null));
+        setSending((n) => Math.max(0, n - 1));
+        // Re-read through the same reader as everything else — including its rule about never
+        // answering with less than there was — and let the RECORD decide when the message stops
+        // being pending (see the effect below). Dropping it here was right while a send lasted the
+        // whole turn and wrong the moment one could join a turn in flight: a steered send returns
+        // immediately, long before the turn it joined has written anything down, so the message
+        // would blink off the screen and come back a minute later.
+        read();
       });
   };
+
+  /**
+   * A message stops being pending when the conversation holds it — whoever put it there.
+   *
+   * The comparison is against the thread rather than against the send that produced it, because the
+   * two no longer coincide: a steered message is part of somebody else's turn, and a stopped one is
+   * recovered from its record's request. Both land in the same place, and this is that place.
+   */
+  useEffect(() => {
+    const turns = thread?.session.turns ?? [];
+    if (turns.length === 0) return;
+    setSent((was) => {
+      const left = was.filter((m) => !turns.some((turn) => turn.role === "user" && turn.text === m));
+      return left.length === was.length ? was : left;
+    });
+  }, [thread]);
 
   const running = surface.detail?.status === "running";
 
@@ -414,48 +675,142 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
    * live tail is the only thing there is to show. Passing a null session here is exactly what
    * `entriesOf` takes it for.
    */
+  /**
+   * What lets an artifact in this conversation RUN, and where a message from one lands.
+   *
+   * Built here because this is the first place that has all three things a grant needs: the task the
+   * artifact belongs to, the project whose map holds it, and a composer for the bridge to write into.
+   *
+   * `onPrompt` FILLS the box rather than sending. A page a model wrote posting straight into the run
+   * that produced it is a different kind of thing from rendering, and the difference is a person
+   * reading the words first — so this ends at `setDraft`, and Enter is still somebody's decision.
+   */
+  const artifacts = useMemo(
+    () => ({
+      serve: (path: string) => invoke("artifact:serve", { taskId, path, ...(project !== undefined ? { project } : {}) }),
+      onPrompt: (text: string) => setDraft(text),
+    }),
+    [taskId, project],
+  );
+
   const entries = useMemo(() => {
     /**
-     * The message that has been sent and is not in the record yet, shown as the turn it is about to
-     * be.
+     * The messages that have been sent and are not in the record yet, shown as the turns they are
+     * about to be.
      *
      * A record lands when its call settles, so between pressing Enter and the answer arriving there
      * is nothing on disk holding what was typed — and a chat that swallows your message for thirty
      * seconds while an agent thinks is a chat you send twice. Dropped the moment the record contains
-     * it, which is a comparison against the thread rather than a timer. Handed to `entriesOf` rather
-     * than appended after it, so it lands above the answer it provoked instead of under it.
+     * one, which is a comparison against the thread rather than a timer. Handed to `entriesOf` rather
+     * than appended after it, so they land above the answer they provoked instead of under it.
      */
-    const pending = sent ?? surface.opening;
-    const already =
-      pending === null || (thread?.session.turns ?? []).some((turn) => turn.role === "user" && turn.text === pending);
+    const outstanding = surface.opening === null ? sent : [surface.opening, ...sent];
+    const turns = thread?.session.turns ?? [];
+    const pending = outstanding.filter((text) => !turns.some((turn) => turn.role === "user" && turn.text === text));
     return entriesOf(
       thread?.session ?? null,
       journalFor(surface.journal?.turns ?? [], thread?.session.stateId),
-      surface.live,
-      already ? undefined : pending!,
+      // The tail that is arriving, or the one that just stopped arriving and has not been replaced
+      // by its record yet — see `afterglow`.
+      surface.live ?? afterglow,
+      pending,
     );
-  }, [thread, surface.journal, surface.live, surface.opening, sent]);
+  }, [thread, surface.journal, surface.live, afterglow, surface.opening, sent]);
   /** Turn index → the position a replacement is sent at. Built once per thread, read per message. */
   const points = useMemo(() => new Map((thread?.points ?? []).map((p) => [p.turn, p.at] as const)), [thread]);
 
+  /**
+   * The thread, cut at each place it divided, with the sides of each division beside it.
+   *
+   * ONE fork is handled — the newest, which is the one a reader is looking at. A conversation edited
+   * three times has three, nested inside each other on the branch that was kept, and drawing them
+   * all means a tab row inside a tab row inside a tab row for a case nobody has yet had. The newest
+   * seam is the one that just moved, and it is the one the person is asking about.
+   *
+   * Split by TURN index, which every message entry carries: the entries are a weave — journal facts,
+   * native lines, live fragments — so their order says nothing about conversation position, and only
+   * the ones the record supplied can be placed. Everything before the first entry at or past the
+   * seam is shared; the rest is the kept side.
+   */
+  const split = useMemo(() => {
+    const fork = (thread?.forks ?? []).at(-1);
+    if (fork === undefined || thread === null) return null;
+    const cut = entries.findIndex((entry) => entry.kind === "message" && entry.turn !== undefined && entry.turn >= fork.turn);
+    if (cut < 0) return null;
+    const kept = entries.slice(cut);
+    return {
+      shared: entries.slice(0, cut),
+      branches: [
+        { key: "", label: labelForBranch(thread.session.turns.slice(fork.turn), "this conversation"), entries: kept },
+        ...fork.left.map((branch) => ({
+          key: branch.sessionId,
+          label: labelForBranch(branch.turns, "what was replaced"),
+          // Rendered through the SAME viewer as the thread it sits beside, over a session that
+          // carries this branch's turns. A second renderer for "the other side" would be a second
+          // answer to what a conversation looks like.
+          entries: entriesOf({ ...thread.session, turns: [...branch.turns] }, [], null),
+        })),
+      ],
+    };
+  }, [entries, thread]);
+  /** Which side of the newest split is being read. The kept one until somebody says otherwise. */
+  const [branch, setBranch] = useState("");
+  const shown = split?.branches.find((b) => b.key === branch) ?? split?.branches[0];
+  /** Replacing a message: the same offer on either transcript, so it is stated once. */
+  const edit = useMemo(
+    () => ({
+      can: (turn: number) => points.has(turn),
+      edit: (turn: number, text: string) => {
+        setEditing({ at: points.get(turn)!, was: text });
+        setDraft(text);
+      },
+    }),
+    [points],
+  );
+
   return (
     <div className="chat-thread">
+      <ArtifactsPanel
+        taskId={taskId}
+        project={project}
+        artifacts={artifacts}
+        // What this conversation has SAID is the cheapest proxy for "it may have produced something":
+        // a turn arrived, so the map may have moved. Cheaper than polling and honest enough — the
+        // list is metadata, and a refetch that finds nothing new costs one query.
+        signal={entries.length}
+      />
       <div className="chat-scroll scroll">
+        <ZigDefs />
         <Paper>
           <Transcript
             session={thread?.session ?? null}
-            entries={entries}
-            live={surface.live}
+            entries={split === null ? entries : split.shared}
+            // The live tail belongs to the END of the conversation, so it rides with whatever is
+            // showing there — and a reader looking at the side that was replaced is not looking at
+            // where a turn is arriving.
+            {...(split === null || shown?.key === "" ? { live: surface.live ?? afterglow } : {})}
             empty={running ? "Working…" : "This conversation has not said anything yet."}
-            onEdit={{
-              can: (turn) => points.has(turn),
-              edit: (turn, text) => {
-                setEditing({ at: points.get(turn)!, was: text });
-                setDraft(text);
-              },
-            }}
+            artifacts={artifacts}
+            onEdit={edit}
           />
         </Paper>
+        {split !== null && shown !== undefined ? (
+          <>
+            <ForkSeam branches={split.branches} shown={shown.key} onShow={setBranch} />
+            <Paper>
+              <Transcript
+                session={thread?.session ?? null}
+                entries={shown.entries}
+                {...(shown.key === "" ? { live: surface.live ?? afterglow } : {})}
+                artifacts={artifacts}
+                // Only on the side that is still being had. A message on the other side cannot be
+                // replaced from here: it is not where this conversation ends, and "edit" means fork
+                // from a position, which that side no longer holds.
+                {...(shown.key === "" ? { onEdit: edit } : {})}
+              />
+            </Paper>
+          </>
+        ) : null}
         <div ref={foot} />
       </div>
 
@@ -481,7 +836,11 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         {error !== null ? <p className="cx-error">{error}</p> : null}
         <Composer
           plan={plan ?? null}
-          busy={sending || running}
+          busy={sending > 0 || running}
+          // There is a thread, so there is somewhere for a mid-turn message to go: it joins the turn
+          // in flight where the transport can take it, and waits for it where it cannot. Both are
+          // `chat:send`'s own behaviour — the box was the only thing refusing.
+          joinable={thread !== null}
           overrides={overrides}
           onOverrides={setOverrides}
           value={draft}

@@ -24,6 +24,7 @@ interface RawArtifact {
   instance_id: number | null;
   state_id: string | null;
   slot: string | null;
+  interactive: number;
   created_at: number;
 }
 
@@ -40,6 +41,10 @@ function toRecord(row: RawArtifact): ArtifactRecord {
     ...(row.instance_id !== null ? { instanceId: row.instance_id } : {}),
     ...(row.state_id !== null ? { stateId: row.state_id } : {}),
     ...(row.slot !== null ? { slot: row.slot } : {}),
+    // Stored as 0/1, because SQLite has no boolean. Only `true` is carried onto the record, so a
+    // static artifact stays absent rather than explicitly false — which is what every consumer
+    // already treats as "not scriptable".
+    ...(row.interactive ? { interactive: true } : {}),
     createdAt: row.created_at,
   };
 }
@@ -53,8 +58,8 @@ export class SqliteArtifactStore implements ArtifactStore {
       .prepare(
         `INSERT INTO artifacts
            (task_id, run_id, logical_path, physical_path, content, hash, bytes, format,
-            instance_id, state_id, slot, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            instance_id, state_id, slot, interactive, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(task_id, logical_path) DO UPDATE SET
            run_id = excluded.run_id,
            physical_path = excluded.physical_path,
@@ -65,6 +70,7 @@ export class SqliteArtifactStore implements ArtifactStore {
            instance_id = excluded.instance_id,
            state_id = excluded.state_id,
            slot = excluded.slot,
+           interactive = excluded.interactive,
            created_at = excluded.created_at`,
       )
       .run(
@@ -79,6 +85,7 @@ export class SqliteArtifactStore implements ArtifactStore {
         record.instanceId ?? null,
         record.stateId ?? null,
         record.slot ?? null,
+        record.interactive === true ? 1 : 0,
         record.createdAt,
       );
   }

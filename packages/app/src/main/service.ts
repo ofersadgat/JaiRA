@@ -22,7 +22,7 @@ import {
   type FSWatcher,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
 import { InMemoryPersistence, loadBundle, type LoadedState, type WorkflowBundle } from "@declarative-ai/hw";
 import type { ExecServices, MemoCache } from "@declarative-ai/exec";
@@ -177,6 +177,7 @@ import {
   type SyncEdit,
 } from "@jaira/runtime";
 import {
+  ARTIFACT_SCHEME,
   defaultSettings,
   descriptionRootOf,
   isComponentName,
@@ -250,6 +251,10 @@ import type {
   ReviewChangesRequest,
   ReviewChangesResult,
   ReviewSyncRequest,
+  ArtifactSummary,
+  ProjectRef,
+  ServeArtifactRequest,
+  ServedArtifact,
   UriContent,
   ReadWorkflowRequest,
   RenameFileRequest,
@@ -277,7 +282,9 @@ import type {
   WriteFileRequest,
   WriteWorkflowRequest,
   InstanceNode,
+  ChatBranch,
   ChatEditPoint,
+  ChatFork,
   ChatPlanView,
   ChatThreadView,
   JairaPromptNode,
@@ -1479,30 +1486,21 @@ export class AppService {
     if (record === undefined) {
       return { ...base, empty: "this run was recorded before conversations were kept" };
     }
-    // Everything the conversation already contained when this state entered it — the ref spelling is
-    // `<id>@<position>`, and `messages` materializes every record BELOW that position, walking forks.
-    // What this state actually said is its record minus that, and only that belongs on screen.
-    const inherited = store.messages(`${row.sessionId}@${row.seq}`);
-    const turns = turnsOf(record.value, inherited);
-    // An interrupted call's TAILS — the fragment it was writing when the process died, preserved by
-    // the streamed partial. Rendered as one trailing turn through the ordinary machinery (a
-    // `thinking` part becomes a thought row), never folded into `messages` where it could be
-    // mistaken for a turn somebody finished.
-    const tails = (record.value as { value?: { partial?: { text?: string; thinking?: string } } } | undefined)?.value?.partial;
-    if (tails !== undefined && (tails.text !== undefined || tails.thinking !== undefined)) {
-      turns.push({
-        role: "assistant",
-        ...(tails.text !== undefined ? { text: tails.text } : {}),
-        ...(tails.thinking !== undefined ? { parts: [{ type: "thinking", thinking: tails.thinking }] as never } : {}),
-      });
-    }
-    if (turns.length === 0 && inherited.length > 0) {
-      // The record was nothing but the history it was handed. Rare, and an answer rather than a
-      // blank panel: the call happened, and it added nothing anybody can read.
+    // Through the SAME reader the thread uses. This panel had its own fold, and the two drifted: it
+    // grew the interrupted call's trailing fragment and never grew the message that PROVOKED the
+    // call, so a stopped agent's transcript opened on an answer to a question that was nowhere on the
+    // page. Which of two readers a person happened to open is not a fact about the conversation.
+    //
+    // No subtraction, and no `store.messages` read to subtract WITH: a record holds the messages its
+    // call contributed and nothing else, so what this state added is simply what its record says.
+    const turns = turnsSaidBy(record);
+    if (turns.length === 0) {
+      // A record that contributed no messages. Rare, and an answer rather than a blank panel: the
+      // call happened, and it added nothing anybody can read.
       return { ...base, empty: "this state added nothing to the conversation it was given" };
     }
     const sidechains = sidechainsOf(record.value);
-    const providerEvents = recordEventsOf(record.value, inherited.length);
+    const providerEvents = recordEventsOf(record.value);
     const native = nativeOf(record.value);
     return {
       ...base,
@@ -1951,6 +1949,8 @@ export class AppService {
       const partial = partialRecordValue(snap);
       if (partial !== null) liveStore.streamPartial(snap.sessionId, snap.seq, partial, snap.providerSessionId);
     });
+    // What "stop" writes down before it stops anything — see `ProjectSession.liveFlush`.
+    open.liveFlush.set(taskId, () => liveFlush.flush());
     const streaming = withTurnStream((delta) => {
       // Folded into main's live-turn log FIRST, so the number the push carries is the count a
       // `session:live` snapshot taken now would report — the merge protocol that lets a viewer seed
@@ -2021,6 +2021,9 @@ export class AppService {
       // what an open would refuse. Absent ⇒ no narrowing, and nothing pays for the feature.
       ...(scopeFloorOf(config) !== undefined ? { scopes: scopeFloorOf(config)! } : {}),
       workspaceRoot: workspace.root,
+      // The size a produced artifact has to exceed before somebody is asked about it. The number is
+      // artifact configuration; turning it into an escalation is the policy's job.
+      askAboveBytes: config.artifacts.askAboveBytes,
     });
     const approve = open.approvals.approver({ taskId });
 
@@ -2141,6 +2144,7 @@ export class AppService {
         open.live.delete(taskId);
         open.liveTurns.drop(taskId);
         liveFlush.dispose();
+        open.liveFlush.delete(taskId);
         this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
         this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
         settle();
@@ -2372,26 +2376,95 @@ export class AppService {
   }
 
   /**
-   * Send one message into the conversation an instance ran, as a child of that instance.
+   * Wait for something, but not forever.
+   *
+   * Every wait on this path is a wait on a CALL, and a provider that stops answering would otherwise
+   * take the waiter with it — and the waiter is an IPC handler, so it would take the request with it
+   * too: no reply, no error, nothing to cancel. Past the bound the caller carries on and the store
+   * resolves the collision by forking, which is a worse answer than a continuation and a far better
+   * one than a request that never returns.
+   */
+  private static async within(promise: Promise<void>, ms: number): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, ms);
+    });
+    try {
+      await Promise.race([promise, expired]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
+  /** What one typed message is, as a request — the same shape whether it queues or goes straight in. */
+  private static chatSend: {
+    taskId: string;
+    instanceId: number;
+    message: string;
+    overrides?: ChatSettings;
+    project?: string;
+    branchAt?: string;
+    fake?: JsonValue | FakeRule[];
+  };
+
+  /**
+   * Send one message into the conversation an instance ran — behind the message before it.
+   *
+   * ## Why a message has to know about the one ahead of it
+   *
+   * Where a message goes is computed from where the conversation is recorded as ENDING, and a message
+   * that has been sent but has not yet been written down is invisible to that computation. So two
+   * messages sent close together both read the same end, both resolve to it, and the store answers
+   * the only way it honestly can: the second collides and branches. One conversation becomes two, the
+   * thread reads one of them, and the other message is on disk and on no screen.
+   *
+   * That window is entirely reachable now that a message can be sent mid-turn — it is the time
+   * between pressing Enter twice — and nothing that can be QUERIED closes it. The live register holds
+   * a call only while it runs, so it is silent both before the call starts and after it settles, and
+   * a waiter that consulted it in either window computed a position something else was holding.
+   *
+   * So each send takes the previous one's completion promise on the way in, synchronously, before any
+   * await — the point being that no second send can read the chain between this one reading it and
+   * joining it. What it does with that promise is {@link runChatMessage}'s business: a message that
+   * can JOIN the turn in flight does not wait for it at all.
+   *
+   * The promise is resolved in the `finally`, so a message that fails anywhere — before its call, in
+   * its call, in the journal write after it — cannot leave the ones behind it waiting.
+   */
+  async sendChatMessage(
+    request: typeof AppService.chatSend,
+  ): Promise<ChatTurnResult & { instanceId: number; iteration: number; steered?: boolean }> {
+    if (request.message.trim() === "") throw new Error("a message cannot be empty");
+    const open = this.session(request.project);
+    // Taken before this send installs its own, so it names the PREDECESSOR rather than itself.
+    const settledAhead = open.chatDone.get(request.taskId);
+    let finished = (): void => undefined;
+    const done = new Promise<void>((resolve) => {
+      finished = resolve;
+    });
+    open.chatDone.set(request.taskId, done);
+    try {
+      return await this.runChatMessage(open, request, settledAhead);
+    } finally {
+      if (open.chatDone.get(request.taskId) === done) open.chatDone.delete(request.taskId);
+      finished();
+    }
+  }
+
+  /**
+   * One typed message, run — everything after its turn in the queue has come round.
    *
    * The child never joins the state machine — nothing binds to it and no transition fires from it —
    * so this assembles what a prompt call needs and nothing else. Notably NOT a run: no workspace is
    * materialized, no job is claimed, no task status moves. A conversation continued by hand is a
    * conversation, not a second execution of the workflow.
    */
-  async sendChatMessage(request: {
-    taskId: string;
-    instanceId: number;
-    message: string;
-    overrides?: ChatSettings;
-    project?: string;
-    /** Send at this position instead of after everything — see `chat:send`'s `branchAt`. */
-    branchAt?: string;
-    /** Scripted answers, exactly as {@link startTask} takes them — a demo conversation needs no provider. */
-    fake?: JsonValue | FakeRule[];
-  }): Promise<ChatTurnResult & { instanceId: number; iteration: number; steered?: boolean }> {
-    if (request.message.trim() === "") throw new Error("a message cannot be empty");
-    const open = this.session(request.project);
+  private async runChatMessage(
+    open: ProjectSession,
+    request: typeof AppService.chatSend,
+    /** The typed turn ahead of this one, if there is one — resolves when it has landed. */
+    settledAhead?: Promise<void>,
+  ): Promise<ChatTurnResult & { instanceId: number; iteration: number; steered?: boolean }> {
     const project = open.project;
     let context = this.chatContextOf(request.taskId, request.instanceId, request.project, request.branchAt);
 
@@ -2408,8 +2481,27 @@ export class AppService {
       return { instanceId: context.hostInstanceId, iteration: context.iteration, steered: true };
     }
 
-    // It cannot be steered, so WAIT for it instead of appending beside it. There is no queue here and
-    // nothing is stored: the promise already exists, and waiting on it is the whole mechanism.
+    /**
+     * It cannot be steered, so this message goes AFTER whatever is in flight — which means waiting
+     * for that to land, and there are two different things it might be.
+     *
+     * A TYPED TURN ahead of this one in the queue is waited for by its own promise. The live register
+     * cannot stand in for it: a call is registered only while it runs, so between this message being
+     * let through (which happens when the turn ahead STARTS) and that turn journalling its result,
+     * the register can be empty while the position is very much taken. Asked first, and asked
+     * unconditionally, because the answer is not visible anywhere a query could find it yet.
+     */
+    if (settledAhead !== undefined) {
+      await AppService.within(settledAhead, CHAT_WAIT_MS);
+      // Re-read: the head MOVED, which is the whole reason for waiting. Sending the position computed
+      // beforehand would fork every time and defeat it.
+      context = this.chatContextOf(request.taskId, request.instanceId, request.project, request.branchAt);
+    }
+    /**
+     * And a RUN's own call — the opening message of a conversation, or a workflow state being typed
+     * into mid-run. That one is not a chat turn and has no promise here, so the register is exactly
+     * the right question for it.
+     */
     const sessionId = sessionOf(context.position);
     if (open.liveCalls.get(sessionId) !== undefined) {
       // BOUNDED. An unbounded await is the same promise the call is parked on, so a provider that
@@ -2452,9 +2544,8 @@ export class AppService {
     // The WIRED executor, not a bare one. Summarizing through `buildPromptExecutor()` with no options
     // is a router with no tree, no routes and no keys, so a conversation in `summary` mode would
     // compact through something that cannot reach a provider.
-    const stores = sessionServicesFor(context.bundle, promptSummarizer(prompt), {
-      inner: new SqliteSessionStore(project.db, { taskId: request.taskId, runId: context.runId }),
-    });
+    const liveStore = new SqliteSessionStore(project.db, { taskId: request.taskId, runId: context.runId });
+    const stores = sessionServicesFor(context.bundle, promptSummarizer(prompt), { inner: liveStore });
     // The same capture `startRun` wires: a chat turn is a real delegated call, and its record would
     // otherwise be the one kind missing the agent's own session lines.
     stores.records = withNativeCapture(stores.records, {
@@ -2462,7 +2553,49 @@ export class AppService {
       onError: (e: Error) =>
         this.log({ level: "warn", source: "engine", message: `native session capture failed: ${e.message}`, project: open.key, taskId: request.taskId }),
     });
-    const executor = withSessionLayers(stores, prompt);
+    /**
+     * The live turn, for a message somebody typed — everything `startRun` wires, wired here too.
+     *
+     * A chat turn had none of it, and the three things missing were not three conveniences:
+     *
+     *  - **Nothing streamed.** The reply appeared when the call settled, so a long answer was a
+     *    frozen box; and the run's own first message DID stream, which made the conversation appear
+     *    to lose a capability after its opening exchange.
+     *  - **Nothing was persisted while it ran.** `streamPartial` writes the accumulated turn into the
+     *    open row on a throttle, and it is also what stamps the provider's handle early. Without it
+     *    an interrupted turn's record held the error and nothing else: what the model had already
+     *    said was gone, and the next message had no handle to resume from.
+     *  - **Nothing was registered as a live call.** `liveCalls` is what `chatPlan` reads to answer
+     *    `steerable`, so a mid-turn message could never JOIN the turn — the one thing the composer's
+     *    "joins this turn" line has always promised.
+     *
+     * Composed INSIDE the session layers, as in `startRun`: by then `ctx.session` is the resolved
+     * position, so a delta names the conversation it belongs to instead of being attributed by guess.
+     */
+    const liveFlush = new LiveTurnFlusher(() => {
+      const snap = open.liveTurns.snapshot(request.taskId);
+      if (snap === null || snap.sessionId === undefined || snap.seq === undefined) return;
+      const partial = partialRecordValue(snap);
+      if (partial !== null) liveStore.streamPartial(snap.sessionId, snap.seq, partial, snap.providerSessionId);
+    });
+    // What "stop" writes down before it stops anything — see `ProjectSession.liveFlush`.
+    open.liveFlush.set(request.taskId, () => liveFlush.flush());
+    const streaming = withTurnStream((delta) => {
+      const { n, item } = open.liveTurns.apply(request.taskId, delta);
+      liveFlush.note();
+      this.publish({
+        type: "session:turn",
+        taskId: request.taskId,
+        runId: context.runId,
+        n,
+        ...(delta.session !== undefined ? { sessionId: delta.session.id, seq: delta.session.seq } : {}),
+        ...(delta.stateId !== undefined ? { stateId: delta.stateId } : {}),
+        ...(delta.text !== undefined ? { text: delta.text } : {}),
+        ...(delta.thinking !== undefined ? { thinking: delta.thinking } : {}),
+        ...(item !== undefined ? { item } : {}),
+      });
+    }, prompt, open.liveCalls);
+    const executor = withSessionLayers(stores, streaming);
 
     // JaiRA registered these and JaiRA compiled the policy, so it always knows what it is handing
     // over — see `gateTools`. An unresolvable name throws rather than quietly running without it.
@@ -2512,6 +2645,7 @@ export class AppService {
       execEnv: config.execEnvironment,
       ...(scopeFloorOf(config) !== undefined ? { scopes: scopeFloorOf(config)! } : {}),
       ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
+      askAboveBytes: config.artifacts.askAboveBytes,
     });
     const authoredModes = plan.settings.permissions?.tools;
     const policy: ExecPolicy =
@@ -2537,6 +2671,8 @@ export class AppService {
 
     const { operation } = chatOperationOf(plan, { message: request.message, session: { id: context.position } });
     const recorder = project.events.recorder(request.taskId, context.runId);
+    /** Push ordering for this turn's journal events — the renderer's own `seq`, as a run supplies. */
+    let chatSeq = 0;
     /**
      * What "stop" reaches — see {@link cancelChatTurn}.
      *
@@ -2546,16 +2682,40 @@ export class AppService {
      * is what the transcript keeps.
      */
     const abort = new AbortController();
-    // A second turn cannot be in flight here — the wait above settles the first — so replacing is
-    // only ever tidying up after a turn that finished without unregistering.
-    open.chatTurns.get(request.taskId)?.abort();
-    open.chatTurns.set(request.taskId, abort);
-    const result = await this.whileChatting(open, request.taskId, abort, () =>
+    // ADDED, never replacing. A turn already in flight here is a turn somebody is still waiting for
+    // an answer to — the message being sent now joined it, or is queued behind it — and the previous
+    // spelling aborted it on the way past, so a follow-up question killed the reply it was following
+    // up on. See `ProjectSession.chatTurns`.
+    const turns = open.chatTurns.get(request.taskId) ?? new Set<AbortController>();
+    turns.add(abort);
+    open.chatTurns.set(request.taskId, turns);
+    const result = await this.whileChatting(open, request.taskId, abort, liveFlush, () =>
       runChatTurn(
       {
         executor,
         sessions: stores.sessions,
-        record: (event, atMs) => recorder.record(event, atMs),
+        /**
+         * Journalled, then TEED to the renderer — the same shape `startRun` gives its own events.
+         *
+         * A chat turn published nothing, which mattered once it started streaming: the renderer drops
+         * its live tail on `operation.completed`/`operation.failed` and had no other signal, so the
+         * tail would have stayed on screen beside the settled record it is a copy of. Main's own copy
+         * goes first, for the reason stated in `startRun`: the stored view holds it by then.
+         */
+        record: (event, atMs) => {
+          recorder.record(event, atMs);
+          if (event.type === "operation.completed" || event.type === "operation.failed") {
+            open.liveTurns.clear(request.taskId);
+          }
+          this.publishFor(open, {
+            type: "engine:event",
+            taskId: request.taskId,
+            runId: context.runId,
+            seq: ++chatSeq,
+            at: atMs,
+            event: event as unknown as JsonValue,
+          });
+        },
         /**
          * Everything the call needs that is not the session — and three of the four were missing.
          *
@@ -2614,22 +2774,35 @@ export class AppService {
   }
 
   /**
-   * Run a turn with its stop registered, and unregister it however the turn ends.
+   * Run a turn with its stop registered, and give back everything the turn held however it ends.
    *
-   * The unregister is conditional on the entry still being THIS turn's. A stop that arrives while the
-   * turn is settling replaces nothing, but a `delete` here after the next turn registered its own
-   * controller would quietly disarm that one — a stop button that works until you use it twice.
+   * THIS turn's controller leaves the set and the others stay: a thread can have two turns in flight,
+   * and removing the task's whole entry would disarm the stop button for the one still going.
+   *
+   * The flusher is disposed on the same path, and it has to be on a path that runs even when the turn
+   * throws: a pending timer keeps a handle open and would fire against a record that has settled.
+   * The live tail is cleared as a BACKSTOP — the settle event clears it first in the ordinary case,
+   * and a turn that failed before reaching one would otherwise leave a tail on screen forever. Only
+   * once nothing is left in flight, or a settling turn would take a live one's tail off the screen.
    */
   private async whileChatting<T>(
     open: ProjectSession,
     taskId: string,
     abort: AbortController,
+    liveFlush: LiveTurnFlusher,
     run: () => Promise<T>,
   ): Promise<T> {
     try {
       return await run();
     } finally {
-      if (open.chatTurns.get(taskId) === abort) open.chatTurns.delete(taskId);
+      const turns = open.chatTurns.get(taskId);
+      turns?.delete(abort);
+      if (turns?.size === 0) open.chatTurns.delete(taskId);
+      liveFlush.dispose();
+      if (!open.chatTurns.has(taskId)) {
+        open.liveTurns.clear(taskId);
+        open.liveFlush.delete(taskId);
+      }
     }
   }
 
@@ -2642,12 +2815,20 @@ export class AppService {
    *
    * `false` means there was nothing to stop, which is an answer rather than a fault: the turn may
    * have landed between the button being shown and being pressed.
+   *
+   * EVERY turn this conversation has going, because that is what the button says. A thread can have
+   * two in flight — a message sent mid-turn joins the one already running, and a queued one starts
+   * its own — and a stop that reached only one of them would leave the agent working under a
+   * composer that had just told the person it had stopped.
    */
   cancelChatTurn(request: { taskId: string; project?: string }): { canceled: boolean } {
     const open = this.session(request.project);
-    const abort = open.chatTurns.get(request.taskId);
-    if (abort === undefined) return { canceled: false };
-    abort.abort();
+    const turns = open.chatTurns.get(request.taskId);
+    if (turns === undefined || turns.size === 0) return { canceled: false };
+    // What it had said by now, written down BEFORE it is stopped — while the record is still open and
+    // a partial can still reach it. See `ProjectSession.liveFlush`.
+    open.liveFlush.get(request.taskId)?.();
+    for (const abort of turns) abort.abort();
     open.chatTurns.delete(request.taskId);
     return { canceled: true };
   }
@@ -2855,26 +3036,26 @@ export class AppService {
     const sidechains: Record<string, SessionTurn[]> = {};
     const providerEvents: Array<{ index: number; event: JsonValue }> = [];
     const native: Array<{ index: number; line: JsonValue }> = [];
-    // What the conversation held when each record began — the previous record's whole message list,
-    // which is the same subtraction `sessionView` makes and has to stay identical to it: a record
-    // stores the full history it was called with, so adding them up unsubtracted would print the
-    // conversation N times over.
-    let inherited: JsonValue[] = [];
+    /** Per branch: the turn its own rows begin at, so a fork can be reported as a turn index. */
+    const begins = new Map<string, number>();
     for (const [i, row] of rows.entries()) {
       const at = turns.length;
-      turns.push(...turnsOf(row.value, inherited));
+      if (!begins.has(row.sessionId)) begins.set(row.sessionId, at);
+      // Concatenated, not subtracted. A record holds the messages its call contributed — the store's
+      // own `materialize` adds records up exactly this way to build the history a provider is
+      // replayed, and a reader that disagreed with it would be describing a different conversation
+      // from the one the model is having.
+      turns.push(...turnsSaidBy(row));
       // The run's own call is not a message somebody typed — editing it means running the task
       // again with different inputs, which is a different verb in a different place.
       if (i > 0) points.push({ turn: at, at: `${sessionOf(context.position)}@${row.seq}` });
       for (const [call, chain] of Object.entries(sidechainsOf(row.value) ?? {})) sidechains[call] = chain;
-      // Both index families count TURNS, and each record's are relative to its own — so they are
-      // shifted onto the thread by where that record started, exactly as `sessionView` shifts them
-      // past the inherited prefix.
-      for (const event of recordEventsOf(row.value, inherited.length) ?? []) {
+      // Both index families count TURNS within their own record, so they are shifted onto the thread
+      // by where that record started.
+      for (const event of recordEventsOf(row.value) ?? []) {
         providerEvents.push({ index: event.index + at, event: event.event });
       }
       for (const line of nativeOf(row.value) ?? []) native.push({ index: line.index + at, line: line.line });
-      inherited = messagesOfRecord(row.value);
     }
 
     const session: SessionView = {
@@ -2890,7 +3071,37 @@ export class AppService {
       ...(native.length > 0 ? { native } : {}),
       ...(turns.length === 0 ? { empty: "this conversation has not said anything yet" } : {}),
     };
-    return { taskId: request.taskId, runId: context.runId, instanceId: host, session, points };
+    /**
+     * The places this conversation SPLIT, folded into turns the same way the thread was.
+     *
+     * A replaced message branches rather than deletes, and the branch left behind is intact in the
+     * record and on no path anybody reads — so an edit looked like a deletion, and there was nothing
+     * on screen to say otherwise or to read the other side with. The seam is reported as a TURN index
+     * because that is the only coordinate the renderer has; the store's own `at` is a position, which
+     * nothing above this line is allowed to parse.
+     *
+     * A branch whose start we cannot place is dropped rather than guessed at: a split drawn between
+     * the wrong two turns is a worse statement than no split at all.
+     */
+    const forks: ChatFork[] = [];
+    for (const fork of store.forks(context.position)) {
+      const begin = begins.get(fork.taken);
+      if (begin === undefined) continue;
+      const left: ChatBranch[] = [];
+      for (const branch of fork.left) {
+        const said = branch.rows.flatMap((row) => turnsSaidBy(row));
+        if (said.length > 0) left.push({ sessionId: branch.sessionId, turns: said });
+      }
+      if (left.length > 0) forks.push({ turn: begin, left });
+    }
+    return {
+      taskId: request.taskId,
+      runId: context.runId,
+      instanceId: host,
+      session,
+      points,
+      ...(forks.length > 0 ? { forks } : {}),
+    };
   }
 
   /**
@@ -2922,14 +3133,33 @@ export class AppService {
    * (`isStartableStatus` is the engine's rule, not a UI nicety: its journal is a complete record of
    * a run that ended), so rerunning one means a fresh task with the same title, workflow, inputs and
    * branch. The copy is what starts, and the response names it.
+   *
+   * ## A task somebody has TALKED TO is copied as well, whatever its status
+   *
+   * A conversation is read from the task's LATEST run, and a second run in the same task starts a
+   * second conversation beside the first — so re-running in place does not add to what was said, it
+   * makes it unreachable. Every hand-typed turn is still in the database and nothing in any view
+   * leads back to it.
+   *
+   * That is reachable rather than theoretical: a conversation whose opening message was stopped
+   * leaves the task `interrupted`, which IS startable, and you can go on chatting to it for another
+   * twenty messages — every one of them recorded under a run the next rerun would supersede.
+   *
+   * Detected by asking whether any hand-typed turn exists (`isChatInstance`), not by asking what
+   * workflow this is. The Chat view's tasks are the common case and not the only one: typing into a
+   * run's transcript in the Tasks view puts the same turns in the same place, and they deserve the
+   * same treatment. A task nobody has talked to has nothing to lose and re-runs in place as before.
    */
   async rerunTask(request: StartRunRequest): Promise<{ taskId: string; runId: number }> {
     const open = this.session(request.project);
     const row = open.project.runtime.get(request.taskId);
     if (row === undefined) throw new Error(`unknown task '${request.taskId}'`);
     if (row.status === "running") throw new Error(`task '${request.taskId}' is already running`);
+    const spokenTo = this.sessionHistory({ taskId: request.taskId, project: request.project }).some((h) =>
+      isChatInstance(h.instanceId),
+    );
     let target = request.taskId;
-    if (!isStartableStatus(row.status)) {
+    if (!isStartableStatus(row.status) || spokenTo) {
       const meta = open.project.tasks.read(request.taskId);
       const copy = createTask(open.project, {
         title: meta.title,
@@ -3011,6 +3241,8 @@ export class AppService {
       }
       // And so does a parked question — dismissed, not errored: nobody is going to answer it.
       session.questions.dismissFor(taskId);
+      // What it had said by now, written down while its record is still open to take it.
+      session.liveFlush.get(taskId)?.();
       run.abort.abort();
     } else if (session.project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
       // Another process is driving it. Raise the flag its heartbeat polls — cross-
@@ -3658,6 +3890,84 @@ export class AppService {
   }
 
   /**
+   * Artifacts granted to a frame, by the token minted for each — see {@link serveArtifact}.
+   *
+   * Bounded and evicted oldest-first. The bound is not about memory so much as about how long a
+   * grant stays live: a window open all day should not accumulate an unbounded set of addresses that
+   * still resolve, and an artifact reopened after eviction simply mints a new one.
+   */
+  private readonly served = new Map<string, { body: string; mediaType: string; interactive: boolean }>();
+
+  /**
+   * Everything one task produced, oldest first — what the artifacts panel lists.
+   *
+   * Metadata only, deliberately: see {@link ArtifactSummary}. A conversation that wrote forty
+   * documents would otherwise send all forty to draw a list of names.
+   */
+  listArtifacts(request: { taskId: string; project?: ProjectRef }): ArtifactSummary[] {
+    const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
+    if (session === undefined) throw new Error("no project is open");
+    return session.project.artifacts.list(request.taskId).map((record) => ({
+      path: record.logicalPath,
+      // The recorded type, else what the name implies — the same order `serveArtifact` resolves in,
+      // so a row in the list and the thing that opens from it cannot disagree about what it is.
+      mediaType: record.format ?? mimeOfPath(record.logicalPath),
+      bytes: record.bytes,
+      interactive: record.interactive === true,
+      createdAt: record.createdAt,
+      ...(record.stateId !== undefined ? { stateId: record.stateId } : {}),
+      ...(record.slot !== undefined ? { slot: record.slot } : {}),
+    }));
+  }
+
+  /**
+   * Mint an address a frame can load ONE artifact from (see {@link ServeArtifactRequest}).
+   *
+   * The renderer names an artifact it can already see; this resolves it and returns an opaque token.
+   * The alternative — a protocol that parses `<taskId>/<path>` out of the URL and reads the artifact
+   * map itself — would be a second door into project data, reachable by any URL the page contrives,
+   * and it would have to re-implement every containment rule the map's readers already apply. A token
+   * grants exactly what was granted.
+   */
+  async serveArtifact(request: ServeArtifactRequest): Promise<ServedArtifact> {
+    const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
+    if (session === undefined) throw new Error("no project is open");
+    const record = session.project.artifacts.get(request.taskId, request.path);
+    if (record === undefined) throw new Error(`no artifact at '${request.path}' for task ${request.taskId}`);
+
+    // Inline copy first, then wherever it was placed — the artifact map's own resolution order, and
+    // the reason a `virtual:` artifact is servable at all.
+    const body =
+      record.content ??
+      (record.physicalPath !== undefined && existsSync(record.physicalPath)
+        ? readFileSync(record.physicalPath, "utf8")
+        : undefined);
+    if (body === undefined) throw new Error(`the bytes for '${request.path}' are no longer where they were placed`);
+
+    const mediaType = request.mediaType ?? record.format ?? mimeOfPath(request.path);
+    const interactive = record.interactive === true;
+    const token = randomUUID();
+    this.served.set(token, { body, mediaType, interactive });
+    // Oldest-first eviction, so the map cannot grow without bound in a long-lived window.
+    while (this.served.size > 64) {
+      const oldest = this.served.keys().next();
+      if (oldest.done === true) break;
+      this.served.delete(oldest.value);
+    }
+    return { url: `${ARTIFACT_SCHEME}://frame/${token}`, mediaType, bytes: Buffer.byteLength(body, "utf8"), interactive };
+  }
+
+  /**
+   * What the protocol handler serves for a token, or `undefined` when nothing was granted for it.
+   *
+   * Kept here rather than in the Electron layer so the whole grant/serve cycle is testable without a
+   * browser — the handler above it does nothing but turn this into a response.
+   */
+  servedArtifact(token: string): { body: string; mediaType: string; interactive: boolean } | undefined {
+    return this.served.get(token);
+  }
+
+  /**
    * One generalised read channel (CHANGESETS.md §8.5): `file:` and the `$…` anchors, `git:` blobs,
    * `db://` recorded values — the addresses a changeset's chain speaks, resolvable by the renderer.
    *
@@ -3690,6 +4000,31 @@ export class AppService {
       const worktree = request.taskId !== undefined ? project.runtime.get(request.taskId)?.worktreePath : undefined;
       if (worktree === undefined) throw new Error(`'$WORKTREE' needs a task with a worktree — pass taskId`);
       return guarded(worktree, rel!);
+    }
+
+    /*
+     * `artifact://<taskId>/<logicalPath>` — the address a produced artifact carries.
+     *
+     * Resolved through the MAP rather than the filesystem, which is the whole reason it is a scheme
+     * of its own: an artifact under `virtual:` has no path on disk, and one under any other
+     * destination is not where its logical name says it is. Both answer here.
+     *
+     * No anchor guard is needed and none would help: nothing is joined onto a root, so there is no
+     * `..` to climb. The bound is the map itself — a `(taskId, logicalPath)` pair either names a
+     * record this project wrote or it names nothing.
+     */
+    const artifact = /^artifact:\/\/([^/]+)\/(.+)$/.exec(uri);
+    if (artifact !== null) {
+      const [, taskId, logicalPath] = artifact;
+      const record = project.artifacts.get(decodeURIComponent(taskId!), logicalPath!);
+      if (record === undefined) throw new Error(`'${uri}' names no artifact this project produced`);
+      const text =
+        record.content ??
+        (record.physicalPath !== undefined && existsSync(record.physicalPath)
+          ? readFileSync(record.physicalPath, "utf8")
+          : undefined);
+      if (text === undefined) throw new Error(`the bytes for '${uri}' are no longer where they were placed`);
+      return { uri, mime: record.format ?? mimeOfPath(logicalPath!), text };
     }
 
     if (uri.startsWith("git:")) {
@@ -4987,27 +5322,6 @@ function writeEnvEntry(file: string, name: string, value: string): void {
 }
 
 /**
- * What THIS record added to the conversation, with the part it merely inherited removed.
- *
- * A session is append-only and shared: a state that resumes one is handed everything said before it
- * and its call returns the whole conversation, prior states included. Rendering that verbatim made
- * every state after the first show its predecessors' words as its own — the deeper into a workflow
- * you looked, the more of somebody else's transcript you read.
- *
- * The prefix has to match ENTIRELY before anything is dropped. A record that carries the history
- * begins with it exactly; one that carries only its own delta does not, and a partial match is
- * neither — most likely two states that happened to open with the same system prompt. Dropping on a
- * partial match would eat a real first message, so a partial match drops nothing.
- */
-export function ownMessages(messages: readonly JsonValue[], inherited: readonly JsonValue[]): JsonValue[] {
-  if (inherited.length === 0 || messages.length < inherited.length) return [...messages];
-  for (const [i, message] of inherited.entries()) {
-    if (JSON.stringify(messages[i]) !== JSON.stringify(message)) return [...messages];
-  }
-  return messages.slice(inherited.length);
-}
-
-/**
  * A stored record's messages, as turns the viewer can render.
  *
  * Kept close to what the provider returned: `content` is a string for an ordinary turn and an array
@@ -5032,22 +5346,27 @@ function turnOf(raw: JsonValue): SessionTurn {
 }
 
 /**
- * The record's per-message times (`messageTimes`), aligned to its OWN messages.
+ * A record's messages as turns, wearing the per-message times (`messageTimes`) the stream measured.
  *
- * Written parallel to `messages` while the call streamed, so the alignment is by index — and the
- * offset matters: `ownMessages` drops the inherited prefix, so the n-th own turn is the
- * `(dropped + n)`-th stamp. A record with no times (written before turns were timed, or by a
- * transport that never streamed) yields nothing rather than zeros.
+ * Every message a record holds is a message that record CONTRIBUTED — `LlmOutput.messages` is "the
+ * messages this call appended to the conversation", a session's messages are its records concatenated
+ * (`materialize`), and a fork inherits its prefix by lineage rather than by copying. So there is
+ * nothing to subtract here, and this used to try: it dropped a leading run of messages whenever a
+ * record happened to begin with the previous record's list in full, which is a shape nothing writes
+ * and which cost a repeated exchange its second copy (ask the same question twice, get the same
+ * answer twice, and the second pair vanished).
+ *
+ * `messageTimes` is a parallel array over `messages`, so the alignment is a plain index. A record
+ * with no times — written before turns were timed, or by a transport that never streamed — yields
+ * turns without them rather than zeros.
  */
-function turnsOf(value: JsonValue | undefined, inherited: readonly JsonValue[] = []): SessionTurn[] {
-  const all = messagesOfRecord(value);
-  const own = ownMessages(all, inherited);
+function turnsOf(value: JsonValue | undefined): SessionTurn[] {
+  const messages = messagesOfRecord(value);
   const raw = (value as { value?: { messageTimes?: unknown } } | undefined)?.value?.messageTimes;
   const times = Array.isArray(raw) ? (raw as Array<{ at?: number; startedAt?: number; thoughtMs?: number }>) : [];
-  const dropped = all.length - own.length;
-  return own.map((message, i) => {
+  return messages.map((message, i) => {
     const turn = turnOf(message);
-    const time = times[dropped + i];
+    const time = times[i];
     if (time === undefined) return turn;
     return {
       ...turn,
@@ -5056,6 +5375,53 @@ function turnsOf(value: JsonValue | undefined, inherited: readonly JsonValue[] =
       ...(typeof time.thoughtMs === "number" ? { thoughtMs: time.thoughtMs } : {}),
     };
   });
+}
+
+/**
+ * What one record contributes to a thread — its own turns, plus the two things an INTERRUPTED one
+ * leaves in places nobody used to look.
+ *
+ * Written once and used twice: for the conversation on screen and for the branches beside it (see
+ * `SqliteSessionStore.forks`). A branch that was rendered by different code would be a second answer
+ * to "what did this record say", and the whole point of showing it is that it is the same kind of
+ * thing as what it sits beside.
+ */
+function turnsSaidBy(row: { value?: JsonValue; status: "open" | "completed" | "failed" }): SessionTurn[] {
+  const said = turnsOf(row.value);
+  /**
+   * …and the half of the ANSWER that was written before the turn was cut off.
+   *
+   * The record keeps it — `preservePartial` folds the streamed tail into an errored settle for
+   * exactly this reason — and the panel beside a run has always rendered it (`sessionView`). This
+   * reader did not, so a conversation showed the question, then nothing, and the words the person
+   * had been watching arrive vanished the moment they pressed stop. One trailing assistant turn,
+   * through the ordinary machinery so a `thinking` tail becomes a thought row — and never folded
+   * into `messages`, where a fragment nobody finished would be indistinguishable from a turn
+   * somebody did.
+   */
+  const tails = partialOf(row.value);
+  if (tails !== undefined) {
+    said.push({
+      role: "assistant",
+      ...(tails.text !== undefined ? { text: tails.text } : {}),
+      ...(tails.thinking !== undefined ? { parts: [{ type: "thinking", thinking: tails.thinking }] as never } : {}),
+    });
+  }
+  return said;
+}
+
+/**
+ * The TAILS a cut-off call was writing — the fragment of a turn nobody finished.
+ *
+ * Kept in its own field by `partialRecordValue` and folded into an errored settle by
+ * `preservePartial`, precisely so it stays distinguishable from a finished turn. `undefined` when
+ * there is nothing to show, which is every settled record and any interruption that arrived before
+ * the model had said a word.
+ */
+function partialOf(value: JsonValue | undefined): { text?: string; thinking?: string } | undefined {
+  const partial = (value as { value?: { partial?: { text?: string; thinking?: string } } } | undefined)?.value?.partial;
+  if (partial === undefined || (partial.text === undefined && partial.thinking === undefined)) return undefined;
+  return partial;
 }
 
 /** The record's subagent conversations, as turns — `LlmOutput.sidechains`, read the way `turns` is. */
@@ -5070,17 +5436,23 @@ function sidechainsOf(value: JsonValue | undefined): Record<string, SessionTurn[
 }
 
 /**
- * The record's provider events, indices shifted past the inherited prefix — an event's `index`
- * counts the record's OWN messages, and the view's turns start after what the state was handed.
+ * The record's provider events, each pinned to how many of the record's messages preceded it.
+ *
+ * Counted against the record's OWN messages, which is what upstream stamps them with and what the
+ * turns rendered from it are. This used to subtract an "inherited prefix" from every index — a
+ * companion to the subtraction in `turnsOf`, and wrong for the same reason, except that this one had
+ * teeth on real data: the count it subtracted was the PREVIOUS record's length, so in an ordinary
+ * chat every event after the first collapsed onto index 0 (`Math.max(0, 1 - 2)`) and rendered above
+ * the turn it happened after.
  */
-function recordEventsOf(value: JsonValue | undefined, inheritedCount: number): Array<{ index: number; event: JsonValue }> | undefined {
+function recordEventsOf(value: JsonValue | undefined): Array<{ index: number; event: JsonValue }> | undefined {
   const raw = (value as { value?: { providerEvents?: unknown } } | undefined)?.value?.providerEvents;
   if (!Array.isArray(raw)) return undefined;
   const out: Array<{ index: number; event: JsonValue }> = [];
   for (const row of raw) {
     const e = row as { index?: unknown; event?: unknown };
     if (typeof e?.index !== "number" || e.event === undefined) continue;
-    out.push({ index: Math.max(0, e.index - inheritedCount), event: e.event as JsonValue });
+    out.push({ index: Math.max(0, e.index), event: e.event as JsonValue });
   }
   return out.length > 0 ? out : undefined;
 }

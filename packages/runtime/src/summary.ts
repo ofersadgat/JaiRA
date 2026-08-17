@@ -182,6 +182,13 @@ export class SummarizingSessionStore implements SessionStore<JsonValue> {
     return this.inner.fork(ref, seed);
   }
 
+  /** Delegated like the rest: a ref's spelling belongs to the store that owns the lineage, and this
+   *  one owns none. Compaction never changes it — it mints a conversation, and the ref names a
+   *  position in whichever conversation the caller ended up in. */
+  refAt(at: { id: string; seq: number }): string {
+    return this.inner.refAt(at);
+  }
+
   /**
    * The conversation's contents — compacted first, if it is over budget.
    *

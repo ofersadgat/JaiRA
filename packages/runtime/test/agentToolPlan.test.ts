@@ -54,11 +54,18 @@ describe("planAgentTools", () => {
     expect(plan.denyNatives).toContain("Edit");
   });
 
-  it("covers every tool in the vocabulary exactly once", () => {
-    // Nothing may fall between the three states — that gap IS the bug this exists to close.
+  it("leaves no tool with a built-in unaccounted for", () => {
+    // Nothing may fall between the three states — that gap IS the bug this exists to close. The
+    // measure is tools that HAVE a native counterpart, because that is where falling through costs
+    // something: an ungranted tool whose built-in stays live is a capability nobody granted. A tool
+    // with no counterpart (`show_artifact`) is fully handled by not being declared — there is no
+    // built-in left behind to deny.
     const plan = planAgentTools(["read_file"], { read_file: "app" });
     const accounted = plan.inject.length + plan.askNatives.length + plan.denyNatives.length;
-    expect(accounted).toBe(TOOL_SPECS.length);
+    const nativeless = TOOL_SPECS.filter((spec) => spec.natives?.claude === undefined).length;
+    expect(accounted).toBe(TOOL_SPECS.length - nativeless);
+    // And the nativeless one is genuinely absent rather than silently denied under some other name.
+    expect(plan.denyNatives).not.toContain("show_artifact");
   });
 });
 
@@ -123,5 +130,15 @@ describe("profileRules", () => {
     expect(readOnly.tools["write_file"]).toBe("deny");
     expect(readOnly.tools["bash"]).toBe("deny");
     expect(readOnly.other).toBe("ask");
+  });
+
+  it("lets a planning agent draw, because showing changes nothing that was there", () => {
+    // `plan` is "read and think; changes wait for a plan you approve" — which is exactly when a
+    // mockup is worth having. `show_artifact` is confined to the task's artifact directory and
+    // cannot touch source (see `showDestination`), so it belongs inside that profile.
+    expect(profileRules()["plan"]!.tools["show_artifact"]).toBe("allow");
+    expect(profileRules()["plan"]!.tools["write_file"]).toBe("deny");
+    // Under `read-only` it still asks rather than being waved through: it does produce something.
+    expect(profileRules()["read-only"]!.tools["show_artifact"]).toBe("ask");
   });
 });

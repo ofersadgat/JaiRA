@@ -667,7 +667,13 @@ export interface WorkflowSyncResult extends WorkflowSyncReport {
  * renderer-reachable channel that resolves arbitrary `file:` URIs is a sandbox escape.
  */
 export interface ReadUriRequest {
-  /** `$PROJECT/…`, `$JAIRA/…`, `$WORKTREE/…` (needs `taskId`), `file:…`, `git:<sha>:<path>`, `db://…`. */
+  /**
+   * `$PROJECT/…`, `$JAIRA/…`, `$WORKTREE/…` (needs `taskId`), `file:…`, `git:<sha>:<path>`, `db://…`,
+   * `artifact://<taskId>/<logicalPath>`.
+   *
+   * The artifact form is the `uri` a produced artifact carries, so the value a tool returned is
+   * directly readable rather than something a caller has to take apart and reassemble.
+   */
   uri: string;
   project?: ProjectRef;
   /** Resolves `$WORKTREE` and scopes a `db://` session id to the run that wrote it. */
@@ -681,6 +687,73 @@ export interface UriContent {
   text: string;
   /** Set when a `file:` URI carried a content hash and the tree no longer matches it (§3.2 drift). */
   drifted?: boolean;
+}
+
+/**
+ * Hand one artifact to a FRAME — the only way a page a model wrote gets to run its own scripts.
+ *
+ * The renderer cannot show an interactive artifact by putting its markup in a `srcdoc` iframe: a
+ * `srcdoc` document inherits the embedder's CSP, and this app's is `script-src 'self'`, so every
+ * inline script in it is refused. (Measured, not assumed.) It has to be loaded from a URL whose own
+ * response carries a policy permitting inline script — which means a real scheme and a real handler.
+ *
+ * The grant is EXPLICIT and one artifact at a time. This mints a single-use address for content the
+ * renderer has already named, and the handler serves nothing it was not handed: no path parsing, no
+ * traversal to worry about, and no ambient authority to read the artifact map by URL. A protocol that
+ * resolved `<taskId>/<path>` on its own would be a second, unauthenticated door into project data.
+ */
+/**
+ * One artifact a task produced, as a LIST reads it.
+ *
+ * Metadata only. The content is fetched per artifact through `uri:read` — a conversation that wrote
+ * forty documents would otherwise send all of them to draw a list of forty names, and the list is
+ * what somebody looks at first and usually all they need.
+ */
+export interface ArtifactSummary {
+  /** The logical path, as the producer addressed it — the name this is known by everywhere. */
+  path: string;
+  mediaType: string;
+  bytes: number;
+  /** Whether it may run when shown. See {@link ServedArtifact.interactive}. */
+  interactive: boolean;
+  createdAt: number;
+  /** Which state and output slot produced it, when it came from one rather than from a tool call. */
+  stateId?: string;
+  slot?: string;
+}
+
+/**
+ * The scheme an interactive artifact is loaded from.
+ *
+ * Named here because three places must agree on it and none of them may guess: the main process
+ * registers and handles it, the renderer's CSP has to name it in `frame-src` (without which the frame
+ * falls through to `default-src 'none'` and is refused outright), and the URL the grant returns is
+ * built from it.
+ */
+export const ARTIFACT_SCHEME = "jaira-artifact";
+
+export interface ServeArtifactRequest {
+  /** The task whose artifact map holds it. */
+  taskId: string;
+  /** The logical path, as the producer addressed it. */
+  path: string;
+  project?: ProjectRef;
+  /** Overrides the recorded media type; the record's own is used when absent. */
+  mediaType?: string;
+}
+
+export interface ServedArtifact {
+  /** The address to point a frame at. Meaningless to anything but this window. */
+  url: string;
+  mediaType: string;
+  bytes: number;
+  /**
+   * Whether the producer asked for this to be able to RUN.
+   *
+   * Carried back so the renderer cannot decide it: an artifact is scriptable because the tool that
+   * made it said so and the record kept it, never because of how it is being viewed today.
+   */
+  interactive: boolean;
 }
 
 /**
@@ -993,6 +1066,9 @@ export interface IpcContract {
   "file:read": { request: ReadFileRequest; response: FileSource };
   /** Read one addressable value — see {@link ReadUriRequest}. Refused rather than guessed at. */
   "uri:read": { request: ReadUriRequest; response: UriContent };
+  "artifact:serve": { request: ServeArtifactRequest; response: ServedArtifact };
+  /** Everything one task produced, oldest first — what the artifacts panel lists. */
+  "artifact:list": { request: { taskId: string; project?: ProjectRef }; response: ArtifactSummary[] };
   /**
    * Project files whose path matches a query — what an `@` in the composer completes against.
    *
@@ -1099,6 +1175,8 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "schema:detect",
   "file:read",
   "uri:read",
+  "artifact:serve",
+  "artifact:list",
   "file:find",
   "changeset:review",
   "changeset:reviewSync",
@@ -1149,6 +1227,45 @@ export interface LiveTurnSnapshot {
   items: JsonValue[];
   /** Subagent turns streaming by, keyed by the spawning call id. */
   sidechains: Record<string, JsonValue[]>;
+}
+
+/**
+ * Does this stream item say the model STARTED REASONING?
+ *
+ * Asked because a thinking block does not always carry text. When the provider withholds the
+ * reasoning it streams the block anyway: `content_block_start` for a `thinking` block, then deltas
+ * whose `thinking` is `""` and whose only payload is the `signature`. Every layer that timed the
+ * tails keyed off thinking TEXT — the transports drop an empty fragment, the folds start the clock
+ * on a non-empty one — so a withheld think set no clock, published no tail, and drew no row. A
+ * model reasoning for four minutes was an empty conversation, indistinguishable from a hung run,
+ * which is exactly how it got reported. The bookkeeping is the only notice that arrives, so the
+ * bookkeeping is the signal.
+ *
+ * Lives here, beside {@link LiveTurnSnapshot}, because it is a fact about the wire shape rather
+ * than about either end: BOTH folds ask it — main's `LiveTurnLog` and the renderer's `session:turn`
+ * reducer — and either can be the one holding the tail on screen, so they must agree.
+ */
+export function startsThinking(item: JsonValue): boolean {
+  if (item === null || typeof item !== "object" || Array.isArray(item)) return false;
+  const rec = item as { kind?: unknown; event?: unknown };
+  if (rec.kind !== "event" || rec.event === null || typeof rec.event !== "object") return false;
+  // A passthrough nests the provider's line under `provider_event`; a pinned event IS the line.
+  const envelope = rec.event as { type?: unknown; payload?: unknown };
+  const line = (envelope.type === "provider_event" ? envelope.payload : envelope) as { type?: unknown; event?: unknown };
+  if (line === null || typeof line !== "object" || line.type !== "stream_event") return false;
+  const event = line.event as { type?: unknown; content_block?: { type?: unknown }; delta?: { type?: unknown } };
+  if (event === null || typeof event !== "object") return false;
+  // The block OPENING is the exact moment thinking began, and it is the signal that survives the
+  // transport: upstream normalizes a recognized `text_delta`/`thinking_delta` into a partial (and
+  // then drops the empty ones), while everything it has no name for — `content_block_start`,
+  // `signature_delta` — is forwarded whole. So the opening is what actually arrives here, and the
+  // signature delta is the fallback for a start that was coalesced or dropped (`events_dropped` is
+  // a real outcome). `thinking_delta` is listed for a transport that forwards raw events.
+  if (event.type === "content_block_start") return event.content_block?.type === "thinking";
+  if (event.type === "content_block_delta") {
+    return event.delta?.type === "thinking_delta" || event.delta?.type === "signature_delta";
+  }
+  return false;
 }
 
 // --- push channels -----------------------------------------------------------

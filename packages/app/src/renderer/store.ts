@@ -55,7 +55,7 @@ import type {
   TaskSummary,
   WorkflowLayer,
 } from "@jaira/shared/browser";
-import { CONFIG_JSON, isTextMime, SHARED_SESSION, WORKFLOW_JSON } from "@jaira/shared/browser";
+import { CONFIG_JSON, isTextMime, SHARED_SESSION, startsThinking, WORKFLOW_JSON } from "@jaira/shared/browser";
 import {
   docKey,
   movedDraft,
@@ -1692,6 +1692,12 @@ export function useApp() {
           if (message.taskId === ref.current.selected) patch({ sessions: {}, liveTurn: null });
           break;
         case "session:turn": {
+          // Somebody ELSE's turn. There is one tail here and it belongs to what is on screen, so a
+          // delta from another task is dropped rather than folded in: a background sync, a run in
+          // another project, or a conversation in another window would otherwise write its answer
+          // into the transcript being read. `n` is per task, so a stray one also breaks the merge
+          // protocol — the skip rule compares counts that were never counting the same thing.
+          if (message.taskId !== ref.current.selected) break;
           // Accumulated per position: a delta is a fragment, and the fragments of one call belong to one
           // answer. A delta for a different position REPLACES rather than appends, because that is a
           // different state speaking and concatenating two would invent a turn neither produced.
@@ -1739,6 +1745,12 @@ export function useApp() {
           if (message.thinking !== undefined) {
             if (thinking.length === 0 && message.thinking.length > 0) thinkingStartedAt = stampedAt;
             thinking += message.thinking;
+          }
+          // A withheld think streams no text at all, so its start arrives as bookkeeping instead of
+          // as a fragment. The identical rule main folds in `LiveTurnLog`; both must agree, because
+          // either can be the one holding the tail on screen.
+          if (thinkingStartedAt === undefined && text.length === 0 && message.item !== undefined && startsThinking(message.item)) {
+            thinkingStartedAt = stampedAt;
           }
           patch({
             liveTurn: {

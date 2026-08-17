@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  artifactOf,
   changeStats,
   changesOf,
   isCodeMime,
@@ -53,6 +54,19 @@ describe("which views apply", () => {
     expect(viewsFor("<p>hi</p>", { mime: "text/html" })).toEqual(["html", "code", "text"]);
   });
 
+  it("renders a drawing first and keeps its source underneath", () => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>`;
+    // The rendering leads because "what does this look like" is what you ask of a drawing; `code`
+    // and `text` are what answer "why is it wrong". Exactly ONE rendered view — SVG is markup, so
+    // the HTML sniffer recognises it too, and two buttons showing the same picture is one too many.
+    expect(viewsFor(svg, { mime: "image/svg+xml" })).toEqual(["media", "code", "text"]);
+  });
+
+  it("still believes an author who declares HTML over markup that would also render as a picture", () => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>`;
+    expect(viewsFor(svg, { mime: "text/html" })).toEqual(["html", "code", "text"]);
+  });
+
   it("offers media only when a player has something to point at", () => {
     // The type alone is not enough — an image slot holding a description is not an image.
     expect(viewsFor("not a picture", { mime: "image/png" })).toEqual(["text"]);
@@ -62,13 +76,14 @@ describe("which views apply", () => {
 });
 
 describe("media", () => {
-  it("names the player a type wants, and leaves SVG to the text views", () => {
+  it("names the player a type wants, SVG included", () => {
     expect(mediaKindOf("image/png")).toBe("image");
     expect(mediaKindOf("audio/mpeg")).toBe("audio");
     expect(mediaKindOf("video/mp4")).toBe("video");
     expect(mediaKindOf("text/plain")).toBeUndefined();
-    // Markup with a source worth reading — treating it as an opaque picture takes that away.
-    expect(mediaKindOf("image/svg+xml")).toBeUndefined();
+    // SVG renders as a picture now. The source it used to be held back for is not lost — see the
+    // views test below, where `code` and `text` sit underneath the rendering.
+    expect(mediaKindOf("image/svg+xml")).toBe("image");
   });
 
   it("takes a URL as it is and wraps raw base64 in a data URI", () => {
@@ -78,6 +93,15 @@ describe("media", () => {
     expect(mediaSrcOf(b64, "image/png")).toBe(`data:image/png;base64,${b64}`);
     // A short word is not base64 no matter what the type claims.
     expect(mediaSrcOf("hello", "image/png")).toBeUndefined();
+  });
+
+  it("points an SVG at its own source, percent-encoded", () => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg"><rect fill="#ff0000"/></svg>`;
+    // `#` would truncate the URI as a fragment if this were pasted in raw — the encoding is what
+    // makes an ordinary fill colour survive the trip.
+    expect(mediaSrcOf(svg, "image/svg+xml")).toBe(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
+    // A type claiming SVG over something that is not markup gets no player, like every other type.
+    expect(mediaSrcOf("just a description", "image/svg+xml")).toBeUndefined();
   });
 
   it("knows which text has a grammar worth colouring", () => {
@@ -102,6 +126,53 @@ describe("media", () => {
       expect(looksLikeHtml("<div><p>hi</p></div>")).toBe(true);
       expect(looksLikeHtml("<!doctype html><title>x</title>")).toBe(true);
     });
+  });
+});
+
+describe("reading a value as an artifact", () => {
+  const ENGINE = { artifact: true, name: "feature.plan#3.plan_doc", format: "text/html", content: "<p>hi</p>" };
+
+  it("takes the engine's registration and a tool's envelope alike", () => {
+    expect(artifactOf(ENGINE)).toEqual({ mime: "text/html", content: "<p>hi</p>", name: "feature.plan#3.plan_doc" });
+    expect(artifactOf({ mediaType: "text/markdown", content: "# hi" })).toEqual({ mime: "text/markdown", content: "# hi" });
+    // A reference with the bytes left behind is still an artifact — that is the large-content case.
+    expect(artifactOf({ mediaType: "text/html", uri: "artifact://t1/mockup.html" })).toEqual({
+      mime: "text/html",
+      uri: "artifact://t1/mockup.html",
+    });
+  });
+
+  it("unwraps a single-key wrapper, which is what one blob output slot produces", () => {
+    expect(artifactOf({ plan_doc: ENGINE })?.content).toBe("<p>hi</p>");
+  });
+
+  it("refuses to unwrap when there is something else in the object", () => {
+    // Rendering `plan_doc` here would hide `notes` completely, which is worse than showing JSON.
+    expect(artifactOf({ plan_doc: ENGINE, notes: ["a"] })).toBeUndefined();
+  });
+
+  it("answers undefined for a value that is not an artifact", () => {
+    // The shape that would match if a declared type were not required — half the payloads in a
+    // transcript carry a `content` string.
+    expect(artifactOf({ path: "a.ts", content: "x" })).toBeUndefined();
+    expect(artifactOf({ mediaType: "text/html" })).toBeUndefined();
+    expect(artifactOf("<p>hi</p>")).toBeUndefined();
+    expect(artifactOf({ uri: "https://example.test/a.mp4" })).toBeUndefined();
+  });
+
+  it("is read as what it carries, with the envelope kept behind it", () => {
+    // The declared type reaches the renderer, so this is the HTML view rather than a JSON dump —
+    // and `json` is last, which is where you check what the producer actually handed over.
+    expect(viewsFor(ENGINE)).toEqual(["html", "code", "text", "json"]);
+    expect(viewsFor({ plan_doc: { artifact: true, name: "x", format: "markdown", content: "- a" } })).toEqual([
+      "markdown",
+      "text",
+      "json",
+    ]);
+  });
+
+  it("has only the envelope to show when the content did not travel", () => {
+    expect(viewsFor({ mediaType: "text/html", uri: "artifact://t1/mockup.html" })).toEqual(["json"]);
   });
 });
 

@@ -195,6 +195,73 @@ describe("compilePolicy", () => {
     expect(await verdict(OPEN, "bash", { unexpected: 1 })).toBe("ask");
   });
 
+  describe("a produced artifact is judged by its size", () => {
+    /** Compile with a threshold and ask about one call. */
+    async function sized(tool: string, input: Record<string, unknown>, askAboveBytes: number, audit?: PolicyAuditEntry[]) {
+      const compiled = compilePolicy(OPEN, {
+        askAboveBytes,
+        ...(audit ? { onDecision: (e: PolicyAuditEntry) => audit.push(e) } : {}),
+      });
+      const smart = compiled.smart?.[tool] as SmartApprover | undefined;
+      expect(smart, `no smart approver for ${tool}`).toBeDefined();
+      return smart!({ tool, input: input as never, sessionId: "s1" });
+    }
+
+    it("has the RULE without taking the tool's permission away", () => {
+      // The rule is registered and the baseline is silent, which is the whole distinction. A baseline
+      // `smart` resolves through the approver INSTEAD of through the tool's mode — so `show_artifact`
+      // was waved through under the ceiling while `write_file` beside it asked, and the permission
+      // menu showed a mode that governed nothing. It now falls to its mode like every other tool, and
+      // the size rule waits for somebody to author `smart`.
+      const compiled = compilePolicy(OPEN);
+      expect(compiled.baseline?.tools?.["show_artifact"]).toBeUndefined();
+      expect(Object.keys(compiled.smart ?? {})).toContain("show_artifact");
+    });
+
+    it("leaves every OTHER producing tool's default exactly where it was", () => {
+      const compiled = compilePolicy(OPEN);
+      expect(compiled.baseline?.tools?.["write_file"]).toBeUndefined();
+      expect(compiled.baseline?.tools?.["edit"]).toBeUndefined();
+      expect(Object.keys(compiled.smart ?? {})).not.toContain("write_file");
+    });
+
+    it("passes what is ordinary and asks about what is enormous", async () => {
+      expect(await sized("show_artifact", { path: "a.html", content: "<p>hi</p>" }, 1024)).toBe("allow");
+      expect(await sized("show_artifact", { path: "a.html", content: "x".repeat(2048) }, 1024)).toBe("ask");
+      // Measured in BYTES, not characters — one emoji is four of them.
+      expect(await sized("show_artifact", { path: "a.html", content: "🙂".repeat(3) }, 8)).toBe("ask");
+    });
+
+    it("says how big it is, so the question can be answered", async () => {
+      const audit: PolicyAuditEntry[] = [];
+      await sized("show_artifact", { path: "a.html", content: "x".repeat(2_097_152) }, 1_048_576, audit);
+      expect(audit[0]).toMatchObject({ tool: "show_artifact", action: "require_approval" });
+      expect(audit[0]!.reason).toMatch(/2\.0 MB/);
+    });
+
+    it("has no ceiling — 0 turns the question off entirely", async () => {
+      // The user's rule: unlimited size, but ask above a point. Setting no point means never asking.
+      expect(await sized("show_artifact", { path: "a.html", content: "x".repeat(50_000_000) }, 0)).toBe("allow");
+    });
+
+    it("still refuses .jaira/ whatever the size", async () => {
+      expect(await sized("show_artifact", { path: ".jaira/x.html", content: "tiny" }, 1024)).toBe("deny");
+    });
+
+    it("gives an opted-in write_file a real answer instead of a blanket escalation", async () => {
+      // Authoring `smart` on a non-command tool used to mean "always ask", because there was no
+      // command to read and nothing else was judged. Now the payload is.
+      const compiled = compilePolicy({ tools: { write_file: "smart" } }, { askAboveBytes: 1024 });
+      const smart = compiled.smart?.["write_file"] as SmartApprover | undefined;
+      expect(await smart!({ tool: "write_file", input: { path: "a.ts", content: "small" } as never, sessionId: "s1" })).toBe("allow");
+      expect(
+        await smart!({ tool: "write_file", input: { path: "a.ts", content: "x".repeat(2048) } as never, sessionId: "s1" }),
+      ).toBe("ask");
+      // And a call with nothing to judge is still escalated rather than assumed.
+      expect(await smart!({ tool: "write_file", input: { path: "a.ts" } as never, sessionId: "s1" })).toBe("ask");
+    });
+  });
+
   it("records every decision for the audit trail (§10.2)", async () => {
     const audit: PolicyAuditEntry[] = [];
     await verdict(OPEN, "bash", { command: "git push --force" }, audit);

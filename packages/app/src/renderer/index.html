@@ -5,10 +5,17 @@
     <!-- The renderer loads only its own bundle; no remote code, no inline eval. worker-src and
          font-src exist for Monaco (CHANGESETS.md §7.3): its diff computation runs in a bundled
          worker ('self'; Vite may wrap one in a blob: URL), and its icons are a bundled font.
-         Everything is still local — no CDN, per the §7.3 Electron rule. -->
+         Everything is still local — no CDN, per the §7.3 Electron rule.
+
+         frame-src names the artifact scheme because an interactive artifact is loaded from it, and
+         because WITHOUT the directive it falls through to default-src 'none' and the frame is
+         refused before it is fetched. It admits that scheme and nothing else: a static artifact is
+         still shown from srcdoc, which needs no allowance here and gets no scripts — this app's own
+         script-src is inherited by such a frame, which is precisely why an interactive one cannot
+         use srcdoc at all. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; worker-src 'self' blob:; font-src 'self'"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; worker-src 'self' blob:; font-src 'self'; frame-src jaira-artifact:"
     />
     <title>JaiRA</title>
   </head>

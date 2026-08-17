@@ -62,7 +62,13 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
           type: "number",
           title: "keep inline below (bytes)",
           description:
-            "Content smaller than this rides along in bindings and prompts rather than being read back from disk. Larger is fewer reads and bigger prompts.",
+            "Content smaller than this rides along in bindings and prompts rather than being read back from disk. Larger is fewer reads and bigger prompts. Not a limit: a bigger artifact still succeeds.",
+        },
+        askAboveBytes: {
+          type: "number",
+          title: "ask above (bytes)",
+          description:
+            "Producing an artifact bigger than this asks you first. There is no ceiling on size — this is a question, not a refusal. 0 turns it off.",
         },
       },
     },

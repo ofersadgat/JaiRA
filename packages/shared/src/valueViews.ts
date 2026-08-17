@@ -47,12 +47,17 @@ export type MediaKind = "image" | "video" | "audio";
 /**
  * The media a type names, when it names one.
  *
- * SVG is deliberately absent: it is markup, `isTextMime` says so, and it has a source worth reading
- * — treating it as an opaque picture would take the one view that answers "why is this wrong".
- * It still renders, through the code and HTML views its type already earns.
+ * SVG is INCLUDED, and the reason it was once excluded no longer holds. The worry was that treating
+ * markup as an opaque picture takes away the source — the one view that answers "why is this
+ * wrong". But {@link viewsFor} adds a media view without returning early, so a picture that is also
+ * text keeps its `code` and `text` views underneath it. Nothing is taken away; a rendering is added,
+ * and it leads because "what does this look like" is the question somebody has about a drawing.
+ *
+ * It is also the safe way to show one: {@link mediaSrcOf} hands it to an `<img>`, and an SVG in an
+ * `<img>` runs no script and fetches nothing however the document is written.
  */
 export function mediaKindOf(mime: string | undefined): MediaKind | undefined {
-  if (mime === undefined || mime === "image/svg+xml") return undefined;
+  if (mime === undefined) return undefined;
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("video/")) return "video";
   if (mime.startsWith("audio/")) return "audio";
@@ -89,6 +94,17 @@ function isBase64(text: string): boolean {
 }
 
 /**
+ * An SVG document or fragment — the `<svg>` root, wherever in the preamble it starts.
+ *
+ * Bounded rather than searching the whole string: a root element that has not appeared within a
+ * kilobyte of prolog and comments is not one this needs to find, and the cost of the search would be
+ * paid on every value that merely CLAIMS to be an image.
+ */
+function looksLikeSvg(text: string): boolean {
+  return /<svg[\s>]/i.test(text.slice(0, 1000));
+}
+
+/**
  * What to point a player at, or `undefined` when this value carries no media.
  *
  * Four shapes reach here because four producers exist: a URL or `data:` URI as a bare string, raw
@@ -99,6 +115,12 @@ function isBase64(text: string): boolean {
 export function mediaSrcOf(value: unknown, mime: string | undefined): string | undefined {
   if (typeof value === "string") {
     if (isPlayableUrl(value)) return value.trim();
+    // SVG travels as its own source, so the `src` IS the document. Percent-encoded rather than
+    // base64: it survives the `#` and `%` that appear in ordinary markup (a fill colour, a url()),
+    // and it stays legible in dev tools when a drawing comes out wrong.
+    if (mime === "image/svg+xml" && looksLikeSvg(value)) {
+      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(value)}`;
+    }
     if (mime !== undefined && isBase64(value)) return `data:${mime};base64,${value.replace(/\s+/g, "")}`;
     return undefined;
   }
@@ -198,6 +220,16 @@ function mimeOfSchema(schema: unknown): string | undefined {
  * present — it is what the rich one is checked against.
  */
 export function viewsFor(value: unknown, hint: ViewHint = {}): ViewId[] {
+  // An ARTIFACT is a reference to content rather than the content itself, so it is read as what it
+  // carries — with the envelope kept behind it, because the media type and the reference are exactly
+  // what you want when the rendering is not what you expected. See {@link artifactOf}.
+  const artifact = artifactOf(value);
+  if (artifact !== undefined) {
+    const inner =
+      artifact.content === undefined ? [] : viewsFor(artifact.content, { mime: artifact.mime ?? hint.mime });
+    return [...inner, "json"];
+  }
+
   const views: ViewId[] = [];
   if (changesOf(value) !== undefined) views.push("changes");
 
@@ -205,13 +237,19 @@ export function viewsFor(value: unknown, hint: ViewHint = {}): ViewId[] {
   // A picture, a clip or a track is the whole of what such a value IS, so it leads — and it is only
   // offered when there is something a player can actually be pointed at, never on the type alone.
   if (mediaKindOf(mime) !== undefined && mediaSrcOf(value, mime) !== undefined) views.push("media");
+  const rendered = views.includes("media");
 
   const text = textOf(value);
   const declared = viewOfMime(hint.mime) ?? viewOfMime(mimeOfSchema(hint.schema));
   if (text !== undefined) {
     // A declared type is a statement and beats the sniffer, which only ever offers.
-    if (declared === "markdown" || (declared === undefined && looksLikeMarkdown(text))) views.push("markdown");
-    if (declared === "html" || (declared === undefined && looksLikeHtml(text))) views.push("html");
+    //
+    // `!rendered` is what keeps SVG from earning two renderings of one picture: it is markup, so
+    // `looksLikeHtml` recognises it, and a toggle whose first two buttons show the same drawing is a
+    // toggle where one of them can only be pressed to no effect. A DECLARED type still wins — an
+    // author who says `text/html` gets the HTML view whatever else applies.
+    if (declared === "markdown" || (declared === undefined && !rendered && looksLikeMarkdown(text))) views.push("markdown");
+    if (declared === "html" || (declared === undefined && !rendered && looksLikeHtml(text))) views.push("html");
     // Highlighted, for text that has a grammar. Below the rendered views and above the raw one: for
     // HTML or JSON the rendering answers "what does this look like" and this answers "what does it
     // say", and the plain source answers neither better than a coloured copy of itself.
@@ -223,6 +261,89 @@ export function viewsFor(value: unknown, hint: ViewHint = {}): ViewId[] {
   // rendering of it is a claim you must be able to check.
   views.push("json");
   return views;
+}
+
+// --- artifacts ---------------------------------------------------------------
+
+/**
+ * An artifact as a VALUE: content a producer made, and what it is.
+ *
+ * Deliberately not a new transport. Three producers already make one and they all end up in the
+ * artifact map — a `blob` output slot the engine registers, an agent's `write_file`, and a tool that
+ * exists to show something — so the rendering keys off the one shape rather than off whichever
+ * producer happened to make it.
+ */
+export interface ArtifactValue {
+  /** The declared media type: the engine's `format`, or an envelope's `mediaType`. */
+  mime?: string;
+  /** The content, when it travelled with the reference. Absent for one too large to inline. */
+  content?: string;
+  /** Where the content resolves when it did not travel — see the artifact map. */
+  uri?: string;
+  name?: string;
+  /** The logical path, which is how a surface asks for this artifact by name. */
+  path?: string;
+  /**
+   * Whether the producer asked for this to be able to RUN when shown.
+   *
+   * A claim carried through, never a conclusion drawn here. A renderer still has to have the artifact
+   * served to it before anything can execute, and the RECORD is what that grant consults — so this
+   * being wrong costs a wasted request, not an execution nobody asked for.
+   */
+  interactive?: boolean;
+}
+
+/**
+ * Read a value as an ARTIFACT, or answer that it is not one.
+ *
+ * Two shapes reach here because two producers exist, and they are the same fact told differently:
+ * the engine's own registration (`{artifact: true, name, format, content}` — what a `blob` output
+ * slot becomes) and a tool's envelope (a declared media type beside the bytes or a reference to
+ * them). Recognising both here is what lets one renderer serve a workflow that writes a document and
+ * an agent that shows one mid-conversation.
+ *
+ * A SINGLE-KEY WRAPPER counts, because that is what a state with one blob output slot actually
+ * produces: `{plan_doc: {artifact: true, …}}`. The restriction to one key is the whole safety of it —
+ * unwrapping `{plan_doc: …, notes: […]}` would render the document and silently hide the notes
+ * beside it, which is worse than showing JSON.
+ *
+ * `undefined` rather than a partial value for "not an artifact": a media type with nothing behind it
+ * is a claim about content that does not exist, and rendering the envelope as though it were the
+ * document is how an empty pane comes to look like a produced one.
+ */
+export function artifactOf(value: unknown): ArtifactValue | undefined {
+  if (!isRecord(value)) return undefined;
+  const direct = artifactEnvelopeOf(value);
+  if (direct !== undefined) return direct;
+  const keys = Object.keys(value);
+  return keys.length === 1 ? artifactEnvelopeOf(value[keys[0]!]) : undefined;
+}
+
+/** One envelope, in either spelling. See {@link artifactOf} for why there are two. */
+function artifactEnvelopeOf(value: unknown): ArtifactValue | undefined {
+  if (!isRecord(value)) return undefined;
+  const content = typeof value["content"] === "string" ? (value["content"] as string) : undefined;
+  const uri = typeof value["uri"] === "string" && value["uri"] !== "" ? (value["uri"] as string) : undefined;
+  const name = typeof value["name"] === "string" && value["name"] !== "" ? (value["name"] as string) : undefined;
+  // `format` is the engine's word for it and `mediaType` is the envelope's; they mean the same thing.
+  const declared = value["format"] ?? value["mediaType"];
+  const mime = typeof declared === "string" && declared !== "" ? declared : undefined;
+
+  const engine = value["artifact"] === true && name !== undefined;
+  // A tool's envelope has to SAY what it is. Without that this would match any object that happens
+  // to carry a `content` string — a tool result, a file read, half the payloads in a transcript.
+  const envelope = mime !== undefined && (content !== undefined || uri !== undefined);
+  if (!engine && !envelope) return undefined;
+
+  const path = typeof value["path"] === "string" && value["path"] !== "" ? (value["path"] as string) : undefined;
+  return {
+    ...(mime !== undefined ? { mime } : {}),
+    ...(content !== undefined ? { content } : {}),
+    ...(uri !== undefined ? { uri } : {}),
+    ...(name !== undefined ? { name } : {}),
+    ...(path !== undefined ? { path } : {}),
+    ...(value["interactive"] === true ? { interactive: true } : {}),
+  };
 }
 
 // --- changes -----------------------------------------------------------------

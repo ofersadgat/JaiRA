@@ -683,12 +683,16 @@ export function liveItemEntries(item: JsonValue, within?: string): Array<Transcr
  * everything settled and everything streaming. Appended to the end — which is what the Chat view
  * used to do — it sat UNDER the thinking and the half-written answer it had provoked, and stayed
  * there until the turn landed and the record put it back where it belonged.
+ *
+ * A LIST of them, because a conversation takes more than one at a time: a message sent mid-turn joins
+ * the turn in flight, so two can be outstanding at once, and a single slot showed the newer and lost
+ * the older until the record caught up.
  */
 export function entriesOf(
   session: SessionView | null,
   journal: readonly ConversationTurn[] = [],
   live?: LiveTail | string | null,
-  pending?: string,
+  pending?: string | readonly string[],
 ): TranscriptEntry[] {
   const said: Array<TranscriptEntry | ResultPart> = [];
   // The record's pinned provider events, spliced where they happened — an event's index counts the
@@ -770,7 +774,9 @@ export function entriesOf(
   // After everything the record holds and before anything still arriving: it was said first, and the
   // stream below it is the answer to it. No `turn` — the record does not hold this message yet, so
   // there is no position to offer an edit at.
-  if (pending !== undefined) entries.push({ kind: "message", role: "user", text: pending });
+  for (const text of pending === undefined ? [] : typeof pending === "string" ? [pending] : pending) {
+    entries.push({ kind: "message", role: "user", text });
+  }
   const tail: LiveTail | null = typeof live === "string" ? { text: live } : (live ?? null);
   if (tail !== null) {
     const streamed: Array<TranscriptEntry | ResultPart> = [];
@@ -782,12 +788,14 @@ export function entriesOf(
     // answers. The tail is a thought row like any settled one, growing as the deltas arrive — and
     // marked LIVE while the answer has not started, which is precisely "still thinking". Once text
     // begins the thinking is over: the row keeps the duration it took and stops pulsing.
-    if (tail.thinking !== undefined && tail.thinking.length > 0) {
+    // A started clock is enough on its own: a WITHHELD think has no text to grow, and gating the row
+    // on text is what made four minutes of reasoning render as nothing at all.
+    if ((tail.thinking !== undefined && tail.thinking.length > 0) || tail.thinkingStartedAt !== undefined) {
       const thinking = tail.thinkingStartedAt;
       const answering = tail.text.length > 0;
       entries.push({
         kind: "thought",
-        text: tail.thinking,
+        text: tail.thinking ?? "",
         ...(answering ? {} : { live: true }),
         ...(thinking !== undefined ? { startedAt: thinking } : {}),
         ...(answering && thinking !== undefined && tail.textStartedAt !== undefined

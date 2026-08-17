@@ -11,9 +11,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ExecServices, Tool } from "@declarative-ai/exec";
+import { viewsFor } from "@jaira/shared";
 import { MemoryArtifactStore } from "../src/artifacts";
 import { parseDestination } from "../src/artifactPath";
-import { createEditFileTool, createReadFileTool, createWriteFileTool, registerFileTools, EDIT_FILE, READ_FILE, WRITE_FILE } from "../src/fileTools";
+import {
+  createEditFileTool,
+  createReadFileTool,
+  createShowArtifactTool,
+  createWriteFileTool,
+  registerFileTools,
+  EDIT_FILE,
+  READ_FILE,
+  SHOW_ARTIFACT,
+  WRITE_FILE,
+} from "../src/fileTools";
 import { newRegistry } from "../src/wiring";
 
 let dir: string;
@@ -46,7 +57,12 @@ function tools(destination: string, inlineMaxBytes = 65_536) {
     },
     now: () => 1_000,
   };
-  return { write: createWriteFileTool(options), read: createReadFileTool(options), edit: createEditFileTool(options) };
+  return {
+    write: createWriteFileTool(options),
+    read: createReadFileTool(options),
+    edit: createEditFileTool(options),
+    show: createShowArtifactTool(options),
+  };
 }
 
 /** Built per call, since `dir` is a fresh temp directory each test. */
@@ -247,5 +263,156 @@ describe("edit", () => {
 
   it("is mutating, which is what a narrowing profile gates on", () => {
     expect(tools("$DEFAULT").edit.readOnly).toBe(false);
+  });
+});
+
+describe("show_artifact", () => {
+  it("creates an artifact and reports what it is, not where it went", async () => {
+    const { show } = tools("$DEFAULT");
+    const result = await call(show, { path: "mockups/dash.html", content: "<h1>hi</h1>" });
+    expect(result).toMatchObject({
+      path: "mockups/dash.html",
+      mediaType: "text/html",
+      bytes: 11,
+      uri: "artifact://t-1/mockups/dash.html",
+      content: "<h1>hi</h1>",
+    });
+    // The illusion `write_file` maintains applies here too — the physical path is never reported.
+    expect(result).not.toHaveProperty("physicalPath");
+    // Under the ARTIFACT directory, not the workspace path the producer named — even though the
+    // configured destination is `$DEFAULT`, which for `write_file` means the workspace itself.
+    expect(existsSync(join(dir, "mockups", "dash.html"))).toBe(false);
+    expect(readFileSync(join(dir, "jaira-artifacts", "t-1", "mockups", "dash.html"), "utf8")).toBe("<h1>hi</h1>");
+  });
+
+  it("cannot overwrite source — the property that makes it read-only", async () => {
+    // The whole basis of the classification. `$DEFAULT` is `$WORKTREE/$RELPATH`, so left on the
+    // configured destination this call would have replaced the file outright.
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "index.ts"), "the real source\n");
+    const { show } = tools("$DEFAULT");
+    await call(show, { path: "src/index.ts", content: "<h1>not source</h1>" });
+    expect(readFileSync(join(dir, "src", "index.ts"), "utf8")).toBe("the real source\n");
+  });
+
+  it("refuses a path that climbs out of the artifact directory", async () => {
+    const { show } = tools("$DEFAULT");
+    expect(await call(show, { path: "../../escape.html", content: "x" })).toMatchObject({
+      error: expect.stringMatching(/outside the destination root/) as unknown as string,
+    });
+  });
+
+  it("writes nothing at all when the project chose a virtual destination", async () => {
+    const { show, read } = tools("virtual:");
+    await call(show, { path: "mockups/dash.html", content: "<h1>hi</h1>" });
+    expect(existsSync(join(dir, "jaira-artifacts"))).toBe(false);
+    // Still round-trips, because the map is what answers — the illusion holds here too.
+    expect(await call(read, { path: "mockups/dash.html" })).toMatchObject({ content: "<h1>hi</h1>" });
+  });
+
+  it("infers the media type from the extension and lets a declaration overrule it", async () => {
+    const { show } = tools("virtual:");
+    expect(await call(show, { path: "a/chart.svg", content: "<svg/>" })).toMatchObject({ mediaType: "image/svg+xml" });
+    expect(await call(show, { path: "a/notes.md", content: "# hi" })).toMatchObject({ mediaType: "text/markdown" });
+    // A name is a guess; a declaration is a statement, and the statement wins.
+    expect(await call(show, { path: "a/thing.txt", content: "<svg/>", mediaType: "image/svg+xml" })).toMatchObject({
+      mediaType: "image/svg+xml",
+    });
+  });
+
+  it("keeps the interactive claim on the RECORD, and only when it was made", async () => {
+    // The claim has to outlive the call, because the grant that lets a page run consults the record
+    // rather than the tool result. Absent by default: a page is static unless it asked not to be.
+    const { show } = tools("virtual:");
+    await call(show, { path: "a/widget.html", content: "<p>x</p>", interactive: true });
+    expect(store.get("t-1", "a/widget.html")?.interactive).toBe(true);
+
+    await call(show, { path: "a/page.html", content: "<p>x</p>" });
+    expect(store.get("t-1", "a/page.html")?.interactive).toBeUndefined();
+
+    // And only `true` counts — a truthy-looking value is not a claim.
+    await call(show, { path: "a/sneak.html", content: "<p>x</p>", interactive: "yes" });
+    expect(store.get("t-1", "a/sneak.html")?.interactive).toBeUndefined();
+  });
+
+  it("reports the claim back, so the value a run carries says what it is", async () => {
+    const { show } = tools("virtual:");
+    expect(await call(show, { path: "a/widget.html", content: "<p>x</p>", interactive: true })).toMatchObject({
+      interactive: true,
+    });
+    expect(await call(show, { path: "a/page.html", content: "<p>x</p>" })).not.toHaveProperty("interactive");
+  });
+
+  it("records the declared type, so what the bytes ARE outlives the run", async () => {
+    const { show } = tools("virtual:");
+    await call(show, { path: "a/thing.txt", content: "<svg/>", mediaType: "image/svg+xml" });
+    expect(store.get("t-1", "a/thing.txt")?.format).toBe("image/svg+xml");
+  });
+
+  it("shows what is already there when given no content — the 'send this file' case", async () => {
+    const { show, write } = tools("virtual:");
+    // Through the map: a virtual artifact is not on disk at the path the agent knows it by.
+    await call(write, { path: "docs/plan.md", content: "# done\n" });
+    expect(await call(show, { path: "docs/plan.md" })).toMatchObject({
+      path: "docs/plan.md",
+      mediaType: "text/markdown",
+      content: "# done\n",
+    });
+    // And an ordinary workspace file, which never went through the map at all.
+    writeFileSync(join(dir, "README.md"), "# real\n");
+    expect(await call(show, { path: "README.md" })).toMatchObject({ content: "# real\n" });
+  });
+
+  it("reports honestly when there is nothing at the path", async () => {
+    const { show } = tools("$DEFAULT");
+    expect(await call(show, { path: "nope.html" })).toMatchObject({
+      error: expect.stringMatching(/could not read/) as unknown as string,
+    });
+  });
+
+  it("keeps the reference but drops the content once it is too big to inline", async () => {
+    // The journal holds what a call returned, so a large artifact travels as a reference — the URI is
+    // what Stage 3's reader resolves. Small ones carry their bytes and render with nothing to fetch.
+    const { show } = tools("$DEFAULT", 8);
+    const big = await call(show, { path: "big.html", content: "<p>0123456789</p>" });
+    expect(big).toMatchObject({ uri: "artifact://t-1/big.html", bytes: 17 });
+    expect(big).not.toHaveProperty("content");
+  });
+
+  it("refuses `.jaira/` like every other producing tool", async () => {
+    const { show } = tools("$DEFAULT");
+    expect(await call(show, { path: ".jaira/sneak.html", content: "x" })).toMatchObject({
+      error: expect.stringMatching(/\.jaira/) as unknown as string,
+    });
+  });
+
+  it("returns something the renderer reads as an artifact — the seam between the tool and the view", async () => {
+    // The end-to-end claim of this work: a tool call comes back, the transcript runs it through
+    // `viewsFor` with NO hint, and the page renders rather than being printed as tags. If the
+    // envelope's spelling ever drifts from what `artifactOf` recognises, this is what says so.
+    const { show } = tools("virtual:");
+    const html = await call(show, { path: "mockups/dash.html", content: "<h1>hi</h1>" });
+    expect(viewsFor(html)).toEqual(["html", "code", "text", "json"]);
+
+    const svg = await call(show, { path: "mockups/chart.svg", content: `<svg xmlns="http://www.w3.org/2000/svg"/>` });
+    expect(viewsFor(svg)).toEqual(["media", "code", "text", "json"]);
+
+    // And an artifact too large to inline has only its envelope to show, which is honest: the bytes
+    // are not here, and Stage 3's reader is what resolves the `uri`.
+    const { show: tiny } = tools("virtual:", 4);
+    expect(viewsFor(await call(tiny, { path: "big.html", content: "<h1>hi</h1>" }))).toEqual(["json"]);
+  });
+
+  it("is read-only, and is registered with the rest", () => {
+    // Which is what lets `plan` mode draw: the profile allows a read-only tool, and nothing that was
+    // already in the workspace is different after this runs.
+    expect(tools("$DEFAULT").show.readOnly).toBe(true);
+    const registry = newRegistry();
+    registerFileTools(registry, {
+      destination: parseDestination("virtual:"),
+      store,
+      vars: { worktree: dir, project: dir, jaira: join(dir, ".jaira"), artifactDir: "a", taskId: "t-1" },
+    });
+    expect(registry.tools.has(SHOW_ARTIFACT)).toBe(true);
   });
 });

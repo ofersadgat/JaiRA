@@ -239,7 +239,7 @@ describe("SummarizingSessionStore", () => {
   });
 
   it("refuses a store that cannot compact, rather than silently never compacting", () => {
-    const cannot = { resolve: () => ({}) as never, fork: () => "x", messages: () => [] };
+    const cannot = { resolve: () => ({}) as never, fork: () => "x", refAt: () => "x", messages: () => [] };
     expect(() => new SummarizingSessionStore({ summarize: async () => "x", inner: cannot })).toThrow(/can compact/);
   });
 });

@@ -17,6 +17,7 @@ import {
   WORKFLOW_DESCRIPTION,
   WORKFLOW_JSON,
   WORKFLOW_YAML,
+  mimeOfPath,
   type WorkflowSource,
 } from "@jaira/shared/browser";
 import { Badge } from "./board";
@@ -28,6 +29,7 @@ import { docKey, useDraftBox } from "./drafts";
 import { EditorActions } from "./editorChrome";
 import { registerFileSurface, type FileSurfaceProps } from "./fileTypes";
 import { MarkdownView } from "./markdown";
+import { ValueView } from "./valueView";
 import { SchemaJsonEditor, schemaReferenceProps } from "./schemaEditor";
 import { WorkflowEditor } from "./stateEditor";
 import { WorkflowSyncPanel } from "./syncPanel";
@@ -356,6 +358,27 @@ export function WorkflowEdit({ doc, busy, onSave, context }: FileSurfaceProps): 
   );
 }
 
+// --- rendered documents ------------------------------------------------------
+
+/**
+ * A document whose type has a RENDERING of its own — an HTML page, an SVG drawing.
+ *
+ * Delegated to {@link ValueView} rather than drawing a frame here, and that is the point of adding
+ * it: the transcript already shows model-produced HTML that way, and a mockup should not look one
+ * way beside the call that made it and another way when opened as a file. One renderer, one sandbox
+ * posture, one toggle back to the source.
+ *
+ * The type comes from the PATH rather than from the tree node, because a surface is handed a
+ * document and not the row that was clicked — and `mimeOfPath` is the same classifier the row used,
+ * so the two cannot disagree.
+ *
+ * No editor is registered for either type: both are text, so the fallback chain gives them the plain
+ * one, which is the right surface for a file whose source is what you came to change.
+ */
+export function RenderedFileView({ doc }: FileSurfaceProps): JSX.Element {
+  return <ValueView value={doc.text} hint={{ mime: mimeOfPath(doc.path) }} />;
+}
+
 // --- configuration -----------------------------------------------------------
 
 /**
@@ -457,6 +480,11 @@ registerFileSurface("text/markdown", "edit", TextEdit);
 // is edited exactly like any other document — which is what makes a proposed rewrite something you
 // can retype before saving.
 registerFileSurface(WORKFLOW_DESCRIPTION, "view", WorkflowSyncPanel);
+
+// A page and a drawing both have a rendering, and neither had a viewer — an `.html` in a layer root
+// fell all the way to the plain text editor, which is the one surface that cannot show what it is.
+registerFileSurface("text/html", "view", RenderedFileView);
+registerFileSurface("image/svg+xml", "view", RenderedFileView);
 
 registerFileSurface("application/json", "view", JsonView);
 // The schema-aware editor, not the plain one: a `.json` file is the one place a picker of known

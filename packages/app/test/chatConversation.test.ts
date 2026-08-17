@@ -207,6 +207,44 @@ describe("editing a message", () => {
     ]);
   });
 
+  it("says WHERE the conversation split, and what it said down the other side", async () => {
+    // A fork is not a deletion, and the thread coming back shorter is indistinguishable from one on
+    // screen. What the branch left behind is intact in the record and was reachable from nowhere —
+    // so it is reported, from the seam onward, in the same shape as the turns it sits beside.
+    const taskId = await started("one");
+    const thread = service.chatThread({ taskId })!;
+    await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "two", fake: REPLY("second answer") });
+    await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "three", fake: REPLY("third answer") });
+
+    const before = service.chatThread({ taskId })!;
+    expect(before.forks).toBeUndefined(); // nothing has split yet, and nothing is paid for
+    await service.sendChatMessage({
+      taskId,
+      instanceId: before.instanceId,
+      message: "two, but better",
+      branchAt: before.points[0]!.at,
+      fake: REPLY("a better second answer"),
+    });
+
+    const after = service.chatThread({ taskId })!;
+    expect(after.forks).toHaveLength(1);
+    const [fork] = after.forks!;
+    // The seam sits where the two sides stop agreeing: everything above turn 2 is common ground.
+    expect(fork!.turn).toBe(2);
+    expect(after.session.turns.slice(0, fork!.turn).map((t) => `${t.role}: ${t.text ?? ""}`)).toEqual([
+      "user: one",
+      "assistant: first answer",
+    ]);
+    // And the other side is whole — the replaced message AND everything that followed it.
+    expect(fork!.left).toHaveLength(1);
+    expect(fork!.left[0]!.turns.map((t) => `${t.role}: ${t.text ?? ""}`)).toEqual([
+      "user: two",
+      "assistant: second answer",
+      "user: three",
+      "assistant: third answer",
+    ]);
+  });
+
   it("can be edited again — the second edit forks the branch the first one made", async () => {
     const taskId = await started("one");
     const thread = service.chatThread({ taskId })!;
@@ -253,12 +291,83 @@ describe("editing a message", () => {
   });
 });
 
+describe("a turn in flight", () => {
+  it("narrates itself to the window, the way a run does", async () => {
+    // A chat turn published nothing at all: no deltas while it ran, no journal events when it
+    // settled. The first is why a reply appeared only once it was finished — while the conversation's
+    // OPENING message, which is a run, streamed perfectly — and the second is what retires the live
+    // tail, since the renderer drops it on exactly these two events. Both come from one wiring.
+    const taskId = await started("one");
+    const thread = service.chatThread({ taskId })!;
+    pushes.length = 0;
+    await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "two", fake: REPLY("second answer") });
+
+    const events = pushes.filter((m) => m.type === "engine:event" && m.taskId === taskId);
+    expect(events.length).toBeGreaterThan(0);
+    const types = events.map((m) => (m as { event: { type?: string } }).event.type);
+    expect(types).toContain("operation.started");
+    expect(types).toContain("operation.completed");
+  });
+});
+
 describe("stopping a turn", () => {
   it("says plainly that there was nothing to stop", async () => {
     const taskId = await started("one");
     // The honest answer between turns, and the one the button needs: `false` is not a failure, it is
     // a turn that landed before the click did.
     expect(service.cancelChatTurn({ taskId })).toEqual({ canceled: false });
+  });
+
+  /**
+   * What a stop leaves behind. Driven with a turn that ENDS BADLY rather than one aborted on a timer,
+   * because the two are the same thing to everything downstream — an abort lands in `runChatTurn` as
+   * an ordinary failure — and only this way is it a test rather than a race.
+   *
+   * All three symptoms had one cause: `operation.failed` carried no metrics, so the turn named no
+   * position, and the position it was actually holding was handed to the next message. See
+   * `runChatTurn`.
+   */
+  it("keeps the OPENING message too, when the very first turn is the one that ends badly", async () => {
+    // The first message of a conversation is the run, so this is the other half of the same story —
+    // and the worse half: with nothing recorded before it, a thread that cannot find the turn has
+    // nothing at all to show, and the view reads as a conversation that was never had.
+    const { taskId } = service.createTask({ title: titleOf("one"), workflow: CHAT_ASSISTANT, inputs: { message: "one" } });
+    await service.startTask({ taskId, fake: [{ error: "stopped" }] });
+    await until(() => pushes.some((m) => m.type === "run:finished" && m.taskId === taskId), "the opening run to end");
+
+    expect(service.chatThread({ taskId })).not.toBeNull();
+    expect(said(taskId)).toEqual(["user: one"]);
+  });
+
+  it("keeps what was typed, and the conversation carries on where it left off", async () => {
+    const taskId = await started("one");
+    const thread = service.chatThread({ taskId })!;
+
+    const stopped = await service.sendChatMessage({
+      taskId,
+      instanceId: thread.instanceId,
+      message: "two",
+      fake: [{ error: "stopped" }],
+    });
+    expect(stopped.failure).toContain("stopped");
+
+    // The message somebody typed is still there. It lives in the record's request — the answer is
+    // what a transport streams, so an interrupted turn has no other trace of the question.
+    expect(said(taskId)).toEqual(["user: one", "assistant: first answer", "user: two"]);
+
+    await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "three", fake: REPLY("third answer") });
+
+    // One conversation, not a branch of it: a stopped turn that named no position left the next
+    // message colliding with the position it held, which forks — onto a branch this reader never
+    // looks at, so everything after the stop simply vanished.
+    expect(service.chatThread({ taskId })!.session.sessionId).toBe(thread.session.sessionId);
+    expect(said(taskId)).toEqual([
+      "user: one",
+      "assistant: first answer",
+      "user: two",
+      "user: three",
+      "assistant: third answer",
+    ]);
   });
 });
 

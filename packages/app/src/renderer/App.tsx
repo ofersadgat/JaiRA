@@ -31,6 +31,7 @@ import type { BoardCard, ConfigLayer, PendingApproval, PendingInteraction, Pendi
 import { SHARED_SESSION } from "@jaira/shared/browser";
 import { Board, lanesOf } from "./board";
 import { ChatListPanel, ChatView, conversationsOf, type ChatSurface } from "./chatPane";
+import { isChatWorkflow } from "./chatWorkflow";
 import { ApprovalDialog, InteractionDialog, QuestionDialog } from "./components";
 import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem } from "./menu";
 import {
@@ -589,9 +590,19 @@ export default function App(): JSX.Element {
           // The same distinctions the task panel's button draws, plus the one it cannot: a FINISHED
           // task reruns as a fresh copy ("task:rerun"), and the label says so rather than letting
           // "Re-run" quietly mean "make another task".
-          label: card.status === "queued" ? "Start" : terminal ? "Re-run as a new task" : "Re-run",
+          //
+          // A CONVERSATION is the same story arrived at differently. Re-running one in place would
+          // start a second conversation in the same task, and a thread is read from the latest run —
+          // so everything already said would still be in the database and reachable from nowhere.
+          // `task:rerun` copies it instead, and this is where that stops being a surprise.
+          label:
+            card.status === "queued"
+              ? "Start"
+              : terminal || isChatWorkflow(card.workflow)
+                ? "Re-run as a new task"
+                : "Re-run",
           disabled: running,
-          ...(terminal ? { note: "fresh copy" } : {}),
+          ...(terminal || isChatWorkflow(card.workflow) ? { note: "fresh copy" } : {}),
           onSelect: () => void actions.rerunTask(card.taskId, project),
         },
         {

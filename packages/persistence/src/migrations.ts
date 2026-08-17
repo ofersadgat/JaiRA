@@ -19,13 +19,23 @@
  *    SQLite rejects the latter outright, because it would have to rewrite every existing row.
  */
 import type { JairaDb } from "./db";
+import { repairInterruptedRecords } from "./sessionStore";
 
 export interface Migration {
   /** The `user_version` this step brings the database TO. Sequential from 1. */
   version: number;
   /** What it is for, in the past tense — read by whoever is wondering why their schema moved. */
   note: string;
-  sql: string;
+  sql?: string;
+  /**
+   * A step SQL cannot express, run after `sql` inside the same transaction.
+   *
+   * For DATA migrations over stored JSON. SQLite's JSON1 can read a blob but has no prepend, and the
+   * contortion that fakes one (`json_group_array` over a `UNION ALL`, ordered by a synthetic column)
+   * is both unreadable and reliant on an ordering SQLite does not promise. A function is the honest
+   * tool, and it can share the exact predicate the write path uses instead of restating it in SQL.
+   */
+  run?: (db: JairaDb) => void;
 }
 
 export const MIGRATIONS: Migration[] = [
@@ -190,6 +200,31 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS state_machine_events_operation ON state_machine_events(operation_id);
     `,
   },
+  {
+    version: 6,
+    note: "recorded whether an artifact may run its own scripts when shown",
+    // A stored column rather than a derived one, because it is not derivable: "may this page run"
+    // is a claim the PRODUCING call made, and nothing about the bytes or the media type says it.
+    // Deriving it from `format = 'text/html'` would have made every artifact ever written scriptable
+    // the day the interactive renderer arrived, including ones written before the question existed.
+    //
+    // `DEFAULT 0` is what makes that safe for a database that already has rows: everything already in
+    // the map predates the claim and is therefore static, which is the answer that takes nothing away.
+    sql: `ALTER TABLE artifacts ADD COLUMN interactive INTEGER NOT NULL DEFAULT 0;`,
+  },
+  {
+    version: 7,
+    note: "gave every interrupted record the message it was called with, which only a settled one used to keep",
+    // A record's messages are the delta its call contributed, and a settled call's delta opens with
+    // the question because the provider echoes it. A STOPPED call has no provider answer, so its
+    // record held only what the transport streamed — the model's own output — and the question was
+    // nowhere in it. Readers compensated at display time and replay did not compensate at all: a
+    // resumed conversation was handed an answer with no question in front of it.
+    //
+    // `openingMessage` now splices it at the write, and this brings the rows already on disk up to
+    // the same shape, so nothing downstream has to know which era a record was written in.
+    run: (db) => void repairInterruptedRecords(db),
+  },
 ];
 
 /**
@@ -209,7 +244,8 @@ export function migrate(db: JairaDb, migrations: readonly Migration[] = MIGRATIO
     // name`, thrown out of `openProject`.
     db.transaction(() => {
       if (read(db) >= migration.version) return; // the other process got here first
-      db.exec(migration.sql);
+      if (migration.sql !== undefined) db.exec(migration.sql);
+      migration.run?.(db);
       // Interpolated because SQLite does not accept a parameter in a PRAGMA. Safe by construction:
       // the value is a number from this file, never from input.
       db.pragma(`user_version = ${migration.version}`);

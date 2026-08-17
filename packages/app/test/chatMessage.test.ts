@@ -248,6 +248,46 @@ describe("sending a message", () => {
   });
 });
 
+/**
+ * A turn that ended badly — which is what pressing stop produces, minus the timing.
+ *
+ * The bug this pins was one missing field: `runChatTurn` emitted `operation.failed` without the
+ * call's metrics, and `session_ref` is generated from `$.metrics.sessionRef`. So the turn named no
+ * position, `stateSessions` could not see it, and the conversation's end was computed as the position
+ * the failed record was ALREADY HOLDING. The next message collided with it and forked — onto a branch
+ * the panel does not read, so everything sent after a stop vanished, the stopped turn went with it,
+ * and the fork inherited no provider handle, so the agent started a fresh session instead of
+ * resuming what it had been interrupted in the middle of.
+ */
+describe("a turn that was stopped", () => {
+  it("keeps its place, so the next message continues the same conversation", async () => {
+    const { taskId, instanceId } = await ranTask();
+
+    const stopped = await service.sendChatMessage({ taskId, instanceId, message: "do the thing", fake: [{ error: "stopped" }] });
+    expect(stopped.failure).toContain("stopped");
+    // The position it ended at, which is the fact the journal has to carry for anything to find it.
+    expect(stopped.sessionRef).toBeDefined();
+
+    const after = await service.sendChatMessage({ taskId, instanceId, message: "carry on then", fake: happyRules() });
+    expect(after.failure).toBeUndefined();
+
+    // The SAME conversation, one position further on — never a fork. A fork is what a collided
+    // position produces, and it mints a session id nothing on screen is reading from.
+    const [session, seq] = [stopped.sessionRef!.slice(0, -2), Number(stopped.sessionRef!.slice(-1))];
+    expect(after.sessionRef).toBe(`${session}@${seq + 1}`);
+  });
+
+  it("appears in the session history, which is what the panel finds a conversation BY", async () => {
+    const { taskId, instanceId } = await ranTask();
+    await service.sendChatMessage({ taskId, instanceId, message: "the one that got stopped", fake: [{ error: "stopped" }] });
+    const chat = service.sessionHistory({ taskId }).find((h) => h.instanceId === CHAT_INSTANCE_BASE + instanceId);
+    // Listed, and listed as what it was. Unlisted, its position was invisible and the next message
+    // was sent straight into it.
+    expect(chat).toBeDefined();
+    expect(chat!.status).toBe("error");
+  });
+});
+
 /** Depth-first by instance id — the projection's tree is only navigable downward. */
 function findNode(roots: readonly InstanceNode[], id: number): InstanceNode | undefined {
   for (const node of roots) {

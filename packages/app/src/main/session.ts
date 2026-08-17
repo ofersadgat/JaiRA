@@ -109,10 +109,46 @@ export class ProjectSession {
    * no task status, and registers nothing there. Without this there was simply nothing to abort, so a
    * message sent to an agent that then worked for four minutes could only be waited out.
    *
-   * One per TASK rather than per conversation: a task's chat is one thread, and `sendChatMessage`
-   * already waits for a call in flight before starting another.
+   * A SET per task, not one controller — because more than one turn can be in flight in a thread.
+   *
+   * It held a single controller on the premise that "`sendChatMessage` already waits for a call in
+   * flight before starting another", and the premise was never quite true: a message can JOIN a turn
+   * rather than wait for it, and the wait itself is bounded and can time out. What the single slot
+   * then did was not merely lose track of one — the new turn ABORTED the old one on its way in, so
+   * sending a follow-up killed the answer being written. The stop button worked by accident and
+   * typing twice worked like pressing it.
+   *
+   * The set is per task because the button is: one conversation, one stop, and it means everything
+   * this thread has going.
    */
-  readonly chatTurns = new Map<string, AbortController>();
+  readonly chatTurns = new Map<string, Set<AbortController>>();
+  /**
+   * The newest typed turn's COMPLETION, by task — what the message behind it waits for.
+   *
+   * Where a message goes is computed from where the conversation is recorded as ENDING, so a message
+   * still in flight is invisible to the next one's arithmetic: both resolve to the same position, the
+   * second collides, and the store branches. One conversation becomes two and the thread reads one.
+   *
+   * Resolved when the send returns, which is after its journal entry — so a waiter that re-reads the
+   * conversation's end at that point sees the turn in it. The live register cannot answer the same
+   * question: it holds a call only while it RUNS, so it is silent both before the call starts and
+   * after it settles, and a waiter consulting it in either window computes a position something else
+   * is already holding.
+   *
+   * Only a message that cannot JOIN the turn in flight waits on this — see `sendChatMessage`. One
+   * that can is not going to claim a position at all.
+   */
+  readonly chatDone = new Map<string, Promise<void>>();
+  /**
+   * How to write down what a task's live turn holds RIGHT NOW, by task id.
+   *
+   * Registered by whatever is streaming — a run or a typed turn — and called by "stop" before it
+   * aborts anything. The throttle behind it is right for the ordinary case and wrong for exactly this
+   * one: an interrupted call has no settled result to supersede its partial, so what survives is the
+   * last flush, which is up to an interval stale and, for a turn stopped early, nothing at all. A
+   * stop is the one moment the exact tail matters, because it is the tail the person was reading.
+   */
+  readonly liveFlush = new Map<string, () => void>();
   readonly hub: InteractionHub;
   /** requestId → taskId, for a request whose registration could not name one. */
   readonly requestTask = new Map<string, string>();
@@ -197,7 +233,7 @@ export class ProjectSession {
     this.pendingSync = undefined;
     // A hand-typed turn is not in `live`, so it would otherwise keep talking to a provider on behalf
     // of a project that is gone — and finish by writing to a closed database.
-    for (const turn of this.chatTurns.values()) turn.abort();
+    for (const turns of this.chatTurns.values()) for (const turn of turns) turn.abort();
     this.chatTurns.clear();
     const inFlight = [...this.live.values()];
     for (const run of inFlight) run.abort.abort();

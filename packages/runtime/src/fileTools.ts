@@ -27,6 +27,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { ExecServices, JsonValue, Tool } from "@declarative-ai/exec";
+import { mimeOfPath } from "@jaira/shared";
 import type { ArtifactRecord, ArtifactStore } from "./artifacts";
 import { MemoryArtifactStore } from "./artifacts";
 import {
@@ -42,6 +43,7 @@ import { isDeniedPath } from "./policy";
 export const WRITE_FILE = "write_file";
 export const READ_FILE = "read_file";
 export const EDIT_FILE = "edit";
+export const SHOW_ARTIFACT = "show_artifact";
 
 export interface FileToolOptions {
   /** The parsed `config.artifacts.destination`. Defaults to `$DEFAULT`. */
@@ -278,9 +280,152 @@ export function createEditFileTool(options: FileToolOptions): Tool {
   } as Tool;
 }
 
+/**
+ * Where a SHOWN artifact goes — the artifact directory, never the workspace at large.
+ *
+ * This is what makes `show_artifact` genuinely non-destructive rather than merely intended to be.
+ * The configured destination is not used, because the default one (`$DEFAULT` = `$WORKTREE/$RELPATH`)
+ * puts an agent-chosen path straight into the workspace: `show_artifact({path: "src/index.ts"})`
+ * would overwrite source, and a tool that can do that is a writer whatever we call it.
+ *
+ * `$CENTRAL` (`$WORKTREE/$ARTIFACT_DIR/$TASK_ID/$RELPATH`) fixes the author-controlled prefix at the
+ * task's artifact directory, which is precisely the boundary `resolveDestination` confines a model's
+ * `$RELPATH` to — so `../../src/index.ts` is refused rather than clamped. That containment already
+ * existed and is already tested; this just points the tool at it.
+ *
+ * `virtual:` is kept as-is when configured, because it writes nothing at all — which is as
+ * non-destructive as a destination gets, and a project that chose it did so deliberately.
+ *
+ * The logical path is still whatever the producer said, so the artifact map answers a later
+ * `read_file` for it — the same shadowing every artifact under a non-`$DEFAULT` destination already
+ * has, and the reason the round trip holds at all.
+ */
+function showDestination(configured: Destination | undefined): Destination {
+  if (configured?.scheme === "virtual") return configured;
+  return parseDestination("$CENTRAL");
+}
+
+/**
+ * `show_artifact` — produce something for a person to LOOK AT.
+ *
+ * The distinction from `write_file` is the audience, and it is what earns a second tool rather than a
+ * flag. A write says "this belongs in the workspace"; a show says "this is a result, and it has a
+ * rendering". Everything downstream turns on the second claim: the media type reaches the renderer,
+ * the transcript draws the page instead of printing its tags, and the value carries a reference that
+ * outlives the call.
+ *
+ * It is deliberately the SAME artifact map underneath. Three producers converge there already — an
+ * engine-registered `blob` output slot, an agent's `write_file`, and now this — and a widget channel
+ * beside the map would be a fourth place for "content a run made" to live, which is how a task's
+ * output comes to depend on which door it walked through.
+ *
+ * ## Two calls, one tool
+ *
+ * With `content`, it creates. Without, it shows what is already at `path` — which is the whole of
+ * "send the user this file", and needs nothing new because {@link currentContent} already resolves a
+ * logical path through the map and then the workspace. Splitting those into two tools would give a
+ * model two names for one intention and a reason to pick wrong.
+ *
+ * ## What comes back
+ *
+ * An ENVELOPE — `{path, mediaType, bytes, uri}` — and the content with it while it is small enough to
+ * inline. Deliberately not the engine's `{artifact: true, …}` spelling: that shape is what
+ * `persistEngineArtifacts` walks a run's outputs for, and returning it would offer this artifact for
+ * placement a second time under a name derived from a slot it never came out of. Both spellings read
+ * as one artifact to `artifactOf`, so the renderer does not care which it gets.
+ */
+export function createShowArtifactTool(options: FileToolOptions): Tool {
+  const destination = showDestination(options.destination);
+  const store = options.store ?? new MemoryArtifactStore();
+  const now = options.now ?? Date.now;
+  const inlineMax = options.inlineMaxBytes ?? DEFAULT_INLINE_MAX;
+  return {
+    description:
+      "Show the user something you produced — an HTML page, an SVG drawing, a markdown document. Give `content` to create it, or just a `path` to show something that already exists. It is rendered in the conversation, so give it a path whose extension says what it is (mockup.html, chart.svg).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Path relative to the workspace root. Its extension is how the media type is inferred.",
+        },
+        content: {
+          type: "string",
+          description: "The full contents. Omit to show what is already at this path.",
+        },
+        mediaType: {
+          type: "string",
+          description: "Overrides what the extension implies, e.g. `text/html`, `image/svg+xml`, `text/markdown`.",
+        },
+        interactive: {
+          type: "boolean",
+          description:
+            "Set only if the page needs its own scripts to run — a control that responds, a chart that filters. It is then shown in an isolated frame that can reach nothing: no network, no storage, no access to the app. A static page or drawing does not need this and should not ask for it.",
+        },
+      },
+      required: ["path"],
+    },
+    // Nothing that was already there is different afterwards — see {@link showDestination} for the
+    // confinement that makes that true, and the vocabulary entry for why it is the right reading.
+    readOnly: true,
+    run: async (input, ctx?: ExecServices): Promise<JsonValue> => {
+      const args = (input ?? {}) as { path?: unknown; content?: unknown; mediaType?: unknown; interactive?: unknown };
+      const logical = logicalKey(typeof args.path === "string" ? args.path : "");
+      const refusal = refusePath(logical);
+      if (refusal !== undefined) return { error: refusal };
+      const interactive = args.interactive === true;
+
+      // The declared type beats the inferred one — an author who says `text/html` about a file named
+      // `.txt` is making a statement, and `mimeOfPath` is only ever a guess from a name.
+      const declared = typeof args.mediaType === "string" && args.mediaType !== "" ? args.mediaType : undefined;
+      const mediaType = declared ?? mimeOfPath(logical);
+      const taskId = options.vars.taskId;
+      const uri = `artifact://${taskId}/${logical}`;
+
+      // No `content`: this is "show what is already there", and the bytes are wherever they landed.
+      if (typeof args.content !== "string") {
+        const read = currentContent(options, logical, ctx);
+        if ("error" in read) return { error: read.error };
+        const bytes = Buffer.byteLength(read.text, "utf8");
+        return {
+          path: logical,
+          mediaType,
+          bytes,
+          uri,
+          ...(bytes <= inlineMax ? { content: read.text } : {}),
+        };
+      }
+
+      const content = args.content;
+      try {
+        const { record, physicalPath } = place(options, destination, taskId, logical, content, now());
+        if (physicalPath !== undefined) {
+          mkdirSync(dirname(physicalPath), { recursive: true });
+          writeFileSync(physicalPath, content, "utf8");
+        }
+        // The declared type is recorded, so what the renderer is told the bytes ARE survives the run
+        // that made them — a `.txt` holding a diagram renders as a diagram tomorrow too.
+        store.put({ ...record, format: mediaType, ...(interactive ? { interactive } : {}) });
+        return {
+          path: logical,
+          mediaType,
+          bytes: record.bytes,
+          uri,
+          ...(interactive ? { interactive } : {}),
+          ...(record.bytes <= inlineMax ? { content } : {}),
+        };
+      } catch (e) {
+        if (e instanceof DestinationError) return { error: e.message };
+        return { error: `could not show '${logical}': ${(e as Error).message}` };
+      }
+    },
+  } as Tool;
+}
+
 /** Register the file tools on a registry's `tools` facet. */
 export function registerFileTools(registry: { tools: Map<string, Tool> }, options: FileToolOptions): void {
   registry.tools.set(WRITE_FILE, createWriteFileTool(options));
   registry.tools.set(READ_FILE, createReadFileTool(options));
   registry.tools.set(EDIT_FILE, createEditFileTool(options));
+  registry.tools.set(SHOW_ARTIFACT, createShowArtifactTool(options));
 }

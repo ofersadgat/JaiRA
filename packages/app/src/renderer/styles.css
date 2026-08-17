@@ -5784,6 +5784,141 @@ textarea.cfg-input {
   border-top: 1px solid var(--line);
 }
 
+/* Where a conversation divided in two.
+
+   The same torn edge the Tasks view uses for a session cut in half (`.sb-tear`), turned to a
+   different question: there it means "this thread stops here and comes back below", here it means
+   "this thread becomes two". The page above is squared off at the tear and the page below opens
+   squared, so the two read as halves of one sheet rather than as two sheets that happen to be
+   stacked — which is exactly what a fork is, and exactly what the thread coming back shorter never
+   said.
+
+   Held to the same width as the pages it joins, or the seam would be wider than the paper it tears. */
+.chat-fork {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+}
+.chat-fork .sb-tear-paused {
+  border-top: 0;
+}
+/* Squared where it was torn — see `.sb-sheet.resumed`, which states the same rule for a panel. */
+.chat-scroll .ts-paper:has(+ .chat-fork) {
+  border-bottom-left-radius: 2px;
+  border-bottom-right-radius: 2px;
+}
+.chat-fork + .ts-paper {
+  border-top-left-radius: 2px;
+  border-top-right-radius: 2px;
+}
+/* The one control between the two edges: how many sides there are, and which you are reading. It
+   sits IN the tear rather than above it, because it is about the split and not about either half. */
+.chat-fork-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 10px;
+  min-width: 0;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+.chat-fork-tabs button {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 320px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 3px 12px;
+  font-size: 11.5px;
+  color: var(--dim);
+  cursor: pointer;
+}
+.chat-fork-tabs button.on {
+  background: var(--panel);
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+/* What the conversation produced — a disclosure above the thread, closed until asked for. It sits
+   outside the scroller on purpose: the thing you made should not scroll away from you while you
+   look for where you made it. */
+.chat-artifacts {
+  flex: none;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.chat-artifacts-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  color: var(--dim);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-artifacts-head:hover {
+  color: var(--text);
+}
+.chat-artifacts.open .chat-artifacts-head .ts-chev {
+  transform: rotate(90deg);
+}
+/* Bounded, and scrollable within that bound: this is a panel over a conversation, not a page of its
+   own, and an artifact that pushed the transcript off the screen would have replaced it. */
+.chat-artifacts-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 45vh;
+  padding: 0 12px 8px;
+  gap: 6px;
+}
+.chat-artifacts-list {
+  flex: none;
+  max-height: 20vh;
+  overflow-y: auto;
+}
+/* The same row shape the board's task list uses (`.leaf-row`): selection is a fill plus a rule down
+   the leading edge, so a selected row is still legible against a hover on the row above it. */
+.chat-artifact-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-artifact-row:hover {
+  background: var(--panel-2);
+}
+.chat-artifact-row.sel {
+  background: var(--panel-2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+/* Said in words, not as an icon: that a page RUNS is the one thing worth knowing before opening it. */
+.chat-artifact-live {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--text);
+}
+.chat-artifact-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /* Above the box, and only while an edit is pending. It changes what Enter MEANS, so it is a line of
    prose rather than a mode indicator: the message will take another's place, and what came after
    that one stops being on the path. */

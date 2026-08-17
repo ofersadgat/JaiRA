@@ -131,6 +131,9 @@ CREATE TABLE IF NOT EXISTS artifacts (
   instance_id   INTEGER,
   state_id      TEXT,
   slot          TEXT,
+  -- The interactive flag is added by migration 6 and deliberately NOT declared here: a fresh
+  -- database walks the same path an old one did, and a column declared in both places is a
+  -- duplicate-column error on every first open.
   created_at    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS artifacts_task ON artifacts(task_id, id);

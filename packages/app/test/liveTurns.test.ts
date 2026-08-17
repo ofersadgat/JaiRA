@@ -65,6 +65,71 @@ describe("LiveTurnLog", () => {
     expect(log.snapshot("t1")!.textStartedAt).toBeUndefined();
   });
 
+  it("starts the thinking clock off BOOKKEEPING, for a think whose text the provider withholds", () => {
+    // No `thinking` delta ever arrives for a withheld think — the transports drop the empty ones —
+    // so the block opening is the only notice. Without this the clock never started, no tail was
+    // published, and a four-minute think was a blank panel.
+    const log = new LiveTurnLog();
+    const blockStart = {
+      kind: "event",
+      event: { type: "provider_event", payload: { type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "", signature: "" } } } },
+    };
+    log.apply("t1", { ...at("s", 1), at: 100, item: blockStart });
+    expect(log.snapshot("t1")).toMatchObject({ thinking: "", thinkingStartedAt: 100 });
+  });
+
+  it("takes a thinking or signature delta as the same notice, so a dropped block start costs nothing", () => {
+    const log = new LiveTurnLog();
+    const sig = {
+      kind: "event",
+      event: { type: "provider_event", payload: { type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "abc" } } } },
+    };
+    log.apply("t1", { ...at("s", 1), at: 250, item: sig });
+    expect(log.snapshot("t1")!.thinkingStartedAt).toBe(250);
+  });
+
+  it("times a withheld think end to end: clock from the block, duration onto the finished turn", () => {
+    const log = new LiveTurnLog();
+    const blockStart = {
+      kind: "event",
+      event: { type: "provider_event", payload: { type: "stream_event", event: { type: "content_block_start", content_block: { type: "thinking" } } } },
+    };
+    log.apply("t1", { ...at("s", 1), at: 1000, item: blockStart });
+    log.apply("t1", { ...at("s", 1), at: 4000, text: "Here" });
+    const { item } = log.apply("t1", { ...at("s", 1), at: 4200, item: { kind: "message", role: "assistant", content: {} } });
+    // The number the settled row will state — the wait a person actually sat through.
+    expect(item).toMatchObject({ startedAt: 1000, thoughtMs: 3000 });
+  });
+
+  it("ignores stream bookkeeping that is not a thinking block, and does not restart a running clock", () => {
+    const log = new LiveTurnLog();
+    const textBlock = {
+      kind: "event",
+      event: { type: "provider_event", payload: { type: "stream_event", event: { type: "content_block_start", content_block: { type: "text" } } } },
+    };
+    log.apply("t1", { ...at("s", 1), at: 100, item: textBlock });
+    expect(log.snapshot("t1")!.thinkingStartedAt).toBeUndefined();
+    const thinkBlock = {
+      kind: "event",
+      event: { type: "provider_event", payload: { type: "stream_event", event: { type: "content_block_start", content_block: { type: "thinking" } } } },
+    };
+    log.apply("t1", { ...at("s", 1), at: 200, item: thinkBlock });
+    log.apply("t1", { ...at("s", 1), at: 300, item: thinkBlock });
+    // The FIRST notice is when thinking began; a later one is the same block still going.
+    expect(log.snapshot("t1")!.thinkingStartedAt).toBe(200);
+  });
+
+  it("persists the started clock as the partial, so a crash mid-think is not a blank", () => {
+    const log = new LiveTurnLog();
+    log.apply("t1", {
+      ...at("s", 1),
+      at: 700,
+      item: { kind: "event", event: { type: "provider_event", payload: { type: "stream_event", event: { type: "content_block_start", content_block: { type: "thinking" } } } } },
+    });
+    const value = partialRecordValue(log.snapshot("t1")!) as { value: { partial?: { thinkingStartedAt?: number } } };
+    expect(value.value.partial).toMatchObject({ thinkingStartedAt: 700 });
+  });
+
   it("sniffs the provider session id off the stream's envelopes", () => {
     const log = new LiveTurnLog();
     log.apply("t1", {

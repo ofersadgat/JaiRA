@@ -245,12 +245,33 @@ export interface JairaArtifactConfig {
   destination: string;
   /** What `$ARTIFACT_DIR` expands to. */
   dir: string;
-  /** Keep content inline below this size, so bindings and prompts stay cheap. */
+  /**
+   * Keep content inline below this size, so bindings and prompts stay cheap.
+   *
+   * NOT a size limit, and worth saying because the name reads like one: this decides WHERE the bytes
+   * live — cached in the database as well as placed, or placed only — never whether the write is
+   * allowed. An artifact larger than this succeeds; it is simply read back from its destination.
+   * The size that gets asked about is {@link JairaArtifactConfig.askAboveBytes}.
+   */
   inlineMaxBytes: number;
+  /**
+   * Above this many bytes, producing an artifact asks the user instead of just doing it.
+   *
+   * There is no ceiling on how large an artifact may be — a run that genuinely produced a 90 MB
+   * report should be able to keep it — so the guard is a question rather than a refusal. `0` turns
+   * it off.
+   *
+   * It matters most under `virtual:`, which has nowhere but the database to put content and so
+   * inlines it whatever its size; that is the one destination where a runaway producer costs
+   * something that is not just disk.
+   */
+  askAboveBytes: number;
 }
 
 export const DEFAULT_ARTIFACT_DESTINATION = "$DEFAULT";
 export const DEFAULT_INLINE_MAX_BYTES = 65_536;
+/** 4 MiB — far above a page or a drawing, far below anything worth silently keeping in a row. */
+export const DEFAULT_ASK_ABOVE_BYTES = 4_194_304;
 
 export interface JairaConfig {
   models: JairaModelConfig;
@@ -348,6 +369,7 @@ export function defaultConfig(): JairaConfig {
       destination: DEFAULT_ARTIFACT_DESTINATION,
       dir: DEFAULT_ARTIFACT_DIR,
       inlineMaxBytes: DEFAULT_INLINE_MAX_BYTES,
+      askAboveBytes: DEFAULT_ASK_ABOVE_BYTES,
     },
     execEnvironment: "windows",
     policy: {},
@@ -415,6 +437,7 @@ function parseArtifacts(raw: unknown, artifactDir: string): JairaArtifactConfig 
     destination: DEFAULT_ARTIFACT_DESTINATION,
     dir: artifactDir,
     inlineMaxBytes: DEFAULT_INLINE_MAX_BYTES,
+    askAboveBytes: DEFAULT_ASK_ABOVE_BYTES,
   };
   if (raw === undefined) return fallback;
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
@@ -434,7 +457,11 @@ function parseArtifacts(raw: unknown, artifactDir: string): JairaArtifactConfig 
   if (typeof inlineMaxBytes !== "number" || !Number.isInteger(inlineMaxBytes) || inlineMaxBytes < 0) {
     throw new Error("config.artifacts.inlineMaxBytes must be a non-negative integer");
   }
-  return { destination, dir, inlineMaxBytes };
+  const askAboveBytes = cfg["askAboveBytes"] ?? fallback.askAboveBytes;
+  if (typeof askAboveBytes !== "number" || !Number.isInteger(askAboveBytes) || askAboveBytes < 0) {
+    throw new Error("config.artifacts.askAboveBytes must be a non-negative integer");
+  }
+  return { destination, dir, inlineMaxBytes, askAboveBytes };
 }
 
 /**

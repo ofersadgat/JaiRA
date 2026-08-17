@@ -9,9 +9,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
 import { isProject } from "@jaira/persistence";
-import { IPC_CHANNELS, PUSH_CHANNEL, type IpcChannel, type PushMessage } from "@jaira/shared";
+import { ARTIFACT_SCHEME, IPC_CHANNELS, PUSH_CHANNEL, type IpcChannel, type PushMessage } from "@jaira/shared";
 import { AppService, type KeychainPort } from "./service";
 
 /** `dist/` layout produced by the build (see build.mjs / vite.config.ts). */
@@ -163,6 +163,8 @@ const handlers: Record<IpcChannel, Handler> = {
   "schema:detect": ((request: { text: string }) => service.detectSchema(request.text)) as Handler,
   "file:read": ((request: Parameters<typeof service.readFile>[0]) => service.readFile(request)) as Handler,
   "uri:read": ((request: Parameters<typeof service.readUri>[0]) => service.readUri(request)) as Handler,
+  "artifact:serve": ((request: Parameters<typeof service.serveArtifact>[0]) => service.serveArtifact(request)) as Handler,
+  "artifact:list": ((request: Parameters<typeof service.listArtifacts>[0]) => service.listArtifacts(request)) as Handler,
   "file:find": ((request: Parameters<typeof service.findFiles>[0]) => service.findFiles(request)) as Handler,
   "changeset:review": ((request: Parameters<typeof service.reviewChanges>[0]) => service.reviewChanges(request)) as Handler,
   "changeset:reviewSync": ((request: Parameters<typeof service.reviewSyncChangeset>[0]) =>
@@ -327,7 +329,57 @@ function startupProject(): string | undefined {
   return isProject(process.cwd()) ? process.cwd() : undefined;
 }
 
+/**
+ * The scheme interactive artifacts load from — declared BEFORE the app is ready, which is the only
+ * time Electron accepts it.
+ *
+ * `standard` so the frame gets an ordinary URL origin to be sandboxed away from, rather than the
+ * quirks a non-standard scheme brings to relative URLs and document.baseURI. Deliberately NOT
+ * `supportFetchAPI` and NOT `corsEnabled`: a shown artifact has no business making requests, and the
+ * served CSP says so too — this just removes the capability rather than relying on the policy alone.
+ */
+protocol.registerSchemesAsPrivileged([
+  { privileges: { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false }, scheme: ARTIFACT_SCHEME },
+]);
+
+/**
+ * Serve one granted artifact into a frame.
+ *
+ * The response headers are the whole point of this handler existing. A model-authored page cannot be
+ * shown from `srcdoc`, because a `srcdoc` document inherits the embedder's CSP — measured against
+ * this app's own policy, where `script-src 'self'` refuses every inline script it contains. Served
+ * from here it gets a policy of its own, as a HEADER, which the document cannot override the way it
+ * could a `<meta>` tag somebody injected into its markup.
+ *
+ * That policy is strictly narrower than the app's in every direction but one: inline script is
+ * permitted (there is no other way for a self-contained page to work), and everything that would let
+ * it reach out — network, frames of its own, form posts — is denied outright.
+ *
+ * A STATIC artifact served here still gets no scripts, because the renderer only ever points a frame
+ * at a token whose grant said `interactive`; this is the second half of that, refusing to serve a
+ * script-permitting policy for a grant that never claimed one.
+ */
+function registerArtifactProtocol(): void {
+  protocol.handle(ARTIFACT_SCHEME, (request) => {
+    const token = new URL(request.url).pathname.replace(/^\/+/, "");
+    const granted = service.servedArtifact(token);
+    if (granted === undefined) return new Response("no such artifact", { status: 404 });
+    const scripts = granted.interactive ? "script-src 'unsafe-inline'; " : "";
+    return new Response(granted.body, {
+      headers: {
+        "Content-Type": `${granted.mediaType}; charset=utf-8`,
+        "Content-Security-Policy":
+          `default-src 'none'; ${scripts}style-src 'unsafe-inline'; img-src data: blob:; ` +
+          `font-src data:; connect-src 'none'; form-action 'none'; frame-src 'none'; base-uri 'none'`,
+        // Belt and braces with the CSP: nothing here is meant to be interpreted as another type.
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  });
+}
+
 void app.whenReady().then(async () => {
+  registerArtifactProtocol();
   // No menu bar. Left alone, Electron installs a default File/Edit/View/Window menu whose every item
   // is either a no-op here or something the app offers better elsewhere — and on Windows and Linux
   // it takes a row across the top of the window to say so. Nulling it also disables the Alt key that

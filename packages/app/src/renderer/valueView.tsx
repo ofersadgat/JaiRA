@@ -26,9 +26,9 @@
  * takes no decisions, and it is available wherever a value happens to be a set of files: in the
  * transcript beside the call that produced them, in the sync report, in a structured output.
  */
-import { lazy, Suspense, useState, type JSX, type ReactNode } from "react";
-import type { Change, ViewHint, ViewId } from "@jaira/shared/browser";
-import { changeStats, changesOf, mediaKindOf, mediaSrcOf, mimeOfPath, totalStats, viewsFor } from "@jaira/shared/browser";
+import { lazy, Suspense, useEffect, useRef, useState, type JSX, type ReactNode } from "react";
+import type { Change, ServedArtifact, ViewHint, ViewId } from "@jaira/shared/browser";
+import { artifactOf, changeStats, changesOf, mediaKindOf, mediaSrcOf, mimeOfPath, totalStats, viewsFor } from "@jaira/shared/browser";
 import { Markdown } from "./markdown";
 import { Icon } from "./icons";
 
@@ -266,9 +266,59 @@ function Source({ value }: { value: unknown }): JSX.Element {
  * is configured to emit no HTML at all. Arbitrary HTML from a model has no such floor — `sandbox`
  * with an empty allow list means no scripts, no forms, no navigation and no same-origin access,
  * which is the only posture under which showing it is a rendering rather than an execution.
+ *
+ * A `srcdoc` frame also INHERITS this window's CSP, which is `script-src 'self'` — so even were the
+ * sandbox opened, nothing in here could run. That is a second floor under the first, and it is the
+ * reason {@link InteractiveArtifact} cannot be a variant of this component.
  */
 function Html({ text }: { text: string }): JSX.Element {
   return <iframe className="vv-html" sandbox="" srcDoc={text} title="Rendered HTML" />;
+}
+
+/**
+ * An artifact that RUNS — the interactive case, and the only thing in this app that executes code a
+ * model wrote.
+ *
+ * Loaded from `jaira-artifact:` rather than `srcdoc`, because a `srcdoc` document inherits this
+ * window's CSP and would have every inline script refused. The scheme's handler serves the bytes with
+ * a policy of its own: inline script permitted, and network, frames, forms and base-uri all denied.
+ *
+ * `sandbox="allow-scripts"` WITHOUT `allow-same-origin`. The two together are not additive — a frame
+ * granted both can reach its own `sandbox` attribute and remove it — so this pair is the whole
+ * posture, and the missing flag matters more than the present one. The frame therefore has an opaque
+ * origin, which is what keeps it away from this window's storage and DOM.
+ *
+ * ## Why the bridge fills the composer instead of sending
+ *
+ * A page a model wrote posting straight into a live run is closer to `bash` than to rendering: it
+ * would let generated markup drive the conversation that generated it. So a message lands in the
+ * composer, where a person reads it and presses send. That keeps the useful half — a button in a
+ * mockup that says what it would ask — without the half nobody asked for.
+ *
+ * `event.source` is what authenticates it, NOT `event.origin`: an opaque origin serialises to the
+ * string `"null"`, which every other sandboxed frame also reports, so matching on it would accept a
+ * message from any of them. Identity here is the window object itself.
+ */
+function InteractiveArtifact({ url, onPrompt }: { url: string; onPrompt?: ((text: string) => void) | undefined }): JSX.Element {
+  const frame = useRef<HTMLIFrameElement | null>(null);
+
+  useEffect(() => {
+    if (onPrompt === undefined) return;
+    const onMessage = (event: MessageEvent): void => {
+      // The window that sent it, not the origin it claims — see the component note.
+      if (frame.current === null || event.source !== frame.current.contentWindow) return;
+      const data = event.data as { type?: unknown; text?: unknown } | null;
+      if (data === null || typeof data !== "object" || data.type !== "prompt") return;
+      if (typeof data.text !== "string" || data.text.trim() === "") return;
+      // Bounded: this is a message from a page that may have been generated wrong, and a composer is
+      // not the place to discover that something posted a megabyte into it.
+      onPrompt(data.text.slice(0, 4000));
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [onPrompt]);
+
+  return <iframe className="vv-html" ref={frame} sandbox="allow-scripts" src={url} title="Interactive artifact" />;
 }
 
 /**
@@ -284,6 +334,8 @@ export function ValueView({
   label,
   actions,
   outcomes,
+  serve,
+  onPrompt,
 }: {
   value: unknown;
   hint?: ViewHint | undefined;
@@ -293,32 +345,92 @@ export function ValueView({
   actions?: ReactNode;
   /** Passed through to {@link ChangesView} when the value turns out to be a set of files. */
   outcomes?: Record<string, ChangeOutcome> | undefined;
+  /**
+   * How to have an artifact SERVED to a frame, for the interactive case — see the module note.
+   *
+   * Supplied by the surface rather than looked up here, because granting one takes a task and a
+   * project and a `ValueView` has neither: it is handed a value. Absent ⇒ no grant is possible, and
+   * an interactive artifact degrades to the static rendering, which shows the same page with its
+   * scripts inert. Degrading is the correct failure: the content is still what it is.
+   */
+  serve?: ((path: string) => Promise<ServedArtifact>) | undefined;
+  /** Where a message from an interactive artifact goes. Absent ⇒ the bridge is not connected. */
+  onPrompt?: ((text: string) => void) | undefined;
 }): JSX.Element {
   const views = viewsFor(value, hint ?? {});
   const [picked, setPicked] = useState<ViewId | null>(null);
   const view = picked !== null && views.includes(picked) ? picked : views[0]!;
 
-  const mime = hint?.mime;
+  /**
+   * An artifact is read as what it CARRIES — except on the raw view, where the envelope is the point.
+   *
+   * That exception is the whole reversibility argument applied one level up: the rendered views
+   * answer "what did it make", and `JSON` answers "what exactly did the producer hand over, and what
+   * did it claim the type was" — which is the question you have the moment the rendering looks wrong.
+   */
+  const artifact = artifactOf(value);
+  const showing = artifact?.content !== undefined && view !== "json" ? artifact.content : value;
+  // The artifact's declared type wins over the caller's hint, because it is the more specific
+  // statement: the hint describes the slot, the envelope describes the bytes in it.
+  const mime = (view === "json" ? undefined : artifact?.mime) ?? hint?.mime;
+
+  /**
+   * The address an interactive artifact is framed from, once it has been granted one.
+   *
+   * Asked for only when the value CLAIMS to be interactive and a grant is possible; the answer is
+   * still checked, because the record is the authority on whether anything may run and this side is
+   * only reporting what a tool result said. A refusal leaves this null and the static rendering
+   * stands, which is why nothing here throws.
+   */
+  const [frameUrl, setFrameUrl] = useState<string | null>(null);
+  const wantsFrame = artifact?.interactive === true && artifact.path !== undefined && serve !== undefined;
+  const framePath = wantsFrame ? artifact.path : undefined;
+  useEffect(() => {
+    if (framePath === undefined || serve === undefined) {
+      setFrameUrl(null);
+      return;
+    }
+    let live = true;
+    void serve(framePath)
+      .then((granted) => {
+        // The GRANT decides, not the value we were handed: a record that never claimed to be
+        // interactive is shown statically however the envelope described itself.
+        if (live) setFrameUrl(granted.interactive ? granted.url : null);
+      })
+      .catch(() => {
+        if (live) setFrameUrl(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [framePath, serve]);
+
   const body = ((): ReactNode => {
+    // `value`, not `showing`: a set of changes is never an artifact's payload, and reading the
+    // envelope for one would be asking a different question of a different value.
     if (view === "changes") return <ChangesView changes={changesOf(value) ?? []} outcomes={outcomes} />;
     if (view === "media") {
-      const src = mediaSrcOf(value, mime);
+      const src = mediaSrcOf(showing, mime);
       const kind = mediaKindOf(mime);
       // Both are guaranteed by `viewsFor` — it only offers this view when a player has something to
       // point at — and checked anyway, because the toggle's state outlives a value that changed.
       if (src !== undefined && kind !== undefined) return <Media src={src} kind={kind} />;
-      return <Source value={value} />;
+      return <Source value={showing} />;
     }
-    if (view === "markdown") return <Markdown text={String(value)} />;
-    if (view === "html") return <Html text={String(value)} />;
+    if (view === "markdown") return <Markdown text={String(showing)} />;
+    if (view === "html") {
+      // The frame only when one was actually granted; otherwise the same page, inert.
+      if (frameUrl !== null) return <InteractiveArtifact url={frameUrl} onPrompt={onPrompt} />;
+      return <Html text={String(showing)} />;
+    }
     if (view === "code") {
       return (
         <Suspense fallback={<div className="diff-pane-loading">loading the editor…</div>}>
-          <MonacoCodePane text={String(value)} mime={mime ?? "text/plain"} />
+          <MonacoCodePane text={String(showing)} mime={mime ?? "text/plain"} />
         </Suspense>
       );
     }
-    return <Source value={value} />;
+    return <Source value={showing} />;
   })();
 
   return (

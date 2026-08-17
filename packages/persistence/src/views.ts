@@ -228,6 +228,40 @@ export function stateSessions(project: Project, taskId: string, runId?: number):
  * event with the instance and state on it, and an operation record holding the position — and,
  * since recovery settles them, the outcome.
  *
+ * ## A call can SETTLE and still lose its terminal event
+ *
+ * The process dying is not the only way. The engine publishes the operation node — and the journal
+ * event with it — AFTER the call has returned, so anything that throws in between leaves a record
+ * settled `completed`, holding the whole answer, with nothing in the journal to find it by. That is
+ * not hypothetical: a store missing `refAt` did exactly this, and a finished chat vanished from the
+ * panel mid-conversation while its transcript sat in the database. So the run filter admits every
+ * NON-SUCCESS outcome — errored, canceled, interrupted — the record filter is "no terminal event
+ * names this position" rather than "not completed", and the outcome comes off the record's own
+ * status instead of being assumed. A run that ended tidily still contributes nothing: every start is
+ * terminated, so it leaves before any of this.
+ *
+ * CANCELED is in that list because stopping a run is the ordinary way to leave a start unterminated,
+ * not an exotic one. Cancellation ends the instance (`instance.terminated`, outcome `canceled`) and
+ * settles the record where it stood — a `failed` row holding everything the call had streamed — but
+ * it emits no `operation.completed` or `operation.failed`, so the journal join above finds nothing
+ * and this is the only pass that can. Naming only `interrupted` and `error` here is what made a
+ * stopped conversation read as one that had never said anything, with every word of it in the
+ * database: `stateSessions` returned no row, so the chat had no host, no position, and no thread.
+ *
+ * ## …and a run can END WELL and still be holding an unsettled call
+ *
+ * A conversation continued by hand outlives its run. The run finishes, the task reads `completed`,
+ * and every message after that is a chat turn recorded under the same run id — so a process killed
+ * during one leaves an open record inside a run whose outcome is `success`, which the filter above
+ * excludes by name. The consequence is not a missing row, it is a WRONG one: the position that
+ * record holds is invisible, so the next message computes it as free, collides with it, and forks —
+ * onto a branch that does not contain the interrupted turn, taking it off the screen for good.
+ *
+ * Hence the second arm of the filter. It asks the records rather than the outcome — "is this run
+ * holding anything unsettled" — which is the actual precondition, and it costs a cheap EXISTS on
+ * an indexed column. A run that ended tidily has no open record and no unterminated start, so it
+ * still leaves before any of this whichever arm admitted it.
+ *
  * ## Why pairing in ORDER is sound rather than a guess
  *
  * Both lists are in START order: the engine emits `operation.started` immediately before dispatch,
@@ -244,7 +278,12 @@ function interruptedSessions(project: Project, taskId: string, runId?: number): 
   // this the only projection in the file that cannot run against a bare database handle.
   const runs = project.db
     .prepare(
-      `SELECT id FROM runs WHERE task_id = ? AND outcome = 'interrupted' ${runId === undefined ? "" : "AND id = ?"} ORDER BY id`,
+      `SELECT id FROM runs
+        WHERE task_id = ?
+          AND (outcome IN ('interrupted', 'error', 'canceled')
+               OR EXISTS (SELECT 1 FROM operation_records r
+                           WHERE r.task_id = runs.task_id AND r.run_id = runs.id AND r.status = 'open'))
+          ${runId === undefined ? "" : "AND id = ?"} ORDER BY id`,
     )
     .all(...(runId === undefined ? [taskId] : [taskId, runId])) as Array<{ id: number }>;
   const out: StateSession[] = [];
@@ -252,13 +291,15 @@ function interruptedSessions(project: Project, taskId: string, runId?: number): 
     // Which instances started an operation that never settled — the calls that were in flight.
     const events = project.db
       .prepare(
-        `SELECT type, payload_json, created_at FROM state_machine_events
+        `SELECT type, payload_json, session_ref, created_at FROM state_machine_events
           WHERE task_id = ? AND run_id = ?
             AND type IN ('operation.started', 'operation.completed', 'operation.failed')
           ORDER BY seq`,
       )
-      .all(taskId, run.id) as Array<{ type: string; payload_json: string; created_at: number }>;
+      .all(taskId, run.id) as Array<{ type: string; payload_json: string; session_ref: string | null; created_at: number }>;
     const started = new Map<number, { stateId: string; at: number }>();
+    /** The record ids the journal ALREADY names — `<sessionId>:<seq>`, one back from the reported end. */
+    const listed = new Set<string>();
     for (const row of events) {
       const event = JSON.parse(row.payload_json) as { instanceId?: number; stateId?: string };
       if (event.instanceId === undefined) continue;
@@ -266,19 +307,25 @@ function interruptedSessions(project: Project, taskId: string, runId?: number): 
         started.set(event.instanceId, { stateId: event.stateId ?? "", at: row.created_at });
       } else {
         started.delete(event.instanceId);
+        const end = row.session_ref === null ? undefined : parseSessionRef(row.session_ref);
+        if (end !== undefined) listed.add(`${end.id}:${end.seq - 1}`);
       }
     }
     if (started.size === 0) continue;
-    // The records those calls left — placed ones only, since an unplaced call has no conversation
-    // to list. Ordered by insertion, which is start order.
-    const records = project.db
-      .prepare(
-        `SELECT r.record_id AS record_id, r.status AS status FROM operation_records r
+    // The records those calls left: placed ones — an unplaced call has no conversation to list —
+    // that no terminal event accounts for. Asking the journal rather than the record's status is what
+    // finds a call that SETTLED and then lost its event; a status test would call that one listed and
+    // leave the answer it holds unreachable. Ordered by insertion, which is start order.
+    const records = (
+      project.db
+        .prepare(
+          `SELECT r.record_id AS record_id, r.status AS status FROM operation_records r
            JOIN session_positions p ON p.operation_record_id = r.id
-          WHERE r.task_id = ? AND r.run_id = ? AND r.status != 'completed'
+          WHERE r.task_id = ? AND r.run_id = ?
           ORDER BY r.id`,
-      )
-      .all(taskId, run.id) as Array<{ record_id: string; status: string }>;
+        )
+        .all(taskId, run.id) as Array<{ record_id: string; status: string }>
+    ).filter((record) => !listed.has(record.record_id));
     if (records.length !== started.size) continue; // ambiguous — see the header
     const inFlight = [...started.entries()];
     for (const [i, record] of records.entries()) {
@@ -296,7 +343,12 @@ function interruptedSessions(project: Project, taskId: string, runId?: number): 
         sessionId: record.record_id.slice(0, cut),
         seq,
         at: where.at,
-        outcome: "interrupted",
+        // Read off the record rather than assumed. `completed` is the one status that means the call
+        // RETURNED and lost only its event afterwards — reporting that answer as interrupted would
+        // be as wrong as not listing it. Everything else is interrupted, `failed` included: a call
+        // that really failed wrote a terminal event and would not be in this list at all, so a failed
+        // row with none is what `recoverInterrupted` wrote over a row the crash left open.
+        outcome: record.status === "completed" ? "success" : "interrupted",
       });
     }
   }

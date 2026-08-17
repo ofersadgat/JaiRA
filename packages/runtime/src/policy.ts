@@ -29,7 +29,7 @@
 import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, SmartVerdict } from "@declarative-ai/permissions";
 import { describeCommand, parseCommand, type CommandDialect, type ParsedCommand } from "./command";
 import { dialectFor, type ExecEnv } from "./paths";
-import type { Scope } from "@jaira/shared";
+import { DEFAULT_ASK_ABOVE_BYTES, type Scope } from "@jaira/shared";
 import { scopeNarrowingFor } from "./tools";
 
 /** What a rule does when it matches — DESIGN §10.1's vocabulary. */
@@ -74,8 +74,28 @@ export interface JairaPolicy {
 /** Tools whose input is a command line, and therefore parsed rather than trusted. */
 const COMMAND_TOOLS = new Set(["bash", "shell", "sh", "powershell", "cmd", "run_command", "execute_command", "terminal"]);
 
+/**
+ * Tools judged by the SIZE of what they produce — the `smart` rule, and NOT a default mode.
+ *
+ * The distinction is the fix. A `smart` verdict is `allow`/`deny`/`ask` with no way to say "no
+ * opinion", so a tool made smart IN THE BASELINE resolves through the approver instead of through
+ * its mode — and `show_artifact` was in that baseline, so every page an agent produced under the
+ * ceiling was waved through while `write_file` beside it stopped and asked. A permission menu that
+ * shows a tool set to `ask` and a tool that never asks is a menu that lies, and "it only writes into
+ * the artifact directory" is an argument about blast radius, not about consent.
+ *
+ * So the rule stays and the default goes: these names get a `smart` APPROVER registered, which does
+ * nothing until something resolves to `smart`. A project that wants size-judged artifacts (or writes,
+ * or edits) opts in by authoring `tools: { show_artifact: "smart" }` — the same opt-in `write_file`
+ * has always had, and now the same treatment.
+ */
+const CONTENT_TOOLS = new Set(["show_artifact"]);
+
 /** Input keys a command-running tool might use for the command itself. */
 const COMMAND_KEYS = ["command", "cmd", "script", "input", "commandLine"];
+
+/** Input keys that carry a PAYLOAD — the bytes a producing tool is about to keep. */
+const CONTENT_KEYS = ["content", "text"];
 
 /** Input keys that carry a filesystem path. */
 const PATH_KEYS = ["path", "file", "file_path", "filePath", "target", "directory", "dir"];
@@ -237,6 +257,22 @@ function commandOf(input: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+/** Pull a payload out of a tool's inputs, if it carries one. */
+function contentOf(input: Record<string, unknown>): string | undefined {
+  for (const key of CONTENT_KEYS) {
+    const value = input[key];
+    if (typeof value === "string") return value;
+  }
+  return undefined;
+}
+
+/** A size a person can judge at a glance — what the approval prompt says. */
+function describeBytes(bytes: number): string {
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} bytes`;
+}
+
 /** Pull a filesystem path out of a tool's inputs, if it has one. */
 function pathOf(input: Record<string, unknown>): string | undefined {
   for (const key of PATH_KEYS) {
@@ -261,6 +297,14 @@ export interface CompilePolicyOptions {
   scopes?: readonly Scope[];
   /** What a relative glob and a relative call path resolve against. */
   workspaceRoot?: string;
+  /**
+   * Above this many bytes, a tool that produces content asks instead of just keeping it.
+   *
+   * `config.artifacts.askAboveBytes`, threaded here because the decision belongs to the policy even
+   * though the number belongs to the artifact configuration — this is the only place that can turn a
+   * size into an escalation. `0` turns it off; absent takes the shared default.
+   */
+  askAboveBytes?: number;
 }
 
 export interface PolicyAuditEntry {
@@ -300,8 +344,22 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
 
     const line = commandOf(input);
     if (line === undefined) {
-      // A command tool with no command to read: nothing to judge, so escalate
-      // rather than assume.
+      // Not a command, but there may still be something here to judge: a PAYLOAD, whose size is the
+      // one question worth asking about content nobody is going to execute. There is no ceiling —
+      // a run that genuinely produced a 90 MB report should keep it — so the guard is a question.
+      const content = contentOf(input);
+      if (content !== undefined) {
+        const bytes = Buffer.byteLength(content, "utf8");
+        const ceiling = options.askAboveBytes ?? DEFAULT_ASK_ABOVE_BYTES;
+        if (ceiling > 0 && bytes > ceiling) {
+          const reason = `${describeBytes(bytes)} is larger than this project keeps without asking`;
+          audit({ tool, action: "require_approval", reason, sessionId: req.sessionId });
+          return "ask";
+        }
+        audit({ tool, action: "allow", reason: `${describeBytes(bytes)} of content`, sessionId: req.sessionId });
+        return "allow";
+      }
+      // Nothing to judge at all, so escalate rather than assume.
       audit({ tool, action: "require_approval", reason: "no command found in the tool input", sessionId: req.sessionId });
       return "ask";
     }
@@ -328,7 +386,12 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   const baseline: PermissionBaseline = {
     ...(policy.toolDefault !== undefined ? { default: policy.toolDefault } : {}),
     tools: {
-      // Command tools are decided per call by the smart approver.
+      // Command tools are decided per call by the smart approver. A command line is not a thing a
+      // person can meaningfully consent to once — `git status` and `git push --force` arrive through
+      // one name — so the argument IS the decision, and that is what earns a baseline mode here.
+      //
+      // {@link CONTENT_TOOLS} deliberately does NOT get one: producing a file is a thing consent is
+      // about, and its size is a reason to ask harder rather than a reason to stop asking.
       ...Object.fromEntries([...COMMAND_TOOLS].map((tool) => [tool, "smart" as PermissionMode])),
       ...policy.tools,
     },
@@ -337,6 +400,7 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
 
   const smart: Record<string, (req: PermissionRequest) => SmartVerdict> = {};
   for (const tool of COMMAND_TOOLS) smart[tool] = (req) => verdictFor(tool, req);
+  for (const tool of CONTENT_TOOLS) smart[tool] = (req) => verdictFor(tool, req);
   // An authored `smart` entry for a non-command tool still gets path screening.
   for (const [tool, mode] of Object.entries(policy.tools ?? {})) {
     if (mode === "smart" && smart[tool] === undefined) smart[tool] = (req) => verdictFor(tool, req);

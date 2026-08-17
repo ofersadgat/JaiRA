@@ -80,7 +80,15 @@ describe("inside a slot", () => {
 
 describe("inside the other nested blocks", () => {
   it("offers a child's fields", () => {
-    expect(offered(state(), '{ "children": { "goals": { "|')).toEqual(["state", "inputs", "async", "environment"]);
+    // `transitions` among them since a child mount can carry its own — the schema gained it, and the
+    // completions read the schema.
+    expect(offered(state(), '{ "children": { "goals": { "|')).toEqual([
+      "state",
+      "inputs",
+      "async",
+      "environment",
+      "transitions",
+    ]);
   });
 
   it("offers a transition's fields inside the array", () => {

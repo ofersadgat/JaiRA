@@ -77,6 +77,8 @@ interface Branch {
 
 interface Row {
   seq: number;
+  /** Which branch this row is on — the same id everywhere else, and what a fork is legible BY. */
+  sessionId: string;
   recordId: string;
   /**
    * The row's lifecycle, verbatim from the `status` column — THE state signal, now that an open
@@ -87,6 +89,15 @@ interface Row {
   status: "open" | "completed" | "failed";
   value?: JsonValue;
   externalId?: string;
+  /**
+   * The operation as it was ASKED — `request_json`, pinned at open and never recomputed.
+   *
+   * Carried on the row because it is the only place one thing lives: what somebody typed. A record's
+   * value is what the call PRODUCED, and a transport streams the answer rather than the question — so
+   * a turn that was interrupted has the half-written reply and no sign of the message that provoked
+   * it. That message was never lost, only unreachable from the read side.
+   */
+  request?: JsonValue;
 }
 
 /**
@@ -148,6 +159,17 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     return join(forked, this.head(forked));
   }
 
+  /**
+   * The ref naming one position — the same spelling `resolve` and `fork` hand out, built here so a
+   * caller holding an `at` pair never has to concatenate one itself.
+   *
+   * Unscoped on purpose. The run namespace belongs to the SQL boundary ({@link SessionScope}), and a
+   * ref that leaked it would be stored in a workflow's output and carried into another run.
+   */
+  refAt(at: { id: string; seq: number }): string {
+    return join(at.id, at.seq);
+  }
+
   messages(ref: string): JsonValue[] {
     const [id, seq] = split(ref);
     return this.materialize(id, seq ?? this.head(id));
@@ -198,23 +220,27 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // newest first.
     const row = this.db
       .prepare(
-        `SELECT id, result_json FROM operation_records
+        `SELECT id, result_json, request_json FROM operation_records
           WHERE record_id = ? AND task_id IS ? AND run_id IS ?
           ORDER BY (status = 'open') DESC, id DESC LIMIT 1`,
       )
-      .get(id, this.scope.taskId ?? null, this.scope.runId ?? null) as { id: number; result_json: string | null } | undefined;
+      .get(id, this.scope.taskId ?? null, this.scope.runId ?? null) as
+      | { id: number; result_json: string | null; request_json: string | null }
+      | undefined;
     if (row === undefined) return;
     // Stored VERBATIM — the result as it settled, the session outcome as reported. What a record
     // MEANS as a conversation turn is the read side's question now (projectValue), which is what
     // "the payload-wins projection moves to the read side" (§5.1) says.
     const error = (settled.result as { error?: unknown } | undefined)?.error;
-    // An ERRORED settle keeps the streamed partial when it arrives with nothing better. The turns a
-    // call streamed before it died were really exchanged — the same reason a failed call is a record
-    // at all ("its turns may already exist remotely") — and an agent's error result is
-    // `{error, value: {finishReason}}`, which would replace them with nothing. A SUCCESS settle
-    // always wins outright: its payload or its session outcome is the complete, authoritative
-    // version of what the partial was an early copy of, and merging the partial in would put a copy
-    // of the messages where `projectValue`'s payload-wins rule would prefer them.
+    // An ERRORED settle keeps the streamed partial when it arrives with nothing better, and completes
+    // it with the message the call was MADE with. The turns a call streamed before it died were
+    // really exchanged — the same reason a failed call is a record at all ("its turns may already
+    // exist remotely") — and an agent's error result is `{error, value: {finishReason}}`, which
+    // would replace them with nothing.
+    //
+    // A SUCCESS settle always wins outright: its payload or its session outcome is the complete,
+    // authoritative version of what the partial was an early copy of, and merging the partial in
+    // would put a copy of the messages where `projectValue`'s payload-wins rule would prefer them.
     //
     // A SUCCESS settle still takes ONE thing from the partial: the per-turn clocks. They are the only
     // field the settle cannot reproduce — a provider result carries no wall clock per message, so the
@@ -223,7 +249,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // the messages themselves still come from the authoritative result.
     const result =
       error !== undefined
-        ? preservePartial(settled.result as JsonValue, settled.sessionOutcome, row.result_json)
+        ? preservePartial(settled.result as JsonValue, settled.sessionOutcome, row.result_json, row.request_json)
         : carryMessageTimes(settled.result as JsonValue, row.result_json);
     this.db
       .prepare(
@@ -259,20 +285,32 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * write, which is what keeps "open" meaning exactly "a live process is streaming into this row".
    */
   streamPartial(sessionId: string, seq: number, value: JsonValue, providerSessionId?: string): void {
+    // The row is found first rather than in a subselect, because the write needs the REQUEST on it:
+    // a flush replaces `result_json` wholesale, and the question `insertRecord` put there would go
+    // with it — leaving the record correct until the moment the model said something, which is the
+    // worst of the three possible times to be wrong.
+    const row = this.db
+      .prepare(
+        `SELECT r.id AS id, r.request_json AS request_json FROM session_positions p
+           JOIN operation_records r ON r.id = p.operation_record_id
+          WHERE p.session_id = ? AND p.seq = ? AND r.status = 'open'
+          ORDER BY r.id DESC LIMIT 1`,
+      )
+      .get(this.k(sessionId), seq) as { id: number; request_json: string | null } | undefined;
+    if (row === undefined) return;
     // The provider handle is stamped EARLY when the stream carried one — it rides nearly every
     // envelope, and waiting for the settle is why a crashed call used to have no handle to resume
     // or resync from. First writer wins (COALESCE on the existing value); the settle's own
     // COALESCE then prefers its authoritative id over ours.
+    //
+    // The `status = 'open'` guard stays on the UPDATE as well as on the SELECT: a settle landing
+    // between the two would otherwise be clobbered by a flush that read the row a microsecond early.
     this.db
       .prepare(
         `UPDATE operation_records SET result_json = ?, provider_session_id = COALESCE(provider_session_id, ?)
-          WHERE status = 'open' AND id = (
-            SELECT p.operation_record_id FROM session_positions p
-              JOIN operation_records r ON r.id = p.operation_record_id
-             WHERE p.session_id = ? AND p.seq = ? AND r.status = 'open'
-             ORDER BY r.id DESC LIMIT 1)`,
+          WHERE id = ? AND status = 'open'`,
       )
-      .run(JSON.stringify(value), providerSessionId ?? null, this.k(sessionId), seq);
+      .run(JSON.stringify(withOpening(value, row.request_json)), providerSessionId ?? null, row.id);
   }
 
   bySession(session: string, upTo?: number): StoredRecord[] {
@@ -301,6 +339,57 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       }
     }
     return out;
+  }
+
+  /**
+   * Where this conversation DIVERGED, and what each divergence left behind.
+   *
+   * A fork is the honest answer to two calls wanting one position — an edit resending an earlier
+   * message, most often — and `transcript` walks straight through one: it follows the lineage back
+   * and takes each ancestor only up to the point its child left it. Everything past that point is
+   * still there and is on no path anybody reads. That is right for materializing a conversation to
+   * send to a model, and wrong as the only view a person gets: what the conversation said INSTEAD is
+   * a fact about it, and losing sight of it is how an edit comes to look like a deletion.
+   *
+   * So this reports the seams. For each one: the position the branches share, the branch this path
+   * took, and every branch it did not — the parent's own tail past the cursor (the continuation an
+   * edit replaced) and any sibling that forked at the same place (a second edit at the same message).
+   *
+   * Rows only, no interpretation: what a row MEANS as a turn is the read side's question, and it is
+   * answered for these by exactly the same code that answers it for the path itself.
+   */
+  forks(ref: string): Array<{ at: { sessionId: string; seq: number }; taken: string; left: Array<{ sessionId: string; rows: Row[] }> }> {
+    const [id, seq] = split(ref);
+    const chain = this.chain(id, seq ?? this.head(id));
+    const out: Array<{ at: { sessionId: string; seq: number }; taken: string; left: Array<{ sessionId: string; rows: Row[] }> }> = [];
+    for (const [i, entry] of chain.entries()) {
+      const child = chain[i + 1];
+      if (child === undefined) continue; // the tip of the path: nothing forked off it that this walk took
+      const [parent, cursor] = entry;
+      const left: Array<{ sessionId: string; rows: Row[] }> = [];
+      // The parent's OWN tail: the turns that were there before something branched away from them.
+      const tail = this.rowsOf(parent).filter((row) => row.seq >= cursor);
+      if (tail.length > 0) left.push({ sessionId: parent, rows: tail });
+      // …and any sibling that left from the same place, which is what a second edit at one message
+      // produces. The branch this path is on is not one of them.
+      for (const sibling of this.branchesFrom(parent, cursor)) {
+        if (sibling === child[0]) continue;
+        const rows = this.rowsOf(sibling);
+        if (rows.length > 0) left.push({ sessionId: sibling, rows });
+      }
+      if (left.length > 0) out.push({ at: { sessionId: parent, seq: cursor }, taken: child[0], left });
+    }
+    return out;
+  }
+
+  /** Every branch that left one conversation at one position — see {@link forks}. */
+  private branchesFrom(parent: string, cursor: number): string[] {
+    const prefix = this.k("");
+    return (
+      this.db.prepare(`SELECT id FROM sessions WHERE parent = ? AND cursor = ? ORDER BY created_at`).all(this.k(parent), cursor) as Array<{
+        id: string;
+      }>
+    ).map((row) => (row.id.startsWith(prefix) ? row.id.slice(prefix.length) : row.id));
   }
 
   /** One record, by the position it claimed. What a state's `sessionRef` resolves to. */
@@ -379,22 +468,33 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
 
   // --- Internals ---------------------------------------------------------------
 
-  /** Stamp the per-attempt row. The request is pinned here — nothing recomputes it (§5.3). */
+  /**
+   * Stamp the per-attempt row. The request is pinned here — nothing recomputes it (§5.3).
+   *
+   * The row is BORN holding the message the call was made with, so a record is the delta it will
+   * finally be from its first instant and only ever grows: the question, then the turns as they
+   * stream, then the provider's authoritative version of both. That is what lets every reader treat
+   * a record the same way whatever state it is in — and the alternative was found the hard way, since
+   * a process killed between `open` and the first flush leaves a row that no later write ever reaches.
+   */
   private insertRecord(stub: RecordStub): number | bigint {
     const attempt = this.db
       .prepare(`SELECT COUNT(*) AS n FROM operation_records WHERE record_id = ? AND task_id IS ? AND run_id IS ?`)
       .get(stub.id, this.scope.taskId ?? null, this.scope.runId ?? null) as { n: number };
+    const request = stub.source === undefined ? null : JSON.stringify(stub.source);
+    const opening = openingMessage(request, []);
     const info = this.db
       .prepare(
-        `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, request_json, started_at)
-         VALUES (?, ?, ?, ?, 'open', ?, ?)`,
+        `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, request_json, result_json, started_at)
+         VALUES (?, ?, ?, ?, 'open', ?, ?, ?)`,
       )
       .run(
         stub.id,
         this.scope.taskId ?? null,
         this.scope.runId ?? null,
         attempt.n + 1,
-        stub.source === undefined ? null : JSON.stringify(stub.source),
+        request,
+        opening.length === 0 ? null : JSON.stringify({ value: { messages: opening } }),
         stub.startMs ?? Date.now(),
       );
     return info.lastInsertRowid;
@@ -528,7 +628,8 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     const rows = this.db
       .prepare(
         `SELECT p.seq AS seq, r.record_id AS record_id, r.status AS status, r.result_json AS result_json,
-                r.session_outcome_json AS session_outcome_json, r.provider_session_id AS provider_session_id
+                r.session_outcome_json AS session_outcome_json, r.provider_session_id AS provider_session_id,
+                r.request_json AS request_json
            FROM session_positions p JOIN operation_records r ON r.id = p.operation_record_id
           WHERE p.session_id = ? ${upTo === undefined ? "" : "AND p.seq < ?"} ORDER BY p.seq`,
       )
@@ -539,6 +640,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       result_json: string | null;
       session_outcome_json: string | null;
       provider_session_id: string | null;
+      request_json: string | null;
     }>;
     return rows.map((row) => {
       const value = projectValue(
@@ -547,10 +649,12 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       );
       return {
         seq: row.seq,
+        sessionId: session,
         recordId: row.record_id,
         status: row.status,
         ...(value !== undefined ? { value } : {}),
         ...(row.provider_session_id !== null ? { externalId: row.provider_session_id } : {}),
+        ...(row.request_json !== null ? { request: JSON.parse(row.request_json) as JsonValue } : {}),
       };
     });
   }
@@ -644,26 +748,135 @@ function preservePartial(
   settledResult: JsonValue | undefined,
   sessionOutcome: { messages?: unknown } | undefined,
   existingJson: string | null,
+  requestJson: string | null,
 ): JsonValue | undefined {
-  if (existingJson === null) return settledResult;
   const settled = settledResult as { value?: { messages?: unknown } } | undefined;
   if (settled?.value?.messages !== undefined) return settledResult;
   if (sessionOutcome?.messages !== undefined) return settledResult;
-  const partial = JSON.parse(existingJson) as {
+  // Through `withOpening` even though `insertRecord` normally put the question there already: a row
+  // opened before that existed, or one whose only flush raced ahead of it, still settles correctly.
+  const partial = withOpening(parsed<JsonValue>(existingJson) ?? {}, requestJson) as {
     value?: { messages?: JsonValue[]; messageTimes?: JsonValue; sidechains?: JsonValue; partial?: JsonValue };
-  } | null;
-  const messages = Array.isArray(partial?.value?.messages) ? partial.value.messages : [];
-  // Worth keeping when the stream left ANY evidence — finished turns, or the tails of the one it
-  // was writing when it died. Both are what the interruption was holding.
-  if (messages.length === 0 && partial?.value?.partial === undefined) return settledResult;
+  };
+  const messages = Array.isArray(partial.value?.messages) ? partial.value.messages : [];
+  // Worth keeping when there is ANY evidence of what happened — the question, the finished turns, or
+  // the tails of the one being written when it died.
+  if (messages.length === 0 && partial.value?.partial === undefined) return settledResult;
   return {
     ...((settledResult ?? {}) as object),
     value: {
       ...((settled?.value ?? {}) as object),
       messages,
-      ...(partial?.value?.messageTimes !== undefined ? { messageTimes: partial.value.messageTimes } : {}),
-      ...(partial?.value?.sidechains !== undefined ? { sidechains: partial.value.sidechains } : {}),
-      ...(partial?.value?.partial !== undefined ? { partial: partial.value.partial } : {}),
+      ...(partial.value?.messageTimes !== undefined ? { messageTimes: partial.value.messageTimes } : {}),
+      ...(partial.value?.sidechains !== undefined ? { sidechains: partial.value.sidechains } : {}),
+      ...(partial.value?.partial !== undefined ? { partial: partial.value.partial } : {}),
     },
   } as JsonValue;
+}
+
+/**
+ * A record value with the call's own question in front of its messages, if it is not there already.
+ *
+ * The one place the splice is spelled out, used by all three writers — the row's birth
+ * (`insertRecord`), every flush into it (`streamPartial`), and its settle (`preservePartial`) — so a
+ * record carries the same shape at every instant of its life rather than acquiring it at one of them.
+ */
+function withOpening(value: JsonValue, requestJson: string | null): JsonValue {
+  const held = value as { value?: { messages?: JsonValue[]; messageTimes?: JsonValue } } | null;
+  const messages = Array.isArray(held?.value?.messages) ? held.value.messages : [];
+  const opening = openingMessage(requestJson, messages);
+  if (opening.length === 0) return value;
+  const times = held?.value?.messageTimes;
+  return {
+    ...((value ?? {}) as object),
+    value: {
+      ...((held?.value ?? {}) as object),
+      messages: [...opening, ...messages],
+      // Padded by however many messages went in front, because `messageTimes` is a parallel array
+      // over `messages` and a shift of one labels every turn with its neighbour's duration.
+      ...(Array.isArray(times) ? { messageTimes: [...opening.map(() => ({})), ...times] } : {}),
+    },
+  } as JsonValue;
+}
+
+/**
+ * The message a cut-off call was MADE with, as the turn it is — the other half of what an interrupted
+ * record has to hold, and the half that used to be lost.
+ *
+ * A record's messages are the delta the call contributed, and for a call that settled that delta
+ * opens with the question: the provider echoes it back as part of the exchange. A call that was
+ * stopped has no provider answer, so all that survives is what the transport STREAMED — and a
+ * transport streams what the model produced, which the question never was. The record was therefore
+ * a different shape depending on how the call ended, and every reader after it had to compensate:
+ * the transcript by splicing the question back at display time (and getting it wrong for an agent,
+ * whose tool results are user-role messages), and provider replay not at all — a resumed conversation
+ * was handed an answer with no question in front of it.
+ *
+ * So it is spliced HERE, once, where the record is written. `request_json` has held it since the
+ * record was opened. Reading `user` off the request is the one op-shaped assumption in this file
+ * besides `{value:{messages}}` itself, and it is narrow: anything without a non-empty `user` string —
+ * a function op, a gate, a pre-dispatch failure with no prompt — contributes nothing and is untouched.
+ *
+ * Skipped when the stream already opens with exactly this message, compared by CONTENT rather than by
+ * role: "is there a user turn here" is the test that mistook a tool result for a question.
+ */
+function openingMessage(requestJson: string | null, streamed: readonly JsonValue[]): JsonValue[] {
+  const asked = parsed<{ user?: unknown }>(requestJson)?.user;
+  if (typeof asked !== "string" || asked.trim() === "") return [];
+  const first = streamed[0] as { role?: unknown; content?: unknown } | undefined;
+  if (first?.role === "user" && first.content === asked) return [];
+  return [{ role: "user", content: asked }];
+}
+
+/**
+ * Splice the question into every interrupted record written before {@link openingMessage} existed —
+ * the one-shot half of that fix, for rows already on disk (migration 7).
+ *
+ * Narrowed to records that FAILED and hold their messages on the result: a settled call's delta
+ * already opens with the question, and a record whose messages live on the session-outcome channel
+ * would be SHADOWED rather than repaired, because `projectValue` prefers the result when it has
+ * messages. Naturally idempotent — a second pass finds the question already in front and does
+ * nothing — so a half-finished upgrade is re-runnable.
+ */
+export function repairInterruptedRecords(db: JairaDb): number {
+  const rows = db
+    .prepare(
+      `SELECT id, result_json, request_json, session_outcome_json FROM operation_records
+        WHERE status = 'failed' AND request_json IS NOT NULL`,
+    )
+    .all() as Array<{ id: number; result_json: string | null; request_json: string; session_outcome_json: string | null }>;
+  const update = db.prepare(`UPDATE operation_records SET result_json = ? WHERE id = ?`);
+  let repaired = 0;
+  for (const row of rows) {
+    if (parsed<{ messages?: unknown }>(row.session_outcome_json)?.messages !== undefined) continue;
+    const result = parsed<{ value?: { messages?: JsonValue[]; messageTimes?: JsonValue[] } }>(row.result_json);
+    if (row.result_json !== null && result === undefined) continue; // unreadable: leave it exactly as it is
+    const messages = Array.isArray(result?.value?.messages) ? result.value.messages : [];
+    const opening = openingMessage(row.request_json, messages);
+    if (opening.length === 0) continue;
+    const times = result?.value?.messageTimes;
+    update.run(
+      JSON.stringify({
+        ...(result ?? {}),
+        value: {
+          ...(result?.value ?? {}),
+          messages: [...opening, ...messages],
+          ...(Array.isArray(times) ? { messageTimes: [...opening.map(() => ({})), ...times] } : {}),
+        },
+      }),
+      row.id,
+    );
+    repaired += 1;
+  }
+  return repaired;
+}
+
+/** JSON from a column, or `undefined` — a malformed blob is a row to leave alone, not a throw. */
+function parsed<T>(json: string | null): T | undefined {
+  if (json === null) return undefined;
+  try {
+    return JSON.parse(json) as T;
+  } catch {
+    return undefined;
+  }
 }

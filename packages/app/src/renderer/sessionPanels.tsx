@@ -52,7 +52,7 @@ const ZIG = "jaira-zig";
  * reads to a screen reader as a run of punctuation. This is one path repeated at 8px, so it fills
  * exactly, and the words in the middle of the bar are the accessible name of the whole thing.
  */
-function ZigDefs(): JSX.Element {
+export function ZigDefs(): JSX.Element {
   return (
     <svg width="0" height="0" aria-hidden focusable="false" style={{ position: "absolute" }}>
       <defs>
@@ -75,17 +75,21 @@ function Zig(): JSX.Element {
 /**
  * A torn edge with a sentence in the middle of it.
  *
- * The session id is in the label because the two halves of a split conversation have to be findable
- * from each other, and the id is the only thing they share that is not also shared with every other
- * panel on screen.
+ * `paused` tears along the BOTTOM of what is above it and `resumed` along the top of what is below,
+ * so the two are always a pair with something in between: the run that interrupted a session here,
+ * or — in a conversation — the point where one thread became two.
+ *
+ * The label is the caller's because the two uses say different things about the same shape. A band
+ * names the session, because the halves of a split conversation have to be findable from each other
+ * and the id is the only thing they share that every other panel does not. A fork names neither
+ * half: both sides are this conversation, and what a reader needs there is which one they are
+ * reading.
  */
-function TearBar({ kind, sessionId }: { kind: "paused" | "resumed"; sessionId: string }): JSX.Element {
+export function TearBar({ kind, children }: { kind: "paused" | "resumed"; children: ReactNode }): JSX.Element {
   return (
     <div className={`sb-tear sb-tear-${kind}`}>
       <Zig />
-      <span className="sb-tear-label">
-        {kind} session <span className="mono">{sessionId}</span>
-      </span>
+      <span className="sb-tear-label">{children}</span>
       <Zig />
     </div>
   );
@@ -169,7 +173,9 @@ function Sheet({
       ) : null}
       <section className={`sb-sheet${segment.resumed ? " resumed" : ""}${segment.paused ? " paused" : ""}`}>
         {segment.resumed && segment.sessionId !== undefined ? (
-          <TearBar kind="resumed" sessionId={segment.sessionId} />
+          <TearBar kind="resumed">
+            resumed session <span className="mono">{segment.sessionId}</span>
+          </TearBar>
         ) : null}
         <div className="sb-body">
           {segment.pieces.map((piece) =>
@@ -183,7 +189,9 @@ function Sheet({
           )}
         </div>
         {segment.paused && segment.sessionId !== undefined ? (
-          <TearBar kind="paused" sessionId={segment.sessionId} />
+          <TearBar kind="paused">
+            paused session <span className="mono">{segment.sessionId}</span>
+          </TearBar>
         ) : null}
       </section>
     </div>

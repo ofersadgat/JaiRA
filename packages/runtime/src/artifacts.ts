@@ -27,6 +27,16 @@ export interface ArtifactRecord {
   hash: string;
   bytes: number;
   format?: string;
+  /**
+   * Whether this artifact may RUN when it is shown.
+   *
+   * Recorded rather than derived, and that is the whole safety of it. If "is this scriptable" were
+   * answered from the media type, every `text/html` artifact any producer ever wrote would become
+   * scriptable the day the interactive renderer shipped — including ones written before the question
+   * existed. Here it is a claim the producing call made, kept with the bytes, so an artifact cannot
+   * acquire scripts by being opened somewhere new.
+   */
+  interactive?: boolean;
   /** Which instance and output slot produced it, when it came from one. */
   instanceId?: number;
   stateId?: string;

@@ -850,6 +850,7 @@ function Chip({
 export function Composer({
   plan,
   busy,
+  joinable,
   overrides,
   onOverrides,
   onSend,
@@ -863,8 +864,18 @@ export function Composer({
 }: {
   /** What the message would run under right now — inherited, with any overrides already folded in. */
   plan: ChatPlanView | null;
-  /** A turn is in flight. The box stays readable; only sending is refused. */
+  /** A turn is in flight — what turns the button into a stop. */
   busy?: boolean;
+  /**
+   * A message may be sent WHILE one is in flight — it joins the turn or queues behind it.
+   *
+   * Off by default, because the two hosts that must refuse are real: the box that STARTS a
+   * conversation would create a second one, and a panel over a state that holds no conversation has
+   * nowhere to put the message. A host that has a thread to send into passes this, and then `busy`
+   * means only "there is something to stop" — which is what the plan's `steerable`/`busy` line has
+   * been promising above this button while the button refused.
+   */
+  joinable?: boolean;
   overrides: ChatSettings;
   onOverrides: (next: ChatSettings) => void;
   onSend: (message: string) => void;
@@ -940,9 +951,12 @@ export function Composer({
   // What the box edits: the override if there is one, else the resolved value it would replace.
   const current = settings.model ?? effective.model ?? "";
 
+  /** Whether Enter does anything right now — see {@link joinable} for the two hosts that say no. */
+  const canSend = disabled === undefined && (busy !== true || joinable === true);
+
   const send = (): void => {
     const message = withFiles(draft.trim(), files);
-    if (message === "" || busy === true || disabled !== undefined) return;
+    if (message === "" || !canSend) return;
     onSend(message);
     setDraft("");
     setFiles([]);
@@ -1306,23 +1320,32 @@ export function Composer({
               />
             </label>
 
-            {/* One button, two verbs. While a turn is in flight the only useful thing to press is
-                stop, and a greyed send button beside a spinner is a control that says "wait" where
-                a control that says "stop" belongs. Without `onStop` there is nothing to offer, and
-                it stays a send button that greys — see the prop. */}
+            {/* Two verbs, and how many buttons they need depends on what is true.
+
+                While a turn is in flight there is something to STOP, and a greyed send button beside
+                a spinner is a control that says "wait" where a control that says "stop" belongs. But
+                in a conversation there is also still something to SAY — the message joins the turn —
+                so both are offered, and the stop sits first because it is about what is already
+                happening. Where nothing can be sent (see {@link joinable}) the stop stands alone,
+                which is the shape this used to have in every case. */}
             {busy === true && onStop !== undefined ? (
               <button type="button" className="cx-send cx-stop" aria-label="Stop" title="Stop this turn" onClick={onStop}>
                 <span className="cx-stop-mark" />
               </button>
-            ) : (
+            ) : null}
+            {busy === true && onStop !== undefined && !canSend ? null : (
               <button
                 type="button"
                 className="cx-send"
                 aria-label="Send"
-                title="Enter to send, Shift+Enter for a new line"
+                title={
+                  busy === true
+                    ? "Enter to send — this joins the turn in flight"
+                    : "Enter to send, Shift+Enter for a new line"
+                }
                 // Attachments alone are a message. A dropped file with no covering note is a
                 // perfectly ordinary thing to send, and the button used to refuse what Enter allowed.
-                disabled={(draft.trim() === "" && files.length === 0) || busy === true || disabled !== undefined}
+                disabled={(draft.trim() === "" && files.length === 0) || !canSend}
                 onClick={send}
               >
                 <Icon name="send" />

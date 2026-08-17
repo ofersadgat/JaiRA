@@ -176,6 +176,20 @@ describe("building the entry list", () => {
     expect(entries).toEqual([{ kind: "thought", text: "hm", live: true, startedAt: 1000 }]);
   });
 
+  it("shows a WITHHELD think as a live row — a started clock is enough, with no text to grow", () => {
+    // The provider streams the block and keeps the reasoning: the tail never gains a character, and
+    // gating the row on text is what made minutes of thinking render as an empty conversation
+    // nobody could tell from a hung run. The clock alone carries the state.
+    const entries = entriesOf(session([] as never), [], { text: "", thinking: "", thinkingStartedAt: 1000 });
+    expect(entries).toEqual([{ kind: "thought", text: "", live: true, startedAt: 1000 }]);
+  });
+
+  it("times a withheld think the same as a written one once the answer begins", () => {
+    const entries = entriesOf(session([] as never), [], { text: "Here goes", thinking: "", thinkingStartedAt: 1000, textStartedAt: 4000 });
+    expect(entries[0]).toMatchObject({ kind: "thought", text: "", durationMs: 3000 });
+    expect((entries[0] as { live?: boolean }).live).toBeUndefined();
+  });
+
   it("stops the pulse and states the duration once the answer begins", () => {
     const entries = entriesOf(session([] as never), [], {
       text: "The plan is…",

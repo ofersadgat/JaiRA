@@ -186,6 +186,18 @@ describe("a turn that failed", () => {
     const chat = tree.instances.flatMap((r) => r.children).find((c) => isChatInstance(c.instanceId));
     expect(chat!.status).toBe("failed");
   });
+
+  it("says WHERE it failed, which is what makes the turn findable afterwards", async () => {
+    // `session_ref` is a generated column over `$.metrics.sessionRef`, so a terminal event without
+    // the metrics names no position — and `stateSessions` reads exactly that column. A turn nothing
+    // can find is a turn whose position the next message computes as free, sends into, collides with
+    // and forks away from: the stopped turn drops off the thread, everything after it lands on a
+    // branch nobody reads, and the fork inherits no provider handle to resume from.
+    const h = harness([{ error: "model refused" }]);
+    await send(h, { message: "do the thing", position: "s@1" });
+    const failed = chatEvents(h.log).find((e) => e.type === "operation.failed") as { metrics?: { sessionRef?: string } };
+    expect(failed.metrics?.sessionRef).toBeDefined();
+  });
 });
 
 describe("the id space", () => {

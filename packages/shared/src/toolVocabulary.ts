@@ -147,6 +147,33 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     natives: { claude: "Write" },
   },
   {
+    name: "show_artifact",
+    label: "show",
+    category: "files",
+    /*
+     * READ-ONLY, and it is the implementation that earns it rather than the intent.
+     *
+     * `readOnly` here means "nothing that was already there is different afterwards" — the property a
+     * narrowing profile exists to protect. Producing a new file under the task's own artifact
+     * directory does not violate that, any more than writing a cache entry does; overwriting
+     * `src/index.ts` would.
+     *
+     * So the tool is confined to that directory and cannot address anything else (`showDestination`
+     * in `fileTools.ts`, which refuses a `$RELPATH` that climbs out). Left on the configured
+     * destination it would inherit `$DEFAULT` — the bare workspace — and this classification would be
+     * a promise the code did not keep.
+     *
+     * What this buys: `plan` mode can draw. A profile whose whole purpose is "read and think before
+     * you change anything" is exactly when a mockup is worth having, and a tool that leaves the
+     * workspace as it found it belongs inside it.
+     */
+    readOnly: true,
+    hint: "produce something to look at — a page, a drawing, a document",
+    pathArgs: ["path"],
+    // No `natives`: the agent has no built-in doing this job in a delegated run, so there is nothing
+    // to displace and nothing to deny when the tool is not granted.
+  },
+  {
     name: "bash",
     label: "bash",
     category: "execution",

@@ -17,7 +17,7 @@ import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MapSessionStore, PositionTaken, type RecordStore, type SessionStore } from "@declarative-ai/exec";
 import { openDb, type JairaDb } from "../src/db";
-import { SqliteSessionStore } from "../src/sessionStore";
+import { repairInterruptedRecords, SqliteSessionStore } from "../src/sessionStore";
 import { parseSessionRef, stateSessions } from "../src/views";
 
 let dir: string;
@@ -104,6 +104,25 @@ describe.each(BUILDERS)("%s — the shared session semantics", (_name, build) =>
     await append(store, "history", "h2", "two");
 
     expect(await store.messages("history@1")).toEqual([turn("one")]);
+  });
+
+  it("spells the ref for a position — including the one AFTER a call, which is what a state publishes", async () => {
+    const store = build();
+    const first = await store.resolve({ ref: "published" });
+    await write(store, first.at, "p1", "one");
+
+    // What the engine publishes as `operation.output.session`: the slot after the turn just written,
+    // built by the store because the spelling is the store's, not the caller's. A store missing this
+    // does not fail a type check against a stale upstream build — it throws mid-run, at the end of
+    // the first call that completes, and takes the conversation with it.
+    const next = store.refAt({ id: first.at.id, seq: first.at.seq + 1 });
+
+    // It has to name the position the next append really lands on. If it named the one just taken,
+    // every hand-off would resolve to a claimed slot and fork.
+    const second = await store.resolve({ ref: next });
+    expect(second.mode).toBe("append");
+    expect(second.at).toEqual({ id: first.at.id, seq: 1 });
+    expect(await store.messages(next)).toEqual([turn("one")]);
   });
 
   it("resumes the provider's handle on an append, and withholds it from a deliberate fork", async () => {
@@ -269,6 +288,38 @@ describe("the migration runner", () => {
       migrated.close();
     }
   });
+
+  it("gives every interrupted record already on disk the message it was called with", async () => {
+    // Built with the store, then rewound to what the old writer left — the streamed turns alone, on a
+    // database that has not seen migration 7. Rewinding beats hand-writing a version-6 schema: the row
+    // is exactly the shape the real writer produced, minus the one thing the migration is about.
+    const file = join(dir, "repair.db");
+    const fresh = openDb(file);
+    const store = new SqliteSessionStore(fresh, { taskId: "t1", runId: 1 }) as unknown as Store & SqliteSessionStore;
+    const at = await store.resolve({ ref: "conv" });
+    await store.open({ id: "r1", source: { kind: "prompt", user: "why is it slow?" } as never, session: at.at, startMs: 1 });
+    fresh
+      .prepare(`UPDATE operation_records SET result_json = ? WHERE record_id = 'r1'`)
+      .run(JSON.stringify({ error: { classification: "canceled", reason: "stopped" }, value: { messages: [turn("looking")], messageTimes: [{ at: 5 }] } }));
+    fresh.prepare(`UPDATE operation_records SET status = 'failed', ended_at = 9 WHERE record_id = 'r1'`).run();
+    fresh.pragma("user_version = 6");
+    fresh.close();
+
+    const migrated = openDb(file);
+    try {
+      const reader = new SqliteSessionStore(migrated, { taskId: "t1", runId: 1 }) as unknown as Store & SqliteSessionStore;
+      // Replay and the screen both, through the ordinary reads — the migration is correct exactly
+      // when an old record becomes indistinguishable from one written today.
+      expect(await reader.messages("conv")).toEqual([{ role: "user", content: "why is it slow?" }, turn("looking")]);
+      expect(reader.transcript("conv")[0]!.value).toMatchObject({
+        value: { messageTimes: [{}, { at: 5 }] },
+      });
+      // Idempotent: a re-run finds the question already in front and leaves the row alone.
+      expect(repairInterruptedRecords(migrated)).toBe(0);
+    } finally {
+      migrated.close();
+    }
+  });
 });
 
 /**
@@ -417,11 +468,73 @@ describe("stateSessions — a run the process died inside", () => {
       `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at) VALUES ('t3', ?, 'operation.completed', ?, ?)`,
     ).run(runId, JSON.stringify({ instanceId: 7, stateId: "wf/done", metrics: { sessionRef: "chat@1" } }), 22);
     started(runId, 8, "wf/dying", 23);
-    record(runId, "chat:1", "completed"); // the settled one — excluded by status
+    // The settled one, at the position its event reports the call ending one past (`chat@1`) — which
+    // is how it is excluded: the journal already names it, whatever its status says.
+    record(runId, "chat:0", "completed");
     record(runId, "chat:2");
     expect(stateSessions({ db } as never, "t3")).toEqual([
       { runId, instanceId: 7, stateId: "wf/done", sessionId: "chat", seq: 0, at: 22, outcome: "success" },
       { runId, instanceId: 8, stateId: "wf/dying", sessionId: "chat", seq: 2, at: 23, outcome: "interrupted" },
+    ]);
+  });
+
+  /**
+   * The case that is NOT a dead process: the engine threw after the call returned, so the record is
+   * settled and whole and the terminal event carrying it was never written. It happened — a session
+   * store missing a method the contract had gained — and the chat it took down was a finished answer
+   * sitting in the database that nothing could reach, on a run marked `error` rather than
+   * `interrupted`. Listed, and listed as the success it was.
+   */
+  it("lists a call that SETTLED and then lost its event, on a run the engine died in", () => {
+    db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t3','failed',1,1)`).run();
+    db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at, ended_at, outcome) VALUES ('t3','h',1,9,'error')`).run();
+    const runId = (db.prepare(`SELECT id FROM runs WHERE task_id = 't3'`).get() as { id: number }).id;
+    started(runId, 1, "chat/agent", 20);
+    record(runId, "#i1:0", "completed");
+
+    expect(stateSessions({ db } as never, "t3")).toEqual([
+      { runId, instanceId: 1, stateId: "chat/agent", sessionId: "#i1", seq: 0, at: 20, outcome: "success" },
+    ]);
+  });
+
+  /**
+   * The case that is not a crash at all: somebody pressed stop.
+   *
+   * Cancelling ends the instance (`instance.terminated`, outcome `canceled`) and settles the record
+   * where it stood — `failed`, holding everything the call had streamed — but writes no
+   * `operation.completed` and no `operation.failed`, so the journal query finds nothing and this
+   * pass is the only one that can. The run filter named `interrupted` and `error` and not
+   * `canceled`, which meant a stopped conversation had no session row, so its chat had no host, no
+   * position and no thread: minutes of answer in the database, and "this conversation has not said
+   * anything yet" on the screen.
+   */
+  it("recovers the call somebody STOPPED, on a run whose outcome is canceled", () => {
+    db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t3','canceled',1,1)`).run();
+    db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at, ended_at, outcome) VALUES ('t3','h',1,9,'canceled')`).run();
+    const runId = (db.prepare(`SELECT id FROM runs WHERE task_id = 't3'`).get() as { id: number }).id;
+    started(runId, 1, "chat/agent", 20);
+    // Cancellation settles the row rather than leaving it open, so the EXISTS arm of the run filter
+    // does not catch this one either — the outcome is the only thing that admits it.
+    record(runId, "#i1:0", "failed");
+
+    expect(stateSessions({ db } as never, "t3")).toEqual([
+      { runId, instanceId: 1, stateId: "chat/agent", sessionId: "#i1", seq: 0, at: 20, outcome: "interrupted" },
+    ]);
+  });
+
+  it("still says nothing about a run that ended in an ordinary error, every call accounted for", () => {
+    db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t3','failed',1,1)`).run();
+    db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at, ended_at, outcome) VALUES ('t3','h',1,9,'error')`).run();
+    const runId = (db.prepare(`SELECT id FROM runs WHERE task_id = 't3'`).get() as { id: number }).id;
+    started(runId, 1, "wf/a", 20);
+    db.prepare(
+      `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at) VALUES ('t3', ?, 'operation.failed', ?, ?)`,
+    ).run(runId, JSON.stringify({ instanceId: 1, stateId: "wf/a", metrics: { sessionRef: "chat@1" } }), 21);
+    record(runId, "chat:0", "failed");
+
+    // One row, from the journal — the recovery path adds nothing, because nothing is unaccounted for.
+    expect(stateSessions({ db } as never, "t3")).toEqual([
+      { runId, instanceId: 1, stateId: "wf/a", sessionId: "chat", seq: 0, at: 21, outcome: "error" },
     ]);
   });
 });
@@ -504,6 +617,86 @@ describe("streamed partials on open records", () => {
     const s = store();
     expect(() => s.streamPartial("nowhere", 3, partial(["x"]))).not.toThrow();
     expect(s.transcript("nowhere")).toEqual([]);
+  });
+
+  /**
+   * A record holds the message it was CALLED with, at every instant of its life.
+   *
+   * `LlmOutput.messages` is "the messages this call appended", and for a settled call that delta
+   * opens with the question because the provider echoes it back. Nothing echoed it to a call that
+   * was stopped, so the record held only what the transport streamed — the model's own output — and
+   * the question, sitting in `request_json` two columns over, reached no reader at all. The
+   * transcript patched it back at display time and got it wrong for an agent (a tool RESULT is a
+   * user-role message, so "is there a user turn here" answered yes); provider replay did not patch
+   * it and handed the model an answer with no question in front of it.
+   *
+   * So it is written once, by whoever touches the row: born with it, kept in front of every flush,
+   * and carried through the settle. These four tests are the four moments.
+   */
+  describe("the message the call was made with", () => {
+    const asked = { kind: "prompt", user: "what is in this repository?" } as never;
+    const question = { role: "user", content: "what is in this repository?" };
+
+    it("is on the record from birth, before anything has streamed", async () => {
+      const s = store();
+      const at = await s.resolve({ ref: "ask" });
+      await s.open({ id: "r1", source: asked, session: at.at, startMs: 1 });
+      // The case that made this the record's birth rather than its first flush: a process killed
+      // here reaches no later write, and the row is all anybody will ever have.
+      expect(s.transcript("ask")[0]).toMatchObject({ status: "open", value: { value: { messages: [question] } } });
+    });
+
+    it("stays in front of the turns a flush writes over it", async () => {
+      const s = store();
+      const at = await s.resolve({ ref: "ask" });
+      await s.open({ id: "r1", source: asked, session: at.at, startMs: 1 });
+      s.streamPartial("ask", 0, partial(["it has two tables"]));
+      expect(s.transcript("ask")[0]!.value).toMatchObject({ value: { messages: [question, turn("it has two tables")] } });
+    });
+
+    it("survives the settle of a call that was stopped, and reaches REPLAY as well as the screen", async () => {
+      const s = store();
+      const at = await s.resolve({ ref: "ask" });
+      await s.open({ id: "r1", source: asked, session: at.at, startMs: 1 });
+      s.streamPartial("ask", 0, partial(["it has two tables"]));
+      await s.close("r1", { result: { error: { classification: "canceled", reason: "stopped" } } as never });
+
+      // Replay is the half that had no workaround: the next call is sent this, and an assistant turn
+      // with nothing in front of it is a conversation that never happened.
+      expect(await s.messages("ask")).toEqual([question, turn("it has two tables")]);
+    });
+
+    it("is not doubled by a settle that carries the question itself", async () => {
+      const s = store();
+      const at = await s.resolve({ ref: "ask" });
+      await s.open({ id: "r1", source: asked, session: at.at, startMs: 1 });
+      s.streamPartial("ask", 0, partial(["half an answer"]));
+      // A call that finished: the provider's delta is authoritative and already opens with the
+      // question, so the splice must stand down rather than print it twice.
+      await s.close("r1", { result: { value: { messages: [question, turn("the whole answer")] } } as never });
+      expect(await s.messages("ask")).toEqual([question, turn("the whole answer")]);
+    });
+
+    it("pads the per-turn clocks it moves, so no turn wears its neighbour's duration", async () => {
+      const s = store();
+      const at = await s.resolve({ ref: "ask" });
+      await s.open({ id: "r1", source: asked, session: at.at, startMs: 1 });
+      s.streamPartial("ask", 0, timed(["thought about it", "answered"], [{ at: 200, thoughtMs: 90 }, { at: 300 }]));
+      // Three messages now, so three stamps — the spliced question wears a blank rather than the
+      // first answer's clock.
+      expect(s.transcript("ask")[0]!.value).toMatchObject({
+        value: { messages: [question, turn("thought about it"), turn("answered")], messageTimes: [{}, { at: 200, thoughtMs: 90 }, { at: 300 }] },
+      });
+    });
+
+    it("says nothing for an operation that is not a prompt", async () => {
+      const s = store();
+      const at = await s.resolve({ ref: "fn" });
+      // A function op, a gate, a pre-dispatch failure: no `user`, so nothing to splice and no record
+      // invented to hold it.
+      await s.open({ id: "r1", source: { kind: "function", name: "review" } as never, session: at.at, startMs: 1 });
+      expect(s.transcript("fn")[0]!.value).toBeUndefined();
+    });
   });
 
   /**
