@@ -25,8 +25,10 @@ import {
 import { createToolGate, isPermissionDenied, PermissionLedger, withPermission } from "@declarative-ai/permissions";
 import {
   absolutize,
+  ALWAYS_GRANTED_TOOLS,
   isAbsolutePath,
   logicalOfNative,
+  withAlwaysGranted,
   normalizePath,
   resolveScopes,
   scopeModeOf,
@@ -440,6 +442,10 @@ export interface AgentToolPlan {
  *  - **Granted, `native`** — declare nothing, leave the built-in, and add an ask-rule so the call
  *    reaches our gate. The mode beside it in the menu is what then decides.
  *
+ * A fourth case sits outside the three: a tool marked `alwaysGranted` is injected whether the list
+ * names it or not, because its absence is an omission rather than a decision. It still answers to the
+ * gate — see {@link ToolSpec.alwaysGranted}.
+ *
  * `app` is the default for a granted tool with no explicit choice, because DECLARING a tool has
  * always meant injecting ours and that is what every authored state already relies on. `native` is
  * the opt-out, and it is the one that needs saying.
@@ -451,7 +457,10 @@ export function planAgentTools(
   const plan: AgentToolPlan = { inject: [], askNatives: [], denyNatives: [] };
   for (const spec of TOOL_SPECS) {
     const native = spec.natives?.claude;
-    if (!granted.includes(spec.name)) {
+    // A tool the list does not get to leave out — see `ToolSpec.alwaysGranted`. It is folded in HERE,
+    // at the one function that turns a grant into what the agent is handed, so every caller of the
+    // plan gets it without a second list to remember.
+    if (spec.alwaysGranted !== true && !granted.includes(spec.name)) {
       if (native !== undefined) plan.denyNatives.push(native);
       continue;
     }
@@ -461,6 +470,39 @@ export function planAgentTools(
     else plan.inject.push(spec.name);
   }
   return plan;
+}
+
+/**
+ * Fold the always-granted tools into every prompt state of a bundle, in place.
+ *
+ * The chat path gets this through {@link planAgentTools}, which is the one function standing between
+ * a grant and what an agent is handed. A RUN does not go through it: the engine resolves a state's
+ * `environment.tools` against the registry itself, so a workflow authored before this tool existed
+ * would keep drawing HTML into its answer forever. This is the run's equivalent, applied where the
+ * bundle is already being walked for capabilities.
+ *
+ * Two restrictions, both load-bearing:
+ *
+ *  - **Prompt states only.** A function operation has no agent to hand a tool to, and writing
+ *    `environment.tools` onto one would declare a capability against something that cannot call it.
+ *  - **In place, on the RESOLVED bundle**, not on the workflow on disk. What somebody authored is not
+ *    edited by running it; a pinned snapshot re-run through a newer build picks this up the same way
+ *    a fresh one does, because it is applied at run start rather than baked at author time.
+ *
+ * A state that names the tool explicitly is untouched — including one that names it in order to
+ * `deny` it, since the deny lives in `permissions`, not here, and this only ever adds to the list.
+ */
+export function grantAlwaysGrantedTools(states: Record<string, unknown>): void {
+  if (ALWAYS_GRANTED_TOOLS.length === 0) return;
+  for (const def of Object.values(states)) {
+    if (def === null || typeof def !== "object") continue;
+    const state = def as { operation?: { kind?: string }; environment?: { tools?: unknown } };
+    if (state.operation?.kind !== "prompt") continue;
+    const env = (state.environment ??= {});
+    // Absent means "no JaiRA tools were declared", which is a real answer and stays one for
+    // everything else — this adds the one tool whose absence was never a decision.
+    env.tools = withAlwaysGranted(Array.isArray(env.tools) ? (env.tools as string[]) : []);
+  }
 }
 
 /**

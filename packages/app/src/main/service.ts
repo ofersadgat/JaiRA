@@ -119,6 +119,7 @@ import {
   gateTools,
   claudePermissionSettings,
   compileClaudeScopeRules,
+  grantAlwaysGrantedTools,
   planAgentTools,
   functionNamesOf,
   InteractionHub,
@@ -206,6 +207,8 @@ import {
   unnamedRouteOf,
   PERMISSION_PRESETS,
   presetOf,
+  ALWAYS_GRANTED_TOOLS,
+  withAlwaysGranted,
 } from "@jaira/shared";
 import { Diagnostics } from "./diagnostics";
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
@@ -1858,6 +1861,11 @@ export class AppService {
     registerSearchTools(registry, { cwd: workspace.root });
     registerWebTools(registry, {});
 
+    // The run's half of `ToolSpec.alwaysGranted` — the chat path gets it inside `planAgentTools`,
+    // and a run resolves `environment.tools` through the engine instead, so it has to be folded in
+    // before the bundle is handed over.
+    grantAlwaysGrantedTools(started.bundle.states);
+
     // §8.2: refuse a state whose runtime cannot enforce the policy it runs under,
     // rather than letting it run unguarded.
     // The RESOLVED states: a snapshot-loaded bundle carries no `source` (EXPRESSIONS.md §11), so
@@ -2660,7 +2668,11 @@ export class AppService {
     const wiring = planAgentTools(plan.settings.tools ?? [], plan.settings.implementations ?? {});
     const { tools, gate } = gateTools({
       registry,
-      names: plan.settings.tools === undefined ? [] : wiring.inject,
+      // `tools === undefined` means the message said nothing and the STATE's declaration stands, so
+      // the plan is not what runs and its injections must not be wrapped. The always-granted set is
+      // the exception, and has to be: a conversation with no tools at all is exactly the one that
+      // reaches for a mockup, and `chat/assistant.json` declares none.
+      names: plan.settings.tools === undefined ? [...ALWAYS_GRANTED_TOOLS] : wiring.inject,
       sessionId: sessionOf(context.position),
       policy,
       approve,

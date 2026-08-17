@@ -39,7 +39,7 @@
 import { useEffect, useState, type JSX, type ReactNode } from "react";
 import type { InstanceNode, ServedArtifact, SessionView } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { Markdown } from "./markdown";
+import { Markdown, type FenceRenderer } from "./markdown";
 import { ValueView } from "./valueView";
 import { Icon } from "./icons";
 import {
@@ -92,6 +92,39 @@ export function durationOf(ms: number): string {
   const seconds = Math.round(ms / 1000);
   return `${Math.floor(seconds / 60)} m ${seconds % 60} s`;
 }
+
+/**
+ * The fenced languages that are a PICTURE, and the type each one is.
+ *
+ * Only markup that a viewer can draw. A fence tagged `js` or `sql` is code, and code read as code is
+ * already the best rendering of it — this exists for the two that have a second one.
+ */
+const DRAWABLE_FENCES: Readonly<Record<string, string>> = {
+  html: "text/html",
+  svg: "image/svg+xml",
+};
+
+/**
+ * A fenced block, drawn rather than quoted — the answer's half of the artifact story.
+ *
+ * A model that wants to hand over a page has two routes: `show_artifact`, which produces a real
+ * artifact with a real viewer, and pasting the page into its answer. The second used to arrive as a
+ * grey box of source with no way to look at it, which is what a transcript full of `<!DOCTYPE html>`
+ * looks like — 29,000 characters nobody can see. This closes that: the SAME {@link ValueView} the
+ * artifacts pane and the payload blocks use, so one page looks identical wherever it turns up, and
+ * the Rendered / Code / Text toggle comes with it rather than being built a second time here.
+ *
+ * Static, and that is the difference from an artifact rather than an oversight. `Html` is a `srcdoc`
+ * frame with an empty `sandbox`, so scripts do not run — the interactive path needs a served
+ * `jaira-artifact:` URL, and a fence has no artifact behind it to serve. A model that wants its
+ * mockup to MOVE has a tool for that, and this is the fallback, not a second way in.
+ *
+ * Module-level so the reference is stable: `Markdown` memoises on it.
+ */
+const drawFence: FenceRenderer = ({ lang, code }) => {
+  const mime = DRAWABLE_FENCES[lang];
+  return mime === undefined ? undefined : <ValueView value={code} hint={{ mime }} />;
+};
 
 /**
  * A payload block, or the honest statement that the record kept none.
@@ -504,7 +537,7 @@ function Message({ entry, onEdit }: { entry: MessageEntry; onEdit?: EditMessage 
           source ? (
             <pre className="ts-text">{entry.text}</pre>
           ) : (
-            <Markdown text={entry.text ?? ""} />
+            <Markdown text={entry.text ?? ""} fence={drawFence} />
           )
         ) : (
           <p className="empty">(no answer was recorded)</p>

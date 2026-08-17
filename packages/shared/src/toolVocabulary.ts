@@ -92,6 +92,21 @@ export interface ToolSpec {
    * it here.
    */
   nativeOnly?: boolean;
+  /**
+   * Available whether or not anybody granted it — the tool list does not decide this one.
+   *
+   * Reserved for a tool that adds no CAPABILITY: `show_artifact` writes only under the task's own
+   * artifact directory and cannot address anything else, so a state that omits it is not making a
+   * decision about reach, it simply never thought about drawing. Leaving it to the list means a
+   * conversation asked for a mockup gets HTML pasted into the answer instead, which is what
+   * happened — the model had no other way to hand a picture over.
+   *
+   * Two things this deliberately is NOT. It is not exemption from the gate: the mode still resolves,
+   * and the size rule on `CONTENT_TOOLS` still asks before a huge one. And it is not immunity from an
+   * EXPLICIT `deny` — an author who names this tool and refuses it has decided, and an omission is
+   * the only thing being overridden here.
+   */
+  alwaysGranted?: boolean;
 }
 
 /**
@@ -168,6 +183,17 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
      * workspace as it found it belongs inside it.
      */
     readOnly: true,
+    /*
+     * ALWAYS GRANTED, and it is the confinement above that pays for it.
+     *
+     * The tool list answers "what may this agent reach", and this tool reaches nothing a state could
+     * want to withhold — it produces a new file under the task's own artifact directory and cannot
+     * address anything else. So its absence from a list is never a decision, only an omission, and
+     * honouring the omission costs the thing the tool exists for: a conversation asked for a mockup
+     * pastes 29k characters of HTML into its answer, because that is the only way left to hand a
+     * picture over. See {@link ToolSpec.alwaysGranted} for what this does not exempt it from.
+     */
+    alwaysGranted: true,
     hint: "produce something to look at — a page, a drawing, a document",
     pathArgs: ["path"],
     // No `natives`: the agent has no built-in doing this job in a delegated run, so there is nothing
@@ -203,6 +229,23 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
 
 /** By logical name — the lookup every consumer wants. */
 export const TOOL_SPEC_BY_NAME: ReadonlyMap<string, ToolSpec> = new Map(TOOL_SPECS.map((spec) => [spec.name, spec]));
+
+/**
+ * The tools a declared list does not get to leave out — see {@link ToolSpec.alwaysGranted}.
+ *
+ * Derived rather than restated, because three call sites need the same answer: what an agent is
+ * handed (`planAgentTools`), what is wrapped for it (`gateTools`'s names), and what a state's own
+ * `environment.tools` resolves to at the top of a run. A second copy is a third place for a tool to
+ * go missing from.
+ */
+export const ALWAYS_GRANTED_TOOLS: readonly string[] = TOOL_SPECS.filter((spec) => spec.alwaysGranted === true).map(
+  (spec) => spec.name,
+);
+
+/** A declared list with the always-granted tools folded in, order preserved, no duplicates. */
+export function withAlwaysGranted(tools: readonly string[]): string[] {
+  return [...tools, ...ALWAYS_GRANTED_TOOLS.filter((name) => !tools.includes(name))];
+}
 
 /**
  * The LOGICAL name an agent's built-in stands for, when one of ours does that job.
@@ -269,7 +312,12 @@ function profileOf(id: string, label: string, hint: string, modeFor: (spec: Tool
     id,
     label,
     hint,
-    tools: Object.fromEntries(TOOL_SPECS.map((spec) => [spec.name, modeFor(spec)])),
+    // `alwaysGranted` short-circuits the profile as well as the list, and it has to: being handed a
+    // tool that then asks every time is the same interruption wearing a different hat, and under
+    // `read-only` and `full` alike this spec's generated mode would be `ask`. `allow` here is not the
+    // last word — the gate composes profile and baseline with the STRICTEST verdict, so the size rule
+    // registered against `CONTENT_TOOLS` still resolves to `smart` and still asks before a huge one.
+    tools: Object.fromEntries(TOOL_SPECS.map((spec) => [spec.name, spec.alwaysGranted === true ? "allow" : modeFor(spec)])),
     ...rest,
   };
 }

@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { LoadedState } from "@declarative-ai/hw";
+import { ALWAYS_GRANTED_TOOLS } from "@jaira/shared";
 import { chatOperationOf, chatPlanFor, type ChatSettings } from "../src/chatOperation";
 
 /** A loaded state with a prompt operation — the post-merge shape a snapshot pins. */
@@ -163,14 +164,31 @@ describe("tools on a continued turn", () => {
     // the permission guard — is gateTools, which reuses the same withPermission the engine does,
     // so there is still one implementation of "resolve a mode, consult smart, escalate to the human".
     const inherited = chatPlanFor([speaking({ environment: { tools: ["bash"] } })]);
-    expect(chatOperationOf(inherited, { message: "run the tests", session: { id: "s@1" } }).environment.tools).toEqual(["bash"]);
+    // Table order rather than grant order — `planAgentTools` walks `TOOL_SPECS`.
+    expect(chatOperationOf(inherited, { message: "run the tests", session: { id: "s@1" } }).environment.tools).toEqual([
+      "show_artifact",
+      "bash",
+    ]);
   });
 
   it("take the person's whole list over the state's, rather than adding to it", () => {
     const asked = chatPlanFor([speaking({ environment: { tools: ["bash"] } })], { tools: [] });
     // An empty list is how an inherited tool is DROPPED — reading it as "nothing was said" would hand bash
-    // back to a call the person just disarmed.
-    expect(chatOperationOf(asked, { message: "just answer", session: { id: "s@1" } }).environment.tools).toEqual([]);
+    // back to a call the person just disarmed. `bash` is gone; what remains is the always-granted set,
+    // which is not a grant the person made and so is not one they can take back here.
+    expect(chatOperationOf(asked, { message: "just answer", session: { id: "s@1" } }).environment.tools).toEqual([
+      ...ALWAYS_GRANTED_TOOLS,
+    ]);
+  });
+
+  it("reach a conversation that declared none at all", () => {
+    // `chat/assistant.json` has no `tools` key, which is what made the tool list's omission bite
+    // hardest: the plainest conversation is the one most likely to be asked for a picture.
+    const bare = chatPlanFor([speaking({ environment: {} })]);
+    expect(bare.settings.tools).toBeUndefined();
+    expect(chatOperationOf(bare, { message: "draw me something", session: { id: "s@1" } }).environment.tools).toEqual([
+      ...ALWAYS_GRANTED_TOOLS,
+    ]);
   });
 
   it("still report what the state had, so the composer can start from it", () => {

@@ -46,6 +46,7 @@
 import type { ExecEnvironmentDecl, LoadedState } from "@declarative-ai/hw";
 import type { InlineFamily, NamedParameter, PromptOp } from "@declarative-ai/exec";
 import type { JsonValue } from "@declarative-ai/json";
+import { ALWAYS_GRANTED_TOOLS } from "@jaira/shared";
 import type { ChatPlanView, ChatSettings, PermissionsDecl, SettingOrigin, UnresolvedSetting } from "@jaira/shared";
 import type { ReasoningSpec } from "@declarative-ai/llm";
 import { claudePermissionSettings, compileClaudeScopeRules, planAgentTools } from "./tools";
@@ -328,7 +329,11 @@ function agentToolWiring(settings: ChatSettings): {
   environment: { tools?: string[] };
   config: { providerOptions?: JsonValue };
 } {
-  if (settings.tools === undefined) return { environment: {}, config: {} };
+  // Nobody declared tools — not the message and not the host state, since `chatPlanFor` has already
+  // folded the state's `environment.tools` into `settings`. So there is no declaration to preserve
+  // here, and the always-granted set is the one thing still worth writing: a conversation with no
+  // tools is exactly the one that gets asked for a mockup. See `ToolSpec.alwaysGranted`.
+  if (settings.tools === undefined) return { environment: { tools: [...ALWAYS_GRANTED_TOOLS] }, config: {} };
   const plan = planAgentTools(settings.tools, settings.implementations ?? {});
   // The scope table, compiled into the agent's own rules, so its built-ins are bounded UP FRONT
   // rather than one callback at a time. Our gate stays underneath for what rules cannot express.

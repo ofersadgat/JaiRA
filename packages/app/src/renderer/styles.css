@@ -1493,6 +1493,11 @@ code {
   background: none;
   padding: 0;
 }
+/* A fenced block a caller took over — a viewer, not source. It gets the spacing a `pre` had and
+   none of its chrome: what is inside brings its own frame and its own toggle. */
+.markdown .md-block {
+  margin: 0 0 10px;
+}
 .markdown blockquote {
   border-left: 3px solid var(--line);
   padding-left: 10px;
