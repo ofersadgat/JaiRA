@@ -8,10 +8,10 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
 import { isProject } from "@jaira/persistence";
-import { ARTIFACT_SCHEME, IPC_CHANNELS, PUSH_CHANNEL, type IpcChannel, type PushMessage } from "@jaira/shared";
+import { ARTIFACT_SCHEME, IPC_CHANNELS, PUSH_CHANNEL, type IpcChannel, type PushMessage, type SaveFileRequest } from "@jaira/shared";
 import { AppService, type KeychainPort } from "./service";
 
 /** `dist/` layout produced by the build (see build.mjs / vite.config.ts). */
@@ -99,6 +99,92 @@ const service = new AppService({
 });
 
 /**
+ * The three verbs that could not be service methods.
+ *
+ * Everything else in the table below forwards to {@link AppService}, which is Electron-free so that
+ * the whole app surface stays testable headlessly. These are the exceptions in the same way
+ * `reveal` and `chooseDirectory` are: a save dialog, a download and a clipboard bitmap are all
+ * Electron's, and there is no shape the service could hold them in that would not be an Electron
+ * shim with a port behind it. They live here, where the Electron already is.
+ */
+
+/**
+ * Save bytes the renderer holds, wherever the person says.
+ *
+ * The proposed name is reduced to its BASENAME. It arrives as an artifact path — `docs/report.md` —
+ * and a `defaultPath` with separators in it proposes a directory that may not exist, so the dialog
+ * opens somewhere nobody asked for. The extension is the part that matters and basename keeps it.
+ *
+ * A cancelled dialog answers `{ file: null }` rather than throwing: the person decided not to save,
+ * which is an outcome. Throwing would put "Error: canceled" in the toast.
+ */
+async function saveFile(request: SaveFileRequest): Promise<{ file: string | null }> {
+  const options = { defaultPath: basename(request.name) };
+  const target = await (window && !window.isDestroyed()
+    ? dialog.showSaveDialog(window, options)
+    : dialog.showSaveDialog(options));
+  if (target.canceled || target.filePath === undefined || target.filePath === "") return { file: null };
+  await writeFile(target.filePath, Buffer.from(request.data, "base64"));
+  return { file: target.filePath };
+}
+
+/**
+ * What may be downloaded by URL — everything a page in this app can legitimately be showing.
+ *
+ * An allow list rather than a deny list, and short on purpose. The URL reaches here from a
+ * right-click, so it is whatever was in a `src` attribute — including one a model wrote — and
+ * `javascript:` is the reason a bare `downloadURL` of an arbitrary string is not something to hand
+ * a renderer. These five are the schemes an image in this app is actually served from.
+ */
+const DOWNLOADABLE = new Set(["data:", "blob:", "file:", "http:", "https:", `${ARTIFACT_SCHEME}:`]);
+
+/**
+ * Hand a URL to Chromium's downloader, which prompts for a location by itself.
+ *
+ * The case {@link saveFile} cannot serve: an image inside a sandboxed artifact frame. The renderer
+ * cannot read those bytes — an opaque origin is exactly what it must not be able to reach into — but
+ * the browser has them decoded already.
+ */
+function download(url: string): { started: boolean } {
+  if (window === undefined || window.isDestroyed()) return { started: false };
+  let scheme: string;
+  try {
+    scheme = new URL(url).protocol;
+  } catch {
+    return { started: false };
+  }
+  if (!DOWNLOADABLE.has(scheme)) return { started: false };
+  window.webContents.downloadURL(url);
+  return { started: true };
+}
+
+/**
+ * Copy the image under a point, in the window's own coordinates.
+ *
+ * Silent when there is no image there — `copyImageAt` is fire-and-forget and reports nothing back —
+ * so `copied` says the request was made, not that a bitmap landed. That is honest: the menu only
+ * offers this over something Chromium already told us was an image.
+ */
+/**
+ * Cut, copy, paste or select-all, on whatever has focus.
+ *
+ * Delegated to the WebContents rather than done in the renderer, because that is the only way
+ * `paste` works: script may not read the clipboard on a page's own say-so. It also lands in the
+ * right place without anybody tracking where that is — Chromium routes these to the focused frame,
+ * which is the frame that was just right-clicked.
+ */
+function edit(verb: "cut" | "copy" | "paste" | "selectAll"): { verb: string } {
+  if (window !== undefined && !window.isDestroyed()) window.webContents[verb]();
+  return { verb };
+}
+
+function copyImageAt(x: number, y: number): { copied: boolean } {
+  if (window === undefined || window.isDestroyed()) return { copied: false };
+  window.webContents.copyImageAt(Math.round(x), Math.round(y));
+  return { copied: true };
+}
+
+/**
  * Channel → handler, one entry per contract channel (a missing or misspelled key
  * is a type error). Requests arrive over IPC as structured clones, so each
  * handler asserts the shape its channel declares.
@@ -174,6 +260,10 @@ const handlers: Record<IpcChannel, Handler> = {
   "file:rename": ((request: Parameters<typeof service.renameFile>[0]) => service.renameFile(request)) as Handler,
   "file:delete": ((request: Parameters<typeof service.deleteFile>[0]) => service.deleteFile(request)) as Handler,
   "shell:reveal": ((request: { file: string }) => service.revealFile(request)) as Handler,
+  "shell:saveFile": ((request: SaveFileRequest) => saveFile(request)) as Handler,
+  "shell:download": ((request: { url: string }) => download(request.url)) as Handler,
+  "shell:copyImageAt": ((request: { x: number; y: number }) => copyImageAt(request.x, request.y)) as Handler,
+  "shell:edit": ((request: { verb: "cut" | "copy" | "paste" | "selectAll" }) => edit(request.verb)) as Handler,
   "history:size": (() => service.historySize()) as Handler,
   "history:prune": ((request: Parameters<typeof service.pruneHistory>[0]) =>
     service.pruneHistory(request)) as Handler,
@@ -298,6 +388,45 @@ async function createWindow(): Promise<BrowserWindow> {
       sandbox: false,
     },
   });
+  /*
+   * A right-click the RENDERER could not have heard.
+   *
+   * The renderer draws this app's context menus itself, over its own document, and cancels the
+   * default — which stops Chromium from ever raising this event for the main frame. What is left is
+   * the case it cannot reach: an artifact rendered in a sandboxed frame with an opaque origin, where
+   * a `contextmenu` listener in this window hears nothing. That is the sandbox working correctly and
+   * not a gap to close, so the fix is not to open the frame up but to forward what the browser
+   * process already saw, and let the renderer draw the SAME menu it draws everywhere else.
+   *
+   * `params.x` / `params.y` are in the web area's coordinates, which is the space a DOM event's
+   * `clientX` / `clientY` is in — so the menu lands under the pointer without any translation.
+   *
+   * Nothing forwarded here is a capability. It is a description of what was clicked; the verbs the
+   * menu offers are the same ones it offers over this window's own content, each checked where it
+   * runs.
+   */
+  win.webContents.on("context-menu", (_event, params) => {
+    if (win.isDestroyed()) return;
+    win.webContents.send(PUSH_CHANNEL, {
+      type: "frame:contextMenu",
+      menu: {
+        x: params.x,
+        y: params.y,
+        selectionText: params.selectionText,
+        linkURL: params.linkURL,
+        srcURL: params.srcURL,
+        mediaType: params.mediaType,
+        isEditable: params.isEditable,
+        editFlags: {
+          canCut: params.editFlags.canCut,
+          canCopy: params.editFlags.canCopy,
+          canPaste: params.editFlags.canPaste,
+          canSelectAll: params.editFlags.canSelectAll,
+        },
+      },
+    } satisfies PushMessage);
+  });
+
   await win.loadFile(RENDERER_HTML);
   win.show();
   return win;

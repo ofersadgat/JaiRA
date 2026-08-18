@@ -18,6 +18,13 @@
  * effect, and forty of them down a transcript is a pattern of noise the eye learns to skip — which
  * is exactly what you do not want the day the value IS a diff.
  *
+ * ## Views on the left of the `…`, verbs on the right of it
+ *
+ * The toggle answers one question — how do I want to READ this — and every button in it changes what
+ * is on screen and nothing else. Saving a file and moving a value into the side panel are not that,
+ * so they are not in that group: they live behind an overflow button, which is also what keeps the
+ * group's meaning intact as more of them arrive.
+ *
  * ## Why the diff view lives here rather than in the reviewer
  *
  * `changesetReview.tsx` reviews a changeset: it decides, it edits, it submits. Reading one is a
@@ -28,9 +35,22 @@
  */
 import { lazy, Suspense, useEffect, useRef, useState, type JSX, type ReactNode } from "react";
 import type { Change, ServedArtifact, ViewHint, ViewId } from "@jaira/shared/browser";
-import { artifactOf, changeStats, changesOf, mediaKindOf, mediaSrcOf, mimeOfPath, totalStats, viewsFor } from "@jaira/shared/browser";
+import {
+  artifactOf,
+  changeStats,
+  changesOf,
+  extensionForMime,
+  mediaKindOf,
+  mediaSrcOf,
+  mimeOfPath,
+  totalStats,
+  viewsFor,
+} from "@jaira/shared/browser";
 import { Markdown } from "./markdown";
 import { Icon } from "./icons";
+import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
+import { useValuePanel } from "./valuePanel";
+import { invoke } from "./store";
 
 /**
  * Loaded on first expand, never with the view — the same rule the reviewer follows.
@@ -322,6 +342,28 @@ function InteractiveArtifact({ url, onPrompt }: { url: string; onPrompt?: ((text
 }
 
 /**
+ * What a value should be called once it is a file on somebody's disk.
+ *
+ * An artifact already has a name and it is the one the producer chose, so that wins outright. For
+ * everything else the name is invented, and the only part of it that carries information is the
+ * EXTENSION — `value.md` and `value.json` open in different things, and a download with no extension
+ * opens in nothing. The rest is a placeholder, which is honest: this value never had a name.
+ */
+function fileNameOf(artifactPath: string | undefined, mime: string | undefined, isText: boolean): string {
+  if (artifactPath !== undefined && artifactPath !== "") return artifactPath.slice(artifactPath.lastIndexOf("/") + 1);
+  const ext = mime === undefined ? undefined : extensionForMime(mime);
+  return `value.${ext ?? (isText ? "txt" : "json")}`;
+}
+
+/** UTF-8 text as base64, which is what `shell:saveFile` takes. */
+function base64Of(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+/**
  * A value, in the best view that applies, with the others a click away.
  *
  * `hint` is what the caller already knows — a file's MIME type, a slot's schema. Absent, the value
@@ -360,6 +402,9 @@ export function ValueView({
   const views = viewsFor(value, hint ?? {});
   const [picked, setPicked] = useState<ViewId | null>(null);
   const view = picked !== null && views.includes(picked) ? picked : views[0]!;
+  /** Where "open in the context panel" sends this, when there is a panel. See `valuePanel.ts`. */
+  const panel = useValuePanel();
+  const [more, setMore] = useState<MenuAnchor | null>(null);
 
   /**
    * An artifact is read as what it CARRIES — except on the raw view, where the envelope is the point.
@@ -433,6 +478,63 @@ export function ValueView({
     return <Source value={showing} />;
   })();
 
+  /**
+   * What a download of this would be CALLED. The bytes are not made until somebody asks — see below.
+   *
+   * Named from the view that is showing, not from the value: `showing` is a string for every rendered
+   * view and the whole envelope for `json`, so downloading from the JSON view gets `value.json` and
+   * downloading from the rendered view gets the document. Saving what is on screen is the only rule
+   * that surprises nobody.
+   */
+  const downloadName = fileNameOf(artifact?.path, mime, typeof showing === "string");
+
+  /**
+   * The overflow: what belongs to this value without belonging in a row of buttons.
+   *
+   * Behind a `…` rather than beside the toggle, because the toggle answers one question — how do I
+   * want to read this — and a fourth button that saved a file would be the first one in that group
+   * that did not change what is on screen. These are verbs; those are views.
+   */
+  const openMore = (rect: DOMRect): void => {
+    setMore({
+      // Under the button and aligned to its right edge, so the menu grows into the pane rather than
+      // over the value it is about.
+      x: rect.right - MENU_WIDTH,
+      y: rect.bottom + 2,
+      items: [
+        {
+          label: "Download…",
+          note: downloadName,
+          // Serialised HERE rather than per render. This is drawn once per tool call down a whole
+          // transcript, and base64-encoding every payload on screen on the chance that one of them
+          // gets saved is a cost paid continuously for something that happens rarely.
+          onSelect: () => {
+            const text = typeof showing === "string" ? showing : JSON.stringify(showing, null, 2);
+            void invoke("shell:saveFile", { name: downloadName, data: base64Of(text) }).catch(() => undefined);
+          },
+        },
+        ...(panel === null
+          ? []
+          : [
+              {
+                label: "Open in context panel",
+                separator: true,
+                note: "keeps it on screen while you carry on",
+                onSelect: () =>
+                  panel.open({
+                    title: artifact?.path ?? artifact?.name ?? label ?? "Value",
+                    value,
+                    ...(hint !== undefined ? { hint } : {}),
+                    ...(label !== undefined ? { label } : {}),
+                    ...(serve !== undefined ? { serve } : {}),
+                    ...(onPrompt !== undefined ? { onPrompt } : {}),
+                  }),
+              },
+            ]),
+      ],
+    });
+  };
+
   return (
     <div className="vv">
       {label !== undefined || views.length > 1 || actions !== undefined ? (
@@ -458,9 +560,20 @@ export function ValueView({
               ))}
             </span>
           ) : null}
+          <button
+            type="button"
+            className="vv-more"
+            title="What else can be done with this"
+            aria-haspopup="menu"
+            aria-expanded={more !== null}
+            onClick={(e) => openMore(e.currentTarget.getBoundingClientRect())}
+          >
+            …
+          </button>
         </div>
       ) : null}
       <div className="vv-body">{body}</div>
+      {more !== null ? <ContextMenu anchor={more} onClose={() => setMore(null)} /> : null}
     </div>
   );
 }

@@ -96,6 +96,35 @@ export function Icon({ name, className }: { name: keyof typeof PATHS; className?
 }
 
 /**
+ * A ring with a gap in it, turning: "this is producing something, right now".
+ *
+ * Its own component rather than an entry in {@link PATHS}, because it is the one glyph here that is
+ * not a picture of a noun. The table is names for KINDS of work — a terminal, an eye, a paperclip —
+ * each drawn beside the word it illustrates; this is a state, it appears alone, and it is the only
+ * thing in the file that moves.
+ *
+ * Two paths and not one: the faint full circle is what stops the arc from reading as a fragment of
+ * something that failed to draw. The turning is CSS (`.spinner`), so a person who has asked their
+ * system for less motion gets a still ring rather than nothing to look at.
+ */
+export function Spinner({ className }: { className?: string }): JSX.Element {
+  return (
+    <svg
+      className={`spinner${className === undefined ? "" : ` ${className}`}`}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.6}
+      strokeLinecap="round"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="9" opacity={0.25} />
+      <path d="M21 12a9 9 0 0 0-9-9" />
+    </svg>
+  );
+}
+
+/**
  * A company's mark — the real logo, or a brand-tinted initial when there is none.
  *
  * Never nothing. A catalog carries fifty vendors and the picker's columns are read by scanning the

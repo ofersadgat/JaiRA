@@ -34,6 +34,9 @@ import { ChatListPanel, ChatView, conversationsOf, type ChatSurface } from "./ch
 import { isChatWorkflow } from "./chatWorkflow";
 import { ApprovalDialog, InteractionDialog, QuestionDialog } from "./components";
 import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem } from "./menu";
+import { PointerMenus } from "./pointerMenu";
+import { ValuePanelContext, type PinnedValue } from "./valuePanel";
+import { ValueView } from "./valueView";
 import {
   FileAddressBar,
   FileInspector,
@@ -60,9 +63,63 @@ import { Sidebar, type SidebarView } from "./sidebar";
 import { Splitter } from "./splitter";
 import { TaskAddressBar } from "./taskBar";
 import { nodeAt } from "./trail";
-import { FOLD, PANE, SHUT, SIDEBAR_RAIL, openOf, paneDefault, paneOf, shutOf } from "./uiState";
+import { FOLD, PANE, PANE_WIDE, SHUT, SIDEBAR_RAIL, openOf, paneDefault, paneOf, shutOf } from "./uiState";
+import { Icon } from "./icons";
 import { History, NewTask } from "./widgets";
 import { useApp, type SettingsSection, type View } from "./store";
+
+/**
+ * How wide each view lets its context panel be dragged while it is describing something.
+ *
+ * Not in `uiState.ts` with the defaults, because these are not defaults: they are the shell's own
+ * bound on a gesture, and they are read twice each — once by the splitter that enforces them and
+ * once by the column that has to obey them when the bound moves. See {@link PANE_WIDE} for what
+ * replaces them while the panel is holding a document instead.
+ */
+const PANE_CEILING = { files: 680, tasks: 760 };
+
+/**
+ * A value held still, in the panel beside whatever is going on.
+ *
+ * The panel's other subjects — a file, a run, a task — are all things the ADDRESS names, and each is
+ * chosen by the rule that the panel describes the end of the path. This one is chosen by hand: it is
+ * there because somebody said "keep this where I can see it" about a document that would otherwise
+ * be twenty turns up a transcript. So it OUTRANKS the rule while it is open, and closing it hands
+ * the panel back — the same shape the task inspector already had.
+ *
+ * The header carries the name and the way out, and nothing else. Everything a value can do is in the
+ * viewer's own `…`, including opening it here, which is where somebody who wants to save it will
+ * already be looking.
+ *
+ * Except that the viewer INSIDE the panel has no panel: the provider is cleared here, so the value
+ * that is already pinned is not offered the chance to pin itself. Its `…` still saves a file, which
+ * is the item somebody reading a document in this column actually wants.
+ */
+function PinnedPane({ pinned, onClose }: { pinned: PinnedValue; onClose: () => void }): JSX.Element {
+  return (
+    <div className="pinned-pane">
+      <div className="pinned-head">
+        <span className="pinned-title ellip" title={pinned.title}>
+          {pinned.title}
+        </span>
+        <button type="button" className="pinned-close" title="Close this and give the panel back" onClick={onClose}>
+          <Icon name="cross" />
+        </button>
+      </div>
+      <div className="pinned-body">
+        <ValuePanelContext.Provider value={null}>
+          <ValueView
+            value={pinned.value}
+            {...(pinned.hint !== undefined ? { hint: pinned.hint } : {})}
+            {...(pinned.label !== undefined ? { label: pinned.label } : {})}
+            {...(pinned.serve !== undefined ? { serve: pinned.serve } : {})}
+            {...(pinned.onPrompt !== undefined ? { onPrompt: pinned.onPrompt } : {})}
+          />
+        </ValuePanelContext.Provider>
+      </div>
+    </div>
+  );
+}
 
 /**
  * The bar above every settings section: which layer is being edited, and when the checks last ran.
@@ -326,6 +383,9 @@ export default function App(): JSX.Element {
     journal: state.selected === state.chat.taskId ? state.conversation : null,
     live: state.selected === state.chat.taskId ? state.liveTurn : null,
     hasProject: state.projectDir !== null,
+    producing: state.producing,
+    seen: ui.seen,
+    onSeen: actions.markSeen,
     onOpen: actions.openConversation,
     onNew: actions.newConversation,
     onRename: actions.renameTask,
@@ -499,6 +559,28 @@ export default function App(): JSX.Element {
    */
   const [taskMenu, setTaskMenu] = useState<MenuAnchor | null>(null);
   const [taskAsk, setTaskAsk] = useState<AskSpec | null>(null);
+  /**
+   * What somebody has asked to keep in the side panel — see {@link PinnedPane}.
+   *
+   * Shell state rather than store state, and deliberately not remembered across restarts. It is a
+   * gesture about the next few minutes ("hold this while I read it"), not a preference: an app that
+   * reopened with a document pinned beside a conversation nobody is having any more would be
+   * restoring furniture rather than work.
+   */
+  const [pinned, setPinned] = useState<PinnedValue | null>(null);
+  const valuePanel = useMemo(() => ({ open: (item: PinnedValue) => setPinned(item) }), []);
+
+  /**
+   * How wide a context panel actually is, given that its ceiling MOVES.
+   *
+   * A panel holding a document may be dragged out to {@link PANE_WIDE}; the same panel back to
+   * describing a file may not. Clamped at the point of use rather than by rewriting the stored
+   * number, so closing a pinned document snaps the column back to inspector width and opening one
+   * again restores the width it was dragged to. What is remembered is what somebody chose, not what
+   * happened to fit at the time.
+   */
+  const panelWidth = (id: string, ceiling: number): number =>
+    Math.min(paneOf(ui, id), pinned !== null ? PANE_WIDE : ceiling);
   const openTaskMenu = useCallback(
     (project: string, card: BoardCard, x: number, y: number) => {
       const plural = (k: number): string => `${k} task${k === 1 ? "" : "s"}`;
@@ -854,6 +936,9 @@ export default function App(): JSX.Element {
   };
 
   return (
+    /* Every `ValueView` in the window, however deeply it is drawn, can put its value in the panel —
+       see `valuePanel.ts` on why this is a context and not six more props. */
+    <ValuePanelContext.Provider value={valuePanel}>
     <div
       className="app"
       style={{ "--sidebar": `${sidebarShut ? SIDEBAR_RAIL : sidebarWidth}px` } as CSSProperties}
@@ -974,7 +1059,7 @@ export default function App(): JSX.Element {
           {view === "files" ? (
             <div
               className="view files-view"
-              style={{ "--pane-right": `${paneOf(ui, PANE.filesInspector)}px` } as CSSProperties}
+              style={{ "--pane-right": `${panelWidth(PANE.filesInspector, PANE_CEILING.files)}px` } as CSSProperties}
             >
               <FilePanel
                 doc={state.doc}
@@ -994,22 +1079,28 @@ export default function App(): JSX.Element {
                 reset={paneDefault(PANE.filesInspector)}
                 invert
                 min={220}
-                max={680}
+                // A document pinned here wants room an inspector never did — see PANE_WIDE.
+                max={pinned !== null ? PANE_WIDE : PANE_CEILING.files}
                 onChange={(size) => actions.setPane(PANE.filesInspector, size)}
               />
 
-              <aside className="col panel">
+              <aside className={`col panel${pinned !== null ? " holding" : ""}`}>
                 {/*
                   The context panel describes the LAST ELEMENT OF THE ADDRESS BAR, always: the run
                   the path ends on, or the open file when no run is on it. One rule, decided by the
                   bar rather than by a mode, which is what stops the two from disagreeing — the panel
                   used to keep describing a file while the path beside it stood on a run.
 
-                  The task is the one exception, and it is reached only by asking for it on the run's
-                  own panel: a run belongs to a task, but a task is not a level of the address and
-                  cannot be navigated to. Any change to the bar drops back to the rule.
+                  Two things outrank the rule, and both are reached by asking for them rather than by
+                  navigating. The task is reached on the run's own panel: a run belongs to a task, but
+                  a task is not a level of the address and cannot be navigated to. A PINNED value is
+                  reached from a value's own `…` — see {@link PinnedPane} — and outranks even that,
+                  because it is the most recent thing anybody said about this column. Any change to
+                  the bar drops back to the rule; closing the pinned value hands the panel back.
                 */}
-                {state.inspect === "task" ? (
+                {pinned !== null ? (
+                  <PinnedPane pinned={pinned} onClose={() => setPinned(null)} />
+                ) : state.inspect === "task" ? (
                   <TaskInspector
                     stateId={state.inspectFrom}
                     detail={detail}
@@ -1065,7 +1156,7 @@ export default function App(): JSX.Element {
           {view === "tasks" ? (
             <div
               className={`view tasks-view${state.taskFocus !== null ? " narrowed" : ""}`}
-              style={{ "--pane-right": `${paneOf(ui, PANE.tasksPanel)}px` } as CSSProperties}
+              style={{ "--pane-right": `${panelWidth(PANE.tasksPanel, PANE_CEILING.tasks)}px` } as CSSProperties}
             >
               {/*
                 A RUN is on the path, so the column shows that run — its executions as cards, or what
@@ -1167,11 +1258,11 @@ export default function App(): JSX.Element {
                 reset={paneDefault(PANE.tasksPanel)}
                 invert
                 min={260}
-                max={760}
+                max={pinned !== null ? PANE_WIDE : PANE_CEILING.tasks}
                 onChange={(size) => actions.setPane(PANE.tasksPanel, size)}
               />
 
-              <aside className="col panel">
+              <aside className={`col panel${pinned !== null ? " holding" : ""}`}>
                 {/*
                   What a click on a card gets you: that task's CONVERSATION. Clicking a card asks what
                   the run said, and the panel used to answer with an instance tree and a list of event
@@ -1179,7 +1270,9 @@ export default function App(): JSX.Element {
                   for the Files view to find the transcript. The detail is still here, behind the
                   toggle in the header, which is the order they are wanted in.
                 */}
-                {detail ? (
+                {pinned !== null ? (
+                  <PinnedPane pinned={pinned} onClose={() => setPinned(null)} />
+                ) : detail ? (
                   <TaskContext
                     detail={detail}
                     stream={state.stream}
@@ -1207,12 +1300,40 @@ export default function App(): JSX.Element {
           ) : null}
 
           {view === "chat" ? (
-            // One column, no inspector. A conversation has nothing beside it to describe: the
-            // thread IS the subject, and the facts a task panel would list — which state, which
-            // instance, what it cost — belong to the Tasks view, which the conversation's task is
-            // on like any other.
-            <div className="view chat-view">
+            /*
+              One column by DEFAULT, and still for the same reason: a conversation has nothing beside
+              it to describe. The facts a task panel would list — which state, which instance, what it
+              cost — belong to the Tasks view, which the conversation's task is on like any other, and
+              putting them here would be answering a question nobody reading a thread has asked.
+
+              A second column appears only when somebody asks for one, by pinning a value to it. That
+              is the case the rule above never covered: an artifact is produced IN the conversation,
+              and the one place it cannot be read is the column it was produced in, because the next
+              turn pushes it off the screen. So the panel is not a description of the thread — it is
+              a thing taken out of the thread and held still. It exists while it holds something and
+              not a moment longer.
+            */
+            <div
+              className={`view chat-view${pinned !== null ? " with-panel" : ""}`}
+              style={{ "--pane-right": `${paneOf(ui, PANE.chatPanel)}px` } as CSSProperties}
+            >
               <ChatView surface={chat} />
+              {pinned !== null ? (
+                <>
+                  <Splitter
+                    label="Resize the context panel"
+                    value={paneOf(ui, PANE.chatPanel)}
+                    reset={paneDefault(PANE.chatPanel)}
+                    invert
+                    min={280}
+                    max={PANE_WIDE}
+                    onChange={(size) => actions.setPane(PANE.chatPanel, size)}
+                  />
+                  <aside className="col panel holding">
+                    <PinnedPane pinned={pinned} onClose={() => setPinned(null)} />
+                  </aside>
+                </>
+              ) : null}
             </div>
           ) : null}
 
@@ -1370,11 +1491,17 @@ export default function App(): JSX.Element {
       {taskMenu !== null ? <ContextMenu anchor={taskMenu} onClose={() => setTaskMenu(null)} /> : null}
       {taskAsk !== null ? <AskDialog spec={taskAsk} onCancel={() => setTaskAsk(null)} /> : null}
 
+      {/* Right-click on CONTENT — a selection, a picture, a link — anywhere in the window, including
+          inside an artifact frame. Mounted once and unconditionally: see `pointerMenu.tsx` on why a
+          menu that exists in some views and not others is one people stop reaching for. */}
+      <PointerMenus />
+
       {state.error ? (
         <div className="toast" onClick={actions.dismissError}>
           {state.error}
         </div>
       ) : null}
     </div>
+    </ValuePanelContext.Provider>
   );
 }

@@ -177,6 +177,30 @@ export function mimeOfPath(relPath: string, isDirectory = false): string {
   return BINARY[ext] ?? TEXT[ext] ?? "text/plain";
 }
 
+/**
+ * A file extension for a type — the inverse of the tables above, for naming a download.
+ *
+ * FIRST match wins, which is what makes the answer the canonical one rather than an arbitrary one:
+ * the tables list `md` before `markdown`, `json` before `jsonc` and `yaml` before `yml`, so the
+ * extension a person would have typed is the one that comes back.
+ *
+ * The vendor types are answered separately because they are POSITIONS rather than extensions — a
+ * workflow is JSON that happens to live under `workflows/` — and scanning a table keyed by extension
+ * would never find them.
+ */
+export function extensionForMime(mime: string): string | undefined {
+  if (mime === WORKFLOW_JSON || mime === CONFIG_JSON) return "json";
+  if (mime === WORKFLOW_YAML) return "yaml";
+  if (mime === WORKFLOW_DESCRIPTION) return "md";
+  const base = mime.split(";")[0]!.trim().toLowerCase();
+  for (const table of [TEXT, BINARY]) {
+    for (const [ext, named] of Object.entries(table)) {
+      if (named === base) return ext;
+    }
+  }
+  return undefined;
+}
+
 /** True when a type is one this app is willing to read as a UTF-8 string. */
 export function isTextMime(mime: string): boolean {
   if (mime === DIRECTORY) return false;

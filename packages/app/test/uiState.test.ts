@@ -15,12 +15,15 @@ import {
   PANE_DEFAULTS,
   SHUT,
   emptyUiState,
+  forgetSeen,
   openOf,
   paneOf,
+  seenOf,
   shutOf,
   toggleShut,
   withOpen,
   withPane,
+  withSeen,
 } from "../src/renderer/uiState";
 
 describe("remembered pane sizes", () => {
@@ -122,5 +125,59 @@ describe("what survives a trip through the settings file", () => {
     expect(paneOf(back, PANE.shellSidebar)).toBe(PANE_DEFAULTS[PANE.shellSidebar]);
     expect(openOf(back, FOLD.filesEditor)).toBe(true);
     expect(shutOf(back, SHUT.folders).size).toBe(0);
+  });
+});
+
+/**
+ * How far a conversation has been read.
+ *
+ * The rules matter more here than for a pane size, because two of them are what keep this out of the
+ * write path and off the screen incorrectly: the mark never moves backwards, and setting it to
+ * something it already covers must return the SAME object — the marker is set from a render effect
+ * several times a second while an answer streams, and a new object each time would be a settings
+ * write forever and a re-render behind it.
+ */
+describe("which conversations have been read", () => {
+  it("reads as unread until something has been seen", () => {
+    expect(seenOf(emptyUiState(), "t-1")).toBe(0);
+  });
+
+  it("moves the mark forward as a conversation is read", () => {
+    const ui = withSeen(emptyUiState(), "t-1", 500);
+    expect(seenOf(ui, "t-1")).toBe(500);
+    expect(seenOf(withSeen(ui, "t-1", 900), "t-1")).toBe(900);
+  });
+
+  it("never moves the mark backwards, and hands back the same object when it would not move", () => {
+    const ui = withSeen(emptyUiState(), "t-1", 900);
+    // The identity check is the assertion: `markSeen` writes only when this returns something new.
+    expect(withSeen(ui, "t-1", 500)).toBe(ui);
+    expect(withSeen(ui, "t-1", 900)).toBe(ui);
+    expect(seenOf(withSeen(ui, "t-1", 500), "t-1")).toBe(900);
+  });
+
+  it("marks one conversation without touching another", () => {
+    const ui = withSeen(withSeen(emptyUiState(), "t-1", 500), "t-2", 900);
+    expect(seenOf(ui, "t-1")).toBe(500);
+    expect(seenOf(ui, "t-2")).toBe(900);
+  });
+
+  it("forgets the marks of deleted conversations and leaves the rest alone", () => {
+    const ui = withSeen(withSeen(emptyUiState(), "t-1", 500), "t-2", 900);
+    const after = forgetSeen(ui, ["t-1"]);
+    expect(seenOf(after, "t-1")).toBe(0);
+    expect(seenOf(after, "t-2")).toBe(900);
+    // Nothing to forget is not a change — same rule, same reason as `withSeen`.
+    expect(forgetSeen(after, ["t-1", "t-nothing"])).toBe(after);
+  });
+
+  it("survives the settings file", () => {
+    const ui = withSeen(emptyUiState(), "t-1", 1_700_000_000_000);
+    const back = parseSettings(JSON.parse(JSON.stringify({ theme: "dark", ui })) as unknown).ui;
+    expect(seenOf(back, "t-1")).toBe(1_700_000_000_000);
+  });
+
+  it("has an empty map when the file has never heard of one", () => {
+    expect(seenOf(parseSettings({ theme: "light" }).ui, "t-1")).toBe(0);
   });
 });

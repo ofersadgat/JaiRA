@@ -33,6 +33,16 @@ export const THEMES: readonly JairaTheme[] = ["light", "dark"];
  * Nothing here is required for the app to work: an absent id means the control's own default, so a
  * settings file from before this existed, or one hand-edited into nonsense, opens the app the way a
  * fresh install does.
+ *
+ * ## The fourth map is not a layout, and lives here anyway
+ *
+ * `seen` records which conversations have been read. That is plainly not "how big is this pane", so
+ * it breaks the vocabulary above — but it is the same KIND of fact in every way that decides where a
+ * value is stored: it belongs to one person on one machine, it is a cache of gestures rather than
+ * anything anyone authored, and losing it costs a dot rather than a document. Putting it here also
+ * gets it the renderer's two rules for free, and read-state needs both: the debounced write, so
+ * scrolling a list is not a write per row, and "the window owns it after hydration", so a
+ * `settings:read` from a project open cannot resurrect a mark somebody just cleared.
  */
 export interface JairaUiState {
   /** Pane sizes in px, by splitter id — a width, or a height for the one horizontal divider. */
@@ -41,6 +51,19 @@ export interface JairaUiState {
   open: Record<string, boolean>;
   /** Folded branches, by tree id, each the list of row keys that are SHUT. */
   shut: Record<string, string[]>;
+  /**
+   * How far each conversation has been READ, by task id: the `updatedAt` of the newest turn the
+   * person has actually had on screen.
+   *
+   * A timestamp rather than a boolean, because "read" is not a property of the conversation but of a
+   * POSITION in it — a thread marked read stops being read the moment the agent says something else,
+   * and a flag would have to be cleared by whatever noticed that, from wherever it noticed it.
+   * Comparing against the row's own `updatedAt` needs nobody to clear anything.
+   *
+   * Absent ⇒ never opened, which reads as unread. That is the right default for a conversation
+   * somebody started before this existed: it is a mark to clear, not a claim about the past.
+   */
+  seen: Record<string, number>;
 }
 
 export interface JairaSettings {
@@ -82,7 +105,7 @@ export function defaultSettings(): JairaSettings {
 
 /** No layout remembered yet — every control opens at its own default. */
 export function defaultUiState(): JairaUiState {
-  return { panes: {}, open: {}, shut: {} };
+  return { panes: {}, open: {}, shut: {}, seen: {} };
 }
 
 /**
@@ -134,6 +157,11 @@ function parseUiState(raw: unknown): JairaUiState {
     // De-duplicated on the way in: the renderer treats these as sets, and a file that grew a
     // duplicate by hand should not make one row take two clicks to unfold.
     if (Array.isArray(keys)) ui.shut[id] = [...new Set(keys.filter((key): key is string => typeof key === "string"))];
+  }
+  for (const [taskId, at] of Object.entries(objectOf(doc["seen"]))) {
+    // Finite and positive, like a pane size: this is compared against a task's `updatedAt`, and a
+    // NaN or a negative from a hand-edited file would mark a row read forever or never.
+    if (typeof at === "number" && Number.isFinite(at) && at > 0) ui.seen[taskId] = at;
   }
   return ui;
 }

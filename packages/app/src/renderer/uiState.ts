@@ -10,7 +10,7 @@
  *
  * ## Why ids rather than fields
  *
- * The stored shape is three maps keyed by string, and this module owns the keys. That is what keeps
+ * The stored shape is four maps keyed by string, and this module owns the keys. That is what keeps
  * the cost of remembering a new control down to one constant here plus reading it where it renders —
  * no shared type to widen, no parser to teach, no migration for the settings files already on disk.
  * The ids are namespaced by view (`files.tree`) so that reading a saved file tells you where each
@@ -42,6 +42,14 @@ export const PANE = {
   /** The Files view's horizontal divider — how tall the viewer opens above the editor. */
   filesViewer: "files.viewer",
   tasksPanel: "tasks.panel",
+  /**
+   * The Chat view's context panel, which exists only while something is pinned to it.
+   *
+   * Remembered anyway, and remembered separately from the Tasks panel: how wide you want a document
+   * held beside a conversation is not how wide you want a task's detail, and a pane that opened at
+   * whatever the other view was left at would be a pane you re-drag every time.
+   */
+  chatPanel: "chat.panel",
   /** The field reference beside the JSON editor. */
   schemaReference: "schema.reference",
 } as const;
@@ -57,11 +65,26 @@ export const PANE_DEFAULTS: Record<string, number> = {
   [PANE.filesInspector]: 300,
   [PANE.filesViewer]: 320,
   [PANE.tasksPanel]: 360,
+  [PANE.chatPanel]: 420,
   [PANE.schemaReference]: 300,
 };
 
 /** How wide the sidebar is when it is collapsed: the nav glyphs and nothing else. */
 export const SIDEBAR_RAIL = 46;
+
+/**
+ * How far a context panel may be dragged while it is HOLDING a value, in px.
+ *
+ * The ordinary caps on those panels — 680, 760 — are about what an inspector is for: a column of
+ * facts about the thing on the left, which stops being readable long before it stops being wide. A
+ * pinned value is the opposite case. It is a document, often a whole rendered page, and the panel is
+ * the only place it can be read; capping it at inspector width would mean the panel refused to be
+ * used for the one thing somebody explicitly asked it to hold.
+ *
+ * Still a cap rather than nothing, because the column beside it has to survive: past this the thing
+ * you pinned the document FROM stops being a conversation and starts being a margin.
+ */
+export const PANE_WIDE = 1200;
 
 /** Disclosure ids — the folds worth reopening the app on. */
 export const FOLD = {
@@ -126,6 +149,47 @@ export const SHUT = {
  */
 export function paneDefault(id: string): number {
   return PANE_DEFAULTS[id] ?? 0;
+}
+
+/**
+ * How far a conversation has been read, by task id — see {@link JairaUiState.seen}.
+ *
+ * A fresh object is not made here: the map is read per row while a list renders, and this is a
+ * lookup rather than a derivation.
+ */
+export function seenOf(ui: JairaUiState, taskId: string): number {
+  return ui.seen[taskId] ?? 0;
+}
+
+/**
+ * Mark a conversation read up to a moment.
+ *
+ * MONOTONIC — a mark never moves backwards. The two things that call this are a conversation being
+ * opened and a turn landing in one that is already open, and they can arrive in either order for the
+ * same thread; taking the later of the two means neither has to know about the other.
+ *
+ * Returns the state UNCHANGED when the mark would not move, which is what keeps this out of the
+ * write path: it is called on every render that has a conversation open, and a new object each time
+ * would be a settings write every four hundred milliseconds forever.
+ */
+export function withSeen(ui: JairaUiState, taskId: string, at: number): JairaUiState {
+  if ((ui.seen[taskId] ?? 0) >= at) return ui;
+  return { ...ui, seen: { ...ui.seen, [taskId]: at } };
+}
+
+/**
+ * Drop the marks for conversations that have been deleted.
+ *
+ * By the ids that WENT rather than by the ids that remain, which is the only safe direction here. A
+ * window holds one project's task list at a time and this map spans every project a person has ever
+ * had a conversation in, so pruning to "what is on screen" would forget every mark belonging to a
+ * project that merely happens to be closed.
+ */
+export function forgetSeen(ui: JairaUiState, taskIds: readonly string[]): JairaUiState {
+  if (!taskIds.some((taskId) => taskId in ui.seen)) return ui;
+  const seen = { ...ui.seen };
+  for (const taskId of taskIds) delete seen[taskId];
+  return { ...ui, seen };
 }
 
 /** A pane's remembered size, or its default. */

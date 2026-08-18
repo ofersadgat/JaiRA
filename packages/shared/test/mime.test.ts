@@ -12,6 +12,7 @@ import {
   CONFIG_JSON,
   descriptionRootOf,
   DIRECTORY,
+  extensionForMime,
   isTextMime,
   isWorkflowDescription,
   mimeFallbacks,
@@ -121,5 +122,46 @@ describe("mimeFallbacks", () => {
 
   it("does not offer a text editor for something that is not text", () => {
     expect(mimeFallbacks("image/png")).toEqual(["image/png"]);
+  });
+});
+
+/**
+ * The inverse, which exists for exactly one reason: naming a file somebody is about to download.
+ *
+ * The value of an answer here is entirely in the extension being the CANONICAL one — `image.md`
+ * rather than `image.markdown` — because the person is going to look at the name in a save dialog and
+ * decide whether it is the file they meant.
+ */
+describe("extensionForMime", () => {
+  it("answers with the spelling a person would have typed", () => {
+    expect(extensionForMime("text/markdown")).toBe("md");
+    expect(extensionForMime("application/json")).toBe("json");
+    expect(extensionForMime("application/yaml")).toBe("yaml");
+    expect(extensionForMime("text/plain")).toBe("txt");
+  });
+
+  it("answers for the types that are not text", () => {
+    expect(extensionForMime("image/png")).toBe("png");
+    expect(extensionForMime("image/svg+xml")).toBe("svg");
+  });
+
+  it("sees through a charset, which is how a type arrives off a header", () => {
+    expect(extensionForMime("text/html; charset=utf-8")).toBe("html");
+  });
+
+  it("answers for the vendor types, which no extension table could find", () => {
+    expect(extensionForMime(WORKFLOW_JSON)).toBe("json");
+    expect(extensionForMime(CONFIG_JSON)).toBe("json");
+    expect(extensionForMime(WORKFLOW_DESCRIPTION)).toBe("md");
+  });
+
+  it("answers nothing rather than guessing for a type it does not name", () => {
+    expect(extensionForMime("application/x-nonsense")).toBeUndefined();
+  });
+
+  it("round-trips every extension the path classifier recognises", () => {
+    for (const name of ["a.md", "a.json", "a.yaml", "a.png", "a.svg", "a.html", "a.ts", "a.py"]) {
+      expect(`a.${extensionForMime(mimeOfPath(name))}`).toBe(name);
+    }
   });
 });

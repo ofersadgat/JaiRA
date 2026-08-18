@@ -50,7 +50,7 @@ import { ContextMenu, AskDialog, type AskSpec, type MenuAnchor } from "./menu";
 import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from "./transcript";
 import { LiveStatusBar, Paper, sizeOf, Transcript, type ArtifactSurface } from "./transcriptView";
 import { ValueView } from "./valueView";
-import { Icon } from "./icons";
+import { Icon, Spinner } from "./icons";
 import { invoke } from "./store";
 
 /** What the Chat view needs from the shell. Assembled in `App.tsx`, like every other pane's. */
@@ -73,6 +73,18 @@ export interface ChatSurface {
   live: LiveTail | null;
   /** Whether a project is open — an agent conversation without one talks about JaiRA's own root. */
   hasProject: boolean;
+  /**
+   * Which conversations have a call in flight right now, by task id — see `AppState.producing`.
+   *
+   * Not `status`. A typed turn is not a run and moves no task status, so a conversation answering its
+   * fourth message is `completed` as far as the list is concerned; this is the fact the list actually
+   * wants to draw.
+   */
+  producing: Readonly<Record<string, number>>;
+  /** How far each conversation has been read — see `JairaUiState.seen`. */
+  seen: Readonly<Record<string, number>>;
+  /** Remember that a conversation has been read up to a moment. Monotonic; safe to call often. */
+  onSeen: (taskId: string, at: number) => void;
   onOpen: (taskId: string | null, project?: string) => void;
   /** Start one. The settings are the composer's, and reach the first message by riding its run. */
   onNew: (message: string, overrides?: ChatSettings) => Promise<string | null>;
@@ -228,6 +240,25 @@ export function ChatListPanel({ surface }: { surface: ChatSurface }): JSX.Elemen
 
   const open = (task: TaskSummary): void => surface.onOpen(task.taskId, surface.project ?? undefined);
 
+  /**
+   * Whether the newest thing this conversation said has been read.
+   *
+   * Compared against the row's own `updatedAt` rather than held as a flag, which is what makes it
+   * self-clearing: a thread marked read stops being read the moment the agent says something else,
+   * and nothing has to notice that and go clear anything. See {@link JairaUiState.seen}.
+   */
+  const unread = (task: TaskSummary): boolean => (surface.seen[task.taskId] ?? 0) < task.updatedAt;
+
+  /**
+   * Whether it is producing something RIGHT NOW.
+   *
+   * Two sources, because there are two ways a conversation speaks and only one of them is a run. The
+   * opening message IS the run, so it moves the task's status; every message after it is a typed
+   * turn, which deliberately moves nothing (`runChatMessage`) and is visible only in the journal.
+   */
+  const answering = (task: TaskSummary): boolean =>
+    task.status === "running" || (surface.producing[task.taskId] ?? 0) > 0;
+
   return (
     <div className="chat-list">
       <button className="chat-new" onClick={() => surface.onOpen(null)}>
@@ -307,10 +338,25 @@ export function ChatListPanel({ surface }: { surface: ChatSurface }): JSX.Elemen
                 />
               ) : (
                 <>
+                  {/* The left edge is what the list is SCANNED down, so that is where "is there
+                      anything here for me" belongs. A dot each way rather than a dot or nothing: a
+                      mark that disappears when it is read takes the column's alignment with it, and
+                      a row that has shifted left is a row the eye has to re-find. */}
+                  <span
+                    className={`chat-row-mark${unread(task) ? " unread" : ""}`}
+                    title={unread(task) ? "The latest reply has not been read" : "Read"}
+                  />
                   <span className="chat-row-title ellip">{task.title}</span>
-                  <span className={`chat-row-when sub${task.status === "running" ? " chat-row-live" : ""}`}>
-                    {task.status === "running" ? "…" : agoOf(task.updatedAt)}
-                  </span>
+                  {/* The time is REPLACED while it is answering, not annotated. "2 min" is a fact
+                      about the last thing that happened, and while something is happening it is a
+                      fact about nothing anybody is asking. */}
+                  {answering(task) ? (
+                    <span className="chat-row-when chat-row-live" title="Answering now">
+                      <Spinner />
+                    </span>
+                  ) : (
+                    <span className="chat-row-when sub">{agoOf(task.updatedAt)}</span>
+                  )}
                 </>
               )}
             </li>
@@ -336,6 +382,23 @@ function agoOf(at: number): string {
 
 /** The middle column: a conversation, or the offer to start one. */
 export function ChatView({ surface }: { surface: ChatSurface }): JSX.Element {
+  /*
+   * Reading a conversation is what marks it read, and this is the only place that knows it is being
+   * read: the list is in the sidebar and stays there whichever view is on screen, so a mark set from
+   * the list would say "seen" about a thread nobody has looked at.
+   *
+   * It fires again every time the conversation moves — a new turn, a streamed answer settling — which
+   * is the point rather than a cost: a thread you are watching should not go unread underneath you.
+   * `markSeen` is monotonic and does nothing when the mark would not move, so the several calls a
+   * second an answer produces cost one comparison each.
+   */
+  const { taskId, conversations, onSeen } = surface;
+  useEffect(() => {
+    if (taskId === null) return;
+    const row = conversations.find((task) => task.taskId === taskId);
+    if (row !== undefined) onSeen(row.taskId, row.updatedAt);
+  }, [taskId, conversations, onSeen]);
+
   return surface.taskId === null ? <ChatStart surface={surface} /> : <ChatThread surface={surface} key={surface.taskId} />;
 }
 

@@ -87,7 +87,7 @@ import { instanceAt, newestRunOf, runTargetOf } from "./runForm";
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestFiles, selfTestScript } from "./debugWorkflow";
 import { CHAT_AGENT, CHAT_STATES, chatWorkflowFiles, titleOf } from "./chatWorkflow";
-import { emptyUiState, SHUT, toggleShut, withOpen, withPane } from "./uiState";
+import { emptyUiState, forgetSeen, SHUT, toggleShut, withOpen, withPane, withSeen } from "./uiState";
 
 /** A prune plan or result, as `history:prune` returns it. */
 export type PruneReport = Response<"history:prune">;
@@ -106,6 +106,18 @@ function bridge(): JairaBridge {
 
 export async function invoke<C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> {
   return bridge().invoke(channel, request);
+}
+
+/**
+ * Listen to what main pushes, from outside the store.
+ *
+ * Almost everything pushed is state this hook owns, so almost every push is handled below. The
+ * exception is a message that is not about state at all — a right-click that happened in a frame,
+ * which is an event with a place on screen and no bearing on anything stored. Routing that through
+ * the store would mean holding a menu position in application state until something drew it.
+ */
+export function subscribe(listener: (message: PushMessage) => void): () => void {
+  return bridge().subscribe(listener);
 }
 
 /** See {@link AppState.inspect}. */
@@ -232,6 +244,19 @@ export interface AppState {
   sync: SyncState;
   /** The Chat view: which conversation is open, and whether its states are installed. */
   chat: ChatState;
+  /**
+   * Which tasks have a call in flight RIGHT NOW, by task id and depth.
+   *
+   * The one thing `status` cannot answer for a conversation. A typed turn is deliberately not a run —
+   * no workspace, no job, no status change (see `runChatMessage`) — so a task that is answering its
+   * fourth message is still `completed` as far as the task list is concerned. What does move is the
+   * journal: every call emits `operation.started` and exactly one terminal event, whatever happens to
+   * it, and those are published for every task rather than only the selected one.
+   *
+   * A DEPTH rather than a flag, because a composite state's children emit the same pair inside their
+   * parent's: counting means a child settling does not report the parent as finished.
+   */
+  producing: Record<string, number>;
 
   /** The Debug view's self-test — see {@link DebugState}. */
   debug: DebugState;
@@ -595,6 +620,7 @@ const EMPTY: AppState = {
   schemaChoice: {},
   sync: { status: null, result: null, running: false, error: null, progress: [] },
   chat: { taskId: null, project: null, installed: false, busy: false, opening: null, error: null },
+  producing: {},
   debug: { files: [], taskId: null, busy: false, error: null },
   drafts: {},
   editorTab: {},
@@ -1637,6 +1663,22 @@ export function useApp() {
           break;
         case "engine:event": {
           const line = engineLine(message.event);
+          /*
+           * "Is this task saying something right now", tracked for EVERY task and not just the
+           * selected one — see {@link AppState.producing}. Before the guard below, deliberately: the
+           * conversation list draws a spinner for whichever of its rows is answering, and every row
+           * but one is by definition not the selection.
+           */
+          const op = (message.event as { type?: string }).type;
+          if (op === "operation.started" || op === "operation.completed" || op === "operation.failed") {
+            const depth = (ref.current.producing[message.taskId] ?? 0) + (op === "operation.started" ? 1 : -1);
+            const producing = { ...ref.current.producing };
+            // Never negative. A window opened mid-turn sees the terminal event without its start, and
+            // a count that went to −1 would then need two starts before it read as speaking again.
+            if (depth > 0) producing[message.taskId] = depth;
+            else delete producing[message.taskId];
+            patch({ producing });
+          }
           // A sync's events name a task nobody selected — it runs in JaiRA's own project. While one is
           // in flight, anything not about the selected task is that sync narrating itself.
           if (message.taskId !== ref.current.selected) {
@@ -1689,7 +1731,14 @@ export function useApp() {
         case "question:resolved":
           void refreshQuestions();
           break;
-        case "run:finished":
+        case "run:finished": {
+          // The backstop for {@link AppState.producing}. A run's every call is balanced by its own
+          // terminal event, so this is normally already zero — but a process killed mid-call publishes
+          // this and nothing else, and a spinner that never stops is worse than one that starts late.
+          if (ref.current.producing[message.taskId] !== undefined) {
+            const { [message.taskId]: _done, ...rest } = ref.current.producing;
+            patch({ producing: rest });
+          }
           void refreshProjects();
           void refreshTasks();
           void refreshSharedTasks();
@@ -1708,6 +1757,7 @@ export function useApp() {
           // panel refetches what it is showing; the live tail's record has landed with it.
           if (message.taskId === ref.current.selected) patch({ sessions: {}, liveTurn: null });
           break;
+        }
         case "session:turn": {
           // Somebody ELSE's turn. There is one tail here and it belongs to what is on screen, so a
           // delta from another task is dropped rather than folded in: a background sync, a run in
@@ -2153,6 +2203,9 @@ export function useApp() {
           if (ref.current.chat.taskId !== null && taskIds.includes(ref.current.chat.taskId)) {
             patch({ chat: { ...ref.current.chat, taskId: null, error: null } });
           }
+          // …and stops being remembered as read. This is the only moment the map can be pruned
+          // safely — see `forgetSeen` on why the other direction is not available.
+          setUi(forgetSeen(ref.current.settings.ui, taskIds));
           if (ref.current.selected !== null && taskIds.includes(ref.current.selected)) {
             patch({
               selected: null,
@@ -2448,6 +2501,20 @@ export function useApp() {
        * no longer matches anything is harmless.
        */
       toggleShut: (id: string, key: string) => setUi(toggleShut(ref.current.settings.ui, id, key)),
+
+      /**
+       * Remember that a conversation has been read as far as a given moment.
+       *
+       * Called from a render effect while a conversation is open, so it is called OFTEN — several
+       * times a second while an answer is streaming. The guard is what makes that fine: `withSeen`
+       * is monotonic and returns the state it was given when the mark would not move, so the common
+       * call does nothing at all rather than patching an identical object and re-rendering the
+       * window that asked.
+       */
+      markSeen: (taskId: string, at: number) => {
+        const next = withSeen(ref.current.settings.ui, taskId, at);
+        if (next !== ref.current.settings.ui) setUi(next);
+      },
 
       // --- the shell --------------------------------------------------------
 

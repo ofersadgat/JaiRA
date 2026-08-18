@@ -31,6 +31,17 @@ export interface MenuItem {
   note?: string;
 }
 
+/**
+ * How wide a menu is, in px.
+ *
+ * A constant rather than a stylesheet rule because the positioning below needs the number: a menu is
+ * placed by clamping against the window edge, which cannot be done without knowing how much room the
+ * menu will take. Exported for the one caller that anchors a menu to a BUTTON rather than to a
+ * pointer — right-aligning under a control means subtracting this, and a second copy of it is a
+ * second copy that stops agreeing.
+ */
+export const MENU_WIDTH = 232;
+
 export interface MenuAnchor {
   x: number;
   y: number;
@@ -68,7 +79,7 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAnchor; onClose: 
     };
   }, [onClose]);
 
-  const width = 232;
+  const width = MENU_WIDTH;
   // A noted item is two lines. Only the tallest case has to be right — this is a clamp against the
   // window edge, not a layout.
   const height = anchor.items.length * (anchor.items.some((i) => i.note !== undefined) ? 40 : 27) + 10;

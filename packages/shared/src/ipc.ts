@@ -1107,6 +1107,42 @@ export interface IpcContract {
    * boundary rather than a convention.
    */
   "shell:reveal": { request: { file: string }; response: { file: string } };
+  /**
+   * Save bytes the RENDERER already holds, through the OS save dialog.
+   *
+   * Base64 rather than a string, because the things worth downloading are not all text — a
+   * rasterised SVG is a PNG — and a channel that took text would need a second one the first time
+   * somebody asked to save an image. `file` is null when the dialog was dismissed, which is an
+   * outcome and not a failure: a cancelled save must not raise where a caller would report it.
+   */
+  "shell:saveFile": { request: SaveFileRequest; response: { file: string | null } };
+  /**
+   * Save whatever is at a URL, letting Chromium fetch it.
+   *
+   * The case {@link SaveFileRequest} cannot cover: an image inside a sandboxed artifact frame, whose
+   * bytes the renderer cannot read — an opaque-origin document is exactly what it must not be able
+   * to reach into. The browser already has them, so it does the fetching and the saving both.
+   */
+  "shell:download": { request: { url: string }; response: { started: boolean } };
+  /**
+   * Copy the image under a point to the clipboard, in window coordinates.
+   *
+   * By POSITION rather than by URL, which looks indirect and is the only thing that works: this has
+   * to serve images inside artifact frames too, and it is Chromium that knows what is under a point
+   * in a frame it is compositing. It also gets the decoding for free — a copied image has to reach
+   * the clipboard as a bitmap, and every format the page could display is already decoded.
+   */
+  "shell:copyImageAt": { request: { x: number; y: number }; response: { copied: boolean } };
+  /**
+   * The four edit verbs, performed by the BROWSER on whatever has focus.
+   *
+   * `paste` is why this is a channel at all: `document.execCommand("paste")` is refused in web
+   * content, and reading the clipboard from script asks a permission for a gesture the person just
+   * made explicitly. Doing all four the same way is then simply consistent — Chromium already knows
+   * what is focused, including when what is focused is inside an artifact frame, and matching its
+   * own behaviour is the point of offering these at all.
+   */
+  "shell:edit": { request: { verb: "cut" | "copy" | "paste" | "selectAll" }; response: { verb: string } };
   "history:size": { request: void; response: HistorySize };
   "history:prune": { request: PruneRequest; response: PruneResult & { remaining: HistorySize } };
   /** User preferences (theme). Readable with no project open — they belong to the person. */
@@ -1185,6 +1221,10 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "file:rename",
   "file:delete",
   "shell:reveal",
+  "shell:saveFile",
+  "shell:download",
+  "shell:copyImageAt",
+  "shell:edit",
   "history:size",
   "history:prune",
   "settings:read",
@@ -1476,7 +1516,47 @@ export type PushMessage =
        * `n` at or below it instead of applying the same fragment twice.
        */
       n?: number;
-    };
+    }
+  /** A right-click inside a sandboxed artifact frame — see {@link FrameContextMenu}. */
+  | { type: "frame:contextMenu"; menu: FrameContextMenu };
+
+/** What {@link IpcContract}'s `shell:saveFile` is handed. */
+export interface SaveFileRequest {
+  /** The name to propose in the dialog. The extension is what picks the filter, so keep it. */
+  name: string;
+  /** The bytes, base64. */
+  data: string;
+}
+
+/**
+ * A right-click that happened somewhere this window's own document cannot see.
+ *
+ * Artifacts render in sandboxed frames with an opaque origin, so a `contextmenu` listener in the
+ * renderer never hears about one — which is the sandbox working, not a gap to close. The browser
+ * process does hear about it, and forwards what it saw; the renderer draws the SAME menu it draws
+ * for its own document, so right-clicking a picture in a mockup behaves like right-clicking a
+ * picture anywhere else instead of summoning a second menu system in OS chrome.
+ *
+ * Everything here is a fact Chromium already had. Nothing in it is trusted as a capability: the
+ * actions the menu offers are the same ones it offers elsewhere, and each is checked where it runs.
+ */
+export interface FrameContextMenu {
+  /** Where, in the window's web area — the same space as a DOM event's `clientX`/`clientY`. */
+  x: number;
+  y: number;
+  /** What is selected in the frame, empty when nothing is. */
+  selectionText: string;
+  /** The link under the cursor, empty when there is none. */
+  linkURL: string;
+  /** The source of the media under the cursor — an image's `src`. Empty when there is none. */
+  srcURL: string;
+  /** What kind of media is under the cursor, `none` for ordinary content. */
+  mediaType: "none" | "image" | "audio" | "video" | "canvas" | "file" | "plugin";
+  /** Whether the thing under the cursor is a field that can be typed into. */
+  isEditable: boolean;
+  /** What the edit verbs would actually do here — Chromium's own answer, not a guess. */
+  editFlags: { canCut: boolean; canCopy: boolean; canPaste: boolean; canSelectAll: boolean };
+}
 
 export const PUSH_CHANNEL = "jaira:push";
 
