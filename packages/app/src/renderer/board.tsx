@@ -12,7 +12,8 @@
  * turn the board's shape into something you cannot read left to right.
  */
 import type { JSX, MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import type { BoardCard, BoardView } from "@jaira/shared/browser";
+import type { BoardCard, BoardView, InstanceStatus, TaskStatus } from "@jaira/shared/browser";
+import { Pill, PILL_WORD, pillKindOf } from "./pill";
 
 /**
  * The four things a card in a column can be DOING, in the order work moves through them.
@@ -81,6 +82,15 @@ export function lanesOf(cards: readonly BoardCard[]): { lane: Lane; cards: Board
   });
 }
 
+/**
+ * The glyph vocabulary, still nine entries wide.
+ *
+ * The PILLS took five of these and folded them into their own set (SHELL.md §4.1) — `blocked` joined
+ * `waiting_for_user` under `⏸`, `timeout` joined `failed`. This map stays whole because {@link Badge}
+ * has other callers, and they are inspectors: a panel describing ONE instance is the surface where
+ * `timeout` and `failed` are worth telling apart, which is exactly the distinction a count on a row
+ * of five cannot afford.
+ */
 const BADGE: Record<string, string> = {
   running: "▶",
   waiting_for_user: "⏸",
@@ -100,6 +110,22 @@ export function Badge({ status }: { status?: string }): JSX.Element {
       {BADGE[key] ?? "·"}
     </span>
   );
+}
+
+/**
+ * A card's status, as the pill (SHELL.md §5.3).
+ *
+ * A word rather than a count, because a card is one task and "1" is not news. What it buys is the
+ * fill: a column of filled pills is the work in flight and a column of flat ones is what is done,
+ * and a person sorts the column that way before reading a single title.
+ *
+ * `queued` has no pill — nothing is happening and nothing has happened — so a not-started card shows
+ * none, which is what the "Not started" lane heading is already saying above it.
+ */
+export function StatusPill({ status }: { status?: string }): JSX.Element | null {
+  const kind = pillKindOf(status as TaskStatus | InstanceStatus | undefined);
+  if (kind === null) return null;
+  return <Pill kind={kind} word={PILL_WORD[kind]} title={status} />;
 }
 
 /**
@@ -172,8 +198,13 @@ export function Tile({
       {...(tip !== undefined ? { title: tip } : {})}
     >
       <div className="card-head">
-        {status !== undefined ? <Badge status={status} /> : null}
         <span className="card-title">{title}</span>
+        {/* TRAILING, not leading (SHELL.md §5.3). A glyph in front of the title indented every card
+            by a column that carried one character, and put the status where a person's eye lands
+            first — which is the wrong order: you find the card by its name and then ask what it is
+            doing. At the end it also lines up down the column, so the shape of the work is readable
+            without reading anything. */}
+        {status !== undefined ? <StatusPill status={status} /> : null}
         {trailing}
       </div>
       {children}

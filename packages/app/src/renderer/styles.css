@@ -2900,6 +2900,79 @@ button.crumb-sep.open {
   color: var(--warn);
   border-color: var(--warn);
 }
+/* --- status pills (SHELL.md §4) ---
+   Two kinds on one shape. ACTIVE pills are filled with a tint of their own colour and state a live
+   fact; STATUS pills are flat and state an unseen count. Fill is the second channel, so `⛔` and a
+   hypothetical red active pill are told apart without reading hue — which is what stops colour being
+   the only carrier of the difference. */
+.pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  border-radius: 999px;
+  line-height: 1.6;
+  white-space: nowrap;
+  flex: none;
+  /* No border. A pill is read by its glyph and its ground; a hairline on top of a tint is a third
+     edge in a column that already has the band's two. */
+  border: 0;
+  background: transparent;
+}
+.pill-glyph {
+  font-size: calc(var(--size-data) * 0.84);
+}
+/* The count is the only part a person compares down a column, so it is the register that lines up. */
+.pill-n {
+  font-variant-numeric: tabular-nums;
+}
+/* `running`, `waiting`, `failed` — JaiRA's vocabulary for a condition, so app voice even though the
+   condition belongs to data (§3.2). It takes the pill's colour rather than `app-secondary`'s dim,
+   because inside a pill the colour IS the status. */
+.pill-word {
+  font-family: var(--font-app);
+  font-size: calc(var(--size-app) * 0.88);
+  font-weight: 500;
+  color: inherit;
+}
+.pill-running {
+  color: var(--accent);
+}
+.pill-waiting {
+  color: var(--warn);
+}
+.pill-error {
+  color: var(--bad);
+}
+.pill-warning {
+  color: var(--warn);
+}
+.pill-success {
+  color: var(--ok);
+}
+/* Filled — a tint of the pill's own colour, reusing the wash that replaced the coloured left
+   borders. Only the two active kinds get it. */
+.pill-active.pill-running {
+  background: var(--tint-accent);
+}
+.pill-active.pill-waiting {
+  background: var(--tint-warn);
+}
+/* Flat, and dimmer than its active twin: an unseen count is a note, not an alarm. */
+.pill-status {
+  background: transparent;
+}
+/* Everything behind the fold, summed as ITEMS. Colourless — see the note in `pill.tsx` on §9.2. */
+.pill-more {
+  color: var(--dim);
+}
+
 .reason {
   color: var(--bad);
   font-size: calc(var(--size-app) * 11 / 12.5);

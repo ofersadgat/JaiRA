@@ -18,7 +18,17 @@
 import type { JSX } from "react";
 import type { BoardCard, BoardView, InstanceNode, ProjectSummary } from "@jaira/shared/browser";
 import { CrumbBar, alternatives, runCrumbs, type Crumb, type MenuItem } from "./crumbs";
+import { Pills, projectCounts } from "./pill";
 import type { TrailStep } from "./trail";
+
+/**
+ * How much room the bar's trailing end can spare for pills.
+ *
+ * The crumbs shrink before this does — an address that has been truncated to `…/plan` is still an
+ * address, where a pill row folded to `+7` has stopped being an answer. Generous enough for all five
+ * at three digits each, which is the case where folding would cost the most.
+ */
+const CRUMB_PILL_BUDGET = 220;
 
 /** What to call the project crumb when nothing has been scrolled to and nothing is chosen. */
 const ALL = "All projects";
@@ -174,9 +184,11 @@ export function TaskAddressBar({
         project !== null && focus === null ? (
           // The counts the group header carried. They belong to the section, so they travel with it
           // into the bar rather than being a fact about the view.
-          <span className="sub ellip doc-label">
-            {project.tasks} tasks{project.running > 0 ? ` · ${project.running} running` : ""}
-          </span>
+          //
+          // As pills now (SHELL.md §4): "12 tasks · 2 running" answered how many and left the four
+          // other things a person came to check — what is parked, what failed — to be read off the
+          // board. The bar has room for one row of pills and that row is the whole answer.
+          <Pills counts={projectCounts(project)} budget={CRUMB_PILL_BUDGET} />
         ) : null
       }
       {...(tools !== undefined ? { tools } : {})}

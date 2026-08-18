@@ -271,6 +271,7 @@ import type {
   ValidateSchemaRequest,
   ValidateSchemaResult,
   TaskDetail,
+  TaskStatus,
   TaskSummary,
   WorkflowBrowser,
   WorkflowLayer,
@@ -1585,6 +1586,22 @@ export class AppService {
     const out: ProjectSummary[] = [];
     for (const session of this.sessions.values()) {
       const tasks = taskSummaries(session.project);
+      const statuses: Partial<Record<TaskStatus, number>> = {};
+      for (const task of tasks) statuses[task.status] = (statuses[task.status] ?? 0) + 1;
+      // Which of them are parked on a person. Read off the session's own hubs rather than projected
+      // out of the journal: a gate, an approval and a question are exactly what the inbox strip
+      // lists, so counting them here is counting the same facts and the two cannot drift apart.
+      // A run's task is `running` in the runtime row while it waits, so the set is intersected with
+      // the running rows — a parked request whose task has since been cancelled counts for nothing.
+      const running = new Set(tasks.filter((t) => t.status === "running").map((t) => t.taskId));
+      const parked = new Set<string>();
+      for (const request of session.hub.list()) {
+        const taskId = request.taskId ?? session.requestTask.get(request.requestId);
+        if (taskId !== undefined && running.has(taskId)) parked.add(taskId);
+      }
+      for (const request of [...session.approvals.list(), ...session.questions.list()]) {
+        if (request.taskId !== undefined && running.has(request.taskId)) parked.add(request.taskId);
+      }
       out.push({
         project: session.dir,
         // The shared group is named for the root it IS, not "shared": repointing the root is the one
@@ -1593,7 +1610,9 @@ export class AppService {
           session.kind === "system" ? "JaiRA" : session.kind === "shared" ? `${basename(session.dir)} (shared)` : basename(session.dir),
         kind: session.kind,
         tasks: tasks.length,
-        running: tasks.filter((t) => t.status === "running").length,
+        running: running.size,
+        statuses,
+        waiting: parked.size,
       });
     }
     // The user's work first, then the shared library, then JaiRA's own — outward from what you are

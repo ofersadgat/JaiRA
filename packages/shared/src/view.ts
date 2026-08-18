@@ -557,7 +557,24 @@ export interface ProjectSummary {
   /** `shared` is the selected root as a project; `system` is JaiRA's own. See `SHARED_SESSION`. */
   kind: "user" | "shared" | "system";
   tasks: number;
+  /** Running, INCLUDING the ones parked on a person — see {@link waiting}, which is a subset. */
   running: number;
+  /**
+   * The same rows {@link tasks} counts, split by status.
+   *
+   * The status pills read this (SHELL.md §4), and they need the split rather than the total: "four
+   * tasks" and "four tasks, three of which failed" are the same number and different news.
+   */
+  statuses: Partial<Record<TaskStatus, number>>;
+  /**
+   * Of the running tasks, how many are parked on a PERSON — a workflow gate, a tool approval or a
+   * mid-run question.
+   *
+   * Not a task status, and it cannot be one: a task parked at a gate is `running` in the runtime row
+   * and says so nowhere else. It is counted from the session's own parked requests, which is the
+   * same place the inbox strip reads, so the two can never disagree.
+   */
+  waiting: number;
 }
 
 /** A row in the task list. */
