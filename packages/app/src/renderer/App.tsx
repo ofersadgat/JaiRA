@@ -42,6 +42,7 @@ import { ChatListPanel, ChatView, conversationsOf, type ChatSurface } from "./ch
 import { isChatWorkflow } from "./chatWorkflow";
 import { ApprovalDialog, InteractionDialog, QuestionDialog } from "./components";
 import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem } from "./menu";
+import { AppearancePane } from "./appearancePane";
 import { projectCounts } from "./pill";
 import { PointerMenus } from "./pointerMenu";
 import { ValuePanelContext, type PinnedValue } from "./valuePanel";
@@ -270,6 +271,9 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; layered: boolean; ne
   { id: "providers", label: "Providers", layered: true },
   { id: "executors", label: "Executors", layered: true },
   { id: "config", label: "Configuration", layered: true },
+  // Not layered and not project-scoped: typography belongs to a PERSON, not to a checkout, and a
+  // window with nothing open is exactly where somebody sets it up.
+  { id: "appearance", label: "Appearance", layered: false },
   { id: "history", label: "History", layered: false, needsProject: true },
 ];
 
@@ -1503,6 +1507,9 @@ export default function App(): JSX.Element {
                     onSaveExecutor={actions.setExecutorConfig}
                     onSaveDefinition={actions.saveDefinition}
                   />
+                ) : null}
+                {state.section === "appearance" ? (
+                  <AppearancePane appearance={state.settings.appearance} busy={state.busy} onChange={actions.setAppearance} />
                 ) : null}
                 {state.section === "history" && state.at !== null ? (
                   <History

@@ -2892,6 +2892,105 @@ button.crumb-sep.open {
   margin: 0;
 }
 
+/* --- the appearance screen (SHELL.md §6) ---
+   A font stack is an ORDERED LIST, so it is drawn as one: numbered rows, top to bottom, ending in a
+   default nobody can remove. A comma-separated text box says none of that. */
+.face-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  width: 100%;
+}
+.face-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 3px 6px;
+  border-radius: var(--control-radius-sm);
+  background: var(--fill-ghost-hover);
+}
+/* The position in the stack — what makes "tried in order" visible. */
+.face-n {
+  flex: none;
+  width: 14px;
+  text-align: right;
+}
+.face-name {
+  flex: 1;
+  min-width: 0;
+}
+/* Stated, not editable: it is the thing that stops a missing glyph becoming tofu. */
+.face-default {
+  background: transparent;
+  border: 1px dashed var(--line);
+}
+.face-warn {
+  flex: none;
+  color: var(--warn);
+}
+.face-chip.warn {
+  background: var(--tint-warn);
+}
+.face-move,
+.face-drop {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  border-radius: 4px;
+}
+.face-move:hover:not(:disabled),
+.face-drop:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--fill-ghost-selected);
+}
+.face-add {
+  display: flex;
+  margin-top: 2px;
+}
+.face-add input {
+  width: 100%;
+}
+/* Size on the SAME line as the family it applies to — they are one decision about one voice. */
+.size-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.size-slider input[type="range"] {
+  flex: 1;
+  min-width: 90px;
+}
+/* Real surfaces, not a sample string: a sample cannot show you that a data face is wider than the
+   column it has to sit in. It is also the one place both voices are guaranteed adjacent. */
+.face-preview {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  background: var(--panel-2);
+}
+.face-preview-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 4px 6px;
+}
+.face-preview-card {
+  cursor: default;
+}
+
 /* --- chips, badges, notices --- */
 .chip {
   font-size: calc(var(--size-app) * 10 / 12.5);

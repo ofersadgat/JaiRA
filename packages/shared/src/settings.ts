@@ -97,10 +97,77 @@ export interface JairaSettings {
    * gives the end-of-line schema hints somewhere to sit.
    */
   wrapJson: boolean;
+  /**
+   * The two voices' faces and sizes — see {@link Appearance} and SHELL.md §6.
+   *
+   * Beside `theme` rather than inside `ui`, because it is the same kind of thing: a display
+   * preference belonging to one person on one machine, and not a cache of gestures the way panes,
+   * folds and read-marks are. It also has NAMED fields, which is exactly what `ui`'s three maps
+   * exist to avoid — a font stack is not "how big is this pane".
+   */
+  appearance: Appearance;
+}
+
+/**
+ * How the two voices are set, per person (SHELL.md §6).
+ *
+ * One family and one size per voice, because that is what the register system makes possible: every
+ * register is a multiple of its voice's base, so one control moves a whole voice with every ratio
+ * intact. A per-register control would be eleven sliders and no coherence.
+ */
+export interface Appearance {
+  /**
+   * Families to try BEFORE the default stack, in order.
+   *
+   * Prepend, never replace. A chosen face that lacks `⛔`, or box-drawing glyphs, or a script the
+   * person reads, falls through to the platform stack instead of showing tofu — which is the failure
+   * a text field for "font family" produces and cannot warn about. Empty ⇒ the default stack alone.
+   */
+  appFamily: string[];
+  dataFamily: string[];
+  /** The app voice's base, in px. Every `.app-*` register is a ratio of it. */
+  sizeApp: number;
+  /** The data voice's base, in px. Every `.data-*` register is a ratio of it. */
+  sizeData: number;
+  /**
+   * The editor's own size, read ONLY when {@link advanced} is set.
+   *
+   * The simple/advanced split borrowed from t3code, where a terminal follows the code font until it
+   * is told not to. Ours is the editor: Monaco, the diff panes and the JSON editor follow
+   * `--size-data` until somebody separates them, because wanting bigger code and the same chrome is
+   * a real want and wanting them to disagree by accident is not.
+   */
+  sizeEditor: number;
+  advanced: boolean;
+  /**
+   * Grayscale antialiasing. Off by default — the platform's own rendering is the one a person's
+   * other applications use, and matching it is worth more than any opinion we have about stem
+   * darkening.
+   */
+  smoothing: boolean;
+}
+
+/** The bounds each size is clamped to, in px. See {@link clampAppearance}. */
+export const SIZE_LIMITS = {
+  sizeApp: { min: 11, max: 17, default: 12.5 },
+  sizeData: { min: 10, max: 16, default: 12 },
+  sizeEditor: { min: 10, max: 20, default: 13 },
+} as const;
+
+export function defaultAppearance(): Appearance {
+  return {
+    appFamily: [],
+    dataFamily: [],
+    sizeApp: SIZE_LIMITS.sizeApp.default,
+    sizeData: SIZE_LIMITS.sizeData.default,
+    sizeEditor: SIZE_LIMITS.sizeEditor.default,
+    advanced: false,
+    smoothing: false,
+  };
 }
 
 export function defaultSettings(): JairaSettings {
-  return { theme: "light", wrapJson: false, ui: defaultUiState() };
+  return { theme: "light", wrapJson: false, ui: defaultUiState(), appearance: defaultAppearance() };
 }
 
 /** No layout remembered yet — every control opens at its own default. */
@@ -133,8 +200,43 @@ export function parseSettings(raw: unknown): JairaSettings {
     theme: THEMES.includes(theme as JairaTheme) ? (theme as JairaTheme) : "light",
     wrapJson: doc["wrapJson"] === true,
     ui: parseUiState(doc["ui"]),
+    appearance: parseAppearance(doc["appearance"]),
     ...(typeof baseDir === "string" && baseDir.length > 0 ? { baseDir } : {}),
   };
+}
+
+/**
+ * Parse the appearance preferences, per field, keeping whatever is readable.
+ *
+ * Same forgiveness as {@link parseUiState} and for the same reason: this is a preference file, not
+ * something anyone authored, and one unreadable field is no reason to reset a person's whole
+ * typography. A size out of range is CLAMPED rather than dropped — an 80px chrome is a window with
+ * no visible controls, and a 2px one is the same window from the other direction.
+ */
+function parseAppearance(raw: unknown): Appearance {
+  const out = defaultAppearance();
+  const doc = objectOf(raw);
+  const families = (value: unknown): string[] | undefined =>
+    Array.isArray(value)
+      ? // Trimmed, non-empty and de-duplicated: a stack is an ORDERED LIST of alternatives, and the
+        // same family twice means the second entry can never be reached.
+        [...new Set(value.filter((f): f is string => typeof f === "string").map((f) => f.trim()).filter((f) => f.length > 0))]
+      : undefined;
+  out.appFamily = families(doc["appFamily"]) ?? out.appFamily;
+  out.dataFamily = families(doc["dataFamily"]) ?? out.dataFamily;
+  for (const key of ["sizeApp", "sizeData", "sizeEditor"] as const) {
+    const size = doc[key];
+    if (typeof size === "number" && Number.isFinite(size)) out[key] = clampSize(key, size);
+  }
+  out.advanced = doc["advanced"] === true;
+  out.smoothing = doc["smoothing"] === true;
+  return out;
+}
+
+/** One size, held inside the bounds its control offers. */
+export function clampSize(key: keyof typeof SIZE_LIMITS, size: number): number {
+  const { min, max } = SIZE_LIMITS[key];
+  return Math.min(max, Math.max(min, size));
 }
 
 /**

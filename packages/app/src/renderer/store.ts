@@ -36,6 +36,7 @@ import type {
   IpcResponse as Response,
   JairaBridge,
   JairaSettings,
+  Appearance,
   JairaTheme,
   PendingApproval,
   PendingQuestion,
@@ -57,6 +58,7 @@ import type {
 } from "@jaira/shared/browser";
 import {
   CONFIG_JSON,
+  defaultAppearance,
   foldWriting,
   isStreamBookkeeping,
   isTextMime,
@@ -87,6 +89,7 @@ import { instanceAt, newestRunOf, runTargetOf } from "./runForm";
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestFiles, selfTestScript } from "./debugWorkflow";
 import { CHAT_AGENT, CHAT_STATES, chatWorkflowFiles, titleOf } from "./chatWorkflow";
+import { applyAppearance } from "./appearance";
 import { unseenTasks } from "./pill";
 import { emptyUiState, forgetSeen, SHUT, toggleShut, withOpen, withPane, withSeen, withSeenAll } from "./uiState";
 
@@ -603,7 +606,7 @@ export type View = "files" | "tasks" | "chat" | "logs" | "debug" | "settings";
  * `history` is a project's run journal and has no layer to pick — nor anything to show without a
  * project, which is why the shell hides it on an empty window rather than rendering it empty.
  */
-export type SettingsSection = "providers" | "executors" | "config" | "history";
+export type SettingsSection = "providers" | "executors" | "appearance" | "config" | "history";
 
 const EMPTY: AppState = {
   at: null,
@@ -625,7 +628,7 @@ const EMPTY: AppState = {
   // first paint and the loaded setting agree in the common case. The layout starts EMPTY rather than
   // at the defaults: an absent id means "whatever this control opens at", so the first paint is the
   // default layout without this having to restate what those numbers are.
-  settings: { theme: "light", wrapJson: false, ui: emptyUiState() },
+  settings: { theme: "light", wrapJson: false, ui: emptyUiState(), appearance: defaultAppearance() },
   config: null,
   executors: [],
   probes: {},
@@ -1612,6 +1615,18 @@ export function useApp() {
   useEffect(() => {
     document.documentElement.dataset["theme"] = state.settings.theme;
   }, [state.settings.theme]);
+
+  /**
+   * Apply the typography preferences to the same element (SHELL.md §6).
+   *
+   * Beside the theme because it is the same gesture — a display preference written onto `:root`,
+   * where it beats the stylesheet's own values without a specificity fight and without a second copy
+   * of the palette. Everything downstream is already a multiple of the two bases, so this is four
+   * property writes and the whole window moves coherently.
+   */
+  useEffect(() => {
+    applyAppearance(document.documentElement, state.settings.appearance);
+  }, [state.settings.appearance]);
 
   // Initial load + push subscription.
   useEffect(() => {
@@ -3202,6 +3217,24 @@ export function useApp() {
         patch({ settings: { ...ref.current.settings, wrapJson } });
         try {
           patch({ settings: keepingUi(await invoke("settings:write", { wrapJson })) });
+        } catch (e) {
+          fail(e);
+        }
+      },
+
+      /**
+       * Change the typography (SHELL.md §6).
+       *
+       * Patched LOCALLY first and written after, like the theme: dragging a size slider must move
+       * the window as it moves, and a round-trip per pixel would make it feel like it was resisting.
+       * The write is whole rather than a delta, because appearance is one setting made of seven
+       * fields and `writeSettings` merges only one level deep.
+       */
+      setAppearance: async (patchTo: Partial<Appearance>) => {
+        const appearance = { ...ref.current.settings.appearance, ...patchTo };
+        patch({ settings: { ...ref.current.settings, appearance } });
+        try {
+          patch({ settings: keepingUi(await invoke("settings:write", { appearance })) });
         } catch (e) {
           fail(e);
         }

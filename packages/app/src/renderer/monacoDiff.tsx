@@ -92,6 +92,28 @@ export function monacoLanguageOf(mime: string): string {
 /** The Monaco theme for the app's `data-theme` attribute. */
 const themeOf = (): string => (document.documentElement.dataset["theme"] === "dark" ? "vs-dark" : "vs");
 
+/**
+ * The editor's face and size, read off the tokens the rest of the app uses (SHELL.md §6).
+ *
+ * Monaco draws into a canvas and cannot inherit CSS the way every other surface does, so the two
+ * values are read from the computed style and passed as options. Without it the editor kept its own
+ * 14px Consolas while the whole window moved around it — the one surface a code-size preference is
+ * most obviously about.
+ *
+ * `--size-editor` rather than `--size-data`: it resolves to the data voice until Advanced separates
+ * them, so the simple case needs no special handling here.
+ */
+function editorFont(): { fontFamily: string; fontSize: number } {
+  const style = getComputedStyle(document.documentElement);
+  const size = Number.parseFloat(style.getPropertyValue("--size-editor"));
+  return {
+    fontFamily: style.getPropertyValue("--font-data").trim(),
+    // Monaco refuses a NaN by falling back to a default that is not ours — better to state the
+    // stylesheet's own base than to let the option through unread.
+    fontSize: Number.isFinite(size) && size > 0 ? size : 12,
+  };
+}
+
 export interface MonacoDiffProps {
   original: string;
   modified: string;
@@ -133,13 +155,20 @@ export function MonacoDiffPane({ original, modified, mime, onModified, readOnly,
       scrollBeyondLastLine: false,
       renderOverviewRuler: false,
       theme: themeOf(),
+      ...editorFont(),
     });
     editor.setModel({ original: originalModel, modified: modifiedModel });
     const edits = modifiedModel.onDidChangeContent(() => report.current?.(modifiedModel.getValue()));
 
     // Follow the app's theme while the pane is open — the attribute is the one source of truth.
-    const themes = new MutationObserver(() => monaco.editor.setTheme(themeOf()));
-    themes.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    // Theme AND typography: both are written onto the root — one as a data attribute, the other as
+    // inline custom properties — so one observer covers both, and the editor follows a size slider
+    // as it moves rather than at the next reopen.
+    const themes = new MutationObserver(() => {
+      monaco.editor.setTheme(themeOf());
+      editor.updateOptions(editorFont());
+    });
+    themes.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "style"] });
 
     return () => {
       themes.disconnect();
@@ -184,9 +213,16 @@ export function MonacoCodePane({ text, mime }: { text: string; mime: string }): 
       scrollBeyondLastLine: false,
       overviewRulerLanes: 0,
       theme: themeOf(),
+      ...editorFont(),
     });
-    const themes = new MutationObserver(() => monaco.editor.setTheme(themeOf()));
-    themes.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    // Theme AND typography: both are written onto the root — one as a data attribute, the other as
+    // inline custom properties — so one observer covers both, and the editor follows a size slider
+    // as it moves rather than at the next reopen.
+    const themes = new MutationObserver(() => {
+      monaco.editor.setTheme(themeOf());
+      editor.updateOptions(editorFont());
+    });
+    themes.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "style"] });
     return () => {
       themes.disconnect();
       editor.dispose();

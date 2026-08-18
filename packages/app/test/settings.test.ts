@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
-import type { PushMessage } from "@jaira/shared";
+import { defaultAppearance, type PushMessage } from "@jaira/shared";
 import { AppService, type KeychainPort } from "../src/main/service";
 
 let dir: string;
@@ -63,7 +63,7 @@ afterEach(async () => {
 describe("user settings", () => {
   it("defaults to the light theme, with no project open", () => {
     // Preferences belong to the person, not the checkout — the theme must apply on an empty window.
-    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, shut: {}, seen: {} } });
+    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, shut: {}, seen: {} }, appearance: defaultAppearance() });
   });
 
   it("persists a change and reads it back", () => {
@@ -76,7 +76,7 @@ describe("user settings", () => {
     writeFileSync(join(baseDir, "settings.json"), "{ not json", "utf8");
 
     // A broken preferences file must never stop the app opening.
-    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, shut: {}, seen: {} } });
+    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, shut: {}, seen: {} }, appearance: defaultAppearance() });
   });
 
   it("keeps the JSON editor's wrap preference, and defaults it off", () => {
@@ -91,7 +91,7 @@ describe("user settings", () => {
 
   it("reads a settings file written before wrapJson existed", () => {
     writeFileSync(join(baseDir, "settings.json"), JSON.stringify({ theme: "dark" }), "utf8");
-    expect(service.readSettings()).toEqual({ theme: "dark", wrapJson: false, ui: { panes: {}, open: {}, shut: {}, seen: {} } });
+    expect(service.readSettings()).toEqual({ theme: "dark", wrapJson: false, ui: { panes: {}, open: {}, shut: {}, seen: {} }, appearance: defaultAppearance() });
   });
 
   /**
