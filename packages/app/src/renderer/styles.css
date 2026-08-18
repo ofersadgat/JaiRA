@@ -89,7 +89,9 @@
  * severity on a notice, availability on a settings row, allow/deny on a policy rule and verdict in
  * the inspector — five meanings on one channel, which is none. A wash over the whole surface says
  * the same thing without claiming an edge, and leaves the edge free for the two jobs where a rule
- * genuinely encodes structure: run status down a column of cards, and nesting in the settings.
+ * genuinely encoded structure. One of those two is left — nesting in the settings. The other, run
+ * status down a column of cards, went with the card's box (SHELL.md §5.3): the trailing pill is
+ * read down a column the same way and says WHICH status as well as that there is one.
  */
 :root {
   --control-radius: 7px;
@@ -2405,43 +2407,38 @@ button.crumb-sep.open {
 /* --- lanes: what the cards in one column are DOING (board.tsx) ---------------
    A column says WHERE a task is; a lane says whether anything is happening to it
    there. Quieter than the column heading above them — these divide one track,
-   they do not add tracks — and drawn only where there is more than one, because
-   a "Running" rule over four running cards says what four badges already say.
+   they do not add tracks.
 
-   The rule sits on the LEFT of the label rather than under it: the heading is a
-   marker in a stack of cards, and a full-width line reads as the top of a new
-   column. */
+   Only TWO of the four are headed now (SHELL.md §5.3). Every card in `running`
+   and `paused` carries a filled pill naming what it is doing, so a heading over
+   them says what each card under it already says; `finished` keeps one because
+   its pills go flat, and `not-started` because a queued card has no pill at all.
+   See `LANE_HEADED`.
+
+   The rule runs to the RIGHT of the label, ending at the count. Under the label
+   it would read as the top of a new column; beside it, it is a marker in a stack
+   of cards, and it carries the eye to the number it is about. */
 .lane h5 {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 2px 0 6px;
-  font-size: calc(var(--size-app) * 9.5 / 12.5);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
+  gap: 8px;
+  margin: 10px 0 6px;
   color: var(--dim);
 }
-.lane h5::before {
-  content: "";
+/* The label sizes itself; the RULE takes the slack. `.grow` is the class the markup uses for "take
+   the rest", and here it deliberately does not. */
+.lane h5 .grow {
   flex: none;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
+}
+.lane h5::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
 }
 .lane h5 .count {
   flex: none;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-/* The lane a person has to act on. It is the only one of the four that is waiting on somebody, so
-   it is the only one that gets a colour — the rest are states of the machine. */
-.lane-paused h5 {
-  color: var(--warn, #b7791f);
-}
-.lane-running h5 {
-  color: var(--dim);
+  order: 3;
 }
 /* Done and never-started are both "nothing is happening", and they sit at the bottom of the stack
    where they are read last. Dimmed so a long tail of finished work does not out-shout two live
@@ -2466,84 +2463,62 @@ button.crumb-sep.open {
   margin: 0;
 }
 
+/* A card is SELECTED, not pressed (SHELL.md §5.3).
+   What was here — a panel fill, a hairline, a radius and a shadow — is the recipe for a button, and
+   a column of them read as a column of things to press. Ground alone now: the ghost hover every
+   other selectable row in the app uses at rest, and the accent tint when it is the one chosen.
+
+   The left edge is GONE, and so is the comment that reserved it. That reservation said the edge was
+   for "run status down a column of cards", which was the last claim keeping a rail in this file at
+   all — and it is a claim the trailing pill answers better, because a pill says which status down a
+   column AND names it, where three pixels of colour could only ever say which. */
 .card {
   position: relative;
-  background: var(--panel);
-  border: 1px solid var(--line);
+  background: var(--fill-ghost-hover);
+  border: 0;
   border-radius: var(--control-radius-sm);
-  padding: 8px 9px 7px 11px;
-  margin-bottom: 7px;
+  padding: 7px 9px 6px;
+  margin-bottom: 4px;
   cursor: pointer;
-  box-shadow: 0 1px 1px rgba(24, 30, 42, 0.09);
-}
-:root[data-theme="dark"] .card {
-  box-shadow: none;
-}
-/* The status as a stripe down the edge — a whole column's worth is readable in one glance, which a
-   glyph per card is not. The badge stays: the stripe says which, the glyph says what.
-   One of the two rails left in the file, and the reason it survived the sweep everywhere else: here
-   the edge is read as a COLUMN, down a list, which is the one thing a tinted surface cannot do. */
-.card::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  border-radius: var(--control-radius-sm) 0 0 var(--control-radius-sm);
-  background: var(--dim);
-}
-.card-running::before,
-.card-interrupted::before {
-  background: var(--accent);
-}
-.card-waiting_for_user::before {
-  background: var(--warn);
-}
-.card-completed::before {
-  background: var(--ok);
-}
-.card-failed::before,
-.card-blocked::before,
-.card-timeout::before {
-  background: var(--bad);
 }
 .card:last-child {
   margin-bottom: 0;
 }
 .card:hover {
-  background: var(--panel-3);
-  border-color: var(--rule);
+  background: var(--fill-ghost-selected);
 }
-.card-selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+.card-selected,
+.card-selected:hover {
+  background: var(--tint-accent);
 }
 .card-head {
   display: flex;
   align-items: center;
   gap: 6px;
 }
+/* A person typed it, so it is the data voice (SHELL.md §3.2). `.is-active` on the selected card
+   moves the weight; nothing here moves the face. */
 .card-title {
   flex: 1;
   min-width: 0;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 0.96);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Where the task actually is, as a footer under a rule — the tracker convention, and it stops the
-   state id from competing with the title for the same line. */
+/* The second line: where the task is, and — where there is room to say it — which KIND of waiting or
+   how long ago it ended. The rule above it went with the card's box; the gap does the same job now
+   that there is no fill for a border to sit inside. */
 .card-meta {
   display: flex;
   align-items: center;
   gap: 6px;
   color: var(--dim);
-  font-size: calc(var(--size-data) * 11 / 12);
   font-family: var(--font-data);
-  margin-top: 6px;
-  padding-top: 5px;
-  border-top: 1px solid var(--line);
+  font-size: calc(var(--size-data) * 0.84);
+  margin-top: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2552,27 +2527,10 @@ button.crumb-sep.open {
   flex: 1;
   min-width: 0;
 }
+/* The far end of that line — `approve`, `gate`, `18 min ago`. Never the status word: the trailing
+   pill says that, and saying it twice on one card is what the pill replaced. */
 .card-status {
   flex: none;
-  font-family: var(--font-app);
-  font-size: calc(var(--size-app) * 10 / 12.5);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-.card-running .card-status,
-.card-interrupted .card-status {
-  color: var(--accent);
-}
-.card-waiting_for_user .card-status {
-  color: var(--warn);
-}
-.card-completed .card-status {
-  color: var(--ok);
-}
-.card-failed .card-status,
-.card-blocked .card-status,
-.card-timeout .card-status {
-  color: var(--bad);
 }
 .drill {
   flex: none;

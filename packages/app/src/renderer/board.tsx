@@ -150,9 +150,11 @@ export function drillTargetOf(board: BoardView, card: BoardCard): string | undef
  * The two boards in this app disagree about what a card IS: on the Tasks view it is a task, and
  * inside a run it is one EXECUTION of a declared child, which is what makes a loop legible (three
  * passes, three cards). That difference is real and it is why there are two boards. Everything
- * around it — the raised tile, the status stripe down the edge, the head row, the footer under a
- * rule — is the same in both, and was duplicated instead of shared until restyling one of them
- * left the other behind.
+ * around it — the ground, the head row with its trailing pill, the second line — is the same in
+ * both, and was duplicated instead of shared until restyling one of them left the other behind.
+ *
+ * There is no box any more (SHELL.md §5.3). A filled, outlined, shadowed rectangle is a button, and
+ * a task is selected rather than pressed; the ground carries both states on its own.
  */
 export function Tile({
   status,
@@ -186,7 +188,10 @@ export function Tile({
 }): JSX.Element {
   return (
     <div
-      className={`card${status !== undefined ? ` card-${status}` : ""}${selected === true ? " card-selected" : ""}`}
+      // No `card-${status}` any more: every rule that read it was colouring the left stripe or the
+      // status word, and both are the trailing pill's job now. A class nothing styles is a hook the
+      // next person has to check before they can change anything.
+      className={`card${selected === true ? " card-selected is-active" : ""}`}
       onClick={onSelect}
       onDoubleClick={onDrill}
       // A shift-click is a range-select gesture here, and the browser's own reading of it — extend
@@ -254,11 +259,24 @@ export function Column({
 }
 
 /**
+ * Which lanes still earn a heading (SHELL.md §5.3).
+ *
+ * Not the active two. Every card in `running` and `paused` now carries a FILLED pill naming what it
+ * is doing, so a "Running" rule over them is a line saying what each card under it already says —
+ * the same argument `lanesOf` makes about a single-lane column, applied one level in.
+ *
+ * `finished` keeps its heading, and that is where the argument stops working: its pills go flat, and
+ * flat is the register the whole rest of the column is in. `not-started` keeps one for a blunter
+ * reason — a queued card has no pill at all, so the heading is the only thing saying what it is.
+ */
+const LANE_HEADED: ReadonlySet<Lane> = new Set<Lane>(["not-started", "finished"]);
+
+/**
  * A column's cards, under a heading per lane.
  *
  * Headings only where there is something under them, and none at all when every card in the column
- * is in the same lane — a "Running" rule over a column of four running tasks is a line that says
- * what the four badges below it already say. The sections earn their space by being a DIVISION, so
+ * is in the same lane — a "Finished" rule over a column of nothing but finished cards is a line that
+ * says what every card below it already says. The sections earn their space by being a DIVISION, so
  * they appear exactly when there is something to divide.
  */
 export function Lanes({
@@ -270,7 +288,7 @@ export function Lanes({
 }): JSX.Element {
   const lanes = lanesOf(cards);
   // One lane: no heading, because a rule saying "Finished" over a column of nothing but finished
-  // cards says what every badge under it says. The lane's OWN cards, not the ones passed in — a
+  // cards says what every card under it says. The lane's OWN cards, not the ones passed in — a
   // column that is all finished is the commonest case there is, and it is the one whose order the
   // lane fixed.
   if (lanes.length <= 1) return <>{(lanes[0]?.cards ?? []).map(render)}</>;
@@ -278,10 +296,12 @@ export function Lanes({
     <>
       {lanes.map(({ lane, cards: inLane }) => (
         <div key={lane} className={`lane lane-${lane}`}>
-          <h5>
-            <span className="grow">{LANE_LABEL[lane]}</span>
-            <span className="count">{inLane.length}</span>
-          </h5>
+          {LANE_HEADED.has(lane) ? (
+            <h5>
+              <span className="grow app-label">{LANE_LABEL[lane]}</span>
+              <span className="count data-num">{inLane.length}</span>
+            </h5>
+          ) : null}
           {inLane.map(render)}
         </div>
       ))}
@@ -325,6 +345,23 @@ export function endedLabel(at: number, now: number = Date.now()): string {
   return "just now";
 }
 
+/**
+ * WHICH kind of waiting, for a card that is parked (SHELL.md §5.3).
+ *
+ * The pill merges the two — a gate and a tool approval are the same thing to a person, and `⏸5` is
+ * the number they want. The card has room to keep the difference, and it is a real one: a `gate` is
+ * a state the workflow AUTHOR put there and a `blocked` instance is the engine saying this run
+ * cannot proceed on the inputs it was given, which is somebody else's problem to fix.
+ *
+ * `undefined` for anything not parked — there is nothing to distinguish, and the pill has already
+ * said what it is.
+ */
+export function waitingKindOf(card: BoardCard): string | undefined {
+  if (card.activeStatus === "waiting_for_user") return "gate";
+  if (card.activeStatus === "blocked") return "blocked";
+  return undefined;
+}
+
 export function Card({
   card,
   selected,
@@ -356,16 +393,20 @@ export function Card({
             : (card.activeStateId ?? card.status)
       }
       trailing={onDrill ? <span className="drill">↳</span> : undefined}
-      // The status in words as well as in the stripe: a colour is a reminder, not a label, and the
-      // state a task is sitting in is the thing you came to the board to read.
+      // The second line: where the task is, and the one thing about that the pill cannot say.
       //
-      // A run that is OVER reports WHEN instead. Where it is stopped being the question the moment it
+      // It used to repeat the status in words. With the status now a trailing pill carrying that
+      // word itself, repeating it put the same fact on a card twice — so this line spends its far
+      // end on the DISTINCTION instead (SHELL.md §5.3): which kind of waiting, and when a finished
+      // run finished. Merged in the count, distinguished where there is room.
+      //
+      // A run that is OVER reports WHEN. Where it is stopped being the question the moment it
       // stopped moving, and "which of these four finished runs is the one from this morning" is a
-      // question a column of identical grey cards could not answer at all.
+      // question a column of identical cards could not answer at all.
       meta={
         card.endedAt !== undefined ? (
           <>
-            <span className="ellip">{card.status}</span>
+            <span className="ellip">{card.activeStateId ?? card.status}</span>
             <span className="card-status" title={new Date(card.endedAt).toLocaleString()}>
               {endedLabel(card.endedAt)}
             </span>
@@ -373,7 +414,7 @@ export function Card({
         ) : (
           <>
             <span className="ellip">{card.activeStateId ?? card.status}</span>
-            {card.activeStateId !== undefined ? <span className="card-status">{status.replace(/_/g, " ")}</span> : null}
+            {waitingKindOf(card) !== undefined ? <span className="card-status">{waitingKindOf(card)}</span> : null}
           </>
         )
       }

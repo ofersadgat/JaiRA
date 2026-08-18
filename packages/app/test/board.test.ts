@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { BoardCard } from "@jaira/shared/browser";
-import { LANES, endedLabel, laneOf, lanesOf } from "../src/renderer/board";
+import { LANES, endedLabel, laneOf, lanesOf, waitingKindOf } from "../src/renderer/board";
 
 const card = (patch: Partial<BoardCard> & Pick<BoardCard, "taskId">): BoardCard => ({
   title: patch.taskId,
@@ -123,6 +123,27 @@ describe("lanesOf", () => {
     const lanes = lanesOf(ended);
     expect(lanes).toHaveLength(1);
     expect(lanes[0]!.cards.map((c) => c.taskId)).toEqual(["new", "old"]);
+  });
+});
+
+/**
+ * Which kind of waiting, for the card's second line (SHELL.md §5.3).
+ *
+ * The PILL merges the two, because `⏸5` is the number a person wants. The card keeps the difference,
+ * because a gate is a state the author put there and `blocked` is the engine saying this run cannot
+ * proceed on the inputs it was given — different problems, and different people's to fix.
+ */
+describe("waitingKindOf", () => {
+  it("tells a gate from a run that cannot proceed", () => {
+    expect(waitingKindOf(card({ taskId: "a", activeStatus: "waiting_for_user" }))).toBe("gate");
+    expect(waitingKindOf(card({ taskId: "b", activeStatus: "blocked" }))).toBe("blocked");
+  });
+
+  it("says nothing at all about a card that is not parked", () => {
+    // The trailing pill has already said what it is; a second word would be the duplication the
+    // pill replaced.
+    expect(waitingKindOf(card({ taskId: "c", activeStatus: "running" }))).toBeUndefined();
+    expect(waitingKindOf(card({ taskId: "d", status: "completed" }))).toBeUndefined();
   });
 });
 
