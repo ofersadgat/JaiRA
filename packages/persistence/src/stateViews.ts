@@ -85,7 +85,7 @@ const HIDDEN_DIRS: ReadonlySet<string> = new Set(["snapshots", "tasks", "worktre
  */
 const isHiddenFile = (name: string): boolean => name === "jaira.db" || name.startsWith("jaira.db-");
 
-function walkDir(root: string, dir: string, layer: WorkflowLayer): FileNode[] {
+function walkDir(root: string, dir: string, layer: WorkflowLayer, project?: string): FileNode[] {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -105,13 +105,22 @@ function walkDir(root: string, dir: string, layer: WorkflowLayer): FileNode[] {
         kind: "directory",
         mime: mimeOfPath(rel, true),
         layer,
-        children: walkDir(root, full, layer),
+        ...(project !== undefined ? { project } : {}),
+        children: walkDir(root, full, layer, project),
       });
       continue;
     }
     if (!entry.isFile() || isHiddenFile(entry.name)) continue;
     const kind = kindOf(rel, entry.name);
-    const node: FileNode = { path: rel, name: entry.name, kind, mime: mimeOfPath(rel), layer };
+    const node: FileNode = {
+      path: rel,
+      name: entry.name,
+      kind,
+      mime: mimeOfPath(rel),
+      layer,
+      // Every node says which project it is in, so a file identifies itself — see `FileNode.project`.
+      ...(project !== undefined ? { project } : {}),
+    };
     if (kind === "workflow") {
       // The state id is the path under `workflows/`, minus the suffix — the same derivation the
       // loader uses, so the tree and a `--workflow` argument name the same thing.
@@ -149,7 +158,7 @@ export function fileTree(project: Project, browser?: WorkflowBrowser): FileTree 
   const lint = lintByStateId(browser);
   const roots = project.paths.roots.map((dir, index) => {
     const layer: WorkflowLayer = index === 0 ? "project" : "base";
-    const nodes = walkDir(dir, dir, layer);
+    const nodes = walkDir(dir, dir, layer, layer === "project" ? project.paths.projectDir : undefined);
     const mark = (list: FileNode[]): void => {
       for (const node of list) {
         if (node.stateId !== undefined) {

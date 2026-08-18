@@ -56,6 +56,13 @@ const VIEWER_HEIGHT = paneDefault(PANE.filesViewer);
 export interface FileSelection {
   layer: WorkflowLayer;
   path: string;
+  /**
+   * WHICH project, for a `project`-layer file. Absent on the shared root.
+   *
+   * The tree holds every open project now (SHELL.md §2.2), so `{layer, path}` names as many files as
+   * there are projects and the highlight would land on all of them.
+   */
+  project?: string;
 }
 
 /** What the tree asks the store to do; `force` is added by the follow-up confirmation. */
@@ -118,14 +125,23 @@ function TreeNode({
   onSelect: (node: FileNode) => void;
   onMenu: (node: FileNode, rootDir: string, x: number, y: number) => void;
 }): JSX.Element {
+  // The FOLD key stays per layer, deliberately: `SHUT.folders` is keyed per layer and not per
+  // checkout so it does not grow without bound as projects come and go, and two projects that both
+  // have a `workflows/review/` sharing its folded state is the trade that buys that.
   const key = `${node.layer}:${node.path}`;
   const isDir = node.kind === "directory";
   const open = isDir && !collapsed.has(key);
   // Every file opens now, whatever it is: the registry has a surface for anything that is text, and
-  // for anything that is not the panel says so. Highlighting is by layer AND path, because the same
-  // state id exists in both roots and only one of them is the file you clicked.
+  // for anything that is not the panel says so. Highlighting is by PROJECT, layer and path: the same
+  // state id exists in both roots and in every open project, and only one of them is the file you
+  // clicked (SHELL.md §2.2).
   const selectable = !isDir;
-  const isSelected = selectable && selected !== null && selected.layer === node.layer && selected.path === node.path;
+  const isSelected =
+    selectable &&
+    selected !== null &&
+    selected.layer === node.layer &&
+    selected.path === node.path &&
+    (selected.project ?? undefined) === node.project;
   // The row's own colour, worst-first. A directory carries the totals of what is under it, so a
   // fault stays visible with the branch collapsed — which is the only way it is visible at all when
   // the state that forgot to wire a child is four levels down.
@@ -605,7 +621,10 @@ export function FileTreePanel({
           <p className="empty">Open a project to browse its files.</p>
         ) : (
           tree.roots.map((root) => (
-            <ul className="file-tree" key={root.layer}>
+            /* Keyed by the ROOT's directory, not by its layer: the tree's top level is the projects
+               now (SHELL.md §2.2), so several roots share the layer `project` and only the directory
+               tells them apart. */
+            <ul className="file-tree" key={root.dir}>
               <li
                 className="tree-root"
                 title={root.dir}
@@ -639,11 +658,14 @@ export function FileTreePanel({
                   });
                 }}
               >
-                {root.layer === "project" ? ".jaira/" : "~/.jaira/"} · {LAYER_LABEL[root.layer]}
+                {/* The project's own name, in the data voice — a directory basename, and the same
+                    string the crumb prints. `~/.jaira` is listed once beside the projects rather
+                    than under each, so it names itself the same way. */}
+                <span className="data-secondary">{root.label}</span>
               </li>
               {(filter.length > 0 ? matches(root.nodes) : root.nodes).map((node) => (
                 <TreeNode
-                  key={`${node.layer}:${node.path}`}
+                  key={`${node.project ?? node.layer}:${node.path}`}
                   node={node}
                   depth={0}
                   rootDir={root.dir}

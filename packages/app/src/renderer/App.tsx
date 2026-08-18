@@ -42,6 +42,7 @@ import { ChatListPanel, ChatView, conversationsOf, type ChatSurface } from "./ch
 import { isChatWorkflow } from "./chatWorkflow";
 import { ApprovalDialog, InteractionDialog, QuestionDialog } from "./components";
 import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem } from "./menu";
+import { projectCounts } from "./pill";
 import { PointerMenus } from "./pointerMenu";
 import { ValuePanelContext, type PinnedValue } from "./valuePanel";
 import { ValueView } from "./valueView";
@@ -67,7 +68,7 @@ import { ExecutorsPane } from "./executorsPane";
 import { initialRunValues, runFieldsOf, runTargetOf } from "./runForm";
 import type { RunSurface } from "./runPanel";
 import { RunModeToggle, RunView, TaskContext } from "./runViews";
-import { Sidebar, type SidebarView } from "./sidebar";
+import { Sidebar, type SidebarProject, type SidebarView } from "./sidebar";
 import { Splitter } from "./splitter";
 import { TaskAddressBar } from "./taskBar";
 import { nodeAt } from "./trail";
@@ -196,18 +197,32 @@ function checkedAgo(at: number): string {
   return minutes < 60 ? `checked ${minutes} min ago` : `checked ${Math.round(minutes / 60)} h ago`;
 }
 
+/**
+ * The rooms INSIDE a project — nested under whichever one the address is standing on (SHELL.md
+ * §5.1). Each is a view of that project's work, so none of them means anything at the root.
+ */
 const VIEWS: readonly SidebarView[] = [
   { id: "files", glyph: "❏", label: "Files" },
   { id: "tasks", glyph: "▶", label: "Tasks" },
   // The third activity, and the newest: TALKING. Files designs, Tasks operates, and this is the one
   // you open when what you want is a conversation rather than a workflow — see `chatPane.tsx`.
   { id: "chat", glyph: "✎", label: "Chat" },
+];
+
+/**
+ * The rooms that belong to NO project, and therefore sit in the footer beside Settings.
+ *
+ * Debug is here rather than inside Settings for the same reason it always was: the self-test is what
+ * you reach for when the app is not behaving, and burying it behind a configuration screen would
+ * make it hardest to find in exactly the situation it exists for.
+ */
+const FOOTER_VIEWS: readonly SidebarView[] = [
   { id: "logs", glyph: "≡", label: "Logs" },
-  // In the sidebar rather than inside Settings: the self-test is the thing you reach for when the
-  // app is not behaving, and burying it behind a configuration screen would make it hardest to find
-  // in exactly the situation it exists for.
   { id: "debug", glyph: "⌁", label: "Debug" },
 ];
+
+/** Every nav row, for the lookups that do not care which group a view is in. */
+const ALL_VIEWS: readonly SidebarView[] = [...VIEWS, ...FOOTER_VIEWS];
 
 /**
  * The window's name for a project directory: its last segment.
@@ -233,7 +248,7 @@ function projectName(dir: string | null): string {
  */
 function windowTitle(project: string | null, view: View | "settings", doc: string | null): string {
   const where = project === null ? "no project" : projectName(project);
-  const what = view === "files" && doc !== null ? doc : (VIEWS.find((v) => v.id === view)?.label ?? "Settings");
+  const what = view === "files" && doc !== null ? doc : (ALL_VIEWS.find((v) => v.id === view)?.label ?? "Settings");
   return `${where} · ${what}`;
 }
 
@@ -386,11 +401,11 @@ export default function App(): JSX.Element {
    * means closing a project cannot leave the list pointed at a database this window is no longer
    * reading — the list simply becomes the other one.
    */
-  const chatProject = state.projectDir === null ? SHARED_SESSION : null;
+  const chatProject = state.at === null ? SHARED_SESSION : null;
   const chat: ChatSurface = {
     conversations: useMemo(
-      () => conversationsOf(state.projectDir === null ? state.sharedTasks : state.tasks),
-      [state.projectDir, state.sharedTasks, state.tasks],
+      () => conversationsOf(state.at === null ? state.sharedTasks : state.tasks),
+      [state.at, state.sharedTasks, state.tasks],
     ),
     taskId: state.chat.taskId,
     project: chatProject,
@@ -403,7 +418,7 @@ export default function App(): JSX.Element {
     detail: state.selected === state.chat.taskId ? detail : null,
     journal: state.selected === state.chat.taskId ? state.conversation : null,
     live: state.selected === state.chat.taskId ? state.liveTurn : null,
-    hasProject: state.projectDir !== null,
+    hasProject: state.at !== null,
     producing: state.producing,
     seen: ui.seen,
     onSeen: actions.markSeen,
@@ -750,7 +765,7 @@ export default function App(): JSX.Element {
   const sidebarWidth = paneOf(ui, PANE.shellSidebar);
 
   // The window's name outside the window — see {@link windowTitle}. Nothing on screen shows it.
-  const title = windowTitle(state.projectDir, view, state.doc?.path ?? state.dir?.path ?? null);
+  const title = windowTitle(state.at, view, state.doc?.path ?? state.dir?.path ?? null);
   useEffect(() => {
     document.title = `${title} — JaiRA`;
   }, [title]);
@@ -783,10 +798,10 @@ export default function App(): JSX.Element {
     if (doc === null || doc.stateId === undefined) return undefined;
     // The LAYER decides where it runs: the shared root is JaiRA's own project, a project file is the
     // open checkout's. Same routing a base-layer description sync uses — see `runTargetOf`.
-    const target = runTargetOf(doc.layer, state.projectDir);
+    const target = runTargetOf(doc.layer, state.at);
     const dir =
       target.project === undefined
-        ? (state.projectDir ?? undefined)
+        ? (state.at ?? undefined)
         : state.projects.find((p) => p.kind === "shared")?.project;
     return {
       fields: runFields,
@@ -896,6 +911,20 @@ export default function App(): JSX.Element {
    * eight actions, a section list wired to one — and a navigation column that knew how to construct
    * either would be a navigation column that had to be handed the whole store. It takes rows.
    */
+  /**
+   * The projects, as the sidebar draws them.
+   *
+   * The counts are the same ones the address bar carries — one derivation, so a project row and the
+   * crumb over its board can never disagree about how much is waiting.
+   */
+  const sidebarProjects: SidebarProject[] = state.projects.map((p) => ({
+    project: p.project,
+    label: p.label,
+    kind: p.kind,
+    counts: projectCounts(p, ui.seen),
+    onSeen: () => actions.markProjectSeen(p.project),
+  }));
+
   const rows: SidebarView[] = VIEWS.map((v) =>
     v.id === "chat"
       ? {
@@ -913,7 +942,11 @@ export default function App(): JSX.Element {
           panel: (
             <FileTreePanel
               tree={state.tree}
-              selected={state.doc ? { layer: state.doc.layer, path: state.doc.path } : null}
+              selected={
+                state.doc
+                  ? { layer: state.doc.layer, path: state.doc.path, ...(state.doc.project !== undefined ? { project: state.doc.project } : {}) }
+                  : null
+              }
               // Which rows have edits that are not on disk. Now that a draft outlives the editor
               // showing it, this is the only thing that says so about a file you are not looking
               // at — and an unsaved change nobody can see is one that gets closed with the window.
@@ -924,7 +957,7 @@ export default function App(): JSX.Element {
               collapsed={foldedFolders}
               onToggleCollapsed={(key) => actions.toggleShut(SHUT.folders, key)}
               busy={state.busy}
-              hasProject={state.projectDir !== null}
+              hasProject={state.at !== null}
               onSelect={actions.selectFile}
               onOpen={actions.openWorkflow}
               onCreate={actions.createWorkflow}
@@ -947,7 +980,7 @@ export default function App(): JSX.Element {
     onOpen: (open: boolean) => actions.setFold(FOLD.shellSections, open),
     panel: (
       <ul className="sections">
-        {SECTIONS.filter((s) => !s.needsProject || state.projectDir !== null).map(({ id, label }) => (
+        {SECTIONS.filter((s) => !s.needsProject || state.at !== null).map(({ id, label }) => (
           <li key={id} className={state.section === id ? "sel" : undefined} onClick={() => actions.setSection(id)}>
             {label}
           </li>
@@ -966,13 +999,15 @@ export default function App(): JSX.Element {
     >
       <Sidebar
         views={rows}
+        footer={FOOTER_VIEWS}
         settings={settingsRow}
         view={view}
         onView={(id) => actions.setView(id as View)}
         collapsed={sidebarShut}
         onCollapsed={(shut) => actions.setFold(FOLD.shellSidebar, !shut)}
-        project={state.projectDir}
-        projectLabel={projectName(state.projectDir)}
+        projects={sidebarProjects}
+        at={state.at}
+        onProject={actions.standOn}
         busy={state.busy}
         theme={state.settings.theme}
         onTheme={actions.setTheme}
@@ -1060,7 +1095,7 @@ export default function App(): JSX.Element {
                   ) : null}
                   {/* Only the focused project can be created into: a task belongs to a checkout, and
                       JaiRA's own runs are started by JaiRA. */}
-                  {(state.taskFocus ?? atProject) === state.projectDir && state.projectDir !== null ? (
+                  {(state.taskFocus ?? atProject) === state.at && state.at !== null ? (
                     <NewTask onCreate={actions.createTask} busy={state.busy} />
                   ) : null}
                 </>
@@ -1390,7 +1425,7 @@ export default function App(): JSX.Element {
               liveTurn={state.liveTurn}
               stream={state.stream}
               availability={state.availability}
-              hasProject={state.projectDir !== null}
+              hasProject={state.at !== null}
               onRun={(options) => void actions.debugRun(options)}
               onCancel={() => void actions.debugCancel()}
               onInstall={(force) => void actions.debugInstall(force)}
@@ -1411,7 +1446,7 @@ export default function App(): JSX.Element {
                 <SettingsHeader
                   section={state.section}
                   layer={state.configLayer}
-                  hasProject={state.projectDir !== null}
+                  hasProject={state.at !== null}
                   busy={state.busy}
                   rechecking={state.rechecking}
                   checkedAt={state.availability.checkedAt}
@@ -1423,7 +1458,7 @@ export default function App(): JSX.Element {
                     config={state.config}
                     layer={state.configLayer}
                     busy={state.busy}
-                    editable={state.configLayer === "base" || state.projectDir !== null}
+                    editable={state.configLayer === "base" || state.at !== null}
                     onSave={actions.saveConfig}
                   >
                     <SettingsPane
@@ -1447,7 +1482,7 @@ export default function App(): JSX.Element {
                     secrets={state.secrets}
                     busy={state.busy}
                     layer={state.configLayer}
-                    editable={state.configLayer === "base" || state.projectDir !== null}
+                    editable={state.configLayer === "base" || state.at !== null}
                     onSaveRoute={actions.saveModels}
                     onSaveExecutor={actions.setExecutorConfig}
                     onAdd={actions.addExecutor}
@@ -1463,13 +1498,13 @@ export default function App(): JSX.Element {
                     availability={state.availability}
                     busy={state.busy}
                     layer={state.configLayer}
-                    editable={state.configLayer === "base" || state.projectDir !== null}
+                    editable={state.configLayer === "base" || state.at !== null}
                     onSaveModels={actions.saveModels}
                     onSaveExecutor={actions.setExecutorConfig}
                     onSaveDefinition={actions.saveDefinition}
                   />
                 ) : null}
-                {state.section === "history" && state.projectDir !== null ? (
+                {state.section === "history" && state.at !== null ? (
                   <History
                     size={state.history}
                     report={state.prune}

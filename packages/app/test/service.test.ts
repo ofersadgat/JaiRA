@@ -306,10 +306,10 @@ describe("AppService.cancelTask (not running here)", () => {
  * singletons on the service (the runs in flight, the hubs they park on, the sync in flight) belong
  * to a session instead.
  *
- * Opening a second user project still closes the first: the map can hold both and everything below
- * is written for that, but which one the project-free channels answer for is a UI decision made
- * separately. What these defend is that the bookkeeping is per-session, so making that change later
- * does not have to also fix a shared counter or a leaked handle.
+ * Opening a second user project now ADDS a session rather than evicting one (SHELL.md §2.3), and
+ * what these defend is the rule that replaced the focus: an unqualified call is answerable exactly
+ * while there is nothing to choose between, and reports rather than guessing the moment there is.
+ * The bookkeeping stays per-session, so no shared counter or leaked handle survives a second open.
  */
 describe("sessions — one process, several projects", () => {
   it("opens another project ALONGSIDE the first, and refuses to guess between them", async () => {
@@ -336,6 +336,25 @@ describe("sessions — one process, several projects", () => {
     } finally {
       // Closed before the directory goes, because Windows will not unlink an open database file —
       // which is also the reason `close()` drains its runs before closing the handle.
+      await service.close();
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it("puts both projects in the files tree, with the shared root listed once beside them", async () => {
+    const other = mkdtempSync(join(tmpdir(), "jaira-app-c-"));
+    initProject(other);
+    try {
+      await service.open(other);
+      const tree = service.filesTree();
+      // The projects ARE the top level (SHELL.md §2.2) — one root each, stamped with the project
+      // every call about a file in it will have to name.
+      const projects = tree.roots.filter((r) => r.layer === "project");
+      expect(projects.map((r) => r.project).sort()).toEqual([dir, other].sort());
+      // And `~/.jaira` exactly once, not once per project: repeating a machine-global directory
+      // invites somebody to wonder which copy they are editing.
+      expect(tree.roots.filter((r) => r.layer === "base")).toHaveLength(1);
+    } finally {
       await service.close();
       rmSync(other, { recursive: true, force: true });
     }

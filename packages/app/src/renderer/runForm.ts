@@ -249,11 +249,11 @@ export interface RunTarget {
   open: boolean;
 }
 
-/** Where a file in this layer runs. `projectDir` is null when no user project is open. */
-export function runTargetOf(layer: WorkflowLayer, projectDir: string | null): RunTarget {
+/** Where a file in this layer runs. `at` is null when no user project is open. */
+export function runTargetOf(layer: WorkflowLayer, at: string | null): RunTarget {
   if (layer === "base") return { project: SHARED_SESSION, label: "the shared root", open: true };
-  const name = projectDir === null ? null : (projectDir.split(/[/\\]/).filter(Boolean).pop() ?? projectDir);
-  return { label: name ?? "this project", open: projectDir !== null };
+  const name = at === null ? null : (at.split(/[/\\]/).filter(Boolean).pop() ?? at);
+  return { label: name ?? "this project", open: at !== null };
 }
 
 // --- whether it can run at all -----------------------------------------------

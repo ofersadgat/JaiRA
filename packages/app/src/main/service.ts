@@ -3961,6 +3961,9 @@ export class AppService {
     if (exists && statSync(file).isDirectory()) throw new Error(`'${request.path}' is a directory`);
     return {
       layer: request.layer,
+      // Echoed back, so the document the panel holds knows which project it is in — the tree's
+      // highlight and every write that follows read it from here (SHELL.md §2.2).
+      ...(request.project !== undefined ? { project: request.project } : {}),
       path: request.path,
       file,
       mime,

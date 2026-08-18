@@ -638,33 +638,11 @@ code {
 .side-title button {
   -webkit-app-region: no-drag;
 }
+/* The app's name, and now the only thing in this row. The project moved out of the title and into
+   the list below it: it is the head of the address, not part of the window's identity, and a window
+   holding several of them has no one project to name up here. */
 .side-brand {
-  font-size: calc(var(--size-app) * 10.5 / 12.5);
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  color: var(--dim);
   flex: none;
-}
-/* Which project this window is on. A control, because the only two things anyone
-   wants from it are "which one is this" and "open another". */
-.side-project {
-  flex: 0 1 auto;
-  min-width: 0;
-  background: transparent;
-  border: 0;
-  padding: 2px 6px;
-  border-radius: 5px;
-  color: var(--text);
-  font-family: var(--font-data);
-  font-size: calc(var(--size-data) * 11.5 / 12);
-}
-.side-project:hover:not(:disabled) {
-  background: var(--panel);
-  border-color: transparent;
-}
-.side-project.none {
-  color: var(--dim);
-  font-style: italic;
 }
 .side-toggle {
   width: 26px;
@@ -745,6 +723,48 @@ code {
 }
 .side-label {
   min-width: 0;
+  flex: 1;
+}
+/*
+ * One project's SECTION — its row, its views, and whatever those open onto.
+ *
+ * Full bleed on `--panel`, with a hairline top and bottom: no radius, no margin. The moment it gets
+ * a radius it is a card, and the last pass spent a redesign getting the settings pane to stop
+ * drawing boxes around itself. In dark, `--panel` sits only about six points of luminance above
+ * `--panel-2`, so it is the two borders that carry the band there — check dark first.
+ */
+.side-section.open {
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  margin: 4px -6px;
+  padding: 0 6px 4px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+/* The project's own row. The name is data, so nothing here touches its case or its family. */
+.side-project-row {
+  height: 28px;
+}
+/* Inside the band, two nesting rules — `--rule` under the project, `--line` under the view. `--rule`
+   is the token whose comment reserves it for "the only thing saying what is inside what", which is
+   exactly this: the views are inside the project. */
+.side-views {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  flex: 1;
+  margin-left: 6px;
+  padding-left: 8px;
+  border-left: 1px solid var(--rule);
+}
+/* The way to a project that is not open. Quieter than a project row, because it is a verb among
+   nouns. */
+.side-open {
+  height: 26px;
 }
 /* The caret, at the far end of the row: which of these rows has something under
    it, and whether it is showing. Only ever on the row you are on. */
@@ -785,11 +805,39 @@ code {
 }
 
 /* --- collapsed ---
-   Back to the rail it replaced: glyphs, centred, nothing that needs a width.
-   The nav stays, which is the point — this is a fold, not a disappearance. */
+   The rail, in TWO zones (SHELL.md §5.2): project tiles, a divider, then the open project's view
+   glyphs. It used to draw the views alone, which with the project as the head of the address left
+   the first crumb both invisible and unreachable — you could not see which project the glyphs were
+   about, and could not change it without reopening the column. */
 .sidebar.shut .side-title {
   justify-content: center;
   padding: 0 4px;
+}
+.side-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 6px;
+}
+.rail-projects,
+.rail-views {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  flex: none;
+}
+/* The divider between the two zones, and the whole reason the rail reads as two things rather than
+   one longer list of glyphs. */
+.rail-split {
+  width: 18px;
+  height: 1px;
+  flex: none;
+  margin: 6px 0;
+  background: var(--rule);
 }
 .sidebar.shut .side-nav,
 .sidebar.shut .side-foot {
@@ -802,8 +850,16 @@ code {
   justify-content: center;
   padding: 0;
 }
-.sidebar.shut .side-label {
+.sidebar.shut .side-label,
+.sidebar.shut .side-twist,
+.sidebar.shut .pills {
   display: none;
+}
+/* A tile carries an initial rather than a glyph — a directory name one character wide is still that
+   name, which is why it is set in the data voice. */
+.rail-tile .side-glyph {
+  font-size: calc(var(--size-data) * 1.12);
+  text-transform: lowercase;
 }
 
 /* --- the approvals strip ---

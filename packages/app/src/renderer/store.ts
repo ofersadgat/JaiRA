@@ -125,7 +125,22 @@ export function subscribe(listener: (message: PushMessage) => void): () => void 
 export type InspectSubject = "path" | "task";
 
 export interface AppState {
-  projectDir: string | null;
+  /**
+   * The project the shell is STANDING ON — the first crumb of the address (SHELL.md §2.2).
+   *
+   * Not "the open project": several are open at once, and this one is derived from where you have
+   * navigated rather than from what has been loaded. It moves when you narrow the Tasks board, open
+   * a file, or select a task; it moves nothing else when it moves, and opening a project no longer
+   * closes the one you were on.
+   *
+   * It is what every project-scoped call names, which is the whole reason it exists as one field: a
+   * window that could not say which project it was standing in had to let main guess, and a guess
+   * reads the wrong database.
+   *
+   * Null is the ROOT — "all projects", a real place and not "nothing chosen". Settings edits `base`
+   * there, the Tasks board lists every group, and the composer asks which project once.
+   */
+  at: string | null;
   tasks: TaskSummary[];
   /**
    * The SELECTED root's own tasks — runs of the workflows that live in it.
@@ -591,7 +606,7 @@ export type View = "files" | "tasks" | "chat" | "logs" | "debug" | "settings";
 export type SettingsSection = "providers" | "executors" | "config" | "history";
 
 const EMPTY: AppState = {
-  projectDir: null,
+  at: null,
   tasks: [],
   sharedTasks: [],
   board: null,
@@ -700,7 +715,7 @@ export function useApp() {
    * The ref used to be assigned during render and nowhere else, so `ref.current` meant "the state as
    * of the last paint" — while every reader of it in this file is a callback asking "what is true
    * now". Between a `patch` and the render it schedules those are different answers, and the gap is
-   * not theoretical: a caller that set `projectDir` and then refreshed in the same tick read the
+   * not theoretical: a caller that set `at` and then refreshed in the same tick read the
    * value from before it set it, decided no project was open, and wrote an empty list that nothing
    * retried because nothing had failed.
    *
@@ -802,8 +817,8 @@ export function useApp() {
    * The focused project's tasks.
    *
    * ASKED FOR unconditionally, and a refusal read as "none". The guard this replaces tested
-   * `ref.current.projectDir`, and `ref.current` is assigned during RENDER — so every caller that
-   * patched `projectDir` and then refreshed in the same tick (opening a project does exactly that)
+   * `ref.current.at`, and `ref.current` is assigned during RENDER — so every caller that
+   * patched `at` and then refreshed in the same tick (opening a project does exactly that)
    * read the value from before the patch, concluded there was no project, and wrote `tasks: []`.
    * Nothing retried it, because nothing had failed. It went unseen for as long as it did because
    * `state.tasks` had no reader until the Files inspector grew a run history — every other surface
@@ -818,7 +833,7 @@ export function useApp() {
     // only at render, so "is a project open" is answered with the current value instead of the last
     // painted one. Without the guard main logs `no project is open` for every refresh in a window
     // that simply has no project — a real error, raised by design, about a question nobody asked.
-    if (ref.current.projectDir === null) return patch({ tasks: [] });
+    if (ref.current.at === null) return patch({ tasks: [] });
     try {
       patch({ tasks: await invoke("task:list", undefined) });
     } catch {
@@ -873,6 +888,25 @@ export function useApp() {
    * open, and the panel already renders its own empty state for that. An error toast on switching
    * views would be noise reporting a condition the user can see.
    */
+  /**
+   * The project half of a layer-scoped address.
+   *
+   * A `base` address has one root and it is the shared one, so it names no project. A `project`
+   * address is in whichever project the shell is standing on — `project` is a LAYER, not a project,
+   * and with several open the pair is what identifies a file (SHELL.md §2.2).
+   *
+   * Empty at the root, where there is no project layer to be in. Main then answers only if there is
+   * nothing to choose between, and reports rather than guessing if there is.
+   */
+  const inLayer = useCallback(
+    (layer: WorkflowLayer, project?: string): { project?: string } => {
+      if (layer === "base") return {};
+      const at = project ?? ref.current.at;
+      return at === null || at === undefined ? {} : { project: at };
+    },
+    [],
+  );
+
   const refreshTree = useCallback(async () => {
     try {
       patch({ tree: await invoke("files:tree", undefined) });
@@ -894,7 +928,7 @@ export function useApp() {
         return null;
       }
       try {
-        const view = await invoke("state:view", { stateId });
+        const view = await invoke("state:view", { stateId, ...(ref.current.at !== null ? { project: ref.current.at } : {}) });
         patch({ state: view });
         return view;
       } catch {
@@ -917,10 +951,12 @@ export function useApp() {
    * apart.
    */
   const refreshDoc = useCallback(
-    async (layer: WorkflowLayer | null, path: string | null) => {
+    async (layer: WorkflowLayer | null, path: string | null, project?: string) => {
       if (layer === null || path === null) return patch({ doc: null });
       try {
-        const doc = await invoke("file:read", { layer, path });
+        // The NODE's project where the caller had one — a file identifies itself (`FileNode.project`)
+        // — and the shell's otherwise, which is where a state id resolved from an address lands.
+        const doc = await invoke("file:read", { layer, path, ...inLayer(layer, project) });
         // A draft the file has caught up with is no longer an edit — see `settled`. Dropped here,
         // where the document is re-read, rather than at the save site: the same thing is true of a
         // file changed under us, and there is one place that learns about both.
@@ -929,7 +965,7 @@ export function useApp() {
         patch({ doc: null });
       }
     },
-    [patch],
+    [patch, inLayer],
   );
 
   /**
@@ -949,7 +985,7 @@ export function useApp() {
         at = layer;
       } else {
         try {
-          at = (await invoke("state:view", { stateId })).layer;
+          at = (await invoke("state:view", { stateId, ...(ref.current.at !== null ? { project: ref.current.at } : {}) })).layer;
         } catch {
           return null;
         }
@@ -1183,7 +1219,7 @@ export function useApp() {
     async (stateId: string | null) => {
       if (stateId === null || stateId === ref.current.stateId) return patch({ trailState: null });
       try {
-        patch({ trailState: await invoke("state:view", { stateId }) });
+        patch({ trailState: await invoke("state:view", { stateId, ...(ref.current.at !== null ? { project: ref.current.at } : {}) }) });
       } catch {
         // A state that will not load leaves the board to the instance tree, which is the honest
         // fallback: the columns that ran, without the ones that did not.
@@ -1249,8 +1285,8 @@ export function useApp() {
    */
   const owningProject = useCallback((): string | undefined => {
     const layer = ref.current.doc?.layer ?? ref.current.state?.layer;
-    const focused = ref.current.projectDir ?? undefined;
-    return layer === undefined ? focused : (runTargetOf(layer, ref.current.projectDir).project ?? focused);
+    const focused = ref.current.at ?? undefined;
+    return layer === undefined ? focused : (runTargetOf(layer, ref.current.at).project ?? focused);
   }, []);
 
   const refreshDetail = useCallback(
@@ -1306,7 +1342,7 @@ export function useApp() {
       }
       // The project the STATE's runs live in, not the focused one — see `owningProject`. `view` is
       // authoritative about the layer here, and it is the value the reads below have to agree with.
-      const at = runTargetOf(view.layer, ref.current.projectDir).project ?? ref.current.projectDir ?? undefined;
+      const at = runTargetOf(view.layer, ref.current.at).project ?? ref.current.at ?? undefined;
       patch({ selected: newest.taskId, selectedProject: at ?? null, stream: [], sessions: {}, trail: [], trailState: null });
       void refreshConversation(newest.taskId, at);
       void refreshSession(newest.taskId, null, at, view.stateId);
@@ -1417,9 +1453,9 @@ export function useApp() {
   const refreshHistory = useCallback(async () => {
     // Same rule as {@link refreshTasks}: run history belongs to a project, so with none open there is
     // nothing to size.
-    if (ref.current.projectDir === null) return patch({ history: { runs: 0, events: 0, commands: 0 } });
+    if (ref.current.at === null) return patch({ history: { runs: 0, events: 0, commands: 0 } });
     try {
-      patch({ history: await invoke("history:size", undefined) });
+      patch({ history: await invoke("history:size", { ...(ref.current.at !== null ? { project: ref.current.at } : {}) }) });
     } catch (e) {
       fail(e);
     }
@@ -1452,7 +1488,7 @@ export function useApp() {
   const refreshConfig = useCallback(async () => {
     try {
       const [config, executors, secrets] = await Promise.all([
-        invoke("config:read", undefined),
+        invoke("config:read", { ...inLayer("project") }),
         invoke("executor:list", undefined),
         invoke("secret:capabilities", undefined),
       ]);
@@ -1518,7 +1554,7 @@ export function useApp() {
     // `project`, every control rendered disabled with no visible reason, which is what a screen that
     // says one thing and does another looks like.
     patch({
-      projectDir: current?.dir ?? null,
+      at: current?.dir ?? null,
       ...(current ? {} : { configLayer: "base" as ConfigLayer }),
     });
     // Before the early return: preferences are the person's, and the shared root is the machine's.
@@ -1589,7 +1625,7 @@ export function useApp() {
       // same run is exactly what the person who pressed the button is waiting to see, and dropping
       // those made a running sync indistinguishable from a button that did nothing.
       const about = (message as { project?: string }).project;
-      if (message.type === "store:invalidate" && about !== undefined && about !== ref.current.projectDir) {
+      if (message.type === "store:invalidate" && about !== undefined && about !== ref.current.at) {
         // …except JaiRA's own lists, which are nobody's project and so are nobody's to ignore. The
         // Tasks view draws a board for EVERY project, including this one, so a card of its that has
         // moved has moved on screen.
@@ -1993,7 +2029,36 @@ export function useApp() {
        * See {@link AppState.taskFocus}. Nothing is fetched — every group's board is already loaded,
        * because the listing draws them all.
        */
-      focusProject: (project: string | null) => patch({ taskFocus: project }),
+      focusProject: (project: string | null) => patch({ taskFocus: project, at: project }),
+
+      /**
+       * Put the address on a project — what clicking a project row in the sidebar does.
+       *
+       * Null is the ROOT, which is a real place and not "nothing chosen": the Tasks board lists
+       * every group there, Settings edits `base`, and no project is expanded because there is no
+       * project for the views to be views OF.
+       *
+       * It moves the Tasks narrowing with it, because the two are one address (SHELL.md §2.2) and a
+       * board still filtered to the project you have just left is a column describing somewhere
+       * else. Nothing is CLOSED by this: standing somewhere else is not closing where you were, and
+       * that is the whole difference between an address and a mode.
+       */
+      standOn: (project: string | null) => {
+        if (project === ref.current.at) return;
+        patch({
+          at: project,
+          taskFocus: project,
+          // With no project there is no project LAYER either, and the settings screens must not
+          // merely hide the switch — they have to be editing the layer they say they are.
+          ...(project === null ? { configLayer: "base" as ConfigLayer } : {}),
+          trail: [],
+          trailState: null,
+        });
+        void refreshTree();
+        void refreshConfig();
+        void refreshTasks();
+        void refreshHistory();
+      },
 
       /**
        * Drill into one project's board. `null` returns that group to its workflow roots.
@@ -2123,7 +2188,7 @@ export function useApp() {
        * {@link setView} does.
        */
       drillTo: (level: string | null) => {
-        if (ref.current.projectDir === null) return;
+        if (ref.current.at === null) return;
         void refreshBoard(level);
       },
       dismissError: () => patch({ error: null }),
@@ -2290,7 +2355,7 @@ export function useApp() {
         const text = message.trim();
         if (text === "") return null;
         patch({ chat: { ...ref.current.chat, busy: true, opening: text, error: null } });
-        const project = ref.current.projectDir === null ? SHARED_SESSION : undefined;
+        const project = ref.current.at === null ? SHARED_SESSION : undefined;
         try {
           // Missing files only — never overwriting. These are ordinary editable files under the
           // shared root, and a conversation must not silently discard somebody's changes to what a
@@ -2566,7 +2631,7 @@ export function useApp() {
       // switch without a project, and an action that could still be reached another way should agree
       // with it rather than leaving the panes claiming to edit a document that does not exist.
       setConfigLayer: (configLayer: ConfigLayer) => {
-        if (configLayer === "project" && ref.current.projectDir === null) return;
+        if (configLayer === "project" && ref.current.at === null) return;
         patch({ configLayer });
       },
 
@@ -2581,7 +2646,7 @@ export function useApp() {
       selectFile: (node: FileNode) => {
         patch({ stateId: node.stateId ?? null, inspect: "path", doc: null, dir: null, sync: clearedSync(ref.current.sync) });
         void refreshState(node.stateId ?? null).then((view) => focusStateRun(view));
-        if (isTextMime(node.mime)) return void refreshDoc(node.layer, node.path);
+        if (isTextMime(node.mime)) return void refreshDoc(node.layer, node.path, node.project);
         // A PNG or the database: `file:read` would refuse it, and a refusal here would leave the
         // panel empty with nothing to explain it. Open it as a document with no contents instead —
         // the panel then says which type it cannot edit, which is the answer to why it is blank.
@@ -2689,7 +2754,7 @@ export function useApp() {
        */
       syncStatus: async (layer: WorkflowLayer, path: string) => {
         try {
-          patch({ sync: { ...ref.current.sync, status: await invoke("workflow:syncStatus", { layer, path }) } });
+          patch({ sync: { ...ref.current.sync, status: await invoke("workflow:syncStatus", { layer, path, ...inLayer(layer) }) } });
         } catch {
           patch({ sync: { ...ref.current.sync, status: null } });
         }
@@ -2764,7 +2829,7 @@ export function useApp() {
       saveConfig: async (layer: "base" | "project", config: unknown) => {
         patch({ busy: true, error: null });
         try {
-          const next = await invoke("config:write", { layer, config: config as never });
+          const next = await invoke("config:write", { layer, config: config as never, ...inLayer(layer === "base" ? "base" : "project") });
           patch({ config: next, busy: false });
           await refreshConfig();
           // `config.json` is the one editor that does not save through `saveDoc` — it writes a
@@ -2958,7 +3023,7 @@ export function useApp() {
       createWorkflow: async (stateId: string, layer: WorkflowLayer) => {
         patch({ busy: true, error: null, view: "files" });
         try {
-          await invoke("workflow:write", { stateId, layer, text: "{}" });
+          await invoke("workflow:write", { stateId, layer, text: "{}", ...inLayer(layer) });
           patch({ busy: false, stateId, inspect: "path" });
           await Promise.all([
             refreshTree(),
@@ -2974,7 +3039,7 @@ export function useApp() {
       createFile: async (layer: WorkflowLayer, path: string, kind: "file" | "directory", text?: string) => {
         patch({ busy: true, error: null });
         try {
-          await invoke("file:create", { layer, path, kind, ...(text !== undefined ? { text } : {}) });
+          await invoke("file:create", { layer, path, kind, ...(text !== undefined ? { text } : {}), ...inLayer(layer) });
           patch({ busy: false });
           await refreshTree();
         } catch (e) {
@@ -3002,7 +3067,7 @@ export function useApp() {
           // rename leaves nothing at the old path, and a draft stranded there would reappear under
           // whatever is created with that name next.
           const from = request.copy === true ? null : await locateState(request.stateId, request.layer);
-          const result = await invoke("workflow:move", request);
+          const result = await invoke("workflow:move", { ...request, ...inLayer(request.layer) });
           patch({ busy: false });
           if (result.applied) {
             // Follow the file: after a rename the old id names nothing, and leaving the tree
@@ -3038,7 +3103,7 @@ export function useApp() {
         patch({ busy: true, error: null });
         try {
           const at = await locateState(stateId, layer);
-          const result = await invoke("workflow:delete", { stateId, layer, ...(force === true ? { force } : {}) });
+          const result = await invoke("workflow:delete", { stateId, layer, ...(force === true ? { force } : {}), ...inLayer(layer) });
           patch({ busy: false });
           if (result.applied) {
             const wasOpen = ref.current.stateId === stateId;
@@ -3071,7 +3136,7 @@ export function useApp() {
       ): Promise<FileMutationResult | null> => {
         patch({ busy: true, error: null });
         try {
-          const result = await invoke("file:rename", { layer, path, to, ...(force === true ? { force } : {}) });
+          const result = await invoke("file:rename", { layer, path, to, ...(force === true ? { force } : {}), ...inLayer(layer) });
           patch({ busy: false });
           if (result.applied) await afterFileChange(result, { layer, path, to });
           return result;
@@ -3085,7 +3150,7 @@ export function useApp() {
       deleteFile: async (layer: WorkflowLayer, path: string, force?: boolean): Promise<FileMutationResult | null> => {
         patch({ busy: true, error: null });
         try {
-          const result = await invoke("file:delete", { layer, path, ...(force === true ? { force } : {}) });
+          const result = await invoke("file:delete", { layer, path, ...(force === true ? { force } : {}), ...inLayer(layer) });
           patch({ busy: false });
           if (result.applied) await afterFileChange(result, { layer, path });
           return result;
@@ -3120,7 +3185,7 @@ export function useApp() {
       stateSlots: async (stateIds: string[]) => {
         if (stateIds.length === 0) return {};
         try {
-          return await invoke("state:slots", { stateIds });
+          return await invoke("state:slots", { stateIds, ...inLayer("project") });
         } catch {
           return null;
         }
@@ -3319,7 +3384,7 @@ export function useApp() {
       runState: async (stateId: string, title: string, inputs: Record<string, JsonValue>, project?: string) => {
         patch({ busy: true, error: null, stream: [] });
         try {
-          const at = project ?? ref.current.projectDir ?? undefined;
+          const at = project ?? ref.current.at ?? undefined;
           const summary = await invoke("task:create", {
             title,
             workflow: stateId,
@@ -3382,9 +3447,9 @@ export function useApp() {
         patch({ busy: true, error: null });
         try {
           if (doc.stateId !== undefined && doc.mime === WORKFLOW_JSON) {
-            await invoke("workflow:write", { stateId: doc.stateId, layer: doc.layer, text });
+            await invoke("workflow:write", { stateId: doc.stateId, layer: doc.layer, text, ...inLayer(doc.layer, doc.project) });
           } else {
-            await invoke("file:write", { layer: doc.layer, path: doc.path, text });
+            await invoke("file:write", { layer: doc.layer, path: doc.path, text, ...inLayer(doc.layer, doc.project) });
           }
           patch({ busy: false });
           await Promise.all([

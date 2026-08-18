@@ -331,6 +331,15 @@ export interface FileNode {
    */
   mime: string;
   layer: WorkflowLayer;
+  /**
+   * WHICH project this file is in, for a `project`-layer node. Absent on the shared root.
+   *
+   * Stamped on every node rather than looked up from the root it came under, so a file identifies
+   * itself: with several projects in one tree (see {@link FileTree}), `{layer, path}` names two
+   * different files and everything holding one — a selection, a draft, a write — would have had to
+   * carry the root it was found beneath.
+   */
+  project?: string;
   /** The state this file defines, when `kind` is `workflow`. */
   stateId?: string;
   /** Set on a BASE file that a project file of the same state id shadows (see {@link WorkflowFileEntry}). */
