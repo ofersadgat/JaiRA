@@ -212,6 +212,7 @@ export function RunSection({
 
       <div className="pane-actions run-actions">
         <button
+          className="primary"
           disabled={blocked !== null}
           title={blocked ?? `starts ${runTitle(state?.stateId ?? "", startedHere)}`}
           onClick={() => onRun(runTitle(state?.stateId ?? "", startedHere), read.inputs)}

@@ -194,7 +194,7 @@ function ChangesetReview({ ctx }: { ctx: MountContext }): JSX.Element {
         />
       ))}
       <div className="options">
-        <button disabled={undecided.length > 0} onClick={submit} data-testid="submit-review">
+        <button className="primary" disabled={undecided.length > 0} onClick={submit} data-testid="submit-review">
           {undecided.length > 0
             ? `${undecided.length} change${undecided.length === 1 ? "" : "s"} still undecided`
             : "Submit review"}

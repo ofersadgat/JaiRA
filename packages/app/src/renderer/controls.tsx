@@ -4,10 +4,13 @@
  * Modelled on findmyprompt's `searchConfig/controls.tsx`, and deliberately so: that surface had
  * already answered the questions this one was getting wrong. Four of its ideas carry the weight —
  *
- *  - **A field is a label, the KEY it writes, a hint, and a control — stacked tight.** The key
- *    matters: a settings screen that hides which config field it is setting leaves you unable to
- *    connect it to the file, the docs, or an error message that names it. So `param` is always shown.
- *  - **Fields flow into a responsive GRID.** One control per line turns eight settings into a wall.
+ *  - **A field is a label, the KEY it writes, a hint, and a control.** The key matters: a settings
+ *    screen that hides which config field it is setting leaves you unable to connect it to the file,
+ *    the docs, or an error message that names it. So `param` is always shown — at the end of the
+ *    hint now rather than beside the label, where it was a third thing competing for the same line.
+ *  - **A field is a ROW, not a tower: the statement on the left, the control on the right.** These
+ *    were stacked cells tiled into an `auto-fit` grid, which is where the wall came from — no two
+ *    controls shared an edge, so eight settings read as eight separate little forms.
  *  - **Empty means UNSET, never zero.** A numeric box left blank inherits; it does not write `0`.
  *    `NumInput` holds a draft string while typing so `0.` survives long enough to become `0.5`.
  *  - **Rare settings live behind a `Disclosure`.** The common path stays short.
@@ -21,10 +24,12 @@ import { useState, type JSX, type ReactNode } from "react";
 /**
  * One setting: what it is called, what it writes, what it means, and the control.
  *
- * `param` is the config path this writes (`models.default`, `routes.local.baseURL`), rendered as a
- * small monospace tag beside the label. It is not decoration — it is the only thing connecting a
- * pretty label to the `config.json` a user may also be editing by hand, and to the error message
- * the parser produces when the value is wrong.
+ * `param` is the config path this writes (`models.default`, `routes.local.baseURL`), rendered in
+ * monospace at the end of the hint. It is not decoration — it is the only thing connecting a pretty
+ * label to the `config.json` a user may also be editing by hand, and to the error message the parser
+ * produces when the value is wrong. It sits under the label rather than beside it because a label,
+ * a key and a "set here" mark on one line is three claims on the reader before the sentence that
+ * says what the setting DOES.
  *
  * `set` marks a value THIS layer states, as opposed to one it inherits. Without it a form cannot
  * distinguish "the shared root says sonnet" from "this project pins sonnet", which are different
@@ -45,26 +50,39 @@ export function Field({
 }): JSX.Element {
   return (
     <div className="cfg-field">
-      <span className="cfg-field-head">
-        <span className="cfg-label">{label}</span>
-        {param ? <code className="cfg-param">{param}</code> : null}
-        {set ? <span className="cfg-set" title="set in the layer you are editing">set here</span> : null}
-      </span>
-      {hint ? <span className="cfg-hint">{hint}</span> : null}
+      <div className="cfg-field-say">
+        <span className="cfg-field-head">
+          <span className="cfg-label">{label}</span>
+          {set ? <span className="cfg-set" title="set in the layer you are editing">set here</span> : null}
+        </span>
+        {hint !== undefined || param !== undefined ? (
+          <span className="cfg-hint">
+            {hint}
+            {param ? <code className="cfg-param">{param}</code> : null}
+          </span>
+        ) : null}
+      </div>
       <div className="cfg-control">{children}</div>
     </div>
   );
 }
 
 /**
- * A responsive multi-column grid of {@link Field}s.
+ * A vertical list of {@link Field}s, each of which is a statement with its control at the end.
  *
- * `auto-fit` rather than a fixed column count: the settings drawer is resizable, and a form that
- * committed to two columns would either overflow when narrowed or waste half a wide window.
+ * It was an `auto-fit` grid of stacked label-over-control cells, and the wall it produced is the
+ * reason this changed. Tiling towers of unequal height means no two controls share an edge: eight
+ * settings became eight little forms, and the eye had nowhere to run down. One column, with every
+ * control landing on the same right-hand rail, is what makes a long settings page scannable — you
+ * read the left edge for what a setting is and the right edge for what it is currently set to.
+ *
+ * `min` is kept, and is now the width at which a row gives up and stacks. It is enforced by a
+ * container query rather than by the viewport, because these forms live in a drawer whose width has
+ * nothing to do with the window's.
  */
 export function FieldGrid({ children, min = 210 }: { children: ReactNode; min?: number }): JSX.Element {
   return (
-    <div className="cfg-grid" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${min}px, 1fr))` }}>
+    <div className="cfg-fields" data-narrow={min <= 180 ? "true" : undefined}>
       {children}
     </div>
   );
@@ -285,11 +303,53 @@ const STATE_WORDS: Record<ProviderState, string> = {
   unchecked: "not checked",
 };
 
-export function StatusPill({ state }: { state: ProviderState }): JSX.Element {
+/**
+ * The state as a DOT, with the word left to the sentence beside it.
+ *
+ * It was a pill — the word, a dot, and a tinted background — sitting next to a row that also carried
+ * a coloured edge and a coloured report box underneath. Four encodings of one fact. A dot cannot say
+ * *which* state, so it does not try: it marks the row for someone scanning a column of them, and the
+ * line under the name says it in words for anyone who has stopped on this one.
+ */
+export function StatusDot({ state }: { state: ProviderState }): JSX.Element {
+  return <span className={`cfg-dot ${state}`} title={STATE_WORDS[state]} aria-hidden="true" />;
+}
+
+/** The state in words, for the sentence that opens a row's status line. */
+export function stateWord(state: ProviderState): string {
+  return STATE_WORDS[state];
+}
+
+/**
+ * On or off, as a switch rather than a button whose label is the OPPOSITE of what it shows.
+ *
+ * "Turn off" on an enabled provider states the action; the control beside it stated the state; and a
+ * reader scanning a column had to invert every label to find out which providers were live. A switch
+ * shows the state and changes it in the same gesture.
+ */
+export function Switch({
+  on,
+  label,
+  disabled,
+  onChange,
+}: {
+  on: boolean;
+  label: string;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+}): JSX.Element {
   return (
-    <span className={`cfg-status ${state}`}>
-      <span className="cfg-dot" aria-hidden="true" />
-      {STATE_WORDS[state]}
-    </span>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      title={label}
+      className={`cfg-switch${on ? " on" : ""}`}
+      disabled={disabled}
+      onClick={() => onChange(!on)}
+    >
+      <span className="cfg-switch-knob" aria-hidden="true" />
+    </button>
   );
 }

@@ -105,7 +105,7 @@ function EditMarkdown({ config, inputs, onSubmit }: ComponentProps<EditMarkdownC
         <textarea rows={14} value={content} onChange={(e) => setContent(e.target.value)} spellCheck={false} />
       </label>
       <div className="options">
-        <button onClick={() => onSubmit({ content })}>Save</button>
+        <button className="primary" onClick={() => onSubmit({ content })}>Save</button>
       </div>
     </>
   );
@@ -517,7 +517,7 @@ export function QuestionDialog({
         ))}
         <div className="options">
           {!immediate || Object.values(other).some((t) => t.trim().length > 0) ? (
-            <button disabled={!complete} onClick={submit}>
+            <button className="primary" disabled={!complete} onClick={submit}>
               Answer
             </button>
           ) : null}

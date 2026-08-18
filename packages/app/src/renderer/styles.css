@@ -32,6 +32,20 @@
   --tok-string: #0f7a45;
   --tok-number: #8a4a00;
   --tok-hint: #949cad;
+  /* Controls. A hover surface one step past --panel-2, an accent dark enough to carry white text
+     (--accent itself is tuned for TEXT on a panel and fails as a fill), and the highlight that makes
+     a filled control read as an object lit from above.
+     --sheen is spent ONLY on filled controls. Put on the bare `button` rule it would have reached
+     the twenty-five rules below that refine a button into a crumb, a menu row or a fold — each of
+     which clears its background but none of which would think to clear a shadow — and painted a
+     hairline across the top of every one of them. */
+  --panel-3: #e2e7ef;
+  --fill-accent: #2563c7;
+  --fill-accent-hover: #1c56b4;
+  --on-accent: #ffffff;
+  --fill-ghost-hover: rgba(24, 30, 42, 0.06);
+  --fill-ghost-selected: rgba(24, 30, 42, 0.1);
+  --sheen: inset 0 1px 0 rgba(255, 255, 255, 0.2);
   color-scheme: light;
 }
 
@@ -53,7 +67,43 @@
   --tok-number: #e0b070;
   /* Dimmer than --dim: a hint sits ON a line of code and must lose to it at a glance. */
   --tok-hint: #5a6274;
+  --panel-3: #232833;
+  --fill-accent: #3f76d4;
+  --fill-accent-hover: #4b81dd;
+  --on-accent: #ffffff;
+  --fill-ghost-hover: rgba(255, 255, 255, 0.055);
+  --fill-ghost-selected: rgba(255, 255, 255, 0.1);
+  --sheen: inset 0 1px 0 rgba(255, 255, 255, 0.18);
   color-scheme: dark;
+}
+
+/*
+ * Geometry and semantic tints, stated ONCE and read by both themes.
+ *
+ * These are not in the palettes above because they are not colours: a radius is the same number in
+ * light and dark, and a tint is a percentage of a variable that already flipped. Four radii and
+ * three paddings used to be spelled out at forty call sites, which is how a card came to be 4px, a
+ * button 6px and a settings row 8px in the same window.
+ *
+ * The tints are what the coloured LEFT BORDERS became. That idiom said status on a task card,
+ * severity on a notice, availability on a settings row, allow/deny on a policy rule and verdict in
+ * the inspector — five meanings on one channel, which is none. A wash over the whole surface says
+ * the same thing without claiming an edge, and leaves the edge free for the two jobs where a rule
+ * genuinely encodes structure: run status down a column of cards, and nesting in the settings.
+ */
+:root {
+  --control-radius: 7px;
+  --control-radius-sm: 6px;
+  --control-pad: 3px 10px;
+  --control-pad-sm: 2px 8px;
+  --card-radius: 10px;
+  --tint-accent: color-mix(in srgb, var(--accent) 10%, transparent);
+  --tint-ok: color-mix(in srgb, var(--ok) 10%, transparent);
+  --tint-warn: color-mix(in srgb, var(--warn) 12%, transparent);
+  --tint-bad: color-mix(in srgb, var(--bad) 10%, transparent);
+  /* Focus is an OUTLINE rather than a box-shadow so it composes with the sheen instead of replacing
+     it, and so one declaration covers controls that each carry a different shadow. */
+  --focus-ring: color-mix(in srgb, var(--accent) 70%, transparent);
 }
 
 * {
@@ -67,29 +117,90 @@ body {
   font: 13px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
 }
 
+/*
+ * Five variants, and AT MOST ONE `primary` on a surface.
+ *
+ * What was here before had exactly one weight: every button was the same panel fill and the same
+ * hairline, so "Run state" and "Cancel" were typographically identical and a toolbar had no
+ * subject. `primary` is the fix, and it is rationed — the moment a second one appears on a screen
+ * neither is the answer to "what am I meant to press".
+ *
+ * Sized by PADDING, not by height. A fixed `height` here would be inherited by the forty rules
+ * below that refine a button into a crumb, a menu row or a tab, none of which reset it, and each of
+ * which would have grown to full control height. Padding is the one geometry a later rule can
+ * override by naming just itself.
+ */
 button {
   font: inherit;
   color: var(--text);
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 5px 10px;
+  border-radius: var(--control-radius);
+  padding: var(--control-pad);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   cursor: pointer;
   white-space: nowrap;
 }
+/* Hover moves the SURFACE. Recolouring the border was the same gesture as focus, which is why
+   hovering anything used to read as "this is now selected" — and on dark, a one-pixel edge going
+   from #262b36 to blue is most of a frame's worth of change that nobody sees. */
 button:hover:not(:disabled) {
-  border-color: var(--accent);
+  background: var(--panel-3);
+  border-color: var(--rule);
 }
 button:disabled {
   opacity: 0.5;
   cursor: default;
+  box-shadow: none;
 }
+
+/* The one affirmative action. --fill-accent rather than --accent: the palette's accent is tuned to
+   be TEXT on a panel, and white on it fails contrast in light mode. */
+button.primary {
+  background: var(--fill-accent);
+  border-color: var(--fill-accent);
+  color: var(--on-accent);
+  font-weight: 600;
+  box-shadow: var(--sheen);
+}
+button.primary:hover:not(:disabled) {
+  background: var(--fill-accent-hover);
+  border-color: var(--fill-accent-hover);
+}
+/* Bounded but unfilled — the app's most common button by a wide margin, and the right default for a
+   row of peers where none of them is the answer. */
 button.ghost {
   background: transparent;
+  box-shadow: none;
+}
+button.ghost:hover:not(:disabled) {
+  background: var(--fill-ghost-hover);
+}
+/* No edge at all: a control that lives INSIDE something else and must not draw a box around itself
+   — a row action, a close, a caret. */
+button.quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--dim);
+  box-shadow: none;
+}
+button.quiet:hover:not(:disabled) {
+  background: var(--fill-ghost-hover);
+  border-color: transparent;
+  color: var(--text);
 }
 button.danger {
-  border-color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
+  background: transparent;
   color: var(--bad);
+  box-shadow: none;
+}
+button.danger:hover:not(:disabled) {
+  background: var(--tint-bad);
+  border-color: color-mix(in srgb, var(--bad) 60%, var(--line));
 }
 button.link {
   background: none;
@@ -98,9 +209,16 @@ button.link {
   color: var(--accent);
   font-family: ui-monospace, Consolas, monospace;
   font-size: 11px;
+  box-shadow: none;
 }
+button.link:hover:not(:disabled) {
+  background: none;
+  text-decoration: underline;
+}
+/* An outline rather than a box-shadow ring: it follows the radius, it composes with the sheen a
+   filled control already spends its box-shadow on, and one declaration covers every variant. */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -111,10 +229,15 @@ select {
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 5px 8px;
+  border-radius: var(--control-radius);
+  padding: 5px 9px;
   width: 100%;
   resize: vertical;
+}
+input:hover:not(:disabled),
+textarea:hover:not(:disabled),
+select:hover:not(:disabled) {
+  border-color: var(--rule);
 }
 textarea {
   font-family: ui-monospace, Consolas, monospace;
@@ -417,7 +540,7 @@ code {
 }
 .side-toggle:hover:not(:disabled) {
   color: var(--text);
-  background: var(--panel);
+  background: var(--fill-ghost-hover);
   border-color: transparent;
 }
 
@@ -450,21 +573,27 @@ code {
   flex: none;
   padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--control-radius-sm);
   background: transparent;
   color: var(--dim);
   text-align: left;
   font-size: 12.5px;
+  box-shadow: none;
 }
 .side-row:hover:not(:disabled) {
   color: var(--text);
-  background: var(--panel);
+  background: var(--fill-ghost-hover);
   border-color: transparent;
 }
+/* Where you ARE, said by the fill and the weight.
+   Hover and selected both painted `--panel` and were told apart by a two-pixel inset rule, so
+   running the pointer down the column lit every row up exactly as brightly as the one you were on.
+   The fill is now two different strengths, and the weight settles it outright — which also means the
+   current view survives being read by someone who cannot pick the stripe out of a dark edge. */
 .side-row.on {
-  color: var(--accent);
-  background: var(--panel);
-  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--text);
+  background: var(--fill-ghost-selected);
+  font-weight: 600;
 }
 .side-glyph {
   width: 16px;
@@ -601,11 +730,11 @@ code {
   cursor: pointer;
 }
 .tree-item:hover {
-  background: var(--panel-2);
+  background: var(--fill-ghost-hover);
 }
 .tree-item.sel {
-  background: var(--panel-2);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--fill-ghost-selected);
+  font-weight: 600;
 }
 .tree-item.inert {
   cursor: default;
@@ -1326,9 +1455,15 @@ code {
   white-space: nowrap;
   overflow: hidden;
 }
+/* The one Enter will take. Filled outright rather than washed, because a completion menu is driven
+   from the keyboard: the active item is not "the one you are looking at", it is the answer. */
 .completions li.on {
-  background: var(--panel-2);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--fill-accent);
+  color: var(--on-accent);
+}
+.completions li.on .completion-key,
+.completions li.on .completion-type {
+  color: inherit;
 }
 .completion-key {
   font-size: 12px;
@@ -1611,10 +1746,11 @@ code {
   gap: 6px;
 }
 /* A refused proposal is not a dimmer version of an accepted one — it is the opposite outcome, and
-   0.75 opacity was the whole of what said so. The mark and the rule carry it now. */
+   0.75 opacity was the whole of what said so. The mark and the wash carry it now. */
 .sync-edit.blocked {
-  border-left: 2px solid var(--bad);
-  padding-left: 6px;
+  background: var(--tint-bad);
+  border-radius: var(--control-radius-sm);
+  padding: 2px 6px;
 }
 .sync-edit-mark {
   flex: none;
@@ -1968,7 +2104,8 @@ code {
   margin: 0;
 }
 button.sm {
-  padding: 2px 7px;
+  padding: var(--control-pad-sm);
+  border-radius: var(--control-radius-sm);
   font-size: 11px;
 }
 
@@ -2138,7 +2275,7 @@ button.crumb-sep.open {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.09em;
-  color: var(--muted);
+  color: var(--dim);
 }
 .lane h5::before {
   content: "";
@@ -2188,7 +2325,7 @@ button.crumb-sep.open {
   position: relative;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--control-radius-sm);
   padding: 8px 9px 7px 11px;
   margin-bottom: 7px;
   cursor: pointer;
@@ -2198,7 +2335,9 @@ button.crumb-sep.open {
   box-shadow: none;
 }
 /* The status as a stripe down the edge — a whole column's worth is readable in one glance, which a
-   glyph per card is not. The badge stays: the stripe says which, the glyph says what. */
+   glyph per card is not. The badge stays: the stripe says which, the glyph says what.
+   One of the two rails left in the file, and the reason it survived the sweep everywhere else: here
+   the edge is read as a COLUMN, down a list, which is the one thing a tinted surface cannot do. */
 .card::before {
   content: "";
   position: absolute;
@@ -2206,7 +2345,7 @@ button.crumb-sep.open {
   top: 0;
   bottom: 0;
   width: 3px;
-  border-radius: 4px 0 0 4px;
+  border-radius: var(--control-radius-sm) 0 0 var(--control-radius-sm);
   background: var(--dim);
 }
 .card-running::before,
@@ -2228,7 +2367,8 @@ button.crumb-sep.open {
   margin-bottom: 0;
 }
 .card:hover {
-  border-color: var(--accent);
+  background: var(--panel-3);
+  border-color: var(--rule);
 }
 .card-selected {
   border-color: var(--accent);
@@ -2339,11 +2479,11 @@ button.crumb-sep.open {
   font-size: 12.5px;
 }
 .leaf-row:hover {
-  background: var(--panel-2);
+  background: var(--fill-ghost-hover);
 }
 .leaf-row.sel {
-  background: var(--panel-2);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--fill-ghost-selected);
+  font-weight: 600;
 }
 .leaf-convo {
   overflow: hidden;
@@ -2645,23 +2785,25 @@ button.crumb-sep.open {
   color: var(--dim);
 }
 
-/* Standing context, not an error: says what a surface reaches, or what is wrong with it. */
+/* Standing context, not an error: says what a surface reaches, or what is wrong with it.
+   A WASH rather than a stripe. The stripe had to be read against a border it sat inside, at three
+   pixels wide, and it was the same gesture five other surfaces were making for five other reasons.
+   Tinting the whole panel says the severity with the thing it is about, and needs no edge. */
 .notice {
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--accent);
-  border-radius: 6px;
+  background: var(--tint-accent);
+  border: 0;
+  border-radius: var(--control-radius);
   padding: 7px 9px;
   font-size: 11px;
   color: var(--dim);
   overflow-wrap: anywhere;
 }
 .notice.warn {
-  border-left-color: var(--warn);
+  background: var(--tint-warn);
   color: var(--warn);
 }
 .notice.bad {
-  border-left-color: var(--bad);
+  background: var(--tint-bad);
   color: var(--bad);
 }
 /* An issue you can follow to the control it is about. A button, not a div, so it is reachable by
@@ -2678,8 +2820,8 @@ button.notice.clickable {
   white-space: normal;
 }
 button.notice.clickable:hover {
-  background: var(--panel);
-  border-color: currentColor;
+  background: color-mix(in srgb, currentColor 18%, transparent);
+  border-color: transparent;
 }
 .warn-text {
   color: var(--warn);
@@ -2721,6 +2863,23 @@ span.issue-warn {
 }
 /* Where you just arrived from the inspector. One second, then gone: it answers "which one?" and has
    nothing to say after that — the outline is what remains, because that is the standing fact. */
+/* The one thing in the app that moves by itself (icons.tsx's `Spinner`). Held still for anybody who
+   has asked their system for less motion: the ring with its gap still reads as "in progress", and a
+   thing that spins forever is exactly what that preference is about. */
+.spinner {
+  animation: spin 900ms linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
+
 @keyframes issue-flash {
   0%,
   55% {
@@ -2774,15 +2933,18 @@ span.issue-warn {
 }
 .sections li {
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--control-radius-sm);
   cursor: pointer;
 }
 .sections li:hover {
-  background: var(--panel-2);
+  background: var(--fill-ghost-hover);
 }
+/* Selected, said by the fill. The inset rule down the left was a sixth meaning for an edge that was
+   already carrying five, and it was the only one of them that meant "you are here". */
 .sections li.sel {
-  background: var(--panel-2);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--fill-ghost-selected);
+  color: var(--text);
+  font-weight: 600;
 }
 .settings-body {
   padding: 14px 16px;
@@ -2902,10 +3064,15 @@ span.issue-warn {
 /* A layer switch. The selected side is filled, because "which file am I about to write?" must be
    readable at a glance rather than inferred from a subtle border. */
 button.layer-on {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--panel);
+  background: var(--fill-accent);
+  border-color: var(--fill-accent);
+  color: var(--on-accent);
   font-weight: 600;
+  box-shadow: var(--sheen);
+}
+button.layer-on:hover:not(:disabled) {
+  background: var(--fill-accent-hover);
+  border-color: var(--fill-accent-hover);
 }
 /* A long absolute path in a narrow column. `direction: rtl` puts the ellipsis at the START, so the
    filename — the part that identifies it — stays visible instead of the drive letter. */
@@ -3260,14 +3427,17 @@ button.link.change-path {
   margin-left: auto;
 }
 
+/* The rhythm is the grouping, now that the boxes are gone. Sections sit far apart and the rows
+   inside them almost touch, so a page reads as three or four things rather than as twenty — which
+   is the job the borders were doing, and doing loudly. */
 .cfg-pane {
   display: flex;
   flex-direction: column;
-  gap: 22px;
-  padding-bottom: 24px;
+  gap: 34px;
+  padding-bottom: 28px;
   /* A settings form stretched across a wide window is a form nobody scans: the eye has to travel
-     the whole width to get from a label to its control. Wide enough for three fields per row. */
-  max-width: 940px;
+     the whole width to get from a label to its control. */
+  max-width: 780px;
 }
 
 /* A group is a whole family — "Model providers", "Presets". Its heading carries the one sentence
@@ -3275,58 +3445,176 @@ button.link.change-path {
 .cfg-group {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
+/* Padded to the rows' own inset, so the heading and the names under it share one left edge. */
 .cfg-group-head {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  padding: 0 11px;
 }
+/* Big enough to be a heading. At 13px it was the size of the rows under it and separated from them
+   only by weight, which is not a separation. */
 .cfg-group-head h4 {
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 650;
-  letter-spacing: 0.02em;
+  letter-spacing: -0.01em;
 }
 .cfg-group-head > p {
   margin: 0;
   max-width: 70ch;
 }
 
+/* Two pixels, not eight. The rows are a LIST and the section is what groups them, so they sit
+   almost touching and the space goes between sections instead — which is what lets the boxes come
+   off without the page turning into one undifferentiated column. */
 .cfg-rows {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 2px;
 }
 
-/* One provider / executor / preset. The left edge carries its state as a colour, so a column of
-   them reads at a glance without any row having to shout. */
+/* One provider / executor / preset.
+   No border and no fill. A bordered card per row means five providers draw five boxes, and none of
+   those boxes is telling you anything — the rows are already separated by being rows. What is left
+   is the hover wash, which appears under the pointer and says "this one", and the rounding exists
+   only to give that wash corners. */
 .cfg-row {
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--control-radius);
+  background: transparent;
+  padding: 9px 11px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 3px;
 }
-.cfg-row.available {
-  border-left-color: var(--ok);
-}
-.cfg-row.unavailable {
-  border-left-color: var(--bad);
-}
-.cfg-row.unconfigured {
-  border-left-color: var(--warn);
+.cfg-row:hover {
+  background: var(--fill-ghost-hover);
 }
 /* A row turned off stays fully legible — dimmed, not hidden, or there would be no way back on. */
 .cfg-row.off {
   opacity: 0.6;
 }
+/* The mark, with the state dot on its corner. Identity and state in one fixation: scanning five
+   providers for "which one is broken" should not mean reading five words. */
+.cfg-mark {
+  position: relative;
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+.cfg-mark-svg {
+  width: 17px;
+  height: 17px;
+}
+/* Scoped to the mark. `.cfg-dot` on its own is still the inline dot inside a `.cfg-status` pill,
+   which two other panes render — lifting THAT out of flow would have thrown it to the corner of
+   whatever happened to be positioned above it. */
+.cfg-mark .cfg-dot {
+  position: absolute;
+  left: -2px;
+  top: -2px;
+  width: 8px;
+  height: 8px;
+  background: var(--dim);
+  /* Ringed in the page's own colour so the dot reads as ON the mark rather than as part of it. */
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.cfg-mark .cfg-dot.available {
+  background: var(--ok);
+}
+.cfg-mark .cfg-dot.unavailable {
+  background: var(--bad);
+}
+.cfg-mark .cfg-dot.unconfigured {
+  background: var(--warn);
+}
+/* The version belongs to the name, not to the report — it is how you tell which build you have, and
+   it was buried at the end of a box you could only see when something was wrong. */
+.cfg-version {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--dim);
+  flex: none;
+}
+/* The collapsed row's whole report, as prose. */
+.cfg-say {
+  margin: 0;
+  padding-left: 30px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.cfg-say-state {
+  color: var(--text);
+}
+.cfg-row.unavailable .cfg-say-state {
+  color: var(--bad);
+}
+.cfg-row.off {
+  opacity: 1;
+}
+.cfg-row.off .cfg-row-title,
+.cfg-row.off .cfg-mark-svg {
+  opacity: 0.55;
+}
+
+/* On/off as a switch: it shows the state and changes it in one control, where a button labelled
+   "Turn off" showed the ACTION and left the state to something else on the row. */
+.cfg-switch {
+  flex: none;
+  width: 30px;
+  height: 18px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  box-shadow: none;
+  transition: background 0.12s, border-color 0.12s;
+}
+.cfg-switch:hover:not(:disabled) {
+  border-color: var(--rule);
+  background: var(--panel-3);
+}
+.cfg-switch-knob {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--dim);
+  transform: translateX(-5px);
+  transition: transform 0.12s, background 0.12s;
+}
+.cfg-switch.on,
+.cfg-switch.on:hover:not(:disabled) {
+  background: var(--fill-accent);
+  border-color: var(--fill-accent);
+}
+.cfg-switch.on .cfg-switch-knob {
+  background: var(--on-accent);
+  transform: translateX(5px);
+}
+.cfg-chevron {
+  flex: none;
+  padding: 2px;
+}
+.cfg-chevron svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.12s;
+}
+.cfg-chevron.open svg {
+  transform: rotate(180deg);
+}
+
 .cfg-row-head {
   display: flex;
   align-items: center;
@@ -3344,13 +3632,15 @@ button.link.change-path {
 .cfg-hint.mono {
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
+/* Indented to the mark's text column, so an opened row's settings read as belonging to the name
+   above them rather than as a new section — which is the job the top rule used to do, badly, by
+   drawing a line across a row that was already inside a box. */
 .cfg-row-body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-top: 6px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
+  margin-top: 8px;
+  padding-left: 30px;
 }
 
 /* --- the four states ---
@@ -3363,9 +3653,9 @@ button.link.change-path {
   gap: 5px;
   font-size: 10.5px;
   color: var(--dim);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 1px 8px 1px 6px;
+  background: var(--panel-2);
+  border-radius: var(--control-radius-sm);
+  padding: 2px 8px 2px 7px;
   white-space: nowrap;
   flex: none;
 }
@@ -3376,17 +3666,19 @@ button.link.change-path {
   background: currentColor;
   flex: none;
 }
+/* The row's one statement of state, now that the left edge no longer makes a second one. A coloured
+   hairline around ten and a half pixels of text was the noisiest way to spend the colour. */
 .cfg-status.available {
   color: var(--ok);
-  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+  background: var(--tint-ok);
 }
 .cfg-status.unavailable {
   color: var(--bad);
-  border-color: color-mix(in srgb, var(--bad) 45%, transparent);
+  background: var(--tint-bad);
 }
 .cfg-status.unconfigured {
   color: var(--warn);
-  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+  background: var(--tint-warn);
 }
 
 /* --- a level of the type hierarchy ---
@@ -3424,16 +3716,46 @@ button.link.change-path {
   gap: 10px;
 }
 
-/* --- a field --- */
-.cfg-grid {
-  display: grid;
-  gap: 14px;
-  align-items: start;
+/* --- a field ---
+   A statement on the left, its control on the right, and every control in a form landing on the same
+   rail. What was here tiled label-over-control cells into an `auto-fit` grid, which is where the
+   wall came from: towers of unequal height, no two controls sharing an edge, and eight settings
+   reading as eight separate little forms.
+   The split is a CONTAINER query, not a media query — these forms live in a drawer whose width has
+   nothing to do with the window's, and a viewport breakpoint would have stacked a wide drawer in a
+   narrow window and squeezed a narrow drawer in a wide one. */
+.cfg-fields {
+  display: flex;
+  flex-direction: column;
+  container-type: inline-size;
 }
 .cfg-field {
   display: grid;
-  gap: 4px;
-  align-content: start;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 15rem);
+  align-items: center;
+  gap: 6px 22px;
+  min-width: 0;
+  padding: 7px 0;
+}
+.cfg-field + .cfg-field {
+  border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+@container (max-width: 380px) {
+  .cfg-field {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+}
+/* A control wide enough to be typed into is worth more than a hairline of alignment: below this the
+   right-hand rail is a lie anyway, so the row gives up and stacks. */
+.cfg-fields[data-narrow="true"] .cfg-field {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+.cfg-field-say {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 .cfg-field-head {
@@ -3448,15 +3770,15 @@ button.link.change-path {
   color: var(--text);
 }
 /* The config key this box writes. Not decoration: it is the only thing connecting a friendly label
-   to the `config.json` a user may also be editing by hand, and to the error the parser produces. */
+   to the `config.json` a user may also be editing by hand, and to the error the parser produces.
+   Mono and dim at the END of the hint, with no box of its own: a bordered tag inside a label inside
+   a row inside a panel was four frames deep to say one word, and monospace already marks it as
+   machine text. */
 .cfg-param {
+  margin-left: 6px;
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 10px;
   color: var(--dim);
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 0 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3469,9 +3791,9 @@ button.link.change-path {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--accent);
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  border-radius: 999px;
-  padding: 0 5px;
+  background: var(--tint-accent);
+  border-radius: 4px;
+  padding: 1px 5px;
 }
 .cfg-hint {
   font-size: 11px;
@@ -3479,42 +3801,18 @@ button.link.change-path {
   color: var(--dim);
   margin: 0;
 }
-/* What a check observed, and what would change it. Set apart from the description above it because
-   they are different kinds of sentence: one is a standing fact about the provider, the other is a
-   report about this machine at this moment. */
-.cfg-report {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--dim);
-  background: var(--panel-2);
-  border-radius: 6px;
-  border-left: 2px solid var(--line);
-  padding: 6px 9px;
-  margin: 1px 0 2px;
-}
-.cfg-report.unavailable {
-  border-left-color: var(--bad);
-  color: var(--bad);
-}
-.cfg-report.unconfigured {
-  border-left-color: var(--warn);
-  color: var(--warn);
-}
-.cfg-report.available {
-  border-left-color: var(--ok);
-}
-/* What would fix a failed check — the half a health report usually leaves out. */
+/* What would fix a failed check — the half a health report usually leaves out. Its own line inside
+   the status sentence, because it is an instruction and everything before it is an observation. */
 .cfg-fix {
+  display: block;
   font-size: 11px;
   line-height: 1.4;
   color: var(--accent);
-  margin: 0;
+  margin: 2px 0 0;
 }
 .cfg-control {
   display: flex;
+  min-width: 0;
 }
 .cfg-stack {
   display: flex;
@@ -3530,13 +3828,14 @@ button.link.change-path {
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 6px 8px;
+  border-radius: var(--control-radius);
+  padding: 6px 9px;
+}
+.cfg-input:hover:not(:disabled) {
+  border-color: var(--rule);
 }
 .cfg-input:focus-visible {
-  outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 .cfg-input:disabled {
   opacity: 0.55;
@@ -3553,37 +3852,48 @@ textarea.cfg-input {
   line-height: 1.45;
 }
 
+/* A preset is a CHOICE among three, so the chosen one is filled and the others carry no frame at
+   all — an outline on each of them made three equal boxes and left the selection to a colour. */
 .cfg-chip {
   padding: 3px 11px;
-  border-radius: 999px;
+  border-radius: var(--control-radius-sm);
   font-size: 11.5px;
   font-weight: 600;
-  border: 1px solid var(--line);
-  background: var(--panel-2);
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--dim);
+  box-shadow: none;
 }
-.cfg-chip.on {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+.cfg-chip:hover:not(:disabled) {
+  background: var(--fill-ghost-hover);
+  border-color: transparent;
+  color: var(--text);
+}
+.cfg-chip.on,
+.cfg-chip.on:hover:not(:disabled) {
+  border-color: var(--fill-accent);
+  color: var(--on-accent);
+  background: var(--fill-accent);
+  box-shadow: var(--sheen);
 }
 
-/* --- a disclosure --- */
+/* --- a disclosure ---
+   A rule and a caret, not a well. A collapsed-by-default panel drew a filled, bordered rectangle
+   around a single line of text — the loudest thing on a settings row, spent on the settings nobody
+   opens. The rule says "there is more below here" for one pixel. */
 .cfg-disclosure {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-2);
-  overflow: hidden;
+  border-top: 1px solid var(--line);
+  padding-top: 2px;
 }
 .cfg-disclosure-head {
   width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 11px;
+  padding: 7px 4px;
   background: none;
   border: none;
-  border-radius: 0;
+  border-radius: var(--control-radius-sm);
   text-align: left;
   color: var(--dim);
 }
@@ -3603,9 +3913,7 @@ textarea.cfg-input {
   font-weight: 600;
 }
 .cfg-disclosure-body {
-  padding: 11px;
-  border-top: 1px solid var(--line);
-  background: var(--panel);
+  padding: 4px 4px 11px 17px;
 }
 
 .cfg-credential {
@@ -3786,9 +4094,8 @@ textarea.cfg-input {
   gap: 8px;
   flex-wrap: wrap;
   padding: 6px 9px;
-  border-radius: 6px;
-  background: var(--panel-2);
-  border-left: 2px solid var(--accent);
+  border-radius: var(--control-radius);
+  background: var(--tint-accent);
 }
 .cfg-node-kind {
   font-size: 11px;
@@ -3865,21 +4172,22 @@ textarea.cfg-input {
   gap: 6px;
   padding: 5px 8px;
   border: 1px solid var(--line);
-  border-left: 3px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--control-radius);
   background: var(--panel);
   flex-wrap: wrap;
 }
+/* Allow and deny are the whole content of a policy list, so they tint the row rather than mark its
+   edge: a column of them has to be scannable for "where does this stop being permissive". */
 .cfg-rule.everything,
 .cfg-rule.allow {
-  border-left-color: var(--ok);
+  background: var(--tint-ok);
 }
 .cfg-rule.nothing,
 .cfg-rule.deny {
-  border-left-color: var(--bad);
+  background: var(--tint-bad);
 }
 .cfg-rule.bad {
-  border-left-color: var(--warn);
+  background: var(--tint-warn);
 }
 .cfg-rule-index {
   display: inline-flex;
@@ -3968,27 +4276,30 @@ textarea.cfg-input {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--muted);
+  color: var(--dim);
 }
 .session-row {
   display: flex;
   gap: 6px;
   align-items: center;
   padding: 4px 6px;
-  border-radius: 4px;
+  border-radius: var(--control-radius-sm);
   cursor: pointer;
   font-size: 12px;
 }
-.session-row:hover { background: var(--panel-2); }
-.session-row.sel { background: var(--sel); }
-.session-row .cost { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.session-row:hover { background: var(--fill-ghost-hover); }
+/* `--sel` and `--muted` were named here and declared in neither palette. An invalid `var()` drops
+   the whole declaration, so a selected session row painted no selection and its cost printed in the
+   inherited colour — both of them failing silently, which is how they survived. */
+.session-row.sel { background: var(--fill-ghost-selected); font-weight: 600; }
+.session-row .cost { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
 .session-row .dot,
 .session-head .dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   flex: none;
-  background: var(--muted);
+  background: var(--dim);
 }
 .session-row .dot.success, .session-head .dot.success { background: var(--ok, #3fa34d); }
 .session-row .dot.error, .session-head .dot.error { background: var(--bad, #c0392b); }
@@ -4011,7 +4322,7 @@ textarea.cfg-input {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--muted);
+  color: var(--dim);
   padding-top: 2px;
 }
 .sturn-body { min-width: 0; flex: 1; }
@@ -4028,7 +4339,7 @@ textarea.cfg-input {
 /* Collapsed by default: a tool call's arguments are evidence you go looking for, not context you
    read past on the way to the answer. */
 .part > summary { cursor: pointer; font-size: 11px; display: flex; gap: 6px; align-items: baseline; }
-.part-kind { color: var(--muted); text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; }
+.part-kind { color: var(--dim); text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; }
 .part-tool { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .part > pre {
   margin: 4px 0 6px 12px;
@@ -4060,11 +4371,11 @@ textarea.cfg-input {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .log-row:hover { background: var(--panel-2); }
-.log-at { color: var(--muted); flex: none; font-variant-numeric: tabular-nums; }
+.log-at { color: var(--dim); flex: none; font-variant-numeric: tabular-nums; }
 .log-level { flex: none; width: 40px; text-transform: uppercase; font-size: 10px; }
 .log-level.log-warn { color: var(--warn, #b8860b); }
 .log-level.log-error { color: var(--bad, #c0392b); }
-.log-source { flex: none; width: 74px; color: var(--muted); }
+.log-source { flex: none; width: 74px; color: var(--dim); }
 .log-message { overflow-wrap: anywhere; }
 .log-row .link { flex: none; background: none; border: none; padding: 0 2px; color: var(--accent, #3b7dd8); cursor: pointer; font-size: 11px; }
 
@@ -4073,7 +4384,7 @@ textarea.cfg-input {
 .console { border-top: 1px solid var(--line); display: flex; flex-direction: column; max-height: 45%; min-height: 0; }
 .console-head { display: flex; gap: 8px; align-items: center; padding: 5px 10px; border-bottom: 1px solid var(--line); font-size: 12px; }
 .console-stream { overflow: auto; min-height: 0; padding: 4px 10px; }
-.console-stream h4 { margin: 4px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.console-stream h4 { margin: 4px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--dim); }
 .console-stream pre {
   margin: 0;
   white-space: pre-wrap;
@@ -4084,7 +4395,7 @@ textarea.cfg-input {
 .console-stderr pre { color: var(--bad, #c0392b); }
 /* Not decoration: without it the tail reads as the whole, which is the misreading that makes a
    truncated log worse than no log. */
-.console-gap { margin: 6px 0; color: var(--muted); font-style: italic; font-size: 11px; }
+.console-gap { margin: 6px 0; color: var(--dim); font-style: italic; font-size: 11px; }
 
 /* An answer still being written. Marked rather than blended in: it has no tool calls yet and may
    still change, so a reader must be able to tell a draft from a record. */
@@ -4107,7 +4418,7 @@ textarea.cfg-input {
   white-space: pre-wrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--dim);
 }
 
 
@@ -4190,17 +4501,16 @@ textarea.cfg-input {
   gap: 10px;
   align-items: baseline;
   padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-left-width: 4px;
-  border-radius: 8px;
+  border: 0;
+  border-radius: var(--card-radius);
   background: var(--panel-2);
 }
 .debug-verdict-word { font-size: 18px; font-weight: 700; letter-spacing: 0.06em; }
-.debug-verdict.good { border-left-color: var(--ok); }
+.debug-verdict.good { background: var(--tint-ok); }
 .debug-verdict.good .debug-verdict-word { color: var(--ok); }
-.debug-verdict.bad { border-left-color: var(--bad); }
+.debug-verdict.bad { background: var(--tint-bad); }
 .debug-verdict.bad .debug-verdict-word { color: var(--bad); }
-.debug-verdict.unknown { border-left-color: var(--warn); }
+.debug-verdict.unknown { background: var(--tint-warn); }
 .debug-verdict.unknown .debug-verdict-word { color: var(--warn); }
 
 /* The transcript is the tallest thing here and the reason the column scrolls; it
@@ -4281,6 +4591,123 @@ textarea.cfg-input {
 .run-target b {
   color: var(--text);
   font-weight: 600;
+}
+
+/* --- a value pinned to the context panel (App.tsx's PinnedPane) ---------------
+   A header saying what is held and offering the way out, over the ordinary value viewer. The body
+   scrolls on its own so the header stays put: the whole point of pinning something is that it does
+   not move while the column beside it does. */
+/* The column itself, while it is holding one. `.panel` is a padded scroller for the inspectors,
+   which is the wrong shape entirely for something that manages its own height: the padding is a
+   margin around a document that asked for the whole column, and the outer scrollbar competes with
+   the inner one for the same gesture. */
+.panel.holding {
+  padding: 0;
+  overflow: hidden;
+}
+/* `pinned-pane` and not `pinned`, which is a name this stylesheet already had: `pane-actions pinned`
+   is the modifier that sticks an editor's Save/Revert row to the bottom of its pane. A bare `.pinned`
+   block here matched that row too and handed it `flex-direction: column; height: 100%` — so every
+   editor's action bar took the whole pane, the form under it collapsed to a three-pixel sliver, and
+   the Files view's Configuration half went blank in every file. A block class has to be a name
+   nothing else in the app is already using as an adjective. */
+.pinned-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.pinned-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.pinned-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.pinned-close {
+  flex: none;
+  display: inline-flex;
+  padding: 3px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+}
+.pinned-close:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.pinned-close svg {
+  width: 14px;
+  height: 14px;
+}
+/* The value OWNS the column, which is the whole difference between this and every other thing the
+   panel shows. Elsewhere the viewer is drawing an aside inside a transcript row, so its bounds are
+   written to stop one payload becoming the whole screen; here it IS the screen, and a page rendered
+   at 360px in a 900px column is the panel refusing to be used. So the chain from the column down to
+   the frame is a flex column with no fixed heights in it, and every bound the viewer sets for the
+   transcript is undone on the way. */
+.pinned-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.pinned-body > .vv {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pinned-body > .vv > .vv-head {
+  flex: none;
+  padding: 7px 10px 0;
+  margin-bottom: 5px;
+}
+/* The body takes what is left and scrolls inside itself, so the header and the view toggle stay put
+   however long the document is. */
+.pinned-body > .vv > .vv-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 10px 10px;
+}
+/* FULL BLEED for the two views that are a viewport rather than a piece of text — a page and an
+   editor are both already scrollers, so the padding and the rounded border around them are a second
+   frame drawn inside the first, and every pixel they cost is a pixel of the page. */
+.pinned-body > .vv > .vv-body:has(> .vv-html),
+.pinned-body > .vv > .vv-body:has(> .monaco-host) {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+}
+.pinned-body .vv-html,
+.pinned-body .vv-body > .monaco-host {
+  flex: 1;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+}
+/* The rest keep their padding and lose their ceilings: a transcript caps these so one value cannot
+   take a screen, and here taking the screen is what was asked for. */
+.pinned-body .vv-source {
+  max-height: none;
+}
+.pinned-body .vv-media {
+  max-width: 100%;
+  max-height: none;
+}
+.pinned-body .vv-audio {
+  max-width: none;
 }
 
 /* --- the task context panel --- */
@@ -5247,11 +5674,11 @@ textarea.cfg-input {
   cursor: pointer;
 }
 .cx-chip:hover {
-  background: var(--panel-2);
+  background: var(--fill-ghost-hover);
   color: var(--text);
 }
 .cx-chip.on {
-  background: var(--panel-2);
+  background: var(--fill-ghost-selected);
   border-color: var(--line);
   color: var(--text);
 }
@@ -5777,6 +6204,12 @@ textarea.cfg-input {
 .chat-view {
   grid-template-columns: minmax(0, 1fr);
 }
+/* The second column exists only while something is pinned to it — see the shell. Same arrangement as
+   the other two views that have a panel, so a document held beside a thread is dragged with the same
+   handle and remembers its own width. */
+.chat-view.with-panel {
+  grid-template-columns: minmax(0, 1fr) auto var(--pane-right, 420px);
+}
 
 /* The thread and its composer: the scroller takes what is left, the box never scrolls away. Same
    arrangement as `.run-convo-wrap`, which is the other surface with a conversation and a box. */
@@ -5961,11 +6394,11 @@ textarea.cfg-input {
   cursor: pointer;
 }
 .chat-artifact-row:hover {
-  background: var(--panel-2);
+  background: var(--fill-ghost-hover);
 }
 .chat-artifact-row.sel {
-  background: var(--panel-2);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--fill-ghost-selected);
+  font-weight: 600;
 }
 /* Said in words, not as an icon: that a page RUNS is the one thing worth knowing before opening it. */
 .chat-artifact-live {
@@ -6092,18 +6525,39 @@ textarea.cfg-input {
 .chat-rows li.sel {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
+/* "Is there anything here for me", at the left edge, where the list is scanned. Drawn both ways —
+   filled for unread, a faint ring for read — because a mark that vanished when it was read would
+   shift every row it left, and a row that has moved is a row you have to find again. */
+.chat-row-mark {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: none;
+}
+.chat-row-mark.unread {
+  border-color: var(--accent);
+  background: var(--accent);
+}
 .chat-row-title {
   flex: 1;
   min-width: 0;
 }
 .chat-row-when {
   flex: none;
+  display: inline-flex;
+  align-items: center;
   font-size: 11px;
 }
-/* A conversation still taking its turn. The dots are the same "still going" this app uses
-   everywhere else; here there is only room for the idea of them. */
+/* A conversation still taking its turn — the spinner stands where the time was, so the row's right
+   edge stays one column rather than becoming two things that take turns. */
 .chat-row-live {
   color: var(--accent);
+}
+.chat-row-live .spinner {
+  width: 12px;
+  height: 12px;
 }
 .chat-rename {
   flex: 1;
@@ -6282,11 +6736,33 @@ textarea.cfg-input {
 }
 .vv-toggle button:hover {
   color: var(--text);
-  background: var(--panel-2);
+  background: var(--fill-ghost-hover);
 }
 .vv-toggle button.on {
   color: var(--text);
+  background: var(--fill-ghost-selected);
+  font-weight: 600;
+}
+/* The overflow beside the toggle: verbs, not views — see `valueView.tsx`'s header. Sized to match
+   the toggle's height exactly so the two read as one strip, and quiet until hovered, because it is
+   the control nobody is looking for until they want it. */
+.vv-more {
+  flex: none;
+  width: 22px;
+  padding: 1px 0 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--tok-hint);
+  cursor: pointer;
+}
+.vv-more:hover,
+.vv-more[aria-expanded="true"] {
+  border-color: var(--line);
   background: var(--panel-2);
+  color: var(--text);
 }
 .vv-body {
   min-width: 0;

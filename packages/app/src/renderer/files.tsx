@@ -683,7 +683,7 @@ export function FileTreePanel({
           <option value="project">in this project</option>
           <option value="base">in the shared root</option>
         </select>
-        <button type="submit" disabled={busy || !newId.trim()}>
+        <button type="submit" className="primary" disabled={busy || !newId.trim()}>
           Create
         </button>
       </form>

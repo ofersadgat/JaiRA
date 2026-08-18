@@ -27,7 +27,8 @@ import {
   type SecretCapabilities,
   type SecretTarget,
 } from "@jaira/shared/browser";
-import { Disclosure, Field, FieldGrid, Level, SelectInput, StatusPill, TextArea, TextInput, type ProviderState } from "./controls";
+import { Disclosure, Field, FieldGrid, Level, SelectInput, StatusDot, Switch, TextArea, TextInput, stateWord, type ProviderState } from "./controls";
+import { BrandIcon, Icon } from "./icons";
 import {
   MODEL_PROVIDERS,
   agentProviders,
@@ -226,38 +227,50 @@ function ProviderRow({
 
   return (
     <li className={`cfg-row ${state}`}>
+      {/* The mark carries the dot, so identity and state are read in one fixation rather than two.
+          `spec.id` and not `spec.title`: the id is the registry name (`codex-cli`, `anthropic`),
+          which is what `brandOf` knows how to resolve — "Codex" and "Claude CLI" are display
+          spellings and match nothing. */}
       <div className="cfg-row-head">
+        <span className="cfg-mark">
+          <BrandIcon name={spec.id} className="cfg-mark-svg" />
+          <StatusDot state={state} />
+        </span>
         <span className="cfg-row-title">{spec.title}</span>
-        <StatusPill state={state} />
-        <button
-          className="ghost"
+        {probe?.version ? <code className="cfg-version">{probe.version}</code> : null}
+        <span className="grow" />
+        <Switch
+          on={enabled}
           disabled={locked}
-          title={enabled ? `stop using ${spec.title} in this project` : `use ${spec.title} again`}
+          label={enabled ? `stop using ${spec.title} in this project` : `use ${spec.title} again`}
           // `undefined` REMOVES the key rather than writing `true`: on is the default, and a layer
           // that says so explicitly is a layer overriding something for no reason.
-          onClick={() => write({ enabled: enabled ? false : undefined })}
+          onChange={(next) => write({ enabled: next ? undefined : false })}
+        />
+        <button
+          className={`quiet cfg-chevron${open ? " open" : ""}`}
+          aria-expanded={open}
+          aria-label={open ? `hide ${spec.title}'s settings` : `configure ${spec.title}`}
+          title={open ? "Done" : "Configure"}
+          onClick={() => setOpen((v) => !v)}
         >
-          {enabled ? "Turn off" : "Turn on"}
-        </button>
-        <button className="ghost" onClick={() => setOpen((v) => !v)}>
-          {open ? "Done" : "Configure"}
+          <Icon name="chevron" />
         </button>
       </div>
 
-      <p className="cfg-hint">{spec.hint}</p>
-      {/* What was observed and what would change it, as ONE block rather than as loose lines beside
-          the description: they are a report about this moment, where everything above is a standing
-          fact about the provider, and a reader should be able to tell those apart at a glance. */}
-      {probe && state !== "off" && (probe.detail || probe.fix) ? (
-        <div className={`cfg-report ${state}`}>
-          <span>{probe.detail}</span>
-          {probe.fix ? <span className="cfg-fix">→ {probe.fix}</span> : null}
-          {probe.version ? <span className="cfg-hint mono">{probe.version}</span> : null}
-        </div>
-      ) : null}
+      {/* One SENTENCE, where there was a description, a pill and a boxed report saying overlapping
+          things. What a collapsed row owes the reader is the state of this provider on this machine
+          right now; `spec.hint` — the standing "would you want this at all" line — moved inside,
+          where it is read once while deciding rather than on every pass down the list. */}
+      <p className="cfg-say">
+        <span className="cfg-say-state">{stateWord(state)}</span>
+        {probe && state !== "off" && probe.detail ? <> — {probe.detail}</> : null}
+        {probe && state !== "off" && probe.fix ? <span className="cfg-fix">→ {probe.fix}</span> : null}
+      </p>
 
       {open ? (
         <div className="cfg-row-body">
+          <p className="cfg-hint">{spec.hint}</p>
           {spec.levels.map((level, depth) => (
             <Level key={level.title} title={level.title} hint={level.hint} depth={depth}>
               {level.fields.length === 0 ? (
@@ -292,7 +305,7 @@ function ProviderRow({
           </p>
           {problem ? <p className="sub warn-text">{problem}</p> : null}
           <div className="pane-actions">
-            <button onClick={save} disabled={locked || !dirty}>
+            <button className="primary" onClick={save} disabled={locked || !dirty}>
               Save
             </button>
             <button

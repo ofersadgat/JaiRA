@@ -54,7 +54,7 @@ export function EditorActions({
 }): JSX.Element {
   return (
     <div className="pane-actions pinned">
-      <button onClick={onSave} disabled={busy === true || dirty === false || blocked !== undefined}>
+      <button className="primary" onClick={onSave} disabled={busy === true || dirty === false || blocked !== undefined}>
         Save
       </button>
       {onRevert ? (

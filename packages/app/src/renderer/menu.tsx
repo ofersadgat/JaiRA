@@ -150,7 +150,7 @@ export function AskDialog({ spec, onCancel }: { spec: AskSpec; onCancel: () => v
           </label>
         ) : null}
         <div className="options">
-          <button type="submit" className={spec.danger ? "danger" : undefined} disabled={!ok} autoFocus={!needsValue}>
+          <button type="submit" className={spec.danger ? "danger" : "primary"} disabled={!ok} autoFocus={!needsValue}>
             {spec.confirmLabel}
           </button>
           <button type="button" className="ghost" onClick={onCancel}>

@@ -282,7 +282,7 @@ function LeafPanel({ context }: FileSurfaceProps): JSX.Element {
           <div className="waiting-on">
             <Badge status="waiting_for_user" />
             <span className="grow">Waiting on you — {waiting.component}</span>
-            {onAnswer ? <button onClick={onAnswer}>Answer</button> : null}
+            {onAnswer ? <button className="primary" onClick={onAnswer}>Answer</button> : null}
           </div>
         ) : null}
       </div>

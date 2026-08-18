@@ -61,7 +61,7 @@ export function NewTask({
             <input value={issue} onChange={(e) => setIssue(e.target.value)} placeholder="optional" />
           </label>
           <div className="pane-actions">
-            <button type="submit" disabled={busy || !title.trim() || !workflow.trim()}>
+            <button type="submit" className="primary" disabled={busy || !title.trim() || !workflow.trim()}>
               Create
             </button>
             <button type="button" className="ghost" onClick={() => setOpen(false)}>

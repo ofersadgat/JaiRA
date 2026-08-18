@@ -27,7 +27,7 @@ import {
   type JairaOperationNode,
   type ProbeResult,
 } from "@jaira/shared/browser";
-import { Disclosure, Field, FieldGrid, StatusPill, TextArea, TextInput } from "./controls";
+import { Disclosure, Field, FieldGrid, TextArea, TextInput } from "./controls";
 import { LlmConfigForm, summariseLlmConfig, type LlmConfigDoc } from "./llmConfigForm";
 import { ExecutorTree } from "./executorTreePane";
 import { providerState } from "./providersPane";
@@ -222,7 +222,7 @@ function PresetRow({
         <div className="cfg-row-body">
           <LlmConfigForm value={draft} disabled={locked} onChange={setDraft} />
           <div className="pane-actions">
-            <button disabled={locked || !dirty} onClick={() => onSave(draft)}>
+            <button className="primary" disabled={locked || !dirty} onClick={() => onSave(draft)}>
               Save
             </button>
             <button className="ghost" disabled={!dirty} onClick={() => setDraft(value)}>
