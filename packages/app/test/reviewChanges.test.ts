@@ -110,8 +110,11 @@ describe("changeset:review", () => {
     // this one, so the gate carries the project its addresses resolve against — without it the
     // reviewer read `$WORKTREE` and `$PROJECT` against whatever happened to be focused, which is
     // another project's files when one is open and nothing at all when none is.
-    expect(pending.project).toBe(service.current()!.dir);
-    const worktree = await service.readUri({ uri: "$WORKTREE/notes.md", taskId, project: pending.project });
+    expect(pending.subjectProject).toBe(service.current()!.dir);
+    // And that it is a DIFFERENT project from the one the request parked in — the distinction the
+    // two fields exist to keep, and what makes the inbox strip resolvable (SHELL.md §2.4).
+    expect(pending.project).not.toBe(pending.subjectProject);
+    const worktree = await service.readUri({ uri: "$WORKTREE/notes.md", taskId, project: pending.subjectProject });
     expect(worktree.text).toBe("the agent's version\n");
 
     // The main-process re-validation: an answer about a change never proposed is refused (§4.1).

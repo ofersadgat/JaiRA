@@ -704,6 +704,11 @@ code {
 .strip .more {
   margin-left: auto;
 }
+/* Whose task the row is. The strip spans every open project, so without this a click resolves a
+   task id against whichever project is focused — see SHELL.md §2.4. */
+.strip-project {
+  color: var(--dim);
+}
 
 /* --- the file tree ---
    Both layer roots, one after the other. Which copy of a state you are about to edit is its

@@ -230,7 +230,8 @@ function MountHost({ mount, mountKey }: { mount: (node: HTMLElement) => () => vo
  * The changeset gate as a hostable element — exported because it has TWO hosts (§8.1's point): the
  * gate modal below, and the reviewed task's conversation view. `about` scopes `$WORKTREE` reads to
  * the reviewed task; `project` says which project's anchors every read resolves against (see
- * `PendingInteraction.project` — a review is parked in JaiRA's own project and is about another's);
+ * `PendingInteraction.subjectProject` — a review is parked in JaiRA's own project and is about
+ * another's, so the two are different projects and the reads want the second one);
  * `services` lets a host with more reach (the app shell has `drafts` and `openFile`; this module has
  * neither) supply what it can.
  */
@@ -341,7 +342,7 @@ export function InteractionDialog({
             inputs={inputs}
             onSubmit={onSubmit}
             about={pending.about}
-            project={pending.project}
+            project={pending.subjectProject ?? pending.project}
             services={services}
             mountKey={pending.requestId}
           />

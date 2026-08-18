@@ -138,6 +138,15 @@ export interface PendingApproval {
   reason?: string;
   input: Record<string, JsonValue>;
   taskId?: string;
+  /**
+   * The project whose database holds {@link taskId} — the session this request parked in.
+   *
+   * Required, not optional, because the inbox is ALREADY cross-project: `pendingApprovals()`
+   * flat-maps every open session, so a strip row carrying a bare task id resolves it against
+   * whichever project happens to be focused and answers "unknown task" — or worse, names a
+   * different task that happens to share the rowid. See SHELL.md §2.4.
+   */
+  project: ProjectRef;
   at: number;
 }
 
@@ -181,6 +190,8 @@ export interface PendingQuestion {
   requestId: string;
   questions: AgentQuestion[];
   taskId?: string;
+  /** Where {@link taskId} is recorded. Same reason as {@link PendingApproval.project}. */
+  project: ProjectRef;
   at: number;
 }
 
@@ -203,6 +214,8 @@ export interface SubmitInteractionRequest {
 export interface PendingInteraction {
   requestId: string;
   taskId: string;
+  /** Where {@link taskId} is recorded. Same reason as {@link PendingApproval.project}. */
+  project: ProjectRef;
   /**
    * The task this request is ABOUT, when that is a different task than the one that parked it.
    *
@@ -216,16 +229,17 @@ export interface PendingInteraction {
    * The project whose ANCHORS this request's file reads resolve against — what a renderer passes
    * back as `uri:read`'s `project`.
    *
-   * Not the project the request was parked in, which for a changeset review is always JaiRA's own:
-   * a review runs there, and the files it is about live in the reviewed task's project (a worktree
-   * review) or in the layer root the proposal targets (a sync review). Without the stamp the
-   * reviewer read `$WORKTREE`, `$JAIRA` and `$PROJECT` against whatever happened to be FOCUSED —
-   * another project's files when one was open, and `no project is open` when none was.
+   * Deliberately NOT {@link project}, which is the project the request was parked in: for a
+   * changeset review those are always different. A review runs in JaiRA's own project, and the
+   * files it is about live in the reviewed task's project (a worktree review) or in the layer root
+   * the proposal targets (a sync review). Without the stamp the reviewer read `$WORKTREE`, `$JAIRA`
+   * and `$PROJECT` against whatever happened to be FOCUSED — another project's files when one was
+   * open, and `no project is open` when none was.
    *
-   * Absent ⇒ the focused project, which is right for every request parked by a run of that
-   * project's own workflow.
+   * Absent ⇒ {@link project}, which is right for every request parked by a run of that project's
+   * own workflow. Named for `ProjectSession.subjectProject`, the map it is stamped from.
    */
-  project?: string;
+  subjectProject?: string;
   /** The registered function name — `choose_option`, `review_artifact`, … */
   component: string;
   /** Resolved inputs, including the state's authored `config` surface. */

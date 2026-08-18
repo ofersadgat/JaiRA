@@ -27,7 +27,15 @@
  * away, and it stays visible while you are deep in the Files tree.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from "react";
-import type { BoardCard, ConfigLayer, PendingApproval, PendingInteraction, PendingQuestion, WorkflowLayer } from "@jaira/shared/browser";
+import type {
+  BoardCard,
+  ConfigLayer,
+  PendingApproval,
+  PendingInteraction,
+  PendingQuestion,
+  ProjectSummary,
+  WorkflowLayer,
+} from "@jaira/shared/browser";
 import { SHARED_SESSION } from "@jaira/shared/browser";
 import { Board, lanesOf } from "./board";
 import { ChatListPanel, ChatView, conversationsOf, type ChatSurface } from "./chatPane";
@@ -261,15 +269,24 @@ function InboxStrip({
   pending,
   approvals,
   questions,
+  projects,
   onSelect,
 }: {
   pending: PendingInteraction[];
   approvals: PendingApproval[];
   questions: PendingQuestion[];
-  onSelect: (taskId: string) => void;
+  projects: ProjectSummary[];
+  onSelect: (taskId: string, project: string) => void;
 }): JSX.Element | null {
   const total = pending.length + approvals.length + questions.length;
   if (total === 0) return null;
+  // The strip's own list is cross-project (`pendingApprovals()` flat-maps every session), so a row
+  // has to say WHOSE task it is — and hand that project back with the click. Selecting on the task
+  // id alone read the id against whichever project was focused. See SHELL.md §2.4.
+  const labelOf = (project: string): string =>
+    // The published label when the project is still listed; the basename when it is not, which is
+    // what a request outliving its session by a tick looks like.
+    projects.find((p) => p.project === project)?.label ?? (project.split(/[\/]+/).filter(Boolean).pop() ?? project);
   const shown = [
     // Questions first: the agent addressed the person directly, and its loop is parked on the reply.
     ...questions.slice(0, 2).map((item) => ({
@@ -279,6 +296,7 @@ function InboxStrip({
       text: item.questions[0]?.question ?? "the agent has a question",
       title: item.questions.map((q) => q.question).join(" · "),
       taskId: item.taskId,
+      project: item.project,
     })),
     ...approvals.slice(0, 2).map((item) => ({
       key: item.requestId,
@@ -287,6 +305,7 @@ function InboxStrip({
       text: item.command ?? item.tool,
       title: item.reason ?? "",
       taskId: item.taskId,
+      project: item.project,
     })),
     ...pending.slice(0, 2).map((item) => ({
       key: item.requestId,
@@ -295,6 +314,7 @@ function InboxStrip({
       text: item.config?.prompt ?? item.component,
       title: item.component,
       taskId: item.taskId as string | undefined,
+      project: item.project,
     })),
   ].slice(0, 3);
   return (
@@ -306,10 +326,11 @@ function InboxStrip({
           key={item.key}
           className="strip-item"
           title={item.title}
-          onClick={() => (item.taskId ? onSelect(item.taskId) : undefined)}
+          onClick={() => (item.taskId ? onSelect(item.taskId, item.project) : undefined)}
         >
           <span className="sep" />
           <span className={`badge ${item.badge}`}>{item.glyph}</span>
+          <span className="chip strip-project">{labelOf(item.project)}</span>
           <span className="ellip">{item.text}</span>
         </span>
       ))}
@@ -1459,7 +1480,13 @@ export default function App(): JSX.Element {
           ) : null}
         </div>
 
-        <InboxStrip pending={pending} approvals={state.approvals} questions={state.questions} onSelect={actions.select} />
+        <InboxStrip
+          pending={pending}
+          approvals={state.approvals}
+          questions={state.questions}
+          projects={state.projects}
+          onSelect={actions.select}
+        />
       </div>
 
       {state.questions.length > 0 ? (

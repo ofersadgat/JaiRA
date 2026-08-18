@@ -537,18 +537,24 @@ export function syncEditPath(raw: string): string {
   return path;
 }
 
-/** A question as the renderer sees it (the hub's request, minus the session key). */
-function pendingQuestionOf(request: QuestionRequest): PendingQuestion {
+/**
+ * A question as the renderer sees it (the hub's request, minus the session key).
+ *
+ * `project` is passed rather than read off the request because the hub does not know it: hubs are
+ * built per session by {@link AppService.hubsFor}, and the session is what supplies the answer.
+ */
+function pendingQuestionOf(request: QuestionRequest, project: string): PendingQuestion {
   return {
     requestId: request.requestId,
     questions: request.questions as PendingQuestion["questions"],
     ...(request.taskId !== undefined ? { taskId: request.taskId } : {}),
+    project,
     at: request.at,
   };
 }
 
 /** An approval as the renderer sees it (the hub's request, minus internals). */
-function pendingApprovalOf(request: ApprovalRequest): PendingApproval {
+function pendingApprovalOf(request: ApprovalRequest, project: string): PendingApproval {
   return {
     requestId: request.requestId,
     tool: request.tool,
@@ -556,6 +562,7 @@ function pendingApprovalOf(request: ApprovalRequest): PendingApproval {
     ...(request.reason !== undefined ? { reason: request.reason } : {}),
     input: request.input as Record<string, JsonValue>,
     ...(request.taskId !== undefined ? { taskId: request.taskId } : {}),
+    project,
     at: request.at,
   };
 }
@@ -751,7 +758,7 @@ export class AppService {
     const approvals = new ApprovalHub({
       onRequest: (request) => {
         this.requestOwner.set(request.requestId, key);
-        this.publish({ type: "approval:requested", pending: pendingApprovalOf(request) });
+        this.publish({ type: "approval:requested", pending: pendingApprovalOf(request, this.refOf(key)) });
       },
       onResolved: (requestId, decision) => {
         // The human's answer is the audit entry policy alone could not produce.
@@ -784,7 +791,7 @@ export class AppService {
     const questions = new QuestionHub({
       onRequest: (request) => {
         this.requestOwner.set(request.requestId, key);
-        this.publish({ type: "question:requested", pending: pendingQuestionOf(request) });
+        this.publish({ type: "question:requested", pending: pendingQuestionOf(request, this.refOf(key)) });
       },
       onResolved: (requestId) => {
         this.requestOwner.delete(requestId);
@@ -1179,18 +1186,31 @@ export class AppService {
     this.publish({ type: "interaction:requested", pending: this.pendingOf(request) });
   }
 
+  /**
+   * The {@link ProjectRef} a session key names — what a renderer sends back to address it.
+   *
+   * The key is a canonicalized realpath and the ref is the directory as opened; they differ on
+   * Windows, where the key is lower-cased. Both resolve through {@link sessionOf}, but only the ref
+   * matches what `project:list` published, which is what a strip row has to compare against.
+   */
+  private refOf(key: string): string {
+    return this.sessions.get(key)?.dir ?? key;
+  }
+
   private pendingOf(request: HubRequest): PendingInteraction {
-    const owner = this.sessions.get(this.requestOwner.get(request.requestId) ?? "");
+    const ownerKey = this.requestOwner.get(request.requestId) ?? "";
+    const owner = this.sessions.get(ownerKey);
     const pending: PendingInteraction = {
       requestId: request.requestId,
       taskId: request.taskId ?? owner?.requestTask.get(request.requestId) ?? "",
+      project: this.refOf(ownerKey),
       component: request.component,
       inputs: request.inputs,
     };
     // Which project this request's file reads are about, when the session it parked in is not it.
     // See `ProjectSession.subjectProject`: a review runs in JaiRA's own project and reads another's.
     const subject = owner?.subjectProject.get(pending.taskId);
-    if (subject !== undefined) pending.project = subject;
+    if (subject !== undefined) pending.subjectProject = subject;
     // A changeset gate parked by a REVIEW task is about the task whose worktree it reviews — the
     // join the review task's labels carry (`["jaira", "changeset-review", <target>]`), and what
     // lets the reviewer render in the reviewed task's conversation (§8.1's default host).
@@ -3273,7 +3293,7 @@ export class AppService {
   pendingApprovals(): PendingApproval[] {
     // Every session's, not the focused one's: an approval names its own request id, and a run in
     // another project parked on a tool call is still waiting for the same person.
-    return [...this.sessions.values()].flatMap((s) => s.approvals.list().map(pendingApprovalOf));
+    return [...this.sessions.values()].flatMap((s) => s.approvals.list().map((r) => pendingApprovalOf(r, s.dir)));
   }
 
   /**
@@ -3293,7 +3313,7 @@ export class AppService {
 
   /** Mid-run questions awaiting the person — `AskUserQuestion`, parked by a running agent. */
   pendingQuestions(): PendingQuestion[] {
-    return [...this.sessions.values()].flatMap((s) => s.questions.list().map(pendingQuestionOf));
+    return [...this.sessions.values()].flatMap((s) => s.questions.list().map((r) => pendingQuestionOf(r, s.dir)));
   }
 
   /**

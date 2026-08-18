@@ -158,7 +158,9 @@ export class ProjectSession {
    * Set for the reviews JaiRA runs on another project's behalf: a changeset review is recorded here,
    * in the system project, while the files under review live in the reviewed task's project or in
    * the layer root a sync proposal targets. It is what lets a parked gate tell the renderer which
-   * project to read `$WORKTREE`, `$JAIRA` and `$PROJECT` against — see `PendingInteraction.project`.
+   * project to read `$WORKTREE`, `$JAIRA` and `$PROJECT` against — see
+   * `PendingInteraction.subjectProject`, which is stamped from here and is deliberately not that
+   * request's `project` (the session it parked in, which for a review is always JaiRA's own).
    *
    * In memory, like {@link requestTask}: a parked request does not outlive the process either.
    */
