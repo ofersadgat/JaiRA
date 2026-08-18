@@ -17,7 +17,7 @@
  *    beside the file, rather than a failure discovered part-way through a run.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { basename, join, relative, sep } from "node:path";
 import { parseReferencedFile, stateFilePath } from "@declarative-ai/hw";
 import { mimeOfPath } from "@jaira/shared";
 import type {
@@ -170,7 +170,16 @@ export function fileTree(project: Project, browser?: WorkflowBrowser): FileTree 
     };
     mark(nodes);
     rollUpLint(nodes);
-    return { layer, dir, exists: existsSync(dir), nodes };
+    return {
+      layer,
+      // Stamped on the PROJECT root only. The shared root belongs to no project — see `FileTree`,
+      // where the window's several projects are the top level and `~/.jaira` is their sibling.
+      ...(layer === "project" ? { project: project.paths.projectDir } : {}),
+      label: layer === "project" ? basename(project.paths.projectDir) : "~/.jaira",
+      dir,
+      exists: existsSync(dir),
+      nodes,
+    };
   });
   return { roots };
 }
@@ -378,7 +387,7 @@ export function baseFileTree(baseDir: string, browser?: WorkflowBrowser): FileTr
   };
   mark(nodes);
   rollUpLint(nodes);
-  return { roots: [{ layer: "base", dir: baseDir, exists: existsSync(baseDir), nodes }] };
+  return { roots: [{ layer: "base", label: "~/.jaira", dir: baseDir, exists: existsSync(baseDir), nodes }] };
 }
 
 // --- declared inputs ---------------------------------------------------------

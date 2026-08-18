@@ -236,8 +236,10 @@ describe("configuration", () => {
     expect(service.listExecutors().find((e) => e.name === "claude-cli")?.enabled).toBe(false);
   });
 
-  it("still refuses to write the project layer with no project open", () => {
-    expect(() => service.writeConfig({ layer: "project", config: {} })).toThrow(/no project is open/);
+  it("still refuses to write the project layer with no project named", () => {
+    // The layer switch became the crumb (SHELL.md §2.2): at the root there is no project layer to
+    // edit, and Settings edits `base` only — which is the rule this case already stated.
+    expect(() => service.writeConfig({ layer: "project", config: {} })).toThrow(/no project was named/);
   });
 });
 

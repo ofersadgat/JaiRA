@@ -312,16 +312,27 @@ describe("AppService.cancelTask (not running here)", () => {
  * does not have to also fix a shared counter or a leaked handle.
  */
 describe("sessions — one process, several projects", () => {
-  it("opens another project and answers as that one", async () => {
+  it("opens another project ALONGSIDE the first, and refuses to guess between them", async () => {
     const other = mkdtempSync(join(tmpdir(), "jaira-app-b-"));
     const paths = initProject(other);
     writeWorkflowFiles(paths.workflowsDir, specPlanningFiles());
     try {
+      const taskId = newTask();
       expect(service.current()?.dir).toBe(dir);
       await service.open(other);
+      // Opening ADDS a session; it does not evict one (SHELL.md §2.3). Both are listed, and both
+      // still answer — for whoever names them. The first project's task is still THERE, which is
+      // the whole change: it used to be closed out from under the window.
+      expect(service.listProjects().filter((p) => p.kind === "user").map((p) => p.project).sort()).toEqual([dir, other].sort());
+      expect(service.listTasks(dir).map((t) => t.taskId)).toEqual([taskId]);
+      // And still a different board rather than a merged one.
+      expect(service.listTasks(other)).toEqual([]);
+      // And the property that replaces the focus: with two open, a call that names neither reports
+      // rather than picking. A guess here reads the wrong database and answers about another
+      // project's task, which is the bug the whole crumb-as-address model exists to make impossible.
+      expect(() => service.listTasks()).toThrow(/must name one/);
+      // `current` survives as a STARTING POINT for a fresh window's address, and nothing more.
       expect(service.current()?.dir).toBe(other);
-      // The first project's tasks went with it — this is a different board, not a merged one.
-      expect(service.listTasks()).toEqual([]);
     } finally {
       // Closed before the directory goes, because Windows will not unlink an open database file —
       // which is also the reason `close()` drains its runs before closing the handle.
@@ -383,7 +394,7 @@ describe("the system project", () => {
     }
   });
 
-  it("is never the project the project-free channels answer for", async () => {
+  it("is never what an unqualified call resolves to", async () => {
     const home = mkdtempSync(join(tmpdir(), "jaira-sys-b-"));
     const bare = new AppService({ baseDir: join(home, "shared"), watchWorkflows: false });
     try {
@@ -530,9 +541,13 @@ describe("the system project", () => {
     }
   });
 
-  it("still answers for the focused project when a task names none", async () => {
+  it("still answers for the only user project when a task names none", async () => {
     // The routing is opt-in. Everything that existed before this — the Tasks view's New task, the
     // debug pane, the CLI path — sends no `project` and must keep landing in the checkout.
+    //
+    // Note what it is NOT: with a second user project open this throws rather than picking (see
+    // "opens another project ALONGSIDE the first"). One open project is not a focus, it is the
+    // absence of anything to choose between — which is what makes the unqualified call safe.
     const taskId = service.createTask({ title: "Plan", workflow: "feature/plan" }).taskId;
     expect(service.listTasks().map((t) => t.taskId)).toEqual([taskId]);
   });

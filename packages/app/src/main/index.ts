@@ -210,8 +210,10 @@ const handlers: Record<IpcChannel, Handler> = {
   "board:view": ((request: { level?: string; project?: string } | undefined) => service.board(request ?? {})) as Handler,
   "board:roots": ((request: { project?: string } | undefined) => service.boardRoots(request ?? {})) as Handler,
   "files:tree": (() => service.filesTree()) as Handler,
-  "state:view": ((request: { stateId: string }) => service.stateView(request.stateId)) as Handler,
-  "state:slots": ((request: { stateIds: string[] }) => service.stateSlots(request.stateIds)) as Handler,
+  "state:view": ((request: { stateId: string; project?: string }) =>
+    service.stateView(request.stateId, request.project)) as Handler,
+  "state:slots": ((request: { stateIds: string[]; project?: string }) =>
+    service.stateSlots(request.stateIds, request.project)) as Handler,
   "task:conversation": ((request: { taskId: string; project?: string }) => service.conversation(request.taskId, request.project)) as Handler,
   "task:system": (() => service.listSystemTasks()) as Handler,
   "project:list": (() => service.listProjects()) as Handler,
@@ -235,7 +237,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "question:pending": (() => service.pendingQuestions()) as Handler,
   "question:submit": ((request: { requestId: string; answers?: Record<string, string | string[]> }) =>
     service.submitQuestion(request.requestId, request.answers)) as Handler,
-  "workflow:browse": (() => service.browseWorkflows()) as Handler,
+  "workflow:browse": ((request: { project?: string } | undefined) => service.browseWorkflows(request?.project)) as Handler,
   "workflow:read": ((request: Parameters<typeof service.readWorkflow>[0]) => service.readWorkflow(request)) as Handler,
   "workflow:write": ((request: Parameters<typeof service.writeWorkflow>[0]) => service.writeWorkflow(request)) as Handler,
   "workflow:move": ((request: Parameters<typeof service.moveWorkflow>[0]) => service.moveWorkflow(request)) as Handler,
@@ -264,12 +266,12 @@ const handlers: Record<IpcChannel, Handler> = {
   "shell:download": ((request: { url: string }) => download(request.url)) as Handler,
   "shell:copyImageAt": ((request: { x: number; y: number }) => copyImageAt(request.x, request.y)) as Handler,
   "shell:edit": ((request: { verb: "cut" | "copy" | "paste" | "selectAll" }) => edit(request.verb)) as Handler,
-  "history:size": (() => service.historySize()) as Handler,
+  "history:size": ((request: { project?: string } | undefined) => service.historySize(request?.project)) as Handler,
   "history:prune": ((request: Parameters<typeof service.pruneHistory>[0]) =>
     service.pruneHistory(request)) as Handler,
   "settings:read": (() => service.readSettings()) as Handler,
   "settings:write": ((request: Parameters<typeof service.writeSettings>[0]) => service.writeSettings(request)) as Handler,
-  "config:read": (() => service.readConfig()) as Handler,
+  "config:read": ((request: { project?: string } | undefined) => service.readConfig(request?.project)) as Handler,
   "config:write": ((request: Parameters<typeof service.writeConfig>[0]) => service.writeConfig(request)) as Handler,
   "executor:list": (() => service.listExecutors()) as Handler,
   "executor:probe": ((request: { name?: string } | undefined) => service.probeExecutors(request?.name)) as Handler,

@@ -353,8 +353,30 @@ export interface FileNode {
  * affordance for "share this across projects" only appears once you have found another way to do
  * it. `exists` is false in that case, so the tree can say so rather than showing a bare "empty".
  */
+/**
+ * Both layer roots — and, since the window holds several projects, one `project` root per open
+ * project with the shared one listed ONCE beside them (SHELL.md §2.2).
+ *
+ * Once beside rather than under each: `~/.jaira` is machine-global, so repeating it per project
+ * would draw the same directory three times and invite somebody to wonder which copy they were
+ * editing. The projects are the tree's top level and the shared root is their sibling.
+ */
 export interface FileTree {
-  roots: Array<{ layer: WorkflowLayer; dir: string; exists: boolean; nodes: FileNode[] }>;
+  roots: FileRoot[];
+}
+
+export interface FileRoot {
+  layer: WorkflowLayer;
+  /**
+   * Which project this root IS, for a `project` root. Absent on the shared root, which belongs to
+   * no project — see {@link FileTree}.
+   */
+  project?: string;
+  /** What to call it: the project's basename, or `~/.jaira` for the shared root. */
+  label: string;
+  dir: string;
+  exists: boolean;
+  nodes: FileNode[];
 }
 
 // --- one state, as the Files view shows it -----------------------------------

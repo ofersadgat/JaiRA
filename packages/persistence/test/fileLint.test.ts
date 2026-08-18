@@ -42,7 +42,7 @@ function writeState(id: string, doc: unknown, layer = "project"): void {
 
 /** Only `paths.roots` is read — see the module header. */
 const projectOf = (): Project =>
-  ({ paths: { roots: [join(dir, "project"), join(dir, "base")] } }) as unknown as Project;
+  ({ paths: { projectDir: join(dir, "project"), roots: [join(dir, "project"), join(dir, "base")] } }) as unknown as Project;
 
 /** A browser result naming which states were reachable and what was found wrong with them. */
 function browserOf(

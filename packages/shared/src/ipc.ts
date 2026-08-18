@@ -292,6 +292,8 @@ export interface ConfigView {
 
 export interface WriteConfigRequest {
   layer: ConfigLayer;
+  /** WHICH project, for the `project` layer — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
   /** The whole document for that layer. Parsed and validated before it is written. */
   config: JsonValue;
 }
@@ -300,11 +302,21 @@ export interface WriteConfigRequest {
 export interface ReadWorkflowRequest {
   stateId: string;
   layer: WorkflowLayer;
+  /**
+   * WHICH project, when {@link layer} is `project`. See {@link ProjectRef}.
+   *
+   * A layer is not a project: `project` says which of the two roots an address is in, and the
+   * window holds several projects at once (SHELL.md §2.2), so the pair is what identifies a file.
+   * Absent is only valid for a `base` address, where there is one root and it is the shared one.
+   */
+  project?: ProjectRef;
 }
 
 export interface WorkflowSource {
   stateId: string;
   layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
   /** Absolute path of the file, for display. */
   file: string;
   /** The file as it stands, or an empty string when it does not exist yet. */
@@ -316,6 +328,8 @@ export interface WorkflowSource {
 export interface WriteWorkflowRequest {
   stateId: string;
   layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
   /** The full file contents. Must parse as JSON; the workflow is re-linted after the write. */
   text: string;
 }
@@ -330,6 +344,8 @@ export interface WriteWorkflowRequest {
 export interface MoveWorkflowRequest {
   stateId: string;
   layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
   /** The id it ends up at. Equal to `stateId` when only the layer changes — that is an override. */
   to: string;
   /** The layer it lands in. Equal to `layer` for a plain rename. */
@@ -354,6 +370,8 @@ export interface MoveWorkflowRequest {
  */
 export interface CreateFileRequest {
   layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
   /** Relative to the layer root, forward slashes. */
   path: string;
   kind: "file" | "directory";
@@ -372,6 +390,8 @@ export interface CreateFileRequest {
  */
 export interface RenameFileRequest {
   layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
   /** Relative to the layer root, forward slashes. */
   path: string;
   /** Where it ends up, relative to the same layer root. Directories on the way are created. */
@@ -423,6 +443,8 @@ export interface DetectSchemaResult {
 /** Read any file under a layer root as text, addressed by path. */
 export interface ReadFileRequest {
   layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
   /** Relative to the layer root, forward slashes. */
   path: string;
 }
@@ -438,6 +460,8 @@ export interface ReadFileRequest {
  */
 export interface FileSource {
   layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
   /** Relative to the layer root, forward slashes. */
   path: string;
   /** Absolute path of the file, for display. */
@@ -462,6 +486,8 @@ export interface FileSource {
  */
 export interface WriteFileRequest {
   layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
   /** Relative to the layer root, forward slashes. */
   path: string;
   /** The full file contents. Directories on the way are created. */
@@ -471,6 +497,8 @@ export interface WriteFileRequest {
 /** Delete a file or a directory under a layer root. A directory takes everything in it. */
 export interface DeleteFileRequest {
   layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
   /** Relative to the layer root, forward slashes. */
   path: string;
   /** Proceed even though states outside the deleted set reference states inside it. */
@@ -488,6 +516,8 @@ export interface DeleteFileRequest {
 export interface FileMutationResult {
   path: string;
   layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
   /** False when the operation was refused because {@link referencedBy} is non-empty. */
   applied: boolean;
   referencedBy: string[];
@@ -499,6 +529,8 @@ export interface FileMutationResult {
 export interface WorkflowMutationResult {
   stateId: string;
   layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
   /** False when the operation was refused because {@link referencedBy} is non-empty. */
   applied: boolean;
   /** States that declare this one as a child. Empty when nothing points at it. */
@@ -533,6 +565,8 @@ export interface SyncStateChange {
  */
 export interface WorkflowSyncStatus {
   layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
   /** The description, relative to the layer root. */
   path: string;
   exists: boolean;
@@ -573,6 +607,8 @@ export interface SyncDelegation {
 
 export interface WorkflowSyncRequest {
   layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
   path: string;
   direction: SyncDirection;
   /**
@@ -610,6 +646,8 @@ export interface WorkflowSyncEdit {
   /** The state id, when the file is a state file — derived from the path. Absent for a prompt file. */
   stateId?: string;
   layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
   /** Relative to the layer root — where the draft is keyed and where a save would land. */
   path: string;
   action: "create" | "update";
@@ -806,6 +844,8 @@ export interface ReviewChangesResult {
  */
 export interface ReviewSyncRequest {
   layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
   /** The description the sync ran for — what the baseline is keyed by. */
   path: string;
   /** The changeset the sync produced ({@link WorkflowSyncResult.changeset}). */
@@ -827,6 +867,8 @@ export interface SetSecretRequest {
   /** An empty value REMOVES the secret from the target, which is how a key is revoked. */
   value: string;
   target: SecretTarget;
+  /** WHICH project, for a project-scoped target — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
 }
 
 /** What the secret store can actually do here — the keychain needs Electron and an OS that has one. */
@@ -896,7 +938,7 @@ export interface IpcContract {
   /** Every file under both roots, as a tree — the Files view's left panel. */
   "files:tree": { request: void; response: FileTree };
   /** Everything the Files view shows about one state: its board or its tasks, plus the inspector. */
-  "state:view": { request: { stateId: string }; response: StateView };
+  "state:view": { request: { stateId: string; project?: ProjectRef }; response: StateView };
   /**
    * The slots a set of states declare — what the authoring form needs to open a child's wiring table
    * already showing what must be filled, and to complete a binding against what can be read.
@@ -905,7 +947,7 @@ export interface IpcContract {
    * trips would make the table appear a row at a time. An id that names no state is simply absent
    * from the response, which is how a half-typed reference is reported.
    */
-  "state:slots": { request: { stateIds: string[] }; response: Record<string, StateSlots> };
+  "state:slots": { request: { stateIds: string[]; project?: ProjectRef }; response: Record<string, StateSlots> };
   /** A task's run, read back out of the journal as turns. */
   "task:conversation": { request: { taskId: string; project?: string }; response: ConversationView };
   /**
@@ -1038,13 +1080,16 @@ export interface IpcContract {
   "approval:submit": { request: SubmitApprovalRequest; response: { requestId: string } };
   "question:pending": { request: void; response: PendingQuestion[] };
   "question:submit": { request: SubmitQuestionRequest; response: { requestId: string } };
-  "workflow:browse": { request: void; response: WorkflowBrowser };
+  "workflow:browse": { request: { project?: ProjectRef } | void; response: WorkflowBrowser };
   "workflow:read": { request: ReadWorkflowRequest; response: WorkflowSource };
   "workflow:write": { request: WriteWorkflowRequest; response: WorkflowSource };
   /** Rename, duplicate, or copy a state into the other layer. */
   "workflow:move": { request: MoveWorkflowRequest; response: WorkflowMutationResult };
   /** Which of the description and the state files has moved since they were last in step. */
-  "workflow:syncStatus": { request: { layer: WorkflowLayer; path: string; text?: string }; response: WorkflowSyncStatus };
+  "workflow:syncStatus": {
+    request: { layer: WorkflowLayer; path: string; text?: string; project?: ProjectRef };
+    response: WorkflowSyncStatus;
+  };
   /**
    * Run the sync. Nothing is written: the result is a proposal the renderer holds as drafts, which
    * is what makes a model's rewrite of someone's document something they read before it lands.
@@ -1110,7 +1155,7 @@ export interface IpcContract {
   "file:delete": { request: DeleteFileRequest; response: FileMutationResult };
   /** Delete a state file. Refuses while other states reference it, unless `force`. */
   "workflow:delete": {
-    request: { stateId: string; layer: WorkflowLayer; force?: boolean };
+    request: { stateId: string; layer: WorkflowLayer; force?: boolean; project?: ProjectRef };
     response: WorkflowMutationResult;
   };
   /**
@@ -1157,12 +1202,12 @@ export interface IpcContract {
    * own behaviour is the point of offering these at all.
    */
   "shell:edit": { request: { verb: "cut" | "copy" | "paste" | "selectAll" }; response: { verb: string } };
-  "history:size": { request: void; response: HistorySize };
+  "history:size": { request: { project?: ProjectRef } | void; response: HistorySize };
   "history:prune": { request: PruneRequest; response: PruneResult & { remaining: HistorySize } };
   /** User preferences (theme). Readable with no project open — they belong to the person. */
   "settings:read": { request: void; response: JairaSettings };
   "settings:write": { request: Partial<JairaSettings>; response: JairaSettings };
-  "config:read": { request: void; response: ConfigView };
+  "config:read": { request: { project?: ProjectRef } | void; response: ConfigView };
   "config:write": { request: WriteConfigRequest; response: ConfigView };
   "executor:list": { request: void; response: ExecutorInfo[] };
   /** Health-check executors. Without `name`, every one of them. */

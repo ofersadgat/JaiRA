@@ -235,6 +235,7 @@ import type {
   ExecutorInfo,
   FileMutationResult,
   FileSource,
+  FileNode,
   FileTree,
   AvailabilitySnapshot,
   JairaOperationNode,
@@ -539,6 +540,31 @@ export function syncEditPath(raw: string): string {
 }
 
 /**
+ * The shared root's nodes, with `shadowed` reduced across every open project's view of it.
+ *
+ * `shadowed` means "this copy is not the one that loads", which is a fact about ONE project — and
+ * the shared root is listed once, beside all of them (SHELL.md §2.2). So it survives only where
+ * EVERY open project overrides the state: that is the one reading still true of a row belonging to
+ * no project. A file two of three projects override is left unmarked, because in the third it is
+ * exactly the file that runs.
+ *
+ * Shape is taken from the first tree — the roots are the same directory walked the same way, so they
+ * differ only in these marks.
+ */
+function sharedShadows(trees: readonly FileTree[]): FileNode[] {
+  const bases = trees.map((tree) => tree.roots.find((root) => root.layer === "base")?.nodes ?? []);
+  const merge = (lists: FileNode[][]): FileNode[] =>
+    (lists[0] ?? []).map((node, index) => {
+      const everywhere = node.shadowed === true && lists.every((list) => list[index]?.shadowed === true);
+      const out: FileNode = { ...node };
+      if (!everywhere) delete out.shadowed;
+      if (node.children !== undefined) out.children = merge(lists.map((list) => list[index]?.children ?? []));
+      return out;
+    });
+  return merge(bases);
+}
+
+/**
  * A question as the renderer sees it (the hub's request, minus the session key).
  *
  * `project` is passed rather than read off the request because the hub does not know it: hubs are
@@ -586,14 +612,7 @@ export class AppService {
    * directory so two spellings of one path cannot become two `better-sqlite3` handles on one file.
    */
   private readonly sessions = new Map<string, ProjectSession>();
-  /**
-   * Which session the project-free channels answer for.
-   *
-   * Never the system session. A window with no user project open must answer "list the tasks" with
-   * nothing rather than with JaiRA's own — the whole point of giving those runs their own project is
-   * that they stay out of the user's board.
-   */
-  private focusedKey?: string;
+
   /**
    * ONE request-id generator for every hub in the process.
    *
@@ -853,18 +872,20 @@ export class AppService {
   // --- lifecycle -------------------------------------------------------------
 
   async open(dir: string): Promise<{ dir: string; recovered: string[] }> {
-    // Still one USER project at a time. The map can hold several and everything below is written for
-    // that, but letting a second one STAY open is a UI decision (which project do the project-free
-    // channels answer for?) and is made separately.
+    // Opening a project ADDS a session; it does not evict one (SHELL.md §2.3). What used to close
+    // every other user project here was answering a question the shell has since answered a better
+    // way: "which project do the project-free channels answer for?" is now "none of them, because
+    // there are no project-free channels" — the project is the head of every address, so each call
+    // says whose it is and several can be open without any of them being THE one.
     //
-    // The system session is deliberately not closed here: it is machine-global, it holds JaiRA's own
-    // runs, and switching a checkout is not a reason to abandon a sync that is in flight against it.
-    await this.closeUserSessions();
+    // Re-opening a project already open is a no-op rather than a second handle: the map is keyed by
+    // canonical directory, so the existing session is returned and its database is not touched.
     const key = sessionKey(dir);
+    const already = this.sessions.get(key);
+    if (already !== undefined) return { dir: already.dir, recovered: [] };
     const project = openProject(dir, { baseDir: this.baseDir });
     const session = new ProjectSession({ key, kind: "user", project, ...this.hubsFor(key) });
     this.sessions.set(key, session);
-    this.focusedKey = key;
     this.log({
       level: "info",
       source: "project",
@@ -1026,9 +1047,17 @@ export class AppService {
     return dir === undefined || dir === null ? null : { dir };
   }
 
+  /**
+   * The user project opened most recently, or null when none is.
+   *
+   * A STARTING POINT for the address, and deliberately nothing more: it is read once, when a window
+   * needs somewhere to stand before anybody has navigated. Nothing resolves against it — that was
+   * `focusedKey`'s job, and the reason a second project could not stay open (SHELL.md §2.3).
+   */
   current(): { dir: string } | null {
-    const session = this.sessionOf();
-    return session ? { dir: session.dir } : null;
+    const open = this.userSessions();
+    const last = open[open.length - 1];
+    return last ? { dir: last.dir } : null;
   }
 
   /**
@@ -1061,19 +1090,37 @@ export class AppService {
     const session = this.sessions.get(key);
     if (session === undefined) return;
     this.sessions.delete(key);
-    if (this.focusedKey === key) this.focusedKey = undefined;
     for (const [requestId, owner] of [...this.requestOwner]) if (owner === key) this.requestOwner.delete(requestId);
     await session.close();
   }
 
   /**
-   * The session a request names, or the focused one when it names none.
+   * The session a request NAMES — or the only one there is, when it names none.
    *
-   * `"system"` is reserved: it addresses JaiRA's own project explicitly, which is the only way to
-   * reach it — {@link focusedKey} never points there.
+   * {@link focusedKey} is gone (SHELL.md §2.3), and this is deliberately NOT it. A focus CHOOSES
+   * among open projects, which is the one thing that cannot be done on a caller's behalf: with two
+   * checkouts open, "the focused one" is a guess, and a guess here reads the wrong database and
+   * answers confidently about another project's task.
+   *
+   * What is left is the case where there is nothing to choose. With exactly one user project open
+   * there is one possible answer and it is not a guess — it is what every unqualified caller has
+   * always meant, and it is what keeps the CLI (which cannot have two) from having to name the
+   * project it just opened. With none, and with two or more, an unqualified call gets `undefined`
+   * and its caller reports rather than picks. That is the property that matters: no width of
+   * ambiguity is ever resolved silently.
+   *
+   * The renderer does not rely on it — every call from there names its project, because the project
+   * is the head of the address it is standing on.
+   *
+   * `"system"` and `"shared"` are reserved and address those two projects by role, which is the only
+   * way to reach either — they are never what a bare directory resolves to, and never what this
+   * answers with no ref.
    */
   private sessionOf(ref?: string): ProjectSession | undefined {
-    if (ref === undefined) return this.focusedKey === undefined ? undefined : this.sessions.get(this.focusedKey);
+    if (ref === undefined) {
+      const open = this.userSessions();
+      return open.length === 1 ? open[0] : undefined;
+    }
     if (ref === SYSTEM_SESSION) return this.systemSession();
     if (ref === SHARED_SESSION) return this.sharedSession();
     return this.sessions.get(sessionKey(ref));
@@ -1083,14 +1130,17 @@ export class AppService {
   private session(ref?: string): ProjectSession {
     const session = this.sessionOf(ref);
     if (session === undefined) {
-      throw new Error(ref === undefined ? "no project is open" : `project '${ref}' is not open`);
+      if (ref !== undefined) throw new Error(`project '${ref}' is not open`);
+      // Two different faults, and telling them apart is the whole reason there is no focus: one is a
+      // window with nothing open, the other is a caller that had to say which and did not.
+      throw new Error(this.hasProject ? "several projects are open, so this call must name one" : "no project is open");
     }
     return session;
   }
 
-  /** The focused project. Shorthand for the overwhelmingly common `this.session()`. */
-  private get p(): Project {
-    return this.session().project;
+  /** A named project. Shorthand for the overwhelmingly common `this.session(ref).project`. */
+  private p(ref?: string): Project {
+    return this.session(ref).project;
   }
 
   /**
@@ -1101,7 +1151,18 @@ export class AppService {
    * project; they just answer about a different thing.
    */
   private get hasProject(): boolean {
-    return this.sessionOf() !== undefined;
+    return this.userSessions().length > 0;
+  }
+
+  /**
+   * Every open USER project, in the order they were opened.
+   *
+   * Insertion order rather than sorted, because the one thing that reads it in order wants the
+   * newest — see {@link current}. `listProjects` does its own sort, which is a different question
+   * (what to show, outward from what you are working on).
+   */
+  private userSessions(): ProjectSession[] {
+    return [...this.sessions.values()].filter((s) => s.kind === "user");
   }
 
   private publish(message: PushMessage): void {
@@ -1330,25 +1391,41 @@ export class AppService {
   }
 
   /**
-   * Both layer roots as trees — the Files view's left panel.
+   * The Files view's left panel: every open project, then the shared root ONCE beside them.
    *
-   * With no project open you still get the SHARED root, because it is machine-global: `~/.jaira`
-   * exists independently of any checkout, and its workflows are the ones every project can reach.
-   * Showing nothing until a project is open would hide the one place you can author something that
-   * outlives this checkout — and would hide it exactly when a new user is looking for somewhere to
+   * The projects are the tree's top level (SHELL.md §2.2). `~/.jaira` is their sibling rather than a
+   * branch under each, because it is machine-global — drawing it per project would show the same
+   * directory three times and invite somebody to wonder which copy they were editing.
+   *
+   * With no project open you still get the shared root, for the same reason it is listed at all:
+   * `~/.jaira` exists independently of any checkout, and its workflows are the ones every project
+   * can reach. Showing nothing until a project is open would hide the one place you can author
+   * something that outlives this checkout — exactly when a new user is looking for somewhere to
    * start.
    */
   filesTree(): FileTree {
-    if (this.hasProject) return fileTree(this.p, this.browseWorkflows());
-    const baseDir = jairaBasePaths(this.baseDir).baseDir;
-    // Linted against the shared project's own tasks when it is open, so a state a run is pinned to
-    // reports drift here the same way it would in a checkout.
-    const shared = this.sharedIfPresent();
-    if (shared !== undefined) return baseFileTree(baseDir, browseBaseWorkflows(baseDir, {}, shared.project));
-    // Linted with no project open, exactly as a project's tree is. The shared root is where a
-    // workflow meant to outlive one checkout gets authored, so leaving it unvalidated meant the one
-    // mode people write shared workflows in was the one mode that never said anything was wrong.
-    return baseFileTree(baseDir, browseBaseWorkflows(baseDir));
+    const open = this.userSessions();
+    if (open.length === 0) {
+      const baseDir = jairaBasePaths(this.baseDir).baseDir;
+      // Linted against the shared project's own tasks when it is open, so a state a run is pinned to
+      // reports drift here the same way it would in a checkout.
+      const shared = this.sharedIfPresent();
+      if (shared !== undefined) return baseFileTree(baseDir, browseBaseWorkflows(baseDir, {}, shared.project));
+      // Linted with no project open, exactly as a project's tree is. The shared root is where a
+      // workflow meant to outlive one checkout gets authored, so leaving it unvalidated meant the one
+      // mode people write shared workflows in was the one mode that never said anything was wrong.
+      return baseFileTree(baseDir, browseBaseWorkflows(baseDir));
+    }
+    // One tree per project, each of which also produced its own view of the shared root — the two
+    // are linted TOGETHER, so a project's copy of a base state can be marked as shadowing it.
+    const trees = open.map((session) => fileTree(session.project, this.browseWorkflowsIn(session)));
+    const roots = trees.flatMap((tree) => tree.roots.filter((root) => root.layer === "project"));
+    // The shared root, from the FIRST project's tree, with its shadow marks reduced across all of
+    // them: a base file is only never-the-one-that-loads if EVERY open project overrides it. With one
+    // project open that is exactly what it meant before, which is the case this has to keep.
+    const base = trees[0]!.roots.find((root) => root.layer === "base");
+    if (base !== undefined) roots.push(trees.length === 1 ? base : { ...base, nodes: sharedShadows(trees) });
+    return { roots };
   }
 
   /**
@@ -1358,8 +1435,11 @@ export class AppService {
    * makes "generic-cli is off, so this state cannot start" an authoring diagnostic rather than a
    * run-time surprise (DESIGN §8.2).
    */
-  stateView(stateId: string): StateView {
-    if (this.hasProject) return stateView(this.p, stateId, this.browseWorkflows(), this.stateViewOptions());
+  stateView(stateId: string, project?: string): StateView {
+    const open = this.sessionOf(project);
+    if (open !== undefined) {
+      return stateView(open.project, stateId, this.browseWorkflowsIn(open), this.stateViewOptions());
+    }
     // No checkout open. The shared root is still a PROJECT — it has a workflows directory and a run
     // history of its own — so this is the full view, not a degraded one: boards, dependants, drift
     // and the tasks that have passed through each state, exactly as a checkout gets.
@@ -1386,8 +1466,9 @@ export class AppService {
    * the slots the loader will look for. With no project open the shared root is the only layer there
    * is, which is also the only layer authorable in that mode.
    */
-  stateSlots(stateIds: string[]): Record<string, StateSlots> {
-    const roots = this.hasProject ? workflowRoots(this.p) : [jairaBasePaths(this.baseDir).workflowsDir];
+  stateSlots(stateIds: string[], project?: string): Record<string, StateSlots> {
+    const open = this.sessionOf(project);
+    const roots = open !== undefined ? workflowRoots(open.project) : [jairaBasePaths(this.baseDir).workflowsDir];
     return stateSlots(roots, stateIds);
   }
 
@@ -1631,8 +1712,8 @@ export class AppService {
    * interactive function is only registered once a run needs it, so linting
    * against this process's partial registry would flag every human gate.
    */
-  browseWorkflows(): WorkflowBrowser {
-    return browseWorkflows(this.p);
+  browseWorkflows(project?: string): WorkflowBrowser {
+    return browseWorkflows(this.p(project));
   }
 
   /** The same, for a named session — what a board drawn for another project reads. */
@@ -1641,8 +1722,8 @@ export class AppService {
   }
 
   /** Rows currently stored, for the pruning panel's "before" figure. */
-  historySize(): HistorySize {
-    return historySize(this.p);
+  historySize(project?: string): HistorySize {
+    return historySize(this.p(project));
   }
 
   /**
@@ -3415,10 +3496,16 @@ export class AppService {
 
   // --- configuration ---------------------------------------------------------
 
-  /** Both configuration layers as authored, plus the merged result a run would use. */
-  readConfig(): ConfigView {
+  /**
+   * Both configuration layers as authored, plus the merged result a run would use.
+   *
+   * `project` is WHICH project's layer to show. The layer switch became the crumb (SHELL.md §2.2):
+   * at the root there is no project layer to edit and Settings edits `base` only, which is exactly
+   * the rule the no-project case already stated.
+   */
+  readConfig(project?: string): ConfigView {
     const base = jairaBasePaths(this.baseDir);
-    const projectFile = this.sessionOf()?.project.paths.configFile;
+    const projectFile = this.sessionOf(project)?.project.paths.configFile;
     const baseDoc = readJsonIfPresent(base.configFile);
     const projectDoc = projectFile !== undefined ? readJsonIfPresent(projectFile) : null;
     return {
@@ -3453,10 +3540,14 @@ export class AppService {
     // Before validating, not after: a document reported field by field and THEN refused for having
     // nowhere to go tells the author to fix the wrong thing. The base layer is always writable —
     // it is the machine's, and `initBase` creates it — so only the project layer can fail here.
-    if (request.layer !== "base" && !this.hasProject) {
-      throw new Error("no project is open, so there is no project config to write");
+    if (request.layer !== "base" && this.sessionOf(request.project) === undefined) {
+      throw new Error(
+        request.project === undefined
+          ? "no project was named, so there is no project config to write"
+          : `project '${request.project}' is not open`,
+      );
     }
-    const current = this.readConfig();
+    const current = this.readConfig(request.project);
     const merged =
       request.layer === "base"
         ? mergeConfigDocuments(request.config, current.project ?? undefined)
@@ -3467,7 +3558,7 @@ export class AppService {
       initBase(base.baseDir);
       file = base.configFile;
     } else {
-      file = this.p.paths.configFile;
+      file = this.p(request.project).paths.configFile;
     }
     writeFileSync(file, `${JSON.stringify(request.config, null, 2)}\n`, "utf8");
     // The open project holds a PARSED copy, and everything downstream of this write reads that copy
@@ -3482,7 +3573,7 @@ export class AppService {
     // settings screen was showing about availability described the configuration BEFORE this, so it
     // is re-observed rather than left to be corrected by hand.
     if (this.options.probeOnStart === true) this.kickAvailability();
-    return this.readConfig();
+    return this.readConfig(request.project);
   }
 
   // --- executors -------------------------------------------------------------
@@ -3665,7 +3756,7 @@ export class AppService {
     const file =
       request.target === "base-env-local"
         ? join(jairaBasePaths(this.baseDir).baseDir, ".env.local")
-        : join(this.requireProjectDir(), ".env.local");
+        : join(this.requireProjectDir(request.project), ".env.local");
     writeEnvEntry(file, request.name, request.value);
     return { name: request.name, target: request.target };
   }
@@ -3674,7 +3765,7 @@ export class AppService {
 
   /** One state file as text, from a named layer. A file that does not exist yet reads as empty. */
   readWorkflow(request: ReadWorkflowRequest): WorkflowSource {
-    const file = this.workflowFile(request.stateId, request.layer);
+    const file = this.workflowFile(request.stateId, request.layer, request.project);
     const exists = existsSync(file);
     return {
       stateId: request.stateId,
@@ -3699,7 +3790,7 @@ export class AppService {
     } catch (e) {
       throw new Error(`not valid JSON: ${(e as Error).message}`);
     }
-    const file = this.workflowFile(request.stateId, request.layer);
+    const file = this.workflowFile(request.stateId, request.layer, request.project);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, request.text.endsWith("\n") ? request.text : `${request.text}\n`, "utf8");
     this.publish({ type: "store:invalidate", scope: "workflows" });
@@ -3718,14 +3809,14 @@ export class AppService {
    * and reports who. Duplicating and overriding break nothing and are never refused.
    */
   moveWorkflow(request: MoveWorkflowRequest): WorkflowMutationResult {
-    const from = this.workflowFile(request.stateId, request.layer);
-    const to = this.workflowFile(request.to, request.toLayer);
+    const from = this.workflowFile(request.stateId, request.layer, request.project);
+    const to = this.workflowFile(request.to, request.toLayer, request.project);
     if (!existsSync(from)) throw new Error(`'${request.stateId}' does not exist in the ${request.layer} layer`);
     if (from === to) throw new Error("the source and destination are the same file");
     if (existsSync(to)) throw new Error(`'${request.to}' already exists in the ${request.toLayer} layer`);
 
     const renaming = request.copy !== true && request.to !== request.stateId;
-    const referencedBy = renaming ? this.referrersOf(request.stateId) : [];
+    const referencedBy = renaming ? this.referrersOf(request.stateId, request.project) : [];
     if (referencedBy.length > 0 && request.force !== true) {
       return { stateId: request.stateId, layer: request.layer, applied: false, referencedBy };
     }
@@ -3744,10 +3835,10 @@ export class AppService {
    * fails to load rather than one with a gap. `force` is the deliberate override, and the refusal
    * names the referrers so there is something to act on.
    */
-  deleteWorkflow(request: { stateId: string; layer: WorkflowLayer; force?: boolean }): WorkflowMutationResult {
-    const file = this.workflowFile(request.stateId, request.layer);
+  deleteWorkflow(request: { stateId: string; layer: WorkflowLayer; force?: boolean; project?: string }): WorkflowMutationResult {
+    const file = this.workflowFile(request.stateId, request.layer, request.project);
     if (!existsSync(file)) throw new Error(`'${request.stateId}' does not exist in the ${request.layer} layer`);
-    const referencedBy = this.referrersOf(request.stateId);
+    const referencedBy = this.referrersOf(request.stateId, request.project);
     if (referencedBy.length > 0 && request.force !== true) {
       return { stateId: request.stateId, layer: request.layer, applied: false, referencedBy };
     }
@@ -3863,7 +3954,7 @@ export class AppService {
    * silent data loss.
    */
   readFile(request: ReadFileRequest): FileSource {
-    const file = this.layerFile(request.path, request.layer);
+    const file = this.layerFile(request.path, request.layer, request.project);
     const mime = mimeOfPath(request.path);
     if (!isTextMime(mime)) throw new Error(`'${request.path}' is ${mime}, which is not text`);
     const exists = existsSync(file);
@@ -4159,7 +4250,7 @@ export class AppService {
     const mime = mimeOfPath(request.path);
     if (!isTextMime(mime)) throw new Error(`'${request.path}' is ${mime}, which is not text`);
     if (mime === WORKFLOW_JSON) throw new Error(`'${request.path}' is a state file — write it through workflow:write`);
-    const file = this.layerFile(request.path, request.layer);
+    const file = this.layerFile(request.path, request.layer, request.project);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, request.text, "utf8");
     this.publish({ type: "store:invalidate", scope: "workflows" });
@@ -4199,7 +4290,7 @@ export class AppService {
    * file" that quietly emptied an existing one is the worst possible reading of the verb.
    */
   createFile(request: CreateFileRequest): { file: string } {
-    const file = this.layerFile(request.path, request.layer);
+    const file = this.layerFile(request.path, request.layer, request.project);
     if (existsSync(file)) throw new Error(`'${request.path}' already exists`);
     if (request.kind === "directory") {
       mkdirSync(file, { recursive: true });
@@ -4223,8 +4314,8 @@ export class AppService {
    * question a state rename asks, applied to the whole set: who outside it names something inside?
    */
   renameFile(request: RenameFileRequest): FileMutationResult {
-    const from = this.layerFile(request.path, request.layer);
-    const to = this.layerFile(request.to, request.layer);
+    const from = this.layerFile(request.path, request.layer, request.project);
+    const to = this.layerFile(request.to, request.layer, request.project);
     if (!existsSync(from)) throw new Error(`'${request.path}' does not exist in the ${request.layer} root`);
     if (from === to) throw new Error("the source and destination are the same path");
     if (existsSync(to)) throw new Error(`'${request.to}' already exists`);
@@ -4232,8 +4323,8 @@ export class AppService {
     // reports it as a bare EINVAL that says nothing about what was attempted.
     if (to.startsWith(`${from}${sep}`)) throw new Error(`'${request.to}' is inside '${request.path}'`);
 
-    const states = this.statesUnder(from, request.layer);
-    const referencedBy = this.brokenBy(states);
+    const states = this.statesUnder(from, request.layer, request.project);
+    const referencedBy = this.brokenBy(states, request.project);
     if (referencedBy.length > 0 && request.force !== true) {
       return { path: request.path, layer: request.layer, applied: false, referencedBy, states };
     }
@@ -4252,11 +4343,11 @@ export class AppService {
    * that named them would only report it at load time.
    */
   deleteFile(request: DeleteFileRequest): FileMutationResult {
-    const file = this.layerFile(request.path, request.layer);
+    const file = this.layerFile(request.path, request.layer, request.project);
     if (!existsSync(file)) throw new Error(`'${request.path}' does not exist in the ${request.layer} root`);
 
-    const states = this.statesUnder(file, request.layer);
-    const referencedBy = this.brokenBy(states);
+    const states = this.statesUnder(file, request.layer, request.project);
+    const referencedBy = this.brokenBy(states, request.project);
     if (referencedBy.length > 0 && request.force !== true) {
       return { path: request.path, layer: request.layer, applied: false, referencedBy, states };
     }
@@ -4286,7 +4377,7 @@ export class AppService {
    * description, no workflows — is a `blocked` string instead, because the panel is rendered by
    * opening a file and an exception there is a blank surface with no explanation on it.
    */
-  syncStatus(request: { layer: WorkflowLayer; path: string; text?: string }): WorkflowSyncStatus {
+  syncStatus(request: { layer: WorkflowLayer; path: string; text?: string; project?: string }): WorkflowSyncStatus {
     const base = {
       layer: request.layer,
       path: request.path,
@@ -4305,10 +4396,10 @@ export class AppService {
       return { ...base, blocked: "open a project to sync its workflows" };
     }
 
-    const source = this.syncSource(request.layer);
+    const source = this.syncSource(request.layer, request.project);
     let file: string;
     try {
-      file = this.layerFile(request.path, request.layer);
+      file = this.layerFile(request.path, request.layer, request.project);
     } catch (e) {
       return { ...base, blocked: (e as Error).message };
     }
@@ -4420,11 +4511,11 @@ export class AppService {
   }
 
   async runSync(request: WorkflowSyncRequest): Promise<WorkflowSyncResult> {
-    const source = this.syncSource(request.layer);
+    const source = this.syncSource(request.layer, request.project);
     const owner = this.syncHolder(request.layer);
     if (owner.syncTask !== undefined) throw new Error("a sync is already running");
 
-    const file = this.layerFile(request.path, request.layer);
+    const file = this.layerFile(request.path, request.layer, request.project);
     const spec = request.text ?? (existsSync(file) ? readFileSync(file, "utf8") : "");
     if (spec.trim() === "") throw new Error(`${request.path} is empty; there is nothing to sync`);
 
@@ -4559,8 +4650,10 @@ export class AppService {
       // Nothing to accept means the two already agree — which is a sync that succeeded, so the
       // baseline moves. The alternative would leave a project that IS in step reporting drift
       // forever, with no button that could ever clear it.
-      if (changed) this.beginPendingSync("document", request.path, request.layer, [docKey(request.layer, request.path)]);
-      else this.commitSyncRecord("document", request.path, request.layer);
+      if (changed) {
+        this.beginPendingSync("document", request.path, request.layer, [docKey(request.layer, request.path)], request.project);
+      }
+      else this.commitSyncRecord("document", request.path, request.layer, request.project);
       return {
         ...common,
         document: { text, changes: outcome.document?.changes ?? [] },
@@ -4568,7 +4661,7 @@ export class AppService {
       };
     }
 
-    const edits = this.placeEdits(outcome.edits ?? [], scope.ownership, source.layer);
+    const edits = this.placeEdits(outcome.edits ?? [], scope.ownership, source.layer, request.project);
     const applicable = edits.filter((e) => e.applicable);
     const identical = (outcome.edits ?? []).length - edits.length;
     // The same proposals, lowered into ONE changeset (CHANGESETS.md §1): the sync stops being its
@@ -4578,11 +4671,11 @@ export class AppService {
     const changeset =
       applicable.length > 0
         ? await editsChangeset(
-            request.layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject().paths.jairaDir,
+            request.layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject(request.project).paths.jairaDir,
             applicable.map((e) => ({ path: e.path, action: e.action, text: e.text, reason: e.reason })),
             (path: string) => {
               try {
-                const file = this.layerFile(path, layerByPath.get(path) ?? request.layer);
+                const file = this.layerFile(path, layerByPath.get(path) ?? request.layer, request.project);
                 return existsSync(file) ? readFileSync(file, "utf8") : undefined;
               } catch {
                 return undefined;
@@ -4596,9 +4689,10 @@ export class AppService {
         request.path,
         request.layer,
         applicable.map((e) => docKey(e.layer, e.path)),
+        request.project,
       );
     } else if (edits.length === 0) {
-      this.commitSyncRecord("states", request.path, request.layer);
+      this.commitSyncRecord("states", request.path, request.layer, request.project);
     }
     // The review, opened by the sync itself when asked to. The reviewer arrives as a pending
     // interaction — from MAIN, not from whichever renderer state happened to await this channel —
@@ -4732,7 +4826,7 @@ export class AppService {
   async reviewSyncChangeset(request: ReviewSyncRequest): Promise<ReviewChangesResult> {
     const changeset = changesetOf(request.changeset);
     if (changeset.changes.length === 0) throw new Error("the proposal has no changes to review");
-    const root = request.layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject().paths.jairaDir;
+    const root = request.layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject(request.project).paths.jairaDir;
 
     const system = this.sessionOf(SYSTEM_SESSION);
     if (system === undefined) {
@@ -4743,7 +4837,7 @@ export class AppService {
     // copy is the closest thing to a stable truth this side of the IPC boundary.
     let spec = "";
     try {
-      const file = this.layerFile(request.path, request.layer);
+      const file = this.layerFile(request.path, request.layer, request.project);
       if (existsSync(file)) spec = readFileSync(file, "utf8");
     } catch {
       // Outside the root or unreadable — the reviewer still works; respond just loses the document.
@@ -4793,7 +4887,7 @@ export class AppService {
         const outputs = JSON.parse(run.outputsJson) as { applied?: string[]; decisions?: Array<{ decision?: string }> };
         const decisions = outputs.decisions ?? [];
         if (outputs.applied !== undefined && decisions.length > 0 && decisions.every((d) => d.decision === "merged")) {
-          this.commitSyncRecord("states", request.path, request.layer);
+          this.commitSyncRecord("states", request.path, request.layer, request.project);
         }
         this.publish({ type: "store:invalidate", scope: "workflows" });
       } catch {
@@ -4845,6 +4939,7 @@ export class AppService {
     edits: readonly SyncEdit[],
     ownership: DescriptionOwnership,
     layer: WorkflowLayer,
+    project?: string,
   ): WorkflowSyncEdit[] {
     const out: WorkflowSyncEdit[] = [];
     const ownerOf = (stateId: string): DescriptionBoundary | undefined =>
@@ -4864,7 +4959,7 @@ export class AppService {
         blocked: reason,
       });
       const place = (path: string, stateId?: string): void => {
-        const file = this.layerFile(path, layer);
+        const file = this.layerFile(path, layer, project);
         const exists = existsSync(file);
         if (exists && hashText(readFileSync(file, "utf8")) === hashText(edit.text)) return;
         out.push({
@@ -4882,7 +4977,7 @@ export class AppService {
       const raw = syncEditPath(edit.path);
       if (raw.startsWith("prompts/")) {
         try {
-          this.layerFile(raw, layer);
+          this.layerFile(raw, layer, project);
         } catch (e) {
           out.push(blocked(raw, (e as Error).message));
           continue;
@@ -4896,7 +4991,7 @@ export class AppService {
       }
       const stateId = raw.slice("workflows/".length).replace(/\.(json|jsonc|ya?ml)$/i, "");
       try {
-        this.workflowFile(stateId, layer);
+        this.workflowFile(stateId, layer, project);
       } catch (e) {
         out.push(blocked(`workflows/${stateId}.json`, (e as Error).message, stateId));
         continue;
@@ -4905,14 +5000,14 @@ export class AppService {
       if (owner !== undefined) {
         out.push(
           blocked(
-            this.existingStateFile(stateId, layer) ?? `workflows/${stateId}.json`,
+            this.existingStateFile(stateId, layer, project) ?? `workflows/${stateId}.json`,
             `\`${owner.document}\` describes this state — change that document instead`,
             stateId,
           ),
         );
         continue;
       }
-      const existing = this.existingStateFile(stateId, layer);
+      const existing = this.existingStateFile(stateId, layer, project);
       if (existing !== undefined && /\.ya?ml$/i.test(existing)) {
         out.push(blocked(existing, "this state is authored as YAML, and the proposal is JSON", stateId));
         continue;
@@ -4923,11 +5018,11 @@ export class AppService {
   }
 
   /** The layer-relative path of a state's file, when the layer already has one. */
-  private existingStateFile(stateId: string, layer: WorkflowLayer): string | undefined {
+  private existingStateFile(stateId: string, layer: WorkflowLayer, project?: string): string | undefined {
     for (const suffix of [".json", ".jsonc", ".yaml", ".yml"]) {
       const path = `workflows/${stateId}${suffix}`;
       try {
-        if (existsSync(this.layerFile(path, layer))) return path;
+        if (existsSync(this.layerFile(path, layer, project))) return path;
       } catch {
         return undefined; // outside the root — the caller has already refused it
       }
@@ -4947,8 +5042,15 @@ export class AppService {
     document: string,
     layer: WorkflowLayer,
     targets: string[],
+    project?: string,
   ): void {
-    this.syncHolder(layer).pendingSync = { direction, document, layer, remaining: new Set(targets) };
+    this.syncHolder(layer).pendingSync = {
+      direction,
+      document,
+      layer,
+      ...(project !== undefined ? { project } : {}),
+      remaining: new Set(targets),
+    };
   }
 
   /**
@@ -4988,7 +5090,7 @@ export class AppService {
       if (!pending.remaining.delete(docKey(layer, path))) continue;
       if (pending.remaining.size > 0) continue;
       holder.pendingSync = undefined;
-      this.commitSyncRecord(pending.direction, pending.document, pending.layer);
+      this.commitSyncRecord(pending.direction, pending.document, pending.layer, pending.project);
     }
   }
 
@@ -4999,12 +5101,12 @@ export class AppService {
    * the pair agreed at one instant, and half of it taken before the save would describe a state of
    * the project that never existed.
    */
-  private commitSyncRecord(direction: SyncDirection, document: string, layer: WorkflowLayer): void {
+  private commitSyncRecord(direction: SyncDirection, document: string, layer: WorkflowLayer, project?: string): void {
     let source: LayerSource;
     let text = "";
     try {
-      source = this.syncSource(layer);
-      const file = this.layerFile(document, layer);
+      source = this.syncSource(layer, project);
+      const file = this.layerFile(document, layer, project);
       if (existsSync(file)) text = readFileSync(file, "utf8");
     } catch {
       // The project closed between the proposal and the save, or the document moved out from under
@@ -5098,8 +5200,8 @@ export class AppService {
    * Throws for a project-layer path with no project open, which is a caller that should have
    * checked; {@link syncStatus} reports that case as a `blocked` line instead.
    */
-  private syncSource(layer: WorkflowLayer): LayerSource {
-    return layer === "base" ? baseSource(this.baseDir) : projectSource(this.p);
+  private syncSource(layer: WorkflowLayer, project?: string): LayerSource {
+    return layer === "base" ? baseSource(this.baseDir) : projectSource(this.p(project));
   }
 
   // --- internals -------------------------------------------------------------
@@ -5107,15 +5209,20 @@ export class AppService {
   /**
    * The states that declare `stateId` as a child.
    *
-   * Empty with no project open: the reference graph is built from the project's browser, and a
+   * Empty with no project named: the reference graph is built from a project's browser, and a
    * base-only edit has nothing to check against. That is a real limitation rather than a safe
    * default — a shared state renamed with no project open can still break a project that used it —
    * so it is worth saying out loud rather than implying the check always ran.
+   *
+   * Asked of ONE project rather than of every open one. The answer is what a confirmation dialog
+   * says before a rename, and "seven states reference this" is only useful if a person can tell
+   * which project's seven; the project a delete came FROM is the one it is about.
    */
-  private referrersOf(stateId: string): string[] {
-    if (!this.hasProject) return [];
+  private referrersOf(stateId: string, project?: string): string[] {
+    const open = this.sessionOf(project);
+    if (open === undefined) return [];
     try {
-      return stateView(this.p, stateId, this.browseWorkflows(), this.stateViewOptions()).referencedBy;
+      return stateView(open.project, stateId, this.browseWorkflowsIn(open), this.stateViewOptions()).referencedBy;
     } catch {
       // A broken workflow cannot answer "who references this"; that is not a reason to block a
       // delete, and the lint surface is already reporting the breakage.
@@ -5137,11 +5244,12 @@ export class AppService {
    * folder rename and the confirmation becomes a keystroke, refuse none and the first thing you learn
    * about a broken workflow is a run that failed to load.
    */
-  private brokenBy(states: string[]): string[] {
-    if (!this.hasProject || states.length === 0) return [];
+  private brokenBy(states: string[], project?: string): string[] {
+    const open = this.sessionOf(project);
+    if (open === undefined || states.length === 0) return [];
     const moving = new Set(states);
     const broken = new Set<string>();
-    for (const entry of this.browseWorkflows().files) {
+    for (const entry of this.browseWorkflowsIn(open).files) {
       let doc: unknown;
       try {
         doc = JSON.parse(readFileSync(join(entry.root, entry.file), "utf8"));
@@ -5173,9 +5281,9 @@ export class AppService {
    * `workflows/` — because a check that disagreed with the loader about which state a file is would
    * protect the wrong thing.
    */
-  private statesUnder(file: string, layer: WorkflowLayer): string[] {
+  private statesUnder(file: string, layer: WorkflowLayer, project?: string): string[] {
     const workflowsDir =
-      layer === "base" ? jairaBasePaths(this.baseDir).workflowsDir : this.requireProject().paths.workflowsDir;
+      layer === "base" ? jairaBasePaths(this.baseDir).workflowsDir : this.requireProject(project).paths.workflowsDir;
     const idOf = (path: string): string | null => {
       const rel = relative(workflowsDir, path).split(sep).join("/");
       if (rel.length === 0 || rel.startsWith("..")) return null;
@@ -5207,8 +5315,8 @@ export class AppService {
    * state id. One implementation for create, rename and delete: three copies of a containment check
    * is how two of them stay right and the third quietly does not.
    */
-  private layerFile(path: string, layer: WorkflowLayer): string {
-    const root = layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject().paths.jairaDir;
+  private layerFile(path: string, layer: WorkflowLayer, project?: string): string {
+    const root = layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject(project).paths.jairaDir;
     const file = resolvePath(root, path);
     const rel = relative(root, file);
     if (rel.startsWith("..") || rel.length === 0 || resolvePath(root, rel) !== file) {
@@ -5226,11 +5334,11 @@ export class AppService {
    * root is the check that cannot be fooled by encoding tricks, because it tests the answer rather
    * than the input.
    */
-  private workflowFile(stateId: string, layer: WorkflowLayer): string {
+  private workflowFile(stateId: string, layer: WorkflowLayer, project?: string): string {
     const root =
       layer === "base"
         ? jairaBasePaths(this.baseDir).workflowsDir
-        : this.requireProject().paths.workflowsDir;
+        : this.requireProject(project).paths.workflowsDir;
     const file = resolvePath(root, `${stateId}.json`);
     const rel = relative(root, file);
     if (rel.startsWith("..") || rel.length === 0 || resolvePath(root, rel) !== file) {
@@ -5300,12 +5408,20 @@ export class AppService {
     });
   }
 
-  private requireProject(): Project {
-    return this.session().project;
+  /**
+   * The project a `project`-layer address is in.
+   *
+   * `project` names a LAYER, not a project, and the window holds several (SHELL.md §2.2) — so the
+   * pair is what identifies a file. Resolved through {@link session}, which means an address that
+   * names no project is answerable exactly while there is nothing to choose between, and reports
+   * "several projects are open, so this call must name one" the moment there is.
+   */
+  private requireProject(ref?: string): Project {
+    return this.session(ref).project;
   }
 
-  private requireProjectDir(): string {
-    return this.requireProject().paths.projectDir;
+  private requireProjectDir(ref?: string): string {
+    return this.requireProject(ref).paths.projectDir;
   }
 }
 

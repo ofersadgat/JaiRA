@@ -44,6 +44,14 @@ export interface PendingSync {
   document: string;
   /** The layer the document lives in — which decides where its baseline is written back. */
   layer: WorkflowLayer;
+  /**
+   * WHICH project, for a `project`-layer document.
+   *
+   * Carried on the pending proposal rather than looked up when the save lands, because by then there
+   * is nothing to look it up FROM: the window holds several projects and none of them is the focused
+   * one (SHELL.md §2.3), so the only moment this is known is when the sync was asked for.
+   */
+  project?: string;
   remaining: Set<string>;
 }
 
