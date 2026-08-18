@@ -37,7 +37,7 @@
  * where the thing being read is grouped by conversation. See `sessionBands.ts`.
  */
 import { useEffect, useState, type JSX, type ReactNode } from "react";
-import type { InstanceNode, ServedArtifact, SessionView } from "@jaira/shared/browser";
+import { artifactOf, type InstanceNode, type ServedArtifact, type SessionView } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { Markdown, type FenceRenderer } from "./markdown";
 import { ValueView } from "./valueView";
@@ -45,6 +45,7 @@ import { Icon } from "./icons";
 import {
   blocksOf,
   iconOf,
+  type LiveStatus,
   sidechainEntriesOf,
   signatureOf,
   type LiveTail,
@@ -54,6 +55,7 @@ import {
   type ToolEntry,
   type TranscriptEntry,
   type WorkEntry,
+  type WritingEntry,
 } from "./transcript";
 
 /** Renders one spawning call's subagent conversation — supplied by the Transcript that has the session. */
@@ -85,12 +87,34 @@ function clockOf(at: number | undefined): string {
   return at === undefined || at === 0 ? "" : new Date(at).toLocaleTimeString();
 }
 
+/** Bytes as a person reads them — what a size looks like beside a name. */
+export function sizeOf(bytes: number): string {
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
 /** `2.4 s`, `1 m 12 s`. */
 export function durationOf(ms: number): string {
   if (ms < 1000) return `${ms} ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
   const seconds = Math.round(ms / 1000);
   return `${Math.floor(seconds / 60)} m ${seconds % 60} s`;
+}
+
+/**
+ * How long a model thought, said the way a person waiting would say it — `0.4 seconds`,
+ * `12.4 seconds`, `2 m 5.3 s`.
+ *
+ * Its own formatter rather than {@link durationOf}, which serves run cards and switches units under
+ * a second: a thinking block that reports `840 ms` and then `1.2 s` a moment later is a counter that
+ * changes shape while you are reading it. Tenths all the way down, so the number only ever grows,
+ * and the word spelled out because this is a sentence about a wait, not a figure in a table.
+ */
+export function thoughtTime(ms: number): string {
+  const seconds = Math.max(0, ms) / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)} seconds`;
+  return `${Math.floor(seconds / 60)} m ${(seconds % 60).toFixed(1)} s`;
 }
 
 /**
@@ -193,6 +217,7 @@ function Row({
   prose,
   note,
   body,
+  shown,
 }: {
   entry: WorkEntry;
   /** The bold half of the line. Absent for an event, whose whole text is the preview. */
@@ -217,6 +242,15 @@ function Row({
   note?: ReactNode;
   /** What opens underneath. Absent means the row does not open at all. */
   body?: ReactNode;
+  /**
+   * What is shown underneath WITHOUT being asked for — today, a page the call produced.
+   *
+   * Deliberately a second slot rather than more {@link body}. The fold is the transcript's answer to
+   * forty tool calls, and it is the right answer for arguments and results, which are evidence you
+   * go looking for. A thing the model made for you to LOOK AT is not evidence; it is the point of
+   * the call, and a point behind a disclosure triangle is a point nobody found. See {@link Tool}.
+   */
+  shown?: ReactNode;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const canOpen = body !== undefined;
@@ -247,16 +281,46 @@ function Row({
         <div className="ts-row-line">{line}</div>
       )}
       {open && canOpen ? <div className="ts-row-body">{body}</div> : null}
+      {shown !== undefined ? <div className="ts-row-shown">{shown}</div> : null}
     </div>
   );
 }
 
 /**
- * One tool call: a line, and both its halves when asked for.
+ * The page a call PRODUCED, when it produced one — `show_artifact`'s half of the artifact story.
+ *
+ * Read off the result rather than off the tool's NAME, deliberately. `show_artifact` reaches an
+ * agent under several names (bare, and MCP-prefixed per transport), and it is not the only producer
+ * an artifact envelope can come out of; what makes a result showable is that it says what its bytes
+ * are, which is exactly what {@link artifactOf} asks. A name test would have to be kept in step with
+ * every transport, and would answer wrongly the first time it was not.
+ *
+ * `content` decides. The envelope carries the bytes inline whenever they are small enough
+ * (`inlineMaxBytes`), which is the common case and the cheap one — there is nothing to fetch and
+ * nothing to serve. Above that the envelope is metadata and a `uri`, and the page stays where the
+ * artifacts panel can open it: an artifact too large to inline is also too large to unfold into the
+ * middle of a conversation unasked.
+ */
+export function producedArtifact(result: JsonValue | undefined): JsonValue | undefined {
+  if (result === undefined) return undefined;
+  const artifact = artifactOf(result);
+  return artifact?.content !== undefined ? result : undefined;
+}
+
+/**
+ * One tool call: a line, and both its halves when asked for — and the page, when it made one.
  *
  * Expanded shows BOTH, labelled. It used to show one — the result if there was one, the arguments
  * otherwise — so a call you opened to find out what it was asked answered with what it returned
  * instead, and a record that kept neither printed the word `null`.
+ *
+ * A call that produced a PAGE draws it under the line without being asked. That is not a special
+ * case for one tool; it is the difference between a result and a rendering. `show_artifact` exists
+ * to put something in front of a person, and for three calls of it the conversation showed three
+ * collapsed grey lines reading `show_artifact  mockup.html` — the work was done, recorded, servable
+ * and invisible. The renderer is the same {@link ValueView} the artifacts panel and the payload
+ * blocks use, so a mockup looks identical wherever it turns up and arrives with its
+ * Rendered / Code / Text toggle rather than a second one built here.
  */
 function Tool({
   entry,
@@ -273,6 +337,7 @@ function Tool({
   // What the crumb will read: the call's first argument is the Task's short description, which is
   // the one name a person chose for this subagent. The tool's own name is the honest fallback.
   const chainName = `⑂ ${entry.summary.length > 0 ? entry.summary : entry.name}`;
+  const produced = producedArtifact(entry.result);
   return (
     <Row
       entry={entry}
@@ -280,6 +345,17 @@ function Tool({
       preview={entry.sidechain !== undefined ? `⑂ ${entry.summary}` : entry.summary}
       tone={entry.ok === false ? "bad" : "plain"}
       mark={entry.ok === undefined ? "waiting" : entry.ok ? "ok" : "bad"}
+      {...(produced !== undefined
+        ? {
+            shown: (
+              <ValueView
+                value={produced}
+                {...(artifacts !== undefined ? { serve: artifacts.serve } : {})}
+                {...(artifacts?.onPrompt !== undefined ? { onPrompt: artifacts.onPrompt } : {})}
+              />
+            ),
+          }
+        : {})}
       body={
         <>
           {/* The subagent's conversation, first: it is what this call DID, and the arguments and
@@ -333,16 +409,20 @@ function Tool({
 /**
  * A wall clock that ticks while something is live, and not otherwise.
  *
- * A second is the right resolution for "thought for 12 s" and the wrong cost for a transcript with
- * forty settled rows in it — so the interval exists only while `live` is true, and a row that has
- * stopped thinking stops re-rendering with it.
+ * TENTHS, because a counter that moves once a second is doing the job of a pulse: what the number
+ * is for is telling a stalled run from a working one, and a digit that changes ten times a second is
+ * the fastest way to say "still going" that is also a measurement. It costs one `setState` per
+ * 100 ms on ONE row — the interval exists only while `live` is true, so a transcript with forty
+ * settled rows in it re-renders none of them.
  */
+const TICK_MS = 100;
+
 function useElapsed(startedAt: number | undefined, live: boolean): number | undefined {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!live || startedAt === undefined) return;
     setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
+    const timer = setInterval(() => setNow(Date.now()), TICK_MS);
     return () => clearInterval(timer);
   }, [live, startedAt]);
   return startedAt === undefined ? undefined : Math.max(0, now - startedAt);
@@ -351,19 +431,23 @@ function useElapsed(startedAt: number | undefined, live: boolean): number | unde
 /**
  * One block of reasoning — and how long it took, which is the question actually being asked of it.
  *
- * A finished block states its duration ("thought for 12.4 s"); a block still being written counts
- * up beside a pulse, because a model that has been thinking for ninety seconds and one that has
- * stalled look identical without a number that moves. The duration is the turn's
+ * A finished block states its duration ("Thought for 12.4 seconds"); a block still being written
+ * counts up in tenths beside a pulse, because a model that has been thinking for ninety seconds and
+ * one that has stalled look identical without a number that moves. The duration is the turn's
  * thinking-start → answer-start, so it is the wait a person actually experienced, not the length of
  * the text that came out of it.
  */
-function Thought({ entry }: { entry: ThoughtEntry }): JSX.Element {
-  const live = entry.live === true;
+function Thought({ entry, narrated }: { entry: ThoughtEntry; narrated?: boolean | undefined }): JSX.Element {
+  // Live only while nothing else is counting these seconds. A bar six pixels below saying
+  // "Thinking · 12.4 seconds" makes this one a second opinion, and two clocks on one wait is worse
+  // than either — but only the LIVE half defers: the duration a finished block states is a fact
+  // about that block, and belongs beside it whatever is happening now.
+  const live = entry.live === true && narrated !== true;
   const elapsed = useElapsed(entry.startedAt, live);
   const shown = live ? elapsed : entry.durationMs;
-  // Present tense while it runs. "thought for 40 s" beside a live pulse reads as a block that
+  // Present tense while it runs. "Thought for 40 seconds" beside a live pulse reads as a block that
   // finished and is somehow still going; what the counter is for is saying what is happening NOW.
-  const took = shown !== undefined ? `${live ? "thinking for" : "thought for"} ${durationOf(shown)}` : undefined;
+  const took = shown !== undefined ? `${live ? "Thinking for" : "Thought for"} ${thoughtTime(shown)}` : undefined;
   return (
     <Row
       entry={entry}
@@ -376,7 +460,7 @@ function Thought({ entry }: { entry: ThoughtEntry }): JSX.Element {
             note: (
               <span className={live ? "ts-think-live" : "ts-think-took"}>
                 {live ? <Pulse /> : null}
-                {took ?? "thinking…"}
+                {took ?? "Thinking…"}
               </span>
             ),
           }
@@ -388,17 +472,53 @@ function Thought({ entry }: { entry: ThoughtEntry }): JSX.Element {
   );
 }
 
-/** One entry of work, dispatched by kind. All three land on the same {@link Row}. */
+/**
+ * A call being WRITTEN — the row that stands in for a tool call while its arguments stream.
+ *
+ * The answer to a conversation that looks stopped while it is working hardest. A model producing a
+ * fifteen-kilobyte page emits it as one argument of one call, and until that call is assembled there
+ * is nothing on the stream a transcript recognises: the thinking has ended, the answer has not
+ * begun, and the row for the call does not exist because the call does not. This is the interval,
+ * shown as what it is — this tool, this path, this much so far, still going.
+ *
+ * A counter rather than a spinner, for the same reason the thinking row counts: a number that grows
+ * is the difference between "producing a large page" and "hung", and those are the only two things
+ * a reader of a long silence is trying to tell apart.
+ *
+ * It never opens. There is nothing behind it — half a JSON string is not an argument list, and a row
+ * that unfolded onto one would be showing the reader the transport.
+ */
+function Writing({ entry }: { entry: WritingEntry }): JSX.Element {
+  return (
+    <Row
+      entry={entry}
+      name={entry.name}
+      preview={entry.path ?? ""}
+      tone="plain"
+      note={
+        <span className="ts-think-live">
+          <Pulse />
+          {`writing${entry.chars > 0 ? ` ${sizeOf(entry.chars)}` : "…"}`}
+        </span>
+      }
+    />
+  );
+}
+
+/** One entry of work, dispatched by kind. All four land on the same {@link Row}. */
 function Work({
   entry,
   sidechainOf,
   onOpenSidechain,
   artifacts,
+  narrated,
 }: {
   entry: WorkEntry;
   sidechainOf?: SidechainOf | undefined;
   onOpenSidechain?: OpenSidechain | undefined;
   artifacts?: ArtifactSurface | undefined;
+  /** A status bar is saying what is happening now — see `narrated` on {@link Transcript}. */
+  narrated?: boolean | undefined;
 }): JSX.Element {
   if (entry.kind === "tool") {
     return (
@@ -410,7 +530,8 @@ function Work({
       />
     );
   }
-  if (entry.kind === "thought") return <Thought entry={entry} />;
+  if (entry.kind === "thought") return <Thought entry={entry} {...(narrated === true ? { narrated } : {})} />;
+  if (entry.kind === "writing") return <Writing entry={entry} />;
   // An event is a fact, not a call: no name to bold, no verdict to give — and nothing to open,
   // unless the fact is a compression of a fuller line (a native attachment, a queued operation).
   return (
@@ -440,41 +561,69 @@ function foldsAt(count: number): number {
   return count > SHOWN + 1 ? count - SHOWN : 0;
 }
 
+/**
+ * Which rows of a block survive the fold — the last {@link SHOWN}, and every page produced before
+ * them.
+ *
+ * The exemption is the fold's own rule taken seriously. It hides the older half because the question
+ * asked of a long agent loop is "what has it done lately"; that is true of forty greps and false of
+ * the mockup you asked for, which is not a step towards the answer but a piece of it. A run that
+ * drew six pages and then read four files would have folded five of the six away — the transcript
+ * saying, of work the model did on request, that it was too old to look at.
+ *
+ * Indices are into the WHOLE block, and travel with the rows: they are the render keys, and a
+ * slice-relative key hands one row's open/closed state to a different row every time the fold moves.
+ */
+export function unfoldable(entries: readonly WorkEntry[], hidden: number): Array<{ entry: WorkEntry; index: number }> {
+  const rows = entries.map((entry, index) => ({ entry, index }));
+  if (hidden === 0) return rows;
+  return rows.filter(
+    ({ entry, index }) => index >= hidden || (entry.kind === "tool" && producedArtifact(entry.result) !== undefined),
+  );
+}
+
 /** A stretch of work between two messages, with its older half foldable. */
 function WorkBlockView({
   entries,
   sidechainOf,
   onOpenSidechain,
   artifacts,
+  narrated,
 }: {
   entries: WorkEntry[];
   sidechainOf?: SidechainOf | undefined;
   onOpenSidechain?: OpenSidechain | undefined;
   artifacts?: ArtifactSurface | undefined;
+  /** A status bar is saying what is happening now — see `narrated` on {@link Transcript}. */
+  narrated?: boolean | undefined;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const hidden = foldsAt(entries.length);
-  const shown = hidden === 0 || open ? entries : entries.slice(hidden);
+  const rows = unfoldable(entries, open ? 0 : hidden);
+  // What the toggle can actually reveal. Not `hidden`: the pages exempted above are on screen
+  // already, and counting them would offer to show rows nobody is hiding.
+  const folded = entries.length - rows.length;
   return (
     <div className="ts-work">
-      {hidden > 0 ? (
+      {folded > 0 ? (
         <button type="button" className="ts-fold" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
           <span className="ts-chev">
             <Icon name="chevron" />
           </span>
-          {open ? "Show fewer steps" : `${hidden} earlier steps`}
+          {open ? "Show fewer steps" : `${folded} earlier steps`}
         </button>
       ) : null}
       {/* Keyed by the entry's position in the WHOLE block, not in the visible slice. Folding shifts
           every index, so a slice-relative key hands one row's open/closed state to a different row —
           an expanded tool call's payload jumps to an unrelated line. */}
-      {shown.map((entry, i) => (
+      {rows.map(({ entry, index }) => (
         <Work
-          key={hidden === 0 || open ? i : hidden + i}
+          key={index}
           entry={entry}
           {...(sidechainOf !== undefined ? { sidechainOf } : {})}
           {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
           {...(artifacts !== undefined ? { artifacts } : {})}
+          {...(narrated === true ? { narrated } : {})}
         />
       ))}
     </div>
@@ -588,6 +737,69 @@ function Pulse(): JSX.Element {
 }
 
 /**
+ * What the model is doing right now, in one fixed place.
+ *
+ * The generalisation of the writing row, and it earns its place by being the only thing on screen
+ * whose POSITION does not depend on how much has happened. Everything else that announces a live run
+ * is a row in stream order — a thinking counter, a waiting call, a page being written — and stream
+ * order puts the answer to "is it still going" wherever the conversation happens to have reached.
+ * Four screens up, behind a closed fold, under a tall artifact. This is at the bottom, always, and
+ * it says one sentence.
+ *
+ * It holds NO state. {@link liveStatusOf} reads it off the entries and the tail that are already
+ * being rendered, so there is nothing here that can disagree with the transcript above it — which is
+ * the way a status line normally goes wrong.
+ *
+ * The transcript stops repeating what this says: see `narrated` on {@link Transcript}. Two places
+ * counting the same seconds, six pixels apart, is worse than either alone.
+ */
+export function LiveStatusBar({ status, onJump }: { status: LiveStatus; onJump?: (() => void) | undefined }): JSX.Element {
+  const since = status.kind === "writing" || status.kind === "working" ? undefined : status.since;
+  const elapsed = useElapsed(since, true);
+  // Sized, not timed. The question asked of a page being written is how big it is getting; the
+  // question asked of everything else is how long it has been.
+  const figure =
+    status.kind === "writing"
+      ? status.chars > 0
+        ? sizeOf(status.chars)
+        : undefined
+      : elapsed !== undefined
+        ? thoughtTime(elapsed)
+        : undefined;
+  return (
+    <div className="ts-status">
+      <Pulse />
+      <span className="ts-status-verb">{verbOf(status)}</span>
+      <span className="ts-status-what ellip">{whatOf(status)}</span>
+      {figure !== undefined ? <span className="ts-status-figure">{figure}</span> : null}
+      {/* Only when the reader has gone somewhere else. The bar is where they would look to find out
+          something is still happening, so it is also where the way back belongs. */}
+      {onJump !== undefined ? (
+        <button type="button" className="ts-status-jump" onClick={onJump}>
+          Jump to live ↓
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** The verb, present tense — the whole of what the line is for. */
+function verbOf(status: LiveStatus): string {
+  if (status.kind === "writing") return "Writing";
+  if (status.kind === "answering") return "Answering";
+  if (status.kind === "thinking") return "Thinking";
+  if (status.kind === "running") return "Running";
+  return "Working";
+}
+
+/** What it is doing it TO, when there is something to name. */
+function whatOf(status: LiveStatus): string {
+  if (status.kind === "writing") return status.path ?? status.name;
+  if (status.kind === "running") return status.summary.length > 0 ? `${status.name} · ${status.summary}` : status.name;
+  return "";
+}
+
+/**
  * A run's conversation, with no chrome at all.
  *
  * This is what a leaf shows, and what a composite shows for its own operation. Both are "this state
@@ -601,6 +813,7 @@ export function Transcript({
   onOpenSidechain,
   onEdit,
   artifacts,
+  narrated,
 }: {
   session?: SessionView | null;
   entries: TranscriptEntry[];
@@ -625,8 +838,24 @@ export function Transcript({
    * project, which a transcript has only where a surface hands them over — see `chatPane.tsx`.
    */
   artifacts?: ArtifactSurface | undefined;
+  /**
+   * Something ELSE is saying what is happening right now — a {@link LiveStatusBar}.
+   *
+   * Set by a surface that has somewhere fixed to put the live state, and it makes the transcript
+   * stop duplicating it: the row for a call still being written goes (it is a now-only fact, never
+   * recorded, and the bar is a better place for it), and the thinking row keeps its text and its
+   * settled duration but gives up its live counter.
+   *
+   * What it does NOT suppress is anything that survives the turn. "Thought for 12.4 seconds" is a
+   * fact about a block that finished and belongs beside it forever; the bar is only ever about the
+   * present, so the two never overlap once a turn has landed.
+   */
+  narrated?: boolean | undefined;
 }): JSX.Element {
-  if (entries.length === 0) {
+  // Dropped rather than never built: `entriesOf` has one reading of the tail and every surface gets
+  // the same one, so which rows a surface DRAWS is a rendering decision and belongs here.
+  const shown = narrated === true ? entries.filter((entry) => entry.kind !== "writing") : entries;
+  if (shown.length === 0) {
     return <p className="empty">{empty ?? session?.empty ?? "Nothing has been said here yet."}</p>;
   }
   // The session and the live tail are what hold the subagent conversations, so only a Transcript
@@ -639,7 +868,7 @@ export function Transcript({
       : undefined;
   return (
     <div className="ts">
-      {blocksOf(entries).map((block, i) => {
+      {blocksOf(shown).map((block, i) => {
         if (block.kind === "work")
           return (
             <WorkBlockView
@@ -648,6 +877,7 @@ export function Transcript({
               {...(sidechainOf !== undefined ? { sidechainOf } : {})}
               {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
               {...(artifacts !== undefined ? { artifacts } : {})}
+              {...(narrated === true ? { narrated } : {})}
             />
           );
         if (block.kind === "message") return <Message key={i} entry={block} {...(onEdit !== undefined ? { onEdit } : {})} />;

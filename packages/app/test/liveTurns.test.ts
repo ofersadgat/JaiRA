@@ -10,6 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LiveTurnFlusher, LiveTurnLog, partialRecordValue } from "../src/main/liveTurns";
+import type { JsonValue } from "@declarative-ai/json";
 
 const at = (id: string, seq: number) => ({ session: { id, seq } });
 
@@ -128,6 +129,28 @@ describe("LiveTurnLog", () => {
     });
     const value = partialRecordValue(log.snapshot("t1")!) as { value: { partial?: { thinkingStartedAt?: number } } };
     expect(value.value.partial).toMatchObject({ thinkingStartedAt: 700 });
+  });
+
+  it("holds the call being written, and drops the bookkeeping it read it from", () => {
+    // The gap this closes: a model producing a large argument leaves nothing else on the stream, and
+    // hundreds of these fragments would push the conversation itself out of a bounded item list.
+    const log = new LiveTurnLog();
+    const stream = (event: JsonValue): JsonValue => ({ kind: "event", event: { type: "provider_event", payload: { type: "stream_event", event } } });
+    log.apply("t1", { ...at("s", 1), at: 100, item: stream({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_1", name: "show_artifact" } }) });
+    log.apply("t1", { ...at("s", 1), at: 200, item: stream({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"path": "mocks/07.html", "content": "<!DOC' } }) });
+    const snapshot = log.snapshot("t1")!;
+    expect(snapshot.writing).toMatchObject({ name: "show_artifact", chars: 43 });
+    expect(snapshot.items).toEqual([]);
+  });
+
+  it("lets go of the half-written call once the turn carrying it lands", () => {
+    const log = new LiveTurnLog();
+    const stream = (event: JsonValue): JsonValue => ({ kind: "event", event: { type: "provider_event", payload: { type: "stream_event", event } } });
+    log.apply("t1", { ...at("s", 1), at: 100, item: stream({ type: "content_block_start", index: 0, content_block: { type: "tool_use", name: "show_artifact" } }) });
+    log.apply("t1", { ...at("s", 1), at: 300, item: { kind: "message", role: "assistant", content: {} } });
+    // The call is on that turn now, assembled, with a row of its own — two rows for one call is
+    // exactly what the drop prevents.
+    expect(log.snapshot("t1")!.writing).toBeUndefined();
   });
 
   it("sniffs the provider session id off the stream's envelopes", () => {

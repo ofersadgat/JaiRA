@@ -55,7 +55,16 @@ import type {
   TaskSummary,
   WorkflowLayer,
 } from "@jaira/shared/browser";
-import { CONFIG_JSON, isTextMime, SHARED_SESSION, startsThinking, WORKFLOW_JSON } from "@jaira/shared/browser";
+import {
+  CONFIG_JSON,
+  foldWriting,
+  isStreamBookkeeping,
+  isTextMime,
+  SHARED_SESSION,
+  startsThinking,
+  WORKFLOW_JSON,
+  type WritingTool,
+} from "@jaira/shared/browser";
 import {
   docKey,
   movedDraft,
@@ -388,6 +397,13 @@ export interface AppState {
     thinkingStartedAt?: number;
     items: JsonValue[];
     sidechains: Record<string, JsonValue[]>;
+    /**
+     * The tool call whose ARGUMENTS are still being written, when one is.
+     *
+     * The only trace a model producing a large argument leaves before the call exists — see
+     * `WritingTool`. Without it, a minute spent writing a page is a transcript with nothing on it.
+     */
+    writing?: WritingTool;
   } | null;
   /**
    * The runs walked into below the open file — the tail of the Files view's address bar.
@@ -1115,6 +1131,7 @@ export function useApp() {
                         ...(live.thinkingStartedAt !== undefined ? { thinkingStartedAt: live.thinkingStartedAt } : {}),
                         items: live.items,
                         sidechains: live.sidechains,
+                        ...(live.writing !== undefined ? { writing: live.writing } : {}),
                       },
               }),
         });
@@ -1715,6 +1732,7 @@ export function useApp() {
           // both must agree, because either can be the one holding the tail on screen.
           let textStartedAt = same ? live.textStartedAt : undefined;
           let thinkingStartedAt = same ? live.thinkingStartedAt : undefined;
+          let writing = same ? live.writing : undefined;
           if (message.item !== undefined) {
             // A SUBAGENT's turn accumulates under the call that spawned it and nowhere else — the
             // doorway row renders it there, and folding it into `items` is the misattribution the
@@ -1724,14 +1742,20 @@ export function useApp() {
               const chain = [...(sidechains[item.parentToolUseId] ?? []), message.item];
               sidechains[item.parentToolUseId] = chain.length > LIVE_ITEM_LIMIT ? chain.slice(-LIVE_ITEM_LIMIT) : chain;
             } else {
-              items.push(message.item);
+              // The identical fold main runs (`LiveTurnLog`), on the identical item: what the
+              // bookkeeping SAYS is kept, the event itself is dropped rather than queued behind the
+              // cap. Either side can be the one holding the tail on screen, so both must agree.
+              writing = foldWriting(writing, message.item);
+              if (!isStreamBookkeeping(message.item)) items.push(message.item);
               // A finished assistant turn carries the same text and thinking its deltas streamed — the
               // tails restart so nothing is shown twice, once in the turn and once as the live edge.
+              // The half-written call ends with them: it is on that turn now, with a row of its own.
               if (item.kind === "message" && item.role === "assistant") {
                 text = "";
                 thinking = "";
                 textStartedAt = undefined;
                 thinkingStartedAt = undefined;
+                writing = undefined;
               }
             }
           }
@@ -1764,6 +1788,7 @@ export function useApp() {
               ...(thinkingStartedAt !== undefined ? { thinkingStartedAt } : {}),
               items: items.length > LIVE_ITEM_LIMIT ? items.slice(-LIVE_ITEM_LIMIT) : items,
               sidechains,
+              ...(writing !== undefined ? { writing } : {}),
             },
           });
           break;

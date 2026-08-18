@@ -21,7 +21,7 @@
  * fragment is ever shown twice or dropped in the seam between fetch and subscribe.
  */
 import type { JsonValue } from "@declarative-ai/json";
-import { startsThinking, type LiveTurnSnapshot } from "@jaira/shared";
+import { foldWriting, isStreamBookkeeping, startsThinking, type LiveTurnSnapshot } from "@jaira/shared";
 import type { TurnDelta } from "@jaira/runtime";
 
 /**
@@ -229,15 +229,26 @@ export class LiveTurnLog {
           ...(finished && startedAt !== undefined ? { startedAt } : {}),
           ...(thoughtMs !== undefined ? { thoughtMs } : {}),
         } as JsonValue;
-        entry.items.push(enriched);
-        if (entry.items.length > LIVE_ITEM_LIMIT) entry.items.splice(0, entry.items.length - LIVE_ITEM_LIMIT);
+        // The one thing bookkeeping SAYS is folded here; the event itself is then dropped rather
+        // than queued behind the cap — see `isStreamBookkeeping`. Folded before the drop, and before
+        // the `finished` reset below, because a fold that runs after the item is gone runs on
+        // nothing.
+        const writing = foldWriting(entry.writing, enriched);
+        if (writing === undefined) delete entry.writing;
+        else entry.writing = writing;
+        if (!isStreamBookkeeping(enriched)) {
+          entry.items.push(enriched);
+          if (entry.items.length > LIVE_ITEM_LIMIT) entry.items.splice(0, entry.items.length - LIVE_ITEM_LIMIT);
+        }
         // A finished assistant turn carries the same text and thinking its deltas streamed — the
-        // tails restart, and with them the tail clocks.
+        // tails restart, and with them the tail clocks. The half-written call goes with them: it is
+        // ON that turn now, assembled, with a row of its own.
         if (finished) {
           entry.text = "";
           entry.thinking = "";
           delete entry.textStartedAt;
           delete entry.thinkingStartedAt;
+          delete entry.writing;
         } else if (entry.thinkingStartedAt === undefined && entry.text.length === 0 && startsThinking(enriched)) {
           // A WITHHELD think starts the clock here rather than on a `thinking` delta, because it
           // sends none — see `startsThinking`. Only while nothing has been said yet: mid-answer the
@@ -275,6 +286,7 @@ export class LiveTurnLog {
       thinking: entry.thinking,
       items: [...entry.items],
       sidechains: Object.fromEntries(Object.entries(entry.sidechains).map(([k, v]) => [k, [...v]])),
+      ...(entry.writing !== undefined ? { writing: { ...entry.writing } } : {}),
     };
   }
 

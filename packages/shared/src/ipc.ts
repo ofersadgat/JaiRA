@@ -1227,6 +1227,134 @@ export interface LiveTurnSnapshot {
   items: JsonValue[];
   /** Subagent turns streaming by, keyed by the spawning call id. */
   sidechains: Record<string, JsonValue[]>;
+  /** The tool call whose ARGUMENTS are still being written, when one is — see {@link WritingTool}. */
+  writing?: WritingTool;
+}
+
+/**
+ * A tool call whose ARGUMENTS are still arriving — the gap between "the model started a call" and
+ * "the call exists".
+ *
+ * That gap is normally imperceptible and occasionally enormous. A tool call reaches the stream as a
+ * whole `message` item, assembled; until it does, the only trace is `input_json_delta` bookkeeping,
+ * which every layer discarded. For `bash({command: "ls"})` there is nothing to miss. For
+ * `show_artifact` writing a fifteen-kilobyte page there is close to a minute in which the model is
+ * producing the entire point of the turn and the transcript has no row for it, no text tail, and
+ * nothing thinking — a conversation that looks stopped while the work is being done.
+ *
+ * So the bookkeeping is kept, in the smallest form that answers "what is it making, and is it still
+ * making it": a name, a count, and the first bytes of the arguments — enough for the path, which in
+ * every tool that writes anything is the argument the model emits first.
+ */
+export interface WritingTool {
+  /** The tool's name, off the block that opened it. */
+  name: string;
+  /** The content block it is being written at — how a delta is matched to the call it belongs to. */
+  index?: number;
+  /** How many characters of arguments have arrived. The size of the thing being made, near enough. */
+  chars: number;
+  /** The first {@link WRITING_HEAD_MAX} characters of the argument JSON, for the path in it. */
+  head: string;
+}
+
+/** How much of the argument JSON is worth keeping. A path is in the first line of it or nowhere. */
+export const WRITING_HEAD_MAX = 512;
+
+/**
+ * The provider's own stream line inside an item, when the item is one.
+ *
+ * Both spellings, for the same reason {@link startsThinking} takes both: a live passthrough nests
+ * the line under `provider_event`, a pinned event IS the line.
+ */
+function streamEventOf(item: JsonValue): Record<string, unknown> | undefined {
+  if (item === null || typeof item !== "object" || Array.isArray(item)) return undefined;
+  const rec = item as { kind?: unknown; event?: unknown };
+  if (rec.kind !== "event" || rec.event === null || typeof rec.event !== "object") return undefined;
+  const envelope = rec.event as { type?: unknown; payload?: unknown };
+  const line = (envelope.type === "provider_event" ? envelope.payload : envelope) as { type?: unknown; event?: unknown };
+  if (line === null || typeof line !== "object" || line.type !== "stream_event") return undefined;
+  const event = line.event;
+  return event !== null && typeof event === "object" && !Array.isArray(event) ? (event as Record<string, unknown>) : undefined;
+}
+
+/**
+ * Is this item pure delta bookkeeping — a fragment whose content arrives again, assembled, on the
+ * finished turn?
+ *
+ * Asked so it can be kept OUT of the live item list. Nothing renders it (`eventEntry` drops every
+ * `stream_event`) and nothing persists it (`partialRecordValue` keeps only messages), but the list
+ * is capped, and a tool call streaming a large argument produces hundreds of these — enough to push
+ * the conversation itself out of a bounded buffer while it is still being read. The one thing these
+ * events actually say is folded first, by {@link startsThinking} and {@link foldWriting}; after that
+ * they are noise with a quota.
+ */
+export function isStreamBookkeeping(item: JsonValue): boolean {
+  return streamEventOf(item) !== undefined;
+}
+
+/**
+ * Fold one stream item into "which call is being written right now", or leave it alone.
+ *
+ * Lives here, beside {@link startsThinking}, for the identical reason: BOTH accumulations ask it —
+ * main's `LiveTurnLog` and the renderer's `session:turn` reducer — and either can be the one holding
+ * the tail on screen, so they must agree to the character.
+ *
+ * The block INDEX is what pairs a delta with its call. A turn can open several blocks, and matching
+ * on "the last start we saw" attributes one call's arguments to another the moment two interleave.
+ * An event with no index is still folded rather than dropped — a transport that omits it is reporting
+ * a stream with one block in it, and refusing the fragment there would show nothing at all.
+ */
+export function foldWriting(writing: WritingTool | undefined, item: JsonValue): WritingTool | undefined {
+  const event = streamEventOf(item);
+  if (event === undefined) return writing;
+  const index = typeof event["index"] === "number" ? (event["index"] as number) : undefined;
+  const mine = writing !== undefined && (index === undefined || writing.index === undefined || index === writing.index);
+  if (event["type"] === "content_block_start") {
+    const block = event["content_block"] as { type?: unknown; name?: unknown } | undefined;
+    // A text or thinking block opening ENDS any write in progress on this index: the model has moved
+    // on, and a stop we never saw would otherwise leave the row up for the rest of the turn.
+    if (block === null || typeof block !== "object" || block.type !== "tool_use") return mine ? undefined : writing;
+    return {
+      name: typeof block.name === "string" ? block.name : "",
+      ...(index !== undefined ? { index } : {}),
+      chars: 0,
+      head: "",
+    };
+  }
+  if (!mine) return writing;
+  if (event["type"] === "content_block_stop") return undefined;
+  if (event["type"] === "content_block_delta") {
+    const delta = event["delta"] as { type?: unknown; partial_json?: unknown } | undefined;
+    if (delta === null || typeof delta !== "object" || delta.type !== "input_json_delta") return writing;
+    const fragment = typeof delta.partial_json === "string" ? delta.partial_json : "";
+    return {
+      ...writing!,
+      chars: writing!.chars + fragment.length,
+      head: writing!.head.length >= WRITING_HEAD_MAX ? writing!.head : (writing!.head + fragment).slice(0, WRITING_HEAD_MAX),
+    };
+  }
+  return writing;
+}
+
+/**
+ * The path a half-written argument list is about to name, when it has got that far.
+ *
+ * A regex over an incomplete JSON string rather than a parse, because there is nothing parseable
+ * yet — that is the whole situation. It reads what has actually arrived and answers nothing until
+ * the value is closed, so a path is never shown half-typed and never shown wrong.
+ *
+ * `path` is `show_artifact`'s and `write_file`'s spelling; `file_path` is what the agent's own
+ * native writers use. Both are asked for because the row is about what is being MADE, and which tool
+ * is making it is not the reader's problem.
+ */
+export function writingPath(head: string): string | undefined {
+  const match = /"(?:file_)?path"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(head);
+  if (match?.[1] === undefined) return undefined;
+  try {
+    return JSON.parse(`"${match[1]}"`) as string;
+  } catch {
+    return match[1];
+  }
 }
 
 /**

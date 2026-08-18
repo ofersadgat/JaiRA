@@ -47,8 +47,8 @@ import { Composer } from "./composer";
 import { TearBar, ZigDefs } from "./sessionPanels";
 import { CHAT_AGENT, isChatWorkflow, titleOf } from "./chatWorkflow";
 import { ContextMenu, AskDialog, type AskSpec, type MenuAnchor } from "./menu";
-import { agentTitleOf, entriesOf, journalFor, type LiveTail } from "./transcript";
-import { Paper, Transcript, type ArtifactSurface } from "./transcriptView";
+import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from "./transcript";
+import { LiveStatusBar, Paper, sizeOf, Transcript, type ArtifactSurface } from "./transcriptView";
 import { ValueView } from "./valueView";
 import { Icon } from "./icons";
 import { invoke } from "./store";
@@ -80,13 +80,6 @@ export interface ChatSurface {
   onDelete: (taskIds: readonly string[], project?: string) => void;
   /** Stop the RUN — what the first message is. Later messages are turns, and `chat:cancel` stops those. */
   onCancelRun: (taskId: string, project?: string) => void;
-}
-
-/** Bytes as a person reads them — the one figure a list of artifacts wants beside each name. */
-function sizeOf(bytes: number): string {
-  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
-  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${bytes} B`;
 }
 
 /**
@@ -518,9 +511,52 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   /** Which message is being replaced, when one is — see `chat:send`'s `branchAt`. */
   const [editing, setEditing] = useState<{ at: string; was: string } | null>(null);
   const mentions = useMentions(surface.hasProject);
-  const foot = useRef<HTMLDivElement | null>(null);
+  const scroller = useRef<HTMLDivElement | null>(null);
+  /**
+   * Whether the reader is still standing at the live edge.
+   *
+   * The pin is what makes "follow the answer" and "read what was said an hour ago" the same view.
+   * A transcript that scrolls itself to the bottom whenever a fragment lands is unreadable while a
+   * run is going: you scroll up to a tool call, the next delta arrives, and the page yanks you back
+   * — every 100 ms, for as long as the model is talking.
+   *
+   * A REF rather than state on purpose. Nothing on screen changes when it flips, so re-rendering the
+   * thread to record it would be work for no picture; and the scroll effect must read the value as
+   * of the moment it runs, which a ref gives it and a state closure would not.
+   *
+   * Starts pinned: a conversation you have just opened is one you are reading from the end.
+   */
+  const pinned = useRef(true);
+  /**
+   * The pin, as something the screen can show.
+   *
+   * The ref is what the scroll effect reads; this is what the bar renders. Two spellings of one fact
+   * because they are wanted at different moments — the effect needs it synchronously, mid-scroll,
+   * and a re-render per scroll event is exactly what the ref exists to avoid; the bar needs it as
+   * state, and only when it CHANGES, which is rare. Set through a comparison so a scroll that does
+   * not cross the line costs nothing.
+   */
+  const [away, setAway] = useState(false);
   /** The agent title a rename has already been asked for — see the effect that adopts it. */
   const asked = useRef<string | null>(null);
+
+  /**
+   * How close to the bottom still counts as being AT it.
+   *
+   * Not zero: a fractional scroll height, a sub-pixel device ratio and a row that grows by a line
+   * while the deltas land all put the reader a few pixels off the floor without them having moved,
+   * and an exact test reads that as "they scrolled away" and stops following. One line of the
+   * transcript is the smallest slack that survives all three.
+   */
+  const nearBottom = (el: HTMLElement): boolean => el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
+
+  /** Back to the live edge, and pinned again — the bar's other job. */
+  const jump = (): void => {
+    pinned.current = true;
+    setAway(false);
+    const el = scroller.current;
+    if (el !== null) el.scrollTop = el.scrollHeight;
+  };
 
   /**
    * The tail that was streaming, held until the record that supersedes it has arrived.
@@ -569,10 +605,27 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
     };
   }, [taskId, project, overrides, thread]);
 
-  // Pinned to the bottom, the way every chat client is: what was just said is what you are reading.
+  // Pinned to the bottom, the way every chat client is: what was just said is what you are reading —
+  // but only while the reader has not gone looking somewhere else. See {@link pinned}.
   useEffect(() => {
-    foot.current?.scrollIntoView({ block: "end" });
+    const el = scroller.current;
+    if (el === null || !pinned.current) return;
+    el.scrollTop = el.scrollHeight;
   }, [thread, surface.live]);
+
+  /**
+   * Back to the live edge whenever a conversation is opened.
+   *
+   * The pin is a fact about where a reader is standing in ONE conversation, so it does not travel
+   * with them to the next: switching threads scrolls to the bottom of the new one regardless of how
+   * far up the old one they had climbed.
+   */
+  useEffect(() => {
+    pinned.current = true;
+    setAway(false);
+    const el = scroller.current;
+    if (el !== null) el.scrollTop = el.scrollHeight;
+  }, [taskId, project]);
 
   /**
    * Take the agent's own name for this conversation, once it has one.
@@ -612,6 +665,10 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
     setError(null);
     const at = editing?.at;
     setEditing(null);
+    // Sending re-pins. Typing into the box is the clearest possible statement that the live edge is
+    // where you are, whatever you had scrolled up to read while composing.
+    pinned.current = true;
+    setAway(false);
     void invoke("chat:send", {
       taskId,
       instanceId,
@@ -716,6 +773,19 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
       pending,
     );
   }, [thread, surface.journal, surface.live, afterglow, surface.opening, sent]);
+
+  /**
+   * What the model is doing right now — read off exactly what is being rendered.
+   *
+   * `running` is the task's own status rather than "the tail is not empty", because a tail outlives
+   * the run that made it by a beat (see `afterglow`), and a bar that read the leftovers would keep
+   * announcing a finished turn until the record landed.
+   */
+  const status = useMemo(
+    () => liveStatusOf(entries, surface.live ?? afterglow, running),
+    [entries, surface.live, afterglow, running],
+  );
+
   /** Turn index → the position a replacement is sent at. Built once per thread, read per message. */
   const points = useMemo(() => new Map((thread?.points ?? []).map((p) => [p.turn, p.at] as const)), [thread]);
 
@@ -779,7 +849,17 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         // list is metadata, and a refetch that finds nothing new costs one query.
         signal={entries.length}
       />
-      <div className="chat-scroll scroll">
+      <div
+        className="chat-scroll scroll"
+        ref={scroller}
+        // Re-decided on every scroll, whoever caused it — including the pinned effect's own write,
+        // which lands at the bottom and so re-affirms the pin rather than fighting it.
+        onScroll={(e) => {
+          const at = nearBottom(e.currentTarget);
+          pinned.current = at;
+          setAway((was) => (was === !at ? was : !at));
+        }}
+      >
         <ZigDefs />
         <Paper>
           <Transcript
@@ -792,6 +872,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
             empty={running ? "Working…" : "This conversation has not said anything yet."}
             artifacts={artifacts}
             onEdit={edit}
+            {...(status !== null ? { narrated: true } : {})}
           />
         </Paper>
         {split !== null && shown !== undefined ? (
@@ -807,12 +888,17 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
                 // replaced from here: it is not where this conversation ends, and "edit" means fork
                 // from a position, which that side no longer holds.
                 {...(shown.key === "" ? { onEdit: edit } : {})}
+                {...(status !== null && shown.key === "" ? { narrated: true } : {})}
               />
             </Paper>
           </>
         ) : null}
-        <div ref={foot} />
       </div>
+
+      {/* Between the conversation and the box: the live state is neither part of the record above it
+          nor part of the message being composed below, and it is the one line whose position must
+          not depend on how much has happened. */}
+      {status !== null ? <LiveStatusBar status={status} {...(away ? { onJump: jump } : {})} /> : null}
 
       <div className="chat-foot">
         {editing !== null ? (

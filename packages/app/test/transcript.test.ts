@@ -7,14 +7,19 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ConversationTurn, InstanceNode, SessionView } from "@jaira/shared/browser";
+import { foldWriting, isStreamBookkeeping, writingPath, type WritingTool } from "@jaira/shared/browser";
+import type { JsonValue } from "@declarative-ai/json";
+import { producedArtifact, unfoldable } from "../src/renderer/transcriptView";
 import {
   agentTitleOf,
   blocksOf,
   entriesOf,
   iconOf,
   journalFor,
+  liveStatusOf,
   messagePartsOf,
   previewOf,
+  resultValueOf,
   sidechainEntriesOf,
   signatureOf,
   type ToolEntry,
@@ -648,5 +653,156 @@ describe("which glyph a line of work draws with", () => {
     expect(iconOf({ kind: "thought", text: "…" })).toBe("think");
     expect(iconOf({ kind: "event", tone: "plain", text: "went to draft" })).toBe("note");
     expect(iconOf({ kind: "event", tone: "bad", text: "failed" })).toBe("alert");
+  });
+});
+
+describe("the call being written, before it is a call", () => {
+  /** One `content_block_delta` carrying tool-argument JSON, in the shape the live stream nests it. */
+  const stream = (event: JsonValue): JsonValue => ({ kind: "event", event: { type: "provider_event", payload: { type: "stream_event", event } } });
+  const inputDelta = (partial: string, index = 0): JsonValue =>
+    stream({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: partial } });
+  const blockStart = (name: string, index = 0): JsonValue =>
+    stream({ type: "content_block_start", index, content_block: { type: "tool_use", id: "toolu_1", name, input: {} } });
+
+  /** The renderer's own fold, run over a stream — the same one main runs. */
+  const foldAll = (items: JsonValue[]): WritingTool | undefined =>
+    items.reduce<WritingTool | undefined>((state, item) => foldWriting(state, item), undefined);
+
+  it("names the tool and counts what has arrived, while the arguments are still coming", () => {
+    const writing = foldAll([blockStart("show_artifact"), inputDelta('{"path": "mocks/07.html", "content": "<!DOC'), inputDelta("TYPE html>…")]);
+    expect(writing).toMatchObject({ name: "show_artifact", index: 0, chars: 54 });
+    expect(writingPath(writing!.head)).toBe("mocks/07.html");
+  });
+
+  it("says nothing about a path it has only seen half of", () => {
+    // The whole point of reading a partial value: a path shown half-typed is worse than no path.
+    expect(writingPath('{"path": "mocks/07.ht')).toBeUndefined();
+  });
+
+  it("keeps one call's arguments out of another's, when two blocks interleave", () => {
+    const writing = foldAll([blockStart("show_artifact", 0), inputDelta('{"path": "a.html"', 0), inputDelta('{"path": "b.html"', 1)]);
+    expect(writingPath(writing!.head)).toBe("a.html");
+  });
+
+  it("ends the row when the block stops — the call exists now, and has a row of its own", () => {
+    const stop = stream({ type: "content_block_stop", index: 0 });
+    expect(foldAll([blockStart("show_artifact"), inputDelta('{"path": "a.html"'), stop])).toBeUndefined();
+  });
+
+  it("draws it as the last row of the live tail, with the size so far", () => {
+    const entries = entriesOf(session([] as never), [], {
+      text: "",
+      writing: { name: "show_artifact", index: 0, chars: 15805, head: '{"path": "dating-mocks/06-wiki.html", "content": "<!DOC' },
+    });
+    expect(entries).toEqual([{ kind: "writing", name: "show_artifact", path: "dating-mocks/06-wiki.html", chars: 15805 }]);
+  });
+
+  it("is bookkeeping, and so is kept out of the item list it would otherwise fill", () => {
+    expect(isStreamBookkeeping(inputDelta("{"))).toBe(true);
+    expect(isStreamBookkeeping({ kind: "message", role: "assistant", content: {} })).toBe(false);
+  });
+});
+
+describe("a page the model made, in the conversation that asked for it", () => {
+  /** What `show_artifact` returns when the bytes fit inline — the common case. */
+  const envelope = { path: "mocks/07.html", mediaType: "text/html", bytes: 42, uri: "artifact://t/mocks/07.html", content: "<p>hi</p>" };
+
+  it("recognises a result that says what its bytes ARE, whatever tool returned it", () => {
+    // Read off the RESULT, not the tool's name: `show_artifact` reaches an agent under several
+    // names, and a name test would answer wrongly the first time a transport added another.
+    expect(producedArtifact(envelope as never)).toEqual(envelope);
+    expect(producedArtifact({ path: "src/a.ts", bytes: 12 } as never)).toBeUndefined();
+    expect(producedArtifact({ ok: true, content: "not an artifact" } as never)).toBeUndefined();
+  });
+
+  it("leaves an artifact too large to inline where the panel can open it", () => {
+    // Above `inlineMaxBytes` the envelope is metadata and a uri; unfolding a fetch into the middle
+    // of a conversation unasked is not what the row is for.
+    expect(producedArtifact({ path: "mocks/07.html", mediaType: "text/html", bytes: 400_000, uri: "artifact://t/mocks/07.html" } as never)).toBeUndefined();
+  });
+
+  it("never folds a produced page away, however far back in the block it is", () => {
+    const step = (n: number): TranscriptEntry => ({ kind: "tool", name: "bash", summary: `step ${n}` });
+    const drew: TranscriptEntry = { kind: "tool", name: "show_artifact", summary: "mocks/07.html", result: envelope as never };
+    const entries = [drew, step(1), step(2), step(3), step(4), step(5), step(6)] as never[];
+    const shown = unfoldable(entries, 2);
+    // The five recent steps, and the page from before them — the fold hides the older half because
+    // the question is "what has it done lately", and that is false of a page you asked for.
+    expect(shown.map((r) => r.index)).toEqual([0, 2, 3, 4, 5, 6]);
+    expect(unfoldable(entries, 0).map((r) => r.index)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+});
+
+describe("what the model is doing right now, as one line", () => {
+  const tail = (over: Partial<Parameters<typeof liveStatusOf>[1] & object>) => ({ text: "", ...over }) as never;
+
+  it("says nothing at all when nothing is running", () => {
+    // An unanswered call is not proof of activity: a record that ended mid-flight keeps one forever,
+    // and reporting that as a run in progress is a bar that lies about last week.
+    const stalled: TranscriptEntry[] = [{ kind: "tool", name: "bash", summary: "npm test" }];
+    expect(liveStatusOf(stalled, null, false)).toBeNull();
+    expect(liveStatusOf(stalled, null, true)).toMatchObject({ kind: "running", name: "bash", summary: "npm test" });
+  });
+
+  it("reads the furthest-along state, because each step ends the one before it", () => {
+    // A text tail beside a running thinking clock means the thinking is over; a half-written
+    // argument list means the answer is.
+    expect(liveStatusOf([], tail({ thinkingStartedAt: 100 }), true)).toMatchObject({ kind: "thinking", since: 100 });
+    expect(liveStatusOf([], tail({ text: "Here", textStartedAt: 400, thinkingStartedAt: 100 }), true)).toMatchObject({
+      kind: "answering",
+      since: 400,
+    });
+    expect(
+      liveStatusOf([], tail({ text: "Here", textStartedAt: 400, writing: { name: "show_artifact", chars: 900, head: '{"path": "a.html"' } }), true),
+    ).toMatchObject({ kind: "writing", name: "show_artifact", path: "a.html", chars: 900 });
+  });
+
+  it("waits on the NEWEST unanswered call, since parallel ones settle one at a time", () => {
+    const entries: TranscriptEntry[] = [
+      { kind: "tool", name: "read_file", summary: "a.ts", ok: true, result: {} },
+      { kind: "tool", name: "bash", summary: "npm test", at: 900 },
+    ];
+    expect(liveStatusOf(entries, null, true)).toMatchObject({ kind: "running", name: "bash", since: 900 });
+  });
+
+  it("falls back to the honest floor: a turn has started and has said nothing", () => {
+    expect(liveStatusOf([], null, true)).toEqual({ kind: "working" });
+  });
+});
+
+describe("a tool result, out of the envelope the transport put it in", () => {
+  /** How MCP actually delivers a return value: serialized, in a text block, in an array. */
+  const mcp = (text: string) => [{ type: "text", text }];
+
+  it("recovers the value a tool returned, so its readers see what it sent", () => {
+    // OBSERVED, from a stored conversation: `show_artifact` returns an envelope and the record holds
+    // this. Every reader downstream was reading the array — which is why the page never rendered.
+    const envelope = { path: "mocks/04.html", mediaType: "text/html", bytes: 10951, uri: "artifact://t/mocks/04.html", content: "<!DOCTYPE html>" };
+    expect(resultValueOf(mcp(JSON.stringify(envelope)) as never)).toEqual(envelope);
+    expect(producedArtifact(resultValueOf(mcp(JSON.stringify(envelope)) as never))).toEqual(envelope);
+  });
+
+  it("marks a failed MCP call as failed, which the envelope was hiding", () => {
+    const failed = toolsOf([
+      { role: "assistant", parts: [{ type: "tool_use", id: "c1", name: "mcp__dai__write_file", input: { path: "a" } }] },
+      { role: "user", parts: [{ type: "tool_result", tool_use_id: "c1", content: mcp('{"error":"no path given"}') }] },
+    ]);
+    expect(failed[0]).toMatchObject({ ok: false });
+  });
+
+  it("leaves alone anything that is not purely text blocks, losing nothing", () => {
+    const mixed = [{ type: "text", text: "{}" }, { type: "image", source: { data: "…" } }];
+    expect(resultValueOf(mixed as never)).toEqual(mixed);
+    expect(resultValueOf([] as never)).toEqual([]);
+    expect(resultValueOf({ ok: true } as never)).toEqual({ ok: true });
+  });
+
+  it("keeps prose as prose — only an object or an array is read as a value", () => {
+    // A tool whose whole answer is a word returns that word, and `12` stays the string a text block
+    // said it was.
+    expect(resultValueOf(mcp("done") as never)).toBe("done");
+    expect(resultValueOf(mcp("12") as never)).toBe("12");
+    // Truncated output begins like JSON and is not any; showing the text beats showing nothing.
+    expect(resultValueOf(mcp('{"path": "a.html", "cont') as never)).toBe('{"path": "a.html", "cont');
   });
 });

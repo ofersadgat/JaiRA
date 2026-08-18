@@ -43,6 +43,7 @@ import type {
   WorkflowSyncEdit,
   WorkflowSyncResult,
   WorkflowSyncStatus,
+  WritingTool,
 } from "@jaira/shared/browser";
 import { mimeFallbacks } from "@jaira/shared/browser";
 import type { Drafts, SetDraft } from "./drafts";
@@ -185,6 +186,8 @@ export interface FileSurfaceContext {
     items: JsonValue[];
     /** Subagent turns streaming by, keyed by the spawning call — see `AppState.liveTurn`. */
     sidechains: Record<string, JsonValue[]>;
+    /** The tool call whose arguments are still streaming — see `WritingTool`. */
+    writing?: WritingTool;
   } | null;
   onShowSession: (instanceId: number | null) => void;
   waiting?: { component: string } | undefined;

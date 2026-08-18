@@ -4652,6 +4652,13 @@ textarea.cfg-input {
   padding-left: 12px;
   border-left: 1px solid var(--rule);
 }
+/* A page the call PRODUCED, drawn under the line without being asked for. Aligned with the fold's
+   body so the two read as one column, but with no rule down the side: the body is evidence hanging
+   off a row, and this is the result the row exists to deliver. */
+.ts-row-shown {
+  margin: 2px 0 10px 28px;
+  min-width: 0;
+}
 /* A subagent's conversation inside a call's row: the same page, one rule further in. */
 .ts-sidechain {
   margin: 4px 0 8px;
@@ -5787,6 +5794,53 @@ textarea.cfg-input {
 .chat-foot {
   flex: none;
   border-top: 1px solid var(--line);
+}
+/* What the model is doing right now — one line, in the one place whose position does not depend on
+   how much has happened. Between the record and the box because it is neither: quieter than the
+   composer under it, and not part of the page above it. */
+.ts-status {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 14px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  font-size: 11.5px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.ts-status-verb {
+  flex: none;
+  font-weight: 600;
+  color: var(--accent);
+}
+/* The thing being worked ON: a path, a command. Monospace, and the part that gets cut. */
+.ts-status-what {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, Consolas, monospace;
+}
+/* Never shrinks — it is a handful of characters, and it is why the line is being read. */
+.ts-status-figure {
+  flex: none;
+}
+/* Only present when the reader has scrolled away. `margin-left` rather than a gap so it sits hard
+   against the right edge whether or not there is a figure beside it. */
+.ts-status-jump {
+  flex: none;
+  margin-left: auto;
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ts-status-jump:hover {
+  text-decoration: underline;
 }
 
 /* Where a conversation divided in two.

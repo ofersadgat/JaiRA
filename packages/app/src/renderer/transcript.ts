@@ -19,7 +19,7 @@
  * identical: they are the same thing.
  */
 import type { JsonValue } from "@declarative-ai/json";
-import type { ConversationTurn, InstanceNode, SessionTurn, SessionView } from "@jaira/shared/browser";
+import { writingPath, type ConversationTurn, type InstanceNode, type SessionTurn, type SessionView, type WritingTool } from "@jaira/shared/browser";
 
 // --- entries ------------------------------------------------------------------
 
@@ -124,12 +124,35 @@ export interface LiveEntry {
   text: string;
 }
 
-export type TranscriptEntry = MessageEntry | ToolEntry | EventEntry | LiveEntry | ThoughtEntry;
+/**
+ * A tool call being WRITTEN — the row that stands in for it until it exists.
+ *
+ * Its own kind rather than a `ToolEntry` with no result, because it is not a call yet: it has no id,
+ * nothing to pair a result with, and no arguments that would survive being read. What it has is the
+ * two facts worth showing while it happens — what is being made, and that it is still being made.
+ *
+ * The row is replaced, not completed: the assembled call arrives as a turn a moment later and brings
+ * its own {@link ToolEntry}. Both folds drop this the instant that happens, which is what keeps the
+ * transcript from showing one call twice.
+ */
+export interface WritingEntry {
+  kind: "writing";
+  at?: number;
+  /** The tool doing the writing. */
+  name: string;
+  /** The path it has named so far, when the arguments have got that far. */
+  path?: string;
+  /** How many characters of argument have arrived — the size of the thing, near enough. */
+  chars: number;
+}
+
+export type TranscriptEntry = MessageEntry | ToolEntry | EventEntry | LiveEntry | ThoughtEntry | WritingEntry;
 
 // --- work blocks --------------------------------------------------------------
 
-/** An entry nobody SAID: a call, a piece of reasoning, a fact the journal recorded. */
-export type WorkEntry = ToolEntry | ThoughtEntry | EventEntry;
+/** An entry nobody SAID: a call, a call being written, a piece of reasoning, a fact the journal
+ *  recorded. */
+export type WorkEntry = ToolEntry | ThoughtEntry | EventEntry | WritingEntry;
 
 /**
  * A run of consecutive work, between one message and the next.
@@ -314,7 +337,7 @@ export function messagePartsOf(parts: JsonValue | undefined): MessagePart[] {
         kind: "result",
         ...(typeof callId === "string" ? { callId } : {}),
         ...(flagged ? { failed: true } : {}),
-        result: (pick(p, ["result", "output", "content"]) ?? null) as JsonValue,
+        result: resultValueOf((pick(p, ["result", "output", "content"]) ?? null) as JsonValue),
       });
       continue;
     }
@@ -332,6 +355,52 @@ export function messagePartsOf(parts: JsonValue | undefined): MessagePart[] {
     });
   }
   return out;
+}
+
+/**
+ * What a tool actually RETURNED, out of the envelope a transport wrapped it in.
+ *
+ * MCP has one content type on the wire, and it is text. A tool that returns
+ * `{path, mediaType, bytes, uri, content}` reaches the record as
+ * `[{type: "text", text: "{\"path\":…}"}]` — the value, serialized, inside a block, inside an array.
+ * Every reader downstream was reading the envelope and none of them said so:
+ *
+ *   - the payload block printed a one-element array holding an escaped JSON string, which for a page
+ *     is thirty thousand characters of `
+` and `\"`;
+ *   - `artifactOf` was handed an array, answered that there was no artifact, and a `show_artifact`
+ *     result rendered as source instead of as the page it describes;
+ *   - `isErrorish` looked for `{error}` one level below where it was, so a failed MCP call drew a
+ *     tick.
+ *
+ * Unwrapping is RECOVERY, not interpretation — the transport serialized a value and this returns
+ * that value — which is why it happens once, here, where the record is read, rather than in each of
+ * the three readers separately guessing at the same envelope.
+ *
+ * Conservative in both directions. Only an array whose every element is a text block is unwrapped,
+ * so an image, a resource link, or a mixed result keeps its shape and loses nothing. And the joined
+ * text becomes a VALUE only if it parses as an object or an array: a tool whose whole answer is the
+ * word `done` returns that word, and `12` stays the string a text block said it was.
+ */
+export function resultValueOf(raw: JsonValue): JsonValue {
+  if (!Array.isArray(raw) || raw.length === 0) return raw;
+  const texts: string[] = [];
+  for (const block of raw) {
+    if (block === null || typeof block !== "object" || Array.isArray(block)) return raw;
+    const part = block as Record<string, JsonValue>;
+    if (part["type"] !== "text" || typeof part["text"] !== "string") return raw;
+    texts.push(part["text"] as string);
+  }
+  const text = texts.join("");
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return text;
+  try {
+    return JSON.parse(trimmed) as JsonValue;
+  } catch {
+    // A payload that begins like JSON and is not one is still the tool's answer. Truncated output is
+    // the common case, and showing the text beats showing nothing.
+    return text;
+  }
 }
 
 /** The one argument worth putting on a collapsed line: a path, a command, the first string there is. */
@@ -507,6 +576,15 @@ export interface LiveTail {
    * render, while the run is still going.
    */
   sidechains?: Readonly<Record<string, readonly JsonValue[]>>;
+  /**
+   * The tool call whose ARGUMENTS are still being written, when one is — see `WritingTool`.
+   *
+   * The gap it fills is the one between a model deciding to make something and the call that makes
+   * it existing. For a page of any size that gap is the bulk of the turn, and everything else on
+   * this object is empty for the whole of it: the answer has not started, the thinking is over, and
+   * the call is not a call yet.
+   */
+  writing?: WritingTool;
 }
 
 /**
@@ -665,6 +743,72 @@ export function liveItemEntries(item: JsonValue, within?: string): Array<Transcr
 }
 
 /**
+ * What the model is doing RIGHT NOW — one state, for one line that says so.
+ *
+ * The generalisation of the writing row, and the reason it is worth generalising: a run already
+ * announces itself five different ways, in five different places, and every one of them is a row in
+ * stream order. Rows in stream order are the right shape for a RECORD and the wrong shape for a
+ * question about the present, because where the answer is depends on how much has happened — a
+ * thinking row four screens up, a waiting tool call behind a closed fold, an artifact block tall
+ * enough to push the live edge out of the viewport. "Is it still going, and on what" should be
+ * answerable without hunting, and that means one fixed place rather than the newest of five.
+ *
+ * Derived, never accumulated. Everything here is already on screen somewhere; this is a reading of
+ * it, so there is no second source of truth to drift — which is the failure a status bar invites
+ * and the reason this is a pure function of the entries and the tail rather than its own state.
+ */
+export type LiveStatus =
+  /** A tool call's arguments are streaming — see {@link WritingEntry}. Sized, not timed: what a
+   *  reader wants to know about a page being written is how much of it there is. */
+  | { kind: "writing"; name: string; path?: string; chars: number }
+  /** The answer is being written. */
+  | { kind: "answering"; since?: number }
+  /** The model is reasoning and has not begun to answer. */
+  | { kind: "thinking"; since?: number }
+  /** A call has been made and its result has not come back — the wait that is somebody else's. */
+  | { kind: "running"; name: string; summary: string; since?: number }
+  /** Something is running and has said nothing yet. The honest floor: a turn that has started. */
+  | { kind: "working" };
+
+/**
+ * Read the live state off what is already being shown.
+ *
+ * Ordered by what SUPERSEDES what, not by importance. The stream moves thinking → answer →
+ * arguments → call, each step ending the one before it, so the test that comes first is the one
+ * furthest along: a text tail beside a running clock means the thinking is over, and a half-written
+ * argument list means the answer is.
+ *
+ * `running` is asked rather than inferred, because an unanswered call is not proof of one. A record
+ * that ended mid-flight keeps its last call forever unanswered, and a bar that read that as activity
+ * would report a crashed run from last week as a run in progress.
+ */
+export function liveStatusOf(
+  entries: readonly TranscriptEntry[],
+  tail: LiveTail | null | undefined,
+  running: boolean,
+): LiveStatus | null {
+  if (!running) return null;
+  if (tail?.writing !== undefined) {
+    const path = writingPath(tail.writing.head);
+    return { kind: "writing", name: tail.writing.name, chars: tail.writing.chars, ...(path !== undefined ? { path } : {}) };
+  }
+  if (tail !== null && tail !== undefined && tail.text.length > 0) {
+    return { kind: "answering", ...(tail.textStartedAt !== undefined ? { since: tail.textStartedAt } : {}) };
+  }
+  if (tail?.thinkingStartedAt !== undefined) {
+    return { kind: "thinking", since: tail.thinkingStartedAt };
+  }
+  // The LAST unanswered call, because parallel calls settle one at a time and the newest is the one
+  // still being waited on when the others have come back.
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const entry = entries[i]!;
+    if (entry.kind !== "tool" || entry.ok !== undefined || entry.result !== undefined) continue;
+    return { kind: "running", name: entry.name, summary: entry.summary, ...(entry.at !== undefined ? { since: entry.at } : {}) };
+  }
+  return { kind: "working" };
+}
+
+/**
  * One instance's transcript: its conversation, with the journal facts that belong to it.
  *
  * `journal` is filtered to THIS instance's state — the projection is per task, and dropping that
@@ -804,6 +948,18 @@ export function entriesOf(
       });
     }
     if (tail.text.length > 0) entries.push({ kind: "live", text: tail.text });
+    // LAST, because it is the thing happening now: the thinking is over, the answer (if any) is
+    // written, and what remains is a call being assembled. A `chars` of zero is still a row — the
+    // block has opened and the tool is named, which is already more than a blank panel says.
+    if (tail.writing !== undefined) {
+      const path = writingPath(tail.writing.head);
+      entries.push({
+        kind: "writing",
+        name: tail.writing.name,
+        chars: tail.writing.chars,
+        ...(path !== undefined ? { path } : {}),
+      });
+    }
   }
   // How the call ENDED, when it did not end well — last, because it is the thing that happened
   // after everything above it. A transcript that simply stops is indistinguishable from one that
