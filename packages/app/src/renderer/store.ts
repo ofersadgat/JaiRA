@@ -87,7 +87,8 @@ import { instanceAt, newestRunOf, runTargetOf } from "./runForm";
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestFiles, selfTestScript } from "./debugWorkflow";
 import { CHAT_AGENT, CHAT_STATES, chatWorkflowFiles, titleOf } from "./chatWorkflow";
-import { emptyUiState, forgetSeen, SHUT, toggleShut, withOpen, withPane, withSeen } from "./uiState";
+import { unseenTasks } from "./pill";
+import { emptyUiState, forgetSeen, SHUT, toggleShut, withOpen, withPane, withSeen, withSeenAll } from "./uiState";
 
 /** A prune plan or result, as `history:prune` returns it. */
 export type PruneReport = Response<"history:prune">;
@@ -2513,6 +2514,20 @@ export function useApp() {
        */
       markSeen: (taskId: string, at: number) => {
         const next = withSeen(ref.current.settings.ui, taskId, at);
+        if (next !== ref.current.settings.ui) setUi(next);
+      },
+
+      /**
+       * Mark a whole project's stopped tasks read — what clicking its pills does (SHELL.md §4.3).
+       *
+       * The status pills clear and the active ones stay, because they are not about having looked:
+       * a run still working is still working. Marks move to each task's OWN clock rather than to
+       * `Date.now()`, so a turn that lands in the same millisecond as the click is not swallowed.
+       */
+      markProjectSeen: (project: string) => {
+        const summary = ref.current.projects.find((p) => p.project === project);
+        if (summary === undefined) return;
+        const next = withSeenAll(ref.current.settings.ui, unseenTasks(summary, ref.current.settings.ui.seen));
         if (next !== ref.current.settings.ui) setUi(next);
       },
 

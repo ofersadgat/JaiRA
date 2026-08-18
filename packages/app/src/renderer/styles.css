@@ -2972,6 +2972,15 @@ button.crumb-sep.open {
 .pill-more {
   color: var(--dim);
 }
+/* Clicking a row's pills marks its share seen, so the row that has something to clear says so. Only
+   where there is a handler: a live-facts-only row has nothing a click would change. */
+.pills[role="button"] {
+  cursor: pointer;
+}
+.pills[role="button"]:hover .pill-status,
+.pills[role="button"]:hover .pill-more {
+  color: var(--text);
+}
 
 .reason {
   color: var(--bad);

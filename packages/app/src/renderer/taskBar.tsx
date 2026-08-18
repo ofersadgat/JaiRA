@@ -53,6 +53,8 @@ export function TaskAddressBar({
   boards,
   trail,
   run,
+  seen,
+  onSeen,
   onFocus,
   onDrill,
   onWalkBack,
@@ -81,6 +83,15 @@ export function TaskAddressBar({
         onSelectTask: (taskId: string) => void;
       }
     | undefined;
+  /**
+   * How far each conversation has been read — see `JairaUiState.seen`.
+   *
+   * The bar's pills are the same two kinds as everywhere else (SHELL.md §4.3): the active ones are
+   * live facts, the status ones count only what has moved since this person last looked.
+   */
+  seen: Readonly<Record<string, number>>;
+  /** Marking this project's share read, which is what clears its status pills. */
+  onSeen: (project: string) => void;
   onFocus: (project: string | null) => void;
   onDrill: (project: string, level: string | null) => void;
   onWalkBack: (index: number) => void;
@@ -188,7 +199,7 @@ export function TaskAddressBar({
           // As pills now (SHELL.md §4): "12 tasks · 2 running" answered how many and left the four
           // other things a person came to check — what is parked, what failed — to be read off the
           // board. The bar has room for one row of pills and that row is the whole answer.
-          <Pills counts={projectCounts(project)} budget={CRUMB_PILL_BUDGET} />
+          <Pills counts={projectCounts(project, seen)} budget={CRUMB_PILL_BUDGET} onClear={() => onSeen(project.project)} />
         ) : null
       }
       {...(tools !== undefined ? { tools } : {})}

@@ -10,8 +10,19 @@
  *    backlog, which "3 kinds hidden" is not.
  */
 import { describe, expect, it } from "vitest";
-import type { ProjectSummary } from "@jaira/shared/browser";
-import { PILL_ORDER, layoutPills, pillFill, pillKindOf, pillTotal, projectCounts, tally, type PillCounts } from "../src/renderer/pill";
+import type { EndedTask, TaskStatus } from "@jaira/shared/browser";
+import {
+  PILL_ORDER,
+  layoutPills,
+  pillFill,
+  pillKindOf,
+  pillTotal,
+  projectCounts,
+  tally,
+  unseenTasks,
+  type CountedProject,
+  type PillCounts,
+} from "../src/renderer/pill";
 
 const kinds = (counts: PillCounts, budget: number): string[] => layoutPills(counts, budget).fit.map((f) => `${f.kind}${f.n}`);
 
@@ -93,11 +104,14 @@ describe("layoutPills", () => {
 });
 
 describe("projectCounts", () => {
-  const summary = (patch: Partial<ProjectSummary>): Pick<ProjectSummary, "statuses" | "waiting"> => ({
+  const summary = (patch: Partial<CountedProject>): CountedProject => ({
     statuses: {},
     waiting: 0,
+    ended: [],
     ...patch,
   });
+  const ended = (status: TaskStatus, n: number, updatedAt = 10): EndedTask[] =>
+    Array.from({ length: n }, (_, i) => ({ taskId: `${status}-${i}`, status, updatedAt }));
 
   it("takes the parked tasks OUT of the running count", () => {
     // `waiting` is a subset of `running` — a task at a gate is `running` in the runtime row and says
@@ -110,7 +124,40 @@ describe("projectCounts", () => {
   });
 
   it("merges the two ways a run stops without failing", () => {
-    expect(projectCounts(summary({ statuses: { interrupted: 1, canceled: 2 } }))).toEqual({ warning: 3 });
+    const project = summary({ ended: [...ended("interrupted", 1), ...ended("canceled", 2)] });
+    expect(projectCounts(project)).toEqual({ warning: 3 });
+  });
+
+  it("counts a status pill only for what has changed since this person looked", () => {
+    const project = summary({ ended: ended("completed", 3) });
+    expect(projectCounts(project)).toEqual({ success: 3 });
+    // Two of the three read. `✓3` was never "three that ever finished" — it is what moved while you
+    // were somewhere else, and it is the number that shrinks as you work through it.
+    expect(projectCounts(project, { "completed-0": 10, "completed-1": 99 })).toEqual({ success: 1 });
+    expect(projectCounts(project, { "completed-0": 10, "completed-1": 10, "completed-2": 10 })).toEqual({});
+  });
+
+  it("leaves the ACTIVE pills alone however much has been read", () => {
+    // A live fact is true whether or not anybody looked, so no watermark clears it — which is the
+    // whole difference between the two kinds. (OPEN: SHELL.md §9.3 asks whether it should be.)
+    const project = summary({ statuses: { running: 2 }, waiting: 1, ended: ended("completed", 1) });
+    const allSeen = { "completed-0": 10 };
+    expect(projectCounts(project, allSeen)).toEqual({ running: 1, waiting: 1 });
+  });
+
+  it("marks exactly the rows its pills were counting", () => {
+    const project = summary({ ended: [...ended("completed", 2), ...ended("failed", 1, 40)] });
+    expect(unseenTasks(project)).toEqual([
+      { taskId: "completed-0", at: 10 },
+      { taskId: "completed-1", at: 10 },
+      { taskId: "failed-0", at: 40 },
+    ]);
+    // A mark moves to the TASK's own clock, not to "now": a turn landing in the same millisecond as
+    // the click would otherwise be swallowed by it.
+    expect(unseenTasks(project, { "completed-0": 10 })).toEqual([
+      { taskId: "completed-1", at: 10 },
+      { taskId: "failed-0", at: 40 },
+    ]);
   });
 
   it("leaves queued tasks out entirely", () => {

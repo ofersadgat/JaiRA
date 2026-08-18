@@ -1045,6 +1045,8 @@ export default function App(): JSX.Element {
                 onWalkTo: actions.walkTo,
                 onSelectTask: (taskId) => actions.select(taskId, state.selectedProject ?? undefined),
               }}
+              seen={ui.seen}
+              onSeen={actions.markProjectSeen}
               onFocus={actions.focusProject}
               onDrill={actions.drillProject}
               onWalkBack={actions.walkBackTo}
@@ -1229,6 +1231,8 @@ export default function App(): JSX.Element {
                           at={p.project}
                           boards={state.boards}
                           trail={[]}
+                          seen={ui.seen}
+                          onSeen={actions.markProjectSeen}
                           onFocus={actions.focusProject}
                           onDrill={actions.drillProject}
                           onWalkBack={actions.walkBackTo}

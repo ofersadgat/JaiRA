@@ -1613,6 +1613,11 @@ export class AppService {
         running: running.size,
         statuses,
         waiting: parked.size,
+        // What a status pill could be counting — see `ProjectSummary.ended`. `queued` is not here
+        // for the same reason it has no pill: it has not stopped, because it has not started.
+        ended: tasks
+          .filter((t) => t.status !== "running" && t.status !== "queued")
+          .map((t) => ({ taskId: t.taskId, status: t.status, updatedAt: t.updatedAt })),
       });
     }
     // The user's work first, then the shared library, then JaiRA's own — outward from what you are

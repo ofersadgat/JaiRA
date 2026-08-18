@@ -575,6 +575,27 @@ export interface ProjectSummary {
    * same place the inbox strip reads, so the two can never disagree.
    */
   waiting: number;
+  /**
+   * Every task that has STOPPED, with the clock a read-watermark is compared against.
+   *
+   * Here rather than as another tally because the status pills are UNSEEN counts (SHELL.md §4.3):
+   * "three finished" means three finished since you last looked, and answering that needs the ids —
+   * the watermark lives in the renderer's settings (`ui.seen`), which is the one place a count of
+   * what a PERSON has read can live.
+   *
+   * Only the stopped ones. A running or parked task is a live fact, always true whether or not
+   * anybody looked, so its count comes from {@link statuses} and needs no row here — which also
+   * bounds this to the tasks a status pill could possibly be counting.
+   */
+  ended: EndedTask[];
+}
+
+/** One stopped task, as small as an unseen count needs it (see {@link ProjectSummary.ended}). */
+export interface EndedTask {
+  taskId: string;
+  status: TaskStatus;
+  /** The task ROW's clock — the same one `ui.seen` watermarks against. */
+  updatedAt: number;
 }
 
 /** A row in the task list. */

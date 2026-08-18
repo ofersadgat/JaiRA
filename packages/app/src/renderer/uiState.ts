@@ -178,6 +178,23 @@ export function withSeen(ui: JairaUiState, taskId: string, at: number): JairaUiS
 }
 
 /**
+ * Mark a whole row's worth read at once — what clicking a project or a view does (SHELL.md §4.3).
+ *
+ * One pass and one new object, rather than folding {@link withSeen} over the list: a project row can
+ * be clearing hundreds of marks, and each fold step would copy the whole map to move one key.
+ *
+ * Monotonic per task, exactly as the single form is, so a row whose marks are already current
+ * returns the state unchanged and writes nothing.
+ */
+export function withSeenAll(ui: JairaUiState, marks: readonly { taskId: string; at: number }[]): JairaUiState {
+  const moved = marks.filter(({ taskId, at }) => (ui.seen[taskId] ?? 0) < at);
+  if (moved.length === 0) return ui;
+  const seen = { ...ui.seen };
+  for (const { taskId, at } of moved) seen[taskId] = Math.max(seen[taskId] ?? 0, at);
+  return { ...ui, seen };
+}
+
+/**
  * Drop the marks for conversations that have been deleted.
  *
  * By the ids that WENT rather than by the ids that remain, which is the only safe direction here. A

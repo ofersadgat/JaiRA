@@ -103,26 +103,58 @@ export function pillTotal(counts: PillCounts): number {
   return PILL_ORDER.reduce((sum, kind) => sum + (counts[kind] ?? 0), 0);
 }
 
+/** What `projectCounts` needs of a project — the live tallies, and the rows a watermark filters. */
+export type CountedProject = Pick<ProjectSummary, "statuses" | "waiting" | "ended">;
+
 /**
- * A project's tasks as pills.
+ * A project's tasks as pills: the active ones live, the status ones UNSEEN (SHELL.md §4.3).
  *
- * The one piece of arithmetic worth stating: `waiting` is a SUBSET of `running` — a task parked at a
- * gate is `running` in the runtime row and says so nowhere else — so `▶` is what is left after the
- * parked ones are taken out. Counting both from `running` would show the same task twice and make
- * `▶2 ⏸2` mean two tasks.
+ * Two pieces of arithmetic are worth stating.
+ *
+ * **`waiting` is a subset of `running`** — a task parked at a gate is `running` in the runtime row
+ * and says so nowhere else — so `▶` is what is left once the parked ones are taken out. Counting
+ * both straight off `running` would show the same task twice and make `▶2 ⏸2` mean two tasks.
+ *
+ * **The two kinds count different populations.** An active pill is a live fact and is always true;
+ * a status pill counts only what has changed since this person last looked, which is why the second
+ * half filters on the watermark and the first half does not.
+ *
+ * OPEN (SHELL.md §9.3): that split is exactly what makes `▶2` and `✓3` on one row count different
+ * things — a run that will change again on its own is not really something you failed to see, but
+ * one could argue a person wants "what moved while I was away" to include it. Making running
+ * unseen-scoped too means giving it rows in `ProjectSummary.ended`, which today holds only what has
+ * stopped; the change is there, not here.
  */
-export function projectCounts(summary: Pick<ProjectSummary, "statuses" | "waiting">): PillCounts {
+export function projectCounts(summary: CountedProject, seen: Readonly<Record<string, number>> = {}): PillCounts {
   const counts: PillCounts = {};
   const add = (kind: PillKind, n: number): void => {
     if (n > 0) counts[kind] = (counts[kind] ?? 0) + n;
   };
   add("running", Math.max(0, (summary.statuses.running ?? 0) - summary.waiting));
   add("waiting", summary.waiting);
-  add("error", summary.statuses.failed ?? 0);
-  add("warning", (summary.statuses.interrupted ?? 0) + (summary.statuses.canceled ?? 0));
-  add("success", summary.statuses.completed ?? 0);
-  // `queued` is deliberately absent: nothing is happening and nothing has happened. See `pillKindOf`.
+  // `queued` never reaches here: it is not in `ended`, and it has no pill. See `pillKindOf`.
+  for (const task of summary.ended) {
+    if ((seen[task.taskId] ?? 0) >= task.updatedAt) continue;
+    const kind = pillKindOf(task.status);
+    if (kind !== null) add(kind, 1);
+  }
   return counts;
+}
+
+/**
+ * The tasks a row's status pills are counting — what "mark this seen" has to mark.
+ *
+ * Returned as the pairs rather than the ids: the watermark is monotonic and per task, so clearing a
+ * row means moving each of its marks to that task's own clock. Moving them all to "now" would also
+ * swallow a turn that landed in the same millisecond as the click.
+ */
+export function unseenTasks(
+  summary: CountedProject,
+  seen: Readonly<Record<string, number>> = {},
+): { taskId: string; at: number }[] {
+  return summary.ended
+    .filter((task) => (seen[task.taskId] ?? 0) < task.updatedAt && pillKindOf(task.status) !== null)
+    .map((task) => ({ taskId: task.taskId, at: task.updatedAt }));
 }
 
 /*
@@ -227,7 +259,12 @@ export function Pills({
   const { fit, rest } = layoutPills(counts, budget);
   if (fit.length === 0) return null;
   return (
-    <span className="pills" {...(onClear !== undefined ? { onClick: onClear } : {})}>
+    <span
+      className="pills"
+      {...(onClear !== undefined
+        ? { role: "button", title: "mark these seen", onClick: onClear }
+        : {})}
+    >
       {fit.map(({ kind, n }) => (
         <Pill key={kind} kind={kind} n={n} title={`${n} ${kind}`} />
       ))}

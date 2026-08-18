@@ -24,6 +24,7 @@ import {
   withOpen,
   withPane,
   withSeen,
+  withSeenAll,
 } from "../src/renderer/uiState";
 
 describe("remembered pane sizes", () => {
@@ -154,6 +155,32 @@ describe("which conversations have been read", () => {
     expect(withSeen(ui, "t-1", 500)).toBe(ui);
     expect(withSeen(ui, "t-1", 900)).toBe(ui);
     expect(seenOf(withSeen(ui, "t-1", 500), "t-1")).toBe(900);
+  });
+
+  it("marks a whole row at once, each task at its own clock", () => {
+    // What clicking a project's status pills does (SHELL.md §4.3). Per-task rather than one "now"
+    // for the row: the marks are compared against each task's own `updatedAt`, and a single stamp
+    // would swallow a turn that landed in the same millisecond as the click.
+    const ui = withSeenAll(emptyUiState(), [
+      { taskId: "t-1", at: 500 },
+      { taskId: "t-2", at: 900 },
+    ]);
+    expect(seenOf(ui, "t-1")).toBe(500);
+    expect(seenOf(ui, "t-2")).toBe(900);
+  });
+
+  it("is monotonic in bulk too, and hands back the same object when nothing would move", () => {
+    const ui = withSeenAll(emptyUiState(), [{ taskId: "t-1", at: 900 }]);
+    // The identity check again: a row already clear must not write settings or re-render the window.
+    expect(withSeenAll(ui, [{ taskId: "t-1", at: 500 }])).toBe(ui);
+    expect(withSeenAll(ui, [])).toBe(ui);
+    // A row where SOME of it has moved still marks only what moved forwards.
+    const next = withSeenAll(ui, [
+      { taskId: "t-1", at: 500 },
+      { taskId: "t-2", at: 100 },
+    ]);
+    expect(seenOf(next, "t-1")).toBe(900);
+    expect(seenOf(next, "t-2")).toBe(100);
   });
 
   it("marks one conversation without touching another", () => {
