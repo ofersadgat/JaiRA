@@ -104,17 +104,157 @@
   /* Focus is an OUTLINE rather than a box-shadow so it composes with the sheen instead of replacing
      it, and so one declaration covers controls that each carry a different shadow. */
   --focus-ring: color-mix(in srgb, var(--accent) 70%, transparent);
+
+  /*
+   * The two voices (SHELL.md §3).
+   *
+   * APP voice is for words JaiRA chose — the names of rooms, actions and states. They are the same
+   * on every machine and in every project. DATA voice is for words something else chose — paths,
+   * project names, state ids, task titles, commands, counts: different everywhere, and the thing a
+   * person is actually there to read. A string's family says which kind of word it is before it is
+   * read, which is why nothing below may switch family to look more selected. Selection moves
+   * weight, colour and ground; it never moves the face.
+   *
+   * Concrete names lead both stacks. `ui-monospace` used to, in fifty-seven declarations, and some
+   * engines alias it to the proportional system UI font — which turns every code surface
+   * proportional on exactly the machines nobody tests on. It sits at the back now, as a last resort
+   * rather than a first choice.
+   *
+   * DM Sans and JetBrains Mono are not bundled: they are a preference, not a dependency, and fall
+   * through to the platform stack on a machine that does not have them.
+   */
+  --font-app: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-data: "JetBrains Mono", "SF Mono", "SFMono-Regular", Menlo, Consolas, ui-monospace, monospace;
+  /*
+   * One base per voice, and every size in this file is a multiple of one of them — see the register
+   * classes below, and the `calc()` at each remaining call site.
+   *
+   * That is what lets a single preference move a whole voice with every ratio intact (§6). A literal
+   * px anywhere is a component that a size control cannot reach, so there are none.
+   */
+  --size-app: 12.5px;
+  --size-data: 12px;
+  /* The editor follows the data voice until Advanced separates them — the "simple / advanced" rule
+     borrowed from t3code, where a terminal follows the code font until it is told not to. Overwritten
+     as an inline style by `applyAppearance`; the fallback belongs here so a cold paint has one. */
+  --size-editor: var(--size-data);
+}
+
+/*
+ * The ten registers (SHELL.md §3.3).
+ *
+ * Ten classes, not ten places to write a font stack. A component picks the register that says what
+ * kind of word it is showing and takes the family, size, weight and colour that go with it.
+ *
+ * `app-label` is for a HEADING OVER A GROUP, not for a row that goes somewhere. That allocation is
+ * the whole reason the nav reads consistently: uppercase means "this names what is below it".
+ *
+ * Data never takes `text-transform`. Uppercasing `review.md` misrepresents it — paths, ids and
+ * commands are case-sensitive, so changing their case is a lie about the value. Keeping data out of
+ * uppercase is exactly what leaves uppercase free as an app-only signal.
+ */
+.app-title,
+.app-label,
+.app-text,
+.app-secondary,
+.app-absent {
+  font-family: var(--font-app);
+}
+.data-title,
+.data-text,
+.data-secondary,
+.data-faint,
+.data-num {
+  font-family: var(--font-data);
+}
+.app-title {
+  font-size: calc(var(--size-app) * 1.05);
+  font-weight: 700;
+  color: var(--text);
+}
+.app-label {
+  font-size: calc(var(--size-app) * 0.8);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+}
+.app-text {
+  font-size: var(--size-app);
+  font-weight: 500;
+  color: var(--text);
+}
+.app-secondary {
+  font-size: calc(var(--size-app) * 0.88);
+  font-weight: 400;
+  color: var(--dim);
+}
+/* App text standing where DATA would be — "open a project…", an empty column, a slot nothing filled.
+   The quietest register, and the reason it is `--tok-hint` rather than an opacity: the palette
+   already carries a step below `--dim` for a hint sitting on a line of code, and a meaningful blank
+   must not read as an omission. `.side-project.none` and `.binding-produced::placeholder` were each
+   spelling this out on their own; this is the name they were missing. */
+.app-absent {
+  font-size: var(--size-app);
+  font-weight: 500;
+  font-style: italic;
+  color: var(--tok-hint);
+}
+.data-title {
+  font-size: calc(var(--size-data) * 1.12);
+  font-weight: 700;
+  color: var(--text);
+}
+.data-text {
+  font-size: calc(var(--size-data) * 0.96);
+  font-weight: 400;
+  color: var(--text);
+}
+.data-secondary {
+  font-size: calc(var(--size-data) * 0.84);
+  font-weight: 400;
+  color: var(--dim);
+}
+.data-faint {
+  font-size: calc(var(--size-data) * 0.84);
+  font-weight: 400;
+  color: var(--tok-hint);
+}
+/* Tabular figures, so a column of counts and durations lines up on the decimal rather than dancing
+   as the numbers change. Colour is left to whatever puts semantics on it — a pill, a lane count. */
+.data-num {
+  font-size: calc(var(--size-data) * 0.79);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  color: var(--dim);
+}
+
+/*
+ * State, and the only three properties it may touch.
+ *
+ * Weight, colour, ground — never the family and never the case. A row that switches to mono to look
+ * more selected is how the two voices stop meaning anything, because the reader can no longer tell
+ * "this is a path" from "this is the row I am on".
+ */
+.is-active {
+  font-weight: 700;
+  color: var(--text);
+  background: var(--tint-accent);
 }
 
 * {
   box-sizing: border-box;
 }
 
+/* The app voice's ground. 13px against a 12.5px base rather than the base itself: the base is the
+   thing every register is a ratio OF, not a promise that the body equals it — and holding the
+   computed size where it was keeps this whole sweep a no-op until a preference moves. */
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 13px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+  font: calc(var(--size-app) * 13 / 12.5) / 1.5 var(--font-app);
 }
 
 /*
@@ -207,8 +347,8 @@ button.link {
   border: 0;
   padding: 0;
   color: var(--accent);
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
   box-shadow: none;
 }
 button.link:hover:not(:disabled) {
@@ -240,8 +380,8 @@ select:hover:not(:disabled) {
   border-color: var(--rule);
 }
 textarea {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 12 / 12);
 }
 /* A disabled field must LOOK disabled. The rule above sets `color` and `background` outright, which
    overrides the browser's own greying — so a read-only reference (a `$ref` prompt, a computed
@@ -261,7 +401,7 @@ h4 {
   margin: 0 0 8px;
 }
 h3 {
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--dim);
@@ -271,8 +411,8 @@ h3 {
   gap: 8px;
 }
 code {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
 }
 
 .empty {
@@ -281,7 +421,7 @@ code {
 }
 .sub {
   color: var(--dim);
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
 }
 .count {
   color: var(--dim);
@@ -497,7 +637,7 @@ code {
   -webkit-app-region: no-drag;
 }
 .side-brand {
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
   font-weight: 700;
   letter-spacing: 0.12em;
   color: var(--dim);
@@ -513,8 +653,8 @@ code {
   padding: 2px 6px;
   border-radius: 5px;
   color: var(--text);
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11.5px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11.5 / 12);
 }
 .side-project:hover:not(:disabled) {
   background: var(--panel);
@@ -535,7 +675,7 @@ code {
   border-radius: 6px;
   background: transparent;
   color: var(--dim);
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   letter-spacing: -0.05em;
 }
 .side-toggle:hover:not(:disabled) {
@@ -577,7 +717,7 @@ code {
   background: transparent;
   color: var(--dim);
   text-align: left;
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
   box-shadow: none;
 }
 .side-row:hover:not(:disabled) {
@@ -599,7 +739,7 @@ code {
   width: 16px;
   flex: none;
   text-align: center;
-  font-size: 14px;
+  font-size: calc(var(--size-app) * 14 / 12.5);
 }
 .side-label {
   min-width: 0;
@@ -608,7 +748,7 @@ code {
    it, and whether it is showing. Only ever on the row you are on. */
 .side-twist {
   flex: none;
-  font-size: 9px;
+  font-size: calc(var(--size-app) * 9 / 12.5);
   color: var(--dim);
 }
 
@@ -629,7 +769,7 @@ code {
 .side-drawer .sections {
   overflow-y: auto;
   padding: 2px 0 4px;
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
 }
 
 /* The file browser, which was a column and is now the drawer under one row. */
@@ -675,10 +815,10 @@ code {
   flex: none;
   background: var(--panel);
   border-top: 1px solid var(--line);
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
 }
 .strip-label {
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--warn);
@@ -717,11 +857,11 @@ code {
   list-style: none;
   margin: 0 0 10px;
   padding: 0;
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
 }
 .tree-root {
   color: var(--dim);
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   padding: 8px 6px 4px;
@@ -773,7 +913,7 @@ code {
    row that is already highlighted by the selection. */
 .lint-dot {
   flex: none;
-  font-size: 8px;
+  font-size: calc(var(--size-app) * 8 / 12.5);
   line-height: 1;
 }
 .tree-item.has-error > .lint-dot {
@@ -783,7 +923,7 @@ code {
    and it has to stay distinguishable from the lint dot sitting beside it on the same row. */
 .dirty-dot {
   flex: none;
-  font-size: 8px;
+  font-size: calc(var(--size-app) * 8 / 12.5);
   line-height: 1;
   color: var(--accent);
 }
@@ -796,15 +936,15 @@ code {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11.5px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11.5 / 12);
 }
 .glyph {
   width: 13px;
   flex: none;
   text-align: center;
   color: var(--dim);
-  font-size: 10px;
+  font-size: calc(var(--size-app) * 10 / 12.5);
 }
 /* --- context menu ---
    Fixed rather than absolute: it is anchored to a pointer position in viewport coordinates, and an
@@ -830,7 +970,7 @@ code {
   border-radius: 0;
   text-align: left;
   padding: 5px 12px;
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -855,7 +995,7 @@ code {
 .menu-note {
   flex: none;
   max-width: 45%;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   color: var(--dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -888,7 +1028,7 @@ code {
 
 .root-empty {
   padding: 2px 6px 6px 19px;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   line-height: 1.45;
 }
 .new-state {
@@ -927,8 +1067,8 @@ code {
   min-width: 0;
 }
 .doc-bar .crumb {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12.5px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 12.5 / 12);
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -965,8 +1105,8 @@ code {
  */
 .doc-bar .crumb-run,
 .doc-bar .crumb-run.last {
-  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
-  font-size: 12px;
+  font-family: var(--font-app);
+  font-size: calc(var(--size-app) * 12 / 12.5);
   max-width: 190px;
   color: var(--text);
 }
@@ -983,8 +1123,8 @@ code {
    is the one crumb that is always there. */
 .doc-bar .crumb-project,
 .doc-bar .crumb-project.last {
-  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
-  font-size: 12px;
+  font-family: var(--font-app);
+  font-size: calc(var(--size-app) * 12 / 12.5);
   max-width: 240px;
   color: var(--text);
   font-weight: 600;
@@ -1037,7 +1177,7 @@ code {
   border: 1px solid transparent;
   border-radius: 6px;
   text-align: left;
-  font-size: 13px;
+  font-size: calc(var(--size-app) * 13 / 12.5);
   min-width: 0;
 }
 .folder-row:hover:not(:disabled) {
@@ -1058,8 +1198,8 @@ code {
 }
 
 .state-id {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 13px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 13 / 12);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1127,12 +1267,12 @@ code {
 .half-caret {
   flex: none;
   color: var(--dim);
-  font-size: 10px;
+  font-size: calc(var(--size-app) * 10 / 12.5);
 }
 .half-label {
   margin: 0;
   flex: none;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   font-weight: 600;
   color: var(--dim);
   text-transform: uppercase;
@@ -1309,7 +1449,7 @@ code {
   margin: 0;
   padding: 8px;
   border: 0;
-  font: 12px/1.55 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font: var(--size-editor)/1.55 var(--font-data);
   tab-size: 2;
   white-space: pre;
   overflow-wrap: normal;
@@ -1427,7 +1567,7 @@ code {
   border: 1px solid var(--line);
   border-radius: 6px;
   box-shadow: var(--lift);
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
 }
 /* Flipped above the caret when the editor has no room below it. */
 .completions.above {
@@ -1471,7 +1611,7 @@ code {
   color: inherit;
 }
 .completion-key {
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   color: var(--accent);
   flex: none;
 }
@@ -1509,7 +1649,7 @@ code {
   display: inline-flex;
   align-items: baseline;
   gap: 5px;
-  font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font: var(--size-data)/1.5 var(--font-data);
   cursor: pointer;
   border: 1px solid var(--line);
   background: var(--bg);
@@ -1524,7 +1664,7 @@ code {
   border-color: var(--accent);
 }
 .violation b {
-  font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font: var(--size-data)/1.5 var(--font-data);
 }
 .schema-reference {
   padding-left: 10px;
@@ -1575,7 +1715,7 @@ code {
    preview inside a panel, not a page: full-size h1s would push the first paragraph off screen. */
 .markdown {
   padding: 2px 2px 12px;
-  font-size: 13px;
+  font-size: calc(var(--size-app) * 13 / 12.5);
   line-height: 1.6;
   overflow-wrap: break-word;
 }
@@ -1590,14 +1730,14 @@ code {
   line-height: 1.3;
 }
 .markdown h1 {
-  font-size: 18px;
+  font-size: calc(var(--size-app) * 18 / 12.5);
 }
 .markdown h2 {
-  font-size: 15px;
+  font-size: calc(var(--size-app) * 15 / 12.5);
 }
 .markdown h3,
 .markdown h4 {
-  font-size: 13px;
+  font-size: calc(var(--size-app) * 13 / 12.5);
 }
 .markdown p,
 .markdown ul,
@@ -1614,7 +1754,7 @@ code {
   margin: 2px 0;
 }
 .markdown code {
-  font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font: var(--size-data)/1.5 var(--font-data);
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -1688,7 +1828,7 @@ code {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-size: 13px;
+  font-size: calc(var(--size-app) * 13 / 12.5);
 }
 .sync-actions {
   display: flex;
@@ -1723,7 +1863,7 @@ code {
   align-items: baseline;
   gap: 6px;
   margin: 0 0 6px;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--dim);
@@ -1741,7 +1881,7 @@ code {
 .sync-change {
   padding: 5px 2px;
   border-top: 1px solid var(--line);
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
 }
 .sync-finding-head,
 .sync-edit-head,
@@ -1767,8 +1907,8 @@ code {
   background: color-mix(in srgb, var(--bad) 12%, transparent);
 }
 .sync-states {
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
 }
 
 /* --- a structured document, read rather than edited ---
@@ -1778,7 +1918,7 @@ code {
   list-style: none;
   margin: 0;
   padding: 0 0 0 13px;
-  font: 12px/1.7 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font: var(--size-data)/1.7 var(--font-data);
   border-left: 1px solid var(--line);
 }
 .doc-tree.doc-root {
@@ -1835,7 +1975,7 @@ code {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--dim);
@@ -1864,7 +2004,7 @@ code {
 /* Column headers. Three text boxes in a row look interchangeable, and the one that decides where a
    value COMES FROM was the one with nothing but a placeholder to say so. */
 .slot-row.slot-head {
-  font-size: 10px;
+  font-size: calc(var(--size-app) * 10 / 12.5);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--dim);
@@ -1933,7 +2073,7 @@ code {
 /* The second rank of a row: a slot's default and description, a child's environment. Closed by
    default so a slot that needs none of it costs one line, open when it has any. */
 .slot-more > summary {
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
   color: var(--dim);
   cursor: pointer;
   list-style: none;
@@ -1944,7 +2084,7 @@ code {
   content: "▸";
   position: absolute;
   left: 2px;
-  font-size: 8px;
+  font-size: calc(var(--size-app) * 8 / 12.5);
   top: 4px;
 }
 .slot-more[open] > summary::before {
@@ -1984,12 +2124,12 @@ code {
 }
 /* A checkbox on its own line, where the label is a sentence rather than a column heading. */
 .slot-opt.wide {
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
 }
 /* The call's own knobs, folded away: they are many, they are rarely touched, and they are not what
    the operation IS. */
 .model-knobs > summary {
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   color: var(--dim);
   cursor: pointer;
   padding: 4px 0;
@@ -2003,7 +2143,7 @@ code {
    A value held in a file rather than inline. The toggle sits beside the field's own label, so the
    choice reads as a property of the field rather than as another control competing with it. */
 .link-toggle {
-  font-size: 10px;
+  font-size: calc(var(--size-app) * 10 / 12.5);
   padding: 1px 5px;
   margin-left: 6px;
   opacity: 0.7;
@@ -2017,8 +2157,8 @@ code {
   color: var(--accent);
 }
 .link-input {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11.5px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11.5 / 12);
 }
 /* Advisory only — the linter probes the search path and has the final word. Bordered rather than
    filled, so a path being typed is not shouted at one character at a time. */
@@ -2050,8 +2190,8 @@ code {
 /* A schema the type picker does not model, shown as a summary. Monospace because it is a fragment of
    the document, and truncated rather than wrapped so one rich slot cannot double the row height. */
 .slot-type-custom {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
   color: var(--dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2066,8 +2206,8 @@ code {
   grid-template-columns: minmax(0, 1.4fr) 14px minmax(0, 1fr) auto auto;
 }
 .slot-row .seq {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 10px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10 / 12);
   color: var(--dim);
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -2094,13 +2234,13 @@ code {
 .slot-row input,
 .slot-row select {
   padding: 3px 6px;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
 }
 .slot-opt {
   display: flex;
   align-items: center;
   gap: 3px;
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
   color: var(--dim);
   white-space: nowrap;
 }
@@ -2111,7 +2251,7 @@ code {
 button.sm {
   padding: var(--control-pad-sm);
   border-radius: var(--control-radius-sm);
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
 }
 
 /* --- board ---
@@ -2213,7 +2353,7 @@ button.crumb-sep.open {
   position: sticky;
   top: 0;
   z-index: 1;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   color: var(--dim);
   display: flex;
   align-items: center;
@@ -2227,8 +2367,8 @@ button.crumb-sep.open {
 /* The sequence number is the order the children RUN in. Absent at the root listing, where the
    columns are workflow roots and have no order relative to each other. */
 .column h4 .seq {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 10px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10 / 12);
   border: 1px solid var(--line);
   border-radius: 3px;
   padding: 0 4px;
@@ -2243,7 +2383,7 @@ button.crumb-sep.open {
   border-radius: 9px;
   background: var(--line);
   color: var(--dim);
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
   line-height: 15px;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -2276,7 +2416,7 @@ button.crumb-sep.open {
   align-items: center;
   gap: 6px;
   margin: 2px 0 6px;
-  font-size: 9.5px;
+  font-size: calc(var(--size-app) * 9.5 / 12.5);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.09em;
@@ -2399,8 +2539,8 @@ button.crumb-sep.open {
   align-items: center;
   gap: 6px;
   color: var(--dim);
-  font-size: 11px;
-  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(var(--size-data) * 11 / 12);
+  font-family: var(--font-data);
   margin-top: 6px;
   padding-top: 5px;
   border-top: 1px solid var(--line);
@@ -2414,8 +2554,8 @@ button.crumb-sep.open {
 }
 .card-status {
   flex: none;
-  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
-  font-size: 10px;
+  font-family: var(--font-app);
+  font-size: calc(var(--size-app) * 10 / 12.5);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -2439,7 +2579,7 @@ button.crumb-sep.open {
   color: var(--accent);
 }
 .tray h4 {
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   color: var(--dim);
   text-transform: uppercase;
   letter-spacing: 0.09em;
@@ -2481,7 +2621,7 @@ button.crumb-sep.open {
   padding: 5px 7px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
 }
 .leaf-row:hover {
   background: var(--fill-ghost-hover);
@@ -2521,7 +2661,7 @@ button.crumb-sep.open {
   align-items: start;
 }
 .turn .role {
-  font-size: 10px;
+  font-size: calc(var(--size-app) * 10 / 12.5);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--dim);
@@ -2534,12 +2674,12 @@ button.crumb-sep.open {
   flex-wrap: wrap;
   align-items: baseline;
   gap: 6px;
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
 }
 .turn-state,
 .turn-tool {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
   color: var(--accent);
 }
 .turn-text {
@@ -2548,8 +2688,8 @@ button.crumb-sep.open {
 }
 .turn-data {
   color: var(--dim);
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 10.5px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10.5 / 12);
   overflow-wrap: anywhere;
 }
 .turn-tool .turn-text,
@@ -2601,7 +2741,7 @@ button.crumb-sep.open {
   grid-template-columns: 72px minmax(0, 1fr);
   gap: 4px 10px;
   margin: 0;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
 }
 .kv dt {
   color: var(--dim);
@@ -2622,8 +2762,8 @@ button.crumb-sep.open {
   align-items: center;
   padding: 5px 0;
   border-bottom: 1px solid var(--line);
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 10.5px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10.5 / 12);
 }
 .trans-row:first-child {
   border-top: 1px solid var(--line);
@@ -2643,7 +2783,7 @@ button.crumb-sep.open {
 .children {
   margin: 0;
   padding-left: 20px;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   display: grid;
   gap: 3px;
 }
@@ -2657,7 +2797,7 @@ button.crumb-sep.open {
   padding: 0;
   display: grid;
   gap: 3px;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
 }
 .refs li {
   display: flex;
@@ -2681,10 +2821,10 @@ button.crumb-sep.open {
 }
 .detail header .sub {
   color: var(--dim);
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
 }
 .detail h2 {
-  font-size: 15px;
+  font-size: calc(var(--size-app) * 15 / 12.5);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2699,8 +2839,8 @@ button.crumb-sep.open {
   margin-top: 16px;
 }
 .path {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
   overflow-wrap: anywhere;
 }
 .tree {
@@ -2717,8 +2857,8 @@ button.crumb-sep.open {
   flex-wrap: wrap;
 }
 .tree-label {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
 }
 .superseded > .tree-row {
   opacity: 0.45;
@@ -2730,8 +2870,8 @@ button.crumb-sep.open {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 8px;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
   max-height: 220px;
   overflow: auto;
   white-space: pre-wrap;
@@ -2740,7 +2880,7 @@ button.crumb-sep.open {
 
 /* --- chips, badges, notices --- */
 .chip {
-  font-size: 10px;
+  font-size: calc(var(--size-app) * 10 / 12.5);
   color: var(--dim);
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -2762,7 +2902,7 @@ button.crumb-sep.open {
 }
 .reason {
   color: var(--bad);
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
 }
 .badge {
   display: inline-flex;
@@ -2799,7 +2939,7 @@ button.crumb-sep.open {
   border: 0;
   border-radius: var(--control-radius);
   padding: 7px 9px;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   color: var(--dim);
   overflow-wrap: anywhere;
 }
@@ -2819,7 +2959,7 @@ button.notice.clickable {
   text-align: left;
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   /* `button` sets nowrap, and a diagnostic is a sentence: without this the message runs off the
      panel and the half that says what is wrong is the half that leaves. */
   white-space: normal;
@@ -2957,7 +3097,7 @@ span.issue-warn {
   overflow-x: hidden;
 }
 .pane-title {
-  font-size: 14px;
+  font-size: calc(var(--size-app) * 14 / 12.5);
   font-weight: 600;
 }
 .prune-controls {
@@ -2965,7 +3105,7 @@ span.issue-warn {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   color: var(--dim);
 }
 .prune-controls label {
@@ -3003,7 +3143,7 @@ span.issue-warn {
   gap: 4px;
 }
 .field > span {
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   color: var(--dim);
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -3056,7 +3196,7 @@ span.issue-warn {
 .tabs.seg button {
   flex: none;
   padding: 2px 11px;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   border-radius: 0;
 }
 .tabs.seg button:first-child {
@@ -3089,7 +3229,7 @@ button.layer-on:hover:not(:disabled) {
   text-align: left;
 }
 .code-editor {
-  font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font: var(--size-editor)/1.5 var(--font-data);
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--line);
@@ -3140,7 +3280,7 @@ button.layer-on:hover:not(:disabled) {
   box-shadow: var(--lift);
 }
 .modal h3 {
-  font-size: 14px;
+  font-size: calc(var(--size-app) * 14 / 12.5);
   text-transform: none;
   letter-spacing: 0;
   color: var(--text);
@@ -3213,8 +3353,8 @@ button.layer-on:hover:not(:disabled) {
   max-height: 320px;
   overflow: auto;
   white-space: pre-wrap;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 12 / 12);
 }
 /* --- the changeset reviewer (CHANGESETS.md §8) --- */
 /* A multi-file review needs width the gate modal was never given; the host widens for it. */
@@ -3231,7 +3371,7 @@ button.layer-on:hover:not(:disabled) {
 }
 .changeset-source {
   color: var(--dim);
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   margin-top: 6px;
 }
 .change-card {
@@ -3247,7 +3387,7 @@ button.layer-on:hover:not(:disabled) {
   align-items: baseline;
 }
 .change-action {
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -3258,15 +3398,15 @@ button.layer-on:hover:not(:disabled) {
 }
 .change-action-create { color: var(--ok); }
 .change-action-delete { color: var(--bad); }
-.change-path { font-size: 12px; }
+.change-path { font-size: calc(var(--size-app) * 12 / 12.5); }
 .change-reason {
   color: var(--dim);
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   margin-top: 4px;
 }
 .change-unshowable {
   color: var(--warn);
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   margin-top: 8px;
 }
 .inline-diff {
@@ -3278,8 +3418,8 @@ button.layer-on:hover:not(:disabled) {
   max-height: 300px;
   overflow: auto;
   white-space: pre-wrap;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 12 / 12);
   line-height: 1.45;
 }
 .diff-ctx { color: var(--dim); }
@@ -3287,7 +3427,7 @@ button.layer-on:hover:not(:disabled) {
 .diff-label {
   display: block;
   color: var(--accent, var(--dim));
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   opacity: 0.9;
 }
 .diff-del {
@@ -3306,24 +3446,24 @@ button.layer-on:hover:not(:disabled) {
 .change-editor {
   width: 100%;
   margin-top: 8px;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 12 / 12);
 }
 .change-files-note {
   color: var(--dim);
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   margin-top: 6px;
   min-height: 14px;
 }
 /* §3.2 and the unsaved-draft flag, surfaced on the card before anyone merges past them. */
 .change-drift {
   color: var(--warn);
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   margin-top: 6px;
 }
 button.link.change-path {
-  font-size: 12px;
-  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(var(--size-data) * 12 / 12);
+  font-family: var(--font-data);
 }
 /* The conversation view hosting a parked review (§8.1's default host) — the newest turn, inline. */
 .inline-gate {
@@ -3332,7 +3472,7 @@ button.link.change-path {
   padding-top: 8px;
 }
 .inline-gate h3 {
-  font-size: 13px;
+  font-size: calc(var(--size-app) * 13 / 12.5);
   color: var(--text);
 }
 .inline-gate .changeset-review {
@@ -3378,7 +3518,7 @@ button.link.change-path {
 /* The policy explanation on an approval dialog — informational, not an error. */
 .reason-note {
   color: var(--warn);
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   margin: 10px 0 0;
 }
 
@@ -3463,7 +3603,7 @@ button.link.change-path {
    only by weight, which is not a separation. */
 .cfg-group-head h4 {
   margin: 0;
-  font-size: 15px;
+  font-size: calc(var(--size-app) * 15 / 12.5);
   font-weight: 650;
   letter-spacing: -0.01em;
 }
@@ -3545,8 +3685,8 @@ button.link.change-path {
 /* The version belongs to the name, not to the report — it is how you tell which build you have, and
    it was buried at the end of a box you could only see when something was wrong. */
 .cfg-version {
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 10.5px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10.5 / 12);
   color: var(--dim);
   flex: none;
 }
@@ -3554,7 +3694,7 @@ button.link.change-path {
 .cfg-say {
   margin: 0;
   padding-left: 30px;
-  font-size: 11.5px;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
   line-height: 1.45;
   color: var(--dim);
   overflow-wrap: anywhere;
@@ -3626,7 +3766,7 @@ button.link.change-path {
   gap: 8px;
 }
 .cfg-row-title {
-  font-size: 13px;
+  font-size: calc(var(--size-app) * 13 / 12.5);
   font-weight: 600;
   flex: 1;
   min-width: 0;
@@ -3635,7 +3775,7 @@ button.link.change-path {
 }
 .cfg-row-title.mono,
 .cfg-hint.mono {
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-data);
 }
 /* Indented to the mark's text column, so an opened row's settings read as belonging to the name
    above them rather than as a new section — which is the job the top rule used to do, badly, by
@@ -3656,7 +3796,7 @@ button.link.change-path {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
   color: var(--dim);
   background: var(--panel-2);
   border-radius: var(--control-radius-sm);
@@ -3706,7 +3846,7 @@ button.link.change-path {
   gap: 2px;
 }
 .cfg-level-title {
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -3770,7 +3910,7 @@ button.link.change-path {
   flex-wrap: wrap;
 }
 .cfg-label {
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   font-weight: 550;
   color: var(--text);
 }
@@ -3781,8 +3921,8 @@ button.link.change-path {
    machine text. */
 .cfg-param {
   margin-left: 6px;
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 10px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10 / 12);
   color: var(--dim);
   white-space: nowrap;
   overflow: hidden;
@@ -3792,7 +3932,7 @@ button.link.change-path {
 /* This layer states the value, as opposed to inheriting it — a different fact with different
    consequences for saving, and previously invisible. */
 .cfg-set {
-  font-size: 9.5px;
+  font-size: calc(var(--size-app) * 9.5 / 12.5);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--accent);
@@ -3801,7 +3941,7 @@ button.link.change-path {
   padding: 1px 5px;
 }
 .cfg-hint {
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   line-height: 1.4;
   color: var(--dim);
   margin: 0;
@@ -3810,7 +3950,7 @@ button.link.change-path {
    the status sentence, because it is an instruction and everything before it is an observation. */
 .cfg-fix {
   display: block;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   line-height: 1.4;
   color: var(--accent);
   margin: 2px 0 0;
@@ -3829,7 +3969,7 @@ button.link.change-path {
   width: 100%;
   min-width: 0;
   font: inherit;
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--line);
@@ -3846,8 +3986,8 @@ button.link.change-path {
   opacity: 0.55;
 }
 .cfg-input.mono {
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 12 / 12);
 }
 .cfg-input.num {
   max-width: 120px;
@@ -3862,7 +4002,7 @@ textarea.cfg-input {
 .cfg-chip {
   padding: 3px 11px;
   border-radius: var(--control-radius-sm);
-  font-size: 11.5px;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
   font-weight: 600;
   border: 1px solid transparent;
   background: transparent;
@@ -3907,14 +4047,14 @@ textarea.cfg-input {
   color: var(--text);
 }
 .cfg-caret {
-  font-size: 9px;
+  font-size: calc(var(--size-app) * 9 / 12.5);
   transition: transform 0.12s;
 }
 .cfg-disclosure.open .cfg-caret {
   transform: rotate(90deg);
 }
 .cfg-disclosure-title {
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   font-weight: 600;
 }
 .cfg-disclosure-body {
@@ -3981,7 +4121,7 @@ textarea.cfg-input {
   border-color: var(--line);
 }
 .llm-rail-label {
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
   font-weight: 550;
   color: var(--dim);
 }
@@ -3989,7 +4129,7 @@ textarea.cfg-input {
   color: var(--text);
 }
 .llm-rail-summary {
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
   color: var(--dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4009,7 +4149,7 @@ textarea.cfg-input {
   gap: 3px;
 }
 .llm-detail-title {
-  font-size: 13px;
+  font-size: calc(var(--size-app) * 13 / 12.5);
   font-weight: 600;
 }
 .llm-detail-head > .cfg-hint {
@@ -4065,7 +4205,7 @@ textarea.cfg-input {
   height: 18px;
   border-radius: 999px;
   border: 1px solid var(--line);
-  font-size: 10px;
+  font-size: calc(var(--size-app) * 10 / 12.5);
   color: var(--dim);
   flex: none;
 }
@@ -4074,7 +4214,7 @@ textarea.cfg-input {
   color: var(--accent);
 }
 .cfg-step-title {
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
   font-weight: 600;
   flex: 1;
 }
@@ -4103,7 +4243,7 @@ textarea.cfg-input {
   background: var(--tint-accent);
 }
 .cfg-node-kind {
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -4134,8 +4274,8 @@ textarea.cfg-input {
   flex-wrap: wrap;
 }
 .cfg-route-prefix {
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 12 / 12);
   font-weight: 600;
   color: var(--text);
 }
@@ -4202,13 +4342,13 @@ textarea.cfg-input {
   height: 18px;
   border-radius: 999px;
   border: 1px solid var(--line);
-  font-size: 10px;
+  font-size: calc(var(--size-app) * 10 / 12.5);
   color: var(--dim);
   flex: none;
 }
 .cfg-rule-text {
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 12 / 12);
   font-weight: 600;
   flex: 1;
 }
@@ -4278,7 +4418,7 @@ textarea.cfg-input {
   gap: 6px;
   align-items: baseline;
   margin: 2px 4px 6px;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--dim);
@@ -4290,14 +4430,14 @@ textarea.cfg-input {
   padding: 4px 6px;
   border-radius: var(--control-radius-sm);
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
 }
 .session-row:hover { background: var(--fill-ghost-hover); }
 /* `--sel` and `--muted` were named here and declared in neither palette. An invalid `var()` drops
    the whole declaration, so a selected session row painted no selection and its cost printed in the
    inherited colour — both of them failing silently, which is how they survived. */
 .session-row.sel { background: var(--fill-ghost-selected); font-weight: 600; }
-.session-row .cost { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+.session-row .cost { color: var(--dim); font-size: calc(var(--size-app) * 11 / 12.5); font-variant-numeric: tabular-nums; }
 .session-row .dot,
 .session-head .dot {
   width: 7px;
@@ -4316,7 +4456,7 @@ textarea.cfg-input {
   align-items: center;
   padding: 6px 10px;
   border-bottom: 1px solid var(--line);
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
 }
 .sturns { overflow: auto; min-height: 0; padding: 6px 10px; }
 .sturn { display: flex; gap: 8px; padding: 5px 0; border-top: 1px solid var(--line-faint, var(--line)); }
@@ -4324,7 +4464,7 @@ textarea.cfg-input {
 .sturn-role {
   flex: none;
   width: 46px;
-  font-size: 10px;
+  font-size: calc(var(--size-app) * 10 / 12.5);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--dim);
@@ -4336,21 +4476,21 @@ textarea.cfg-input {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
   line-height: 1.45;
 }
 .turn-parts { margin-top: 4px; display: flex; flex-direction: column; gap: 3px; }
 /* Collapsed by default: a tool call's arguments are evidence you go looking for, not context you
    read past on the way to the answer. */
-.part > summary { cursor: pointer; font-size: 11px; display: flex; gap: 6px; align-items: baseline; }
-.part-kind { color: var(--dim); text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; }
-.part-tool { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.part > summary { cursor: pointer; font-size: calc(var(--size-app) * 11 / 12.5); display: flex; gap: 6px; align-items: baseline; }
+.part-kind { color: var(--dim); text-transform: uppercase; font-size: calc(var(--size-app) * 10 / 12.5); letter-spacing: 0.04em; }
+.part-tool { font-family: var(--font-data); }
 .part > pre {
   margin: 4px 0 6px 12px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   max-height: 220px;
   overflow: auto;
 }
@@ -4372,35 +4512,35 @@ textarea.cfg-input {
   gap: 8px;
   align-items: baseline;
   padding: 2px 10px;
-  font-size: 11.5px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: calc(var(--size-data) * 11.5 / 12);
+  font-family: var(--font-data);
 }
 .log-row:hover { background: var(--panel-2); }
 .log-at { color: var(--dim); flex: none; font-variant-numeric: tabular-nums; }
-.log-level { flex: none; width: 40px; text-transform: uppercase; font-size: 10px; }
+.log-level { flex: none; width: 40px; text-transform: uppercase; font-size: calc(var(--size-app) * 10 / 12.5); }
 .log-level.log-warn { color: var(--warn, #b8860b); }
 .log-level.log-error { color: var(--bad, #c0392b); }
 .log-source { flex: none; width: 74px; color: var(--dim); }
 .log-message { overflow-wrap: anywhere; }
-.log-row .link { flex: none; background: none; border: none; padding: 0 2px; color: var(--accent, #3b7dd8); cursor: pointer; font-size: 11px; }
+.log-row .link { flex: none; background: none; border: none; padding: 0 2px; color: var(--accent, #3b7dd8); cursor: pointer; font-size: calc(var(--size-app) * 11 / 12.5); }
 
 /* The captured output of one process, opened from a row. Bounded above so the list it came from
    stays reachable — reading a log should not mean losing your place in it. */
 .console { border-top: 1px solid var(--line); display: flex; flex-direction: column; max-height: 45%; min-height: 0; }
-.console-head { display: flex; gap: 8px; align-items: center; padding: 5px 10px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.console-head { display: flex; gap: 8px; align-items: center; padding: 5px 10px; border-bottom: 1px solid var(--line); font-size: calc(var(--size-app) * 12 / 12.5); }
 .console-stream { overflow: auto; min-height: 0; padding: 4px 10px; }
-.console-stream h4 { margin: 4px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--dim); }
+.console-stream h4 { margin: 4px 0; font-size: calc(var(--size-app) * 10 / 12.5); text-transform: uppercase; letter-spacing: 0.04em; color: var(--dim); }
 .console-stream pre {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   line-height: 1.4;
 }
 .console-stderr pre { color: var(--bad, #c0392b); }
 /* Not decoration: without it the tail reads as the whole, which is the misreading that makes a
    truncated log worse than no log. */
-.console-gap { margin: 6px 0; color: var(--dim); font-style: italic; font-size: 11px; }
+.console-gap { margin: 6px 0; color: var(--dim); font-style: italic; font-size: calc(var(--size-app) * 11 / 12.5); }
 
 /* An answer still being written. Marked rather than blended in: it has no tool calls yet and may
    still change, so a reader must be able to tell a draft from a record. */
@@ -4421,8 +4561,8 @@ textarea.cfg-input {
   max-height: 140px;
   overflow: auto;
   white-space: pre-wrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
   color: var(--dim);
 }
 
@@ -4472,18 +4612,18 @@ textarea.cfg-input {
   gap: 16px;
 }
 .debug > section { display: flex; flex-direction: column; gap: 8px; }
-.debug-head h2 { margin: 0 0 4px; font-size: 15px; }
+.debug-head h2 { margin: 0 0 4px; font-size: calc(var(--size-app) * 15 / 12.5); }
 .debug-head .sub { margin: 0; max-width: 70ch; line-height: 1.5; }
 
 /* The two stages, numbered — the sequence the cursor follows, written the way the
    file declares it rather than as prose about it. */
 .debug-stages { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
-.debug-stages li { font-size: 12px; line-height: 1.6; }
-.debug-stages .mono { font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
-.debug-stages .sub { font-size: 12px; }
+.debug-stages li { font-size: calc(var(--size-app) * 12 / 12.5); line-height: 1.6; }
+.debug-stages .mono { font-family: var(--font-data); font-size: calc(var(--size-data) * 11 / 12); }
+.debug-stages .sub { font-size: calc(var(--size-app) * 12 / 12.5); }
 
 .debug-source > div { margin-top: 8px; }
-.debug-source summary { cursor: pointer; font-size: 12px; color: var(--dim); }
+.debug-source summary { cursor: pointer; font-size: calc(var(--size-app) * 12 / 12.5); color: var(--dim); }
 
 .debug-file {
   display: flex;
@@ -4491,13 +4631,13 @@ textarea.cfg-input {
   align-items: center;
   padding: 4px 6px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
 }
 .debug-file:hover { background: var(--panel-2); }
 .debug-file .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--dim); }
 .debug-file .dot.success { background: var(--ok); }
 .debug-file .dot.error { background: var(--bad); }
-.debug-file .mono { font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+.debug-file .mono { font-family: var(--font-data); font-size: calc(var(--size-data) * 11 / 12); }
 
 /* The one thing someone crossing the room can read. A verdict that needs to be
    found among five panels is a verdict nobody trusts they read correctly. */
@@ -4510,7 +4650,7 @@ textarea.cfg-input {
   border-radius: var(--card-radius);
   background: var(--panel-2);
 }
-.debug-verdict-word { font-size: 18px; font-weight: 700; letter-spacing: 0.06em; }
+.debug-verdict-word { font-size: calc(var(--size-app) * 18 / 12.5); font-weight: 700; letter-spacing: 0.06em; }
 .debug-verdict.good { background: var(--tint-ok); }
 .debug-verdict.good .debug-verdict-word { color: var(--ok); }
 .debug-verdict.bad { background: var(--tint-bad); }
@@ -4531,8 +4671,8 @@ textarea.cfg-input {
 .run-field > span {
   text-transform: none;
   letter-spacing: 0;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
   color: var(--text);
 }
 .run-field .req {
@@ -4543,11 +4683,11 @@ textarea.cfg-input {
   border-color: var(--bad);
 }
 .run-field .sub.ellip {
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
 }
 .run-fixed {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 10.5px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10.5 / 12);
   overflow-wrap: anywhere;
 }
 .run-bool {
@@ -4574,23 +4714,23 @@ textarea.cfg-input {
 /* Which of the two groups a run is in — see `runHistoryOf`. A heading rather than a section of its
    own, because two headings called History would be worse than one with two labels under it. */
 .run-group {
-  font-size: 10px;
+  font-size: calc(var(--size-app) * 10 / 12.5);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   margin-top: 5px;
 }
 .run-row {
   padding: 4px 6px;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
 }
 .run-row .run-at {
   flex: none;
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
 }
 /* Which project the run is recorded in. Quiet, but never hidden — a shared workflow runs in JaiRA's
    own project with `~/.jaira` as its workspace, and that must not be a discovery. */
 .run-target {
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   margin-bottom: 2px;
 }
 .run-target b {
@@ -4633,7 +4773,7 @@ textarea.cfg-input {
 .pinned-title {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   font-weight: 600;
 }
 .pinned-close {
@@ -4720,7 +4860,7 @@ textarea.cfg-input {
    state used to be a one-way trip. */
 .back-arrow {
   flex: none;
-  font-size: 14px;
+  font-size: calc(var(--size-app) * 14 / 12.5);
   line-height: 1;
   padding: 0 4px;
 }
@@ -4730,8 +4870,8 @@ textarea.cfg-input {
 }
 .task-state-row {
   padding: 4px 6px;
-  font-size: 11.5px;
-  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(var(--size-data) * 11.5 / 12);
+  font-family: var(--font-data);
 }
 /* The ↗ only earns its space on the row you are pointing at — the row itself is already a click,
    and two competing affordances on every line reads as noise. */
@@ -4824,7 +4964,7 @@ textarea.cfg-input {
 .ts-tag {
   display: block;
   margin-bottom: 3px;
-  font-size: 10px;
+  font-size: calc(var(--size-app) * 10 / 12.5);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -4834,7 +4974,7 @@ textarea.cfg-input {
 .ts-text-live {
   margin: 0;
   font-family: inherit;
-  font-size: 13px;
+  font-size: calc(var(--size-app) * 13 / 12.5);
   line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -4844,7 +4984,7 @@ textarea.cfg-input {
   color: var(--dim);
 }
 .ts-msg .markdown {
-  font-size: 13.5px;
+  font-size: calc(var(--size-app) * 13.5 / 12.5);
   line-height: 1.65;
 }
 .ts-msg .markdown > *:first-child {
@@ -4862,8 +5002,8 @@ textarea.cfg-input {
   gap: 8px;
   margin-top: 4px;
   padding: 0 3px;
-  font-size: 11px;
-  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(var(--size-data) * 11 / 12);
+  font-family: var(--font-data);
   font-variant-numeric: tabular-nums;
   color: var(--dim);
   opacity: 0;
@@ -4886,7 +5026,7 @@ textarea.cfg-input {
   align-items: center;
   gap: 7px;
   margin-top: 6px;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   color: var(--dim);
 }
 .ts-pulse {
@@ -4980,7 +5120,7 @@ textarea.cfg-input {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   font-weight: 600;
   color: var(--text);
 }
@@ -4989,14 +5129,14 @@ textarea.cfg-input {
 .ts-preview {
   flex: 1;
   min-width: 0;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11.5px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11.5 / 12);
   color: var(--dim);
 }
 /* A thought and an event are English, and English set in monospace at 11px is a ransom note. */
 .ts-row.prose .ts-preview {
   font-family: inherit;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
 }
 /* The annotation between the preview and the clock — "thought for 12 s", the live pulse. Never
    shrinks: it is a handful of characters, and the preview beside it is the part with room to give. */
@@ -5005,7 +5145,7 @@ textarea.cfg-input {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   color: var(--dim);
   font-variant-numeric: tabular-nums;
 }
@@ -5021,9 +5161,9 @@ textarea.cfg-input {
 }
 .ts-at {
   flex: none;
-  font-size: 11px;
+  font-size: calc(var(--size-data) * 11 / 12);
   color: var(--dim);
-  font-family: ui-monospace, Consolas, monospace;
+  font-family: var(--font-data);
   font-variant-numeric: tabular-nums;
 }
 .ts-chev {
@@ -5101,7 +5241,7 @@ textarea.cfg-input {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--dim);
@@ -5130,7 +5270,7 @@ textarea.cfg-input {
   flex-wrap: wrap;
   gap: 2px;
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   color: var(--dim);
   border-bottom: 1px solid var(--rule);
 }
@@ -5166,8 +5306,8 @@ textarea.cfg-input {
 .ts-payload-label {
   display: block;
   margin-bottom: 3px;
-  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
-  font-size: 10px;
+  font-family: var(--font-app);
+  font-size: calc(var(--size-app) * 10 / 12.5);
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--tok-hint);
@@ -5175,7 +5315,7 @@ textarea.cfg-input {
 /* "Nothing was recorded" is an answer. `null` is what a viewer prints when it has not got one. */
 .ts-payload-empty {
   padding: 4px 0 6px;
-  font-size: 11.5px;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
   font-style: italic;
   color: var(--tok-hint);
 }
@@ -5183,7 +5323,7 @@ textarea.cfg-input {
   margin: 0;
   padding: 4px 0 6px;
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
   line-height: 1.6;
   font-style: italic;
   white-space: pre-wrap;
@@ -5203,7 +5343,7 @@ textarea.cfg-input {
   border: 0;
   border-radius: 6px;
   text-align: left;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   font-weight: 600;
   color: var(--dim);
   cursor: pointer;
@@ -5268,8 +5408,8 @@ textarea.cfg-input {
 .ts-sig {
   flex: 1;
   min-width: 0;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 12 / 12);
 }
 .ts-sig-name {
   color: var(--text);
@@ -5278,7 +5418,7 @@ textarea.cfg-input {
 .ts-sig-label {
   color: var(--dim);
   font-weight: 400;
-  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+  font-family: var(--font-app);
 }
 .ts-sig-args {
   color: var(--dim);
@@ -5288,7 +5428,7 @@ textarea.cfg-input {
 }
 .ts-card-meta {
   flex: none;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   color: var(--dim);
   font-variant-numeric: tabular-nums;
 }
@@ -5336,7 +5476,7 @@ textarea.cfg-input {
   border: 0;
   border-radius: 0;
   background: none;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   padding: 4px 11px;
   color: var(--dim);
 }
@@ -5407,7 +5547,7 @@ textarea.cfg-input {
   min-width: 0;
 }
 .sb-session {
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   color: var(--dim);
   min-width: 0;
 }
@@ -5471,8 +5611,8 @@ textarea.cfg-input {
   border-radius: 8px 8px 0 0;
   background: var(--bg);
   padding: 4px 12px;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
   color: var(--dim);
   cursor: pointer;
 }
@@ -5549,21 +5689,21 @@ textarea.cfg-input {
 }
 .sb-tear-label {
   flex: none;
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
   letter-spacing: 0.02em;
   text-transform: lowercase;
   white-space: nowrap;
 }
 .sb-tear-label .mono {
-  font-family: ui-monospace, Consolas, monospace;
+  font-family: var(--font-data);
   color: var(--text);
 }
 
 /* A run board is the SAME board — see `Tile` and `Column` in `board.tsx`. All that is left here is
    what a run card has and a task card does not: the inputs it was called with. */
 .card-args {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 10.5px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10.5 / 12);
   color: var(--dim);
   line-height: 1.45;
   margin-top: 5px;
@@ -5614,7 +5754,7 @@ textarea.cfg-input {
   background: none;
   resize: none;
   font: inherit;
-  font-size: 13.5px;
+  font-size: calc(var(--size-app) * 13.5 / 12.5);
   line-height: 1.55;
   padding: 13px 15px 6px;
   color: var(--text);
@@ -5674,7 +5814,7 @@ textarea.cfg-input {
   background: none;
   border: 1px solid transparent;
   border-radius: 999px;
-  font-size: 11.5px;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
   color: var(--dim);
   cursor: pointer;
 }
@@ -5731,12 +5871,12 @@ textarea.cfg-input {
   margin-bottom: 7px;
 }
 .cx-pop-title {
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   font-weight: 600;
   color: var(--text);
 }
 .cx-origin {
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
   color: var(--tok-hint);
 }
 .cx-origin.cx-own {
@@ -5751,7 +5891,7 @@ textarea.cfg-input {
   border: 0;
   border-radius: 999px;
   background: var(--panel-2);
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
   color: var(--dim);
   cursor: pointer;
 }
@@ -5761,8 +5901,8 @@ textarea.cfg-input {
 .cx-input {
   width: 100%;
   font: inherit;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 12 / 12);
   padding: 5px 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -5827,12 +5967,12 @@ textarea.cfg-input {
   gap: 1px;
 }
 .cx-opt-name {
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   font-weight: 500;
   line-height: 1.25;
 }
 .cx-opt-hint {
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
   line-height: 1.3;
   color: var(--tok-hint);
 }
@@ -5844,13 +5984,13 @@ textarea.cfg-input {
   margin-left: auto;
   flex: none;
   color: var(--accent);
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
 }
 
 .cx-hint {
   max-width: 320px;
   margin: 7px 0 0;
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
   line-height: 1.5;
   color: var(--tok-hint);
 }
@@ -5881,7 +6021,7 @@ textarea.cfg-input {
   width: auto;
   gap: 5px;
   padding: 4px 6px;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   color: var(--tok-hint);
 }
 .cx-tool .cx-tool-mode:hover {
@@ -5955,7 +6095,7 @@ textarea.cfg-input {
 .cx-warn {
   min-width: 0;
   padding-left: 4px;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   color: var(--warn);
 }
 /* Three behaviours wear one button — join a turn already running, wait for one to finish, or start a
@@ -5965,7 +6105,7 @@ textarea.cfg-input {
   align-items: center;
   gap: 6px;
   flex: none;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
   color: var(--accent);
   white-space: nowrap;
 }
@@ -6005,7 +6145,7 @@ textarea.cfg-input {
   border-radius: 8px;
   background: color-mix(in srgb, var(--bad) 12%, transparent);
   color: var(--bad);
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
 }
 
 /* --- the route → model cascade ---
@@ -6071,17 +6211,17 @@ textarea.cfg-input {
 .cx-more {
   margin-left: auto;
   color: var(--tok-hint);
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
 }
 .cx-tick {
   flex: none;
   width: 10px;
   color: var(--ok);
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
 }
 .cx-col-last .cx-opt-name {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11.5px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11.5 / 12);
   font-weight: 400;
 }
 
@@ -6117,7 +6257,7 @@ textarea.cfg-input {
   color: var(--text);
 }
 .cx-filter-label {
-  font-size: 9.5px;
+  font-size: calc(var(--size-app) * 9.5 / 12.5);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--tok-hint);
@@ -6126,7 +6266,7 @@ textarea.cfg-input {
   color: var(--accent);
 }
 .cx-filter-any {
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
 }
 .cx-filter .cx-chip-icon svg {
   width: 11px;
@@ -6155,7 +6295,7 @@ textarea.cfg-input {
   border: 0;
   border-radius: 6px;
   background: none;
-  font-size: 11.5px;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
   color: var(--dim);
   text-align: left;
   cursor: pointer;
@@ -6245,7 +6385,7 @@ textarea.cfg-input {
   padding: 5px 14px;
   border-top: 1px solid var(--line);
   background: color-mix(in srgb, var(--accent) 5%, transparent);
-  font-size: 11.5px;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
   color: var(--dim);
   font-variant-numeric: tabular-nums;
 }
@@ -6258,7 +6398,7 @@ textarea.cfg-input {
 .ts-status-what {
   flex: 1;
   min-width: 0;
-  font-family: ui-monospace, Consolas, monospace;
+  font-family: var(--font-data);
 }
 /* Never shrinks — it is a handful of characters, and it is why the line is being read. */
 .ts-status-figure {
@@ -6327,7 +6467,7 @@ textarea.cfg-input {
   border-radius: 8px;
   background: var(--bg);
   padding: 3px 12px;
-  font-size: 11.5px;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
   color: var(--dim);
   cursor: pointer;
 }
@@ -6394,7 +6534,7 @@ textarea.cfg-input {
   background: none;
   color: var(--text);
   font: inherit;
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
   text-align: left;
   cursor: pointer;
 }
@@ -6430,7 +6570,7 @@ textarea.cfg-input {
   border-radius: 8px;
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   color: var(--dim);
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
 }
 .chat-editing .ellip {
   flex: 1;
@@ -6441,7 +6581,7 @@ textarea.cfg-input {
 .chat-title {
   min-width: 0;
   padding: 0 4px;
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
   color: var(--dim);
 }
 
@@ -6463,13 +6603,13 @@ textarea.cfg-input {
 .chat-start-head {
   margin: 0 0 4px;
   padding: 0 16px;
-  font-size: 20px;
+  font-size: calc(var(--size-app) * 20 / 12.5);
   font-weight: 500;
 }
 .chat-start-where {
   margin: 0 0 14px;
   padding: 0 16px;
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
 }
 
 /* --- the list in the sidebar --- */
@@ -6489,7 +6629,7 @@ textarea.cfg-input {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
   cursor: pointer;
 }
 .chat-new:hover {
@@ -6505,7 +6645,7 @@ textarea.cfg-input {
   border-radius: 8px;
   background: var(--bg);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
 }
 .chat-rows {
   flex: 1;
@@ -6521,7 +6661,7 @@ textarea.cfg-input {
   gap: 6px;
   padding: 4px 8px;
   border-radius: 6px;
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
   cursor: pointer;
 }
 .chat-rows li:hover {
@@ -6553,7 +6693,7 @@ textarea.cfg-input {
   flex: none;
   display: inline-flex;
   align-items: center;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
 }
 /* A conversation still taking its turn — the spinner stands where the time was, so the row's right
    edge stays one column rather than becoming two things that take turns. */
@@ -6572,7 +6712,7 @@ textarea.cfg-input {
   border-radius: 4px;
   background: var(--bg);
   font: inherit;
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
 }
 
 /* --- what goes with a message (composer.tsx) --- */
@@ -6595,7 +6735,7 @@ textarea.cfg-input {
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--panel-2);
-  font-size: 11.5px;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
 }
 .cx-file svg {
   width: 12px;
@@ -6604,7 +6744,7 @@ textarea.cfg-input {
   color: var(--dim);
 }
 .cx-file .sub {
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
 }
 .cx-file button {
   flex: none;
@@ -6677,7 +6817,7 @@ textarea.cfg-input {
   border-radius: 6px;
   background: none;
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   text-align: left;
   cursor: pointer;
 }
@@ -6689,7 +6829,7 @@ textarea.cfg-input {
    it is an action about the record rather than part of it. */
 .ts-edit {
   padding: 0 4px;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
 }
 
 /* The mention list is anchored to the composer's shell, so the shell has to be what it measures
@@ -6712,7 +6852,7 @@ textarea.cfg-input {
   min-width: 0;
 }
 .vv-label {
-  font-size: 10px;
+  font-size: calc(var(--size-app) * 10 / 12.5);
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--tok-hint);
@@ -6732,7 +6872,7 @@ textarea.cfg-input {
   border-left: 1px solid var(--line);
   border-radius: 0;
   background: none;
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
   color: var(--tok-hint);
   cursor: pointer;
 }
@@ -6758,7 +6898,7 @@ textarea.cfg-input {
   border: 1px solid transparent;
   border-radius: 6px;
   background: none;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   line-height: 1;
   color: var(--tok-hint);
   cursor: pointer;
@@ -6776,8 +6916,8 @@ textarea.cfg-input {
    transcript row and a thousand-line one would be the row. */
 .vv-source {
   margin: 0;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11.5px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11.5 / 12);
   line-height: 1.55;
   color: var(--dim);
   max-height: 340px;
@@ -6786,7 +6926,7 @@ textarea.cfg-input {
   overflow-wrap: anywhere;
 }
 .vv-body > .markdown {
-  font-size: 12.5px;
+  font-size: calc(var(--size-app) * 12.5 / 12.5);
 }
 /* Rendered HTML runs in a sandboxed frame — see `Html` on why. Fixed height: the frame cannot be
    measured from outside without same-origin access, which is exactly what the sandbox withholds. */
@@ -6828,7 +6968,7 @@ textarea.cfg-input {
   border-radius: 4px;
   background: none;
   color: inherit;
-  font-size: 12px;
+  font-size: calc(var(--size-app) * 12 / 12.5);
   text-align: left;
   cursor: pointer;
 }
@@ -6840,13 +6980,13 @@ textarea.cfg-input {
 }
 .vv-path {
   flex: 1;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11.5px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11.5 / 12);
   min-width: 0;
 }
 .vv-action {
   flex: none;
-  font-size: 10px;
+  font-size: calc(var(--size-app) * 10 / 12.5);
 }
 /* The counts, as a pair that keeps its column: `+12 −3` scanned down a list only reads if the plus
    side is always where the plus side was. */
@@ -6854,8 +6994,8 @@ textarea.cfg-input {
   flex: none;
   display: inline-flex;
   gap: 5px;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 11px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
 }
 .vv-add {
   color: var(--ok);
@@ -6884,7 +7024,7 @@ textarea.cfg-input {
 }
 .vv-row-open {
   flex: none;
-  font-size: 11px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
 }
 .vv-change-body {
   padding: 4px 0 8px;
@@ -6983,7 +7123,7 @@ textarea.cfg-input {
   border-radius: 8px;
   background: var(--accent);
   color: var(--panel);
-  font-size: 10px;
+  font-size: calc(var(--size-app) * 10 / 12.5);
   text-align: center;
 }
 /* The children, indented under the row rather than boxed: the rule down the left is the nesting. */
@@ -7021,7 +7161,7 @@ textarea.cfg-input {
   border-radius: 5px;
   background: none;
   color: var(--tok-hint);
-  font-size: 10.5px;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
   cursor: pointer;
 }
 .cx-tool-impl:hover {
