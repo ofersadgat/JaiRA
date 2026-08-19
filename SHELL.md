@@ -484,24 +484,50 @@ and that declaration does nothing. What DM Sans does have is two axes,
 
 ---
 
-## 9. Open questions
+## 9. Questions, and their answers
 
-1. **`interrupted`: warning or active?** Filed under ⚠ here because the active set
-   is defined as exactly working and waiting-on-you. But `laneOf` calls it "a
-   pause somebody has to end — not a failure", and a person may well think an
-   interrupted run is theirs to resume. If it is active, it takes a third active
-   icon and the priority order grows an entry.
-2. **Does `+N` carry colour?** Recommended: tint it to the most severe kind it
-   hides. Otherwise a folded error reads as a folded success.
-3. **Do running tasks belong in the unseen counts at all?** A count that will
-   change again on its own is not really something you failed to see. The pill
-   set works if status is unseen-scoped and active is live — which is what §4.3
-   says — but it means `▶2` and `✓3` on the same row are counting different
-   things.
-4. **Is the split pane still wanted?** Not specified here. Authoring a state in
-   `~/.jaira` while watching it run in a checkout is the one thing this design
-   does not do; if it is wanted, keep the shell's view components instanceable
-   rather than binding them to the window.
+All four were decided on 2026-08-18. Kept as questions because the reasoning is
+what a later change has to argue against, and an answer with its reason attached
+is harder to reverse by accident than a rule.
+
+1. **`interrupted`: warning or active?** → **Warning.** The active set is exactly
+   working and waiting-on-you, and an interrupted run is neither: nothing is
+   happening, and nothing is being asked of you until you go and restart it.
+   `laneOf` still calls it "a pause somebody has to end", which stays true and is
+   a fact about the LANE — where the card sits among its neighbours — rather than
+   about whether the row counting it should read as live.
+2. **Does `+N` carry colour?** → **Yes**, tinted to the worst kind behind the
+   fold. Colourless, a folded error and a folded success were the same grey `+4`,
+   so the fold hid the one fact it exists to summarise. Severity is its own order
+   (`PILL_SEVERITY`) and deliberately not `PILL_ORDER` or its reverse: that one is
+   a claim about SPACE, and the two disagree at both ends — `running` heads the
+   priority order because no width may hide a live run, and sits near the bottom
+   of severity because a hidden run will say so again by itself. The overflow pill
+   stays FLAT: it is a marker, not a sixth status.
+3. **Do running tasks belong in the unseen counts?** → **They belong in the
+   counts, and they are never unseen-scoped.** The point of the pills is to know
+   what is happening without opening the view, and unseen-scoping the active kinds
+   would clear `▶2` the moment somebody glanced at the row — two runs still going
+   and nothing on screen saying so, which is the one question these rows exist to
+   answer. It does mean `▶2` and `✓3` count different populations; that is the
+   price, and it is worth it. A live fact is worth stating every time it is true.
+4. **Is the split pane still wanted?** → **Yes** — its job is authoring a state
+   while watching it run, which is a different function from navigating, and one
+   pane cannot be in two places at once.
+
+   The constraint that follows is the one this document already named: **the view
+   components stay instanceable.** They are, and it is worth saying why that is
+   not an accident to be re-checked but a property to be kept — `Board`,
+   `FileTreePanel`, `ChatView`, `ChatListPanel`, `TaskAddressBar` and `Sidebar`
+   all take their address as props, and `useApp()` has exactly ONE call site. A
+   view that reached for the store directly would bind itself to the window and
+   cost a rewrite later; the rule is that it must not.
+
+   What is still window-bound is the STORE's single address (`state.at`,
+   `state.view`, `state.doc`). Splitting the pane means making that per-pane, and
+   the shape of it — how a second pane is opened, whether it has its own sidebar,
+   what the window title says with two addresses on screen — is not designed here
+   and needs its own pass.
 
 ---
 

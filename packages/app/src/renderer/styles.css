@@ -3263,10 +3263,13 @@ button.crumb-sep.open {
   padding-left: 3px;
   padding-right: 3px;
 }
-/* Everything behind the fold, summed as ITEMS. The quietest register — `--tok-hint`, not `--dim` —
-   because it is the one pill that names nothing. Colourless: see the note in `pill.tsx` on §9.2. */
+/* Everything behind the fold, summed as ITEMS. Takes the colour of the worst kind it hides (§9.2),
+   falling back to the quietest register — `--tok-hint`, not `--dim` — when there is nothing behind
+   it worth naming. Never FILLED: an overflow marker is not a sixth status, and a filled `+4` would
+   read as a live count of something. */
 .pill-more {
-  color: var(--tok-hint);
+  color: var(--pill-c, var(--tok-hint));
+  background: transparent;
   padding: 1px 3px;
   font-weight: 500;
 }

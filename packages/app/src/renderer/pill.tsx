@@ -29,6 +29,20 @@ import type { InstanceStatus, ProjectSummary, TaskStatus } from "@jaira/shared/b
 export const PILL_ORDER = ["running", "waiting", "error", "warning", "success"] as const;
 export type PillKind = (typeof PILL_ORDER)[number];
 
+/**
+ * The same five, ordered by how much they WANT ATTENTION rather than by how much room they deserve.
+ *
+ * Not {@link PILL_ORDER} and not its reverse. That one is a claim about space — `running` heads it so
+ * no width can hide a live run — and this one is a claim about alarm, which are different questions
+ * with different answers at both ends: `running` is the most important to SHOW and among the least
+ * alarming to have hidden, because it will say so again by itself.
+ *
+ * Read by the overflow pill, which tints itself to the worst thing behind the fold (§9.2). Without it
+ * a folded error and a folded success are the same grey `+4`, which is the one reading the fold must
+ * not produce.
+ */
+const PILL_SEVERITY: readonly PillKind[] = ["error", "warning", "waiting", "running", "success"];
+
 /** Which of the two kinds a pill is. See the module comment — this is what decides fill. */
 export function pillFill(kind: PillKind): "active" | "status" {
   return kind === "running" || kind === "waiting" ? "active" : "status";
@@ -63,11 +77,11 @@ export const PILL_WORD: Record<PillKind, string> = {
  * approval are both "it stopped, and it is on you". The APPROVALS STRIP still tells them apart,
  * because there the difference is real: an approval has an agent's tool loop parked behind it.
  *
- * OPEN (SHELL.md §9.1): `interrupted` is filed under ⚠ here, because the active set is defined as
- * exactly working and waiting-on-you, and an interrupted run is neither. But `laneOf` calls it "a
- * pause somebody has to end — not a failure", and a person may well read it as theirs to resume. If
- * it becomes active it needs a third active glyph and `PILL_ORDER` grows an entry; the change starts
- * at this one line.
+ * `interrupted` is a WARNING (SHELL.md §9.1, decided). The active set is exactly working and
+ * waiting-on-you, and an interrupted run is neither: nothing is happening and nothing is being asked
+ * of you until you go and restart it. `laneOf` still calls it "a pause somebody has to end", which is
+ * true and is a fact about the LANE — where it sits among the cards — rather than about whether the
+ * row it is counted on should read as live.
  */
 export function pillKindOf(status: TaskStatus | InstanceStatus | undefined): PillKind | null {
   switch (status) {
@@ -138,11 +152,11 @@ export type CountedProject = Pick<ProjectSummary, "statuses" | "waiting" | "ende
  * a status pill counts only what has changed since this person last looked, which is why the second
  * half filters on the watermark and the first half does not.
  *
- * OPEN (SHELL.md §9.3): that split is exactly what makes `▶2` and `✓3` on one row count different
- * things — a run that will change again on its own is not really something you failed to see, but
- * one could argue a person wants "what moved while I was away" to include it. Making running
- * unseen-scoped too means giving it rows in `ProjectSummary.ended`, which today holds only what has
- * stopped; the change is there, not here.
+ * That split is deliberate and settled (SHELL.md §9.3, decided). It does mean `▶2` and `✓3` on one
+ * row count different populations, and that is the price of what the pills are FOR: knowing what is
+ * happening without opening the view. Unseen-scoping the active kinds would clear `▶2` the moment
+ * somebody glanced at the row — leaving two runs going and nothing on screen saying so, which is the
+ * one question these rows exist to answer. A live fact is worth stating every time it is true.
  */
 export function projectCounts(summary: CountedProject, seen: Readonly<Record<string, number>> = {}): PillCounts {
   const counts: PillCounts = {};
@@ -197,6 +211,11 @@ export interface PillLayout {
   fit: { kind: PillKind; n: number }[];
   /** How many ITEMS did not fit — not how many kinds. */
   rest: number;
+  /**
+   * The most alarming kind behind the fold, by {@link PILL_SEVERITY} — what `+N` takes its colour
+   * from. `null` when nothing is folded.
+   */
+  worst: PillKind | null;
 }
 
 /**
@@ -229,7 +248,12 @@ export function layoutPills(counts: PillCounts, budget: number): PillLayout {
     used += width;
   }
   const shown = new Set(fit.map((f) => f.kind));
-  return { fit, rest: PILL_ORDER.reduce((sum, k) => sum + (shown.has(k) ? 0 : (counts[k] ?? 0)), 0) };
+  const hidden = PILL_ORDER.filter((k) => !shown.has(k) && (counts[k] ?? 0) > 0);
+  return {
+    fit,
+    rest: hidden.reduce((sum, k) => sum + (counts[k] ?? 0), 0),
+    worst: PILL_SEVERITY.find((k) => hidden.includes(k)) ?? null,
+  };
 }
 
 /**
@@ -277,7 +301,7 @@ export function Pills({
   /** Marking this row's share seen — see §4.3. Absent where the pills are live facts only. */
   onClear?: (() => void) | undefined;
 }): JSX.Element | null {
-  const { fit, rest } = layoutPills(counts, budget);
+  const { fit, rest, worst } = layoutPills(counts, budget);
   if (fit.length === 0) return null;
   return (
     <span
@@ -290,12 +314,11 @@ export function Pills({
         <Pill key={kind} kind={kind} n={n} title={`${n} ${kind}`} />
       ))}
       {rest > 0 ? (
-        // OPEN (SHELL.md §9.2): `+N` is colourless, so a folded error looks like a folded success.
-        // Tinting it to the most severe kind it hides is the recommendation, and it is one line —
-        // add ` pill-${worstHidden}` here, where `worstHidden` is the last kind of PILL_ORDER not in
-        // `fit` that has a count. Left colourless until that is decided, because a `+4` that is
-        // sometimes red and sometimes not is harder to read than one that is never either.
-        <span className="pill pill-more" title={`${rest} more`}>
+        // TINTED to the worst thing it hides (SHELL.md §9.2, decided). Colourless, a folded error and
+        // a folded success were the same grey `+4` — the fold would have been hiding the one fact it
+        // exists to summarise. It stays FLAT rather than filled: it is an overflow marker, not a
+        // sixth status, and a filled `+4` would read as a live count of something.
+        <span className={`pill pill-more${worst === null ? "" : ` pill-${worst}`}`} title={`${rest} more`}>
           +{rest}
         </span>
       ) : null}

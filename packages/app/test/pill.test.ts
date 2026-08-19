@@ -38,8 +38,8 @@ describe("pillKindOf", () => {
     expect(pillKindOf("failed")).toBe("error");
     expect(pillKindOf("timeout")).toBe("error");
     expect(pillKindOf("canceled")).toBe("warning");
-    // OPEN (SHELL.md §9.1): filed as a warning because the active set is exactly working and
-    // waiting-on-you. If it becomes active, this expectation is the one that says so.
+    // A warning, decided (SHELL.md §9.1): nothing is happening and nothing is being asked of you
+    // until somebody goes and restarts it, which is neither half of what `active` means.
     expect(pillKindOf("interrupted")).toBe("warning");
   });
 
@@ -99,7 +99,27 @@ describe("layoutPills", () => {
   });
 
   it("says nothing at all about an empty tally", () => {
-    expect(layoutPills({}, 200)).toEqual({ fit: [], rest: 0 });
+    expect(layoutPills({}, 200)).toEqual({ fit: [], rest: 0, worst: null });
+  });
+
+  it("colours the fold by the worst thing behind it, not by the commonest", () => {
+    // §9.2, decided. Colourless, a folded error and a folded success were the same grey `+4` — the
+    // fold hiding the one fact it exists to summarise.
+    const wide = 1000;
+    expect(layoutPills({ running: 1, error: 1, success: 9 }, wide).worst).toBeNull();
+    // One error behind thirty successes still makes the fold red: severity, not volume.
+    expect(layoutPills({ running: 1, error: 1, success: 30 }, 60).worst).toBe("error");
+    expect(layoutPills({ running: 1, warning: 2, success: 30 }, 60).worst).toBe("warning");
+    // And a fold that hides only good news says so rather than borrowing an alarm.
+    expect(layoutPills({ running: 1, success: 30 }, 60).worst).toBe("success");
+  });
+
+  it("ranks the fold by alarm, which is not the order the pills claim room in", () => {
+    // `running` heads PILL_ORDER because no width may hide a live run; it is near the BOTTOM of
+    // severity because a run that is hidden will say so again by itself. The two orders disagree at
+    // both ends, which is why there are two.
+    expect(layoutPills({ waiting: 1, running: 1 }, 0).fit.map((f) => f.kind)).toEqual(["running"]);
+    expect(layoutPills({ waiting: 1, running: 1 }, 0).worst).toBe("waiting");
   });
 });
 
@@ -139,7 +159,9 @@ describe("projectCounts", () => {
 
   it("leaves the ACTIVE pills alone however much has been read", () => {
     // A live fact is true whether or not anybody looked, so no watermark clears it — which is the
-    // whole difference between the two kinds. (OPEN: SHELL.md §9.3 asks whether it should be.)
+    // whole difference between the two kinds, and the whole point of the pills (§9.3, decided):
+    // knowing what is happening without opening the view. Clearing `▶2` on a glance would leave two
+    // runs going and nothing on screen saying so.
     const project = summary({ statuses: { running: 2 }, waiting: 1, ended: ended("completed", 1) });
     const allSeen = { "completed-0": 10 };
     expect(projectCounts(project, allSeen)).toEqual({ running: 1, waiting: 1 });

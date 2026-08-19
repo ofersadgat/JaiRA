@@ -713,6 +713,19 @@ function engineLine(raw: unknown): string {
   return `${event.type ?? "event"}  ${detail}`;
 }
 
+/**
+ * The window's state and the actions that move it.
+ *
+ * **One call site, and the views must not become a second** (SHELL.md §9.4). Every view component —
+ * `Board`, `FileTreePanel`, `ChatView`, `ChatListPanel`, `TaskAddressBar`, `Sidebar` — takes its
+ * address as PROPS and reaches for nothing global, which is what keeps them instanceable. The split
+ * pane is wanted: authoring a state while watching it run is a different job from navigating, and one
+ * pane cannot be in two places at once. A view that called this directly would bind itself to the
+ * window and cost a rewrite to unbind.
+ *
+ * What is still per-window is the ADDRESS this holds — {@link AppState.at}, `view`, `doc`. Splitting
+ * the pane means making those per-pane; the components are already ready for it.
+ */
 export function useApp() {
   const [state, setState] = useState<AppState>(EMPTY);
   /**
