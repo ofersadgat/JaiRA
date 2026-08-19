@@ -372,9 +372,31 @@ argues for an idiom the app no longer uses.
 
 ---
 
-## 6. Appearance preferences
+## 6. Appearance — a new Settings section
 
-Modelled on t3code's `appearanceFonts.ts`, mapped onto two voices.
+None of §3 is fixed. **Appearance is a setting**: a fifth entry in the `SECTIONS`
+array in `packages/app/src/renderer/App.tsx`, beside Providers, Executors,
+Configuration and History, where a person changes the two families and two sizes
+that the ten registers derive from.
+
+```ts
+{ id: "appearance", label: "Appearance", layered: false }
+```
+
+**`layered: false`, and no `needsProject`.** Fonts are a per-person display
+preference, not a project's — so the layer switch must not appear above this
+section, and it must be reachable on an empty window. That is the rule the theme
+toggle already follows, and `sidebar.tsx` states the reason:
+
+> Theme sits here rather than inside Settings: it is a per-person display
+> preference, and burying it behind a view that needs an open project would make
+> it unreachable on an empty window.
+
+The theme toggle stays in the sidebar footer — it is one click and belongs at
+hand — but it may also be mirrored inside this section, since that is where
+somebody looking for "how this app looks" will go first.
+
+The model, mapped onto two voices from t3code's `appearanceFonts.ts`:
 
 ```ts
 const DEFAULT_APP_STACK  = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
@@ -439,6 +461,9 @@ and that declaration does nothing. What DM Sans does have is two axes,
 | `app/src/renderer/files.tsx` | Tree top level becomes the projects; `~/.jaira` listed once (§2.2) |
 | `app/src/renderer/board.tsx` | Card loses its box; trailing pill; lane heading over `finished` only (§5.3) |
 | `app/src/renderer/uiState.ts` | Appearance preferences; **no** per-project expansion state (§5.1, §6) |
+| `app/src/renderer/App.tsx` | `SECTIONS` gains an `appearance` entry, `layered: false` (§6) |
+| `app/src/renderer/store.ts` | `SettingsSection` is a closed union — widen it with `"appearance"` (§6) |
+| `app/src/renderer/panes.tsx` | The Appearance pane itself — family multi-select, size steppers, live preview (§6) |
 | `app/src/renderer/styles.css` | Two font tokens replace 57 `ui-monospace` declarations; ten register classes; `.card` loses fill/border/shadow/stripe; update the left-edge comment (§3.3, §3.4, §5.3) |
 | `docs/ui/direction.md` | §3 belongs here — it is the standing typography vocabulary that doc is waiting for |
 
