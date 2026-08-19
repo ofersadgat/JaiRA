@@ -385,6 +385,47 @@ describe("binding and guard scopes", () => {
    * name — and JaiRA does not (see `workflows.ts`). This is the rule, tested where the capability
    * used to be: the engine would run it, and an author is told to write the wire down instead.
    */
+  /**
+   * WORKFLOWS.md §3.3: a derived output's `schema` is optional, and an undeclared one is INFERRED
+   * from its binding. Tested here rather than only upstream because JaiRA reads `@declarative-ai/hw`
+   * from its built `dist/` — a change to the rule that is not rebuilt is a change this surface does
+   * not have.
+   */
+  it("gives an untyped output the type of what fills it, so a typed consumer accepts it", () => {
+    expect(
+      problems({
+        s: {
+          inputs: { seed: { schema: { type: "string" } } },
+          outputs: { answer: { schema: { type: "string" }, binding: ".children.helper.outputs.result" } },
+          children: { helper: { state: "s/helper", inputs: { seed: ".inputs.seed" } } },
+          sequence: ["helper"],
+        },
+        "s/helper": {
+          inputs: { seed: { schema: { type: "string" } } },
+          // No schema: it is whatever `seed` is.
+          outputs: { result: { binding: ".inputs.seed" } },
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  it("still rejects a wire whose inferred type does not fit the consumer", () => {
+    // Undeclared is not unchecked — the adopted type is the one that gets compared.
+    const [message] = problems({
+      s: {
+        inputs: { seed: { schema: { type: "number" } } },
+        outputs: { answer: { schema: { type: "string" }, binding: ".children.helper.outputs.result" } },
+        children: { helper: { state: "s/helper", inputs: { seed: ".inputs.seed" } } },
+        sequence: ["helper"],
+      },
+      "s/helper": {
+        inputs: { seed: { schema: { type: "number" } } },
+        outputs: { result: { binding: ".inputs.seed" } },
+      },
+    });
+    expect(message).toMatch(/producer type 'number' not allowed by consumer string/);
+  });
+
   it("refuses an output that says nothing about where its value comes from", () => {
     const [message] = problems({
       s: {

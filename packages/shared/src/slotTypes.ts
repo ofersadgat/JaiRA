@@ -25,7 +25,13 @@
  * delete the properties the moment anyone touched the row.
  */
 
-/** A named type in the vocabulary. `any` is "no schema at all" — unconstrained, and unchecked. */
+/**
+ * A named type in the vocabulary. `any` is "no schema at all".
+ *
+ * On an input that is unconstrained and unchecked. On a DERIVED output it is not: an output with a
+ * binding and no schema takes the type of whatever the binding produces (WORKFLOWS.md §3.3), so
+ * `any` there means "whatever is wired in", not "nothing is known".
+ */
 export type SlotTypeName =
   | "any"
   | "text"
@@ -57,7 +63,11 @@ export interface SlotTypeInfo {
 }
 
 export const SLOT_TYPES: readonly SlotTypeInfo[] = [
-  { name: "any", label: "any", hint: "no schema — nothing about this slot can be type-checked" },
+  {
+    name: "any",
+    label: "any",
+    hint: "no schema — an output with a binding takes the bound value's type; anywhere else, unchecked",
+  },
   { name: "text", label: "text", hint: "a plain string" },
   { name: "url", label: "url", hint: "a string tagged Url — only another Url may be wired into it" },
   { name: "file", label: "file path", hint: "a string tagged FilePath — a path, not the bytes" },

@@ -309,7 +309,7 @@ A slot is a named, typed value. Both maps take the same shape:
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `schema` | optional (but see below) | JSON Schema for the value. Absent ⇒ unconstrained, and the checker treats it as universal — so nothing about it can be type-checked. |
+| `schema` | optional (but see below) | JSON Schema for the value. Absent on an **input** ⇒ unconstrained, and nothing about it can be type-checked. Absent on a **derived output** ⇒ *inferred from its `binding`* — see §3.3. |
 | `kind` | optional | One of `text` · `json` · `blob` · `prompt` · `function`. Derived from `schema` when omitted. |
 | `binding` | see §3.3 | Where the value comes from (§8). |
 | `default` | optional | Value used when nothing is wired in. Also the opt-out from the reachability rule (§11). |
@@ -335,6 +335,16 @@ also the explicit opt-out from the reachability rule (§11).
 An output with a **`binding`** is *derived* — computed when the state terminates,
 from the operation, a child, an expression, or a literal. An output **without** a
 binding is *produced*: the operation must return it, and it is filled directly.
+
+**A derived output's `schema` is optional, and leaving it off does not make the
+output untyped — it makes it take the type of what fills it.** Declaring one is a
+constraint checked twice: the binding must satisfy it, and so must every consumer
+reading the output. Declaring none used to mean the *top* type, which no typed
+consumer accepts, so an undeclared output could not be wired into anything typed —
+and the error landed on the parent, about a slot the parent did not write. It is
+now inferred from the binding, by the same rule the binding check itself uses. A
+*produced* output has nothing connected to it, so there is nothing to infer: its
+schema stays unconstrained unless you write one.
 
 ```jsonc
 "outputs": {
