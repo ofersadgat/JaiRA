@@ -351,8 +351,44 @@ binding is *produced*: the operation must return it, and it is filled directly.
 producing cannot.** A produced output receives the call's result under a name it
 must share with it; a bound one names its source, so it can RENAME (`summary`
 from `report`), reshape it through an expression, or take a return that has no
-names at all — a list, a blob — with `.operation.output`. Producing stays as the
-shorthand for the common case where the two names are the same.
+names at all — a list, a blob — with `.operation.output`.
+
+### ⚠️ JaiRA requires the binding: an unbound output is a lint ERROR
+
+The format allows producing. JaiRA does not, and the check is an error rather
+than a warning because of what it prevents: a produced output is filled by NAME,
+silently, so a call that stops returning that name leaves a state that terminates
+**successfully** having handed back nothing. Every other wire in a state is
+written down; this was the one place "the obvious thing" stood in for saying it.
+
+So the explicit form is two lines — what the call returns, and what the state
+publishes from it:
+
+```jsonc
+"outputs":   { "goals": { "schema": …, "binding": ".operation.output.goals" } },
+"operation": { "kind": "prompt", "prompt": …, "outputs": { "goals": { "schema": … } } }
+```
+
+`.operation.output.*` is typed from `operation.outputs` **and from nothing
+else**, which is why the call has to declare its returns for the binding to
+resolve.
+
+**Two consequences worth knowing before you migrate a state.**
+
+*A bound output is computed when the state TERMINATES.* A produced one is filled
+the moment the operation returns, so anything that reads a value mid-state — a
+guard, a child's wiring — must name the call's result rather than the slot:
+
+```jsonc
+"children":    { "fix": { "inputs": { "weaknesses": ".operation.output.weaknesses" } } },
+"transitions": [{ "to": "fix", "when": ".operation.output.outcome === 'needs_changes'" }]
+```
+
+*A FUNCTION operation is exempt.* A host function returns one value and the
+engine cannot index it, so `.operation.output.decision` resolves to nothing at
+run time however the operation declares itself — a component's answer lands on
+the state's slots by name or not at all. Outputs of a `kind: "function"` state
+may therefore be produced, and the linter says nothing about them.
 
 This is what SPEC's old `"from": "children.x.outputs.y"` became: an output's
 `from` is now that slot's `binding`.

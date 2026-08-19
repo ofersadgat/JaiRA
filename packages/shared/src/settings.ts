@@ -49,6 +49,15 @@ export interface JairaUiState {
   panes: Record<string, number>;
   /** Disclosures by id: `true` is open. Absent ⇒ whatever the control opens as. */
   open: Record<string, boolean>;
+  /**
+   * Controls with more than two positions, by id — the chosen position as a plain word.
+   *
+   * Beside {@link open} rather than instead of it: most folds are a fold, and widening every one of
+   * them to a string would cost every reader a comparison it does not need. A control that grew a
+   * third position moves here and keeps its own id, so a settings file written before the change
+   * carries an `open` entry this simply ignores — see `modeOf`.
+   */
+  modes: Record<string, string>;
   /** Folded branches, by tree id, each the list of row keys that are SHUT. */
   shut: Record<string, string[]>;
   /**
@@ -172,7 +181,7 @@ export function defaultSettings(): JairaSettings {
 
 /** No layout remembered yet — every control opens at its own default. */
 export function defaultUiState(): JairaUiState {
-  return { panes: {}, open: {}, shut: {}, seen: {} };
+  return { panes: {}, open: {}, modes: {}, shut: {}, seen: {} };
 }
 
 /**
@@ -254,6 +263,11 @@ function parseUiState(raw: unknown): JairaUiState {
   }
   for (const [id, open] of Object.entries(objectOf(doc["open"]))) {
     if (typeof open === "boolean") ui.open[id] = open;
+  }
+  for (const [id, mode] of Object.entries(objectOf(doc["modes"]))) {
+    // Any word, checked by whoever reads it: this file cannot know the positions a control has, and
+    // an unknown one falls back to that control's default rather than being dropped here.
+    if (typeof mode === "string") ui.modes[id] = mode;
   }
   for (const [id, keys] of Object.entries(objectOf(doc["shut"]))) {
     // De-duplicated on the way in: the renderer treats these as sets, and a file that grew a

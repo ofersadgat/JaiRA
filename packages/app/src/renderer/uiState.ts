@@ -86,6 +86,15 @@ export const SIDEBAR_RAIL = 46;
  */
 export const PANE_WIDE = 1200;
 
+/**
+ * The narrowest a pinned SURFACE may be shown in, in px.
+ *
+ * A pinned value is a document and reads at any width; a pinned surface is a form, and its rows —
+ * a name, a type, a binding, a switch — stop fitting beside each other somewhere below this. The
+ * column grows to meet one rather than showing it folded over itself. See `statePanel.tsx`.
+ */
+export const PANE_SURFACE = 480;
+
 /** Disclosure ids — the folds worth reopening the app on. */
 export const FOLD = {
   /**
@@ -216,6 +225,37 @@ export function paneOf(ui: JairaUiState, id: string): number {
 
 export function withPane(ui: JairaUiState, id: string, size: number): JairaUiState {
   return { ...ui, panes: { ...ui.panes, [id]: size } };
+}
+
+/**
+ * The Files view's lower half has three positions, not two.
+ *
+ * `half` is the working split — what the state is DOING above, what it IS below. `full` gives the
+ * whole column to the editor, which is what authoring a nine-child state actually needs; `shut`
+ * gives it to the viewer, which is what watching one run needs. Two positions made the third of
+ * those impossible and the fold had to be dragged instead.
+ */
+export const HALVES = ["shut", "half", "full"] as const;
+export type HalfMode = (typeof HALVES)[number];
+
+/** What a multi-position control opens at when nothing has been remembered. */
+export const MODE_DEFAULTS: Record<string, string> = {
+  [FOLD.filesEditor]: "half",
+};
+
+/**
+ * A multi-position control's position — see {@link JairaUiState.modes}.
+ *
+ * `among` is the list of positions the control actually has, so a word from a settings file written
+ * by another version cannot put a control into a state it no longer offers.
+ */
+export function modeOf<T extends string>(ui: JairaUiState, id: string, among: readonly T[], fallback: T): T {
+  const held = ui.modes[id] ?? MODE_DEFAULTS[id];
+  return among.includes(held as T) ? (held as T) : fallback;
+}
+
+export function withMode(ui: JairaUiState, id: string, mode: string): JairaUiState {
+  return { ...ui, modes: { ...ui.modes, [id]: mode } };
 }
 
 /** Whether a disclosure is open, falling back to {@link FOLD_DEFAULTS} and then to open. */

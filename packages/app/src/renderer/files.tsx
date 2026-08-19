@@ -42,7 +42,21 @@ import { signatureOf } from "./transcript";
 import { durationOf } from "./transcriptView";
 import { Splitter } from "./splitter";
 import { nodeAt, stepOf, type TrailStep } from "./trail";
-import { PANE, paneDefault } from "./uiState";
+import { HALVES, PANE, paneDefault, type HalfMode } from "./uiState";
+
+/**
+ * The three positions of the lower half, as the bar says them.
+ *
+ * A glyph that shows how much of the column this half HAS, rather than an arrow pointing at what a
+ * click would do: the arrow was ambiguous the moment there were three positions, and the size of a
+ * thing is what a size control should show.
+ */
+const HALF_GLYPHS: Record<HalfMode, string> = { shut: "▁", half: "▄", full: "█" };
+const HALF_WORDS: Record<HalfMode, string> = {
+  shut: "folded away",
+  half: "half the column",
+  full: "the whole column",
+};
 
 /**
  * How tall the viewer opens, and what a double-click on the divider restores.
@@ -1241,8 +1255,8 @@ export function FilePanel({
   context,
   viewerHeight,
   onViewerHeight,
-  configOpen = true,
-  onConfigOpen,
+  half = "half",
+  onHalf,
   onSave,
 }: {
   doc: FileSource | null;
@@ -1260,15 +1274,16 @@ export function FilePanel({
   viewerHeight: number;
   onViewerHeight: (height: number) => void;
   /**
-   * Whether the lower half is open, or folded down to the bar that restores it.
+   * How much of the column the lower half is taking: all of it, the split, or none.
    *
-   * A state's configuration is what you edit for a minute and then want out of the way for ten:
-   * watching a run on a board squeezed into the top third of the column is the reason this exists.
-   * Held by the shell with the pane sizes, for the same reason they are — it must survive clicking
-   * another file.
+   * A state's configuration is what you edit for a minute and then want out of the way for ten —
+   * watching a run on a board squeezed into the top third of the column is why `shut` exists — and
+   * it is also the thing you spend an hour in, which is why `full` does. The middle is the default
+   * and the two ends are one click away in the same place. Held by the shell with the pane sizes,
+   * for the same reason they are: it must survive clicking another file.
    */
-  configOpen?: boolean;
-  onConfigOpen?: ((open: boolean) => void) | undefined;
+  half?: HalfMode;
+  onHalf?: ((half: HalfMode) => void) | undefined;
   onSave: (text: string) => void;
 }): JSX.Element {
   if (doc === null) {
@@ -1298,15 +1313,17 @@ export function FilePanel({
   const View = resolveFileSurface(doc.mime, "view");
   const Edit = resolveFileSurface(doc.mime, "edit");
   const props = { doc, busy, onSave, context };
-  // With no viewer the editor IS the panel, so there is nothing to fold it away from.
-  const shut = View !== null && !configOpen;
+  // With no viewer the editor IS the panel, so there is nothing to fold it away from and nothing to
+  // grow into: a file type with no viewer is always at `full`, whatever was remembered.
+  const at: HalfMode = View === null ? "full" : half;
+  const shut = at === "shut";
 
   return (
     <div
       className={`col mid${shut ? " config-shut" : ""}`}
       style={{ "--viewer-height": `${viewerHeight}px` } as CSSProperties}
     >
-      {View ? (
+      {View !== null && at !== "full" ? (
         <>
           <div className="run-half">
             <View {...props} />
@@ -1333,18 +1350,20 @@ export function FilePanel({
         </>
       ) : null}
 
-      <div className={View ? `config-half${shut ? " shut" : ""}` : "config-half whole"}>
+      <div className={View === null || at === "full" ? "config-half whole" : `config-half${shut ? " shut" : ""}`}>
         {View ? (
           // The label became the control. Folded, this row IS the lower half — a bar across the
-          // bottom of the column saying what is behind it and taking one click to bring back.
+          // bottom of the column saying what is behind it and taking one click to bring back. It
+          // cycles rather than toggles: three positions, one place, and the glyph is how much of the
+          // column this half currently has.
           <button
             type="button"
             className="half-bar"
-            onClick={() => onConfigOpen?.(shut)}
-            disabled={onConfigOpen === undefined}
-            title={shut ? "show the editor" : "fold the editor away"}
+            onClick={() => onHalf?.(HALVES[(HALVES.indexOf(at) + 1) % HALVES.length]!)}
+            disabled={onHalf === undefined}
+            title={`${HALF_WORDS[at]} — click for ${HALF_WORDS[HALVES[(HALVES.indexOf(at) + 1) % HALVES.length]!]}`}
           >
-            <span className="half-caret">{shut ? "▴" : "▾"}</span>
+            <span className="half-caret">{HALF_GLYPHS[at]}</span>
             <span className="half-label">{doc.stateId !== undefined ? "Configuration" : "Source"}</span>
             <span className="grow" />
             {/* Only when folded, and only when it matters: an editor you cannot see holding an

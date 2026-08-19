@@ -233,8 +233,11 @@ describe("no project open", () => {
     baseWorkflows("plan", { label: "Plan", children: { goals: {} }, sequence: ["goals"] });
     baseWorkflows("plan/goals", {
       inputs: { issue: { schema: { type: "string" } } },
-      outputs: { goals: { schema: { type: "string" } } },
-      operation: { kind: "prompt", prompt: "go" },
+      // Bound, so that the fault under test is the only one reported: an output with no binding is
+      // an error of its own now (see `workflows.ts`), and a fixture carrying two faults tests the
+      // pair rather than the one it was written for.
+      outputs: { goals: { schema: { type: "string" }, binding: ".operation.output.goals" } },
+      operation: { kind: "prompt", prompt: "go", outputs: { goals: { schema: { type: "string" } } } },
     });
   };
 
@@ -377,18 +380,36 @@ describe("binding and guard scopes", () => {
     ]);
   };
 
-  it("binds a state output to the operation's result through `.outputs.<produced>`", () => {
-    // The capability itself: `report` has no binding, so the operation fills it; `summary` reads it
-    // back. The operation declares nothing about what it returns, and does not need to — this route
-    // goes through the state's own slots. The next test is the other one.
+  /**
+   * The FORMAT allows a produced output — no binding, filled by the operation's result of the same
+   * name — and JaiRA does not (see `workflows.ts`). This is the rule, tested where the capability
+   * used to be: the engine would run it, and an author is told to write the wire down instead.
+   */
+  it("refuses an output that says nothing about where its value comes from", () => {
+    const [message] = problems({
+      s: {
+        outputs: {
+          report: { schema: { type: "string" } },
+          summary: { schema: { type: "string" }, binding: ".outputs.report" },
+        },
+        operation: { kind: "prompt", prompt: "go" },
+      },
+    });
+    expect(message).toMatch(/output 'report' has no binding/);
+  });
+
+  /**
+   * The one exemption, and it is a limit of the machinery rather than a taste: a host function
+   * returns ONE value and the engine cannot index it, so `.operation.output.decision` resolves to
+   * nothing at run time however the operation declares itself. A component's answer lands on its
+   * slots by name or not at all.
+   */
+  it("allows a produced output where the operation is a function", () => {
     expect(
       problems({
         s: {
-          outputs: {
-            report: { schema: { type: "string" } },
-            summary: { schema: { type: "string" }, binding: ".outputs.report" },
-          },
-          operation: { kind: "prompt", prompt: "go" },
+          outputs: { decision: { schema: { type: "string" } } },
+          operation: { kind: "function", function: "choose_option", args: { prompt: "pick", options: ["a", "b"] } },
         },
       }),
     ).toEqual([]);
@@ -451,8 +472,8 @@ describe("binding and guard scopes", () => {
           },
         },
         "p/kid": {
-          outputs: { note: { schema: { type: "string" } } },
-          operation: { kind: "prompt", prompt: "go" },
+          outputs: { note: { schema: { type: "string" }, binding: ".operation.output.note" } },
+          operation: { kind: "prompt", prompt: "go", outputs: { note: { schema: { type: "string" } } } },
         },
       }),
     ).toEqual([]);

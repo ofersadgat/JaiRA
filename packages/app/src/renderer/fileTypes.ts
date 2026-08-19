@@ -40,6 +40,7 @@ import type {
   SyncDirection,
   ValidateSchemaResult,
   WorkflowLayer,
+  WorkflowSource,
   WorkflowSyncEdit,
   WorkflowSyncResult,
   WorkflowSyncStatus,
@@ -47,6 +48,7 @@ import type {
 } from "@jaira/shared/browser";
 import { mimeFallbacks } from "@jaira/shared/browser";
 import type { Drafts, SetDraft } from "./drafts";
+import type { EditorTab } from "./editorChrome";
 import type { TrailStep } from "./trail";
 
 /** What a surface does with the file. The two halves of the panel, top to bottom. */
@@ -257,6 +259,17 @@ export interface FileSurfaceContext {
    */
   stateSlots: (stateIds: string[]) => Promise<Record<string, StateSlots> | null>;
   /**
+   * Read one state's file without opening it, and write one that is not the open file.
+   *
+   * The pair the graph's side panel needs: clicking a box asks what the state behind it is, and the
+   * answer is a document the address bar is not standing on. Optional together — a surface with
+   * neither shows the box's own declaration instead, which is what it can prove without asking.
+   */
+  readState?: ((stateId: string) => Promise<WorkflowSource | null>) | undefined;
+  saveState?: ((source: WorkflowSource, text: string) => void) | undefined;
+  /** Any file's text, for showing what a LINKED property says — see `linkPreview.tsx`. */
+  readFile?: ((layer: WorkflowLayer, path: string) => Promise<string | null>) | undefined;
+  /**
    * The schema chosen per document, keyed by `layer:path`, and how to change one.
    *
    * An ABSENT key means nobody has decided; `""` means "plain JSON" was chosen. The distinction is
@@ -286,8 +299,10 @@ export interface FileSurfaceContext {
    * hand-editing should not put you on the form. Optional for the same reason as the draft store —
    * the editor falls back to its own state.
    */
-  editorTab?: Record<string, "form" | "json"> | undefined;
-  onEditorTab?: ((key: string, tab: "form" | "json") => void) | undefined;
+  editorTab?: Record<string, EditorTab> | undefined;
+  /** What a file nothing is remembered about opens on — see `AppState.editorTabLast`. */
+  editorTabLast?: EditorTab | undefined;
+  onEditorTab?: ((key: string, tab: EditorTab) => void) | undefined;
   /**
    * The description-vs-workflows machinery, for the one surface that shows it.
    *

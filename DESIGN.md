@@ -2540,6 +2540,138 @@ run-record requirements of spec §10.2.
   result instead of only receiving it. The implicit fill still works: an output
   with no binding is PRODUCED (§3.3), and the Outputs table says so where the box
   is rather than leaving an empty field that reads as an omission.
+- **Graph tab**: the third reading of a state file, beside the form and the JSON.
+  It answers the two questions neither of those can — *what runs after what and
+  what makes it*, and *where does this value come from* — which are spread across
+  the whole document and otherwise have to be assembled in the reader's head.
+  Read-only on purpose: the tab beside it already edits, and a control on every
+  box would cost the space the picture is made of.
+
+  **The five channels.** Every mark on the drawing belongs to exactly one of
+  these, and each answers exactly one question. That is the whole vocabulary; a
+  sixth meaning has to displace one of them rather than be added beside it.
+
+  | channel | asks | says |
+  | --- | --- | --- |
+  | **position** | *when does it run* | columns are run order, left to right; lane 0 is the cursor's own path, lane 1 is everything it reaches only by jumping |
+  | **geometry** | *what kind of movement* | a smooth curve between two PORTS is a value moving; an arc between two BOX EDGES, with an arrowhead, is the cursor moving. Nothing else may be a line |
+  | **hue** | *which one* | a wire takes the colour of the VALUE it carries — one hue per source port, the same wherever that value goes; an arrow takes the colour of its DIRECTION. Hue never separates data from control: geometry does |
+  | **dash** | *how it is written* | solid is the plain case (a bare binding, a rule on the mount); dashed is one-of-several (a read inside an expression, a rule that belongs to no child); dotted is not-written-at-all (the implicit fill, a guard's read, a step that does not wait) |
+  | **weight · opacity · depth** | *what am I looking at* | and nothing else — see the attention model below |
+
+  Three directions a move can take, because three things can happen to a run:
+  **onward** (nearer the end — a later step, or out), **back** (over ground
+  already covered — a loop, or a step re-entered) and **abort** (an ending that
+  is not success). Measured by the target's COLUMN against the source's, which is
+  what makes it a fact about the drawing rather than a guess about intent. The
+  sequence keeps grey to itself: it is not a rule anybody wrote.
+
+  **Every box shows both halves of its surface.** Inputs down the left edge,
+  outputs down the right, one dot per slot — a node editor's arrangement, because
+  the question is what a child TAKES and GIVES rather than what this file happened
+  to fill in. A child's own declaration supplies the slots nothing is wired into
+  yet; a slot only a binding claims exists is drawn all the same, ringed in the
+  abort hue, since the wire to it is real and the far end may not be. The dot is
+  FILLED when a value passes through it and hollow when none does, and carries
+  that value's colour, so a dot and the wire leaving it are one statement.
+
+  **A guard is shown whole, and is followable.** Never truncated, never numbered
+  — a digit beside a condition reads as part of the condition, so a rule's
+  position in its list is said in words on its tooltip. It is split at its
+  top-level operators onto one line per clause with the `&&`/`||` in the gutter;
+  `&&` binds tighter, so a mixed condition splits at the `||`s and each clause
+  holding an `&&` is bracketed, which is the difference between the condition in
+  the file and a flat list of alternatives. Every runtime path inside it is a
+  TERM with a wire of its own, drawn from the port that produced the value to the
+  line of the label that reads it: a condition is dataflow, and it was the one
+  place that went unanswered.
+
+  **Click asks, double-click goes.** Clicking a CHILD puts the state it mounts in
+  the window's side panel — the same form and the same JSON tab as the middle
+  column, over the same channel and the same writer, opening on the form. A box
+  draws a mount; what an author wants when they point at one is the state that
+  mount runs, and that is another file entirely. Every other box IS part of the
+  open file, which the middle column is already showing, so those pin their own
+  slice of it as a value. Nothing about the address, the open file or the camera
+  moves, which is what makes it safe to click around a graph while reading it; the
+  panel arrives through the same mechanism a transcript pins a document with, and
+  grows to a width a form can be read at. Double-clicking opens that child's file
+  properly, the same move the board's columns make, and it lands on the reading
+  you were last using — from a graph you get a graph. The pointer is not CAPTURED
+  until a drag has actually travelled a few pixels, because capturing on the way
+  down retargets the compatibility mouse events too, which handed the map every
+  click and double-click meant for a box.
+
+  **A line is a target, and it says where it ends.** Two pixels of stroke is not
+  something a pointer can be expected to find, so every line carries a fat
+  invisible twin that answers for it: pointing at a line asks the same question
+  its label does. The dot a wire ARRIVES at is filled in that value's colour,
+  exactly as the one it leaves is — marked at one end only, a fed slot reads as
+  one nobody wired, and hollow-against-filled is how a box says which of its
+  slots are actually carrying something.
+
+  **Zooming in costs the answer, and it is given back at the edge.** Close enough
+  to read a box, most of what the boxes are joined TO is off the screen, and a
+  line running off the edge stops saying anything. So a line that crosses the
+  edge gets a pill AT that edge naming what is at its far end, each name in its
+  own line's colour. Pills are pinned to the edge they crossed rather than left
+  where the curve was last seen, merged into a LIST when they cross within a
+  pill's length of each other — and only then, since merging by name instead put
+  one pill at the average of two crossings a screen apart, naming a box neither
+  line was near — a box near the edge sends four wires the same way, and four pills
+  on one crossing is four times the ink for one fact — and then pushed apart along
+  the edge until none covers another. A condition whose place on its arc has gone
+  off screen slides ALONG the arc to the nearest place it can still be read, and
+  then off anything already written there: upwards, since what it most likely
+  landed on is the pill naming the far end of its own arc, and downwards only when
+  up would leave the pane. All of it is worked out in viewport space, because all
+  of it is a question about the camera rather than about the drawing.
+
+  **Attention is depth, not colour.** Hue is spent on which value and which
+  direction, so emphasis cannot use it; what is left is weight, opacity and
+  order. One model serves all four hovers, so they cannot drift into four ideas
+  of what "related" means: the thing under the pointer and the lines that ARE its
+  answer are lit and raised, whatever those lines touch stays legible, and
+  everything else falls back hard. A box lights its own lines and recedes its
+  neighbours; a rule — pointed at by its condition or by the arrow itself —
+  lights that arrow and BOTH boxes it joins; a port lights the wires through it
+  and the ports at their far ends; a term in a guard lights the one wire it
+  reads. Lines are re-ordered rather than only restyled — in SVG the only
+  z-index there is is the order they are painted in.
+
+  **Columns are never shared.** An arc runs vertically out of the box it leaves
+  before it turns, so a box directly above or below another would have that arc
+  pass straight through it. With a column each, every vertical run is over empty
+  ground and no transition ever crosses a box. Lane 0 is TOP-aligned rather than
+  centred, so the sequence's own line runs level across the headings instead of
+  through the ports, where it used to be lost.
+
+  **The canvas is a map.** Drag to pan, wheel to zoom about the pointer, no
+  scrollbars: a graph is not a page, and the reader is looking for a region rather
+  than a position in a list. It opens fitted and stops fitting the moment anyone
+  moves it; fitting has a floor, below which it parks at the entry rather than
+  shrinking a nine-child state to an unreadable third.
+- **The Files column's lower half has three positions**, not two: the whole
+  column, the split, or folded away to the bar that restores it. The middle is
+  the default — what the state is DOING above, what it IS below — and the two ends
+  are the two things people actually do: watching a run wants the board, and
+  authoring a nine-child state wants the editor. One control in one place cycling
+  through the three, its glyph showing how much of the column the half currently
+  has rather than an arrow that stopped being unambiguous the moment there was a
+  third position. Remembered like a pane size, in `ui.modes` — the same map any
+  future control with more than two positions uses, since a fold is a boolean and
+  a position is a word.
+- **A linked property shows what it says.** A reference moves the substance of a
+  field into another file — `"prompt": {"$ref": "$/prompts/draft.md"}` — and the
+  form is then showing a path where six lines of prompt used to be. The target is
+  rendered underneath, read-only, in the same viewer the rest of the app shows
+  that kind of file with: a markdown prompt as markdown, a JSON fragment as a
+  tree. Open by default, because the reason to look at a linked field is almost
+  always to read what is behind it; collapsible, because once you know, it is a
+  filename again. The reference is resolved against the file tree the window
+  already holds — `refForPath` read backwards, project layer first, the same
+  order the loader would search — so it costs no round trip beyond reading the
+  one file.
 - **Pruning panel** (§12, SPEC §13): stored counts, then preview → delete. Never
   one click, because pruned history is not recoverable.
 - **Debug** (§11.3): a two-state workflow this app installs and runs against

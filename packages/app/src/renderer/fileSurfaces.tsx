@@ -26,7 +26,7 @@ import { entriesOf, journalFor } from "./transcript";
 import { nodeAt } from "./trail";
 import { Paper, Transcript } from "./transcriptView";
 import { docKey, useDraftBox } from "./drafts";
-import { EditorActions } from "./editorChrome";
+import { EditorActions, type EditorTab } from "./editorChrome";
 import { registerFileSurface, type FileSurfaceProps } from "./fileTypes";
 import { MarkdownView } from "./markdown";
 import { ValueView } from "./valueView";
@@ -351,8 +351,20 @@ export function WorkflowEdit({ doc, busy, onSave, context }: FileSurfaceProps): 
       draft={context.drafts?.[key] ?? null}
       {...(context.onDraft ? { onDraft: (text: string | null) => context.onDraft?.(key, text) } : {})}
       {...(context.onEditorTab
-        ? { tab: context.editorTab?.[key] ?? "form", onTab: (next: "form" | "json") => context.onEditorTab?.(key, next) }
+        ? {
+            tab: context.editorTab?.[key] ?? context.editorTabLast ?? "form",
+            onTab: (next: EditorTab) => context.onEditorTab?.(key, next),
+          }
         : {})}
+      // The graph's child boxes lead to the states they mount — the same move the board's columns
+      // make, through the same action, so "open that child" means one thing in the app.
+      onOpenState={context.onDrill}
+      // Reading and writing a state that is not this file: what the graph's side panel shows about a
+      // child box — see `statePanel.tsx`.
+      {...(context.readState !== undefined ? { readState: context.readState } : {})}
+      {...(context.saveState !== undefined ? { saveState: context.saveState } : {})}
+      // Reading any file: what a linked property's preview shows — see `linkPreview.tsx`.
+      {...(context.readFile !== undefined ? { readFile: context.readFile } : {})}
       onSave={(_stateId, _layer, text) => onSave(text)}
     />
   );

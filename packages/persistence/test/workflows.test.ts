@@ -161,9 +161,16 @@ describe("browseWorkflows", () => {
       JSON.stringify({
         label: "Goals",
         inputs: { issue: { kind: "blob", schema: { type: "string", contentMediaType: "markdown" } } },
-        outputs: { goals: { schema: { type: "array", items: { type: "string" } } } },
+        outputs: {
+          goals: { schema: { type: "array", items: { type: "string" } }, binding: ".operation.output.goals" },
+        },
         environment: { conversation: { mode: "summary" } },
-        operation: { kind: "prompt", prompt: "Extract goals.", model: "planner" },
+        operation: {
+          kind: "prompt",
+          prompt: "Extract goals.",
+          model: "planner",
+          outputs: { goals: { schema: { type: "array", items: { type: "string" } } } },
+        },
       }),
     );
     const plan = browseWorkflows(project).workflows[0]!;

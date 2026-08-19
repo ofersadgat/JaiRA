@@ -9,13 +9,16 @@
  * about the specimen; the only question worth asking is what the app draws, so the scaffolding
  * stops at the window frame and everything inside it is imported.
  */
-import { useState, type JSX, type ReactNode } from "react";
-import type { BoardCard, BoardView } from "@jaira/shared/browser";
+import { useMemo, useState, type JSX, type ReactNode } from "react";
+import type { BoardCard, BoardView, FileTree } from "@jaira/shared/browser";
 import { defaultAppearance } from "@jaira/shared/browser";
 import { AppearancePane } from "../src/renderer/appearancePane";
 import { Board } from "../src/renderer/board";
 import { Pill, Pills } from "../src/renderer/pill";
 import { Sidebar, type SidebarAct } from "../src/renderer/sidebar";
+import { StateGraphView } from "../src/renderer/stateGraphView";
+import { StatePanel } from "../src/renderer/statePanel";
+import { ValuePanelContext, type PinnedValue } from "../src/renderer/valuePanel";
 
 /**
  * The clock the specimen's ages are measured back from.
@@ -320,9 +323,167 @@ function AppearanceSpecimen(): JSX.Element {
   );
 }
 
+/**
+ * A state with a re-plan loop, an escape hatch and a jump target — the shapes the graph exists to
+ * make readable, in one document.
+ */
+const GRAPH_STATE = JSON.stringify(
+  {
+    label: "Planning",
+    inputs: {
+      issue: { schema: { type: "string", contentMediaType: "text/markdown" } },
+      depth: { schema: { type: "integer" }, default: 2, optional: true },
+    },
+    outputs: {
+      plan_doc: { binding: ".children.context.outputs.plan_doc" },
+      outcome: { binding: ".children.critique.outputs.outcome", optional: true },
+    },
+    children: {
+      goals: { inputs: { issue: ".inputs.issue" } },
+      context: { inputs: { goals: ".children.goals.outputs.goals" }, async: true },
+      critique: {
+        inputs: { plan_doc: ".children.context.outputs.plan_doc", depth: ".inputs.depth" },
+        transitions: [
+          { to: "terminate.success", when: ".children.critique.outputs.outcome === 'clean'" },
+          { to: "goals", when: ".run.iteration < .limits.max_iterations" },
+          { to: "escalate" },
+        ],
+      },
+      escalate: { state: "$/lib/escalate", inputs: { findings: ".children.critique.outputs.findings" } },
+    },
+    sequence: ["goals", "context", "critique"],
+    transitions: [{ to: "terminate.error", when: ".run.iteration >= .limits.max_iterations" }],
+    limits: { max_iterations: 3, timeout: 600 },
+  },
+  null,
+  2,
+);
+
+/**
+ * The graph tab, over that state. Real component, real layout — see `stateGraphView.tsx`.
+ *
+ * What the surface asks the SHELL to do is written onto the document, because those two gestures
+ * have no picture of their own: clicking a box fills a side panel this page does not have, and
+ * double-clicking opens a file it cannot open. The harness reads them back and reports them in
+ * words — see `shoot.mjs`, and the `graph-click` step. Without that the two would be checkable only
+ * by hand, which is how a double-click that had been silently retargeted went unnoticed.
+ */
+function GraphSpecimen(): JSX.Element {
+  const asked = useMemo(
+    () => ({ open: (item: PinnedValue) => (document.documentElement.dataset["pinned"] = item.title) }),
+    [],
+  );
+  return (
+    <ValuePanelContext.Provider value={asked}>
+      <StateGraphView
+        text={GRAPH_STATE}
+        stateId="plan"
+        onOpenState={(id) => (document.documentElement.dataset["opened"] = id)}
+        // Enough for a click to reach the side panel's editor rather than the box's own declaration
+        // — the two are different surfaces, and the harness should exercise the real one.
+        readState={async (id) =>
+          ({
+            stateId: id,
+            layer: "project",
+            file: `/w/p/workflows/${id}.json`,
+            text: CHILD_STATE,
+            exists: true,
+          }) as never
+        }
+      />
+    </ValuePanelContext.Provider>
+  );
+}
+
+/** TEMPORARY: the side panel's state editor, over a stub document. */
+const CHILD_STATE = JSON.stringify(
+  {
+    label: "Goals",
+    inputs: { issue: { schema: { type: "string" } } },
+    outputs: { goals: { schema: { type: "array" }, binding: ".operation.output.goals" } },
+    operation: {
+      kind: "prompt",
+      model: "anthropic/claude-sonnet-5",
+      prompt: { $ref: "$/prompts/goals.md" },
+      outputs: { goals: { schema: { type: "array" } } },
+    },
+  },
+  null,
+  2,
+);
+
+const PROMPT_FILE = [
+  "# Extract the goals",
+  "",
+  "Read the issue and list what the change has to achieve.",
+  "",
+  "- one line each",
+  "- no solutions, only outcomes",
+].join("\n");
+
+/** Just enough tree for a reference to resolve: the prompt the state below links to. */
+const PROMPT_TREE: FileTree = {
+  roots: [
+    {
+      layer: "project",
+      project: "/w/p",
+      nodes: [
+        {
+          path: "prompts",
+          name: "prompts",
+          kind: "directory",
+          mime: "inode/directory",
+          layer: "project",
+          children: [
+            {
+              path: "prompts/goals.md",
+              name: "goals.md",
+              kind: "file",
+              mime: "text/markdown",
+              layer: "project",
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+function StatePanelSpecimen(): JSX.Element {
+  return (
+    <StatePanel
+      // A prompt held in another file, and what it says — the whole reason a link costs something.
+      tree={PROMPT_TREE}
+      readFile={async () => PROMPT_FILE}
+      stateId="plan/goals"
+      read={async () =>
+        ({
+          stateId: "plan/goals",
+          layer: "project",
+          file: "/w/p/workflows/plan/goals.json",
+          text: CHILD_STATE,
+          exists: true,
+        }) as never
+      }
+      save={() => {}}
+      executors={[]}
+      busy={false}
+      onOpenState={() => {}}
+    />
+  );
+}
+
 export interface Specimen {
   id: string;
-  /** The figure in `reference/the-shell.html` this one is answerable to. */
+  /**
+   * The figure in `reference/the-shell.html` this one is answerable to, or `—` for a surface the
+   * reference does not draw.
+   *
+   * The dash is not an exemption from the comparison — it says there is nothing to compare against,
+   * which is the case for a surface designed after the reference was written. Photographing it is
+   * still worth the frame: a drawing whose arrows stop meeting their boxes is invisible to every
+   * test that reads the model rather than the pixels.
+   */
   figure: string;
   width: number;
   height: number;
@@ -336,4 +497,6 @@ export const SPECIMENS: readonly Specimen[] = [
   { id: "pills", figure: "05 · The pills", width: 320, height: 120, node: <PillSpecimen /> },
   { id: "registers", figure: "04 · Ten registers", width: 360, height: 230, node: <RegisterSpecimen /> },
   { id: "appearance", figure: "07 · Appearance", width: 430, height: 620, node: <AppearanceSpecimen /> },
+  { id: "graph", figure: "— · The state graph", width: 980, height: 560, node: <GraphSpecimen /> },
+  { id: "state-panel", figure: "— · A child in the panel", width: 480, height: 560, node: <StatePanelSpecimen /> },
 ];

@@ -84,7 +84,20 @@ import { Sidebar, type SidebarAct, type SidebarProject, type SidebarView } from 
 import { Splitter } from "./splitter";
 import { TaskAddressBar } from "./taskBar";
 import { nodeAt } from "./trail";
-import { FOLD, PANE, PANE_WIDE, SHUT, SIDEBAR_RAIL, openOf, paneDefault, paneOf, shutOf } from "./uiState";
+import {
+  FOLD,
+  HALVES,
+  PANE,
+  PANE_SURFACE,
+  PANE_WIDE,
+  SHUT,
+  SIDEBAR_RAIL,
+  modeOf,
+  openOf,
+  paneDefault,
+  paneOf,
+  shutOf,
+} from "./uiState";
 import { Icon } from "./icons";
 import { History, NewTask } from "./widgets";
 import { useApp, type SettingsSection, type View } from "./store";
@@ -127,15 +140,19 @@ function PinnedPane({ pinned, onClose }: { pinned: PinnedValue; onClose: () => v
           <Icon name="cross" />
         </button>
       </div>
-      <div className="pinned-body">
+      <div className={pinned.node === undefined ? "pinned-body" : "pinned-body pinned-surface"}>
         <ValuePanelContext.Provider value={null}>
-          <ValueView
-            value={pinned.value}
-            {...(pinned.hint !== undefined ? { hint: pinned.hint } : {})}
-            {...(pinned.label !== undefined ? { label: pinned.label } : {})}
-            {...(pinned.serve !== undefined ? { serve: pinned.serve } : {})}
-            {...(pinned.onPrompt !== undefined ? { onPrompt: pinned.onPrompt } : {})}
-          />
+          {/* A surface when one was handed over — see {@link PinnedValue.node} — and the value viewer
+              otherwise, which is what everything but the graph's boxes pins. */}
+          {pinned.node ?? (
+            <ValueView
+              value={pinned.value}
+              {...(pinned.hint !== undefined ? { hint: pinned.hint } : {})}
+              {...(pinned.label !== undefined ? { label: pinned.label } : {})}
+              {...(pinned.serve !== undefined ? { serve: pinned.serve } : {})}
+              {...(pinned.onPrompt !== undefined ? { onPrompt: pinned.onPrompt } : {})}
+            />
+          )}
         </ValuePanelContext.Provider>
       </div>
     </div>
@@ -715,8 +732,19 @@ export default function App(): JSX.Element {
    * again restores the width it was dragged to. What is remembered is what somebody chose, not what
    * happened to fit at the time.
    */
-  const panelWidth = (id: string, ceiling: number): number =>
-    Math.min(paneOf(ui, id), pinned !== null ? PANE_WIDE : ceiling);
+  /**
+   * How wide the context panel is, given what it is holding.
+   *
+   * A pinned SURFACE has a floor as well as a ceiling: a state's configuration is a form, and a form
+   * whose rows are a name, a type, a binding and a switch stops being a form somewhere around 460px.
+   * Opening one into a column dragged narrow for an inspector would show it broken — so the column
+   * grows to meet it, once, and stays wherever it is dragged afterwards.
+   */
+  const panelWidth = (id: string, ceiling: number): number => {
+    const held = pinned !== null;
+    const floor = pinned?.node === undefined ? 0 : PANE_SURFACE;
+    return Math.max(floor, Math.min(paneOf(ui, id), held ? PANE_WIDE : ceiling));
+  };
   const openTaskMenu = useCallback(
     (project: string, card: BoardCard, x: number, y: number) => {
       const plural = (k: number): string => `${k} task${k === 1 ? "" : "s"}`;
@@ -968,6 +996,9 @@ export default function App(): JSX.Element {
     onSaveConfig: actions.saveConfig,
     validateSchema: actions.validateSchema,
     stateSlots: actions.stateSlots,
+    readState: actions.readState,
+    saveState: actions.saveState,
+    readFile: actions.readFile,
     schemaChoice: state.schemaChoice,
     onSchemaChoice: actions.setSchemaChoice,
     drafts: state.drafts,
@@ -997,6 +1028,7 @@ export default function App(): JSX.Element {
       reviewChangeset: actions.reviewSyncChangeset,
     },
     editorTab: state.editorTab,
+    editorTabLast: state.editorTabLast,
     onEditorTab: actions.setEditorTab,
     detectSchema: actions.detectSchema,
     wrapJson: state.settings.wrapJson,
@@ -1340,8 +1372,8 @@ export default function App(): JSX.Element {
                 context={surfaces}
                 viewerHeight={paneOf(ui, PANE.filesViewer)}
                 onViewerHeight={(size) => actions.setPane(PANE.filesViewer, size)}
-                configOpen={openOf(ui, FOLD.filesEditor)}
-                onConfigOpen={(open) => actions.setFold(FOLD.filesEditor, open)}
+                half={modeOf(ui, FOLD.filesEditor, HALVES, "half")}
+                onHalf={(half) => actions.setMode(FOLD.filesEditor, half)}
                 onSave={actions.saveDoc}
               />
 

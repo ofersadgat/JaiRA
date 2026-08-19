@@ -78,14 +78,22 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
     "feature/plan/goals": {
       label: "Goals",
       inputs: { issue: artifact("markdown") },
-      outputs: { goals: strArray() },
-      operation: { prompt: "Extract goals from {{.inputs.issue}}." },
+      // The call says what it returns and the state says what it publishes, with a binding between
+      // them (WORKFLOWS.md §3.3). Two lines rather than one, and the reason for the second is that
+      // the first is otherwise a claim nothing in the file supports: a produced output is filled by
+      // NAME, silently, and a call that stops returning that name leaves a state that terminates
+      // successfully having handed back nothing.
+      outputs: { goals: { ...strArray(), binding: ".operation.output.goals" } },
+      operation: { prompt: "Extract goals from {{.inputs.issue}}.", outputs: { goals: strArray() } },
     },
     "feature/plan/context": {
       label: "Context",
       inputs: { issue: artifact("markdown"), goals: strArray() },
-      outputs: { plan_doc: artifact("markdown") },
-      operation: { prompt: "Write the plan for {{.inputs.issue}}." },
+      outputs: { plan_doc: { ...artifact("markdown"), binding: ".operation.output.plan_doc" } },
+      operation: {
+        prompt: "Write the plan for {{.inputs.issue}}.",
+        outputs: { plan_doc: artifact("markdown") },
+      },
     },
     "feature/plan/critique": {
       label: "Critique Plan",
@@ -98,9 +106,12 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
         },
       },
       outputs: {
-        outcome: { schema: { type: "string", enum: ["clean", "needs_changes", "blocked"] } },
-        weaknesses: strArray(),
-        critique_report: artifact("markdown"),
+        outcome: {
+          schema: { type: "string", enum: ["clean", "needs_changes", "blocked"] },
+          binding: ".operation.output.outcome",
+        },
+        weaknesses: { ...strArray(), binding: ".operation.output.weaknesses" },
+        critique_report: { ...artifact("markdown"), binding: ".operation.output.critique_report" },
         human_decision: {
           schema: { type: "string", enum: ["approve", "request_changes", "block"] },
           optional: true,
@@ -110,18 +121,29 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
       environment: { conversation: { mode: "full_history" } },
       operation: {
         model: model("critic"),
-        prompt: "Review the plan document. Find significant weaknesses at or above the configured severity threshold. Return structured output matching this state's output schema.",
+        prompt:
+          "Review the plan document. Find significant weaknesses at or above the configured " +
+          "severity threshold. Return structured output matching this operation's declared returns.",
+        outputs: {
+          outcome: { schema: { type: "string", enum: ["clean", "needs_changes", "blocked"] } },
+          weaknesses: strArray(),
+          critique_report: artifact("markdown"),
+        },
       },
+      // The children read the CALL's result rather than this state's slots, and that is what binding
+      // those slots costs: a produced output is filled the moment the operation returns, while a
+      // bound one is computed when the state TERMINATES (WORKFLOWS.md §3.3). Anything that has to
+      // see the value mid-state — a child's wiring, a guard below — must name where it came from.
       children: {
         address_weaknesses: {
           inputs: {
             plan_doc: ".inputs.plan_doc",
-            weaknesses: { expr: ".outputs.weaknesses" },
-            critique_report: { expr: ".outputs.critique_report" },
+            weaknesses: ".operation.output.weaknesses",
+            critique_report: ".operation.output.critique_report",
           },
         },
         human_review: {
-          inputs: { plan_doc: ".inputs.plan_doc", critique_report: { expr: ".outputs.critique_report" } },
+          inputs: { plan_doc: ".inputs.plan_doc", critique_report: ".operation.output.critique_report" },
         },
       },
       // These two children are ALTERNATIVES, not a spine: an absent `sequence` would run both in
@@ -130,20 +152,24 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
       transitions: [
         { to: "terminate.success", when: ".children.human_review.outcome === 'success'" },
         { to: "terminate.success", when: ".children.address_weaknesses.outcome === 'success'" },
-        { to: "terminate.success", when: ".outputs.outcome === 'clean'" },
-        { to: "human_review", when: ".outputs.outcome === 'blocked'" },
-        { to: "address_weaknesses", when: ".outputs.outcome === 'needs_changes'" },
+        { to: "terminate.success", when: ".operation.output.outcome === 'clean'" },
+        { to: "human_review", when: ".operation.output.outcome === 'blocked'" },
+        { to: "address_weaknesses", when: ".operation.output.outcome === 'needs_changes'" },
       ],
     },
     "feature/plan/critique/address_weaknesses": {
       label: "Address Weaknesses",
       inputs: { plan_doc: artifact("markdown"), weaknesses: strArray(), critique_report: artifact("markdown") },
-      outputs: { resolution: str() },
-      operation: { prompt: "Fix the listed weaknesses.", model: model("fixer") },
+      outputs: { resolution: { ...str(), binding: ".operation.output.resolution" } },
+      operation: { prompt: "Fix the listed weaknesses.", model: model("fixer"), outputs: { resolution: str() } },
     },
     "feature/plan/critique/human_review": {
       label: "Human Review",
       inputs: { plan_doc: artifact("markdown"), critique_report: artifact("markdown") },
+      // Produced, and that is the one place JaiRA still allows it: a component's answer is delivered
+      // by NAME onto these slots, and `.operation.output.decision` resolves to nothing at run time
+      // however it is declared — a host function returns one value, not a map the engine can index.
+      // See the rule in `workflows.ts`.
       outputs: {
         decision: { schema: { type: "string", enum: ["approve", "request_changes", "block"] } },
         comments: { schema: { type: "string", format: "markdown" }, optional: true },

@@ -61,12 +61,35 @@ setTimeout(() => {
 const REF_FIGURES = ".spec .win, .settings, .tbl";
 
 /**
- * Extra frames, each taken after one click.
+ * Extra frames, each taken after one gesture.
  *
  * Kept as data rather than as a flag on the specimen, because what is being photographed is a
  * TRANSITION — the control before and the control after — and a specimen that opened itself on mount
  * would have no picture of the first half.
+ *
+ * `click` names something to press; `run` is an expression evaluated in the page instead, for a
+ * surface whose gesture is not a click. The graph's map is the reason the second exists: a wheel
+ * listener that is silently passive and a drag that reads a stale camera both LOOK fine in a still,
+ * and both were real — found by photographing the map after it had been moved.
  */
+/**
+ * Put the pointer on something and leave it there.
+ *
+ * `mouseover` with no `relatedTarget` is what React turns into `onMouseEnter` for the whole chain
+ * from the document to the target, which is exactly what a real pointer arriving from outside the
+ * window produces. The frames it makes are the only picture there is of the graph's attention model
+ * — a still of the resting state says nothing about what hovering answers.
+ */
+const hover = (selector) =>
+  [
+    "(() => {",
+    "  const el = document.querySelector(" + JSON.stringify(selector) + ");",
+    "  if (!el) return false;",
+    '  el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true }));',
+    "  return true;",
+    "})()",
+  ].join("\n");
+
 const OPENED = [
   { name: "appearance-menu", click: `[data-shot="appearance"] .face-add`, shot: `[data-shot="appearance"]` },
   // The row you are ALREADY ON, clicked again. It must still be showing its tree afterwards: a row
@@ -88,6 +111,81 @@ const OPENED = [
   // The rail. Every row in it is drawn by the same function as the expanded column, so a change to
   // what a row IS reaches 46px whether or not anybody looked — which is the reason to look.
   { name: "sidebar-rail", click: `[data-shot="sidebar"] .side-toggle`, shot: `[data-shot="sidebar"]` },
+  // The form scrolled to its operation, which is where a linked property — and the preview of what
+  // it says — actually is. A still of the top of a form says nothing about the bottom of it.
+  {
+    name: "state-panel-link",
+    shot: `[data-shot="state-panel"]`,
+    run: `(() => {
+      const at = document.querySelector('[data-shot="state-panel"] .link-preview');
+      if (!at) return "no preview rendered";
+      at.scrollIntoView({ block: "center", behavior: "instant" });
+      return "preview: " + at.textContent.slice(0, 60);
+    })()`,
+  },
+  {
+    name: "graph-moved",
+    shot: `[data-shot="graph"]`,
+    run: `(() => {
+      const map = document.querySelector('[data-shot="graph"] .sg-map');
+      if (!map) return false;
+      const r = map.getBoundingClientRect();
+      const at = { clientX: r.left + 300, clientY: r.top + 200, bubbles: true, cancelable: true };
+      map.dispatchEvent(new WheelEvent("wheel", { ...at, deltaY: -420 }));
+      map.dispatchEvent(new PointerEvent("pointerdown", { ...at, pointerId: 1, button: 0, isPrimary: true }));
+      const to = { ...at, clientX: at.clientX - 160, clientY: at.clientY + 40, pointerId: 1, isPrimary: true };
+      map.dispatchEvent(new PointerEvent("pointermove", to));
+      map.dispatchEvent(new PointerEvent("pointerup", { ...at, pointerId: 1, isPrimary: true }));
+      return true;
+    })()`,
+  },
+  // Further in, and pushed up: what a reader has when the boxes are readable and most of what they
+  // are joined to is not. The frame is here for the two repairs that state needs — a pill at each
+  // crossing naming what is off the edge, and a condition slid along its arc to somewhere visible.
+  // The two gestures with no picture: click asks for the box's configuration, double-click asks to
+  // open it. Both answer in words — see the loop below, and `GraphSpecimen`.
+  {
+    name: "graph-click",
+    run: `(() => {
+      const el = document.querySelector('[data-shot="graph"] [data-node="child:goals"]');
+      if (!el) return "no such box";
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      el.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      const html = document.documentElement.dataset;
+      return "panel=" + (html.pinned ?? "nothing") + " · opened=" + (html.opened ?? "nothing");
+    })()`,
+  },
+  {
+    name: "graph-deep",
+    shot: `[data-shot="graph"]`,
+    run: `(() => {
+      const map = document.querySelector('[data-shot="graph"] .sg-map');
+      if (!map) return false;
+      const r = map.getBoundingClientRect();
+      const at = { clientX: r.left + 500, clientY: r.top + 120, bubbles: true, cancelable: true };
+      map.dispatchEvent(new WheelEvent("wheel", { ...at, deltaY: -300 }));
+      map.dispatchEvent(new PointerEvent("pointerdown", { ...at, pointerId: 3, button: 0, isPrimary: true }));
+      const to = { ...at, clientX: at.clientX - 40, clientY: at.clientY - 260, pointerId: 3, isPrimary: true };
+      map.dispatchEvent(new PointerEvent("pointermove", to));
+      map.dispatchEvent(new PointerEvent("pointerup", to));
+      return true;
+    })()`,
+  },
+  {
+    name: "graph-on-node",
+    shot: `[data-shot="graph"]`,
+    run: hover(`[data-shot="graph"] [data-node="child:critique"]`),
+  },
+  { name: "graph-on-rule", shot: `[data-shot="graph"]`, run: hover(`[data-shot="graph"] .sg-label`) },
+  { name: "graph-on-port", shot: `[data-shot="graph"]`, run: hover(`[data-shot="graph"] .sg-node .sg-port`) },
+  { name: "graph-on-term", shot: `[data-shot="graph"]`, run: hover(`[data-shot="graph"] .sg-term`) },
+  // The LINE, not its label: two pixels of stroke is not a target, which is why every line carries a
+  // fat invisible twin. This is the frame that says the twin is there and asks the right question.
+  {
+    name: "graph-on-line",
+    shot: `[data-shot="graph"]`,
+    run: hover(`[data-shot="graph"] [data-line="edge:mount:critique:1"]`),
+  },
 ];
 
 /** Waits for the page to say it has settled — fonts loaded, one frame painted. */
@@ -167,15 +265,19 @@ async function main() {
 
     // The states a specimen only reaches by being used. A popover is half the design of the control
     // it belongs to, and a harness that photographs every surface at rest has no picture of it.
-    for (const { name, click, shot } of OPENED) {
+    for (const { name, click, shot, run } of OPENED) {
       const hit = await win.webContents.executeJavaScript(
-        `(() => { const el = document.querySelector(${JSON.stringify(click)}); if (!el) return false; el.click(); return true; })()`,
+        run ?? `(() => { const el = document.querySelector(${JSON.stringify(click)}); if (!el) return false; el.click(); return true; })()`,
       );
-      if (hit !== true) {
-        say(`  ! nothing at ${click} — skipped ${name}`);
+      if (hit !== true && typeof hit !== "string") {
+        say(`  ! nothing at ${click ?? name} — skipped ${name}`);
         continue;
       }
-      await shoot(win, [{ name: `${name}.${theme}`, selector: shot }], join(out, "app"));
+      // A gesture whose whole effect is a CALLBACK leaves no picture — clicking a box asks the shell
+      // to fill a panel this page does not have. A step may answer in words instead, and the words
+      // are the evidence: see the specimens, which record what the surface asked for.
+      if (typeof hit === "string") say(`  ${name}: ${hit}`);
+      if (shot !== undefined) await shoot(win, [{ name: `${name}.${theme}`, selector: shot }], join(out, "app"));
     }
   }
 

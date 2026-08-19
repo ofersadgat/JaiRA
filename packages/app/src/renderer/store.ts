@@ -56,6 +56,7 @@ import type {
   WorkflowSyncStatus,
   TaskSummary,
   WorkflowLayer,
+  WorkflowSource,
 } from "@jaira/shared/browser";
 import {
   CONFIG_JSON,
@@ -86,13 +87,24 @@ import {
 } from "./executorConfig";
 import { applyModelPatch, type ModelPatch } from "./modelsConfig";
 import type { FileSelection } from "./files";
+import type { EditorTab } from "./editorChrome";
 import { instanceAt, newestRunOf, runTargetOf } from "./runForm";
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestFiles, selfTestScript } from "./debugWorkflow";
 import { CHAT_AGENT, CHAT_STATES, chatWorkflowFiles, titleOf } from "./chatWorkflow";
 import { applyAppearance } from "./appearance";
 import { unseenTasks } from "./pill";
-import { emptyUiState, forgetSeen, SHUT, toggleShut, withOpen, withPane, withSeen, withSeenAll } from "./uiState";
+import {
+  emptyUiState,
+  forgetSeen,
+  SHUT,
+  toggleShut,
+  withMode,
+  withOpen,
+  withPane,
+  withSeen,
+  withSeenAll,
+} from "./uiState";
 
 /** A prune plan or result, as `history:prune` returns it. */
 export type PruneReport = Response<"history:prune">;
@@ -236,7 +248,18 @@ export interface AppState {
    * Per file for the same reason the schema choice is: one remembered globally would put you on the
    * JSON tab of the next state you opened because of a raw edit made to a different one.
    */
-  editorTab: Record<string, "form" | "json">;
+  editorTab: Record<string, EditorTab>;
+
+  /**
+   * The reading last CHOSEN, for a file nothing has been remembered about.
+   *
+   * Per file is the rule (see {@link editorTab}) and this is what it falls back to. Opening a child
+   * from the graph should land you in the graph — you were reading a picture and you asked for the
+   * next one — and the same holds for someone working through a directory on the JSON tab. Only an
+   * explicit click on a tab moves it, so it is a statement about how the person is working rather
+   * than a trail left by wherever they happened to navigate.
+   */
+  editorTabLast: EditorTab;
 
   /**
    * What has been typed into a state's run form, keyed by STATE ID then by input name.
@@ -652,6 +675,7 @@ const EMPTY: AppState = {
   debug: { files: [], taskId: null, busy: false, error: null },
   drafts: {},
   editorTab: {},
+  editorTabLast: "form",
   runValues: {},
   doc: null,
   dir: null,
@@ -2676,6 +2700,9 @@ export function useApp() {
       /** Open or close a disclosure — the Files editor half, the field reference, "Show effective". */
       setFold: (id: string, open: boolean) => setUi(withOpen(ref.current.settings.ui, id, open)),
 
+      /** Put a control with more than two positions into one of them — see `uiState`'s `modes`. */
+      setMode: (id: string, mode: string) => setUi(withMode(ref.current.settings.ui, id, mode)),
+
       /**
        * Fold one branch of a collapsible tree, or unfold it.
        *
@@ -3502,9 +3529,70 @@ export function useApp() {
        */
       setDraft: (key: string, text: string | null) => patch({ drafts: withDraft(ref.current.drafts, key, text) }),
 
+      /**
+       * Read one state's file WITHOUT opening it.
+       *
+       * What the graph's side panel shows about a child: the box draws a mount, and the thing an
+       * author wants to see when they click it is the state that mount runs — its slots, its
+       * operation, its own children — which lives in another file entirely. Opening that file is the
+       * other gesture (double-click); this one leaves the address exactly where it is.
+       *
+       * `null` for anything that cannot be resolved, because a panel that cannot find a state has
+       * something to say ("nothing here defines it") and an exception has not.
+       */
+      readState: async (stateId: string): Promise<WorkflowSource | null> => {
+        const at = await locateState(stateId);
+        if (at === null) return null;
+        try {
+          return await invoke("workflow:read", { stateId, layer: at.layer, ...inLayer(at.layer) });
+        } catch {
+          return null;
+        }
+      },
+
+      /**
+       * Read any file in either layer, as text, without opening it.
+       *
+       * What a LINKED property's preview shows: a reference moves the substance of a field into
+       * another file, and the form would otherwise show a path where six lines of prompt used to be.
+       * `null` for anything unreadable, because a preview is never worth an error — the linter is
+       * what reports a reference that resolves to nothing.
+       */
+      readFile: async (layer: WorkflowLayer, path: string): Promise<string | null> => {
+        try {
+          return (await invoke("file:read", { layer, path, ...inLayer(layer) })).text;
+        } catch {
+          return null;
+        }
+      },
+
+      /**
+       * Save a state that is not the open file — the panel's editor, and only it.
+       *
+       * Through `workflow:write` like every other state write, so the same parse and the same re-lint
+       * happen: a file edited in a side panel is not a lesser file. The tree and the open state are
+       * refreshed afterwards because this may well have been the state the middle column is showing
+       * a board of.
+       */
+      saveState: async (source: WorkflowSource, text: string) => {
+        patch({ busy: true, error: null });
+        try {
+          await invoke("workflow:write", {
+            stateId: source.stateId,
+            layer: source.layer,
+            text,
+            ...inLayer(source.layer),
+          });
+          patch({ busy: false });
+          await Promise.all([refreshTree(), refreshState(ref.current.stateId)]);
+        } catch (e) {
+          fail(e);
+        }
+      },
+
       /** Remember which tab a state file's editor is on, so returning to the file returns to it. */
-      setEditorTab: (key: string, tab: "form" | "json") =>
-        patch({ editorTab: { ...ref.current.editorTab, [key]: tab } }),
+      setEditorTab: (key: string, tab: EditorTab) =>
+        patch({ editorTab: { ...ref.current.editorTab, [key]: tab }, editorTabLast: tab }),
 
       /** Hold one box of a state's run form. See {@link AppState.runValues} on why `""` is stored. */
       setRunValue: (stateId: string, name: string, text: string) =>

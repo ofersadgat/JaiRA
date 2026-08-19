@@ -25,6 +25,7 @@ import {
   type FileNode,
   type FileTree,
   type StateSlots,
+  type WorkflowLayer,
 } from "@jaira/shared/browser";
 
 /** Every state id in both layers, deduplicated and sorted. A shadowed base copy has the id its
@@ -134,6 +135,45 @@ export function linkTargets(tree: FileTree | null): string[] {
   };
   for (const root of tree.roots) walk(root.nodes);
   return [...refs].sort();
+}
+
+/**
+ * The file a reference names, if this window can see one.
+ *
+ * The inverse of {@link linkTargets}, and it is the same rule read backwards: a node's path becomes
+ * a reference through `refForPath`, so a reference is that node's when the two spellings agree. The
+ * PROJECT layer is tried first because a bare `$/…` is searched along the layer path and a project
+ * copy overrides the shared one — the same order the loader would resolve it in.
+ *
+ * Everything after the file name is a property path into the document (§2.2), so the name is given
+ * back one dotted component at a time, longest first — `$/lib/review.operation` is `review.json`
+ * with `.operation` taken out of it, and what this answers is the FILE.
+ */
+export function resolveRef(tree: FileTree | null, ref: string): { layer: WorkflowLayer; path: string } | null {
+  const trimmed = ref.trim();
+  if (tree === null || !trimmed.startsWith("$/")) return null;
+  const cut = trimmed.lastIndexOf("/");
+  const dir = trimmed.slice(0, cut + 1);
+  const parts = trimmed.slice(cut + 1).split(".");
+  const found = new Map<string, { layer: WorkflowLayer; path: string }>();
+  const walk = (layer: WorkflowLayer, nodes: FileNode[]): void => {
+    for (const node of nodes) {
+      if (node.kind === "directory") {
+        if (node.children) walk(layer, node.children);
+        continue;
+      }
+      const spelling = refForPath(node.path);
+      // First writer wins per spelling, and the roots are walked project-first below.
+      if (!found.has(spelling)) found.set(spelling, { layer, path: node.path });
+    }
+  };
+  const roots = [...tree.roots].sort((a, b) => (a.layer === b.layer ? 0 : a.layer === "project" ? -1 : 1));
+  for (const root of roots) walk(root.layer, root.nodes);
+  for (let take = parts.length; take >= 1; take--) {
+    const at = found.get(`${dir}${parts.slice(0, take).join(".")}`);
+    if (at !== undefined) return at;
+  }
+  return null;
 }
 
 /**

@@ -25,6 +25,7 @@ import {
 } from "./operationForm";
 import { NO_ISSUES, fieldClass, markFor, type FormIssues } from "./issues";
 import { LinkInput, LinkToggle } from "./links";
+import { LinkPreview } from "./linkPreview";
 import { emptySlotRow } from "./slotForm";
 import { SlotTable, SlotTypePicker } from "./slotTable";
 
@@ -132,6 +133,8 @@ function SimpleFieldControl({
       )}
       {structured ? <span className="sub">{REF_HINT}</span> : null}
       {linked ? <span className="sub">spliced in where it is referenced — a copy, not a live link</span> : null}
+      {/* And what it says, since the whole cost of a link is that the substance moved elsewhere. */}
+      {linked && ref !== undefined && ref.length > 0 ? <LinkPreview reference={ref} /> : null}
     </label>
   );
 }

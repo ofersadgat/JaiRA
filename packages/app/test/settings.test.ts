@@ -63,7 +63,7 @@ afterEach(async () => {
 describe("user settings", () => {
   it("defaults to the light theme, with no project open", () => {
     // Preferences belong to the person, not the checkout — the theme must apply on an empty window.
-    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, shut: {}, seen: {} }, appearance: defaultAppearance() });
+    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, seen: {} }, appearance: defaultAppearance() });
   });
 
   it("persists a change and reads it back", () => {
@@ -76,7 +76,7 @@ describe("user settings", () => {
     writeFileSync(join(baseDir, "settings.json"), "{ not json", "utf8");
 
     // A broken preferences file must never stop the app opening.
-    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, shut: {}, seen: {} }, appearance: defaultAppearance() });
+    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, seen: {} }, appearance: defaultAppearance() });
   });
 
   it("keeps the JSON editor's wrap preference, and defaults it off", () => {
@@ -91,7 +91,7 @@ describe("user settings", () => {
 
   it("reads a settings file written before wrapJson existed", () => {
     writeFileSync(join(baseDir, "settings.json"), JSON.stringify({ theme: "dark" }), "utf8");
-    expect(service.readSettings()).toEqual({ theme: "dark", wrapJson: false, ui: { panes: {}, open: {}, shut: {}, seen: {} }, appearance: defaultAppearance() });
+    expect(service.readSettings()).toEqual({ theme: "dark", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, seen: {} }, appearance: defaultAppearance() });
   });
 
   /**
@@ -106,6 +106,7 @@ describe("user settings", () => {
     const ui = {
       panes: { "files.tree": 310 },
       open: { "files.editor": false },
+      modes: { "files.editor": "full" },
       shut: { "files.folders": ["project:workflows"] },
       seen: { "t-1": 1_700_000_000_000 },
     };
@@ -114,13 +115,13 @@ describe("user settings", () => {
 
     // Replaced, not merged: the renderer holds the live copy and sends all of it, which is what
     // makes forgetting a pane possible at all — a deep merge would leave every id ever stored.
-    const later = { panes: { "tasks.panel": 420 }, open: {}, shut: {}, seen: {} };
+    const later = { panes: { "tasks.panel": 420 }, open: {}, modes: {}, shut: {}, seen: {} };
     service.writeSettings({ ui: later });
     expect(service.readSettings().ui).toEqual(later);
   });
 
   it("keeps the layout out of the way of the other preferences", () => {
-    service.writeSettings({ ui: { panes: { "files.tree": 310 }, open: {}, shut: {}, seen: {} } });
+    service.writeSettings({ ui: { panes: { "files.tree": 310 }, open: {}, modes: {}, shut: {}, seen: {} } });
     expect(service.writeSettings({ theme: "dark" }).ui.panes["files.tree"]).toBe(310);
     expect(service.readSettings().theme).toBe("dark");
   });
@@ -149,6 +150,7 @@ describe("user settings", () => {
     expect(service.readSettings().ui).toEqual({
       panes: { "files.inspector": 4000, "tasks.panel": 400 },
       open: { "settings.effective": true },
+      modes: {},
       shut: { "files.folders": ["a", "b"] },
       seen: { "t-1": 1_700_000_000_000 },
     });

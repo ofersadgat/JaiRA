@@ -27,6 +27,17 @@
  */
 import type { JSX, ReactNode } from "react";
 
+/**
+ * The readings a state file's editor offers, and the name the store remembers one under.
+ *
+ * Here rather than in the editor because three modules that are not React pass it around — the
+ * surface registry, the store that holds one per file, and the app that wires them together — and a
+ * type imported from a component only so a record can be keyed by it is a dependency none of them
+ * need. Two of these EDIT the document and the third only reads it; that asymmetry is deliberate and
+ * is spelled out in `stateGraphView.tsx`.
+ */
+export type EditorTab = "form" | "json" | "graph";
+
 export function EditorActions({
   dirty,
   busy,

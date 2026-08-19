@@ -2737,6 +2737,615 @@ button.sm {
   font-size: calc(var(--size-app) * 11 / 12.5);
 }
 
+/* --- what a linked property says (linkPreview.tsx) ---------------------------
+   A reference moves the substance of a field into another file, and the form is then showing a path
+   where six lines of prompt used to be. The target is rendered underneath in the app's own viewer,
+   read-only and open by default: the reason to look at a linked field is almost always to read what
+   is behind it. Indented and quieter than the control above it, because it is not part of the form —
+   nothing here is editable, and it must not read as a field that refuses to take input. */
+.link-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  /* A form field is a two-column grid and its label owns the first column; this belongs under BOTH,
+     so it spans them rather than lining up as if it were a value. */
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  border-left: 2px solid var(--rule);
+  padding-left: 8px;
+}
+/* The bar IS the control, like the Files column's lower half — one click, no separate handle. */
+.link-preview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  gap: 5px;
+  padding: 1px 4px;
+  margin-left: -4px;
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  text-align: left;
+}
+.link-preview-bar:hover:not(:disabled) {
+  background: var(--fill-ghost-hover);
+}
+/* A ceiling rather than a height: a two-line schema takes two lines, and a forty-line prompt stops
+   at a third of the pane and scrolls, so a link never pushes the rest of the form off the screen. */
+.link-preview-body {
+  max-height: 320px;
+  overflow: auto;
+  padding: 4px 0 2px;
+}
+/* The viewer keeps its own head — the Rendered/Source toggle and the `…`. Both are worth having on a
+   preview: a prompt is worth reading as text as well as as a page, and the menu is how you pin it
+   beside the form or save it. Only its padding goes, since the fold above it already says what this
+   is. */
+.link-preview-body > .vv > .vv-head {
+  padding: 0 0 4px;
+  margin: 0;
+}
+
+/* --- the graph a state draws (stateGraph.ts, stateGraphView.tsx) --------------
+   Boxes in HTML over lines in SVG, both placed from the same layout. Every height below that a box
+   is made of — a title line, a subtitle, a chip row, a settings row, a port — is FIXED and matches a
+   constant in `stateGraph.ts`, because the layout sizes each box rather than measuring it: a rule
+   here that let its content grow would push a port off the line that ends at it.
+
+   ## The five channels (DESIGN.md, and the header of `stateGraph.ts`)
+
+   Each answers one question and nothing else, which is what stops a drawing this dense from turning
+   into decoration:
+
+     position  WHEN it runs      columns are run order; lane 0 is the cursor's path
+     geometry  WHAT KIND         port→port curve = a value; box-edge arc + head = the cursor
+     hue       WHICH ONE         one colour per value; direction for control flow
+     dash      HOW IT IS WRITTEN solid plain · dashed one-of-several · dotted not-written
+     depth     ATTENTION         `is-lit` / `is-near` / `is-dim`, and nothing else
+
+   Nothing inside a box wraps: a binding is a path and a slot name is an identifier, both can be
+   longer than the column they sit in, and neither reads better broken in half — so each is one line
+   with its end cut and its whole self on the tooltip. GUARDS are the exception and the deliberate
+   one: they wrap, because a condition you cannot read is a condition the picture did not show you. */
+.sg {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 6px;
+  /*
+   * The two numbers every value's colour is made of.
+   *
+   * OKLCH rather than HSL, and that is what makes twenty hues affordable: a fixed lightness in OKLCH
+   * IS a fixed lightness at every hue, so a yellow wire and a blue one are equally readable on the
+   * same ground. In HSL half the wheel would disappear into the panel. The hue itself comes from the
+   * layout — see `HUE_STEP` — so this is only how bright and how saturated, per theme.
+   */
+  --wire-l: 52%;
+  --wire-c: 0.15;
+  /* Where a move takes the run. Three answers, three colours, and they are the palette's own: the
+     accent for progress, the warning hue for going back over covered ground, the bad hue for an
+     ending that is not success. Grey is reserved for the sequence, which is not a rule anyone wrote. */
+  --go-spine: var(--rule);
+  --go-onward: var(--accent);
+  --go-back: var(--warn);
+  --go-abort: var(--bad);
+}
+:root[data-theme="dark"] .sg {
+  --wire-l: 78%;
+  --wire-c: 0.14;
+}
+
+/* The legend and the zoom. `edit-bar` gives it the row every editing surface's chrome sits on. */
+.sg-bar {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.sg-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  white-space: nowrap;
+}
+/* A length of the line it names, drawn the way the drawing draws it — a colour swatch would say
+   which colour and not which KIND, and the kinds differ by dash as much as by hue. The values swatch
+   is a sweep of the hue wheel, because "one colour each" is the whole of what it has to say. */
+.sg-swatch {
+  width: 20px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--go-spine);
+}
+.sg-swatch-data {
+  background: linear-gradient(
+    90deg,
+    oklch(var(--wire-l) var(--wire-c) 32),
+    oklch(var(--wire-l) var(--wire-c) 170),
+    oklch(var(--wire-l) var(--wire-c) 300)
+  );
+}
+.sg-swatch-onward {
+  background: var(--go-onward);
+}
+.sg-swatch-back {
+  background: var(--go-back);
+}
+.sg-swatch-abort {
+  background: var(--go-abort);
+}
+.sg-swatch-any {
+  background: repeating-linear-gradient(90deg, var(--go-onward) 0 5px, transparent 5px 9px);
+}
+
+/* --- the map ---
+   No scrollbars. A graph is not a page: the reader is looking for a region rather than a position in
+   a list, and the two gestures that find one — drag and zoom — are the ones every map already has.
+   `touch-action: none` hands the pointer stream over whole, without which a trackpad drag is
+   swallowed as a scroll this container cannot perform. */
+.sg-map {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  cursor: grab;
+  touch-action: none;
+}
+.sg-panning {
+  cursor: grabbing;
+}
+.sg-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  /* A drag across a box must move the map, not select the text under the pointer. */
+  user-select: none;
+}
+.sg-lines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* An arc that rides above the topmost box is outside the viewBox by design — the layout has
+     already reserved the room, and clipping it here would cut the loops. */
+  overflow: visible;
+}
+
+/* --- dataflow ---
+   One colour per value, set on the element from the layout's hue. Round caps and a soft weight: a
+   wire is the quiet layer, and there are ten of them for every arrow. */
+.sg-flow {
+  fill: none;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  opacity: 0.9;
+}
+/* One of several reads that make up one value (§8's `{ expr }`) — dashed, because the line is part
+   of the binding rather than the whole of it. */
+.sg-flow-expr {
+  stroke-dasharray: 7 4;
+}
+/* Written nowhere: the implicit fill (§3.3), and the reads a guard makes. Dotted and quieter — they
+   are true, and they are not something an author typed. */
+.sg-flow-produced,
+.sg-flow-guard {
+  stroke-dasharray: 1.5 4;
+}
+.sg-flow-guard {
+  opacity: 0.5;
+  stroke-width: 1.5;
+}
+
+/* --- control flow ---
+   Thicker than a wire and always arrowheaded: the cursor's moves are the few lines that must be
+   findable in a drawing full of the other kind. */
+.sg-step {
+  fill: none;
+  stroke-width: 2;
+  stroke: var(--go-onward);
+}
+.sg-step-back {
+  stroke: var(--go-back);
+}
+.sg-step-abort {
+  stroke: var(--go-abort);
+}
+/* A rule that belongs to no child — it leaves the `any` box and is weighed after every round. */
+.sg-step-state {
+  stroke-dasharray: 7 5;
+}
+/* Last, so it wins over the direction rules above: the sequence is not a rule anybody wrote, and it
+   is the floor the columns are ordered by rather than traffic on top of it. */
+.sg-step-sequence {
+  stroke: var(--go-spine);
+  stroke-width: 2.5;
+}
+/* `async`: the cursor starts this child and moves on without waiting for it (§6). */
+.sg-step-nowait {
+  stroke-dasharray: 2 5;
+}
+.sg-head-spine {
+  fill: var(--go-spine);
+}
+.sg-head-onward {
+  fill: var(--go-onward);
+}
+.sg-head-back {
+  fill: var(--go-back);
+}
+.sg-head-abort {
+  fill: var(--go-abort);
+}
+
+/*
+ * The line as a target.
+ *
+ * Two pixels of stroke is not something a pointer can be expected to find, so every line carries a
+ * fat invisible twin that answers for it. `pointer-events: stroke` on the twin and `none` on the
+ * drawn line is what makes the hit area the LINE rather than the box its curve happens to sit in.
+ */
+.sg-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+}
+.sg-flow,
+.sg-step {
+  pointer-events: none;
+}
+
+/* --- what is off the screen ---
+   A line running off the edge stops saying anything, and zooming in is exactly when that starts
+   happening to most of them. The pill at the crossing names what is at the far end, borrows that
+   line's colour, and goes to it when clicked through — chrome about the camera, so it lives outside
+   the canvas and does not scale with it. */
+.sg-edge-marks {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+}
+.sg-edge-mark {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 46%;
+  height: 22px;
+  padding: 1px 8px;
+  transform: translate(-50%, -50%);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: var(--lift);
+  white-space: nowrap;
+  pointer-events: auto;
+  cursor: default;
+}
+.sg-edge-arrow {
+  color: var(--dim);
+  flex: none;
+}
+/* Each name in its own line's colour, so a pill listing three of them says which is which — the
+   same rule the wires follow, since it is the same question. */
+.sg-edge-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Two names in one pill are separated by the pill's own hairline rather than by a comma: the list is
+   a set of places, not a sentence. */
+.sg-edge-name + .sg-edge-name {
+  padding-left: 6px;
+  border-left: 1px solid var(--line);
+}
+
+/* --- attention ---
+   Hue is spent on which value and which direction, so emphasis cannot use it. What is left is
+   weight, opacity and depth, and all three move together: the answer comes forward, its neighbours
+   stay legible, everything else falls back hard enough to be out of the way. */
+.is-lit.sg-flow,
+.is-lit.sg-step {
+  stroke-width: 3.2;
+  opacity: 1;
+}
+.is-near.sg-flow,
+.is-near.sg-step {
+  opacity: 0.6;
+}
+.is-dim.sg-flow,
+.is-dim.sg-step {
+  opacity: 0.07;
+}
+.sg-node.is-dim,
+.sg-label.is-dim {
+  opacity: 0.12;
+}
+/* Receded, not answered: a box at the far end of a lit line has to be identifiable — that is what
+   makes the line mean anything — but it is not what the pointer asked about, and at rest weight it
+   would leave nothing faded at all in a state where everything is wired to everything. */
+.sg-node.is-near {
+  opacity: 0.45;
+}
+/* Raised as well as lit: a box under three labels is still under them, and the whole point of the
+   gesture is to get the answer out from behind everything else. */
+.sg-node.is-lit,
+.sg-label.is-lit {
+  z-index: 6;
+  box-shadow: var(--lift);
+}
+.sg-node.is-lit {
+  border-color: var(--accent);
+}
+
+/* --- the boxes --- */
+.sg-node {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  padding: 9px 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  /* VISIBLE, and that is load-bearing: a port's dot sits ON the border, half of it outside the box.
+     Everything inside that could overrun clips itself — see the ellipsis rules below. */
+  overflow: visible;
+}
+/* The two ends. Tinted rather than outlined: they are where the run comes in and goes out, which is
+   a fact about the whole drawing and not a status on one box. */
+.sg-entry {
+  background: var(--panel-2);
+}
+.sg-exit {
+  background: var(--tint-ok);
+}
+.sg-operation {
+  border-color: var(--rule);
+  background: var(--tint-accent);
+}
+/* Declared, and never walked into: only a jump reaches it (§6). A dashed edge says "not a step" in
+   the same vocabulary the dashed lines use for "not tied to one child". */
+.sg-child.sg-aside,
+.sg-any {
+  border-style: dashed;
+  background: none;
+}
+.sg-outcome,
+.sg-missing {
+  border-color: var(--go-abort);
+  background: var(--tint-bad);
+}
+.sg-title {
+  height: 20px;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sg-subtitle {
+  height: 15px;
+  line-height: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sg-node-chips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 21px;
+  overflow: hidden;
+}
+/* A model name is longer than the box, and a chip cut off mid-glyph reads as a rendering fault rather
+   than as a value that continues. Only the LAST one gives way: the chips are written most general
+   first — what this operation IS, then which function, then which model — so the one with a name
+   long enough to cost the others their words is also the one that can spare its ending. */
+.sg-node-chips > .chip:last-child {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The one chip the graph adds to the shared set: an operation's kind, which is neither good news nor
+   a warning — it is what this box IS. */
+.sg-chip-on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.sg-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 17px;
+  line-height: 17px;
+  min-width: 0;
+}
+.sg-name {
+  flex: none;
+  max-width: 48%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Cut from the end, like every other ellipsis in the app — the whole value is on the row's tooltip. */
+.sg-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- ports ---
+   What the box takes on the left, what it hands back on the right, in two columns of one row each.
+   The container reaches back over the box's padding so a port's dot can sit ON the border, which is
+   the coordinate the layout gave the wire that ends there. */
+.sg-ports {
+  display: flex;
+  margin: 5px -10px 0;
+  min-width: 0;
+}
+/* `flex: 1 1 0` rather than a half each: a box with ports on one side only gives that side the whole
+   width, which is most of what the entry and the exit are. */
+.sg-side {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-width: 0;
+  padding-left: 10px;
+}
+.sg-side-out {
+  padding-left: 6px;
+  padding-right: 10px;
+  align-items: flex-end;
+}
+.sg-port {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 17px;
+  line-height: 17px;
+  max-width: 100%;
+  border-radius: 4px;
+}
+/* An output reads outwards: its name is against the edge its wire leaves from. */
+.sg-port-out {
+  flex-direction: row-reverse;
+}
+/* Under the pointer, or lit because something else is: the row takes a wash so the name and its dot
+   read as one thing while its wires are picked out. */
+.sg-port:hover,
+.sg-port.is-lit {
+  background: var(--fill-ghost-hover);
+}
+/*
+ * The dot IS the port.
+ *
+ * Filled when a value passes through it and hollow when nothing does — one glyph, two states, and
+ * the difference is the question an author is asking when they look at a box at all. The colour is
+ * the VALUE's, set from the layout, so the dot and every wire leaving it agree.
+ */
+.sg-dot {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  border: 1.5px solid var(--rule);
+  border-radius: 50%;
+  background: var(--panel);
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.sg-port-in .sg-dot {
+  left: -15px;
+}
+.sg-port-out .sg-dot {
+  right: -15px;
+}
+/* A slot only a binding claims exists — nothing declares it. The port is drawn all the same, because
+   the wire to it is real; the ring is what says the far end may not be. */
+.sg-port-loose .sg-dot {
+  border-color: var(--go-abort);
+  border-style: dashed;
+}
+.sg-port.is-lit .sg-dot {
+  transform: scale(1.35);
+}
+/* The NAME is the port. It gives way last — a slot called `architecture_amendment` cut to
+   `architect…` is still the slot, while the same width spent on its type says nothing about which
+   port the wire beside it ends at. */
+.sg-pname {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* What no wire could say: the type of an input nothing is bound to, a literal, `optional`. Shrinks
+   five times as fast as the name beside it, which is what makes the name the last thing to go. */
+.sg-pnote {
+  flex: 0 5 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- what makes a transition happen ---
+   On the line rather than beside it: a guard belongs to exactly one arc, and a legend of conditions
+   under the drawing is a second thing to hold in your head. It carries the panel's own ground so it
+   stays readable where it crosses its own curve, and it is tinted by the DIRECTION its arrow takes,
+   so a label and its line are one statement.
+
+   Nothing here truncates. The line height and the size are fixed because `stateGraph.ts` measures
+   the label to stack the arcs around it — change either and change `LABEL_LINE` and `LABEL_CHAR`
+   with it. */
+.sg-label {
+  position: absolute;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  max-width: 460px;
+  padding: 6px 8px;
+  background: var(--panel);
+  border: 1px solid var(--go-onward);
+  border-left-width: 3px;
+  border-radius: var(--control-radius);
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 0.86);
+  line-height: 15px;
+  overflow-wrap: anywhere;
+}
+.sg-label-back {
+  border-color: var(--go-back);
+}
+.sg-label-abort {
+  border-color: var(--go-abort);
+}
+/* A rule that leaves the `any` box, in the same dash its arrow takes. */
+.sg-label-any {
+  border-style: dashed;
+  border-left-style: solid;
+}
+.sg-clause {
+  line-height: 15px;
+}
+/* The operator that joins this line to the one above it, in the gutter — so the shape of a compound
+   condition is read down the left edge rather than hunted for inside it. */
+.sg-op {
+  color: var(--dim);
+  margin-right: 4px;
+}
+/*
+ * A value the condition reads.
+ *
+ * Underlined the way a link is, because it behaves like one: hovering it follows the value back to
+ * the port that produced it. The wire it lights is drawn from that port to this line of the label,
+ * which is why the two look like one gesture.
+ */
+.sg-term {
+  border-bottom: 1px dotted var(--dim);
+  cursor: help;
+}
+.sg-term:hover,
+.sg-term.is-lit {
+  background: var(--tint-accent);
+  border-bottom-color: var(--accent);
+}
+/* No guard at all. In the app voice, because it is our sentence about the rule rather than the
+   author's own expression. */
+.sg-always {
+  font-family: var(--font-app);
+  font-style: italic;
+}
+
 /* --- board ---
    The crumb primitives, unscoped: both address bars are `.doc-bar` now (see `crumbs.tsx`), and these
    are the base the rules up there refine. They were shared with a second, plainer path bar the Tasks
@@ -5689,6 +6298,43 @@ textarea.cfg-input {
   flex: 1;
   min-height: 0;
   display: flex;
+}
+/*
+ * A pinned SURFACE rather than a pinned value — a state's configuration, which is an editor.
+ *
+ * It takes the column whole and scrolls inside itself, the same shape the middle column gives the
+ * same editor. The padding is the editor's own: the value viewer brings its own head and body and
+ * this one brings a form.
+ */
+.pinned-surface {
+  flex-direction: column;
+  overflow: hidden;
+}
+.state-panel {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  /* The form has a floor: its rows are a name, a type, a binding and a switch, and below this they
+     start climbing over each other. A panel narrower than that scrolls sideways rather than showing
+     a form that looks broken — and the divider beside it goes as wide as a document needs. */
+  overflow-x: auto;
+}
+.state-panel > * {
+  min-width: 460px;
+}
+.state-panel-go {
+  display: flex;
+  justify-content: flex-end;
+  flex: none;
+}
+/* The editor inside it is the same component the Files view puts below a board, so it wants the same
+   thing: everything left over, scrolling on its own. */
+.state-panel > .pane.editor {
+  flex: 1;
+  min-height: 0;
 }
 .pinned-body > .vv {
   flex: 1;

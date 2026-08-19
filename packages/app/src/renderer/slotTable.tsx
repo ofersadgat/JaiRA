@@ -14,6 +14,7 @@ import {
 } from "@jaira/shared/browser";
 import { NO_ISSUES, fieldClass, markFor, type FormIssues } from "./issues";
 import { LinkInput, LinkToggle } from "./links";
+import { LinkPreview } from "./linkPreview";
 import { emptySlotRow, type SlotRow } from "./slotForm";
 
 /**
@@ -321,6 +322,9 @@ export function SlotTable({
                 />
               </div>
             </details>
+            {/* A linked TYPE is the same trade as a linked prompt: the schema moved to another file
+                and this row shows its path. So it shows what that file says, too. */}
+            {row.typeRef !== undefined && row.typeRef.length > 0 ? <LinkPreview reference={row.typeRef} /> : null}
           </div>
           );
           })}

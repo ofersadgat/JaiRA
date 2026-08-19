@@ -144,12 +144,16 @@ export const EMPTY_FORM: FormModel = {
 /**
  * Children in the order they RUN: the state's `sequence` first, then anything it left out.
  *
- * The same rule the board's columns use, so the form and the columns above it never disagree about
- * which child is first. A child omitted from `sequence` is still SHOWN — appended rather than
- * dropped, since it is declared and a transition may enter it — but it is marked out of the spine,
- * which is what stops the next save from turning it into a step.
+ * The same rule the board's columns use, so the form, the columns above it and the graph beside it
+ * never disagree about which child is first. A child omitted from `sequence` is still LISTED —
+ * appended rather than dropped, since it is declared and a transition may enter it — but it is
+ * marked out of the spine, which is what stops the next save from turning it into a step.
+ *
+ * Exported for the graph, which needs the same two answers and none of the rest of a {@link ChildRow}:
+ * the run order is what its columns are, and the spine flag is what decides whether a box is a step
+ * or a place only a jump reaches.
  */
-function childrenOf(state: Record<string, unknown>): ChildRow[] {
+export function childOrder(state: Record<string, unknown>): { key: string; inSpine: boolean }[] {
   const map = asRecord(state["children"]);
   const declared = Object.keys(map);
   const authored = Array.isArray(state["sequence"]);
@@ -159,7 +163,13 @@ function childrenOf(state: Record<string, unknown>): ChildRow[] {
   // Absent `sequence` means declaration order, so every child is in the spine. An authored one is a
   // CLAIM about which children are steps, and a child it leaves out is a jump target.
   const inSpine = (key: string): boolean => !authored || sequence.includes(key);
-  return [...sequence, ...declared.filter((k) => !sequence.includes(k))].map((key) => {
+  return [...sequence, ...declared.filter((k) => !sequence.includes(k))].map((key) => ({ key, inSpine: inSpine(key) }));
+}
+
+/** The children table's rows: {@link childOrder}, with each child's declaration read into a row. */
+function childrenOf(state: Record<string, unknown>): ChildRow[] {
+  const map = asRecord(state["children"]);
+  return childOrder(state).map(({ key, inSpine }) => {
     const decl = asRecord(map[key]);
     const environment = asRecord(decl["environment"]);
     const kind = environment["kind"];
@@ -167,7 +177,7 @@ function childrenOf(state: Record<string, unknown>): ChildRow[] {
       key,
       state: typeof decl["state"] === "string" ? decl["state"] : "",
       async: decl["async"] === true,
-      inSpine: inSpine(key),
+      inSpine,
       inputs: bindingsOf(decl["inputs"]),
       environment: {
         kind: kind === "prompt" || kind === "function" ? kind : "",

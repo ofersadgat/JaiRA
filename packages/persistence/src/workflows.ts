@@ -386,6 +386,45 @@ function browseLayers(
       }
     }
 
+    /**
+     * Every declared output has to say where its value comes from.
+     *
+     * The format allows an output with no `binding` — it is *produced*, and the operation's result
+     * of the same name fills it (WORKFLOWS.md §3.3). JaiRA does not, and this is the rule that says
+     * so. Producing is invisible: it works only while the operation happens to return that exact
+     * name, it says nothing about which of several children was meant, and when it silently does not
+     * fire what you get is a state that terminates successfully having handed back nothing. Every
+     * other wire in the format is written down; an output is the one place where "the obvious thing"
+     * was allowed to stand in for saying it, and the obvious thing is what breaks quietly.
+     *
+     * An ERROR rather than a warning, because the failure it prevents is a run that reports success.
+     */
+    for (const id of states) {
+      const def = effective[id] as { outputs?: unknown; operation?: unknown } | undefined;
+      const outputs = def?.outputs;
+      if (outputs === null || typeof outputs !== "object" || Array.isArray(outputs)) continue;
+      // The one exemption, and it is a limit of the machinery rather than a taste: a host FUNCTION
+      // returns one value and the engine cannot index it, so `.operation.output.decision` resolves
+      // to nothing at run time however the operation declares itself. A component's answer reaches
+      // its slots by name or not at all — see `demoWorkflow`'s human gate.
+      const op = def?.operation;
+      const byName =
+        op !== null && typeof op === "object" && !Array.isArray(op) && (op as { kind?: unknown }).kind === "function";
+      if (byName) continue;
+      for (const [name, decl] of Object.entries(outputs as Record<string, unknown>)) {
+        if (decl !== null && typeof decl === "object" && "binding" in (decl as object)) continue;
+        issues.push({
+          stateId: id,
+          path: `outputs.${name}`,
+          message:
+            `output '${name}' has no binding — say where its value comes from. ` +
+            `For the operation's own result, declare it (operation.outputs.${name}) and bind ` +
+            `".operation.output.${name}"`,
+          severity: "error",
+        });
+      }
+    }
+
     const hash = snapshotHash(bundle);
     // A task pinned to a different hash is running older source — worth showing,
     // since execution reads the snapshot and never live `workflows/` (§5.3).

@@ -106,8 +106,10 @@ describe("inherited environment across files", () => {
     });
     write(wf, "feature/plan/goals.json", {
       label: "Goals",
-      outputs: { goals: { schema: { type: "string" } } },
-      operation: { prompt: "go" },
+      // Bound like every other output (see `workflows.ts`), so the only thing this leaf is testing
+      // is where its `kind` and its model came from.
+      outputs: { goals: { schema: { type: "string" }, binding: ".operation.output.goals" } },
+      operation: { prompt: "go", outputs: { goals: { schema: { type: "string" } } } },
     });
 
     const goals = load("feature/plan").states["feature/plan/goals"]!;

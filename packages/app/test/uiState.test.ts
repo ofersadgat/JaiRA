@@ -11,21 +11,55 @@ import { parseSettings } from "@jaira/shared";
 import {
   FOLD,
   FOLD_DEFAULTS,
+  HALVES,
   PANE,
   PANE_DEFAULTS,
   SHUT,
   emptyUiState,
   forgetSeen,
+  modeOf,
   openOf,
   paneOf,
   seenOf,
   shutOf,
   toggleShut,
+  withMode,
   withOpen,
   withPane,
   withSeen,
   withSeenAll,
 } from "../src/renderer/uiState";
+
+/**
+ * The one control with more than two positions, and the rule that keeps it safe.
+ *
+ * A fold is a boolean and a mode is a word, so a word from a settings file written by another
+ * version can name a position this one no longer has. The list of positions is passed in at the
+ * point of reading for exactly that reason — the file cannot know them, and a control that trusted
+ * it would open in a state it cannot draw.
+ */
+describe("remembered modes", () => {
+  it("opens at the control's own default until something has been chosen", () => {
+    expect(modeOf(emptyUiState(), FOLD.filesEditor, HALVES, "half")).toBe("half");
+  });
+
+  it("returns what was chosen", () => {
+    const ui = withMode(emptyUiState(), FOLD.filesEditor, "full");
+    expect(modeOf(ui, FOLD.filesEditor, HALVES, "half")).toBe("full");
+  });
+
+  it("falls back rather than taking a position the control does not offer", () => {
+    const ui = withMode(emptyUiState(), FOLD.filesEditor, "sideways");
+    expect(modeOf(ui, FOLD.filesEditor, HALVES, "half")).toBe("half");
+  });
+
+  /** A layout is a cache of gestures: a mode survives the round trip like a pane size does. */
+  it("survives being written and read back", () => {
+    const ui = withMode(emptyUiState(), FOLD.filesEditor, "shut");
+    const written = JSON.parse(JSON.stringify({ ui })) as unknown;
+    expect(parseSettings(written).ui.modes[FOLD.filesEditor]).toBe("shut");
+  });
+});
 
 describe("remembered pane sizes", () => {
   it("falls back to the pane's own default until something has been dragged", () => {

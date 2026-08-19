@@ -1,8 +1,9 @@
 /**
- * Edit one state file: a form over the state format, with a raw JSON tab beside it.
+ * Edit one state file: a form over the state format, a raw JSON tab, and the graph the two describe.
  *
- * The two views share one source of truth — the parsed document — so switching tabs never loses an
- * edit made in the other. The form now covers the whole of WORKFLOWS.md §2–§7: slots and their
+ * The three views share one source of truth — the document as text — so switching tabs never loses
+ * an edit made in another, and the graph is a drawing of what is in the boxes rather than of what
+ * was last saved. The form now covers the whole of WORKFLOWS.md §2–§7: slots and their
  * types, children and their wiring, the operation, the `environment` defaults layer, transitions and
  * limits. What it still refuses to pretend it understands is anything spelled as a REFERENCE, which
  * it shows read-only rather than as an empty box.
@@ -32,7 +33,8 @@ import {
   type FormModel,
   type TransitionRow,
 } from "./stateForm";
-import { EditorActions } from "./editorChrome";
+import { EditorActions, type EditorTab } from "./editorChrome";
+import { StateGraphView } from "./stateGraphView";
 import { anchorFor, fieldClass, FLASH_MS, formIssues, markFor, NO_ISSUES, type FormIssues } from "./issues";
 import type { UiSurface } from "./fileTypes";
 import { SchemaJsonEditor, schemaReferenceProps } from "./schemaEditor";
@@ -40,6 +42,7 @@ import { SlotTable } from "./slotTable";
 import { EMPTY_OPERATION_FIELDS, type OperationFieldsForm } from "./operationForm";
 import { operationFieldPaths, OperationDataLists, OperationFieldsEditor, REF_HINT } from "./operationFields";
 import { LinkInput, LinkTargets, LinkToggle } from "./links";
+import { LinkPreview, LinkReaderProvider } from "./linkPreview";
 import {
   bindingTargets,
   childKeyOptions,
@@ -47,6 +50,7 @@ import {
   childStateOptions,
   functionOptions,
   guardTargets,
+  resolveRef,
   linkTargets,
   operationOutputNames,
 } from "./completions";
@@ -74,6 +78,15 @@ const GUARD_TARGETS_ID = "guard-targets";
 const OPERATION_FIELD_PATHS = operationFieldPaths("operation");
 
 // --- shared row furniture ------------------------------------------------------
+
+/** The three readings of a state file, in the order the tab strip offers them. */
+const TABS: readonly EditorTab[] = ["form", "json", "graph"];
+const TAB_WORDS: Record<EditorTab, string> = { form: "Form", json: "JSON", graph: "Graph" };
+const TAB_TITLES: Record<EditorTab, string> = {
+  form: "the fields, as controls",
+  json: "the document, as text",
+  graph: "what runs after what, and what makes it",
+};
 
 /** Move a row within a list. Order is semantics for children and transitions alike. */
 function moved<T>(rows: readonly T[], from: number, to: number): T[] {
@@ -578,6 +591,11 @@ export function WorkflowEditor({
   onDraft,
   tab: tabProp,
   onTab,
+  tabs = TABS,
+  onOpenState,
+  readState,
+  saveState,
+  readFile,
 }: {
   source: WorkflowSource;
   /** Both layer roots, for completing child keys and state references. */
@@ -631,10 +649,42 @@ export function WorkflowEditor({
   draft?: string | null;
   onDraft?: ((text: string | null) => void) | undefined;
   /** The tab to show, and where to remember it. Uncontrolled — starting on the form — without them. */
-  tab?: "form" | "json";
-  onTab?: ((tab: "form" | "json") => void) | undefined;
+  tab?: EditorTab;
+  onTab?: ((tab: EditorTab) => void) | undefined;
+  /**
+   * Which readings this host offers. All three by default.
+   *
+   * The side panel takes `["form", "json"]`: the graph is a picture and the column it would be drawn
+   * in is a quarter of the window wide. A limit rather than a separate component, because everything
+   * else about the two is the same document, the same merge and the same writer.
+   */
+  tabs?: readonly EditorTab[];
+  /**
+   * Open another state's file, by id — what the graph's child boxes lead to.
+   *
+   * Optional, and the graph degrades to a picture without it. A drawing of a state's children is
+   * also the shortest route to one of them, and a box you cannot follow makes the reader go back to
+   * the tree and find by name what they are already looking at.
+   */
+  onOpenState?: ((stateId: string) => void) | undefined;
+  /**
+   * Reading and writing a state that is NOT this file — what the graph's side panel needs.
+   *
+   * Passed through rather than reached for, because this component is also rendered where there is
+   * no store: a graph without them still draws, and clicking a box then shows the box's own
+   * declaration rather than the state behind it.
+   */
+  readState?: ((stateId: string) => Promise<WorkflowSource | null>) | undefined;
+  saveState?: ((source: WorkflowSource, text: string) => void) | undefined;
+  /**
+   * Read any file in either layer, for showing what a LINKED property says — see `linkPreview.tsx`.
+   *
+   * Absent ⇒ a linked field shows its path and nothing else, which is what a form rendered outside
+   * the shell can prove about a reference.
+   */
+  readFile?: ((layer: WorkflowLayer, path: string) => Promise<string | null>) | undefined;
 }): JSX.Element {
-  const [localTab, setLocalTab] = useState<"form" | "json">("form");
+  const [localTab, setLocalTab] = useState<EditorTab>("form");
   /**
    * Used only when nothing outside is holding the draft — see {@link draft}.
    *
@@ -643,8 +693,11 @@ export function WorkflowEditor({
    */
   const [localDraft, setLocalDraft] = useState<{ file: string; text: string } | null>(null);
 
-  const tab = tabProp ?? localTab;
-  const setTab = (next: "form" | "json"): void => (onTab ? onTab(next) : setLocalTab(next));
+  // A tab this host does not offer falls back to the first one it does — a remembered `graph` must
+  // not leave the side panel showing nothing at all.
+  const asked = tabProp ?? localTab;
+  const tab = tabs.includes(asked) ? asked : tabs[0]!;
+  const setTab = (next: EditorTab): void => (onTab ? onTab(next) : setLocalTab(next));
 
   /**
    * The file as this editor found it — what Revert goes back to, and what `dirty` is measured
@@ -886,7 +939,22 @@ export function WorkflowEditor({
     });
   }, [declared, childStateId, form.children]);
 
+  /**
+   * What a link preview needs, supplied once for the whole form — see `linkPreview.tsx`.
+   *
+   * `null` when this editor was given no reader: a form rendered outside the shell shows its links
+   * as paths, which is what it can prove.
+   */
+  const reader = useMemo(
+    () =>
+      readFile === undefined
+        ? null
+        : { resolve: (ref: string) => resolveRef(tree, ref), read: readFile, ...(ui !== undefined ? { ui } : {}) },
+    [tree, readFile, ui],
+  );
+
   return (
+    <LinkReaderProvider value={reader}>
     <div className="pane editor">
       {/* One line of chrome. All three of these are standing facts about the file rather than things
           you act on, and each used to own a row: a path, a padded notice, and a pair of tabs
@@ -905,17 +973,47 @@ export function WorkflowEditor({
             shared copy
           </span>
         ) : null}
+        {/* The two that EDIT first, in the order they are reached for; the reading is what you step
+            out to, so it is last. A host may offer fewer — see {@link tabs}. */}
         <div className="tabs seg">
-          <button className={tab === "form" ? "layer-on" : "ghost"} onClick={() => setTab("form")}>
-            Form
-          </button>
-          <button className={tab === "json" ? "layer-on" : "ghost"} onClick={() => setTab("json")}>
-            JSON
-          </button>
+          {tabs.map((one) => (
+            <button
+              key={one}
+              className={tab === one ? "layer-on" : "ghost"}
+              title={TAB_TITLES[one]}
+              onClick={() => setTab(one)}
+            >
+              {TAB_WORDS[one]}
+            </button>
+          ))}
         </div>
       </div>
 
-      {tab === "form" ? (
+      {tab === "graph" ? (
+        <StateGraphView
+          text={text}
+          stateId={source.stateId}
+          // What the children declare, which the form has already asked for to seed its wiring rows.
+          // The graph shows a child's whole surface — every slot it takes and hands back — and only
+          // the children themselves know what that is.
+          declared={declared}
+          {...(onOpenState !== undefined ? { onOpenState } : {})}
+          // What the side panel's editor needs when a box is clicked: the state that box mounts is
+          // another file, and showing it properly means the same form, the same lists to complete
+          // against, and the same writer.
+          {...(readState !== undefined ? { readState } : {})}
+          {...(saveState !== undefined ? { saveState } : {})}
+          {...(readFile !== undefined ? { readFile } : {})}
+          tree={tree}
+          executors={executors}
+          busy={busy}
+          {...(validateSchema !== undefined ? { validateSchema } : {})}
+          loadStateSlots={loadStateSlots}
+          {...(wrapJson !== undefined ? { wrapJson } : {})}
+          onWrapJson={onWrapJson}
+          ui={ui}
+        />
+      ) : tab === "form" ? (
         parseError !== null ? (
           // The form cannot represent a document it could not parse, and guessing would destroy it.
           <div className="reason">
@@ -969,9 +1067,10 @@ export function WorkflowEditor({
               issues={marks}
               onChange={(inputs) => editForm({ inputs })}
             />
-            {/* §3.3: an output with a binding is DERIVED, one without is PRODUCED — the operation
-                returns it — and there is no third case. Which makes the empty box the answer to
-                "bind this to the operation's result", not an unfilled field. */}
+            {/* §3.3 lets an output with no binding be PRODUCED — the operation's result of the same
+                name fills it — and JaiRA does not: an empty box here is an error, because a wire
+                nobody wrote down is a wire nobody can check. The exception is a FUNCTION operation,
+                whose result the engine cannot index, so a component's answer still lands by name. */}
             <SlotTable
               title="Outputs"
               rows={form.outputs}
@@ -979,9 +1078,9 @@ export function WorkflowEditor({
               targets={targets}
               bindingListId={BINDING_TARGETS_ID}
               emptyBindingMeans={
-                form.operationKind === ""
-                  ? "nothing produces it — this state has no operation"
-                  : "the operation returns it"
+                form.operationKind === "function"
+                  ? "the component's answer lands here by name"
+                  : "unbound — say where the value comes from"
               }
               path="outputs"
               issues={marks}
@@ -1042,6 +1141,8 @@ export function WorkflowEditor({
                   <div className="sub">
                     spliced in whole; sibling keys would override it, and those stay on the JSON tab
                   </div>
+                  {/* The whole operation lives in another file — so what that file says is here. */}
+                  {form.operationRef.length > 0 ? <LinkPreview reference={form.operationRef} /> : null}
                 </div>
               ) : form.operationKind !== "" ? (
                 <>
@@ -1197,5 +1298,6 @@ export function WorkflowEditor({
         {source.exists ? null : <span className="sub">new file — saving creates it</span>}
       </EditorActions>
     </div>
+    </LinkReaderProvider>
   );
 }
