@@ -362,6 +362,13 @@ function ChildrenTable({
             childPath === undefined
               ? ""
               : fieldClass(issues, childPath, [inputsPath!, `${childPath}.environment`]);
+          // What this mount actually RUNS, when the box does not already say it. A child's `state`
+          // is optional and a `./` one is relative to the parent's id rather than to its directory
+          // (WORKFLOWS.md §6), so the two commonest spellings — blank, and `./goals` — both name a
+          // file whose id appears nowhere on the row. The link had a destination the form knew and
+          // did not show.
+          const mounted = stateIdOf(row);
+          const resolved = mounted.length > 0 && mounted !== row.state.trim() ? mounted : "";
           return (
           <div className="slot-group" key={i}>
             <div
@@ -377,14 +384,21 @@ function ChildrenTable({
                 spellCheck={false}
                 onChange={(e) => edit(i, { key: e.target.value })}
               />
-              <input
-                className={stateMark.trim()}
-                value={row.state}
-                list="child-states"
-                placeholder={row.key ? `./${row.key}` : "state id (defaults to the key)"}
-                spellCheck={false}
-                onChange={(e) => edit(i, { state: e.target.value })}
-              />
+              <span className="child-state">
+                <input
+                  className={stateMark.trim()}
+                  value={row.state}
+                  list="child-states"
+                  placeholder={row.key ? `./${row.key}` : "state id (defaults to the key)"}
+                  spellCheck={false}
+                  onChange={(e) => edit(i, { state: e.target.value })}
+                />
+                {resolved.length > 0 ? (
+                  <span className="mount-id" title={`this mount runs the state '${resolved}'`}>
+                    → {resolved}
+                  </span>
+                ) : null}
+              </span>
               <label
                 className="slot-opt"
                 title="in the sequence: the cursor walks into it. Off means it runs only if a transition names it."
@@ -1106,11 +1120,16 @@ export function WorkflowEditor({
                   so — a transcluded or absent operation still lints, and that diagnostic has to land
                   somewhere. The SELECT carries the mark either way: a complaint about the block as a
                   whole (rather than about one of its fields, which mark themselves) is a complaint
-                  about what kind of operation this is. */}
+                  about what kind of operation this is.
+
+                  A STACKED label, not an inline one: the rest of this block's fields stack, and an
+                  inline label pushes its control 86px to the right of them. The Kind picker then sat
+                  further in than the Prompt box whose existence it decides, which reads as a nesting
+                  level that is not there. */}
               <label
                 {...(form.operationKind === "" || form.operationKind === "ref"
-                  ? markFor(marks, "operation", "field inline")
-                  : { className: "field inline" })}
+                  ? markFor(marks, "operation", "field")
+                  : { className: "field" })}
               >
                 <span>Kind</span>
                 <select

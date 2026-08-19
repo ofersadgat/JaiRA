@@ -52,6 +52,15 @@ export function LinkPreview({ reference }: { reference: string }): JSX.Element |
   const reader = useContext(LinkReaderContext);
   const at = reader === null ? null : reader.resolve(reference);
   const [text, setText] = useState<string | null | "reading">("reading");
+  /**
+   * The fold, when there is no window layout to remember it in.
+   *
+   * The bar was always a button and always said "▾", and where the surface was absent it was also
+   * `disabled` — so the one control on it did nothing, forever, and the preview could not be shut.
+   * A form rendered outside the shell has nowhere to persist the choice; it can still honour it for
+   * as long as it is on screen, which is the whole of what the reader asked for.
+   */
+  const [localOpen, setLocalOpen] = useState(true);
 
   useEffect(() => {
     if (reader === null || at === null) return;
@@ -72,15 +81,19 @@ export function LinkPreview({ reference }: { reference: string }): JSX.Element |
   // preview that announced "not found" would be a second, worse diagnostic in a smaller typeface.
   if (at === null) return null;
 
-  const open = reader.ui?.open(`link:${at.layer}:${at.path}`, true) ?? true;
+  const foldId = `link:${at.layer}:${at.path}`;
+  const open = reader.ui === undefined ? localOpen : reader.ui.open(foldId, true);
+  const toggle = (): void => {
+    if (reader.ui === undefined) setLocalOpen(!open);
+    else reader.ui.setOpen(foldId, !open);
+  };
   return (
     <div className="link-preview">
       <button
         type="button"
         className="link-preview-bar"
-        onClick={() => reader.ui?.setOpen(`link:${at.layer}:${at.path}`, !open)}
-        disabled={reader.ui === undefined}
-        title={at.path}
+        onClick={toggle}
+        title={`${at.path} — click to ${open ? "hide" : "show"} what it says`}
       >
         <span className="half-caret">{open ? "▾" : "▸"}</span>
         <span className="sub">what {reference} says</span>

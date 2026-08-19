@@ -2681,6 +2681,30 @@ button.side-twist:hover:not(:disabled) {
   white-space: nowrap;
   cursor: help;
 }
+/* The `state` cell of a child row: the box, and — when the box does not already say it — the id the
+   mount RESOLVES to. Blank means `./<key>` and a `./` reference hangs off the parent's id, so the
+   file a child actually runs is routinely a name that appears nowhere on the row. */
+.child-state {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.child-state > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.mount-id {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10.5 / 12);
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
+}
 /* Children carry a run-order number and a reorder pair; transitions carry the arrow instead. */
 .slot-row.child-row {
   grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1.3fr) auto auto auto auto;
@@ -3848,14 +3872,18 @@ button.crumb-sep.open {
 .trans-row .to {
   color: var(--accent);
 }
-.children {
+/* The read-only listing of a state's children in the file inspector. Scoped to the OL it was
+   written for: the state form's children table also calls itself `children`, and this rule's
+   padding and grid landed on it — a whole block indented past every other one in the form, for no
+   reason anybody looking at it could see. */
+ol.children {
   margin: 0;
   padding-left: 20px;
   font-size: calc(var(--size-app) * 12 / 12.5);
   display: grid;
   gap: 3px;
 }
-.children li::marker {
+ol.children li::marker {
   color: var(--dim);
   font-variant-numeric: tabular-nums;
 }
