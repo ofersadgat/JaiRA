@@ -10,7 +10,7 @@
  * This file holds the crumb MODEL and the bar that renders it. Who builds the crumbs is the caller's
  * business: `files.tsx` builds them from the open document, `taskBar.tsx` from the focused project.
  */
-import { useState, type JSX, type ReactNode } from "react";
+import { useState, type CSSProperties, type JSX, type ReactNode } from "react";
 import type { BoardCard, InstanceNode } from "@jaira/shared/browser";
 import { ContextMenu, type MenuAnchor, type MenuItem } from "./menu";
 import { nodeAt, stepOf, type TrailStep } from "./trail";
@@ -35,6 +35,13 @@ export interface Crumb {
    * other and had a pill of its own for no reason except that it happened to be first.
    */
   kind: "folder" | "state" | "run" | "project";
+  /**
+   * The project's colour, for a `project` crumb — see `hueOf`.
+   *
+   * The head of the address wears the same mark its sidebar row and its inbox chip wear, which is
+   * what ties three surfaces to one project without any of them repeating a path.
+   */
+  hue?: string;
   /** The full story, for the tooltip: which instance, which state it ran, where on disk. */
   title?: string;
   go?: () => void;
@@ -173,6 +180,17 @@ export function runCrumbs(input: RunCrumbInput): Crumb[] {
 }
 
 /**
+ * "All projects" — the one APP crumb in an otherwise data-voiced address bar (SHELL.md §3.2).
+ *
+ * It names a LEVEL rather than a directory, so it is a word JaiRA chose and takes the sans; every
+ * other project crumb prints a basename and takes the mono. Told apart by the absence of a hue,
+ * which is the same fact from the other side: there is no project for a colour to be of.
+ */
+function allCrumb(crumb: Crumb): string {
+  return crumb.kind === "project" && crumb.hue === undefined ? " crumb-all" : "";
+}
+
+/**
  * The bar itself: the crumbs, then whatever the view wants at the right-hand end.
  *
  * Clicking the bar's own background is the caller's to define — in Files it puts the inspector back
@@ -203,7 +221,11 @@ export function CrumbBar({
       {...(title !== undefined ? { title } : {})}
     >
       {crumbs.map((crumb, i) => (
-        <span key={`${i}:${crumb.kind}:${crumb.text}`} className="crumb-part">
+        <span
+          key={`${i}:${crumb.kind}:${crumb.text}`}
+          className="crumb-part"
+          {...(crumb.hue !== undefined ? { style: { "--hue": crumb.hue } as CSSProperties } : {})}
+        >
           {/* The separator is the join between two levels, so it is where "what ELSE is at this
               level" belongs — Explorer's move, and the reason it turns to face down when open. A
               level with no alternatives keeps a plain glyph rather than an empty menu. */}
@@ -227,14 +249,14 @@ export function CrumbBar({
           )}
           {crumb.go === undefined ? (
             <span
-              className={`crumb crumb-${crumb.kind} ${i === crumbs.length - 1 ? "last" : "inert"}`}
+              className={`crumb crumb-${crumb.kind}${allCrumb(crumb)} ${i === crumbs.length - 1 ? "last" : "inert"}`}
               title={crumb.title}
             >
               {crumb.text}
             </span>
           ) : (
             <button
-              className={`crumb crumb-${crumb.kind}`}
+              className={`crumb crumb-${crumb.kind}${allCrumb(crumb)}`}
               title={crumb.title ?? (crumb.kind === "run" ? "back to this run" : "open this state")}
               onClick={(e) => {
                 e.stopPropagation();

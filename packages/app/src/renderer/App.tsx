@@ -43,7 +43,7 @@ import { isChatWorkflow } from "./chatWorkflow";
 import { ApprovalDialog, InteractionDialog, QuestionDialog } from "./components";
 import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem } from "./menu";
 import { AppearancePane } from "./appearancePane";
-import { projectCounts } from "./pill";
+import { hueOf, Pill, projectCounts } from "./pill";
 import { PointerMenus } from "./pointerMenu";
 import { ValuePanelContext, type PinnedValue } from "./valuePanel";
 import { ValueView } from "./valueView";
@@ -302,10 +302,15 @@ function InboxStrip({
   // The strip's own list is cross-project (`pendingApprovals()` flat-maps every session), so a row
   // has to say WHOSE task it is — and hand that project back with the click. Selecting on the task
   // id alone read the id against whichever project was focused. See SHELL.md §2.4.
-  const labelOf = (project: string): string =>
-    // The published label when the project is still listed; the basename when it is not, which is
-    // what a request outliving its session by a tick looks like.
-    projects.find((p) => p.project === project)?.label ?? (project.split(/[\/]+/).filter(Boolean).pop() ?? project);
+  // The published label and hue when the project is still listed; the basename and the grey when it
+  // is not, which is what a request outliving its session by a tick looks like.
+  const chipOf = (project: string): { label: string; hue: string } => {
+    const at = projects.findIndex((p) => p.project === project);
+    const found = projects[at];
+    return found === undefined
+      ? { label: project.split(/[\/]+/).filter(Boolean).pop() ?? project, hue: "var(--p0)" }
+      : { label: found.label, hue: hueOf(found.kind, at) };
+  };
   const shown = [
     // Questions first: the agent addressed the person directly, and its loop is parked on the reply.
     ...questions.slice(0, 2).map((item) => ({
@@ -338,22 +343,30 @@ function InboxStrip({
   ].slice(0, 3);
   return (
     <footer className="strip">
-      <span className="strip-label">Awaiting you</span>
-      <span className="chip chip-warn">{total}</span>
-      {shown.map((item) => (
-        <span
-          key={item.key}
-          className="strip-item"
-          title={item.title}
-          onClick={() => (item.taskId ? onSelect(item.taskId, item.project) : undefined)}
-        >
-          <span className="sep" />
-          <span className={`badge ${item.badge}`}>{item.glyph}</span>
-          <span className="chip strip-project">{labelOf(item.project)}</span>
-          <span className="ellip">{item.text}</span>
-        </span>
-      ))}
-      {total > shown.length ? <span className="sub more">+{total - shown.length} more</span> : null}
+      {/* App voice, sentence case. It was an uppercase warn-coloured label, which made the strip
+          shout the same thing whether one thing was waiting or nine — the COUNT beside it is what
+          varies, so the count is the coloured part. */}
+      <span className="strip-label app-title">Awaiting you</span>
+      <Pill kind="waiting" n={total} title={`${total} waiting on you`} />
+      {shown.map((item) => {
+        const chip = chipOf(item.project);
+        return (
+          <span
+            key={item.key}
+            className="strip-item"
+            title={item.title}
+            onClick={() => (item.taskId ? onSelect(item.taskId, item.project) : undefined)}
+          >
+            {/* The project's hue, the same one its sidebar row and its address crumb carry — which is
+                how a row here is tied back to somewhere without spelling out a path. */}
+            <span className="chip strip-project" style={{ "--hue": chip.hue } as CSSProperties}>
+              {chip.label}
+            </span>
+            <span className="ellip data-text">{item.text}</span>
+          </span>
+        );
+      })}
+      {total > shown.length ? <span className="more app-secondary">+{total - shown.length} more</span> : null}
     </footer>
   );
 }
@@ -921,10 +934,14 @@ export default function App(): JSX.Element {
    * The counts are the same ones the address bar carries — one derivation, so a project row and the
    * crumb over its board can never disagree about how much is waiting.
    */
-  const sidebarProjects: SidebarProject[] = state.projects.map((p) => ({
+  const sidebarProjects: SidebarProject[] = state.projects.map((p, i) => ({
     project: p.project,
     label: p.label,
     kind: p.kind,
+    // By POSITION in the list, which `listProjects` sorts user → shared → system and then by label.
+    // Stable while the set is, which is what a colour code needs; a project opened later takes the
+    // next hue rather than renaming everybody's.
+    hue: hueOf(p.kind, i),
     counts: projectCounts(p, ui.seen),
     onSeen: () => actions.markProjectSeen(p.project),
   }));

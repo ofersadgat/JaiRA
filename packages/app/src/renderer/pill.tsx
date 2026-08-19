@@ -103,6 +103,25 @@ export function pillTotal(counts: PillCounts): number {
   return PILL_ORDER.reduce((sum, kind) => sum + (counts[kind] ?? 0), 0);
 }
 
+/**
+ * The colour that stands for one project, as a CSS variable name.
+ *
+ * The project is the head of every address, and it appears in four places that are nowhere near each
+ * other: a dot on its sidebar row, its tile in the collapsed rail, the head crumb of the address bar,
+ * and its chip on the inbox strip. One hue ties those together — it is how "this row, that crumb and
+ * that pending approval are the same project" is answered without reading three directory names.
+ *
+ * Three hues, cycled. Not one per project: a palette that grows without bound stops being a code, and
+ * three is what a person can hold while two or three checkouts are open — which is what the window is
+ * for. Two projects sharing a hue at four-deep is a smaller cost than a fourth colour nobody can name.
+ *
+ * The shared root and JaiRA's own take the GREY. They are not projects a person is working in — they
+ * are the machine's — so they sit outside the code rather than consuming one of its entries.
+ */
+export function hueOf(kind: ProjectSummary["kind"], index: number): string {
+  return kind === "user" ? `var(--p${(index % 3) + 1})` : "var(--p0)";
+}
+
 /** What `projectCounts` needs of a project — the live tallies, and the rows a watermark filters. */
 export type CountedProject = Pick<ProjectSummary, "statuses" | "waiting" | "ended">;
 
@@ -233,8 +252,10 @@ export function Pill({
   return (
     <span className={`pill pill-${kind} pill-${pillFill(kind)}`} {...(title !== undefined ? { title } : {})}>
       <span className="pill-glyph">{PILL_GLYPH[kind]}</span>
+      {/* No register class on either: the PILL is the register (see `.pill`), and a `data-num` here
+          would re-declare a size the pill has already settled. */}
       {word !== undefined ? <span className="pill-word">{word}</span> : null}
-      {n !== undefined ? <span className="pill-n data-num">{n}</span> : null}
+      {n !== undefined ? <span className="pill-n">{n}</span> : null}
     </span>
   );
 }
@@ -275,7 +296,7 @@ export function Pills({
         // `fit` that has a count. Left colourless until that is decided, because a `+4` that is
         // sometimes red and sometimes not is harder to read than one that is never either.
         <span className="pill pill-more" title={`${rest} more`}>
-          <span className="pill-n data-num">+{rest}</span>
+          +{rest}
         </span>
       ) : null}
     </span>

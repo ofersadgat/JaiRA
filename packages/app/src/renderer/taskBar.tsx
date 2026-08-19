@@ -18,7 +18,7 @@
 import type { JSX } from "react";
 import type { BoardCard, BoardView, InstanceNode, ProjectSummary } from "@jaira/shared/browser";
 import { CrumbBar, alternatives, runCrumbs, type Crumb, type MenuItem } from "./crumbs";
-import { Pills, projectCounts } from "./pill";
+import { hueOf, Pills, projectCounts } from "./pill";
 import type { TrailStep } from "./trail";
 
 /**
@@ -127,9 +127,13 @@ export function TaskAddressBar({
   const levels = focus === null ? [] : (boards[focus]?.breadcrumb ?? []);
 
   const crumbs: Crumb[] = [];
+  const hueAt = projects.findIndex((p) => p.project === project?.project);
   crumbs.push({
     text: project?.label ?? ALL,
     kind: "project",
+    // "All projects" takes no hue: it is the one APP crumb in an otherwise data-voiced address bar
+    // (§3.2), naming a level rather than a directory, so there is no project for a colour to be of.
+    ...(project !== null && hueAt >= 0 ? { hue: hueOf(project.kind, hueAt) } : {}),
     title: project?.project ?? "every project this window can see",
     // Never empty — "Open another project…" is always somewhere else to go — but asked through the
     // same gate as every other level, so the rule stays one rule.

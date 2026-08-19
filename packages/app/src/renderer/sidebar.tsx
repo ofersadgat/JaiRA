@@ -36,7 +36,7 @@
  * closed to nothing would be a sidebar you had to reopen before you could do anything, and the
  * button to reopen it would be the only thing on screen that still worked.
  */
-import { Fragment, useState, type JSX, type ReactNode } from "react";
+import { Fragment, useState, type CSSProperties, type JSX, type ReactNode } from "react";
 import { ContextMenu, type MenuAnchor } from "./menu";
 import { Pills, type PillCounts } from "./pill";
 
@@ -68,6 +68,14 @@ export interface SidebarProject {
   /** Its basename, or the role name for the two that have one. */
   label: string;
   kind: "user" | "shared" | "system";
+  /**
+   * The colour that stands for this project, as a CSS variable reference — see `hueOf`.
+   *
+   * One hue, four places: the dot on this row, this project's tile in the collapsed rail, the head
+   * crumb of the address bar, and its chip on the inbox strip. It is how "this row, that crumb and
+   * that pending approval are the same project" is answered without reading three directory names.
+   */
+  hue: string;
   counts: PillCounts;
   onSeen?: () => void;
 }
@@ -201,7 +209,7 @@ export function Sidebar({
     const open = p.project === at;
     return (
       <Fragment key={p.project}>
-        <div className={`side-section${open ? " open" : ""}`}>
+        <div className={`side-section${open ? " open" : ""}`} style={{ "--hue": p.hue } as CSSProperties}>
           <button
             className="side-row side-project-row"
             title={p.project}
@@ -211,9 +219,12 @@ export function Sidebar({
             // being closed is just not being where the address is.
             onClick={() => onProject(open ? null : p.project)}
           >
-            <span className="side-twist">{open ? "▾" : "▸"}</span>
+            {/* The hue, as a mark BESIDE the name rather than on it. The name is data and recolouring
+                it would be the one thing state may not do to a voice. */}
+            <i className="side-dot" />
             <span className={`side-label ellip ${open ? "data-title" : "data-secondary"}`}>{p.label}</span>
             <Pills counts={p.counts} budget={ROW_PILL_BUDGET} onClear={p.onSeen} />
+            {open ? null : <span className="side-twist">▸</span>}
           </button>
           {open ? <div className="side-views">{views.map((v) => rowOf(v, true))}</div> : null}
         </div>
@@ -259,14 +270,16 @@ export function Sidebar({
             {projects.map((p) => (
               <button
                 key={p.project}
-                className={`side-row rail-tile${p.project === at ? " on is-active" : ""}`}
+                className={`rail-tile${p.project === at ? " on" : ""}`}
                 title={p.project}
                 aria-current={p.project === at ? "true" : undefined}
+                style={{ "--hue": p.hue } as CSSProperties}
                 onClick={() => onProject(p.project === at ? null : p.project)}
               >
-                {/* The initial, in the data voice: it stands for a directory name, and a rail one
-                    character wide is still showing you that name rather than a word JaiRA chose. */}
-                <span className="side-glyph data-text">{p.label.slice(0, 1).toLowerCase()}</span>
+                {/* Two letters, in the data voice: they stand for a directory name, and a rail is
+                    still showing you that name rather than a word JaiRA chose. Two rather than one
+                    because one cannot tell `notes-api` from `nginx`. */}
+                <span className="side-glyph">{p.label.replace(/[^a-z0-9]/gi, "").slice(0, 2).toLowerCase() || "·"}</span>
               </button>
             ))}
           </div>
