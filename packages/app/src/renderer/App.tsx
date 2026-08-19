@@ -43,7 +43,7 @@ import { isChatWorkflow } from "./chatWorkflow";
 import { ApprovalDialog, InteractionDialog, QuestionDialog } from "./components";
 import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem } from "./menu";
 import { AppearancePane } from "./appearancePane";
-import { hueOf, Pill, projectCounts } from "./pill";
+import { hueOf, Pill, projectCounts, type PillCounts } from "./pill";
 import { PointerMenus } from "./pointerMenu";
 import { ValuePanelContext, type PinnedValue } from "./valuePanel";
 import { ValueView } from "./valueView";
@@ -222,6 +222,22 @@ const FOOTER_VIEWS: readonly SidebarView[] = [
   { id: "debug", glyph: "⌁", label: "Debug" },
 ];
 
+/**
+ * The rooms at the ROOT of the address — every project's work at once.
+ *
+ * The same two view ids the projects nest, because they are the same rooms seen from one level up:
+ * Tasks at the root is the board sectioned by project, and Chat at the root is every conversation in
+ * recency order. Named for the level rather than the room, because "Tasks" appearing twice in one
+ * column with no way to tell which is which is the thing that would make this unreadable.
+ *
+ * No Files. The tree's top level is ALREADY every project with `~/.jaira` beside them (§2.2), so a
+ * root Files row would open the same tree a project row opens — two ways to one view.
+ */
+const ROOT_VIEWS: readonly SidebarView[] = [
+  { id: "tasks", glyph: "▦", label: "All tasks" },
+  { id: "chat", glyph: "✻", label: "All conversations" },
+];
+
 /** Every nav row, for the lookups that do not care which group a view is in. */
 const ALL_VIEWS: readonly SidebarView[] = [...VIEWS, ...FOOTER_VIEWS];
 
@@ -289,12 +305,15 @@ function InboxStrip({
   approvals,
   questions,
   projects,
+  hues,
   onSelect,
 }: {
   pending: PendingInteraction[];
   approvals: PendingApproval[];
   questions: PendingQuestion[];
   projects: ProjectSummary[];
+  /** Directory → the colour that project wears everywhere else. See `hueOf`. */
+  hues: Readonly<Record<string, string>>;
   onSelect: (taskId: string, project: string) => void;
 }): JSX.Element | null {
   const total = pending.length + approvals.length + questions.length;
@@ -305,11 +324,11 @@ function InboxStrip({
   // The published label and hue when the project is still listed; the basename and the grey when it
   // is not, which is what a request outliving its session by a tick looks like.
   const chipOf = (project: string): { label: string; hue: string } => {
-    const at = projects.findIndex((p) => p.project === project);
-    const found = projects[at];
-    return found === undefined
-      ? { label: project.split(/[\/]+/).filter(Boolean).pop() ?? project, hue: "var(--p0)" }
-      : { label: found.label, hue: hueOf(found.kind, at) };
+    const found = projects.find((p) => p.project === project);
+    return {
+      label: found?.label ?? (project.split(/[\/]+/).filter(Boolean).pop() ?? project),
+      hue: hues[project] ?? "var(--p0)",
+    };
   };
   const shown = [
     // Questions first: the agent addressed the person directly, and its loop is parked on the reply.
@@ -418,12 +437,38 @@ export default function App(): JSX.Element {
    * means closing a project cannot leave the list pointed at a database this window is no longer
    * reading — the list simply becomes the other one.
    */
+  /**
+   * The projects the SIDEBAR lists, and the colour each one wears.
+   *
+   * JaiRA's own project is not among them. It runs its workflows out of the shared root, so one
+   * `~/.jaira` row is the whole of "the machine's own" as far as somewhere to stand is concerned —
+   * two rows for one place is two answers to "where am I". Its RUNS are still everywhere they were:
+   * the root's Tasks board sections by project and draws one for it, which is where a description
+   * sync belongs — filed under JaiRA rather than mixed into a checkout.
+   */
+  const shownProjects = useMemo(() => state.projects.filter((p) => p.kind !== "system"), [state.projects]);
+  /** Directory → hue, for the surfaces that draw a project they did not enumerate. */
+  const projectHues = useMemo(
+    () => Object.fromEntries(state.projects.map((p, i) => [p.project, hueOf(p.kind, i)])),
+    [state.projects],
+  );
+
+  /**
+   * Where a NEW conversation goes, and what an existing row falls back to.
+   *
+   * At the root there is no project the composer is standing in, so a new thread goes to the shared
+   * root — which is the one project that means the same thing in every window. Rows opened from the
+   * root list carry their own project and never reach this.
+   */
   const chatProject = state.at === null ? SHARED_SESSION : null;
   const chat: ChatSurface = {
+    // At the ROOT: every project's conversations, newest first, each stamped with its own project —
+    // "all conversations" is a place, and this is what it holds. Inside a project: that project's.
     conversations: useMemo(
-      () => conversationsOf(state.at === null ? state.sharedTasks : state.tasks),
-      [state.at, state.sharedTasks, state.tasks],
+      () => (state.at === null ? state.allConversations : conversationsOf(state.tasks)),
+      [state.at, state.allConversations, state.tasks],
     ),
+    hues: projectHues,
     taskId: state.chat.taskId,
     project: chatProject,
     busy: state.chat.busy,
@@ -934,16 +979,34 @@ export default function App(): JSX.Element {
    * The counts are the same ones the address bar carries — one derivation, so a project row and the
    * crumb over its board can never disagree about how much is waiting.
    */
-  const sidebarProjects: SidebarProject[] = state.projects.map((p, i) => ({
+  const sidebarProjects: SidebarProject[] = shownProjects.map((p) => ({
     project: p.project,
     label: p.label,
     kind: p.kind,
-    // By POSITION in the list, which `listProjects` sorts user → shared → system and then by label.
-    // Stable while the set is, which is what a colour code needs; a project opened later takes the
-    // next hue rather than renaming everybody's.
-    hue: hueOf(p.kind, i),
+    // Looked up rather than recomputed from THIS list's index: the sidebar hides one project and the
+    // strip and the crumb bar hide none, and a hue derived from each list's own position would give
+    // one project two colours the moment those lists differ.
+    hue: projectHues[p.project] ?? "var(--p0)",
     counts: projectCounts(p, ui.seen),
     onSeen: () => actions.markProjectSeen(p.project),
+  }));
+
+  /**
+   * The root rows, with the counts of EVERY project on them.
+   *
+   * Summed rather than per-project, which is what makes them a level: "all tasks" is one place, and
+   * the number beside it is how much is in it. Clicking the pills marks the lot seen, for the same
+   * reason clicking a project row's does.
+   */
+  const rootRows: SidebarView[] = ROOT_VIEWS.map((v) => ({
+    ...v,
+    counts: shownProjects.reduce<PillCounts>((sum, p) => {
+      for (const [kind, n] of Object.entries(projectCounts(p, ui.seen))) {
+        sum[kind as keyof PillCounts] = (sum[kind as keyof PillCounts] ?? 0) + (n ?? 0);
+      }
+      return sum;
+    }, {}),
+    onSeen: () => shownProjects.forEach((p) => actions.markProjectSeen(p.project)),
   }));
 
   const rows: SidebarView[] = VIEWS.map((v) =>
@@ -1020,6 +1083,7 @@ export default function App(): JSX.Element {
     >
       <Sidebar
         views={rows}
+        roots={rootRows}
         footer={FOOTER_VIEWS}
         settings={settingsRow}
         view={view}
@@ -1548,6 +1612,7 @@ export default function App(): JSX.Element {
           approvals={state.approvals}
           questions={state.questions}
           projects={state.projects}
+          hues={projectHues}
           onSelect={actions.select}
         />
       </div>

@@ -360,6 +360,37 @@ describe("sessions — one process, several projects", () => {
     }
   });
 
+  it("lists every project's tasks as one recency-ordered list, each stamped with its project", async () => {
+    const other = mkdtempSync(join(tmpdir(), "jaira-app-d-"));
+    const paths = initProject(other);
+    writeWorkflowFiles(paths.workflowsDir, specPlanningFiles());
+    try {
+      const here = newTask("here");
+      await service.open(other);
+      const there = service.createTask({ title: "there", workflow: "feature/plan", project: other }).taskId;
+
+      // The ROOT of the address is a place, and this is what it holds. One list, not one per
+      // project: a list spanning four databases has no order until something imposes one, and
+      // recency is the only order that means the same thing in all of them.
+      const all = service.listAllTasks();
+      const mine = all.filter((t) => t.taskId === here || t.taskId === there);
+      expect(mine.map((t) => t.taskId)).toEqual([there, here]);
+      // Stamped, because a row that cannot say whose task it is cannot be opened — the same fault
+      // the inbox strip had (SHELL.md §2.4).
+      expect(mine.map((t) => t.project)).toEqual([other, dir]);
+
+      // Narrowed by workflow, which is how the Chat view asks for conversations without this
+      // channel having to know what a conversation is.
+      expect(service.listAllTasks({ workflows: ["feature/plan"] }).map((t) => t.taskId)).toEqual(
+        expect.arrayContaining([here, there]),
+      );
+      expect(service.listAllTasks({ workflows: ["chat/agent"] })).toEqual([]);
+    } finally {
+      await service.close();
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
   it("re-opening the same directory under another spelling does not open it twice", async () => {
     // Two `better-sqlite3` handles on one file is the failure `sessionKey` exists to prevent, and it
     // is invisible until two writers disagree — so it is asserted on the way in, not after.

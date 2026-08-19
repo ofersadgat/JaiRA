@@ -217,6 +217,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "task:conversation": ((request: { taskId: string; project?: string }) => service.conversation(request.taskId, request.project)) as Handler,
   "task:system": (() => service.listSystemTasks()) as Handler,
   "project:list": (() => service.listProjects()) as Handler,
+  "task:all": ((request: { workflows?: string[] } | undefined) => service.listAllTasks(request ?? {})) as Handler,
   "session:history": ((request: Parameters<typeof service.sessionHistory>[0]) => service.sessionHistory(request)) as Handler,
   "session:view": ((request: Parameters<typeof service.sessionView>[0]) => service.sessionView(request)) as Handler,
   "session:live": ((request: Parameters<typeof service.sessionLive>[0]) => service.sessionLive(request)) as Handler,

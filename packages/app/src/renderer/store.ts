@@ -17,6 +17,7 @@ import type {
   JobOutputChunk,
   LogEntry,
   ProjectSummary,
+  ProjectTask,
   SessionRef,
   SessionView,
   AvailabilitySnapshot,
@@ -394,6 +395,14 @@ export interface AppState {
    * project you are reading, reversibly, from the path rather than from a twisty.
    */
   projects: ProjectSummary[];
+  /**
+   * Every conversation in every open project, newest first — what the ROOT's Chat list shows.
+   *
+   * Separate from {@link tasks}, which is one project's, because it answers a different question:
+   * this is "what have I been talking to, anywhere", and its order spans databases. Each row carries
+   * its own project, because a row that cannot say whose task it is cannot be opened.
+   */
+  allConversations: ProjectTask[];
   boards: Record<string, BoardView | null>;
   levels: Record<string, string | null>;
   /**
@@ -661,6 +670,7 @@ const EMPTY: AppState = {
   jobOutput: null,
   liveTurn: null,
   projects: [],
+  allConversations: [],
   boards: {},
   levels: {},
   taskFocus: null,
@@ -1108,6 +1118,23 @@ export function useApp() {
     const focus = ref.current.taskFocus;
     const gone = focus !== null && !projects.some((p) => p.project === focus);
     patch({ projects, boards, ...(gone ? { taskFocus: null } : {}) });
+  }, [patch]);
+
+  /**
+   * The conversations of every open project, for the root's Chat list.
+   *
+   * Narrowed to the chat workflows at the CHANNEL, not after: `chatWorkflow.ts` is the one module
+   * that says what a conversation is, and passing its two states keeps main from having to know —
+   * while keeping a board's worth of rows off the wire to draw a list of threads.
+   */
+  const refreshAllConversations = useCallback(async () => {
+    try {
+      patch({ allConversations: await invoke("task:all", { workflows: [...CHAT_STATES] }) });
+    } catch {
+      // Quiet: a project closing under a refresh already in flight, and an empty list is the honest
+      // answer to that until the next one lands.
+      patch({ allConversations: [] });
+    }
   }, [patch]);
 
   const refreshLogs = useCallback(async () => {
@@ -1587,11 +1614,13 @@ export function useApp() {
       refreshTree(),
       refreshDetail(ref.current.selected),
       refreshState(ref.current.stateId),
+      refreshAllConversations(),
     ]);
   }, [
     patch,
     refreshTasks,
     refreshSharedTasks,
+    refreshAllConversations,
     refreshBoard,
     refreshPending,
     refreshApprovals,
@@ -1650,6 +1679,9 @@ export function useApp() {
         // A shared workflow's runs land here, and the Files inspector shows them beside its Run
         // button. Dropping this invalidate is what would leave that history one run behind.
         if (message.scope === "tasks") void refreshSharedTasks();
+        // The root's conversation list spans every project, so a thread that moved in one this
+        // window is not standing in still moved on screen.
+        if (message.scope === "tasks") void refreshAllConversations();
         // …and except the task on SCREEN. A sync or a review runs in JaiRA's own project, and the
         // person watching its conversation is owed the same refresh cadence as any selected task —
         // dropping these is why a watched run showed nothing until it finished, then everything at
@@ -1666,6 +1698,7 @@ export function useApp() {
           if (message.scope === "tasks") {
             void refreshTasks();
             void refreshHistory();
+            void refreshAllConversations();
             // The open state's view carries its own task lists (`tasksHere`, `tasksRecent`), which
             // the Files inspector reads for the second half of its run history and the middle panel
             // reads for its task list. A `tasks` invalidate is exactly the event that changes them,
@@ -1908,6 +1941,7 @@ export function useApp() {
     refreshAll,
     refreshTasks,
     refreshSharedTasks,
+    refreshAllConversations,
     refreshBoard,
     refreshProjects,
     refreshDetail,

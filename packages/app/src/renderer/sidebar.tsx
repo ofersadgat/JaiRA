@@ -126,6 +126,7 @@ function OpenAnother({ busy, onChooseProject }: { busy: boolean; onChooseProject
 
 export function Sidebar({
   views,
+  roots,
   footer,
   settings,
   view,
@@ -142,6 +143,15 @@ export function Sidebar({
 }: {
   /** The rows nested under the OPEN project. Empty when the address is standing at the root. */
   views: readonly SidebarView[];
+  /**
+   * The rows that stand at the ROOT of the address — every project's work at once.
+   *
+   * Above the projects rather than beside or below them, because that is the reading order the
+   * address has: the root is above the things inside it, and "all tasks" is the level "this
+   * project's tasks" is one step down from. They select a view AND put the address at the root,
+   * which is one gesture because they are one place.
+   */
+  roots: readonly SidebarView[];
   /** The rows that belong to no project — Logs and Debug. */
   footer: readonly SidebarView[];
   /** The row pinned to the very bottom. Same shape as the rest — it has a drawer too. */
@@ -165,8 +175,16 @@ export function Sidebar({
   onTheme: (theme: "light" | "dark") => void;
   onChooseProject: (mode: "open" | "init") => void;
 }): JSX.Element {
-  const rowOf = (v: SidebarView, nested: boolean): JSX.Element => {
-    const here = view === v.id;
+  /**
+   * One nav row.
+   *
+   * `scope` is which address the row belongs to, and it is what makes "Tasks" at the root and
+   * "Tasks" inside a project two different rows rather than one drawn twice: they carry the same
+   * view id, and only where the address is standing tells them apart.
+   */
+  const rowOf = (v: SidebarView, nested: boolean, scope: "root" | "project" | "any" = "any"): JSX.Element => {
+    const inScope = scope === "any" || (scope === "root") === (at === null);
+    const here = view === v.id && inScope;
     // A drawer belongs to the view it is under, so it is only ever open on the view you are on —
     // and never at all while the column is a strip of glyphs with no room for it.
     const drawer = v.panel !== undefined && here && !collapsed;
@@ -179,7 +197,13 @@ export function Sidebar({
           aria-label={v.label}
           aria-current={here ? "page" : undefined}
           aria-expanded={drawer ? open : undefined}
-          onClick={() => (drawer ? v.onOpen?.(!open) : onView(v.id))}
+          onClick={() => {
+            // A root row goes to the root FIRST — the view means a different thing there — and a
+            // nested one is already inside the project it is drawn in.
+            if (scope === "root" && at !== null) onProject(null);
+            if (drawer) v.onOpen?.(!open);
+            else onView(v.id);
+          }}
         >
           <span className="side-glyph">{v.glyph}</span>
           {/* One register for every nav row, footer included — they are one control, and this
@@ -226,7 +250,7 @@ export function Sidebar({
             <Pills counts={p.counts} budget={ROW_PILL_BUDGET} onClear={p.onSeen} />
             {open ? null : <span className="side-twist">▸</span>}
           </button>
-          {open ? <div className="side-views">{views.map((v) => rowOf(v, true))}</div> : null}
+          {open ? <div className="side-views">{views.map((v) => rowOf(v, true, "project"))}</div> : null}
         </div>
       </Fragment>
     );
@@ -266,6 +290,9 @@ export function Sidebar({
           there is always at most one project the rail is on, so the second zone has one subject.
         */
         <div className="side-rail">
+          {/* The root's own glyphs, above the tiles — the same order the expanded column has. */}
+          <div className="rail-views">{roots.map((v) => rowOf(v, false, "root"))}</div>
+          <div className="rail-split" />
           <div className="rail-projects">
             {projects.map((p) => (
               <button
@@ -292,6 +319,9 @@ export function Sidebar({
         </div>
       ) : (
         <div className="side-nav">
+          {/* The root, above the things inside it. It takes no hue and no dot: there is no project
+              for a colour to be OF, which is the same fact "All projects" states in the crumb. */}
+          <div className="side-roots">{roots.map((v) => rowOf(v, false, "root"))}</div>
           {projects.map(projectRow)}
           <OpenAnother busy={busy} onChooseProject={onChooseProject} />
         </div>

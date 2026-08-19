@@ -32,7 +32,7 @@
  * about the code you have open. With no project open, conversations run in JaiRA's own root, which
  * is the same routing every base-layer workflow uses.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from "react";
 import type {
   ArtifactSummary,
   ChatPlanView,
@@ -55,11 +55,24 @@ import { invoke } from "./store";
 
 /** What the Chat view needs from the shell. Assembled in `App.tsx`, like every other pane's. */
 export interface ChatSurface {
-  /** Every conversation this window can show — already filtered to the chat workflows. */
-  conversations: TaskSummary[];
+  /**
+   * Every conversation this window can show — already filtered to the chat workflows.
+   *
+   * A row may carry its OWN project, which is what makes the list work at the root of the address:
+   * "all conversations" spans every open project, and a row that cannot say whose task it is cannot
+   * be opened. Absent falls back to {@link project}, which is the case inside one project.
+   */
+  conversations: Array<TaskSummary & { project?: string }>;
   /** The open one, and the project it belongs to. */
   taskId: string | null;
   project: string | null;
+  /**
+   * The colour each project wears, by directory — see `hueOf`.
+   *
+   * Only read when a row carries its own project, which is only at the root: inside one project
+   * every row is the same project and a chip on each would be a column of identical marks.
+   */
+  hues?: Readonly<Record<string, string>>;
   /** True while a conversation is being created — its first message is a run, which takes a moment. */
   busy: boolean;
   /** The opening message, until the record holding it exists — see `ChatState.opening`. */
@@ -238,7 +251,10 @@ export function ChatListPanel({ surface }: { surface: ChatSurface }): JSX.Elemen
     return needle === "" ? list : list.filter((t) => t.title.toLowerCase().includes(needle));
   }, [surface.conversations, query]);
 
-  const open = (task: TaskSummary): void => surface.onOpen(task.taskId, surface.project ?? undefined);
+  // The ROW's project first — at the root every row is a different one — and the surface's only as
+  // the fallback for a list that is already inside a project.
+  const open = (task: TaskSummary & { project?: string }): void =>
+    surface.onOpen(task.taskId, task.project ?? surface.project ?? undefined);
 
   /**
    * Whether the newest thing this conversation said has been read.
@@ -347,6 +363,18 @@ export function ChatListPanel({ surface }: { surface: ChatSurface }): JSX.Elemen
                     title={unread(task) ? "The latest reply has not been read" : "Read"}
                   />
                   <span className="chat-row-title ellip">{task.title}</span>
+                  {/* Only on a row that carries its own project, which is only at the ROOT: inside
+                      one project every row is the same project and a chip on each would be a column
+                      of identical marks. The hue is the one that project wears everywhere else. */}
+                  {task.project !== undefined ? (
+                    <span
+                      className="chip strip-project"
+                      title={task.project}
+                      style={{ "--hue": surface.hues?.[task.project] ?? "var(--p0)" } as CSSProperties}
+                    >
+                      {task.project.split(/[\/]+/).filter(Boolean).pop() ?? task.project}
+                    </span>
+                  ) : null}
                   {/* The time is REPLACED while it is answering, not annotated. "2 min" is a fact
                       about the last thing that happened, and while something is happening it is a
                       fact about nothing anybody is asking. */}

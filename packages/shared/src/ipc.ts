@@ -28,6 +28,7 @@ import type {
   LogEntry,
   LogLevel,
   ProjectSummary,
+  ProjectTask,
   SessionRef,
   SessionView,
   FileTree,
@@ -909,6 +910,20 @@ export interface IpcContract {
    * checkout's and is readable with no checkout open at all.
    */
   "task:list": { request: { project?: ProjectRef } | void; response: TaskSummary[] };
+  /**
+   * Every task in EVERY open project, each stamped with the project holding it.
+   *
+   * The root of the address is a real place — "all projects" — and this is what it reads. Distinct
+   * from calling `task:list` once per project because the answer is one list in one order, which is
+   * what a recency-sorted conversation list needs; per-project calls would have to be merged by a
+   * caller that then owns the ordering.
+   *
+   * `workflows` narrows it to tasks created from those workflow roots. The Chat view passes its two
+   * (see `chatWorkflow.ts`), which keeps "what counts as a conversation" in the one module that
+   * documents it and keeps this channel from shipping a whole board's worth of rows to draw a list
+   * of threads.
+   */
+  "task:all": { request: { workflows?: string[] } | void; response: ProjectTask[] };
   "task:detail": { request: { taskId: string; project?: string }; response: TaskDetail };
   "task:create": { request: CreateTaskRequest; response: TaskSummary };
   "task:start": { request: StartTaskRequest; response: { taskId: string; runId: number } };
@@ -1226,6 +1241,7 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "project:choose",
   "project:current",
   "task:list",
+  "task:all",
   "task:detail",
   "task:create",
   "task:start",

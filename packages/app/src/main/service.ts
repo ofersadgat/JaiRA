@@ -225,6 +225,7 @@ import type {
   LogEntry,
   LogLevel,
   ProjectSummary,
+  ProjectTask,
   RunMetrics,
   SessionRef,
   SessionTurn,
@@ -1650,6 +1651,34 @@ export class AppService {
     // Scoped, because the Tasks view now shows JaiRA's own runs beside the project's and selecting one
     // must read the database it actually lives in.
     return taskDetailView(this.session(project).project, taskId, this.viewOptions());
+  }
+
+  /**
+   * Every task in every open project, newest first, each stamped with the project holding it.
+   *
+   * What the ROOT of the address reads — "all projects" is a place, not the absence of one. Sorted
+   * here rather than by the caller because the order is the answer: a list spanning four databases
+   * has no meaningful order until something imposes one, and recency is the only one that means the
+   * same thing in all of them.
+   *
+   * `workflows` is a filter on the workflow ROOT, passed by the caller that knows what it is looking
+   * for — the Chat view narrows to its two conversation states rather than making this channel know
+   * what a conversation is.
+   */
+  listAllTasks(request?: { workflows?: string[] }): ProjectTask[] {
+    // Materialized first, so the shared root is in the answer before anything has run in it — the
+    // same reason `listProjects` does it.
+    this.sharedSession();
+    this.systemSession();
+    const wanted = request?.workflows === undefined ? undefined : new Set(request.workflows);
+    const out: ProjectTask[] = [];
+    for (const session of this.sessions.values()) {
+      for (const task of taskSummaries(session.project)) {
+        if (wanted !== undefined && !wanted.has(task.workflow)) continue;
+        out.push({ ...task, project: session.dir });
+      }
+    }
+    return out.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
   /**

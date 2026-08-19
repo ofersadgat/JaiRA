@@ -629,6 +629,16 @@ export interface EndedTask {
   updatedAt: number;
 }
 
+/**
+ * A task, stamped with the project holding it — what a list spanning every project is made of.
+ *
+ * The stamp is not optional here: a row in a cross-project list that cannot say whose task it is
+ * cannot be opened, for exactly the reason the inbox strip's rows could not (SHELL.md §2.4).
+ */
+export interface ProjectTask extends TaskSummary {
+  project: string;
+}
+
 /** A row in the task list. */
 export interface TaskSummary {
   taskId: string;
