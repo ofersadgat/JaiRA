@@ -6,6 +6,7 @@
  */
 import type { JSX } from "react";
 import {
+  ANY_TYPE,
   DEFAULT_MEDIA_TYPE,
   OWNED_KEYWORDS,
   SLOT_TYPES,
@@ -23,6 +24,11 @@ import { emptySlotRow, type SlotRow } from "./slotForm";
  * A schema the vocabulary does not cover is shown as a read-only summary instead. That is not a
  * fallback, it is the honest rendering — the alternative is a dropdown that can only round
  * `{"type":"object","properties":{…}}` down to "object" and delete the properties on the way.
+ *
+ * The `list of` toggle belongs to the row and not to the vocabulary, which is why it survives
+ * LINKING. A named type is still a type: "a list of `$/types/plan`" is an ordinary thing to declare,
+ * and the control that could say it about `text` refused to say it about a type from the library
+ * that exists precisely so those declarations can be shared.
  */
 export function SlotTypePicker({
   row,
@@ -49,19 +55,22 @@ export function SlotTypePicker({
       </span>
     );
   }
-  // A LINKED type: the named type's document decides the schema, so the vocabulary picker has
-  // nothing to say and is replaced rather than shown beside it claiming otherwise.
+  // A LINKED type: the named type's document decides the WHAT, so the vocabulary dropdown is
+  // replaced rather than shown beside it claiming otherwise. `list` is not the vocabulary's — it is
+  // the wrapper this row puts around whatever the type is — so it stays.
   //
   // Both branches, and the second one is a bug this used to have: a picker with no link control fell
-  // THROUGH to the vocabulary, which showed `any` with `list` unchecked over a document that said
-  // `"schema": "$/types/markdown"`. Every control on it was dead — `applySlotType` writes the
-  // reference and returns before it reads a thing the picker holds — so checking `list` there
-  // toggled a checkbox and changed nothing in the file.
+  // THROUGH to the vocabulary, which showed `any` over a document that said
+  // `"schema": "$/types/markdown"` and offered to overwrite it.
   if (row.typeRef !== undefined) {
+    // The wrapper is the ROW's, not the referenced document's — see {@link SlotRow.typeRef}. Held
+    // through the link so unlinking gives back a picker that says the same thing it did.
+    const wrapped = row.type ?? ANY_TYPE;
     if (onLink === undefined) {
       return (
         <span className={`slot-type-custom${mark}`} title={`${row.typeRef} — a linked type; edit it on the JSON tab`}>
-          🔗 {row.typeRef}
+          🔗 {wrapped.list ? "list of " : ""}
+          {row.typeRef}
         </span>
       );
     }
@@ -74,6 +83,14 @@ export function SlotTypePicker({
           mark={mark}
           onChange={(ref) => onLink(ref)}
         />
+        <label className="slot-opt" title="wrap the named type in an array — a list of these">
+          <input
+            type="checkbox"
+            checked={wrapped.list}
+            onChange={(e) => onChange({ ...wrapped, list: e.target.checked })}
+          />
+          list
+        </label>
         <LinkToggle linked onToggle={() => onLink(null)} />
       </span>
     );

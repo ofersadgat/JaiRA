@@ -55,6 +55,11 @@ export interface SlotRow {
    * Presence is the link; the value may be empty while it is being typed. Held beside `type` rather
    * than instead of it so that unlinking restores whatever the picker last had, the same
    * non-destructive toggle the operation form's links use.
+   *
+   * A LIST of a named type is `{"type": "array", "items": "$/types/plan"}` — `items` is one of
+   * the keywords the expander recurses into, so a bare-string reference there is ours in exactly
+   * the way it is at the top of a `schema`. `type.list` carries the wrapper while this carries the
+   * target, which is why the two are held side by side rather than one replacing the other.
    */
   typeRef?: string;
   /** Inputs only: SPEC §4.1 makes a slot required unless it says otherwise. */
@@ -92,19 +97,36 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
+/**
+ * A schema that is a LINK, in either of its two spellings: the bare reference, or an array wrapping
+ * one. Anything else — including an array of an inline schema — is not this and is read elsewhere.
+ */
+function linkedSchemaOf(schema: unknown): { ref: string; list: boolean } | undefined {
+  const direct = readRef(schema, "schema");
+  if (direct !== undefined) return { ref: direct, list: false };
+  const wrapper = asRecord(schema);
+  if (wrapper["type"] !== "array") return undefined;
+  // Only `items` may accompany it, for the same reason `slotTypeOf` insists on that: a tuple form or
+  // a bound is a schema this row cannot round-trip, and showing it as "a list of X" would drop it.
+  if (Object.keys(wrapper).some((key) => key !== "type" && key !== "items")) return undefined;
+  const items = readRef(wrapper["items"], "schema");
+  return items === undefined ? undefined : { ref: items, list: true };
+}
+
 /** Read one declaration into a row. `name` is the map key, or an authored `name` for an output. */
 export function slotRowOf(name: string, raw: unknown): SlotRow {
   const decl = asRecord(raw);
   const binding = decl["binding"];
-  const typeRef = readRef(decl["schema"], "schema");
+  const linked = linkedSchemaOf(decl["schema"]);
   // A linked type has no vocabulary type — the referenced document decides. `ANY_TYPE` is what the
-  // picker falls back to when the link is removed, which is the least surprising thing to reveal.
-  const type = typeRef === undefined ? slotTypeOf(decl["schema"]) : ANY_TYPE;
+  // picker falls back to when the link is removed, which is the least surprising thing to reveal;
+  // its `list` flag is NOT a fallback, it is the wrapper the schema actually carries.
+  const type = linked === undefined ? slotTypeOf(decl["schema"]) : { ...ANY_TYPE, list: linked.list };
   return {
     name,
     type,
     schemaText: type === null ? JSON.stringify(decl["schema"]) : "",
-    ...(typeRef !== undefined ? { typeRef } : {}),
+    ...(linked !== undefined ? { typeRef: linked.ref } : {}),
     optional: decl["optional"] === true,
     binding: typeof binding === "string" ? binding : binding === undefined ? "" : JSON.stringify(binding),
     default: jsonTextOf(decl["default"]),
@@ -152,7 +174,10 @@ function applySlotType(decl: Record<string, unknown>, row: SlotRow): void {
       // reference, which is what every other half-typed control in this form does.
       return;
     }
-    decl["schema"] = writeRef(ref, "schema");
+    const named = writeRef(ref, "schema");
+    // `list` applies to a named type as much as to a vocabulary one — "three plans" is a shape the
+    // picker could say in one half of its own control and not in the other.
+    decl["schema"] = row.type?.list === true ? { type: "array", items: named } : named;
     delete decl["kind"];
     return;
   }

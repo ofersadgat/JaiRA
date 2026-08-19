@@ -400,6 +400,43 @@ describe("slot types", () => {
       expect(withRow(typed, { ...rowOf(typed), typeRef: "  " })).toEqual(typed);
     });
 
+    /**
+     * A LIST of a named type — `{"type": "array", "items": "$/types/plan"}`.
+     *
+     * `items` is one of the keywords the loader's expander recurses into, so a bare-string
+     * reference there is ours exactly as it is at the top of a `schema`. The picker could say "a
+     * list of text" and could not say "a list of `$/types/plan`", which made the shared type
+     * library the one vocabulary the list toggle did not apply to.
+     */
+    const LINKED_LIST = { inputs: { plan: { schema: { type: "array", items: "$/types/markdown" } } } };
+
+    it("reads an array of a reference as a linked type that is a list", () => {
+      const row = formOf(LINKED_LIST).inputs[0]!;
+      expect(row.typeRef).toBe("$/types/markdown");
+      expect(row.type).toEqual({ name: "any", list: true });
+    });
+
+    it("round-trips a list of a named type untouched", () => {
+      expect(round(LINKED_LIST)).toEqual(LINKED_LIST);
+    });
+
+    it("wraps and unwraps a link as the list toggle moves", () => {
+      const row = rowOf(LINKED);
+      expect(withRow(LINKED, { ...row, type: { name: "any", list: true } })).toEqual(LINKED_LIST);
+
+      const listed = formOf(LINKED_LIST).inputs[0]!;
+      expect(withRow(LINKED_LIST, { ...listed, type: { name: "any", list: false } })).toEqual(LINKED);
+    });
+
+    it("does not read an array of an INLINE schema as a link", () => {
+      // `items` is a schema, not a reference — the vocabulary picker owns this one.
+      const inline = { inputs: { tags: { schema: { type: "array", items: { type: "string" } } } } };
+      const row = formOf(inline).inputs[0]!;
+
+      expect(row.typeRef).toBeUndefined();
+      expect(row.type).toEqual({ name: "text", list: true });
+    });
+
     it("does not mistake JSON Schema's own $ref for a link", () => {
       // Inside a schema the key is JSON Schema's, never ours (WORKFLOWS.md §2.2). Reading it as a
       // link would rewrite a `#/$defs/plan` pointer as a bare string and retype the slot.
