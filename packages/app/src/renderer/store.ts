@@ -848,7 +848,10 @@ export function useApp() {
     // that simply has no project — a real error, raised by design, about a question nobody asked.
     if (ref.current.at === null) return patch({ tasks: [] });
     try {
-      patch({ tasks: await invoke("task:list", undefined) });
+      // NAMED, not left to main to resolve. Unqualified it was answerable only while one project was
+      // open, and threw "several projects are open" the moment a second one did — which is the whole
+      // point of the rule, working, on a call that had simply not been told where it was standing.
+      patch({ tasks: await invoke("task:list", { project: ref.current.at }) });
     } catch {
       // Quiet, not a toast: the overwhelmingly likely cause is a project closing underneath a
       // refresh already in flight, and an empty list is the right answer to that.
@@ -885,7 +888,11 @@ export function useApp() {
     async (level?: string | null) => {
       try {
         const next = level === undefined ? ref.current.level : level;
-        const board = next === null ? await invoke("board:roots", undefined) : await invoke("board:view", { level: next });
+        // Named, like every other project-scoped read: the project is the head of the address and
+        // this board is of whatever the shell is standing on. At the root there is none, and main
+        // answers the roots board with an empty one rather than throwing.
+        const at = ref.current.at === null ? {} : { project: ref.current.at };
+        const board = next === null ? await invoke("board:roots", at) : await invoke("board:view", { level: next, ...at });
         patch({ board, level: next });
       } catch (e) {
         fail(e);

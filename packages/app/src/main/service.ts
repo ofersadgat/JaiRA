@@ -22,6 +22,7 @@ import {
   type FSWatcher,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
+import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
 import { InMemoryPersistence, loadBundle, type LoadedState, type WorkflowBundle } from "@declarative-ai/hw";
@@ -538,6 +539,19 @@ export function syncEditPath(raw: string): string {
   const suffixed = last.includes(".");
   if (!suffixed || STATE_FILE_SUFFIX.test(last)) return `workflows/${path}`;
   return path;
+}
+
+/**
+ * A root directory as a person writes it: `~/.jaira` under the home directory, the path otherwise.
+ *
+ * The basename alone is not enough for this one. Every other project is named for its checkout, where
+ * the basename IS the name; the shared root's basename is `.jaira`, which names nothing on its own
+ * and collides with any project that happens to contain one.
+ */
+function shortRoot(dir: string): string {
+  const home = homedir();
+  const rel = relative(home, dir);
+  return rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel) ? `~/${rel.split(sep).join("/")}` : dir;
 }
 
 /**
@@ -1716,8 +1730,12 @@ export class AppService {
         project: session.dir,
         // The shared group is named for the root it IS, not "shared": repointing the root is the one
         // thing that changes which runs are in it, so the directory is the useful label.
-        label:
-          session.kind === "system" ? "JaiRA" : session.kind === "shared" ? `${basename(session.dir)} (shared)` : basename(session.dir),
+        //
+        // Written HOME-RELATIVE where it is under the home directory, which in the default install is
+        // the whole of it: `~/.jaira` is what a person calls that place and what every document here
+        // calls it, where the bare basename `.jaira` names nothing and collides with any project that
+        // happens to have one. A root pointed elsewhere still prints its own directory.
+        label: session.kind === "system" ? "JaiRA" : session.kind === "shared" ? shortRoot(session.dir) : basename(session.dir),
         kind: session.kind,
         tasks: tasks.length,
         running: running.size,
