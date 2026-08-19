@@ -66,7 +66,9 @@ describe("remembered folds", () => {
     // spelling would have collapsed the app's whole navigation on first launch after the upgrade,
     // leaving one button on screen that still did anything.
     expect(openOf(parseSettings({ theme: "light" }).ui, FOLD.shellSidebar)).toBe(true);
-    expect(openOf(emptyUiState(), FOLD.shellFiles)).toBe(true);
+    // And an id nobody declares a default for reads as showing too — which is what the three
+    // retired drawer folds (`shell.files` and friends) would do if anything still asked.
+    expect(openOf(emptyUiState(), "shell.files")).toBe(true);
   });
 
   it("remembers being closed, which is the whole point of storing a boolean", () => {

@@ -24,6 +24,34 @@ import { SIZE_LIMITS, clampSize, type Appearance } from "@jaira/shared/browser";
 export const DEFAULT_APP_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
 export const DEFAULT_DATA_STACK = '"SF Mono", "SFMono-Regular", Menlo, Consolas, monospace';
 
+/**
+ * The faces JaiRA ships and sets by default — what is rendering when nobody has chosen anything.
+ *
+ * They are bundled webfonts (`fonts/`), declared at the head of the stylesheet's own `--font-app`
+ * and `--font-data`, so with no preference stored they are what the window is actually set in.
+ *
+ * The picker SHOWS them, which is the whole reason they are named here rather than left implicit in
+ * the stylesheet. An empty box under a heading called "App text" states that nothing is chosen; it
+ * cannot state what is being used, and "what am I looking at" is the first question anybody opens
+ * this screen with. Choosing anything replaces them outright — see `stackOf`: a chosen stack is
+ * prepended to {@link DEFAULT_APP_STACK}, and ours stops being relevant the moment theirs exists.
+ */
+export const SHIPPED_APP_FAMILY = "DM Sans";
+export const SHIPPED_DATA_FAMILY = "JetBrains Mono";
+
+/**
+ * What the picker draws for a voice: the chosen families, or ours when there are none.
+ *
+ * The distinction is kept rather than collapsed — {@link Appearance} still stores `[]` for "not
+ * chosen", and `applyAppearance` still REMOVES the property in that case so the stylesheet stays
+ * the single source of what unset looks like. This is only what a person is shown, and what they
+ * are shown is the truth: these two faces are the ones on screen.
+ */
+export function shownFamilies(families: readonly string[], voice: "app" | "data"): readonly string[] {
+  if (families.length > 0) return families;
+  return [voice === "app" ? SHIPPED_APP_FAMILY : SHIPPED_DATA_FAMILY];
+}
+
 /** A family as it goes into a CSS stack: quoted when it has a space, bare when it does not. */
 function cssFamily(name: string): string {
   return /^[a-zA-Z][a-zA-Z0-9-]*$/.test(name) ? name : `"${name.replace(/"/g, "")}"`;
@@ -86,5 +114,34 @@ export function isMonospace(family: string, measure?: CanvasRenderingContext2D |
   return Math.abs(narrow - wide) < 1;
 }
 
-/** The sizes a control offers, for the one place that renders a slider per voice. */
+/**
+ * Is this family actually on this machine? — measured, because nothing reports it.
+ *
+ * There is no API that lists installed fonts (the one that exists is behind a permission prompt and
+ * returns four hundred entries), and `document.fonts.check` answers about loaded webfonts rather
+ * than about system faces — it says yes for a name no machine has ever heard of. What is left is the
+ * classic measurement: set the same string in `family, sentinel` for two sentinels that disagree
+ * about everything, and if BOTH come out the width of their sentinel, the family did not resolve and
+ * the fallback rendered.
+ *
+ * `false` is a NOTE and never a block. A family that is not here still belongs in the stack — it is
+ * a stack, and a person configuring one machine from another, or installing the face afterwards, is
+ * a perfectly ordinary thing to be doing.
+ */
+export function isInstalled(family: string, measure?: CanvasRenderingContext2D | null): boolean {
+  const ctx = measure ?? document.createElement("canvas").getContext("2d");
+  if (ctx === null) return true;
+  // Two sentinels rather than one: a family whose metrics happen to match `monospace` would pass a
+  // single-sentinel test, and matching BOTH of two faces that differ from each other is not a
+  // coincidence a real font has.
+  const sample = "mmmmmwwwwwiiiiilllll0123";
+  const width = (stack: string): number => {
+    ctx.font = `72px ${stack}`;
+    return ctx.measureText(sample).width;
+  };
+  const named = cssFamily(family);
+  return width(`${named}, monospace`) !== width("monospace") || width(`${named}, serif`) !== width("serif");
+}
+
+/** The sizes a control offers, for the one place that renders a size per voice. */
 export { SIZE_LIMITS };

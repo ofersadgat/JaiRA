@@ -28,8 +28,16 @@
  * the sections under **Settings**. Not a separate headed section further down the column: that put
  * the word "Files" on the screen twice, once as the button that goes there and once as the heading
  * over what it holds, and left the tree looking like a thing beside the views rather than the inside
- * of one. Clicking a row you are not on goes there and opens it; clicking the row you are on folds
- * it, which is the only meaning left for that click.
+ * of one. **Clicking a row goes there and shows what is in it — always, and never the reverse.**
+ *
+ * There is no fold and no caret. A drawer is open exactly while its view is the one selected, and
+ * the way to close it is to select another — which is the only thing a person is saying when they
+ * click a row. Anything else gives two ways to hide one thing; and because a fold is remembered, it
+ * gave a column that could open with the tree of the view you were on already gone.
+ *
+ * A row also carries its own VERBS ({@link SidebarAct}) — new conversation, find — as glyphs at its
+ * trailing end. They were the top two lines of the drawer, which is one fold away from the row that
+ * names them and a line of the column each, whether or not anybody was searching.
  *
  * COLLAPSED it is a rail of {@link SIDEBAR_RAIL} pixels, in two zones — see {@link Sidebar}.
  * Deliberately not "gone": every view in the app is reached from this column, so a sidebar that
@@ -39,6 +47,28 @@
 import { Fragment, useState, type CSSProperties, type JSX, type ReactNode } from "react";
 import { ContextMenu, type MenuAnchor } from "./menu";
 import { Pills, type PillCounts } from "./pill";
+import { parentName } from "./projects";
+
+/**
+ * One thing a row can DO, drawn as a glyph inside it.
+ *
+ * A view row is a place, and every place has one or two verbs that belong to it and nowhere else —
+ * "start a conversation" is only ever about Chat, "find a file" is only ever about Files. Those used
+ * to live at the top of the drawer, which put them one fold away from the row that names them and
+ * cost a line of the column each: the search box was on screen whether or not anybody was searching.
+ *
+ * On the ROW, they are reachable without opening the drawer at all, and a click on one means the
+ * verb rather than "go there and then look for the button".
+ */
+export interface SidebarAct {
+  id: string;
+  glyph: string;
+  /** What it does, as a sentence — the tooltip and the accessible name. */
+  label: string;
+  /** Whether it is currently ON, for the ones that toggle something in the drawer (search). */
+  on?: boolean;
+  onAct: () => void;
+}
 
 /** One row of the view switcher, and whatever it opens onto. */
 export interface SidebarView {
@@ -49,12 +79,16 @@ export interface SidebarView {
    * What this view browses, shown under the row while the view is the one showing.
    *
    * Absent ⇒ the row is a plain switch. Tasks and Logs have nothing to list here: their content IS
-   * the view, and a twisty over an empty drawer is worse than no twisty.
+   * the view.
+   *
+   * There is NO fold. A drawer is shown exactly while its view is the one selected, and hidden by
+   * selecting another — which is the only state a person is expressing when they click a row. A
+   * caret on top of that gave two ways to hide one thing and one of them was remembered, so a
+   * column could open with the tree of the view you were on already gone.
    */
   panel?: ReactNode;
-  /** Whether that drawer is open, and how to toggle it. Only read when `panel` is set. */
-  open?: boolean;
-  onOpen?: (open: boolean) => void;
+  /** This row's own verbs — see {@link SidebarAct}. Drawn only while the column has width for them. */
+  acts?: readonly SidebarAct[];
   /** What this view has waiting in the open project — see SHELL.md §4.3. */
   counts?: PillCounts;
   /** Marking this view's share seen, which is what clears its status pills. */
@@ -88,6 +122,21 @@ export interface SidebarProject {
  * the fold and never the fact that something is working (SHELL.md §4.2).
  */
 const ROW_PILL_BUDGET = 96;
+
+/**
+ * The same, on the project row that is OPEN — which has one more thing to say and no more width.
+ *
+ * Narrower on purpose. While a project is open, the two rows directly beneath it carry its counts
+ * split by room (see SHELL.md §4.3), so this row is the only place in the column saying WHERE the
+ * project is and the third place saying how much is in it. `running` still heads the order, so what
+ * a tighter budget costs is the tail of the fold and never the fact that something is working.
+ */
+const OPEN_PILL_BUDGET = 62;
+
+/** What one of a row's own verbs costs the pills, in px — see {@link SidebarAct}. */
+const ACT_WIDTH = 20;
+
+
 
 /**
  * The way to a project that is not open, and the two ways to make one.
@@ -129,6 +178,7 @@ export function Sidebar({
   roots,
   footer,
   settings,
+  onLeaveSettings,
   view,
   onView,
   collapsed,
@@ -154,8 +204,21 @@ export function Sidebar({
   roots: readonly SidebarView[];
   /** The rows that belong to no project — Logs and Debug. */
   footer: readonly SidebarView[];
-  /** The row pinned to the very bottom. Same shape as the rest — it has a drawer too. */
+  /**
+   * The row pinned to the very bottom — until it is the view you are on, when it goes to the top.
+   *
+   * Same shape as the rest: it has a drawer, and it has counts nowhere, and it is drawn by the same
+   * function. Where it SITS is the only thing about it that moves — see the lifted row below.
+   */
   settings: SidebarView;
+  /**
+   * The way out of Settings, and back to whatever the window was showing before it.
+   *
+   * Settings is the one view that is not a place in the address: you go into it FROM somewhere, and
+   * the thing a person wants afterwards is that somewhere back. Which view that was is the shell's
+   * to remember — this column only has to offer the door.
+   */
+  onLeaveSettings: () => void;
   /** The id of the view showing. */
   view: string;
   onView: (id: string) => void;
@@ -181,43 +244,87 @@ export function Sidebar({
    * `scope` is which address the row belongs to, and it is what makes "Tasks" at the root and
    * "Tasks" inside a project two different rows rather than one drawn twice: they carry the same
    * view id, and only where the address is standing tells them apart.
+   *
+   * The row is a DIV holding a button, rather than one button, and that is forced rather than
+   * chosen: a row now carries its own verbs and its own twisty, and a `<button>` inside a
+   * `<button>` is not markup a browser will keep — Chrome breaks the inner one out of the outer and
+   * the row lays itself out twice. The clickable area is `.side-hit`, which is everything up to the
+   * first control, so the row still behaves as one target where nothing else is drawn.
    */
-  const rowOf = (v: SidebarView, nested: boolean, scope: "root" | "project" | "any" = "any"): JSX.Element => {
+  const rowOf = (
+    v: SidebarView,
+    nested: boolean,
+    scope: "root" | "project" | "any" = "any",
+    /**
+     * What this row is, when it is not simply a row in the column.
+     *
+     * `back` makes it the header of the settings panel: it grows a `‹`, and its body means "out"
+     * rather than "here", because you are already here. `expand` is the rail's ⚙ — there is no room
+     * for a panel at 46px, so the click opens the column and the panel opens with it, rather than
+     * switching to a view whose navigation cannot be drawn.
+     */
+    mode?: { back?: () => void; expand?: () => void },
+  ): JSX.Element => {
     const inScope = scope === "any" || (scope === "root") === (at === null);
     const here = view === v.id && inScope;
     // A drawer belongs to the view it is under, so it is only ever open on the view you are on —
     // and never at all while the column is a strip of glyphs with no room for it.
+    // Shown while this is the view, and never otherwise. That is the whole rule — see `panel`.
     const drawer = v.panel !== undefined && here && !collapsed;
-    const open = drawer && (v.open ?? true);
+    const acts = collapsed ? [] : (v.acts ?? []);
     return (
       <Fragment key={v.id}>
-        <button
-          className={`side-row${nested ? " side-nested" : ""}${here ? " on is-active" : ""}`}
-          title={v.label}
-          aria-label={v.label}
-          aria-current={here ? "page" : undefined}
-          aria-expanded={drawer ? open : undefined}
-          onClick={() => {
-            // A root row goes to the root FIRST — the view means a different thing there — and a
-            // nested one is already inside the project it is drawn in.
-            if (scope === "root" && at !== null) onProject(null);
-            if (drawer) v.onOpen?.(!open);
-            else onView(v.id);
-          }}
-        >
-          <span className="side-glyph">{v.glyph}</span>
-          {/* One register for every nav row, footer included — they are one control, and this
-              function renders all of them. `app-label` is for a heading over a group, and a view row
-              is exactly that: the tree under Files is what it heads. */}
-          <span className="side-label ellip app-label">{v.label}</span>
-          {v.counts !== undefined && !collapsed ? (
-            <Pills counts={v.counts} budget={ROW_PILL_BUDGET} onClear={v.onSeen} />
+        <div className={`side-row${nested ? " side-nested" : ""}${here ? " on is-active" : ""}`}>
+          {/* Back, on a LIFTED row: the row moved to the top of the column and this is the way out
+              of it (SHELL.md §5.1). Left of the name rather than at the far end, because it undoes
+              the thing the name is announcing and reads in that order. */}
+          {mode?.back !== undefined ? (
+            <button className="side-back" title="back to where you were" aria-label="Back" onClick={mode.back}>
+              ‹
+            </button>
           ) : null}
-          {/* Only on the row that has a drawer, and only where it is showing: a caret on every row
-              would promise four drawers and deliver one. */}
-          {drawer ? <span className="side-twist">{open ? "▾" : "▸"}</span> : null}
-        </button>
-        {open ? <div className="side-drawer">{v.panel}</div> : null}
+          <button
+            className="side-hit"
+            title={v.label}
+            aria-label={v.label}
+            aria-current={here ? "page" : undefined}
+            onClick={() => {
+              // The panel's header is where you already are, so the only move left in it is out —
+              // the same click the arrow beside it makes.
+              if (mode?.back !== undefined) return mode.back();
+              // The rail's ⚙: open the column, and the panel opens in it.
+              mode?.expand?.();
+              // A root row goes to the root FIRST — the view means a different thing there — and a
+              // nested one is already inside the project it is drawn in.
+              if (scope === "root" && at !== null) onProject(null);
+              // GOING somewhere shows what is there — always, and nothing else this row can be
+              // clicked for. The drawer follows the selection and has no state of its own.
+              onView(v.id);
+            }}
+          >
+            <span className="side-glyph">{v.glyph}</span>
+            {/* One register for every nav row, footer included — they are one control, and this
+                function renders all of them. `app-label` is for a heading over a group, and a view
+                row is exactly that: the tree under Files is what it heads. */}
+            <span className="side-label ellip app-label">{v.label}</span>
+          </button>
+          {acts.map((act) => (
+            <button
+              key={act.id}
+              className={`side-act${act.on === true ? " on" : ""}`}
+              title={act.label}
+              aria-label={act.label}
+              aria-pressed={act.on}
+              onClick={act.onAct}
+            >
+              {act.glyph}
+            </button>
+          ))}
+          {v.counts !== undefined && !collapsed ? (
+            <Pills counts={v.counts} budget={ROW_PILL_BUDGET - acts.length * ACT_WIDTH} onClear={v.onSeen} />
+          ) : null}
+        </div>
+        {drawer ? <div className="side-drawer">{v.panel}</div> : null}
       </Fragment>
     );
   };
@@ -234,27 +341,70 @@ export function Sidebar({
     return (
       <Fragment key={p.project}>
         <div className={`side-section${open ? " open" : ""}`} style={{ "--hue": p.hue } as CSSProperties}>
-          <button
-            className="side-row side-project-row"
-            title={p.project}
-            aria-expanded={open}
-            // Clicking a project puts the address on it, which is what expands it. Clicking the one
-            // you are on goes back to the root — there is no second gesture for "close", because
-            // being closed is just not being where the address is.
-            onClick={() => onProject(open ? null : p.project)}
-          >
-            {/* The hue, as a mark BESIDE the name rather than on it. The name is data and recolouring
-                it would be the one thing state may not do to a voice. */}
-            <i className="side-dot" />
-            <span className={`side-label ellip ${open ? "data-title" : "data-secondary"}`}>{p.label}</span>
-            <Pills counts={p.counts} budget={ROW_PILL_BUDGET} onClear={p.onSeen} />
-            {open ? null : <span className="side-twist">▸</span>}
-          </button>
+          <div className="side-row side-project-row">
+            <button
+              className="side-hit"
+              title={p.project}
+              aria-expanded={open}
+              // Clicking a project puts the address on it, which is what expands it. Clicking the
+              // one you are on goes back to the root — there is no second gesture for "close",
+              // because being closed is just not being where the address is.
+              onClick={() => onProject(open ? null : p.project)}
+            >
+              {/* The hue, as a mark BESIDE the name rather than on it. The name is data and
+                  recolouring it would be the one thing state may not do to a voice. */}
+              <i className="side-dot" />
+              <span className="side-label side-name">
+                <span className={`ellip ${open ? "data-title" : "data-secondary"}`}>{p.label}</span>
+                {/* Where it is, BESIDE what it is called rather than under it — one row per project,
+                    however much it has to say. Only on the open one: a path against four names is a
+                    column of paths, and only one of them is the one you are working in. It yields
+                    the width first (`flex: 0 1 auto` against the name's `flex: none`), because the
+                    name is the answer and this is the qualifier. */}
+                {open ? <span className="side-where ellip data-faint">{parentName(p.project)}</span> : null}
+              </span>
+            </button>
+            <Pills counts={p.counts} budget={open ? OPEN_PILL_BUDGET : ROW_PILL_BUDGET} onClear={p.onSeen} />
+            {open ? null : <span className="side-twist is-mark">▸</span>}
+          </div>
           {open ? <div className="side-views">{views.map((v) => rowOf(v, true, "project"))}</div> : null}
         </div>
       </Fragment>
     );
   };
+
+  /** Light or dark, as a row. Drawn in the panel when the column is open, in the rail when it is not. */
+  const themeRow = (
+    <button
+      className="side-row side-theme"
+      title={theme === "dark" ? "switch to light" : "switch to dark"}
+      aria-label="Toggle theme"
+      onClick={() => onTheme(theme === "dark" ? "light" : "dark")}
+    >
+      <span className="side-glyph">{theme === "dark" ? "☀" : "☾"}</span>
+      <span className="side-label ellip app-label">{theme === "dark" ? "Light" : "Dark"}</span>
+    </button>
+  );
+
+  /**
+   * Settings, while you are IN it: a full-height panel OVER the column, headed by its own row.
+   *
+   * It is pinned to the foot because it belongs to no project — true, and the reason it starts
+   * there. But the foot is also where the column runs out of room, so opening it as an accordion put
+   * its section list in the two inches between the last project and the bottom of the window, with
+   * the whole of the navigation it had just been left for still stacked above it.
+   *
+   * A panel rather than a taller accordion, because Settings is not a place in the address: you are
+   * not in a project while you are in it, so the column has nothing to be showing underneath. The
+   * row becomes the panel's header, the `‹` beside it is the way out, and everything that belongs to
+   * no project — the sections, Logs, Debug, the theme — is in here with it. That is the whole of
+   * "not part of your work", in one place, instead of four rows competing with the projects for the
+   * bottom of the column.
+   *
+   * Only while the column has width for it: in the rail there is no room for a panel, so ⚙ opens the
+   * column first (see the rail's own footer).
+   */
+  const settingsPanel = view === "settings" && !collapsed;
 
   return (
     <nav className={`sidebar${collapsed ? " shut" : ""}`}>
@@ -327,22 +477,32 @@ export function Sidebar({
         </div>
       )}
 
+      {/*
+        The foot, which is now one row wide open and four in the rail.
+
+        Logs, Debug and the theme moved INTO the settings panel: they belong to no project, which is
+        the whole of what they have in common with Settings, and four rows saying so at the bottom of
+        the column were four rows the projects were competing with. The rail keeps them, because
+        there is no panel at 46px to put them in — and losing them there would leave a mode of the
+        window with no way to reach the log.
+      */}
       <div className="side-foot">
-        {footer.map((v) => rowOf(v, false))}
-        {/* Theme sits here rather than inside Settings: it is a per-person display preference, and
-            burying it behind a view that needs an open project would make it unreachable on an empty
-            window. */}
-        <button
-          className="side-row"
-          title={theme === "dark" ? "switch to light" : "switch to dark"}
-          aria-label="Toggle theme"
-          onClick={() => onTheme(theme === "dark" ? "light" : "dark")}
-        >
-          <span className="side-glyph">{theme === "dark" ? "☀" : "☾"}</span>
-          <span className="side-label ellip app-label">{theme === "dark" ? "Light" : "Dark"}</span>
-        </button>
-        {rowOf(settings, false)}
+        {collapsed ? footer.map((v) => rowOf(v, false)) : null}
+        {collapsed ? themeRow : null}
+        {/* Not drawn while the panel is: the panel's header IS this row, and the second copy under
+            it would be a row that cannot be seen and cannot be reached. */}
+        {settingsPanel ? null : rowOf(settings, false, "any", collapsed ? { expand: () => onCollapsed(false) } : undefined)}
       </div>
+
+      {settingsPanel ? (
+        <div className="side-panel">
+          {rowOf(settings, false, "any", { back: onLeaveSettings })}
+          <div className="side-panel-rest">
+            {footer.map((v) => rowOf(v, false))}
+            {themeRow}
+          </div>
+        </div>
+      ) : null}
     </nav>
   );
 }

@@ -1,4 +1,39 @@
 /*
+ * The two faces the design is drawn in, shipped with the app.
+ *
+ * They used to be named and not bundled — "a preference, not a dependency" — which was a defensible
+ * rule and the wrong one, because it made the app's appearance depend on what a machine happened to
+ * have installed. Neither face is on a stock Windows or Linux box, so on most machines every
+ * specimen in the visual reference (SHELL.md §10) was being compared against Segoe UI and Consolas.
+ * The ratios in §3.3 were tuned against THESE metrics; served with other ones they are arithmetic
+ * about a face nobody is looking at.
+ *
+ * Both are variable fonts, which is why one file covers every weight the registers ask for: DM Sans
+ * carries `wght 100–1000` and JetBrains Mono `wght 400–800` (SHELL.md §6). They remain the DEFAULT
+ * and not a fixture — Appearance still puts a person's own families in front of them, and the stacks
+ * below still end in the platform's own faces so a glyph neither one has falls through rather than
+ * showing tofu.
+ *
+ * Licensed under the SIL Open Font License 1.1 — see `fonts/OFL.txt`.
+ */
+@font-face {
+  font-family: "DM Sans";
+  src: url("./fonts/dm-sans-variable.woff2") format("woff2");
+  font-weight: 100 1000;
+  font-style: normal;
+  /* `swap`, not `block`: these load from disk in a few milliseconds, and a window that paints its
+     chrome invisibly while waiting is a worse first frame than one that reflows. */
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("./fonts/jetbrains-mono-variable.woff2") format("woff2");
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/*
  * Two palettes behind one set of variable names, so every rule below is written once and neither
  * theme is the special case.
  *
@@ -131,8 +166,9 @@
    * proportional on exactly the machines nobody tests on. It sits at the back now, as a last resort
    * rather than a first choice.
    *
-   * DM Sans and JetBrains Mono are not bundled: they are a preference, not a dependency, and fall
-   * through to the platform stack on a machine that does not have them.
+   * DM Sans and JetBrains Mono are BUNDLED — see the `@font-face` rules at the top of this file.
+   * They still head a stack rather than being the whole of one: what follows them is what renders a
+   * glyph they lack, and what a person prepends in Appearance goes in front of all of it.
    */
   --font-app: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-data: "JetBrains Mono", "SF Mono", "SFMono-Regular", Menlo, Consolas, ui-monospace, monospace;
@@ -648,6 +684,8 @@ code {
   background: var(--panel-2);
   border-right: 1px solid var(--line);
   overflow: hidden;
+  /* The frame the settings panel is positioned against — everything below the title row. */
+  position: relative;
 }
 
 /* The window's drag handle, and the only one on this side of the app. It starts
@@ -716,14 +754,18 @@ code {
   padding-top: 6px;
   border-top: 1px solid var(--line);
 }
+/* A row is a CONTAINER, not a button, and that is forced rather than chosen: it carries its own
+   verbs and its own caret now, and a `<button>` inside a `<button>` is not markup a browser keeps —
+   Chrome lifts the inner one out and the row lays itself out twice. Two rows are still buttons in
+   their own right (`.side-open`, `.side-theme`); they carry the padding the hit carries here. */
 .side-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   width: 100%;
   height: 26px;
   flex: none;
-  padding: 0 7px;
+  padding: 0;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -731,6 +773,136 @@ code {
   text-align: left;
   font-size: calc(var(--size-app) * 12.5 / 12.5);
   box-shadow: none;
+}
+/* Everything the row means by "go here", as ONE target: it takes the whole width less whatever is
+   drawn at the trailing end, so a row with no verbs is exactly as clickable as it was when the row
+   itself was the button. */
+.side-hit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  box-shadow: none;
+}
+/* The two rows that ARE buttons — no hit inside them to carry the padding or the gap. */
+.side-open,
+.side-theme {
+  padding: 0 7px;
+  gap: 8px;
+}
+/*
+ * A row's own verb — new conversation, find (see `SidebarAct`).
+ *
+ * Quiet until the row is under the pointer or the thing it toggles is on. A verb that is as loud as
+ * the name beside it turns a column of places into a column of controls, and these are worth
+ * exactly as much attention as the row they belong to has just been given.
+ */
+.side-act {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  opacity: 0.5;
+}
+.side-row:hover .side-act,
+.side-row.on .side-act,
+.side-act.on {
+  opacity: 1;
+}
+.side-act:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--fill-ghost-selected);
+}
+/* ON is a state of the drawer below, not of the button: the search field is showing. */
+.side-act.on {
+  color: var(--accent);
+  background: var(--tint-accent);
+}
+/* The way out of a LIFTED row, left of the name because it undoes what the name announces. */
+.side-back {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  margin-left: 4px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 16 / 12.5);
+  line-height: 1;
+}
+.side-back:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--fill-ghost-selected);
+}
+.side-back + .side-hit {
+  padding-left: 3px;
+}
+/*
+ * Settings, while it is the view you are on: a full-height panel OVER the column.
+ *
+ * Pinned to the foot it is one row among the four that belong to no project, which is what it is.
+ * Opened there as an accordion, its section list got the two inches between the last project and
+ * the bottom of the window, underneath the whole of the navigation it had just been left for.
+ *
+ * OVER rather than taller, because Settings is not a place in the address — you are not in a
+ * project while you are in it, so the column has nothing to be showing underneath. It starts below
+ * the title row rather than at y=0: that row is the window's drag handle and the collapse button,
+ * and neither of those stops being true because a panel is open.
+ */
+.side-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: max(var(--wco-height), 34px);
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 4px 6px 6px;
+  gap: 1px;
+  background: var(--panel-2);
+  /* Opaque, and lifted: what is behind it is a column of navigation, and a panel you can read the
+     projects through is a panel that reads as a mistake. */
+  box-shadow: var(--lift);
+}
+/* Everything else that belongs to no project, under the sections it arrived with. Pushed to the
+   bottom of the panel, so the sections stay where the eye is and these stay where a footer was. */
+.side-panel-rest {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: none;
+  margin-top: auto;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+/* Inside the panel the drawer is not the thing taking the height — the panel is. It sizes to its
+   list and scrolls inside it, so the rows below stay on screen. */
+.side-panel > .side-drawer {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 .side-row:hover:not(:disabled) {
   color: var(--text);
@@ -763,6 +935,33 @@ code {
   min-width: 0;
   flex: 1;
 }
+/* A project's name, and beside it where that project sits — see `whereOf`, and the tree row it
+   replaces. One line: the row is one project, and a second line for its qualifier would make the
+   open project twice the height of every other row in the column. */
+.side-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+/* The name keeps its width; the path gives its up. A truncated `declarative-ai` to make room for a
+   directory would be the qualifier crowding out the answer. */
+.side-name > :first-child {
+  flex: none;
+  min-width: 0;
+  max-width: 100%;
+}
+/* Cut from the end, like every other ellipsis in the app. `direction: rtl` would cut from the front
+   — which is the more useful half of a path — but it also reorders the leading `/` of a POSIX one to
+   the far end, so `/home/me` reads `home/me/`. The whole path is on the row's tooltip. */
+.side-where {
+  /* Takes what is left between the name and the pills, and right-aligns in it — so the path sits
+     against the counts rather than trailing the name, and the gap grows on a name that is short
+     rather than on the thing that says where you are. */
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+}
 /*
  * One project's SECTION — its row, its views, and whatever those open onto.
  *
@@ -785,11 +984,15 @@ code {
 /* The project's own row. The name is data, so nothing here touches its case or its family. */
 .side-project-row {
   height: auto;
-  padding: 5px 8px;
+  padding: 0 8px 0 0;
   gap: 7px;
 }
-.side-section.open > .side-project-row {
-  padding: 8px 8px 6px;
+.side-project-row > .side-hit {
+  padding: 5px 0 5px 8px;
+  gap: 7px;
+}
+.side-section.open > .side-project-row > .side-hit {
+  padding: 8px 0 6px 8px;
 }
 /* The project's HUE, as a dot (see `hueOf`). Seven pixels of colour rather than a coloured name: the
    name is data and must not be recoloured, and a mark beside it is what the address bar's head crumb
@@ -836,12 +1039,29 @@ code {
   margin-bottom: 3px;
   border-bottom: 1px solid var(--line);
 }
-/* The caret, at the far end of the row: which of these rows has something under
-   it, and whether it is showing. Only ever on the row you are on. */
+/* The caret, at the far end of the row: which of these rows has something under it, and whether it
+   is showing. Only ever on the row you are on — and a CONTROL, not a mark, because "click the row
+   again to fold it" is a rule you have to be told and a twisty is not. The project row's is the one
+   exception, and it says so: `is-mark`, on a row whose whole body already toggles it. */
 .side-twist {
   flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
   font-size: calc(var(--size-app) * 9 / 12.5);
   color: var(--dim);
+}
+button.side-twist:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--fill-ghost-selected);
+}
+.side-twist.is-mark {
+  pointer-events: none;
 }
 
 /* What a row opens onto. `min-height: 0` all the way down, so the tree scrolls
@@ -926,6 +1146,11 @@ code {
 }
 .sidebar.shut .side-row {
   width: 34px;
+  justify-content: center;
+  padding: 0;
+}
+.sidebar.shut .side-hit,
+.rail-views .side-hit {
   justify-content: center;
   padding: 0;
 }
@@ -1072,6 +1297,33 @@ code {
   padding: 3px 6px;
   border-radius: 5px;
   cursor: pointer;
+}
+/*
+ * One rule per level of nesting — the sidebar's own convention, continued into the tree.
+ *
+ * The column already draws a rule down the left of everything inside a project (`.side-views`) and
+ * everything inside a view (`.side-drawer`), and then the tree — where the nesting actually gets
+ * deep — indented with padding and drew nothing. A row four levels down had no line to any of the
+ * four, so "which folder is this in" was answered by counting pixels.
+ *
+ * `flex: none` and an exact width, because this is the indent as well as the mark: the row's
+ * padding is the first step, and each of these is one more. The last one is the one that matters —
+ * it is the rule of the folder the row is actually in — so the earlier ones are dimmed.
+ */
+.tree-guide {
+  /* 13px per level — the indent this replaced, to the pixel. The negative margin cancels the row's
+     flex gap, so a level advances by exactly the width declared here. */
+  width: 13px;
+  flex: none;
+  align-self: stretch;
+  /* Vertically it has to cover the row's PADDING as well as its content, or the rule arrives as a
+     column of dashes with a gap at every row boundary — which reads as decoration rather than as a
+     line joining a row to what contains it. */
+  margin: -3px -5px -3px 0;
+  border-left: 1px solid var(--rule);
+}
+.tree-guide:not(:nth-last-of-type(1)) {
+  border-left-color: var(--line);
 }
 .tree-item:hover {
   background: var(--fill-ghost-hover);
@@ -2540,7 +2792,9 @@ button.crumb-sep.open {
   min-height: 0;
   overflow-y: auto;
   overflow-x: auto;
-  padding: 13px 15px;
+  /* Tight, because the columns now have edges of their own. The wider inset was doing the work of
+     the boundary the columns lacked, and it was doing it out of the width of the card titles. */
+  padding: 10px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -2555,7 +2809,10 @@ button.crumb-sep.open {
 .columns {
   display: flex;
   gap: 10px;
-  align-items: flex-start;
+  /* STRETCH, so the columns share a floor. Sized to their own contents they ended at different
+     heights, and a row of boxes with ragged bottoms reads as a set of unrelated cards rather than as
+     the tracks of one board. */
+  align-items: stretch;
 }
 /* The root listing: columns are whole workflows, which are siblings with no order and which no task
    ever moves between. Nothing is lost by putting the tenth one on a second row, and a board you have
@@ -2564,6 +2821,11 @@ button.crumb-sep.open {
   flex-wrap: wrap;
   row-gap: 12px;
 }
+/* The column is the BOX, and it is the only one on this board (SHELL.md §5.3).
+   A hairline all the way round rather than one that appears on hover: the edge is what says where
+   one place stops and the next begins, and a boundary that is only there while the pointer is over
+   it is not a boundary — two columns of stripe-free cards with nothing between them read as one
+   field of tiles, which is exactly what the cards losing their box would otherwise cost. */
 .column {
   flex: 1 0 210px;
   max-width: 320px;
@@ -2571,73 +2833,74 @@ button.crumb-sep.open {
   display: flex;
   flex-direction: column;
   background: var(--panel-2);
-  border: 1px solid transparent;
-  border-radius: 5px;
-  padding: 8px 8px 4px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
   cursor: pointer;
 }
+/* Deliberately NOT `overflow: hidden` to clip the band into the corners: an overflow container ends
+   the sticky heading below, and a heading that scrolls away is worth more than two rounded pixels.
+   The band rounds its own top corners instead. */
 .column:hover {
-  border-color: var(--line);
+  border-color: var(--rule);
 }
-/* The header stays put while the cards move under it, which is what makes a long column readable. */
+/* A full-bleed band on --panel-3, which is the same idiom the settings sections use for a section
+   head: the strip of a different ground says "the column starts here", and the hairline under it
+   says what is inside it. The header stays put while the cards move under it, which is what makes a
+   long column readable. */
 .column h4 {
   position: sticky;
   top: 0;
   z-index: 1;
-  font-size: calc(var(--size-app) * 11 / 12.5);
-  color: var(--dim);
   display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 8px;
-  padding: 2px 2px 6px;
-  background: var(--panel-2);
-  /* No uppercase: the name inside is a state id, and case is part of a value that identifies a
-     file. Uppercasing it would be a lie about what the board is showing (§3.1, law 2). */
-  letter-spacing: 0.08em;
+  align-items: baseline;
+  gap: 7px;
+  margin: 0;
+  padding: 6px 10px;
+  background: var(--panel-3);
+  border-bottom: 1px solid var(--line);
+  border-radius: 8px 8px 0 0;
+  color: var(--dim);
+}
+/* The cards' own padding, so the band above can go edge to edge. */
+.column-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 6px;
 }
 /* The sequence number is the order the children RUN in. Absent at the root listing, where the
-   columns are workflow roots and have no order relative to each other. */
+   columns are workflow roots and have no order relative to each other. Loose, in the number
+   register: it was a bordered chip, which made the quietest fact in the heading the loudest mark in
+   it — and the columns are already laid out left to right in that order. */
 .column h4 .seq {
-  font-family: var(--font-data);
-  font-size: calc(var(--size-data) * 10 / 12);
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  padding: 0 4px;
   flex: none;
-  font-variant-numeric: tabular-nums;
 }
-/* The count as a pill rather than loose text — it is a quantity, and it reads as one. */
+/* The count, loose at the far end. It was a filled pill, which is now a word with a meaning: a pill
+   on this board is a STATUS (§4.1), and spending that shape on "how many" put a sixth kind of pill
+   in a vocabulary of five. */
 .column h4 .count {
   flex: none;
-  min-width: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  background: var(--line);
-  color: var(--dim);
-  font-size: calc(var(--size-app) * 10.5 / 12.5);
-  line-height: 15px;
-  text-align: center;
+  margin-left: auto;
   font-variant-numeric: tabular-nums;
 }
 /* DATA, not an app label (SHELL.md §3.2). A board column heading looks like a room name and is not —
    it is the child state of whatever workflow is open, authored in the user's own files — so it takes
-   the mono and it never takes uppercase. That is exactly the case the voice rule exists to decide. */
+   the mono and it never takes uppercase. That is exactly the case the voice rule exists to decide.
+   The `data-title` register, because this is the name of the thing the column IS. */
 .col-name {
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
   font-family: var(--font-data);
-  font-size: calc(var(--size-data) * 0.96);
-  letter-spacing: -0.01em;
+  font-size: calc(var(--size-data) * 1.12);
+  letter-spacing: -0.02em;
   font-weight: 700;
   text-transform: none;
 }
-.column > .empty {
-  padding: 2px 4px 8px;
+.column-body > .empty {
+  padding: 2px 4px 6px;
 }
 
 /* --- lanes: what the cards in one column are DOING (board.tsx) ---------------
@@ -2773,10 +3036,6 @@ button.crumb-sep.open {
    pill says that, and saying it twice on one card is what the pill replaced. */
 .card-status {
   flex: none;
-}
-.drill {
-  flex: none;
-  color: var(--accent);
 }
 .tray h4 {
   font-size: calc(var(--size-app) * 11 / 12.5);
@@ -3079,102 +3338,345 @@ button.crumb-sep.open {
 }
 
 /* --- the appearance screen (SHELL.md §6) ---
-   A font stack is an ORDERED LIST, so it is drawn as one: numbered rows, top to bottom, ending in a
-   default nobody can remove. A comma-separated text box says none of that. */
-.face-stack {
+   Six settings, all about type. They get a layout of their own rather than the label-on-the-left
+   form the other sections use: with one-word names and a preview to check the answer against, a
+   paragraph beside each control would be three times the height of the thing it explains.
+
+   Every size below is a ratio of a voice's base, like everything else in this file — a literal px in
+   the screen that SETS the base is the one place the joke would be on us. */
+.cfg-pane.ap {
+  /* Compounded with `.cfg-pane` deliberately: this screen borrows that column's scrolling and its
+     bottom padding, and overrides the two things a form of forty settings wants and a screen of six
+     does not — a 34px gap between sections, and 780px of width. */
+  gap: 10px;
+  /* Narrower than the other sections' 780px. Those are forms of forty settings whose controls need
+     the width; this one is six controls and a preview, and a stack box stretched across a wide
+     window puts a chip at each end of a line with nothing between them. */
+  max-width: 560px;
+}
+/* Whose settings these are. A non-layered section is drawn without the chrome's `settings-head`
+   (there is no shared-versus-project switch to put in it), so the sentence that header would have
+   carried is stated here instead. */
+.ap-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--line);
+}
+.ap-head > .app-secondary {
+  margin-left: auto;
+}
+.ap-field {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 5px;
   min-width: 0;
-  width: 100%;
+}
+/* The family and its size, on ONE line. They are a single decision about a single voice, and split
+   across two rows a person sets the face and then hunts for the size of what they just set. */
+.ap-line {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+/* The resolved stack, as the stylesheet will receive it — the one line that proves what "prepend"
+   actually did, in the voice it did it to. */
+.ap-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ap-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 0;
+}
+.ap-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 26px;
+}
+.ap-toggle-value {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+
+/* A stack is an ordered list, and this is the box it lives in: chips left to right in the order they
+   are tried, and the way to add one at the end of them. Not a column of rows — three full-width rows
+   read as three settings, when they are three attempts at one. */
+.face-box {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.face-stack {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 4px 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--panel);
+}
+.face-stack.open {
+  border-color: var(--accent);
 }
 .face-chip {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  padding: 3px 6px;
+  max-width: 100%;
+  padding: 2px 4px 2px 6px;
   border-radius: var(--control-radius-sm);
   background: var(--fill-ghost-hover);
 }
 /* The position in the stack — what makes "tried in order" visible. */
 .face-n {
   flex: none;
-  width: 14px;
-  text-align: right;
 }
 .face-name {
-  flex: 1;
   min-width: 0;
-}
-/* Stated, not editable: it is the thing that stops a missing glyph becoming tofu. */
-.face-default {
-  background: transparent;
-  border: 1px dashed var(--line);
-}
-.face-warn {
-  flex: none;
-  color: var(--warn);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .face-chip.warn {
   background: var(--tint-warn);
 }
-.face-move,
 .face-drop {
   flex: none;
-  width: 20px;
-  height: 20px;
+  width: 17px;
+  height: 17px;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--dim);
   border-radius: 4px;
+  font-size: calc(var(--size-app) * 0.8);
+  line-height: 1;
 }
-.face-move:hover:not(:disabled),
 .face-drop:hover:not(:disabled) {
   color: var(--text);
   background: var(--fill-ghost-selected);
 }
 .face-add {
-  display: flex;
-  margin-top: 2px;
+  border: 0;
+  background: transparent;
+  padding: 2px 6px;
+  border-radius: var(--control-radius-sm);
+  cursor: pointer;
 }
-.face-add input {
+.face-add:hover:not(:disabled) {
+  background: var(--fill-ghost-hover);
+  color: var(--text);
+}
+
+/* What can go in the box. It OVERLAYS what is below rather than pushing it down: a menu that reflows
+   the page moves the control you opened it from out from under the pointer. */
+.face-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 3px);
+  left: 0;
+  /* `min-width` beats `max-width` in CSS, so a pane narrower than 230px was a popover hanging out
+     over the edge of it. Sized from the control it belongs to instead, with a floor that is a
+     fraction of the pane rather than an absolute number. */
+  min-width: min(230px, 100%);
   width: 100%;
-}
-/* Size on the SAME line as the family it applies to — they are one decision about one voice. */
-.size-slider {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.size-slider input[type="range"] {
-  flex: 1;
-  min-width: 90px;
-}
-/* Real surfaces, not a sample string: a sample cannot show you that a data face is wider than the
-   column it has to sit in. It is also the one place both voices are guaranteed adjacent. */
-.face-preview {
-  display: grid;
-  grid-template-columns: minmax(150px, 220px) 1fr;
-  gap: 12px;
-  align-items: start;
-  padding: 10px;
+  max-width: 100%;
+  padding: 4px;
   border: 1px solid var(--line);
-  border-radius: var(--card-radius);
-  background: var(--panel-2);
-}
-.face-preview-nav {
+  border-radius: var(--control-radius);
+  background: var(--panel);
+  box-shadow: var(--lift);
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  background: var(--panel);
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  padding: 4px 6px;
 }
-.face-preview-card {
+/* Only the OFFER scrolls. The type-in row and the default-stack line are the two things a person
+   came here for that are not in the list, and a menu that scrolls them off the bottom hides them. */
+.face-menu-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 210px;
+  overflow-y: auto;
+}
+.face-menu-head {
+  padding: 5px 8px 4px;
+}
+/*
+ * One offered face.
+ *
+ * `justify-content: flex-start` is load-bearing and is the fix for what this menu looked like: a
+ * `<button>` centres its contents in Chromium even when it is `display: flex`, so the rows carrying
+ * a trailing note ("not on this machine", pushed right by `margin-left: auto`) filled their width
+ * and read as left-aligned, while the rows WITHOUT one — every face already chosen — centred
+ * themselves. The ticked rows sat a hundred and forty pixels to the right of the unticked ones, in
+ * a list whose whole job is to be scanned down one edge.
+ */
+.face-menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--control-radius-sm);
+  background: transparent;
+  text-align: left;
+}
+/* A face name can be long and the menu is 230px. It ellipsises rather than pushing the note off the
+   end of a popover that cannot scroll sideways. */
+.face-menu-name {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+button.face-menu-row {
+  cursor: pointer;
+}
+button.face-menu-row:hover {
+  background: var(--fill-ghost-hover);
+}
+.face-menu-row.on {
+  background: var(--tint-accent);
+}
+.face-menu-row.is-note {
   cursor: default;
+}
+.face-menu-row input {
+  flex: 1;
+  min-width: 0;
+}
+/* The tick's column exists on every row, set or not, so the names line up down one edge. */
+.face-tick {
+  flex: none;
+  width: 12px;
+  color: var(--accent);
+  font-size: calc(var(--size-app) * 0.88);
+}
+.face-elsewhere {
+  margin-left: auto;
+  padding-left: 8px;
+  flex: none;
+}
+/* The shipped face, drawn as the stack while nothing has been chosen: it is a statement of what is
+   rendering, not a choice somebody made, so it is quieter and carries the word instead of a ✕. */
+.face-chip.is-ours {
+  background: transparent;
+  border: 1px dashed var(--line);
+}
+.face-ours {
+  flex: none;
+  padding-right: 2px;
+}
+.face-menu-sep {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 6px;
+}
+
+/* The size, as a number and a stepper rather than a slider: a person knows whether they want 12 or
+   12.5, and a slider is the control for a quantity whose exact value does not matter. */
+.size-box {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 3px 4px 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--panel);
+}
+.size-box.off {
+  opacity: 0.55;
+}
+.size-n {
+  width: 34px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* Chromium's own spinners, removed: this box has its own, sized to the type rather than to the
+   browser's idea of a form control. */
+.size-n::-webkit-inner-spin-button,
+.size-n::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+.size-step {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+}
+.size-step button {
+  width: 15px;
+  height: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font-size: 7px;
+  line-height: 1;
+  cursor: pointer;
+}
+.size-step button:hover:not(:disabled) {
+  color: var(--text);
+}
+.size-step button:disabled {
+  opacity: 0.35;
+}
+
+/* Real surfaces, not a sample string: a sample cannot show you that a data face is wider than the
+   column it has to sit in. It is also the one place both voices are guaranteed adjacent — a heading
+   band in the app voice over two panes of data. */
+.ap-preview {
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  overflow: hidden;
+}
+.ap-preview-band {
+  padding: 5px 9px;
+  background: var(--panel-3);
+  border-bottom: 1px solid var(--line);
+}
+.ap-preview-panes {
+  display: flex;
+}
+.ap-preview-files,
+.ap-preview-task {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 7px 9px;
+  overflow: hidden;
+}
+.ap-preview-files {
+  background: var(--panel-2);
+}
+.ap-preview-task {
+  background: var(--bg);
+}
+.ap-preview-files > span,
+.ap-preview-task > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* --- chips, badges, notices --- */
@@ -7004,24 +7506,8 @@ textarea.cfg-input {
   gap: 4px;
   padding: 4px 0;
 }
-.chat-new {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  font-size: calc(var(--size-app) * 12.5 / 12.5);
-  cursor: pointer;
-}
-.chat-new:hover {
-  border-color: var(--accent);
-}
-.chat-new-mark {
-  color: var(--accent);
-  font-weight: 600;
-}
+/* "New conversation" and the filter are the ROW's verbs now (`SidebarAct`) — the drawer holds the
+   list, and nothing above it. What is left here is the field one of those verbs reveals. */
 .chat-search {
   padding: 4px 8px;
   border: 1px solid var(--line);

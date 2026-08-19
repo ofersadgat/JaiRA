@@ -95,6 +95,38 @@ against whichever database happens to be focused.
 **Do this first.** It is a correctness bug the moment §2.3 lands, and it is a
 small change.
 
+### 2.5 The same fault, in the Chat view
+
+Found by running it: `chat:thread`, `artifact:list` and `chat:startPlan` all
+threw **`no project is open`** on a window whose address was standing on
+`~/.jaira`.
+
+The surface named its project as `state.at === null ? SHARED_SESSION : null`, and
+`null` means *let main resolve the focused one*. `sessionOf(undefined)` answers
+only when exactly **one user project is open**, so that expression has three
+failure modes and only one working case:
+
+| address | main resolves | outcome |
+| --- | --- | --- |
+| one checkout open | that checkout | works |
+| standing on `~/.jaira` | nothing — a shared session is not a *user* one | `no project is open` |
+| two checkouts open | ambiguous | `several projects are open, so this call must name one` |
+| a root-list thread in project X | whatever is focused | the wrong database, silently |
+
+The last one is the quiet one: `openConversation(taskId, project)` was already
+being told which project a root-list row belongs to, and **nothing read it** —
+the surface passed the address's answer instead. A thread would come back empty
+rather than wrong, which reads as "this conversation has nothing in it".
+
+The rule, now stated once as `chatProjectOf` and tested: **a chat call names its
+project** — the open conversation's, else the address's, else the shared root.
+`newConversation` and the `@`-mention completion took the same fix; both were one
+`undefined` away from failing as soon as a second checkout was open.
+
+The general form is §2.4's, and it is worth stating as a rule: *a cross-project
+surface may not let main resolve a project.* Focus resolution is a convenience
+for a window with one checkout, and this shell is not that window.
+
 ---
 
 ## 3. The two voices
@@ -176,6 +208,16 @@ every ratio intact.
 /* state — the only three properties it may touch */
 .is-active       font-weight +200 · color → --text · background → --tint-accent
 ```
+
+**Both leading faces are bundled** — `app/src/renderer/fonts/`, one variable
+woff2 each, under the OFL. They were named and not shipped at first, on the
+grounds that a face is a preference rather than a dependency. That was the wrong
+call for one reason: neither is installed on a stock Windows or Linux machine, so
+on most of them every ratio above was being applied to Segoe UI and Consolas —
+metrics these numbers were not tuned against — and every specimen in §10 was
+being compared to a screen drawn in different faces. They still lead a stack
+rather than being the whole of one, and Appearance still puts a person's own
+families in front of them (§6).
 
 `app-label` is for **headings over a group**, not for rows that go somewhere.
 That allocation is what keeps the nav consistent.
@@ -271,6 +313,35 @@ remain, because they are not about having looked.
 Chat is not exempt: an agent mid-reply is `running`, and a question it asked is
 `waiting`.
 
+**A view row counts its own ROOM, and the rooms do not overlap.** This is the
+half of "its own subtree" that is easy to skip and expensive to get wrong. Given
+the project's whole tally, both root rows read the same number — so **All
+conversations** wore a `✓` for a workflow run that had finished, a mark pointing
+at a place that did not contain the thing it pointed at, with no row below it
+repeating the mark and therefore nothing to follow it to. A project summary
+cannot answer this: `ended` carries a status and a clock and no workflow. The
+list of conversations can, and it is fetched for every open project whatever view
+is showing, so:
+
+```
+chat row   = the conversations of that project, counted from their own rows
+tasks row  = the project's tally MINUS the chat row's
+project    = the whole tally, unchanged
+```
+
+`taskCounts` is that second population, and it is honest about the one thing it
+cannot see: whether a running task is parked on a person is counted from the
+session's own requests and is not on the task row, so a conversation waiting on
+an answer reads as `▶` on its view row and is broken out as `⏸` on the project
+row above. A view row is a pointer to where to look, and it does point.
+
+**Opening is looking.** A status pill counts what has stopped since you last
+looked, so the gesture that clears it is the one that answers it — going and
+reading the thing. Selecting a task marks it seen, at the task's OWN clock and
+never at `Date.now()`, for the reason a row's mark moves that way: a turn landing
+in the same millisecond as the click is news. Clicking the pills stays as the way
+to dismiss a row you are *not* going to open.
+
 ---
 
 ## 5. Surfaces
@@ -281,18 +352,82 @@ Structure, top to bottom:
 
 ```
 [toggle]  JAIRA                                  ← app-label; drag handle
-▸ declarative-ai                    ▶2 ⏸3 +4     ← data-title when open, data-secondary when not
-    ❏ FILES                              ▾       ← app-label, .is-active when current
-        workflows/feature/                       ← data-text
-        prompts/review.md                        ← data-text .is-active
+◎ ALL TASKS                         ▶3 ⏸1 +6     ← the root: every project at once
+✻ ALL CONVERSATIONS               + ⌕     ⏸1     ← its drawer is every thread, newest first
+● declarative-ai        checkouts     ▶2 +4     ← name, then the folder it sits in, then counts
+    ❏ FILES                         + ⌕          ← app-label, .is-active when current; no caret
+        workflows/                               ← data-text, one guide rule per level
+        │ feature/
+        │ │ prompts/review.md                    ← data-text .is-active
+        ~/.JAIRA                                 ← the OTHER root still introduces itself
+        │ workflows/
     ▶ TASKS                         ▶2 ⏸3 +4
-    ✎ CHAT                              ⏸1
+    ✎ CHAT                          + ⌕     ⏸1
   notes-api                             ⛔1 ✓4
   atlas-web                             ▶1 ⚠1
   ~/.jaira                                  ▸
 ─────────────────────────────────────────────    ← border-top --line
-  ≡ LOGS   ⌁ DEBUG   ☾ DARK   ⚙ SETTINGS         ← app-label, same rows
+  ⚙ SETTINGS                                     ← the only footer row left; see the panel below
 ```
+
+**What a row carries**, left to right: a hit area that means "go here", then the
+row's own **verbs**, then its pills. Three consequences, and each one is a fault
+that was in the built column:
+
+- **A row is a place, and nothing folds a drawer.** Clicking a row goes there and
+  shows what is in it, *always* — never the reverse. A drawer is open exactly
+  while its view is the one selected; the way to put one away is to select
+  another, which is the only thing a person is saying when they click a row.
+  There is no caret. Two ways to hide one thing is one too many, and because a
+  fold is remembered, the second one gave a column that could open with the tree
+  of the view you were on already gone.
+- **A row's verbs live on the row.** "New conversation" and the search box were
+  the first two lines of the drawer under Chat, and the filter and the create
+  form were the first and last lines under Files: four permanent controls in a
+  250px column, on screen whether or not anybody was searching or creating, and
+  all of them one fold away from the row that names them. They are `+` and `⌕` on
+  the row now, and what they reveal appears in the drawer only while it is on.
+- **The row is a container, not a button.** Forced rather than chosen: a
+  `<button>` inside a `<button>` is not markup a browser keeps.
+
+**The root has a drawer too.** "All conversations" is a level, and a row that
+names a level and opens onto nothing makes the level look empty; its drawer is
+the same list the project's Chat row opens, one step up, each thread stamped with
+the project it is in.
+
+**Settings is a panel, not an accordion.**
+
+```
+[toggle]  JAIRA
+┌───────────────────────────────────────────┐    ← full height, over the column
+│ ‹  ⚙ SETTINGS                             │    ← the row IS the header
+│    Providers                              │
+│    Executors                              │
+│    Configuration                          │
+│    Appearance                             │
+│    History                                │
+│   ─────────────────────────────────────   │
+│    ≡ LOGS    ⌁ DEBUG    ☾ DARK            │    ← pinned to the bottom of the panel
+└───────────────────────────────────────────┘
+```
+
+It is pinned to the foot because it belongs to no project — true, and the reason
+it starts there. But the foot is also where the column runs out of room, so
+opening it as an accordion put its section list in the two inches between the
+last project and the bottom of the window, underneath the whole of the
+navigation it had just been left for.
+
+Over rather than taller, because **Settings is not a place in the address**: you
+are not in a project while you are in it, so the column has nothing to be showing
+underneath. The `‹` and the header row both mean "back to where you were", which
+is the view the window was showing when Settings was opened.
+
+**Logs, Debug and the theme are in it.** Belonging to no project is the whole of
+what they have in common with Settings, and four rows saying so at the bottom of
+the column were four rows the projects had to compete with. The rail keeps them:
+there is no panel at 46px to put them in, and losing them there would leave a
+mode of the window with no way to reach the log. For the same reason ⚙ in the
+rail opens the *column* rather than a view whose navigation cannot be drawn.
 
 - **One project expanded**, derived from the address. Never persisted — see the
   precedent in `uiState.ts`, where `SHUT.folders` is deliberately keyed per
@@ -313,6 +448,30 @@ Treatment:
 - Inside the band, **two nesting rules**: `--rule` under the project (the token
   whose comment reserves it for "the only thing saying what is inside what"), and
   `--line` under the view, at the 12px indent `.side-drawer` already uses.
+- **The root the drawer is standing in is not named.** Every root used to be
+  introduced by a row carrying its own name — inside a drawer hanging under a row
+  that is already that project's name, which printed it twice and spent the first
+  line of the column doing it. The others still introduce themselves: a second
+  checkout is a different place, and so is `~/.jaira` *while you are standing in
+  a checkout*. Matched on the DIRECTORY as well as the project stamp
+  (`rootNeedsName`): the shared root carries no project and is also a row in the
+  sidebar and a place to stand, so a stamp-only test could never be true there
+  and `~/.jaira` went on introducing itself inside itself.
+- What that line is worth instead is on the project row: **the folder the project
+  sits in**, beside its name, on the open project only. Two checkouts of one
+  repository are told apart by where they are, which is exactly the half a
+  basename throws away. One segment rather than the whole path — inside 250px the
+  whole of `/w/checkouts/acme` renders as `/w/ch…`, which is three characters of
+  the half every project on the machine has in common. The whole path is on the
+  row's tooltip, where a path belongs, and the open row's pills fold sooner
+  (`OPEN_PILL_BUDGET`) to pay for it — its counts are also on the two rows
+  directly beneath it, split by room.
+- **The tree continues them, one rule per level.** It indented with padding and
+  drew nothing, which dropped the column's own convention at exactly the point
+  where nesting gets deep: a row four levels down had no line to any of the four,
+  so "which folder is this in" was answered by counting pixels. 13px per level —
+  the indent it replaces, to the pixel — with the innermost rule in `--rule` and
+  its ancestors in `--line`.
 - In dark, `--panel` sits only ~6 points of luminance above `--panel-2`; the two
   hairline borders carry the band there. Check dark first.
 
@@ -350,9 +509,25 @@ which is a button. A task is selected, not pressed.
 
 - Ground is `--fill-ghost-hover` at rest and `--tint-accent` when selected. No
   border, no shadow, **no left stripe.**
+- **The column keeps the box the card gave up**, and this is the other half of the
+  same argument rather than an exception to it. A column is a *place* — the one
+  thing on the board a task moves between — so it earns a hairline all the way
+  round, a heading band on `--panel-3`, and a rule under that band. Two columns of
+  stripe-free cards with nothing between them read as one field of tiles, which is
+  what removing the card's box costs if nothing takes the boundary over. The
+  border is drawn always, never on hover: an edge that is only there while the
+  pointer is over it is not an edge.
+- The heading is `data-title` for the state's name and `app-secondary` for the
+  count, at the two ends of the band. **Nothing else** — the sequence number is
+  loose in `data-num` where there is one, and the count is not a pill: a pill on
+  this board is a *status* (§4.1), and spending that shape on a quantity puts a
+  sixth kind into a vocabulary of five.
 - The trailing pill is the same component as the sidebar's, with a word instead
   of a count. Active filled, status flat — so a column sorts itself visually
-  before a title is read.
+  before a title is read. **Nothing trails the pill** — no drill marker: the head
+  row is a title and a status, the width a marker takes comes out of the title,
+  and a glyph announcing that a double-click exists is a manual printed on the
+  machine.
 - The second line says which *kind* of waiting (`approve` vs `gate`) and why an
   error failed (`not a SyncEdit`, `3 attempts`). Merged in the count,
   distinguished where there is room.
@@ -434,12 +609,52 @@ Three rules borrowed, one added:
   Measure the candidate data family — if `i` and `W` advance the same it is
   monospace, if not, say so. A note, not a block: it is their app.
 
+**The headings are "app text" and "data text".** *Voice* is what the stylesheet
+calls the two scales and what §3 argues about; on the screen where a person picks
+a font, the thing being picked is the text of the app and the text of their data.
+A label naming an internal distinction makes somebody work out which of two
+abstractions their font is about before they can set it.
+
+**The control shows what is rendering, not only what was chosen.** `appFamily:
+[]` means unset — the property is removed and the stylesheet's own value stands,
+which is what keeps a change to the shipped default reaching everybody who never
+touched the control. On screen that produced an EMPTY BOX under a heading, which
+states that nothing is chosen and cannot state what the window is set in. The box
+now shows the shipped face (`DM Sans`, `JetBrains Mono`), marked `ours` and
+without a ✕ — there is no choice there to take back — and the resolved line under
+it leads with that face for the same reason. Choosing anything replaces it
+outright: `stackOf` prepends the choice to the platform fallback, and ours is not
+in that fallback. The stored value is untouched by any of this; it is a display.
+
 The control is a **multi-select**, not a text field: a stack is an ordered list,
 so the chips are numbered 1, 2 (the second family is what renders a glyph the
-first lacks), drag to reorder, ✕ to drop. The default stack is the last line of
-the menu — stated and un-removable, which makes "prepend, never replace" visible
-rather than a rule you have to know. **Size sits on the same line as the family
-it applies to.**
+first lacks) and sit in one box, left to right, in the order they are tried; ✕
+drops one. The default stack is the last line of the menu — stated,
+un-removable, and outside the menu's scrolling list so it cannot be scrolled
+away, which makes "prepend, never replace" visible rather than a rule you have to
+know. **Size sits on the same line as the family it applies to**, as a number
+with a stepper rather than a slider: a person knows whether they want 12 or 12.5,
+and a slider is the control for a quantity whose exact value does not matter.
+
+Three consequences of that shape, each decided against the obvious alternative:
+
+- **This section does not use the `Level` / `Field` chrome.** That chrome is a
+  statement on the left and a control on the right, which is right for forty
+  independent settings whose names are all that distinguish them. This screen has
+  six, they are two pairs and two switches, and every one is about type — so the
+  labels are one word, the controls are the width of the pane, and what belongs
+  beside a control is the preview, not a paragraph.
+- **It draws its own head.** A non-layered section gets no `settings-head` from
+  the chrome — there is no shared-versus-project switch to put in one — so the
+  fact that header would have carried, *whose* settings these are, is stated in
+  the pane: "Appearance · every project on this machine".
+- **The menu says which offered faces are actually here.** There is no API that
+  lists installed fonts, and `document.fonts.check` answers about loaded
+  webfonts — it says yes to a name no machine has ever heard of. What can be
+  answered is whether a *named* one resolves, by the same canvas measurement the
+  proportional check uses (`isInstalled`). A face that is absent is still allowed
+  into the stack, marked rather than refused: configuring one machine from
+  another is ordinary.
 
 One thing from t3code *not* to copy: its marketing CSS sets
 `font-feature-settings: "ss01", "ss02"` on DM Sans. The served font's features
@@ -536,8 +751,16 @@ is harder to reverse by accident than a rule.
 Rendered specimens, both themes, at real width. Each carries the alternatives
 that were considered and the reason the chosen one won.
 
+**The composed reference is in the repository**, at
+`packages/app/snapshot/reference/the-shell.html` — the seven figures this
+document's §2–§6 are drawn from, with the two faces extracted into
+`app/src/renderer/fonts/` and pointed at from there rather than embedded twice.
+A link is a reference somebody has to be logged in to open; a file in the tree is
+one a comparison can be run against.
+
 | Subject | Reference |
 | --- | --- |
+| **The shell, composed (seven figures)** | `packages/app/snapshot/reference/the-shell.html` · https://claude.ai/code/artifact/8657c833-6f01-4090-86e2-baf6e62b2628 |
 | Multi-project layouts (five) | https://claude.ai/code/artifact/182b8a00-23b6-4fed-a107-7c9c296d04f0 |
 | Sidebar structures (four) | https://claude.ai/code/artifact/c25f5b2e-58d6-494a-b8f4-f2edded48aa3 |
 | Projects-over-views variants | https://claude.ai/code/artifact/389ace43-3491-4a63-94aa-4b819d83f8aa |
@@ -552,5 +775,49 @@ that were considered and the reason the chosen one won.
 | The pill vocabulary | https://claude.ai/code/artifact/92296173-c85e-4cff-a80c-f73c2c6c1802 |
 | `+N` overflow, final pill set | https://claude.ai/code/artifact/578b0a97-25ce-4bd7-9203-cc8fc28e0510 |
 
-These are private links on the author's account. Everything an implementer needs
-is in §3–§6; the references are for the judgement calls, not the values.
+The remaining rows are private links on the author's account. Everything an
+implementer needs is in §3–§6; the references are for the judgement calls, not
+the values.
+
+### 10.1 Checking the app against them
+
+```
+npm --workspace @jaira/app run snapshot -- --ref
+```
+
+Photographs the app's own components — the real `Board`, `Sidebar`,
+`AppearancePane`, `Pill` and register classes, framed at the size of the figure
+each one answers to — and, with `--ref`, the figures themselves. Both land in
+`packages/app/snapshot/out/` (git-ignored) to be read side by side.
+
+It runs in **Electron**, not a headless browser bought in for the purpose: this
+app *is* Electron, so a picture taken here is a picture of what ships, down to
+the rasteriser. A screenshot from another engine disagrees with the running app
+about hinting and subpixel positioning, and every one of those disagreements
+reads as a design difference.
+
+Three things it is deliberately not:
+
+- **Not a pixel-diff gate.** The figures are mockups: they carry hand-written
+  strings the app has no field for, and a numeric threshold over that comparison
+  measures the mock's prose, not the app's chrome. What the pictures are for is a
+  person looking at two of them.
+- **Not a place to reimplement a surface.** A specimen that draws its own markup
+  answers a question about the specimen. `snapshot/specimens.tsx` imports every
+  component it shows, and the only markup it owns is the window frame.
+- **Not committed output.** The PNGs go stale the first time a hairline moves.
+
+Three differences the harness surfaces that are *data*, not styling, and are
+still open:
+
+1. **A card's second line.** The figures say `40s · 3 turns` for a running card
+   and `6 min ago · not a SyncEdit` for a failed one. `BoardCard` carries neither
+   an elapsed time, a turn count, nor a failure reason, so the app says the
+   active state id instead.
+2. **`approve` versus `gate`.** §5.3 asks the second line to distinguish a tool
+   approval from an authored gate. Both arrive as `waiting_for_user`;
+   `waitingKindOf` currently splits `waiting_for_user`/`blocked`, which is a
+   different cut.
+3. **Where `interrupted` sits.** Figure 06 files a stopped run under `finished`;
+   `laneOf` puts it in `paused`, which is what §9.1 decided and this document
+   still holds to. The figure is the loose one.

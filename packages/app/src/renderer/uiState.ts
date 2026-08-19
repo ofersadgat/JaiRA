@@ -96,12 +96,15 @@ export const FOLD = {
    * the app's navigation with it and leave one button to get it back.
    */
   shellSidebar: "shell.sidebar",
-  /** The sidebar's file browser — the accordion that holds the tree. */
-  shellFiles: "shell.files",
-  /** The sidebar's other accordion: the Settings sections, while Settings is open. */
-  shellSections: "shell.sections",
-  /** The sidebar's conversation list, while Chat is open. */
-  shellChats: "shell.chats",
+  /*
+   * `shell.files`, `shell.sections` and `shell.chats` were here, one per drawer in the sidebar.
+   *
+   * There are no such folds any more (see `sidebar.tsx`): a drawer is shown exactly while its view
+   * is the one selected, so there is no second state to remember. The ids are named here rather
+   * than merely deleted because a settings file written before this still carries them — reading an
+   * unknown key costs nothing, and the alternative was giving a future control one of these names
+   * and inheriting somebody's year-old fold.
+   */
   /** The Files view's lower half: "Configuration" on a state, "Source" on anything else. */
   filesEditor: "files.editor",
   /** Whether the JSON editor is showing the schema's field reference. */
@@ -119,9 +122,6 @@ export const FOLD = {
  */
 export const FOLD_DEFAULTS: Record<string, boolean> = {
   [FOLD.shellSidebar]: true,
-  [FOLD.shellFiles]: true,
-  [FOLD.shellSections]: true,
-  [FOLD.shellChats]: true,
   [FOLD.filesEditor]: true,
   [FOLD.schemaReference]: false,
   [FOLD.settingsEffective]: false,

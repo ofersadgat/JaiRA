@@ -14,11 +14,12 @@
  * The tree shows BOTH layer roots, which is what removes the layer picker: which copy of a file you
  * are about to edit is its position on screen rather than a mode you have to remember being in.
  */
-import { Fragment, useMemo, useState, type CSSProperties, type JSX } from "react";
+import { Fragment, useMemo, useState, type CSSProperties, type JSX, type MouseEvent as ReactMouseEvent } from "react";
 import type {
   BoardCard,
   FileMutationResult,
   FileNode,
+  FileRoot,
   FileSource,
   FileTree,
   InstanceNode,
@@ -162,10 +163,13 @@ function TreeNode({
     <>
       <li
         className={`tree-item${isSelected ? " sel" : ""}${node.shadowed ? " shadowed" : ""}${tone}${isTextMime(node.mime) || isDir ? "" : " inert"}`}
-        style={{ paddingLeft: 6 + depth * 13 }}
         onClick={() => (isDir ? onToggle(key) : onSelect(node))}
         onContextMenu={(e) => {
           e.preventDefault();
+          // And it stops here. The root's own menu now hangs off the LIST (the row that used to
+          // carry it is gone — see `FileTreePanel`), so an unstopped right-click on a file would
+          // open this menu and then be overwritten by the root's on the way up.
+          e.stopPropagation();
           // Right-click selects too, so the menu always acts on the row that is highlighted — a menu
           // operating on something other than what looks selected is how the wrong file gets deleted.
           if (selectable) onSelect(node);
@@ -173,6 +177,17 @@ function TreeNode({
         }}
         title={node.error ?? lintTitle(node, isDir) ?? node.path}
       >
+        {/*
+          One rule per level of nesting, drawn rather than padded for.
+          The indent used to be `paddingLeft`, which says how far in a row is and nothing about what
+          it is in. The sidebar answers that with a rule down the left of everything inside a project
+          and everything inside a view — and then the tree, which is where nesting actually gets deep,
+          dropped the convention at its own first branch. These are the same line, continued: one per
+          ancestor, so a row four levels down is joined to all four.
+        */}
+        {Array.from({ length: depth }, (_, i) => (
+          <i key={i} className="tree-guide" />
+        ))}
         <span className="glyph">{isDir ? (open ? "▾" : "▸") : (KIND_GLYPH[node.kind] ?? "·")}</span>
         <span className="name">{node.name}</span>
         {unsaved ? (
@@ -227,6 +242,25 @@ function statePrefixOf(node: FileNode): string | null {
 
 const copyText = (text: string): void => void navigator.clipboard?.writeText(text);
 
+/**
+ * Does this root need introducing, in a tree being browsed from `project`?
+ *
+ * Not the one the drawer is standing in: the project row directly above the tree is already that
+ * name, and printing it again at the top of the branch says the same word twice and costs the first
+ * line of a 250px column. Every OTHER root does — a second checkout is a different place, and so is
+ * `~/.jaira` while you are standing in a checkout.
+ *
+ * Matched on the DIRECTORY as well as on the stamp, and that second test is the whole reason this
+ * is a named function with a test under it. The shared root carries no `project` — it belongs to
+ * none, see `FileTree` — and it is also a row in the sidebar and a perfectly ordinary place to
+ * stand. Standing there, a stamp-only test can never be true, so the one root on screen went on
+ * introducing itself inside itself.
+ */
+export function rootNeedsName(root: Pick<FileRoot, "dir" | "project">, project: string | null): boolean {
+  if (project === null) return true;
+  return root.dir !== project && root.project !== project;
+}
+
 /** The default for {@link FileTreePanel}'s `dirty`. A module constant, so its identity is stable. */
 const EMPTY_DIRTY: ReadonlySet<string> = new Set();
 
@@ -247,6 +281,9 @@ export function FileTreePanel({
   onRenameFile,
   onDeleteFile,
   onReveal,
+  find = false,
+  creating = false,
+  project = null,
 }: {
   tree: FileTree | null;
   selected: FileSelection | null;
@@ -288,6 +325,25 @@ export function FileTreePanel({
   /** Delete the same. A directory takes everything in it. */
   onDeleteFile: (layer: WorkflowLayer, path: string, force?: boolean) => Promise<FileMutationResult | null>;
   onReveal: (file: string) => void;
+  /**
+   * Whether the FIND field is showing, and whether the "new state" form is.
+   *
+   * Both were permanent: a filter box over the tree and a three-control form under it, on screen in
+   * a 250px column whether or not anybody was filtering or creating. They are the Files row's own
+   * verbs now (`SidebarAct`), and these say which of them is currently on. Defaulted off, so a host
+   * that draws this panel without a row to press still gets a tree.
+   */
+  find?: boolean;
+  creating?: boolean;
+  /**
+   * The project this tree is being browsed FROM — the row the drawer hangs under.
+   *
+   * What it decides is which root goes unnamed. The tree's top level is every open project with
+   * `~/.jaira` beside them (SHELL.md §2.2), and each of those used to be introduced by a row
+   * carrying its own name — which, in a drawer nested under a row that is already that project's
+   * name, printed it twice. The one you are standing in is the one that needs no introduction.
+   */
+  project?: string | null;
 }): JSX.Element {
   /** Used only when the host does not control the folding — see the prop's own note. */
   const [ownCollapsed, setOwnCollapsed] = useState<ReadonlySet<string>>(new Set());
@@ -614,55 +670,70 @@ export function FileTreePanel({
    */
   return (
     <div className="file-browser">
-      <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter…" />
+      {find ? (
+        <input
+          className="tree-find"
+          autoFocus
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={(e) => (e.key === "Escape" ? setFilter("") : undefined)}
+          placeholder="Filter…"
+        />
+      ) : null}
 
       <div className="scroll">
         {tree === null ? (
           <p className="empty">Open a project to browse its files.</p>
         ) : (
-          tree.roots.map((root) => (
+          tree.roots.map((root) => {
+            const named = rootNeedsName(root, project);
+            const rootMenu = (e: ReactMouseEvent): void => {
+              e.preventDefault();
+              e.stopPropagation();
+              setMenu({
+                x: e.clientX,
+                y: e.clientY,
+                items: [
+                  {
+                    label: "New state…",
+                    onSelect: () =>
+                      setAsk({
+                        title: `New state in the ${LAYER_LABEL[root.layer]} root`,
+                        field: "State id",
+                        confirmLabel: "Create",
+                        onConfirm: (v) => {
+                          setAsk(null);
+                          onCreate(v, root.layer);
+                        },
+                      }),
+                  },
+                  ...creationItems(root.layer, ""),
+                  { label: "Copy path", separator: true, onSelect: () => copyText(root.dir) },
+                  {
+                    label: "Reveal in file explorer",
+                    disabled: !root.exists,
+                    onSelect: () => onReveal(root.dir),
+                  },
+                ],
+              });
+            };
+            return (
             /* Keyed by the ROOT's directory, not by its layer: the tree's top level is the projects
                now (SHELL.md §2.2), so several roots share the layer `project` and only the directory
-               tells them apart. */
-            <ul className="file-tree" key={root.dir}>
-              <li
-                className="tree-root"
-                title={root.dir}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setMenu({
-                    x: e.clientX,
-                    y: e.clientY,
-                    items: [
-                      {
-                        label: "New state…",
-                        onSelect: () =>
-                          setAsk({
-                            title: `New state in the ${LAYER_LABEL[root.layer]} root`,
-                            field: "State id",
-                            confirmLabel: "Create",
-                            onConfirm: (v) => {
-                              setAsk(null);
-                              onCreate(v, root.layer);
-                            },
-                          }),
-                      },
-                      ...creationItems(root.layer, ""),
-                      { label: "Copy path", separator: true, onSelect: () => copyText(root.dir) },
-                      {
-                        label: "Reveal in file explorer",
-                        disabled: !root.exists,
-                        onSelect: () => onReveal(root.dir),
-                      },
-                    ],
-                  });
-                }}
-              >
+               tells them apart.
+
+               The root's own menu hangs off the LIST, not off a row, so it survives the row being
+               dropped: right-clicking the empty space under a headerless tree still offers "new
+               file here". Every node stops the event, so a right-click on a file gets the file's. */
+            <ul className="file-tree" key={root.dir} title={named ? undefined : root.dir} onContextMenu={rootMenu}>
+              {named ? (
+              <li className="tree-root" title={root.dir} onContextMenu={rootMenu}>
                 {/* The project's own name, in the data voice — a directory basename, and the same
                     string the crumb prints. `~/.jaira` is listed once beside the projects rather
                     than under each, so it names itself the same way. */}
                 <span className="data-secondary">{root.label}</span>
               </li>
+              ) : null}
               {(filter.length > 0 ? matches(root.nodes) : root.nodes).map((node) => (
                 <TreeNode
                   key={`${node.project ?? node.layer}:${node.path}`}
@@ -686,12 +757,16 @@ export function FileTreePanel({
                 </li>
               ) : null}
             </ul>
-          ))
+            );
+          })
         )}
       </div>
 
       {/* The one place a layer is still chosen, and the only question it can be: where does a NEW
-          thing land? Everything that already exists answers it by where it sits above. */}
+          thing land? Everything that already exists answers it by where it sits above. Shown when
+          the row's `+` asks for it — three controls to create something are worth their height while
+          you are creating something and not before. */}
+      {creating ? (
       <form
         className="new-state"
         onSubmit={(e) => {
@@ -709,6 +784,7 @@ export function FileTreePanel({
           Create
         </button>
       </form>
+      ) : null}
 
       {menu ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
       {ask ? <AskDialog spec={ask} onCancel={() => setAsk(null)} /> : null}

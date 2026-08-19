@@ -1,0 +1,2211 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}</style></head><body>
+<title>The Shell</title>
+<style>
+  @font-face {
+    font-family: "DM Sans";
+    src: url(../../src/renderer/fonts/dm-sans-variable.woff2) format("woff2");
+    font-weight: 100 1000;
+    font-style: normal;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: "JetBrains Mono";
+    src: url(../../src/renderer/fonts/jetbrains-mono-variable.woff2) format("woff2");
+    font-weight: 400 800;
+    font-style: normal;
+    font-display: swap;
+  }
+
+  :root {
+    --ground: #f2f4f7;
+    --surface: #ffffff;
+    --surface-2: #e8ebf1;
+    --ink: #141821;
+    --ink-2: #3d4657;
+    --dim: #666f81;
+    --rule: #d3d8e1;
+    --rule-soft: #e3e6ed;
+    --signal: #2b6a58;
+    --signal-ink: #1f5645;
+    --signal-soft: rgba(43, 106, 88, 0.11);
+    --flag: #a8451f;
+    --flag-soft: rgba(168, 69, 31, 0.09);
+    --sans: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0b0d12;
+      --surface: #13161d;
+      --surface-2: #1a1e27;
+      --ink: #e3e7ef;
+      --ink-2: #b2bac9;
+      --dim: #848da1;
+      --rule: #242935;
+      --rule-soft: #1c202a;
+      --signal: #63c0a4;
+      --signal-ink: #7fd0b7;
+      --signal-soft: rgba(99, 192, 164, 0.13);
+      --flag: #e08a63;
+      --flag-soft: rgba(224, 138, 99, 0.1);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0b0d12;
+    --surface: #13161d;
+    --surface-2: #1a1e27;
+    --ink: #e3e7ef;
+    --ink-2: #b2bac9;
+    --dim: #848da1;
+    --rule: #242935;
+    --rule-soft: #1c202a;
+    --signal: #63c0a4;
+    --signal-ink: #7fd0b7;
+    --signal-soft: rgba(99, 192, 164, 0.13);
+    --flag: #e08a63;
+    --flag-soft: rgba(224, 138, 99, 0.1);
+    color-scheme: dark;
+  }
+
+  .lt {
+    --mk-panel: #ffffff;
+    --mk-panel2: #eceff4;
+    --mk-panel3: #e2e7ef;
+    --mk-bg: #f5f6f8;
+    --mk-line: #d4dae3;
+    --mk-rule: #c2cbd9;
+    --mk-text: #1b2130;
+    --mk-dim: #5c6779;
+    --mk-faint: #949cad;
+    --mk-accent: #2563c7;
+    --mk-ok: #0f7a45;
+    --mk-warn: #8a6100;
+    --mk-bad: #c02c1f;
+    --mk-sel: rgba(24, 30, 42, 0.06);
+    --p1: #3f76d4;
+    --p2: #b57a1c;
+    --p3: #7d5fc7;
+    --p0: #737b8d;
+  }
+  .dk {
+    --mk-panel: #161922;
+    --mk-panel2: #1c2029;
+    --mk-panel3: #232833;
+    --mk-bg: #0f1115;
+    --mk-line: #262b36;
+    --mk-rule: #3b4356;
+    --mk-text: #e6e9ef;
+    --mk-dim: #8b93a7;
+    --mk-faint: #5a6274;
+    --mk-accent: #6ea8fe;
+    --mk-ok: #57d38c;
+    --mk-warn: #ffc857;
+    --mk-bad: #ff6b6b;
+    --mk-sel: rgba(255, 255, 255, 0.055);
+    --p1: #6e9df0;
+    --p2: #d7a145;
+    --p3: #a98ee6;
+    --p0: #8b93a7;
+  }
+  .lt,
+  .dk {
+    --mk-tint-accent: color-mix(in srgb, var(--mk-accent) 10%, transparent);
+    --font-app: "DM Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
+    --font-data: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    --size-app: 12.5px;
+    --size-data: 12px;
+  }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-optical-sizing: auto;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: clamp(2.5rem, 6vw, 4.5rem) clamp(1.1rem, 4vw, 2.5rem) 6rem;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(2.5rem, 5vw, 3.75rem);
+  }
+  .prose {
+    max-width: 66ch;
+  }
+  .prose p {
+    margin: 0 0 0.85em;
+    color: var(--ink-2);
+  }
+  .prose p:last-child {
+    margin-bottom: 0;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    margin: 0;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  h1 {
+    font-size: clamp(2.1rem, 5vw, 2.9rem);
+    line-height: 1.08;
+    letter-spacing: -0.035em;
+  }
+  h2 {
+    font-size: 1.36rem;
+    line-height: 1.25;
+  }
+  h3 {
+    font-size: 1.02rem;
+    letter-spacing: -0.01em;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.67rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--dim);
+    margin: 0 0 0.75rem;
+  }
+  code {
+    font-family: var(--mono);
+    font-size: 0.84em;
+    color: var(--ink);
+    background: var(--surface-2);
+    border-radius: 4px;
+    padding: 0.08em 0.34em;
+  }
+  a {
+    color: var(--signal-ink);
+  }
+  a:focus-visible {
+    outline: 2px solid var(--signal);
+    outline-offset: 2px;
+  }
+  .lede {
+    font-size: 1.1rem;
+    color: var(--ink-2);
+    max-width: 62ch;
+    margin: 0;
+  }
+  .masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+  }
+  .toc {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+    gap: 1px;
+    background: var(--rule-soft);
+    border: 1px solid var(--rule-soft);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-top: 0.9rem;
+  }
+  .toc a {
+    background: var(--surface);
+    padding: 0.7rem 0.85rem;
+    text-decoration: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+  .toc a .n {
+    font-family: var(--mono);
+    font-size: 0.64rem;
+    letter-spacing: 0.12em;
+    color: var(--dim);
+  }
+  .toc a .t {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .block {
+    display: flex;
+    flex-direction: column;
+    gap: 1.15rem;
+    padding-top: 1.9rem;
+    border-top: 1px solid var(--rule);
+    scroll-margin-top: 1rem;
+  }
+  .shead {
+    display: flex;
+    align-items: baseline;
+    gap: 0.8rem;
+    flex-wrap: wrap;
+  }
+  .snum {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    color: var(--dim);
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    padding: 0.1rem 0.55rem;
+    flex: none;
+  }
+  .sref {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    color: var(--dim);
+  }
+  .sheet {
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .sheet-row {
+    display: flex;
+    gap: 14px;
+    min-width: min-content;
+    align-items: flex-start;
+  }
+  .spec {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    flex: none;
+    margin: 0;
+  }
+  .spec figcaption {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--dim);
+  }
+  .spec figcaption b {
+    font-weight: 500;
+    color: var(--ink);
+  }
+  .notes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(245px, 1fr));
+    gap: 0.95rem 2rem;
+    font-size: 0.86rem;
+  }
+  .notes div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.18rem;
+  }
+  .notes b {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--dim);
+    font-weight: 500;
+  }
+  .notes span {
+    color: var(--ink-2);
+    line-height: 1.46;
+  }
+  .notes .key b {
+    color: var(--signal);
+  }
+
+  /* ═══ registers ═══ */
+  .t-app-title {
+    font-family: var(--font-app);
+    font-size: calc(var(--size-app) * 1.05);
+    font-weight: 700;
+    letter-spacing: -0.012em;
+    color: var(--mk-text);
+  }
+  .t-app-label {
+    font-family: var(--font-app);
+    font-size: calc(var(--size-app) * 0.8);
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--mk-dim);
+  }
+  .t-app-label.is-active {
+    color: var(--mk-text);
+  }
+  .t-app-text {
+    font-family: var(--font-app);
+    font-size: var(--size-app);
+    font-weight: 500;
+    color: var(--mk-text);
+  }
+  .t-app-secondary {
+    font-family: var(--font-app);
+    font-size: calc(var(--size-app) * 0.88);
+    font-weight: 400;
+    color: var(--mk-dim);
+  }
+  .t-app-absent {
+    font-family: var(--font-app);
+    font-size: var(--size-app);
+    font-weight: 500;
+    font-style: italic;
+    color: var(--mk-faint);
+  }
+  .t-data-title {
+    font-family: var(--font-data);
+    font-size: calc(var(--size-data) * 1.12);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--mk-text);
+  }
+  .t-data-text {
+    font-family: var(--font-data);
+    font-size: calc(var(--size-data) * 0.96);
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    color: var(--mk-text);
+  }
+  .t-data-text.is-active {
+    font-weight: 600;
+  }
+  .t-data-secondary {
+    font-family: var(--font-data);
+    font-size: calc(var(--size-data) * 0.84);
+    font-weight: 400;
+    color: var(--mk-dim);
+  }
+  .t-data-faint {
+    font-family: var(--font-data);
+    font-size: calc(var(--size-data) * 0.84);
+    font-weight: 400;
+    color: var(--mk-faint);
+  }
+  .t-data-num {
+    font-family: var(--font-data);
+    font-size: calc(var(--size-data) * 0.79);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--mk-dim);
+  }
+
+  /* ═══ pills ═══ */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex: none;
+    border-radius: 999px;
+    padding: 1px 6px 1px 5px;
+    line-height: 15px;
+    font-family: var(--font-data);
+    font-variant-numeric: tabular-nums;
+    font-size: calc(var(--size-data) * 0.8);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .pill .ic {
+    font-size: calc(var(--size-data) * 0.78);
+    line-height: 1;
+  }
+  .pill.act {
+    color: var(--c);
+    background: color-mix(in srgb, var(--c) 15%, transparent);
+  }
+  .pill.sta {
+    color: var(--c);
+    background: transparent;
+    padding-left: 3px;
+    padding-right: 3px;
+  }
+  .pill.more {
+    color: var(--mk-faint);
+    background: transparent;
+    padding: 1px 3px;
+    font-weight: 500;
+  }
+  .c-run {
+    --c: var(--mk-accent);
+  }
+  .c-wait {
+    --c: var(--mk-warn);
+  }
+  .c-err {
+    --c: var(--mk-bad);
+  }
+  .c-warn {
+    --c: var(--mk-warn);
+  }
+  .c-ok {
+    --c: var(--mk-ok);
+  }
+  .pills {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex: none;
+  }
+
+  /* ═══ window ═══ */
+  .win {
+    border: 1px solid var(--mk-line);
+    border-radius: 11px;
+    overflow: hidden;
+    background: var(--mk-bg);
+    display: flex;
+    flex-direction: column;
+    width: 780px;
+    height: 452px;
+    flex: none;
+    line-height: 1.4;
+    user-select: none;
+  }
+  .win.tall {
+    height: 472px;
+  }
+  .win-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+  }
+  .main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .addr {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--mk-line);
+    white-space: nowrap;
+    overflow: hidden;
+    flex: none;
+  }
+  .addr .crumb {
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  .addr .head {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: color-mix(in srgb, var(--h) 18%, transparent);
+  }
+  .addr .head::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--h);
+    flex: none;
+  }
+  .addr .sep {
+    color: var(--mk-faint);
+    font-family: var(--font-data);
+    font-size: 10px;
+  }
+  .addr .tools {
+    margin-left: auto;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    padding-left: 10px;
+  }
+  .btn {
+    font-family: var(--font-app);
+    font-size: calc(var(--size-app) * 0.84);
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 6px;
+    background: var(--mk-accent);
+    color: #fff;
+    white-space: nowrap;
+  }
+  .btn.ghost {
+    background: transparent;
+    border: 1px solid var(--mk-line);
+    color: var(--mk-dim);
+    font-weight: 500;
+  }
+  .canvas {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
+  }
+  .doc {
+    flex: 1;
+    min-width: 0;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    overflow: hidden;
+  }
+  .doc .l {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--mk-panel3);
+  }
+  .doc .h {
+    font-family: var(--font-data);
+    font-size: 11px;
+    color: var(--mk-accent);
+    margin-top: 5px;
+  }
+  .insp {
+    flex: 0 0 178px;
+    border-left: 1px solid var(--mk-line);
+    background: var(--mk-panel);
+    padding: 10px 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .strip {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 11px;
+    border-top: 1px solid var(--mk-line);
+    background: var(--mk-panel2);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--font-data);
+    font-size: 9.5px;
+    color: var(--mk-text);
+    background: color-mix(in srgb, var(--h) 16%, transparent);
+    border-radius: 999px;
+    padding: 0 6px;
+    line-height: 15px;
+    flex: none;
+  }
+  .chip::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--h);
+    flex: none;
+  }
+  .sep-dot {
+    color: var(--mk-faint);
+    flex: none;
+  }
+
+  /* ═══ sidebar ═══ */
+  .sb {
+    width: 250px;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--mk-panel2);
+    color: var(--mk-text);
+    border-right: 1px solid var(--mk-line);
+    overflow: hidden;
+  }
+  .sb.solo {
+    border-right: 0;
+  }
+  .sb-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    min-height: 34px;
+    padding: 0 8px;
+  }
+  .tg {
+    font-family: var(--font-data);
+    font-size: 10px;
+    color: var(--mk-dim);
+    width: 22px;
+    text-align: center;
+    flex: none;
+  }
+  .sb-list {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 0 0 6px;
+    overflow: hidden;
+  }
+  .sec {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    padding: 0 8px;
+  }
+  .sec.open {
+    background: var(--mk-panel);
+    border-top: 1px solid var(--mk-line);
+    border-bottom: 1px solid var(--mk-line);
+    margin: 2px 0 5px;
+    padding-bottom: 6px;
+  }
+  .pj {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex: none;
+    padding: 8px 8px 6px;
+    white-space: nowrap;
+  }
+  .sec:not(.open) .pj {
+    padding: 5px 8px;
+  }
+  .pj .nm {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--h);
+    flex: none;
+  }
+  .push {
+    margin-left: auto;
+    padding-left: 6px;
+  }
+  .tw {
+    flex: none;
+    font-size: 9px;
+    color: var(--mk-faint);
+  }
+  .kids {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding-left: 8px;
+    margin-left: 12px;
+    border-left: 1px solid var(--mk-rule);
+    padding-bottom: 4px;
+  }
+  .vw {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 26px;
+    flex: none;
+    padding: 0 7px;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+  .vw .gl {
+    width: 15px;
+    flex: none;
+    text-align: center;
+    font-size: 12.5px;
+    color: var(--mk-dim);
+  }
+  .vw.is-active {
+    background: var(--mk-tint-accent);
+  }
+  .vw.is-active .gl {
+    color: var(--mk-text);
+  }
+  .tree {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 3px 0 6px 8px;
+    margin-left: 6px;
+    border-left: 1px solid var(--mk-line);
+  }
+  .tree span {
+    padding: 1px 6px;
+    border-radius: 5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tree span.is-active {
+    background: var(--mk-tint-accent);
+  }
+  .sb-foot {
+    margin-top: auto;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 6px;
+    border-top: 1px solid var(--mk-line);
+  }
+  .sb-foot .vw {
+    padding: 0 8px;
+    gap: 9px;
+  }
+
+  /* collapsed rail */
+  .rail {
+    width: 46px;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: var(--mk-panel2);
+    border-right: 1px solid var(--mk-line);
+    padding: 0 0 6px;
+    gap: 5px;
+  }
+  .rail .sb-top {
+    justify-content: center;
+    padding: 0;
+    align-self: stretch;
+  }
+  .tile {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    font-family: var(--font-data);
+    font-size: 10.5px;
+    font-weight: 600;
+    background: var(--mk-panel);
+    border: 1px solid var(--mk-line);
+    color: var(--mk-dim);
+    position: relative;
+    flex: none;
+  }
+  .tile.on {
+    background: color-mix(in srgb, var(--h) 22%, transparent);
+    border-color: var(--h);
+    color: var(--mk-text);
+  }
+  .tile .pip {
+    position: absolute;
+    right: -3px;
+    top: -3px;
+    min-width: 11px;
+    height: 11px;
+    padding: 0 3px;
+    border-radius: 6px;
+    background: var(--c, var(--mk-bad));
+    color: #fff;
+    font-size: 8px;
+    line-height: 11px;
+    font-family: var(--font-data);
+  }
+  .rail hr {
+    width: 20px;
+    border: 0;
+    border-top: 1px solid var(--mk-line);
+    margin: 2px 0;
+    flex: none;
+  }
+  .rail .gl {
+    width: 34px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border-radius: 6px;
+    color: var(--mk-dim);
+    font-size: 14px;
+    flex: none;
+  }
+  .rail .gl.on {
+    background: var(--mk-tint-accent);
+    color: var(--mk-text);
+  }
+  .rail .rfoot {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    align-self: stretch;
+    padding-top: 6px;
+    border-top: 1px solid var(--mk-line);
+  }
+
+  /* ═══ board ═══ */
+  .board {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    gap: 9px;
+    padding: 9px;
+    overflow: hidden;
+  }
+  .col {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid var(--mk-line);
+    border-radius: 9px;
+    background: var(--mk-panel2);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .col > .ch {
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--mk-line);
+    background: var(--mk-panel3);
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+  }
+  .col .cb {
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow: hidden;
+  }
+  .lane {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 5px 2px;
+  }
+  .lane .bar {
+    flex: 1;
+    height: 1px;
+    background: var(--mk-line);
+  }
+  .task {
+    border-radius: 8px;
+    padding: 6px 8px;
+    background: var(--mk-sel);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .task.sel {
+    background: var(--mk-tint-accent);
+  }
+  .task .r {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .task .ti {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ═══ tables ═══ */
+  .tblwrap {
+    overflow-x: auto;
+  }
+  .tbl {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.86rem;
+  }
+  .tbl th,
+  .tbl td {
+    text-align: left;
+    padding: 0.48rem 0.8rem;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: middle;
+  }
+  .tbl thead th {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: var(--dim);
+    font-weight: 500;
+    border-bottom: 1px solid var(--rule);
+  }
+  .tbl td {
+    color: var(--ink-2);
+  }
+  .tbl .m {
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    white-space: nowrap;
+    color: var(--ink);
+  }
+  .tbl .k {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+  .tbl .k.a {
+    color: var(--flag);
+  }
+  .tbl .k.s {
+    color: var(--signal);
+  }
+  .demo {
+    padding: 0.3rem 0.8rem !important;
+  }
+  .samp {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 9px;
+    padding: 0.55rem 0.85rem;
+  }
+
+  /* legend */
+  .withlegend {
+    display: flex;
+    gap: 14px;
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+  .legend {
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    overflow: hidden;
+    flex: 1 1 320px;
+    min-width: 290px;
+    align-self: flex-start;
+  }
+  .legend .lh {
+    background: var(--surface-2);
+    font-family: var(--mono);
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--dim);
+    padding: 0.45rem 0.85rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  .legend .lr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    gap: 0.7rem;
+    padding: 0.38rem 0.85rem;
+    border-bottom: 1px solid var(--rule-soft);
+    font-size: 0.82rem;
+    color: var(--ink-2);
+    align-items: baseline;
+  }
+  .legend .lr:last-child {
+    border-bottom: 0;
+  }
+  .legend .lr .t {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    white-space: nowrap;
+    color: var(--signal-ink);
+  }
+
+  /* appearance pane */
+  .settings {
+    width: 462px;
+    flex: none;
+    border: 1px solid var(--mk-line);
+    border-radius: 10px;
+    background: var(--mk-bg);
+    overflow: visible;
+    display: flex;
+    flex-direction: column;
+  }
+  .settings > .sh {
+    padding: 9px 13px;
+    border-bottom: 1px solid var(--mk-line);
+    background: var(--mk-panel2);
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    border-radius: 10px 10px 0 0;
+  }
+  .settings .sbody {
+    padding: 12px 13px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 13px;
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    position: relative;
+  }
+  .fline {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+  }
+  .stackbox {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid var(--mk-line);
+    border-radius: 7px;
+    background: var(--mk-panel);
+    padding: 3px 4px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .stackbox.open {
+    border-color: var(--mk-accent);
+  }
+  .fam {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--mk-panel3);
+    border-radius: 5px;
+    padding: 2px 5px 2px 6px;
+    flex: none;
+  }
+  .fam .x {
+    color: var(--mk-faint);
+    font-size: 9px;
+  }
+  .addf {
+    color: var(--mk-dim);
+    padding: 2px 6px;
+    flex: none;
+  }
+  .sizebox {
+    flex: none;
+    width: 84px;
+    border: 1px solid var(--mk-line);
+    border-radius: 7px;
+    background: var(--mk-panel);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 4px 0 8px;
+  }
+  .sizebox .step {
+    display: flex;
+    flex-direction: column;
+    line-height: 0.8;
+    color: var(--mk-faint);
+    font-size: 8px;
+    padding: 2px;
+  }
+  .menu {
+    position: absolute;
+    left: 0;
+    top: 100%;
+    margin-top: 4px;
+    width: 252px;
+    background: var(--mk-panel);
+    border: 1px solid var(--mk-line);
+    border-radius: 8px;
+    box-shadow: 0 10px 26px rgba(24, 30, 42, 0.18);
+    padding: 4px;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .dk .menu {
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  }
+  .menu .mi {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 3px 7px;
+    border-radius: 5px;
+  }
+  .menu .mi.on {
+    background: var(--mk-tint-accent);
+  }
+  .menu .tick {
+    width: 12px;
+    flex: none;
+    color: var(--mk-accent);
+    font-size: 10px;
+  }
+  .menu .msep {
+    border-top: 1px solid var(--mk-line);
+    margin: 3px 0;
+  }
+  .menu .mh {
+    padding: 4px 7px 3px;
+  }
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .toggle .sw {
+    width: 26px;
+    height: 15px;
+    border-radius: 999px;
+    background: var(--mk-panel3);
+    position: relative;
+    flex: none;
+  }
+  .toggle .sw.on {
+    background: var(--mk-accent);
+  }
+  .toggle .sw::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--mk-panel);
+  }
+  .toggle .sw.on::after {
+    left: auto;
+    right: 2px;
+  }
+  .divider {
+    border-top: 1px solid var(--mk-line);
+  }
+
+  pre.algo {
+    font-family: var(--mono);
+    font-size: 0.77rem;
+    line-height: 1.7;
+    background: var(--surface-2);
+    border-radius: 9px;
+    padding: 0.9rem 1.1rem;
+    overflow-x: auto;
+    color: var(--ink-2);
+    margin: 0;
+  }
+  pre.algo b {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  pre.algo i {
+    color: var(--dim);
+    font-style: normal;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+</style>
+
+<div class="page">
+  <header class="masthead">
+    <p class="eyebrow">JaiRA · the final design</p>
+    <h1>The Shell</h1>
+    <p class="lede">
+      Every decision, drawn as it will ship. No alternatives on this page — the options and the reasons
+      one won are in the references at the end of <code>SHELL.md</code>; this is the target.
+    </p>
+    <nav class="toc">
+      <a href="#s1"><span class="n">01</span><span class="t">The window</span></a>
+      <a href="#s2"><span class="n">02</span><span class="t">The sidebar</span></a>
+      <a href="#s3"><span class="n">03</span><span class="t">Collapsed</span></a>
+      <a href="#s4"><span class="n">04</span><span class="t">Two voices</span></a>
+      <a href="#s5"><span class="n">05</span><span class="t">The pills</span></a>
+      <a href="#s6"><span class="n">06</span><span class="t">The board</span></a>
+      <a href="#s7"><span class="n">07</span><span class="t">Appearance setting</span></a>
+    </nav>
+  </header>
+
+  <!-- ═══ 1 · the window ═══ -->
+  <section class="block" id="s1">
+    <div class="shead">
+      <span class="snum">01</span>
+      <h2>The window</h2>
+      <span class="sref">SHELL.md §2, §5</span>
+    </div>
+    <div class="prose">
+      <p>
+        Four projects open. The address begins with the project, the sidebar's expanded section is
+        derived from it, and the approvals strip spans all four — which is why every row on it now
+        carries a project chip.
+      </p>
+    </div>
+    <div class="sheet">
+      <div class="sheet-row">
+        <figure class="spec lt">
+          <figcaption><b>Files</b> · light</figcaption>
+          <div class="win">
+            <div class="win-body">
+              <div class="sb">
+                <div class="sb-top"><span class="tg">|◂</span><span class="t-app-label">JAIRA</span></div>
+                <div class="sb-list">
+                  <div class="sec open" style="--h: var(--p1)">
+                    <div class="pj">
+                      <i class="dot"></i><span class="nm t-data-title">declarative-ai</span>
+                      <span class="pills push">
+                        <span class="pill act c-run"><span class="ic">▶</span>2</span>
+                        <span class="pill act c-wait"><span class="ic">⏸</span>1</span>
+                        <span class="pill more">+3</span>
+                      </span>
+                    </div>
+                    <div class="kids">
+                      <div class="vw is-active">
+                        <span class="gl">❏</span><span class="t-app-label is-active">Files</span><span class="tw push">▾</span>
+                      </div>
+                      <div class="tree">
+                        <span class="t-data-text">workflows/feature/</span>
+                        <span class="t-data-text is-active">prompts/review.md</span>
+                        <span class="t-data-text">schema/task.json</span>
+                        <span class="t-data-faint">~/.jaira/ (base)</span>
+                      </div>
+                      <div class="vw">
+                        <span class="gl">▶</span><span class="t-app-label">Tasks</span>
+                        <span class="pills push">
+                          <span class="pill act c-run"><span class="ic">▶</span>2</span>
+                          <span class="pill more">+4</span>
+                        </span>
+                      </div>
+                      <div class="vw">
+                        <span class="gl">✎</span><span class="t-app-label">Chat</span>
+                        <span class="pills push"><span class="pill act c-wait"><span class="ic">⏸</span>1</span></span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="sec" style="--h: var(--p2)">
+                    <div class="pj">
+                      <i class="dot"></i><span class="nm t-data-secondary">notes-api</span>
+                      <span class="pills push">
+                        <span class="pill sta c-err"><span class="ic">⛔</span>1</span>
+                        <span class="pill sta c-ok"><span class="ic">✓</span>4</span>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="sec" style="--h: var(--p3)">
+                    <div class="pj">
+                      <i class="dot"></i><span class="nm t-data-secondary">atlas-web</span>
+                      <span class="pills push">
+                        <span class="pill act c-run"><span class="ic">▶</span>1</span>
+                        <span class="pill sta c-warn"><span class="ic">⚠</span>1</span>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="sec" style="--h: var(--p0)">
+                    <div class="pj"><i class="dot"></i><span class="nm t-data-secondary">~/.jaira</span><span class="tw push">▸</span></div>
+                  </div>
+                </div>
+                <div class="sb-foot">
+                  <div class="vw"><span class="gl">≡</span><span class="t-app-label">Logs</span></div>
+                  <div class="vw"><span class="gl">⌁</span><span class="t-app-label">Debug</span></div>
+                  <div class="vw"><span class="gl">☾</span><span class="t-app-label">Dark</span></div>
+                  <div class="vw"><span class="gl">⚙</span><span class="t-app-label">Settings</span></div>
+                </div>
+              </div>
+              <div class="main">
+                <div class="addr" style="--h: var(--p1)">
+                  <span class="crumb head t-data-text">declarative-ai</span>
+                  <span class="sep">›</span><span class="crumb t-data-text">.jaira</span>
+                  <span class="sep">›</span><span class="crumb t-data-text">prompts</span>
+                  <span class="sep">›</span><span class="crumb t-data-text">review.md</span>
+                  <span class="tools"><span class="btn ghost">Open project…</span></span>
+                </div>
+                <div class="canvas">
+                  <div class="doc">
+                    <div class="h">## Review</div>
+                    <div class="l" style="width: 88%"></div>
+                    <div class="l" style="width: 71%"></div>
+                    <div class="l" style="width: 92%"></div>
+                    <div class="h">### Rules</div>
+                    <div class="l" style="width: 66%"></div>
+                    <div class="l" style="width: 81%"></div>
+                    <div class="l" style="width: 47%"></div>
+                    <div class="l" style="width: 74%"></div>
+                    <div class="l" style="width: 58%"></div>
+                  </div>
+                  <div class="insp">
+                    <span class="t-data-title" style="font-size: 12px">review.md</span>
+                    <span class="t-app-label">project layer</span>
+                    <span class="t-data-secondary">4.2 kB · 2 min ago</span>
+                    <span class="t-data-faint">shadows ~/.jaira/</span>
+                    <span class="t-app-secondary" style="margin-top: auto">used by 3 states</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="strip">
+              <span class="t-app-title" style="font-size: 11.5px">Awaiting you</span>
+              <span class="pill act c-wait"><span class="ic">⏸</span>2</span>
+              <span class="chip" style="--h: var(--p1)">declarative-ai</span>
+              <span class="t-data-text" style="font-size: 10.5px">rm -rf ./build</span>
+              <span class="sep-dot">·</span>
+              <span class="chip" style="--h: var(--p3)">atlas-web</span>
+              <span class="t-data-text" style="font-size: 10.5px">ship it?</span>
+            </div>
+          </div>
+        </figure>
+      </div>
+    </div>
+
+    <div class="sheet">
+      <div class="sheet-row">
+        <figure class="spec dk">
+          <figcaption><b>Tasks</b> · dark</figcaption>
+          <div class="win">
+            <div class="win-body">
+              <div class="sb">
+                <div class="sb-top"><span class="tg">|◂</span><span class="t-app-label">JAIRA</span></div>
+                <div class="sb-list">
+                  <div class="sec open" style="--h: var(--p1)">
+                    <div class="pj">
+                      <i class="dot"></i><span class="nm t-data-title">declarative-ai</span>
+                      <span class="pills push">
+                        <span class="pill act c-run"><span class="ic">▶</span>2</span>
+                        <span class="pill act c-wait"><span class="ic">⏸</span>1</span>
+                        <span class="pill more">+3</span>
+                      </span>
+                    </div>
+                    <div class="kids">
+                      <div class="vw"><span class="gl">❏</span><span class="t-app-label">Files</span></div>
+                      <div class="vw is-active">
+                        <span class="gl">▶</span><span class="t-app-label is-active">Tasks</span>
+                        <span class="pills push">
+                          <span class="pill act c-run"><span class="ic">▶</span>2</span>
+                          <span class="pill more">+4</span>
+                        </span>
+                      </div>
+                      <div class="vw">
+                        <span class="gl">✎</span><span class="t-app-label">Chat</span>
+                        <span class="pills push"><span class="pill act c-wait"><span class="ic">⏸</span>1</span></span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="sec" style="--h: var(--p2)">
+                    <div class="pj">
+                      <i class="dot"></i><span class="nm t-data-secondary">notes-api</span>
+                      <span class="pills push">
+                        <span class="pill sta c-err"><span class="ic">⛔</span>1</span>
+                        <span class="pill sta c-ok"><span class="ic">✓</span>4</span>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="sec" style="--h: var(--p3)">
+                    <div class="pj">
+                      <i class="dot"></i><span class="nm t-data-secondary">atlas-web</span>
+                      <span class="pills push">
+                        <span class="pill act c-run"><span class="ic">▶</span>1</span>
+                        <span class="pill sta c-warn"><span class="ic">⚠</span>1</span>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="sec" style="--h: var(--p0)">
+                    <div class="pj"><i class="dot"></i><span class="nm t-data-secondary">~/.jaira</span><span class="tw push">▸</span></div>
+                  </div>
+                </div>
+                <div class="sb-foot">
+                  <div class="vw"><span class="gl">≡</span><span class="t-app-label">Logs</span></div>
+                  <div class="vw"><span class="gl">☀</span><span class="t-app-label">Light</span></div>
+                  <div class="vw"><span class="gl">⚙</span><span class="t-app-label">Settings</span></div>
+                </div>
+              </div>
+              <div class="main">
+                <div class="addr" style="--h: var(--p1)">
+                  <span class="crumb head t-data-text">declarative-ai</span>
+                  <span class="sep">›</span><span class="crumb t-data-text">feature</span>
+                  <span class="sep">›</span><span class="crumb t-data-text">plan</span>
+                  <span class="tools"><span class="btn">New task</span></span>
+                </div>
+                <div class="canvas">
+                  <div class="board">
+                    <div class="col">
+                      <div class="ch">
+                        <span class="t-data-title" style="font-size: 11.5px">plan</span>
+                        <span class="t-app-secondary" style="margin-left: auto">4</span>
+                      </div>
+                      <div class="cb">
+                        <div class="task sel">
+                          <div class="r">
+                            <span class="ti t-data-text is-active">tighten the sync lint</span>
+                            <span class="pill act c-run push" style="margin-left: auto"><span class="ic">▶</span>running</span>
+                          </div>
+                          <div class="r"><span class="t-data-secondary">40s · 3 turns</span></div>
+                        </div>
+                        <div class="task">
+                          <div class="r">
+                            <span class="ti t-data-text">rate limiter</span>
+                            <span class="pill act c-run push" style="margin-left: auto"><span class="ic">▶</span>running</span>
+                          </div>
+                          <div class="r"><span class="t-data-secondary">4 min · 11 turns</span></div>
+                        </div>
+                        <div class="task">
+                          <div class="r">
+                            <span class="ti t-data-text">token budget</span>
+                            <span class="pill act c-wait push" style="margin-left: auto"><span class="ic">⏸</span>waiting</span>
+                          </div>
+                          <div class="r"><span class="t-data-secondary">gate · 6 min</span></div>
+                        </div>
+                        <div class="lane"><span class="t-app-label">finished</span><span class="bar"></span><span class="t-data-num">1</span></div>
+                        <div class="task">
+                          <div class="r">
+                            <span class="ti t-data-text">retry policy</span>
+                            <span class="pill sta c-ok push" style="margin-left: auto"><span class="ic">✓</span>done</span>
+                          </div>
+                          <div class="r"><span class="t-data-secondary">3 min ago</span></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="col">
+                      <div class="ch">
+                        <span class="t-data-title" style="font-size: 11.5px">build</span>
+                        <span class="t-app-secondary" style="margin-left: auto">2</span>
+                      </div>
+                      <div class="cb">
+                        <div class="task">
+                          <div class="r">
+                            <span class="ti t-data-text">bump the schema</span>
+                            <span class="pill act c-run push" style="margin-left: auto"><span class="ic">▶</span>running</span>
+                          </div>
+                          <div class="r"><span class="t-data-secondary">1 min · 2 turns</span></div>
+                        </div>
+                        <div class="lane"><span class="t-app-label">finished</span><span class="bar"></span><span class="t-data-num">1</span></div>
+                        <div class="task">
+                          <div class="r">
+                            <span class="ti t-data-text">classify changeset</span>
+                            <span class="pill sta c-err push" style="margin-left: auto"><span class="ic">⛔</span>bad output</span>
+                          </div>
+                          <div class="r"><span class="t-data-secondary">6 min ago · not a SyncEdit</span></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="insp">
+                    <span class="t-data-title" style="font-size: 12px">tighten the sync lint</span>
+                    <span class="t-app-label">running</span>
+                    <span class="t-data-secondary">feature.plan · 40s</span>
+                    <span class="t-data-secondary">3 turns · 2 tools</span>
+                    <span class="t-app-secondary" style="margin-top: auto">declarative-ai</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="strip">
+              <span class="t-app-title" style="font-size: 11.5px">Awaiting you</span>
+              <span class="pill act c-wait"><span class="ic">⏸</span>2</span>
+              <span class="chip" style="--h: var(--p1)">declarative-ai</span>
+              <span class="t-data-text" style="font-size: 10.5px">rm -rf ./build</span>
+              <span class="sep-dot">·</span>
+              <span class="chip" style="--h: var(--p3)">atlas-web</span>
+              <span class="t-data-text" style="font-size: 10.5px">ship it?</span>
+            </div>
+          </div>
+        </figure>
+      </div>
+    </div>
+
+    <div class="notes">
+      <div class="key">
+        <b>The project is the address</b>
+        <span>No <code>state.projectDir</code>. The crumb head is the project, the sidebar's open
+          section follows it, and closing a project is closing a session — not evicting the window's
+          identity.</span>
+      </div>
+      <div class="key">
+        <b>Every strip row names its project</b>
+        <span>The approvals list already spanned every open session; with a second project actually
+          open, a row without a project resolves its task id against the wrong database.</span>
+      </div>
+      <div>
+        <b>One expanded section</b>
+        <span>Height is the same at two projects or ten, and the expansion is derived — never written
+          to <code>settings.json</code>.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 2 · sidebar ═══ -->
+  <section class="block" id="s2">
+    <div class="shead">
+      <span class="snum">02</span>
+      <h2>The sidebar</h2>
+      <span class="sref">SHELL.md §5.1</span>
+    </div>
+    <div class="withlegend">
+      <figure class="spec lt">
+        <figcaption><b>250px</b> · at size</figcaption>
+        <div class="win" style="width: 252px; height: 396px; border-radius: 10px">
+          <div class="win-body">
+            <div class="sb solo">
+              <div class="sb-top"><span class="tg">|◂</span><span class="t-app-label">JAIRA</span></div>
+              <div class="sb-list">
+                <div class="sec open" style="--h: var(--p1)">
+                  <div class="pj">
+                    <i class="dot"></i><span class="nm t-data-title">declarative-ai</span>
+                    <span class="pills push">
+                      <span class="pill act c-run"><span class="ic">▶</span>2</span>
+                      <span class="pill act c-wait"><span class="ic">⏸</span>1</span>
+                      <span class="pill more">+3</span>
+                    </span>
+                  </div>
+                  <div class="kids">
+                    <div class="vw is-active">
+                      <span class="gl">❏</span><span class="t-app-label is-active">Files</span><span class="tw push">▾</span>
+                    </div>
+                    <div class="tree">
+                      <span class="t-data-text">workflows/feature/</span>
+                      <span class="t-data-text is-active">prompts/review.md</span>
+                      <span class="t-data-text">schema/task.json</span>
+                      <span class="t-data-faint">~/.jaira/ (base)</span>
+                    </div>
+                    <div class="vw">
+                      <span class="gl">▶</span><span class="t-app-label">Tasks</span>
+                      <span class="pills push">
+                        <span class="pill act c-run"><span class="ic">▶</span>2</span>
+                        <span class="pill more">+4</span>
+                      </span>
+                    </div>
+                    <div class="vw">
+                      <span class="gl">✎</span><span class="t-app-label">Chat</span>
+                      <span class="pills push"><span class="pill act c-wait"><span class="ic">⏸</span>1</span></span>
+                    </div>
+                  </div>
+                </div>
+                <div class="sec" style="--h: var(--p2)">
+                  <div class="pj">
+                    <i class="dot"></i><span class="nm t-data-secondary">notes-api</span>
+                    <span class="pills push">
+                      <span class="pill sta c-err"><span class="ic">⛔</span>1</span>
+                      <span class="pill sta c-ok"><span class="ic">✓</span>4</span>
+                    </span>
+                  </div>
+                </div>
+                <div class="sec" style="--h: var(--p3)">
+                  <div class="pj">
+                    <i class="dot"></i><span class="nm t-data-secondary">atlas-web</span>
+                    <span class="pills push">
+                      <span class="pill act c-run"><span class="ic">▶</span>1</span>
+                      <span class="pill sta c-warn"><span class="ic">⚠</span>1</span>
+                    </span>
+                  </div>
+                </div>
+                <div class="sec" style="--h: var(--p0)">
+                  <div class="pj"><i class="dot"></i><span class="nm t-data-secondary">~/.jaira</span><span class="tw push">▸</span></div>
+                </div>
+              </div>
+              <div class="sb-foot">
+                <div class="vw"><span class="gl">≡</span><span class="t-app-label">Logs</span></div>
+                <div class="vw"><span class="gl">⌁</span><span class="t-app-label">Debug</span></div>
+                <div class="vw"><span class="gl">☾</span><span class="t-app-label">Dark</span></div>
+                <div class="vw"><span class="gl">⚙</span><span class="t-app-label">Settings</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </figure>
+      <div class="legend">
+        <div class="lh">every string, and what sets it</div>
+        <div class="lr"><span>JAIRA</span><span class="t">app-label</span></div>
+        <div class="lr"><span>declarative-ai, open</span><span class="t">data-title</span></div>
+        <div class="lr"><span>notes-api · atlas-web · ~/.jaira</span><span class="t">data-secondary</span></div>
+        <div class="lr"><span>Files · Tasks · Chat</span><span class="t">app-label</span></div>
+        <div class="lr"><span>Files, where you are</span><span class="t">app-label · is-active</span></div>
+        <div class="lr"><span>workflows/feature/</span><span class="t">data-text</span></div>
+        <div class="lr"><span>prompts/review.md, open</span><span class="t">data-text · is-active</span></div>
+        <div class="lr"><span>~/.jaira/ (base), shadowed</span><span class="t">data-faint</span></div>
+        <div class="lr"><span>Logs · Debug · Dark · Settings</span><span class="t">app-label</span></div>
+        <div class="lr"><span>▶2 ⏸1 · ⛔1 ✓4</span><span class="t">pill</span></div>
+        <div class="lr"><span>+3</span><span class="t">pill · overflow</span></div>
+      </div>
+    </div>
+    <div class="notes">
+      <div class="key">
+        <b>Band, full bleed</b>
+        <span>The open section sits on <code>--panel</code> edge to edge with a 1px <code>--line</code>
+          top and bottom, no radius and no margin. A radius would make it a card, and the last pass
+          spent a redesign getting panes to stop drawing boxes around themselves.</span>
+      </div>
+      <div class="key">
+        <b>Two nesting rules</b>
+        <span><code>--rule</code> under the project, <code>--line</code> under the view, at the 12px
+          indent <code>.side-drawer</code> already uses. The band says where the section is; the rules
+          say what is inside what.</span>
+      </div>
+      <div>
+        <b>No heading over the roster</b>
+        <span>The other projects simply follow. The band's edge already separates them.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 3 · collapsed ═══ -->
+  <section class="block" id="s3">
+    <div class="shead">
+      <span class="snum">03</span>
+      <h2>Collapsed</h2>
+      <span class="sref">SHELL.md §5.2</span>
+    </div>
+    <div class="prose">
+      <p>
+        Today <code>sidebar.tsx</code> renders <code>null</code> for the brand and project whenever the
+        column is shut. With the project as the head of the address, that would make the first crumb
+        invisible and unreachable. Collapsed becomes two zones: project tiles, a divider, the open
+        project's view glyphs.
+      </p>
+    </div>
+    <div class="sheet">
+      <div class="sheet-row">
+        <figure class="spec lt">
+          <figcaption><b>46px</b> · light</figcaption>
+          <div class="win" style="width: 300px; height: 300px">
+            <div class="win-body">
+              <div class="rail">
+                <div class="sb-top"><span class="tg">▸|</span></div>
+                <div class="tile on" style="--h: var(--p1)">dc</div>
+                <div class="tile" style="--h: var(--p2)"><span>no</span><span class="pip" style="--c: var(--mk-bad)">1</span></div>
+                <div class="tile" style="--h: var(--p3)"><span>at</span><span class="pip" style="--c: var(--mk-accent)">1</span></div>
+                <div class="tile" style="--h: var(--p0)">◇</div>
+                <hr />
+                <div class="gl on">❏</div>
+                <div class="gl">▶</div>
+                <div class="gl">✎</div>
+                <div class="rfoot">
+                  <div class="gl">≡</div>
+                  <div class="gl">⚙</div>
+                </div>
+              </div>
+              <div class="main">
+                <div class="addr" style="--h: var(--p1)">
+                  <span class="crumb head t-data-text">declarative-ai</span>
+                  <span class="sep">›</span><span class="crumb t-data-text">review.md</span>
+                </div>
+                <div class="canvas">
+                  <div class="doc">
+                    <div class="h">## Review</div>
+                    <div class="l" style="width: 84%"></div>
+                    <div class="l" style="width: 66%"></div>
+                    <div class="l" style="width: 90%"></div>
+                    <div class="l" style="width: 52%"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </figure>
+        <figure class="spec dk">
+          <figcaption><b>46px</b> · dark</figcaption>
+          <div class="win" style="width: 300px; height: 300px">
+            <div class="win-body">
+              <div class="rail">
+                <div class="sb-top"><span class="tg">▸|</span></div>
+                <div class="tile on" style="--h: var(--p1)">dc</div>
+                <div class="tile" style="--h: var(--p2)"><span>no</span><span class="pip" style="--c: var(--mk-bad)">1</span></div>
+                <div class="tile" style="--h: var(--p3)"><span>at</span><span class="pip" style="--c: var(--mk-accent)">1</span></div>
+                <div class="tile" style="--h: var(--p0)">◇</div>
+                <hr />
+                <div class="gl on">❏</div>
+                <div class="gl">▶</div>
+                <div class="gl">✎</div>
+                <div class="rfoot">
+                  <div class="gl">≡</div>
+                  <div class="gl">⚙</div>
+                </div>
+              </div>
+              <div class="main">
+                <div class="addr" style="--h: var(--p1)">
+                  <span class="crumb head t-data-text">declarative-ai</span>
+                  <span class="sep">›</span><span class="crumb t-data-text">review.md</span>
+                </div>
+                <div class="canvas">
+                  <div class="doc">
+                    <div class="h">## Review</div>
+                    <div class="l" style="width: 84%"></div>
+                    <div class="l" style="width: 66%"></div>
+                    <div class="l" style="width: 90%"></div>
+                    <div class="l" style="width: 52%"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </figure>
+        <div class="samp" style="max-width: 300px">
+          <p class="eyebrow" style="margin-bottom: 0.5rem">why this works</p>
+          <p style="margin: 0; font-size: 0.87rem; color: var(--ink-2); line-height: 1.5">
+            Exclusivity is what makes it possible. Because exactly one project is ever expanded, there
+            is always a project the rail is <em>on</em> — so the view glyphs below the divider have an
+            unambiguous owner, and the rail is today's rail with one zone added rather than a new
+            control.
+          </p>
+          <p style="margin: 0.7rem 0 0; font-size: 0.87rem; color: var(--ink-2); line-height: 1.5">
+            Tiles keep a pip for the single most severe unseen kind. Two letters is a poor name for a
+            checkout, so tiles need a tooltip and the project hue to be readable.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 4 · voices ═══ -->
+  <section class="block" id="s4">
+    <div class="shead">
+      <span class="snum">04</span>
+      <h2>Two voices, ten registers</h2>
+      <span class="sref">SHELL.md §3</span>
+    </div>
+    <div class="prose">
+      <p>
+        App voice for words JaiRA chose, data voice for words something else chose. Voice is the face;
+        state is weight, colour and ground. No component carries a literal font-size — every register
+        is a multiple of its voice's base, so §07's two sliders move a whole voice with the ratios
+        intact.
+      </p>
+    </div>
+    <div class="tblwrap">
+      <table class="tbl lt">
+        <thead>
+          <tr>
+            <th scope="col">Sample</th>
+            <th scope="col">Register</th>
+            <th scope="col">Spec</th>
+            <th scope="col">Used for</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="demo"><span class="t-app-title">Awaiting you</span></td>
+            <td class="k a">app-title</td>
+            <td class="m">1.05× · 700</td>
+            <td>Pane and section headings</td>
+          </tr>
+          <tr>
+            <td class="demo"><span class="t-app-label">Files</span></td>
+            <td class="k a">app-label</td>
+            <td class="m">0.80× · 700 · UPPER .1em</td>
+            <td>Nav rows, field labels, group headings, lane headings</td>
+          </tr>
+          <tr>
+            <td class="demo"><span class="t-app-label is-active">Files</span></td>
+            <td class="k a">· is-active</td>
+            <td class="m">+ --text + tint</td>
+            <td>Where you are</td>
+          </tr>
+          <tr>
+            <td class="demo"><span class="t-app-text">Open project…</span></td>
+            <td class="k a">app-text</td>
+            <td class="m">1.00× · 500</td>
+            <td>Buttons, prose, menu items</td>
+          </tr>
+          <tr>
+            <td class="demo"><span class="t-app-secondary">checked 2 min ago</span></td>
+            <td class="k a">app-secondary</td>
+            <td class="m">0.88× · 400 · --dim</td>
+            <td>Hints and counts of app things</td>
+          </tr>
+          <tr>
+            <td class="demo"><span class="t-app-absent">open a project…</span></td>
+            <td class="k a">app-absent</td>
+            <td class="m">1.00× · 500 · italic · --tok-hint</td>
+            <td>App words standing where data would be</td>
+          </tr>
+          <tr>
+            <td class="demo"><span class="t-data-title">declarative-ai</span></td>
+            <td class="k s">data-title</td>
+            <td class="m">1.12× · 700</td>
+            <td>The open project, a file name at a pane head</td>
+          </tr>
+          <tr>
+            <td class="demo"><span class="t-data-text">prompts/review.md</span></td>
+            <td class="k s">data-text</td>
+            <td class="m">0.96× · 400</td>
+            <td>Paths, ids, task titles, commands</td>
+          </tr>
+          <tr>
+            <td class="demo"><span class="t-data-text is-active">prompts/review.md</span></td>
+            <td class="k s">· is-active</td>
+            <td class="m">600 + tint</td>
+            <td>The open one</td>
+          </tr>
+          <tr>
+            <td class="demo"><span class="t-data-secondary">4.2 kB · 2 min ago</span></td>
+            <td class="k s">data-secondary</td>
+            <td class="m">0.84× · 400 · --dim</td>
+            <td>Closed projects, metadata, timings</td>
+          </tr>
+          <tr>
+            <td class="demo"><span class="t-data-faint">shadowed by ~/.jaira</span></td>
+            <td class="k s">data-faint</td>
+            <td class="m">0.84× · 400 · --tok-hint</td>
+            <td>Present but inert</td>
+          </tr>
+          <tr>
+            <td class="demo"><span class="t-data-num">2 · 40s · 11</span></td>
+            <td class="k s">data-num</td>
+            <td class="m">0.79× · 600 · tabular</td>
+            <td>Counts and durations</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="notes">
+      <div class="key">
+        <b>Data never takes text-transform</b>
+        <span>Uppercasing <code>review.md</code> misrepresents it — paths and ids are case-sensitive.
+          That is what leaves uppercase free as an app-only signal, and it is why the two voices are
+          separable at a glance rather than merely different.</span>
+      </div>
+      <div class="key">
+        <b>State never touches the face</b>
+        <span>Active is one gesture in both voices: +200 weight, full ink, a tint behind. A row that
+          switched to mono to look selected is how the system dies.</span>
+      </div>
+      <div>
+        <b>The third tier already exists</b>
+        <span><code>--tok-hint</code> is in the palette, documented as "dimmer than <code>--dim</code>".
+          Both voices use it for their quietest register rather than inventing an opacity.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 5 · pills ═══ -->
+  <section class="block" id="s5">
+    <div class="shead">
+      <span class="snum">05</span>
+      <h2>The pills</h2>
+      <span class="sref">SHELL.md §4</span>
+    </div>
+    <div class="prose">
+      <p>
+        Active is a live fact and is always true; status is an unseen count and clears when you look.
+        Active pills are filled, status pills flat — the second channel, so red-on-red is never told
+        apart by hue alone. Icons are the existing <code>BADGE</code> map from <code>board.tsx</code>.
+      </p>
+    </div>
+    <div class="tblwrap">
+      <table class="tbl lt">
+        <thead>
+          <tr>
+            <th scope="col">#</th>
+            <th scope="col">Pill</th>
+            <th scope="col">Kind</th>
+            <th scope="col">Maps from</th>
+            <th scope="col">Means</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="m">1</td>
+            <td class="demo"><span class="pill act c-run"><span class="ic">▶</span>2</span></td>
+            <td class="k a">active</td>
+            <td class="m">running</td>
+            <td>Working. Never dropped at any width</td>
+          </tr>
+          <tr>
+            <td class="m">2</td>
+            <td class="demo"><span class="pill act c-wait"><span class="ic">⏸</span>3</span></td>
+            <td class="k a">active</td>
+            <td class="m">waiting_for_user + blocked</td>
+            <td>Stopped on your answer — a gate and a tool approval are one thing to a person</td>
+          </tr>
+          <tr>
+            <td class="m">3</td>
+            <td class="demo"><span class="pill sta c-err"><span class="ic">⛔</span>1</span></td>
+            <td class="k s">status</td>
+            <td class="m">failed · timeout</td>
+            <td>The model failed — timed out, retries spent, wrong output type</td>
+          </tr>
+          <tr>
+            <td class="m">4</td>
+            <td class="demo"><span class="pill sta c-warn"><span class="ic">⚠</span>1</span></td>
+            <td class="k s">status</td>
+            <td class="m">interrupted · canceled</td>
+            <td>Stopped without finishing, nothing waiting on you</td>
+          </tr>
+          <tr>
+            <td class="m">5</td>
+            <td class="demo"><span class="pill sta c-ok"><span class="ic">✓</span>3</span></td>
+            <td class="k s">status</td>
+            <td class="m">completed</td>
+            <td>Finished, and it worked</td>
+          </tr>
+          <tr>
+            <td class="m">—</td>
+            <td class="demo"><span class="pill more">+5</span></td>
+            <td class="k">overflow</td>
+            <td class="m">—</td>
+            <td>What did not fit, summed as items. <code>queued</code> lives here or nowhere</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <pre class="algo">
+<b>ORDER</b> = [running, waiting, error, warning, success]
+
+<b>layout(row, counts)</b>
+  fit = []
+  for kind in ORDER where counts[kind] > 0
+    if width(fit + kind + reserve("+N")) &lt;= row.budget  →  fit.push(kind)
+    else break
+  rest = sum of counts not in fit
+  render fit, then "+" + rest when rest > 0
+
+<i>running heads ORDER and one pill always fits → no width can hide that something is working</i></pre>
+    <div class="notes">
+      <div class="key">
+        <b>Unseen, not total</b>
+        <span>Status counts derive from <code>ui.seen[taskId] &lt; task.updatedAt</code> — the watermark
+          already in <code>uiState.ts</code>, already used by <code>chatPane.tsx</code>. A view row
+          counts its subtree; a project row sums its views. No new persistence.</span>
+      </div>
+      <div>
+        <b>Clicking clears its share</b>
+        <span>Status pills go; active pills stay, because they are not about having looked.</span>
+      </div>
+      <div>
+        <b>Open: does +N carry colour?</b>
+        <span>It is currently neutral, so a folded error reads like a folded success. Tinting it to the
+          most severe kind it hides is one line — recommended, and listed in SHELL.md §9.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 6 · board ═══ -->
+  <section class="block" id="s6">
+    <div class="shead">
+      <span class="snum">06</span>
+      <h2>The board</h2>
+      <span class="sref">SHELL.md §5.3</span>
+    </div>
+    <div class="prose">
+      <p>
+        The card loses the box: no fill of its own beyond a hover ground, no border, no shadow, no left
+        stripe. Status moves to a trailing pill with a word. Order is unchanged — <code>LANES</code> is
+        already <code>[running, paused, not-started, finished]</code> and the finished lane is already
+        re-sorted newest-first.
+      </p>
+    </div>
+    <div class="sheet">
+      <div class="sheet-row">
+        <figure class="spec lt">
+          <figcaption><b>Column</b> · light</figcaption>
+          <div class="win" style="width: 276px; height: 384px">
+            <div class="win-body">
+              <div class="main">
+                <div class="board" style="padding: 8px">
+                  <div class="col">
+                    <div class="ch">
+                      <span class="t-data-title" style="font-size: 11.5px">feature.plan</span>
+                      <span class="t-app-secondary" style="margin-left: auto">7 runs</span>
+                    </div>
+                    <div class="cb">
+                      <div class="task sel">
+                        <div class="r">
+                          <span class="ti t-data-text is-active">tighten the sync lint</span>
+                          <span class="pill act c-run" style="margin-left: auto"><span class="ic">▶</span>running</span>
+                        </div>
+                        <div class="r"><span class="t-data-secondary">40s · 3 turns</span></div>
+                      </div>
+                      <div class="task">
+                        <div class="r">
+                          <span class="ti t-data-text">rate limiter</span>
+                          <span class="pill act c-run" style="margin-left: auto"><span class="ic">▶</span>running</span>
+                        </div>
+                        <div class="r"><span class="t-data-secondary">4 min · 11 turns</span></div>
+                      </div>
+                      <div class="task">
+                        <div class="r">
+                          <span class="ti t-data-text">delete stale worktrees</span>
+                          <span class="pill act c-wait" style="margin-left: auto"><span class="ic">⏸</span>waiting</span>
+                        </div>
+                        <div class="r"><span class="t-data-secondary">approve · 2 min</span></div>
+                      </div>
+                      <div class="task">
+                        <div class="r">
+                          <span class="ti t-data-text">token budget</span>
+                          <span class="pill act c-wait" style="margin-left: auto"><span class="ic">⏸</span>waiting</span>
+                        </div>
+                        <div class="r"><span class="t-data-secondary">gate · 6 min</span></div>
+                      </div>
+                      <div class="lane"><span class="t-app-label">finished</span><span class="bar"></span><span class="t-data-num">3</span></div>
+                      <div class="task">
+                        <div class="r">
+                          <span class="ti t-data-text">retry policy</span>
+                          <span class="pill sta c-ok" style="margin-left: auto"><span class="ic">✓</span>done</span>
+                        </div>
+                        <div class="r"><span class="t-data-secondary">3 min ago</span></div>
+                      </div>
+                      <div class="task">
+                        <div class="r">
+                          <span class="ti t-data-text">schema migration</span>
+                          <span class="pill sta c-err" style="margin-left: auto"><span class="ic">⛔</span>timed out</span>
+                        </div>
+                        <div class="r"><span class="t-data-secondary">18 min ago · 2 retries</span></div>
+                      </div>
+                      <div class="task">
+                        <div class="r">
+                          <span class="ti t-data-text">worktree cleanup</span>
+                          <span class="pill sta c-warn" style="margin-left: auto"><span class="ic">⚠</span>stopped</span>
+                        </div>
+                        <div class="r"><span class="t-data-secondary">1 h ago</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </figure>
+        <div class="samp" style="max-width: 330px">
+          <p class="eyebrow" style="margin-bottom: 0.5rem">what changed, and why</p>
+          <p style="margin: 0 0 0.7rem; font-size: 0.87rem; color: var(--ink-2); line-height: 1.5">
+            <code>.card</code> is currently <code>--panel</code> fill + 1px border + radius +
+            <code>box-shadow</code> — a filled, outlined, shadowed rectangle, which is a button. A task
+            is selected, not pressed.
+          </p>
+          <p style="margin: 0 0 0.7rem; font-size: 0.87rem; color: var(--ink-2); line-height: 1.5">
+            <b style="color: var(--ink)">No lane heading over the active runs.</b> Cards each carrying
+            a filled pill say what a "Running" heading would — the argument <code>lanesOf</code>
+            already makes about single-lane columns. The heading returns over <code>finished</code>,
+            where the pills go flat.
+          </p>
+          <p style="margin: 0; font-size: 0.87rem; color: var(--flag); line-height: 1.5">
+            The comment above <code>.card::before</code> reserves the left edge for "run status down a
+            column of cards" — the only reason it survived the last pass. Change the comment with the
+            code.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 7 · appearance ═══ -->
+  <section class="block" id="s7">
+    <div class="shead">
+      <span class="snum">07</span>
+      <h2>The Appearance setting</h2>
+      <span class="sref">SHELL.md §6</span>
+    </div>
+    <div class="prose">
+      <p>
+        None of the type above is fixed. <strong>Appearance is a new section in Settings</strong> —
+        a fifth entry in <code>SECTIONS</code> beside Providers, Executors, Configuration and
+        History — where a person changes the two families and two sizes the ten registers derive
+        from.
+      </p>
+      <p>
+        It is <code>layered: false</code> and has no <code>needsProject</code>: fonts are a per-person
+        display preference, not a project's, so there is no shared-versus-project switch above it and
+        it is reachable on an empty window. That is the same rule the theme toggle already follows —
+        it sits in the sidebar footer "rather than inside Settings: it is a per-person display
+        preference, and burying it behind a view that needs an open project would make it unreachable
+        on an empty window."
+      </p>
+      <p>
+        A stack is an ordered list, so the control is a multi-select with numbered chips; the default
+        stack is the last line of the menu, stated and un-removable, which makes "prepend, never
+        replace" visible rather than a rule you have to know.
+      </p>
+    </div>
+    <div class="sheet">
+      <div class="sheet-row">
+        <div class="settings lt">
+          <div class="sh">
+            <span class="t-app-title">Appearance</span>
+            <span class="t-app-secondary" style="margin-left: auto">every project on this machine</span>
+          </div>
+          <div class="sbody">
+            <div class="field">
+              <span class="t-app-label">app voice</span>
+              <div class="fline">
+                <div class="stackbox open">
+                  <span class="fam"><span class="t-data-num">1</span><span class="t-app-text">DM Sans</span><span class="x">✕</span></span>
+                  <span class="fam"><span class="t-data-num">2</span><span class="t-app-text">Segoe UI</span><span class="x">✕</span></span>
+                  <span class="addf t-app-secondary">+ add…</span>
+                </div>
+                <div class="sizebox">
+                  <span class="t-data-num" style="font-size: 11px">12.5</span>
+                  <span class="t-data-faint">px</span>
+                  <span class="step"><span>▲</span><span>▼</span></span>
+                </div>
+              </div>
+              <div class="menu">
+                <div class="mh t-app-label">installed · sans</div>
+                <div class="mi on"><span class="tick">✓</span><span class="t-app-text">DM Sans</span></div>
+                <div class="mi on"><span class="tick">✓</span><span class="t-app-text">Segoe UI</span></div>
+                <div class="mi"><span class="tick"></span><span class="t-app-text">Inter</span></div>
+                <div class="msep"></div>
+                <div class="mi"><span class="tick"></span><span class="t-app-secondary">always ends with the default stack</span></div>
+              </div>
+            </div>
+            <div style="height: 104px"></div>
+            <div class="field">
+              <span class="t-app-label">data voice</span>
+              <div class="fline">
+                <div class="stackbox">
+                  <span class="fam"><span class="t-data-num">1</span><span class="t-data-text">JetBrains Mono</span><span class="x">✕</span></span>
+                  <span class="fam"><span class="t-data-num">2</span><span class="t-data-text">Consolas</span><span class="x">✕</span></span>
+                  <span class="addf t-app-secondary">+ add…</span>
+                </div>
+                <div class="sizebox">
+                  <span class="t-data-num" style="font-size: 11px">12</span>
+                  <span class="t-data-faint">px</span>
+                  <span class="step"><span>▲</span><span>▼</span></span>
+                </div>
+              </div>
+              <span class="t-data-faint">→ "JetBrains Mono", Consolas, "SF Mono", Menlo, monospace</span>
+            </div>
+            <div class="divider"></div>
+            <div class="toggle">
+              <span class="sw on"></span><span class="t-app-text">Separate editor size</span>
+              <span class="t-app-secondary" style="margin-left: auto">13 px</span>
+            </div>
+            <div class="toggle">
+              <span class="sw"></span><span class="t-app-text">Smooth text</span>
+              <span class="t-app-secondary" style="margin-left: auto">grayscale</span>
+            </div>
+            <div class="divider"></div>
+            <span class="t-app-label">preview</span>
+            <div style="border: 1px solid var(--mk-line); border-radius: 8px; overflow: hidden">
+              <div style="padding: 5px 9px; background: var(--mk-panel3)"><span class="t-app-label">Files</span></div>
+              <div style="display: flex">
+                <div style="flex: 1; padding: 7px 9px; display: flex; flex-direction: column; gap: 3px; background: var(--mk-panel2)">
+                  <span class="t-data-title">declarative-ai</span>
+                  <span class="t-data-text">prompts/review.md</span>
+                  <span class="t-data-secondary">4.2 kB</span>
+                </div>
+                <div style="flex: 1; padding: 7px 9px; display: flex; flex-direction: column; gap: 3px; background: var(--mk-bg)">
+                  <span class="t-data-text">tighten the sync lint</span>
+                  <span class="pill act c-run" style="align-self: flex-start"><span class="ic">▶</span>running</span>
+                  <span class="t-data-secondary">40s · 3 turns</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="samp" style="max-width: 330px; align-self: flex-start">
+          <p class="eyebrow" style="margin-bottom: 0.5rem">the model</p>
+          <pre class="algo" style="font-size: 0.72rem; padding: 0.7rem 0.85rem">
+<b>appFamily</b>   string[]  ordered
+<b>dataFamily</b>  string[]  ordered
+<b>sizeApp</b>     11–17     default 12.5
+<b>sizeData</b>    10–16     default 12
+<b>sizeEditor</b>  10–20     default 13
+<b>advanced</b>    bool      false ⇒ editor follows data
+<b>smoothing</b>   bool      default off</pre>
+          <p style="margin: 0.75rem 0 0; font-size: 0.87rem; color: var(--ink-2); line-height: 1.5">
+            <b style="color: var(--ink)">Prepend, never replace.</b> A custom family goes in front of
+            the default stack, so a face missing <code>⛔</code> or box-drawing glyphs falls through
+            instead of showing tofu.
+          </p>
+          <p style="margin: 0.7rem 0 0; font-size: 0.87rem; color: var(--ink-2); line-height: 1.5">
+            <b style="color: var(--ink)">The proportional check.</b> Two voices can be configured into
+            one. Measure the data family — if <code>i</code> and <code>W</code> advance the same it is
+            monospace. A note, not a block: it is their app.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+</body></html>

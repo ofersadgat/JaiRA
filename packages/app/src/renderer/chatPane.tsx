@@ -43,7 +43,9 @@ import type {
   TaskDetail,
   TaskSummary,
 } from "@jaira/shared/browser";
+import { SHARED_SESSION } from "@jaira/shared/browser";
 import { Composer } from "./composer";
+import { projectName } from "./projects";
 import { TearBar, ZigDefs } from "./sessionPanels";
 import { CHAT_AGENT, isChatWorkflow, titleOf } from "./chatWorkflow";
 import { ContextMenu, AskDialog, type AskSpec, type MenuAnchor } from "./menu";
@@ -73,6 +75,15 @@ export interface ChatSurface {
    * every row is the same project and a chip on each would be a column of identical marks.
    */
   hues?: Readonly<Record<string, string>>;
+  /**
+   * What to CALL each project, by directory — the same name the sidebar's own row prints.
+   *
+   * Passed rather than derived, so one project is called one thing everywhere in the window: main
+   * names them (`listProjects`), and it is the only thing that knows `~/.jaira` is called that
+   * rather than `.jaira`, or that JaiRA's own project is called JaiRA. A directory that is not in
+   * the map falls back to its last segment.
+   */
+  names?: Readonly<Record<string, string>>;
   /** True while a conversation is being created — its first message is a run, which takes a moment. */
   busy: boolean;
   /** The opening message, until the record holding it exists — see `ChatState.opening`. */
@@ -235,12 +246,20 @@ function ArtifactsPanel({
 /**
  * The conversation list — the Chat row's drawer in the sidebar.
  *
- * Newest first, because a conversation you are having is a conversation you had a moment ago. The
- * search box appears once there are enough of them to be worth searching; below that it is a control
- * offering to filter a list you can see all of.
+ * Newest first, because a conversation you are having is a conversation you had a moment ago.
+ *
+ * The two controls that used to head it — "New conversation" and the search box — are the ROW's
+ * now (SHELL.md §5.1): they are the verbs of the place this list is inside, and on the row they are
+ * reachable without opening the drawer at all. What is left here is the list, which is what a
+ * drawer under a row named Chat should hold.
  */
-export function ChatListPanel({ surface }: { surface: ChatSurface }): JSX.Element {
+export function ChatListPanel({ surface, find = false }: { surface: ChatSurface; find?: boolean }): JSX.Element {
   const [query, setQuery] = useState("");
+  // Dropped when the field goes away, so re-opening it does not re-apply a filter nobody can see —
+  // the list would come back short with an empty-looking reason.
+  useEffect(() => {
+    if (!find) setQuery("");
+  }, [find]);
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
   const [ask, setAsk] = useState<AskSpec | null>(null);
   const [renaming, setRenaming] = useState<{ taskId: string; title: string } | null>(null);
@@ -277,16 +296,14 @@ export function ChatListPanel({ surface }: { surface: ChatSurface }): JSX.Elemen
 
   return (
     <div className="chat-list">
-      <button className="chat-new" onClick={() => surface.onOpen(null)}>
-        <span className="chat-new-mark">+</span> New conversation
-      </button>
-
-      {surface.conversations.length > 6 ? (
+      {find ? (
         <input
           className="chat-search"
+          autoFocus
           value={query}
           placeholder="Search conversations"
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => (e.key === "Escape" ? setQuery("") : undefined)}
         />
       ) : null}
 
@@ -372,7 +389,7 @@ export function ChatListPanel({ surface }: { surface: ChatSurface }): JSX.Elemen
                       title={task.project}
                       style={{ "--hue": surface.hues?.[task.project] ?? "var(--p0)" } as CSSProperties}
                     >
-                      {task.project.split(/[\/]+/).filter(Boolean).pop() ?? task.project}
+                      {surface.names?.[task.project] ?? projectName(task.project)}
                     </span>
                   ) : null}
                   {/* The time is REPLACED while it is answering, not annotated. "2 min" is a fact
@@ -443,8 +460,8 @@ export function ChatView({ surface }: { surface: ChatSurface }): JSX.Element {
 function ChatStart({ surface }: { surface: ChatSurface }): JSX.Element {
   const [overrides, setOverrides] = useState<ChatSettings>({});
   const [plan, setPlan] = useState<ChatPlanView | null>(null);
-  const mentions = useMentions(surface.hasProject);
   const project = surface.project ?? undefined;
+  const mentions = useMentions(surface.hasProject, project);
 
   /**
    * What the first message would run under — asked of the STATE, since there is no conversation yet.
@@ -601,7 +618,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const [draft, setDraft] = useState("");
   /** Which message is being replaced, when one is — see `chat:send`'s `branchAt`. */
   const [editing, setEditing] = useState<{ at: string; was: string } | null>(null);
-  const mentions = useMentions(surface.hasProject);
+  const mentions = useMentions(surface.hasProject, project);
   const scroller = useRef<HTMLDivElement | null>(null);
   /**
    * Whether the reader is still standing at the live edge.
@@ -1039,21 +1056,53 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
  * Neither with no project open: `@` would complete against a project that is not there, and the
  * completion would answer "no project is open" per keystroke. A conversation in JaiRA's own root
  * still works — it simply has nothing to mention.
+ *
+ * Both NAME the project rather than letting main resolve one. `$PROJECT` and a file search are
+ * project-scoped calls, and an unnamed one answers only while exactly one user project is open — so
+ * with a second checkout open every keystroke of a mention answered "several projects are open, so
+ * this call must name one" instead of completing.
  */
-function useMentions(hasProject: boolean): {
+function useMentions(hasProject: boolean, project: string | undefined): {
   mentions?: (query: string) => Promise<string[]>;
   readMention?: (path: string) => Promise<string>;
 } {
   return useMemo(() => {
     if (!hasProject) return {};
+    const where = project !== undefined ? { project } : {};
     return {
       mentions: (query: string) =>
-        invoke("file:find", { query, limit: 20 })
+        invoke("file:find", { query, limit: 20, ...where })
           .then((found) => found.paths)
           .catch(() => []),
-      readMention: (path: string) => invoke("uri:read", { uri: `$PROJECT/${path}` }).then((content) => content.text),
+      readMention: (path: string) =>
+        invoke("uri:read", { uri: `$PROJECT/${path}`, ...where }).then((content) => content.text),
     };
-  }, [hasProject]);
+  }, [hasProject, project]);
+}
+
+/**
+ * Which project the Chat view reads and writes — the rule, so it can be stated once and tested.
+ *
+ * **A chat call always names its project.** Left unnamed, main resolves "the focused project", and
+ * that answers only while exactly one user project is open: it throws `no project is open` on a
+ * window standing on `~/.jaira` — a shared session is not a user one — and `several projects are
+ * open, so this call must name one` the moment a second checkout is, which is the arrangement this
+ * shell exists for. Every read the view makes went through that resolution: the thread, the artifact
+ * list, the plan the composer shows before the first message, and the `@` completion per keystroke.
+ *
+ * Three answers, in order:
+ *
+ *  - the OPEN conversation's own project. It is what `openConversation` was already being told and
+ *    what nothing was reading, so a thread opened from the root list — which spans every project —
+ *    was read out of whichever database main resolved rather than the one holding it.
+ *  - the project the address is standing on: where a new conversation goes, and what the composer's
+ *    plan is read from.
+ *  - the shared root at the root of the address, where there is no project to stand in. The same
+ *    rule `runTargetOf` gives base-layer workflows, and the one project that means the same thing in
+ *    every window.
+ */
+export function chatProjectOf(open: string | null, at: string | null): string {
+  return open ?? at ?? SHARED_SESSION;
 }
 
 /** Which of a project's tasks are conversations — the list the drawer shows. */

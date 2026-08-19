@@ -190,6 +190,79 @@ export function unseenTasks(
     .map((task) => ({ taskId: task.taskId, at: task.updatedAt }));
 }
 
+/** The least a row has to know about a task to be counted: what it is doing, and when it last did. */
+export type CountedTask = { taskId: string; status: TaskStatus; updatedAt: number };
+
+/**
+ * A named LIST of tasks as pills — what a view row counts, where a project row counts a summary.
+ *
+ * The difference is the population, and it is the whole reason this exists beside
+ * {@link projectCounts}. A project row answers "how much is in this project"; a view row answers
+ * "how much of it is in HERE", and the two rooms inside a project hold different things. A summary
+ * cannot be asked that — `ended` carries no workflow, so nothing in it says which rows are
+ * conversations — but the lists the views are drawn from can, because they ARE the rows.
+ *
+ * Same split as `projectCounts` on what the watermark applies to: an active pill is a live fact and
+ * is always true, a status pill counts only what has stopped since this person last looked.
+ *
+ * `waiting` is the one thing it cannot see. Whether a running task is parked on a person is counted
+ * from the session's own requests and is not on the task row, so a conversation waiting on an
+ * answer reads as `▶` here and is broken out only on the project row above. That is a fair trade
+ * for a view row: it is a pointer to where to look, and it does point.
+ */
+export function taskCounts(rows: readonly CountedTask[], seen: Readonly<Record<string, number>> = {}): PillCounts {
+  const counts: PillCounts = {};
+  for (const row of rows) {
+    const kind = pillKindOf(row.status);
+    if (kind === null) continue;
+    if (pillFill(kind) === "status" && (seen[row.taskId] ?? 0) >= row.updatedAt) continue;
+    counts[kind] = (counts[kind] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/** The rows a {@link taskCounts} status pill is counting — what "mark this row seen" has to mark. */
+export function unseenRows(
+  rows: readonly CountedTask[],
+  seen: Readonly<Record<string, number>> = {},
+): { taskId: string; at: number }[] {
+  return rows
+    .filter((row) => {
+      // `queued` has no pill at all, so there is nothing about it to have seen — see `pillKindOf`.
+      const kind = pillKindOf(row.status);
+      return kind !== null && pillFill(kind) === "status" && (seen[row.taskId] ?? 0) < row.updatedAt;
+    })
+    .map((row) => ({ taskId: row.taskId, at: row.updatedAt }));
+}
+
+/** Two tallies added — how a root row sums the projects under it. */
+export function addCounts(a: PillCounts, b: PillCounts): PillCounts {
+  const out: PillCounts = { ...a };
+  for (const kind of PILL_ORDER) {
+    const n = (a[kind] ?? 0) + (b[kind] ?? 0);
+    if (n > 0) out[kind] = n;
+  }
+  return out;
+}
+
+/**
+ * One tally less another — how "everything here" becomes "everything here that is not a
+ * conversation".
+ *
+ * Floored at zero per kind, because the two sides are counted from different places and can
+ * disagree by one: `waiting` is broken out of `running` on a summary and is not visible on a task
+ * row at all (see {@link taskCounts}). A negative count is not a number worth propagating, and the
+ * kinds that can disagree are the live ones, which say so again a second later.
+ */
+export function minusCounts(all: PillCounts, part: PillCounts): PillCounts {
+  const out: PillCounts = {};
+  for (const kind of PILL_ORDER) {
+    const n = Math.max(0, (all[kind] ?? 0) - (part[kind] ?? 0));
+    if (n > 0) out[kind] = n;
+  }
+  return out;
+}
+
 /*
  * How wide a pill is, near enough to decide what fits.
  *

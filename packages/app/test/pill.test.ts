@@ -13,14 +13,19 @@ import { describe, expect, it } from "vitest";
 import type { EndedTask, TaskStatus } from "@jaira/shared/browser";
 import {
   PILL_ORDER,
+  addCounts,
   layoutPills,
+  minusCounts,
   pillFill,
   pillKindOf,
   pillTotal,
   projectCounts,
   tally,
+  taskCounts,
+  unseenRows,
   unseenTasks,
   type CountedProject,
+  type CountedTask,
   type PillCounts,
 } from "../src/renderer/pill";
 
@@ -184,5 +189,64 @@ describe("projectCounts", () => {
 
   it("leaves queued tasks out entirely", () => {
     expect(projectCounts(summary({ statuses: { queued: 9 } }))).toEqual({});
+  });
+});
+
+/**
+ * A view row counts one ROOM, not the project (SHELL.md §4.3).
+ *
+ * The fault these guard is a real one and it was invisible: both root rows were given the same
+ * summed tally, so **All conversations** wore a `✓` for a workflow run that finished — a mark
+ * pointing at a place that did not contain the thing it pointed at, with no row further down
+ * repeating it, so there was nothing to follow the mark to.
+ */
+describe("taskCounts", () => {
+  const row = (patch: Partial<CountedTask> & Pick<CountedTask, "taskId">): CountedTask => ({
+    status: "completed",
+    updatedAt: 10,
+    ...patch,
+  });
+
+  it("counts a live run whether or not anybody has looked", () => {
+    expect(taskCounts([row({ taskId: "a", status: "running" })], { a: 99 })).toEqual({ running: 1 });
+  });
+
+  it("counts a stopped run only until it has been read", () => {
+    const rows = [row({ taskId: "a" }), row({ taskId: "b", status: "failed", updatedAt: 40 })];
+    expect(taskCounts(rows)).toEqual({ success: 1, error: 1 });
+    expect(taskCounts(rows, { a: 10 })).toEqual({ error: 1 });
+    expect(taskCounts(rows, { a: 10, b: 40 })).toEqual({});
+  });
+
+  it("marks exactly the stopped rows, and never the live ones", () => {
+    const rows = [row({ taskId: "a" }), row({ taskId: "b", status: "running" })];
+    expect(unseenRows(rows)).toEqual([{ taskId: "a", at: 10 }]);
+  });
+
+  it("leaves a queued row out, which is what having no pill means", () => {
+    expect(taskCounts([row({ taskId: "a", status: "queued" })])).toEqual({});
+    expect(unseenRows([row({ taskId: "a", status: "queued" })])).toEqual([]);
+  });
+});
+
+describe("splitting a project between its rooms", () => {
+  it("gives Tasks what is left once the conversations are taken out", () => {
+    const project: PillCounts = { running: 3, success: 4 };
+    const chats: PillCounts = { running: 1, success: 1 };
+    expect(minusCounts(project, chats)).toEqual({ running: 2, success: 3 });
+  });
+
+  it("floors at zero rather than propagating a disagreement", () => {
+    // The two sides are counted from different places: `waiting` is broken out of `running` on a
+    // summary and is not visible on a task row at all. A negative count is not worth carrying.
+    expect(minusCounts({ running: 1 }, { running: 2, error: 1 })).toEqual({});
+  });
+
+  it("sums the projects for the row that stands over all of them", () => {
+    expect(addCounts({ running: 1, success: 2 }, { success: 1, error: 3 })).toEqual({
+      running: 1,
+      success: 3,
+      error: 3,
+    });
   });
 });

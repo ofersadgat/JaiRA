@@ -411,3 +411,30 @@ describe("finding files to mention", () => {
     expect(service.findFiles({ query: "note" }).paths[0]).toBe("note.md");
   });
 });
+
+/**
+ * The list the ROOT's "All conversations" row draws — every project's threads, stamped.
+ *
+ * A cross-project list is the one thing that cannot be assembled from the open project's tasks, and
+ * the row that draws it is one click from the sidebar now. What it needs of the channel is exactly
+ * two things: only conversations come back, and every row can say whose it is — a row that cannot
+ * name its project cannot be opened (SHELL.md §2.4).
+ */
+describe("every project's conversations", () => {
+  it("returns the chat tasks, stamped with the project holding them", () => {
+    const chat = service.createTask({ title: "a thread", workflow: CHAT_AGENT, inputs: { message: "hi" } });
+    service.createTask({ title: "a run", workflow: "feature/plan", inputs: { issue: "x" } });
+
+    const all = service.listAllTasks({ workflows: [CHAT_AGENT, CHAT_ASSISTANT] });
+    expect(all.map((t) => t.taskId)).toEqual([chat.taskId]);
+    // The stamp, which is what makes the row openable — `openConversation` reads the thread out of
+    // the database this names, rather than out of whichever project happens to be focused.
+    expect(all[0]?.project).toBe(dir);
+  });
+
+  it("asked for nothing in particular, answers with everything", () => {
+    service.createTask({ title: "a thread", workflow: CHAT_AGENT, inputs: { message: "hi" } });
+    service.createTask({ title: "a run", workflow: "feature/plan", inputs: { issue: "x" } });
+    expect(service.listAllTasks({}).length).toBe(2);
+  });
+});

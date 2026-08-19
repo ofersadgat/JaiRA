@@ -19,7 +19,9 @@
     "build": "npm run build:main && npm run build:renderer",
     "start": "npm run build && npm run abi:electron && electron .",
     "abi:electron": "node ../../scripts/nativeAbi.mjs electron",
-    "abi:node": "node ../../scripts/nativeAbi.mjs node"
+    "abi:node": "node ../../scripts/nativeAbi.mjs node",
+    "build:snapshot": "vite build --config vite.snapshot.config.ts",
+    "snapshot": "npm run build:snapshot && electron snapshot/shoot.mjs"
   },
   "dependencies": {
     "@declarative-ai/exec": "file:../../../declarative-ai/packages/exec",

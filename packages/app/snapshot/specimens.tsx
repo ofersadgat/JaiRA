@@ -1,0 +1,339 @@
+/**
+ * The specimens the snapshot harness photographs.
+ *
+ * Each one is a REAL component from `src/renderer`, given fixed props and framed at the same size
+ * as the corresponding figure in the visual reference (`reference/the-shell.html`, SHELL.md §10), so
+ * the two PNGs can be laid side by side and read as one comparison rather than two impressions.
+ *
+ * Nothing here may reimplement a surface. A specimen that draws its own markup answers a question
+ * about the specimen; the only question worth asking is what the app draws, so the scaffolding
+ * stops at the window frame and everything inside it is imported.
+ */
+import { useState, type JSX, type ReactNode } from "react";
+import type { BoardCard, BoardView } from "@jaira/shared/browser";
+import { defaultAppearance } from "@jaira/shared/browser";
+import { AppearancePane } from "../src/renderer/appearancePane";
+import { Board } from "../src/renderer/board";
+import { Pill, Pills } from "../src/renderer/pill";
+import { Sidebar, type SidebarAct } from "../src/renderer/sidebar";
+
+/**
+ * The clock the specimen's ages are measured back from.
+ *
+ * Read once at load rather than pinned to a date, because what has to be stable between runs is the
+ * rendered STRING — "3 minutes ago" — and a card's age is computed against the real clock. A fixed
+ * timestamp gives a reproducible number that grows by a day every day.
+ */
+export const NOW = Date.now();
+
+const card = (c: Partial<BoardCard> & Pick<BoardCard, "taskId" | "title" | "status">): BoardCard => ({
+  workflow: "feature",
+  activePath: [],
+  hasSubBoard: false,
+  updatedAt: NOW,
+  ...c,
+});
+
+/** The column of the reference's figure 06, card for card. */
+const PLAN_CARDS: BoardCard[] = [
+  card({
+    taskId: "t1",
+    title: "tighten the sync lint",
+    status: "running",
+    activeStatus: "running",
+    activeStateId: "plan",
+    hasSubBoard: true,
+  }),
+  card({ taskId: "t2", title: "rate limiter", status: "running", activeStatus: "running", activeStateId: "plan" }),
+  card({
+    taskId: "t3",
+    title: "delete stale worktrees",
+    status: "running",
+    activeStatus: "waiting_for_user",
+    activeStateId: "plan",
+  }),
+  card({ taskId: "t4", title: "token budget", status: "running", activeStatus: "blocked", activeStateId: "plan" }),
+  card({ taskId: "t5", title: "retry policy", status: "completed", endedAt: NOW - 3 * 60_000 }),
+  card({ taskId: "t6", title: "schema migration", status: "failed", endedAt: NOW - 18 * 60_000 }),
+  card({ taskId: "t7", title: "worktree cleanup", status: "interrupted", endedAt: NOW - 60 * 60_000 }),
+];
+
+const BUILD_CARDS: BoardCard[] = [
+  card({ taskId: "b1", title: "bump the schema", status: "running", activeStatus: "running", activeStateId: "build" }),
+  card({ taskId: "b2", title: "classify changeset", status: "failed", endedAt: NOW - 6 * 60_000 }),
+];
+
+const ONE_COLUMN: BoardView = {
+  level: "feature",
+  breadcrumb: [],
+  columns: [{ key: "plan", stateId: "feature.plan", label: "feature.plan", cards: PLAN_CARDS }],
+  atLevel: [],
+  finished: [],
+};
+
+const TWO_COLUMNS: BoardView = {
+  level: "feature",
+  breadcrumb: [],
+  columns: [
+    { key: "plan", stateId: "feature.plan", label: "plan", cards: PLAN_CARDS.slice(0, 5) },
+    { key: "build", stateId: "feature.build", label: "build", cards: BUILD_CARDS },
+  ],
+  atLevel: [],
+  finished: [],
+};
+
+function BoardSpecimen({ board }: { board: BoardView }): JSX.Element {
+  return (
+    <Board
+      board={board}
+      selected="t1"
+      onSelectTask={() => {}}
+      onDrill={() => {}}
+      onOpenTask={() => {}}
+    />
+  );
+}
+
+/**
+ * The sidebar of the reference's figure 01: four projects, the first one open on Files.
+ *
+ * STATEFUL, which is the difference between a photograph of a column and a photograph of a control.
+ * Every row it draws is an accordion, a switch or a verb, and a specimen wired to `() => {}` looks
+ * identical to one whose accordion does not open — which is exactly the fault this pass was fixing.
+ * The harness clicks it (see `OPENED` in `shoot.mjs`), so what is photographed is what a click does.
+ */
+function SidebarSpecimen(): JSX.Element {
+  const [view, setView] = useState("files");
+  const [finding, setFinding] = useState<Record<string, boolean>>({});
+  const [shut, setShut] = useState(false);
+  const find = (id: string): SidebarAct => ({
+    id: "find",
+    glyph: "⌕",
+    label: `find in ${id}`,
+    on: finding[id] === true,
+    onAct: () => setFinding((f) => ({ ...f, [id]: !(f[id] ?? false) })),
+  });
+  return (
+    <Sidebar
+      views={[
+        {
+          id: "files",
+          glyph: "❏",
+          label: "Files",
+          panel: <FileTreeStub />,
+          acts: [{ id: "new", glyph: "+", label: "new file", onAct: () => {} }, find("files")],
+        },
+        { id: "tasks", glyph: "▶", label: "Tasks", counts: { running: 2, waiting: 1, success: 3 } },
+        {
+          id: "chat",
+          glyph: "✎",
+          label: "Chat",
+          counts: { waiting: 1 },
+          panel: <ChatListStub />,
+          acts: [{ id: "new", glyph: "+", label: "new conversation", onAct: () => {} }, find("chat")],
+        },
+      ]}
+      roots={[{ id: "all", glyph: "◎", label: "All tasks" }]}
+      footer={[
+        { id: "logs", glyph: "≡", label: "Logs" },
+        { id: "debug", glyph: "⌁", label: "Debug" },
+      ]}
+      settings={{
+        id: "settings",
+        glyph: "⚙",
+        label: "Settings",
+        panel: <SectionsStub />,
+      }}
+      onLeaveSettings={() => setView("files")}
+      view={view}
+      onView={setView}
+      collapsed={shut}
+      onCollapsed={setShut}
+      projects={[
+        {
+          project: "/w/checkouts/declarative-ai",
+          label: "declarative-ai",
+          kind: "user",
+          hue: "var(--p1)",
+          counts: { running: 2, waiting: 1, success: 2, error: 1 },
+        },
+        { project: "/w/notes-api", label: "notes-api", kind: "user", hue: "var(--p2)", counts: { error: 1, success: 4 } },
+        { project: "/w/atlas-web", label: "atlas-web", kind: "user", hue: "var(--p3)", counts: { running: 1, warning: 1 } },
+        { project: "~/.jaira", label: "~/.jaira", kind: "shared", hue: "var(--p0)", counts: {} },
+      ]}
+      at="/w/checkouts/declarative-ai"
+      onProject={() => {}}
+      busy={false}
+      theme="light"
+      onTheme={() => {}}
+      onChooseProject={() => {}}
+    />
+  );
+}
+
+/**
+ * Standing in for the file tree, which needs a service behind it.
+ *
+ * The real rows, though — `.tree-item` with its `.tree-guide` rules — because the guides are the
+ * thing being checked: one rule per level of nesting, continuing the two the column draws above.
+ */
+function FileTreeStub(): JSX.Element {
+  const row = (depth: number, name: string, sel = false): JSX.Element => (
+    <li className={`tree-item${sel ? " sel" : ""}`}>
+      {Array.from({ length: depth }, (_, i) => (
+        <i key={i} className="tree-guide" />
+      ))}
+      <span className="glyph">{name.endsWith("/") ? "▾" : "·"}</span>
+      <span className="name">{name}</span>
+    </li>
+  );
+  return (
+    <div className="file-browser">
+      <div className="scroll">
+        {/* HEADERLESS: the root the drawer is standing in is the project row above it, and printing
+            its name again at the top of its own branch said the same word twice. */}
+        <ul className="file-tree">
+          {row(0, "workflows/")}
+          {row(1, "feature/")}
+          {row(2, "plan/")}
+          {row(3, "goals.json")}
+          {row(3, "critique.json", true)}
+          {row(1, "prompts/")}
+          {row(2, "review.md")}
+        </ul>
+        {/* The shared root introduces itself HERE — the drawer is standing in a project, so this is
+            somewhere else. Standing in `~/.jaira` it would be the unnamed one and this row would be
+            gone, which is the case that was still printing it. */}
+        <ul className="file-tree">
+          <li className="tree-root">~/.jaira</li>
+          {row(0, "workflows/")}
+          {row(1, "review/")}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+/** The conversation list, as the drawer under the Chat row holds it. */
+function ChatListStub(): JSX.Element {
+  return (
+    <div className="chat-list">
+      <ul className="chat-rows">
+        {[
+          { title: "why does the lint pass here", when: "2 min", unread: true },
+          { title: "worktree cleanup", when: "1 h", unread: false },
+          { title: "what does §9.2 decide", when: "yesterday", unread: false },
+        ].map((c) => (
+          <li key={c.title} className={c.unread ? "sel" : undefined}>
+            <span className={`chat-row-mark${c.unread ? " unread" : ""}`} />
+            <span className="chat-row-title ellip">{c.title}</span>
+            <span className="chat-row-when sub">{c.when}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** The Settings sections, as the drawer under the lifted Settings row holds them. */
+function SectionsStub(): JSX.Element {
+  return (
+    <ul className="sections">
+      {["Providers", "Executors", "Configuration", "Appearance"].map((label) => (
+        <li key={label} className={label === "Appearance" ? "sel" : undefined}>
+          {label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Figure 05: every pill, in both fills, plus the overflow. */
+function PillSpecimen(): JSX.Element {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 12 }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <Pill kind="running" word="running" />
+        <Pill kind="waiting" word="waiting" />
+        <Pill kind="error" word="failed" />
+        <Pill kind="warning" word="stopped" />
+        <Pill kind="success" word="done" />
+      </div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <Pill kind="running" n={2} />
+        <Pill kind="waiting" n={1} />
+        <Pill kind="error" n={1} />
+        <Pill kind="warning" n={1} />
+        <Pill kind="success" n={4} />
+      </div>
+      <Pills counts={{ running: 2, waiting: 1, error: 1, warning: 1, success: 4 }} budget={96} />
+    </div>
+  );
+}
+
+/** Figure 04: the ten registers, each set in itself. */
+const REGISTERS: readonly { cls: string; sample: string }[] = [
+  { cls: "app-title", sample: "Appearance" },
+  { cls: "app-label", sample: "Files" },
+  { cls: "app-text", sample: "Separate editor size" },
+  { cls: "app-secondary", sample: "every project on this machine" },
+  { cls: "app-absent", sample: "no project open" },
+  { cls: "data-title", sample: "declarative-ai" },
+  { cls: "data-text", sample: "prompts/review.md" },
+  { cls: "data-secondary", sample: "40s · 3 turns" },
+  { cls: "data-faint", sample: "shadows ~/.jaira/" },
+  { cls: "data-num", sample: "1234567890" },
+];
+
+function RegisterSpecimen(): JSX.Element {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 7, padding: 12 }}>
+      {REGISTERS.map(({ cls, sample }) => (
+        <div key={cls} style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <span className="data-faint" style={{ width: 110, flex: "none" }}>
+            {cls}
+          </span>
+          <span className={cls}>{sample}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Figure 07, live: the real pane, holding its own state so the controls can be exercised by hand. */
+function AppearanceSpecimen(): JSX.Element {
+  // App text UNSET, data text chosen — the two states this control has, in one picture. Unset is
+  // what almost every window is in, and it is the one that used to draw an empty box under a
+  // heading: the chips now say which face is rendering and that it is ours (`shownFamilies`).
+  const [appearance, setAppearance] = useState({
+    ...defaultAppearance(),
+    appFamily: [] as string[],
+    dataFamily: ["JetBrains Mono", "Consolas"],
+    advanced: true,
+  });
+  return (
+    <AppearancePane
+      appearance={appearance}
+      busy={false}
+      onChange={(patch) => setAppearance((a) => ({ ...a, ...patch }))}
+    />
+  );
+}
+
+export interface Specimen {
+  id: string;
+  /** The figure in `reference/the-shell.html` this one is answerable to. */
+  figure: string;
+  width: number;
+  height: number;
+  node: ReactNode;
+}
+
+export const SPECIMENS: readonly Specimen[] = [
+  { id: "board-column", figure: "06 · Column", width: 276, height: 384, node: <BoardSpecimen board={ONE_COLUMN} /> },
+  { id: "board-two", figure: "01 · Tasks", width: 560, height: 340, node: <BoardSpecimen board={TWO_COLUMNS} /> },
+  { id: "sidebar", figure: "02 · The sidebar", width: 251, height: 470, node: <SidebarSpecimen /> },
+  { id: "pills", figure: "05 · The pills", width: 320, height: 120, node: <PillSpecimen /> },
+  { id: "registers", figure: "04 · Ten registers", width: 360, height: 230, node: <RegisterSpecimen /> },
+  { id: "appearance", figure: "07 · Appearance", width: 430, height: 620, node: <AppearanceSpecimen /> },
+];

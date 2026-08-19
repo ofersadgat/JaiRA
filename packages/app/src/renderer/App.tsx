@@ -34,17 +34,28 @@ import type {
   PendingInteraction,
   PendingQuestion,
   ProjectSummary,
+  ProjectTask,
   WorkflowLayer,
 } from "@jaira/shared/browser";
-import { SHARED_SESSION } from "@jaira/shared/browser";
 import { Board, lanesOf } from "./board";
-import { ChatListPanel, ChatView, conversationsOf, type ChatSurface } from "./chatPane";
+import { ChatListPanel, ChatView, chatProjectOf, conversationsOf, type ChatSurface } from "./chatPane";
 import { isChatWorkflow } from "./chatWorkflow";
 import { ApprovalDialog, InteractionDialog, QuestionDialog } from "./components";
 import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem } from "./menu";
 import { AppearancePane } from "./appearancePane";
-import { hueOf, Pill, projectCounts, type PillCounts } from "./pill";
+import {
+  addCounts,
+  hueOf,
+  minusCounts,
+  Pill,
+  projectCounts,
+  taskCounts,
+  unseenRows,
+  unseenTasks,
+  type PillCounts,
+} from "./pill";
 import { PointerMenus } from "./pointerMenu";
+import { projectName } from "./projects";
 import { ValuePanelContext, type PinnedValue } from "./valuePanel";
 import { ValueView } from "./valueView";
 import {
@@ -69,7 +80,7 @@ import { ExecutorsPane } from "./executorsPane";
 import { initialRunValues, runFieldsOf, runTargetOf } from "./runForm";
 import type { RunSurface } from "./runPanel";
 import { RunModeToggle, RunView, TaskContext } from "./runViews";
-import { Sidebar, type SidebarProject, type SidebarView } from "./sidebar";
+import { Sidebar, type SidebarAct, type SidebarProject, type SidebarView } from "./sidebar";
 import { Splitter } from "./splitter";
 import { TaskAddressBar } from "./taskBar";
 import { nodeAt } from "./trail";
@@ -242,19 +253,6 @@ const ROOT_VIEWS: readonly SidebarView[] = [
 const ALL_VIEWS: readonly SidebarView[] = [...VIEWS, ...FOOTER_VIEWS];
 
 /**
- * The window's name for a project directory: its last segment.
- *
- * The full path is what the crumb's tooltip carries. A column 250px wide cannot show
- * `C:/checkouts/acme/services/billing` and would show the wrong half of it if it tried — the half
- * every project on the machine has in common.
- */
-function projectName(dir: string | null): string {
-  if (dir === null) return "";
-  const parts = dir.split(/[\\/]/).filter((p) => p.length > 0);
-  return parts.at(-1) ?? dir;
-}
-
-/**
  * The window's name, for the taskbar and the window switcher.
  *
  * `document.title` only — with no frame there is nothing else to set, and nothing on screen shows
@@ -326,7 +324,7 @@ function InboxStrip({
   const chipOf = (project: string): { label: string; hue: string } => {
     const found = projects.find((p) => p.project === project);
     return {
-      label: found?.label ?? (project.split(/[\/]+/).filter(Boolean).pop() ?? project),
+      label: found?.label ?? projectName(project),
       hue: hues[project] ?? "var(--p0)",
     };
   };
@@ -419,7 +417,34 @@ export default function App(): JSX.Element {
    * nobody had asked yet.
    */
   const [runMode, setRunMode] = useState<"board" | "conversation">("board");
+  /**
+   * Which of the sidebar drawers is currently showing its FIND field (SHELL.md §5.1).
+   *
+   * Session-scoped, and deliberately not in the remembered layout beside the folds: a fold is how
+   * you like the column arranged and is worth reopening the app on, while a search is a thing you
+   * are in the middle of. A window that opened with a stale query in it, filtering a tree, would be
+   * a window that opened looking broken.
+   */
+  const [finding, setFinding] = useState<Record<string, boolean>>({});
+  const find = (id: string): SidebarAct => ({
+    id: "find",
+    glyph: "⌕",
+    label: `find in ${id}`,
+    on: finding[id] === true,
+    onAct: () => setFinding((f) => ({ ...f, [id]: !(f[id] ?? false) })),
+  });
   const { board, detail, pending, view } = state;
+  /**
+   * Where "back" goes from Settings — the view the window was showing when it was opened.
+   *
+   * Settings is the one view that is not a place in the address: you go into it FROM somewhere, and
+   * the way out is that somewhere rather than a default. A ref rather than state, because nothing
+   * renders differently for it: it is read only when the arrow is clicked.
+   */
+  const beforeSettings = useRef<View>("files");
+  useEffect(() => {
+    if (view !== "settings") beforeSettings.current = view;
+  }, [view]);
 
   /**
    * The files with unsaved edits, as the `layer:path` keys the tree rows are identified by.
@@ -452,15 +477,27 @@ export default function App(): JSX.Element {
     () => Object.fromEntries(state.projects.map((p, i) => [p.project, hueOf(p.kind, i)])),
     [state.projects],
   );
+  /**
+   * Directory → what to call it, for the same surfaces.
+   *
+   * Main's own labels: the basename for a checkout, `~/.jaira` for the shared root, `JaiRA` for its
+   * own. Handed out rather than re-derived per surface, so one project is called one thing wherever
+   * the window mentions it — and so the two places that cannot derive it (a root is not its
+   * basename) do not have to.
+   */
+  const projectNames = useMemo(
+    () => Object.fromEntries(state.projects.map((p) => [p.project, p.label])),
+    [state.projects],
+  );
 
   /**
-   * Where a NEW conversation goes, and what an existing row falls back to.
+   * Which project the Chat view reads and writes — the open conversation's, or where a new one goes.
    *
-   * At the root there is no project the composer is standing in, so a new thread goes to the shared
-   * root — which is the one project that means the same thing in every window. Rows opened from the
-   * root list carry their own project and never reach this.
+   * The rule is `chatProjectOf`, stated where the surface it feeds is defined. What matters here is
+   * that it is never `null`: a chat call NAMES its project, because main resolves an unnamed one
+   * only while exactly one user project is open.
    */
-  const chatProject = state.at === null ? SHARED_SESSION : null;
+  const chatProject = chatProjectOf(state.chat.project, state.at);
   const chat: ChatSurface = {
     // At the ROOT: every project's conversations, newest first, each stamped with its own project —
     // "all conversations" is a place, and this is what it holds. Inside a project: that project's.
@@ -469,6 +506,7 @@ export default function App(): JSX.Element {
       [state.at, state.allConversations, state.tasks],
     ),
     hues: projectHues,
+    names: projectNames,
     taskId: state.chat.taskId,
     project: chatProject,
     busy: state.chat.busy,
@@ -992,37 +1030,122 @@ export default function App(): JSX.Element {
   }));
 
   /**
-   * The root rows, with the counts of EVERY project on them.
+   * The conversations of the projects the sidebar lists, and of the OPEN one.
+   *
+   * `allConversations` is fetched for every open project whatever view is showing, so it is the one
+   * list that can answer "which of these ended rows is a conversation" — a project summary cannot:
+   * its `ended` rows carry a status and a clock and no workflow. That question is what makes a view
+   * row's pills honest, and answering it wrong is what put a `✓` on **All conversations** for a
+   * task that was never a conversation.
+   */
+  const chatsOf = (project: string): ProjectTask[] =>
+    state.allConversations.filter((t) => t.project === project);
+  /** The stopped rows of a project that are NOT conversations — what the Tasks rows count. */
+  const runsOf = (p: ProjectSummary): { taskId: string; at: number }[] => {
+    const chats = new Set(chatsOf(p.project).map((t) => t.taskId));
+    return unseenTasks(p, ui.seen).filter(({ taskId }) => !chats.has(taskId));
+  };
+
+  /**
+   * The root rows: every project's work at once, split by which ROOM it is in.
    *
    * Summed rather than per-project, which is what makes them a level: "all tasks" is one place, and
-   * the number beside it is how much is in it. Clicking the pills marks the lot seen, for the same
-   * reason clicking a project row's does.
+   * the number beside it is how much is in it. Clicking the pills marks that row's share seen.
+   *
+   * Split, because the two rows are two rooms and the counts have to say which. Given the same
+   * total, **All conversations** carried a `✓` for a run that finished in a workflow — a mark
+   * pointing at a place that did not contain the thing it was pointing at, and no row below it
+   * repeating the mark, so there was nothing to follow it to. Chat counts conversations; Tasks
+   * counts what is left.
    */
-  const rootRows: SidebarView[] = ROOT_VIEWS.map((v) => ({
-    ...v,
-    counts: shownProjects.reduce<PillCounts>((sum, p) => {
-      for (const [kind, n] of Object.entries(projectCounts(p, ui.seen))) {
-        sum[kind as keyof PillCounts] = (sum[kind as keyof PillCounts] ?? 0) + (n ?? 0);
-      }
-      return sum;
-    }, {}),
-    onSeen: () => shownProjects.forEach((p) => actions.markProjectSeen(p.project)),
-  }));
+  const chatCounts = taskCounts(state.allConversations, ui.seen);
+  /** The project the address is standing on, as the summary its rows count from. */
+  const atSummary = state.at === null ? null : (shownProjects.find((p) => p.project === state.at) ?? null);
+  const atChats = state.at === null ? [] : chatsOf(state.at);
+  /**
+   * Start a conversation, from the row that names them.
+   *
+   * The button used to be the first line of the drawer, which meant "open Chat, wait for the list,
+   * then click the thing above it". On the row it is the verb the row is for.
+   */
+  const newChat: SidebarAct = {
+    id: "new",
+    glyph: "+",
+    label: "new conversation",
+    onAct: () => {
+      actions.setView("chat");
+      actions.openConversation(null);
+    },
+  };
+  /**
+   * The same verb on the ROOT's row, which goes to the root first.
+   *
+   * Exactly what clicking that row does, and for the same reason: a conversation started from the
+   * row that spans every project belongs to the shared root, not to whichever checkout the address
+   * happened to be standing on when the `+` was clicked.
+   */
+  const newRootChat: SidebarAct = {
+    ...newChat,
+    onAct: () => {
+      actions.standOn(null);
+      newChat.onAct();
+    },
+  };
+  /** Every project's work, before it is split between the two rooms. */
+  const allCounts = shownProjects.reduce<PillCounts>((sum, p) => addCounts(sum, projectCounts(p, ui.seen)), {});
+  const rootRows: SidebarView[] = ROOT_VIEWS.map((v) => {
+    if (v.id !== "chat") {
+      return {
+        ...v,
+        counts: minusCounts(allCounts, chatCounts),
+        onSeen: () => actions.markSeenAll(shownProjects.flatMap(runsOf)),
+      };
+    }
+    return {
+      ...v,
+      counts: chatCounts,
+      onSeen: () => actions.markSeenAll(unseenRows(state.allConversations, ui.seen)),
+      // The same list the project's own Chat row opens, one level up (SHELL.md §5.1). "All
+      // conversations" is a place and this is what is in it; a row that names a level and opens
+      // onto nothing is the one arrangement that makes the level look empty.
+      acts: [newRootChat, find("conversations")],
+      panel: <ChatListPanel surface={chat} find={finding.conversations === true} />,
+    };
+  });
 
   const rows: SidebarView[] = VIEWS.map((v) =>
-    v.id === "chat"
+    v.id === "tasks"
       ? {
           ...v,
-          open: openOf(ui, FOLD.shellChats),
-          onOpen: (open: boolean) => actions.setFold(FOLD.shellChats, open),
-          panel: <ChatListPanel surface={chat} />,
+          // This project's work, less what is in the room next door — see `rootRows`.
+          counts: minusCounts(
+            atSummary === null ? {} : projectCounts(atSummary, ui.seen),
+            taskCounts(atChats, ui.seen),
+          ),
+          onSeen: () => actions.markSeenAll(atSummary === null ? [] : runsOf(atSummary)),
+        }
+      : v.id === "chat"
+      ? {
+          ...v,
+          counts: taskCounts(atChats, ui.seen),
+          onSeen: () => actions.markSeenAll(unseenRows(atChats, ui.seen)),
+          acts: [newChat, find("chat")],
+          panel: <ChatListPanel surface={chat} find={finding.chat === true} />,
         }
       : v.id !== "files"
       ? v
       : {
           ...v,
-          open: openOf(ui, FOLD.shellFiles),
-          onOpen: (open: boolean) => actions.setFold(FOLD.shellFiles, open),
+          acts: [
+            {
+              id: "new",
+              glyph: "+",
+              label: "new file or state here",
+              on: finding["files.new"] === true,
+              onAct: () => setFinding((f) => ({ ...f, "files.new": !(f["files.new"] ?? false) })),
+            },
+            find("files"),
+          ],
           panel: (
             <FileTreePanel
               tree={state.tree}
@@ -1051,6 +1174,13 @@ export default function App(): JSX.Element {
               onRenameFile={actions.renameFile}
               onDeleteFile={actions.deleteFile}
               onReveal={actions.revealFile}
+              // Both were permanent fixtures of the drawer — a filter field over the tree and a
+              // three-control form under it, on screen whether or not anybody was filtering or
+              // creating. They are the row's verbs now, and this is the row saying which one is on.
+              find={finding.files === true}
+              creating={finding["files.new"] === true}
+              // Which root goes unnamed: the one the drawer is hanging under. See the prop.
+              project={state.at}
             />
           ),
         },
@@ -1060,8 +1190,6 @@ export default function App(): JSX.Element {
     id: "settings",
     glyph: "⚙",
     label: "Settings",
-    open: openOf(ui, FOLD.shellSections),
-    onOpen: (open: boolean) => actions.setFold(FOLD.shellSections, open),
     panel: (
       <ul className="sections">
         {SECTIONS.filter((s) => !s.needsProject || state.at !== null).map(({ id, label }) => (
@@ -1086,6 +1214,7 @@ export default function App(): JSX.Element {
         roots={rootRows}
         footer={FOOTER_VIEWS}
         settings={settingsRow}
+        onLeaveSettings={() => actions.setView(beforeSettings.current)}
         view={view}
         onView={(id) => actions.setView(id as View)}
         collapsed={sidebarShut}

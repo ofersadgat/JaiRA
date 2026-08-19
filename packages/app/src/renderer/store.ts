@@ -1339,6 +1339,30 @@ export function useApp() {
     return layer === undefined ? focused : (runTargetOf(layer, ref.current.at).project ?? focused);
   }, []);
 
+  /**
+   * When a task was last touched, from whichever of this window's lists happens to hold its row.
+   *
+   * Three, because the three answer for different populations and a window has any of them at any
+   * moment: the open project's tasks, every project's conversations, and the per-project summaries'
+   * `ended` rows — which is the only one that knows about a stopped task in a project the Tasks view
+   * has not been opened on.
+   *
+   * `null` for a task none of them has, which is not a fault: a run reached from the Files inspector
+   * may belong to a project no list has been fetched for, and a watermark that cannot be dated is
+   * one there is no honest value to move.
+   */
+  const taskClock = useCallback((taskId: string): number | null => {
+    const row =
+      ref.current.tasks.find((t) => t.taskId === taskId) ??
+      ref.current.allConversations.find((t) => t.taskId === taskId);
+    if (row !== undefined) return row.updatedAt;
+    for (const project of ref.current.projects) {
+      const ended = project.ended.find((t) => t.taskId === taskId);
+      if (ended !== undefined) return ended.updatedAt;
+    }
+    return null;
+  }, []);
+
   const refreshDetail = useCallback(
     // The detail is RETURNED as well as patched, because it is what a navigation seeds the address
     // bar from: the run a path stands on is an instance, and the instance tree is the only record
@@ -1998,6 +2022,19 @@ export function useApp() {
         // the focused project, which with no checkout open is none and makes every read that follows
         // throw. See `owningProject`.
         const at = project ?? ref.current.selectedProject ?? owningProject();
+        // OPENING IS LOOKING (SHELL.md §4.3). A status pill counts what has stopped since you last
+        // looked, so the gesture that clears it is the one that answers it — going and reading the
+        // thing. Clicking the pills stays as the way to dismiss a row you are not going to open.
+        //
+        // Marked to the row's OWN clock rather than to now, for the reason `markProjectSeen` is: a
+        // turn landing in the same millisecond as the click is news, and `Date.now()` swallows it.
+        if (taskId !== null) {
+          const clock = taskClock(taskId);
+          if (clock !== null) {
+            const next = withSeen(ref.current.settings.ui, taskId, clock);
+            if (next !== ref.current.settings.ui) setUi(next);
+          }
+        }
         const from = atState ?? ref.current.stateId;
         patch({
           selected: taskId,
@@ -2127,6 +2164,11 @@ export function useApp() {
         void refreshConfig();
         void refreshTasks();
         void refreshHistory();
+        // The ROOT's conversation list spans every project, so moving to the root is arriving at a
+        // list this window may never have fetched. It was filled once at startup — before main had
+        // finished reopening the projects it is a list OF — and then only by task invalidates, so a
+        // window that had simply not been told anything since it opened showed an empty root.
+        void refreshAllConversations();
       },
 
       /**
@@ -2424,7 +2466,13 @@ export function useApp() {
         const text = message.trim();
         if (text === "") return null;
         patch({ chat: { ...ref.current.chat, busy: true, opening: text, error: null } });
-        const project = ref.current.at === null ? SHARED_SESSION : undefined;
+        // NAMED, both when there is a checkout to name and when there is not. `undefined` meant "the
+        // focused project", which main resolves only while exactly one user project is open — so
+        // creating a conversation with a second checkout open failed with "several projects are
+        // open, so this call must name one", and failed on the `task:create` after the workflow
+        // files had already been written. The address is the answer, and at the root it is the
+        // shared one (`runTargetOf`'s rule for base-layer workflows).
+        const project = ref.current.at ?? SHARED_SESSION;
         try {
           // Missing files only — never overwriting. These are ordinary editable files under the
           // shared root, and a conversation must not silently discard somebody's changes to what a
@@ -2451,11 +2499,11 @@ export function useApp() {
             // started as one continue to run under.
             workflow: CHAT_AGENT,
             inputs: { message: text },
-            ...(project !== undefined ? { project } : {}),
+            project,
           });
           // Selected BEFORE it starts, so the thread is pointed at the run when its first delta
           // arrives — selecting afterwards means watching the opening in the past tense.
-          patch({ chat: { ...ref.current.chat, taskId: summary.taskId, project: project ?? null, busy: false } });
+          patch({ chat: { ...ref.current.chat, taskId: summary.taskId, project, busy: false } });
           actionsRef.current.select(summary.taskId, project);
           await Promise.all([project === SHARED_SESSION ? refreshSharedTasks() : refreshTasks(), refreshBoard()]);
           // The composer's picks ride the START, because for a conversation the first message IS the
@@ -2464,7 +2512,7 @@ export function useApp() {
           await invoke("task:start", {
             taskId: summary.taskId,
             ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
-            ...(project !== undefined ? { project } : {}),
+            project,
           });
           return summary.taskId;
         } catch (e) {
@@ -2665,6 +2713,19 @@ export function useApp() {
         if (next !== ref.current.settings.ui) setUi(next);
       },
 
+      /**
+       * Mark a NAMED set of rows read — what a view row's pills clear.
+       *
+       * `markProjectSeen` clears a whole project because that is what a project row counts. A view
+       * row counts one of the two things inside it (SHELL.md §4.3), so it has to name its own share
+       * rather than take the project's: clearing Chat's `✓2` must not also clear the three finished
+       * runs on Tasks, or the pills would be answering a question nobody asked.
+       */
+      markSeenAll: (marks: readonly { taskId: string; at: number }[]) => {
+        const next = withSeenAll(ref.current.settings.ui, marks);
+        if (next !== ref.current.settings.ui) setUi(next);
+      },
+
       // --- the shell --------------------------------------------------------
 
       /**
@@ -2684,6 +2745,8 @@ export function useApp() {
         // project per journal entry. Arriving is when that debt is paid. See the `board` invalidate.
         if (view === "tasks") void refreshProjects();
         // Backfilled once on open; everything after arrives on the push.
+        // Same for arriving at Chat by any other door: the list it draws is fetched by nothing else.
+        if (view === "chat") void refreshAllConversations();
         if (view === "logs") void refreshLogs();
         // What the pane leads with is whether the self-test is installed, so it has to be true when
         // the pane appears rather than after the first click.
@@ -3572,9 +3635,11 @@ export function useApp() {
       loadSessions,
       locateState,
       owningProject,
+      taskClock,
       refreshConversation,
       refreshSession,
       refreshSharedTasks,
+      refreshAllConversations,
       focusStateRun,
       refreshDebugFiles,
       afterFileChange,

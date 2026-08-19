@@ -11,7 +11,14 @@
  */
 import { describe, expect, it } from "vitest";
 import { SIZE_LIMITS, clampSize, defaultAppearance, parseSettings, type Appearance } from "@jaira/shared";
-import { DEFAULT_APP_STACK, DEFAULT_DATA_STACK, stackOf } from "../src/renderer/appearance";
+import {
+  DEFAULT_APP_STACK,
+  DEFAULT_DATA_STACK,
+  SHIPPED_APP_FAMILY,
+  SHIPPED_DATA_FAMILY,
+  shownFamilies,
+  stackOf,
+} from "../src/renderer/appearance";
 
 const appearanceOf = (patch: Record<string, unknown>): Appearance =>
   parseSettings({ appearance: patch }).appearance;
@@ -76,5 +83,33 @@ describe("parsing a preferences file", () => {
 
   it("reads a settings file written before any of this existed", () => {
     expect(parseSettings({ theme: "dark" }).appearance).toEqual(defaultAppearance());
+  });
+});
+
+/**
+ * What the picker draws, which is not the same question as what is stored.
+ *
+ * "Unset means unset" is a rule about the DOCUMENT — the property is removed and the stylesheet's
+ * own value stands. On screen it produced an empty box under a heading, which states that nothing
+ * is chosen and cannot state what the window is set in. Both are true at once, and this is the seam
+ * that keeps them from contradicting each other.
+ */
+describe("what the picker shows for a voice", () => {
+  it("shows the shipped face when nothing has been chosen", () => {
+    expect(shownFamilies([], "app")).toEqual([SHIPPED_APP_FAMILY]);
+    expect(shownFamilies([], "data")).toEqual([SHIPPED_DATA_FAMILY]);
+  });
+
+  it("shows the choice, and only the choice, once there is one", () => {
+    // Never ours plus theirs: a chosen stack REPLACES the shipped face outright — `stackOf` prepends
+    // it to the platform fallback, and DM Sans is not in that fallback.
+    expect(shownFamilies(["Inter"], "app")).toEqual(["Inter"]);
+    expect(stackOf(["Inter"], DEFAULT_APP_STACK)).not.toContain(SHIPPED_APP_FAMILY);
+  });
+
+  it("leaves the stored value alone, which is what keeps `unset` meaning unset", () => {
+    expect(stackOf(shownFamilies([], "app"), DEFAULT_APP_STACK)).toContain(SHIPPED_APP_FAMILY);
+    // The document still says nothing: this is a display, not a write.
+    expect(stackOf([], DEFAULT_APP_STACK)).toBeNull();
   });
 });

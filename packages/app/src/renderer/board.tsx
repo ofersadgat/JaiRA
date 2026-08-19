@@ -224,6 +224,13 @@ export function Tile({
  * Also chrome, and shared for the same reason: a column of tasks and a column of executions are
  * both "a heading, a count, and a stack of cards", and the only board-specific thing about either
  * is what goes inside.
+ *
+ * The column is a BOX and the card is not, which is the opposite of where this started. A column is
+ * a place — the one thing on this screen that a task moves between — so it earns an edge and a
+ * heading band that says where its contents stop. A card is one item inside that place, and giving
+ * it its own edge as well left two boxes nested one deep, neither of which read as the boundary.
+ * Removing the card's box (§5.3) is only half of that argument; this is the other half, and without
+ * it the cards of two adjacent columns run together into one field of rounded rectangles.
  */
 export function Column({
   name,
@@ -248,12 +255,19 @@ export function Column({
   return (
     <section className="column" {...(onOpen !== undefined ? { onDoubleClick: onOpen } : {})} {...(tip !== undefined ? { title: tip } : {})}>
       <h4>
-        {seq !== undefined ? <span className="seq">{seq}</span> : null}
+        {/* The order this child RUNS in, as a number and not a chip. A bordered box around a digit
+            is the loudest thing in a heading whose job is to name a place, and the columns are laid
+            out left to right in that same order — so the number is a confirmation, not news. */}
+        {seq !== undefined ? <span className="seq data-num">{seq}</span> : null}
         <span className="col-name">{name}</span>
-        <span className="count">{count}</span>
+        <span className="count app-secondary">{count}</span>
       </h4>
-      {children}
-      {count === 0 ? <div className="empty">{empty}</div> : null}
+      {/* The cards get their own scrolling box, so the heading band stays put over a column longer
+          than the screen without a sticky rule that has to repaint its own background. */}
+      <div className="column-body">
+        {children}
+        {count === 0 ? <div className="empty">{empty}</div> : null}
+      </div>
     </section>
   );
 }
@@ -392,7 +406,12 @@ export function Card({
             ? "double-click to open this run"
             : (card.activeStateId ?? card.status)
       }
-      trailing={onDrill ? <span className="drill">↳</span> : undefined}
+      // NOTHING trailing the pill. There was a `↳` here on every drillable card, and it cost more
+      // than it said: it is not in the design (SHELL.md §5.3 gives the head row a title and a
+      // trailing pill, and nothing else), it repeated for most of a column what "most of a column"
+      // already implies, and the width it took came out of the title — which is the one string on
+      // the card a person is reading. The affordance is on the tooltip and in the cursor; a glyph
+      // announcing that a double-click exists is a manual printed on the machine.
       // The second line: where the task is, and the one thing about that the pill cannot say.
       //
       // It used to repeat the status in words. With the status now a trailing pill carrying that
