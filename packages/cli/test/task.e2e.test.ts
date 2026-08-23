@@ -121,7 +121,7 @@ describe("jaira task lifecycle (e2e, temp project)", () => {
     // Simulate a crash: begin a run (status=running, open run row) and never finish it.
     {
       const project = openProject(dir);
-      beginTaskRun(project, taskId);
+      await beginTaskRun(project, taskId);
       project.close();
     }
 

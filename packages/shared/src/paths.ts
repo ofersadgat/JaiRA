@@ -86,6 +86,20 @@ export interface JairaBasePaths {
   /** Machine-local secrets, checked after the project's own (see the secret chain). */
   envFile: string;
   envLocalFile: string;
+  /**
+   * What the user has agreed to RUN — the approved content hash of every js/ts function module
+   * (SPEC §7.5.5).
+   *
+   * One store per machine rather than per project, because that is what an approval is a statement
+   * about: a file on one disk. A project's `functions/` and the base's are approved into the same
+   * table, keyed by absolute path, so approving `$BASE/functions/confidence.ts` once covers every
+   * project that resolves it.
+   *
+   * **Never synced, and gitignored for the same reason.** Propagating approvals would let one
+   * compromised machine confer trust on the rest — which is precisely the property the strong form
+   * of the rule ("an unknown file is an unapproved file") exists to hold.
+   */
+  approvalsFile: string;
   /** Run state for JaiRA's own project — see the amendment above. */
   dbFile: string;
   snapshotsDir: string;
@@ -121,6 +135,7 @@ export function jairaBasePaths(baseDir: string = defaultBaseDir()): JairaBasePat
     skillsDir: join(root, "skills"),
     envFile: join(root, ".env"),
     envLocalFile: join(root, ".env.local"),
+    approvalsFile: join(root, "approvals.local.json"),
     dbFile: join(root, "jaira.db"),
     snapshotsDir: join(root, "snapshots"),
     tasksDir: join(root, "tasks"),

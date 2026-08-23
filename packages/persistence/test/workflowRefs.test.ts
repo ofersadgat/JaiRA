@@ -268,3 +268,48 @@ describe("the project search path", () => {
     ]);
   });
 });
+
+/**
+ * The operations JaiRA itself supplies (WORKFLOWS.md §7.4).
+ *
+ * A call in an expression names a DOCUMENT, so `on_user_event('task_drag')` resolves only because
+ * the load path is handed one. It is shipped rather than written into `~/.jaira/functions` — a file
+ * is one a user can edit into disagreement with the code that serves it — and it is consulted LAST,
+ * so a project that wants its own still gets it.
+ */
+describe("host-shipped operation documents", () => {
+  const waiting = {
+    operation: { kind: "prompt", prompt: "go", model: "anthropic/claude-sonnet-5" },
+    children: { deploy: { state: "./deploy" } },
+    transitions: [{ to: "deploy", when: "on_user_event('task_drag')" }],
+  };
+
+  it("resolves `on_user_event` with no file anywhere", () => {
+    write(project.paths.workflowsDir, "ship.json", waiting);
+    write(project.paths.workflowsDir, "ship/deploy.json", leaf);
+    const guard = load("ship").states.ship!.transitions![0]!;
+    expect(guard.whenError).toBeUndefined();
+    expect((guard.whenRef as { op: { functionRef: string } }).op.functionRef).toBe("on_user_event");
+  });
+
+  /** The rule's own target, bound by the loader — what makes the options bag optional. */
+  it("fills the call's `transition` input with where the rule goes", () => {
+    write(project.paths.workflowsDir, "ship.json", waiting);
+    write(project.paths.workflowsDir, "ship/deploy.json", leaf);
+    const guard = load("ship").states.ship!.transitions![0]!;
+    const parameters = (guard.whenRef as { parameters?: Record<string, { binding?: { json?: unknown } }> }).parameters;
+    expect(parameters?.transition?.binding?.json).toEqual({ to: "deploy" });
+  });
+
+  it("loses to a project file of the same name", () => {
+    write(project.paths.workflowsDir, "ship.json", waiting);
+    write(project.paths.workflowsDir, "ship/deploy.json", leaf);
+    write(project.paths.jairaDir, "functions/on_user_event.json", {
+      kind: "function",
+      function: "something_else",
+      input: { event: { kind: "text", index: 0 } },
+    });
+    const guard = load("ship").states.ship!.transitions![0]!;
+    expect((guard.whenRef as { op: { functionRef: string } }).op.functionRef).toBe("something_else");
+  });
+});

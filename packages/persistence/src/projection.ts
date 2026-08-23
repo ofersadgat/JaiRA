@@ -103,6 +103,8 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
   const blocked: BlockedChild[] = [];
   /** parent instanceId → child keys cleared by a sequence reset. */
   const supersededKeys = new Map<number, Set<string>>();
+  /** instanceId → the deferred calls it is waiting on right now (`call.waiting`/`call.settled`). */
+  const waitingCalls = new Map<number, Set<string>>();
 
   events.forEach((event, i) => {
     const at = atMs?.[i] ?? 0;
@@ -166,6 +168,29 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
         if (!node) break;
         node.operation = { kind: event.op, status: "failed", reason: event.failure.reason };
         if (node.status === "waiting_for_user") node.status = "running";
+        break;
+      }
+      /**
+       * A transition is waiting on a person (`on_user_event`), so the instance is paused rather than
+       * running — the same badge an interactive OPERATION gets, for the same reason. It reads as
+       * running otherwise, and a board cannot show what it cannot tell apart: a task offering a drag
+       * looks exactly like one whose agent is thinking.
+       */
+      case "call.waiting": {
+        const node = byId.get(event.instanceId);
+        if (!node) break;
+        waitingCalls.set(event.instanceId, (waitingCalls.get(event.instanceId) ?? new Set()).add(event.operationId));
+        if (node.status === "running") node.status = "waiting_for_user";
+        break;
+      }
+      case "call.settled": {
+        const node = byId.get(event.instanceId);
+        if (!node) break;
+        const waits = waitingCalls.get(event.instanceId);
+        waits?.delete(event.operationId);
+        // Counted, not flagged: a guard can be waiting on two calls, and the first to answer does not
+        // end the wait.
+        if (node.status === "waiting_for_user" && (waits === undefined || waits.size === 0)) node.status = "running";
         break;
       }
       case "transition.taken": {

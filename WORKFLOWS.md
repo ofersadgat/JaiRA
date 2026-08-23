@@ -973,7 +973,8 @@ Entering a sequence member **moves the cursor to it**:
 Transitions are evaluated **in order, first match wins**, when an operation
 completes or a child terminates. A guard that evaluates to `PENDING` (it reads a
 child still running) is **skipped this round** and retried — it does not fail and
-does not fall through to a later transition permanently.
+does not fall through to a later transition permanently. The one exception is a
+guard WAITING on a person (§7.4), which stops the list rather than skipping.
 
 ### ⚠️ Guards must infer to `boolean` — strictly
 
@@ -993,6 +994,110 @@ decide on, or an empty `sequence`.
 A transition back to a child key starts a **fresh instance** of it (§6, "a
 transition into a child is a jump"). `run.iteration` counts the transitions this
 instance has taken.
+
+### 7.4 Waiting for a person: `on_user_event`
+
+A guard can wait for somebody to DO something. The commonest something is dragging
+a task's card from one column to another on the board:
+
+```jsonc
+"transitions": [
+  { "to": "in_review", "when": "on_user_event('task_drag')" },
+  { "to": "terminate.success" }
+]
+```
+
+`on_user_event(event, options?)` takes the event type first — today `'task_drag'`
+is the only one — and an options bag whose shape belongs to that event. It returns
+`true` when the gesture happens and `false` when it does not.
+
+| `task_drag` option | Meaning |
+| --- | --- |
+| `to_state` | The column the card has to be dropped on, as a **child key** of this state — the same namespace `to` names. Absent ⇒ **this rule's own `to`**, which is why the example above needs no options at all. |
+| `timeout` | Seconds to wait before answering `false`. Absent ⇒ wait indefinitely, which is what a column on a board means: the task sits there until somebody moves it. |
+
+**It is a guard, not a state.** "Wait for a drag" could have been a state whose
+operation blocks, and it must not be: a state that waits is a place a task SITS,
+and the task is already sitting somewhere — in the column drawn for the state it is
+actually in. Written as a guard, the task stays where it is and the rule says what
+would move it.
+
+#### The conditions ahead of it are the preconditions
+
+```jsonc
+{ "to": "escalate", "when": ".inputs.severity > 2 && on_user_event('task_drag')" }
+```
+
+At severity 1 **nobody is asked**: `&&` short-circuits before the call, so no wait
+is registered, no card becomes draggable, and the rules behind this one have their
+turn immediately. This is the intended way to say "this move is available only
+when…" — the condition and the offer are one rule.
+
+#### Everything after it waits
+
+While the answer is outstanding:
+
+- **no later transition is evaluated** — including the state's own list, if the
+  waiting rule was on a child mount;
+- **the state does not terminate**, even with nothing left to run. It is paused on
+  a decision, and the board shows the card as `paused`;
+- **the sequence does not advance.** Nothing new starts in a state waiting to be
+  told where to go.
+
+That is what makes it an *async transition*: the pipeline stops at the rule that
+asked, and resumes from the top of the same list when the answer arrives.
+
+**Only one rule asks at a time.** A rule behind a waiting rule — or behind one that
+already fires — is a rule about a decision this round will not reach, so its wait is
+never registered and its column never lights up. Two rules offering the same card two
+different moves are offered *in order*: the first, and then the second only if the
+first is answered `false`.
+
+#### A transition that fires cancels the waits it did not answer
+
+The list is walked from the top every round, so a rule AHEAD of the waiting one can
+become true while somebody is still deciding — a child finishes, an agent reports,
+a limit is reached. When it fires, the outstanding wait is **cancelled**: the card
+stops being draggable, and the offer disappears rather than sitting there belonging
+to a decision that has already been made somewhere else. The same happens when the
+state ends for any other reason — terminated, timed out, or superseded by a sequence
+reset.
+
+A drop that lands in that window is not an error. It answers a wait nobody is holding
+any more, and nothing happens.
+
+⚠️ **A state offering a drag does not finish on its own.** Its list is evaluated
+after every round, so an unconditional offer is re-made forever and the run never
+terminates — which is correct for a column somebody is meant to move cards out of,
+and a hang for anything else. Give it a way out: a `timeout` in the options, a
+rule ahead of it that terminates, or a condition that stops holding —
+`.run.cursor !== 'in_review'` is the usual one, since `run.cursor` is the child the
+run last entered.
+
+#### An answer is used once
+
+A taken transition **consumes** the answer. The next round asks again, registering
+a fresh wait — so a card that was dragged into a column can be offered another
+move, and the rule that moved it does not fire a second time on the memory of the
+first drag.
+
+#### What the board does with it
+
+The card becomes draggable, and the columns its rules name light up as drop
+targets. Nothing else appears: no dialog, no inbox entry, no badge. The board reads
+the WAITS the running workflows have published rather than re-reading the workflow
+file, which is why the preconditions above are honoured exactly — a wait exists only
+because the engine reached the call.
+
+A drag is offered only when **both ends are on screen**: the card, and a column
+whose key matches `to_state` at the board level being viewed. A rule pointing at a
+child of a deeper state offers nothing here.
+
+#### Unattended runs answer `false`
+
+A CLI run, or a scheduled one, has nobody to make the gesture. Rather than hanging,
+the call answers `false` immediately and the rules behind it have their turn — so
+write a fallback rule after any wait that a headless run might reach.
 
 ---
 
@@ -1142,10 +1247,97 @@ in where the name resolves:
 ```
 
 Arguments bind positionally, by the callee's declared `index` (or declaration order).
+Where a call takes an options bag rather than a list of values, write an **object
+literal** — the aggregate literal, and the only place keys are written in an expression:
+
+```jsonc
+{ "expr": "notify(.inputs.owner, { channel: 'email', urgent: .inputs.severity > 2 })" }
+```
+
+Keys are bare identifiers or quoted strings, never computed (`get(o, k)` is the
+spelling for a computed read); values are full expressions; a trailing comma is fine.
 
 Every call is **memoized by content** — the callee plus its resolved arguments — so the
 same call named twice is one execution, and a call in a guard costs one however many
 rounds the guard is evaluated over. A call whose argument differs is a different call.
+
+A call in a guard runs only when the guard actually **asks** for it: `.inputs.n > 3 &&
+classify(.inputs.issue).severity === 'high'` does not classify anything at `n = 2`. That
+matters most for a call that waits on a person (§7.4), where an unnecessary call is not a
+wasted computation but a request somebody should never have seen.
+
+### 9.1 Calling your own TypeScript
+
+A callee's body can be a **`.ts` file** beside the workflow, and nothing at the call site
+changes:
+
+```ts
+// $BASE/functions/confidence.ts
+export const confidence = {
+  /** @param rank blocker=3 … note=0. */
+  score(rank: number, iteration: number, maxIterations = 3): number {
+    return Math.max(0, 1 - 0.35 * (rank / 3) - 0.25 * (iteration / maxIterations));
+  },
+};
+```
+
+```jsonc
+"outputs": { "score": { "binding": "confidence.score(.inputs.rank, .run.iteration)" } }
+```
+
+**The signature is READ from the TypeScript**, never declared beside it: parameter names,
+their positions (which is why arguments bind positionally with no annotation), their
+types converted to the wire schema, `?` and `| undefined` as optionality, a parameter
+default as the slot's default, and a JSDoc `@param` as its description. There is nowhere
+for a JSON restatement to disagree, because there is no JSON restatement.
+
+**Use `.ts`, not `.js`.** A `.js` module has no annotations, so every slot is untyped —
+and an untyped slot accepts anything, which is exactly the hole a typed consumer is
+supposed to catch. `any`, `unknown`, and generic type variables degrade the same way, and
+each is reported as a warning naming the parameter rather than swallowed.
+
+**What a file contributes is its EXPORTS, not its name.** A default-exported function
+contributes the filename; a default-exported *object* contributes one symbol per key,
+nested to any depth, and the filename contributes nothing. `export const confidence = {…}`
+above contributes `confidence.score` — and would still contribute it from `lib.ts`.
+
+**Nothing reaches a function but its parameters.** No run context, no session, no ambient
+handle. A throw becomes a classified failure rather than an exception crossing the seam,
+so a retriable error raised inside one still reaches the retry machinery.
+
+#### ⚠️ Approve it before it runs
+
+A module is the one reference that is not inlined into the workflow, so JaiRA gates it:
+
+```bash
+jaira functions approve ~/.jaira/functions/confidence.ts
+jaira functions list            # approved · CHANGED · missing
+jaira functions revoke <file>
+```
+
+Until a file is approved it **contributes no symbols at all** — the call fails to resolve
+and the workflow will not load, rather than resolving and refusing at run time. That reads
+as harsh and is the only version that works: the rule has to be *an unknown file is an
+unapproved file*, because a NEW file earlier on the search path changes which module a name
+resolves to without touching anything that already existed. Editing an approved file puts
+it back in that state until it is approved again.
+
+Approvals are **machine-local and never synced** (`$BASE/approvals.local.json`,
+gitignored): an approval is a statement about a file on one disk, and propagating it would
+let one compromised machine confer trust on the rest. Files under `node_modules/` are
+exempt — their integrity is the lockfile's problem.
+
+#### What a run is frozen to
+
+At task start every reachable module is resolved, checked against its approval, and the
+**transpiled** output is copied into the snapshot directory beside the state files. Their
+hashes fold into the snapshot hash, so a workflow's identity covers the code it calls.
+
+Two consequences worth knowing. A pinned re-run executes the **frozen copies**, not
+what is on disk now — a stored hash can only detect drift and refuse, it cannot run the
+version that was approved. And an unapproved or changed file **stops the run before
+anything executes**, as an error rather than a prompt: a run is not the moment to be
+deciding what code to trust.
 
 ### Built-in operations
 
@@ -1743,6 +1935,104 @@ Three things worth knowing before running it:
 
 ---
 
+### 12.2 A third example: a board somebody moves cards on
+
+Three columns, an agent working in each, and a person deciding when a ticket moves
+between them (§7.4). Nothing here is a UI feature: the columns are children, the
+moves are transitions, and the only thing that makes the cards draggable is a guard
+that waits.
+
+> These states are the fixture in `packages/runtime/test/userEvents.test.ts`, driven
+> through the real hub — so this is a workflow that loads and runs, not one that ought
+> to.
+
+**`support/ticket.json`** — the board level. Each child is a column, left to right.
+
+```jsonc
+{
+  "label": "Ticket",
+  "inputs": {
+    "issue": { "kind": "text", "schema": { "type": "string" } },
+    "severity": { "schema": { "type": "number" } }
+  },
+  "children": {
+    // Each column takes the ticket, not the previous column's output. A column reached by a
+    // DRAG is not proven to have run after any particular other one, so wiring
+    // `.children.triage.outputs.summary` into it is a reachability error (§11) — and the
+    // checker is right: a person decides the order, so there is no order to prove.
+    "triage":    { "state": "./triage",    "inputs": { "issue": ".inputs.issue" } },
+    "in_review": { "state": "./in_review", "inputs": { "issue": ".inputs.issue" } },
+    "done":      { "state": "./done",      "inputs": { "issue": ".inputs.issue" } }
+  },
+  // Only `triage` is on the spine. The other two columns are reached by a person
+  // moving the card there, which is what `sequence` naming one child says (§6).
+  "sequence": ["triage"],
+  "transitions": [
+    // Draggable from triage to in_review, but only for a real problem. At severity 1
+    // nobody is asked, the card is not draggable, and the run simply ends after triage.
+    { "to": "in_review",
+      "when": ".run.cursor === 'triage' && .inputs.severity > 2 && on_user_event('task_drag')" },
+
+    // …and from in_review to done. `to_state` is the rule's own `to`, so neither rule
+    // has to name a column twice.
+    { "to": "done",
+      "when": ".run.cursor === 'in_review' && on_user_event('task_drag')" },
+
+    { "to": "terminate.success", "when": ".run.cursor === 'done'" }
+  ]
+}
+```
+
+`.run.cursor` — the child the run last entered — is what stops each offer once it has
+been taken. Without it the first rule would be re-made the moment `in_review` finished,
+offering to drag the card into the column it is already in, and the run would never
+terminate (§7.4).
+
+**`support/ticket/triage.json`** — an ordinary agent state. The columns are states like
+any other; nothing in them knows a person is watching.
+
+```jsonc
+{
+  "label": "Triage",
+  "inputs": { "issue": { "kind": "text", "schema": { "type": "string" } } },
+  "outputs": { "summary": { "kind": "blob", "schema": { "type": "string", "contentMediaType": "text/markdown" } } },
+  "operation": {
+    "kind": "function",
+    "function": "claude-cli",
+    "input": { "prompt": { "kind": "text", "binding": { "expr": "concat('Summarize and classify this ticket: ', .inputs.issue)" } } },
+    "output": { "name": "summary", "kind": "blob" }
+  }
+}
+```
+
+`in_review.json` and `done.json` are the same shape with different instructions.
+
+⚠️ **A hand-moved column cannot be wired from the one before it.** Dataflow between
+columns is the one thing this shape gives up: a state entered by a drag has no proven
+predecessor, so `.children.triage.outputs.summary` in `in_review`'s wiring fails the
+reachability check. Pass what every column needs from the board level's own inputs, or
+give the consuming slot a `default`.
+
+**What a person sees.** The ticket's card sits in the `Triage` column with a `paused`
+pill while the workflow waits. Its cursor is a grab handle; picking it up dashes the
+`In review` column and nothing else. Dropping it there answers that rule — the card
+moves because the run moved, not because the board moved it — and a moment later the
+card is in `In review`, paused again, now offering `Done`.
+
+**Two variations worth knowing:**
+
+```jsonc
+// Give up after an hour and escalate instead — a wait with no `timeout` waits forever.
+{ "to": "in_review", "when": "on_user_event('task_drag', { timeout: 3600 })" },
+{ "to": "escalate" }
+
+// Drop somewhere OTHER than where the rule goes. Rare, and the reason `to_state` exists:
+// dragging to the parking column records the decision and routes to a state that says so.
+{ "to": "record_parked", "when": "on_user_event('task_drag', { to_state: 'parked' })" }
+```
+
+---
+
 ## 13. The traps, in one list
 
 Every one of these fails **silently or misleadingly**:
@@ -1785,3 +2075,20 @@ Every one of these fails **silently or misleadingly**:
     the JSON wins. Two files whose names differ only past a dot
     (`user.json`, `user.address.json`) make `$/types/user.address` ambiguous —
     also a warning, longest match wins.
+19. A guard that waits (`on_user_event`, §7.4) **stops the list** — everything
+    after it, the state's own rules included, waits with it, and the state will
+    not terminate. An offer with nothing to stop it being re-made after every
+    round is a run that never ends: bound it with `.run.cursor`, a `timeout`, or
+    a rule ahead of it.
+20. A column a person drags a card INTO cannot be wired from the column before
+    it: a hand-moved state has no proven predecessor, so the reachability check
+    rejects it (§12.2).
+21. A `.ts` function contributes NOTHING until it is approved (§9.1), and the
+    failure reads as a typo: `'confidence.score' is not a known operation`. Run
+    `jaira functions approve <file>`. Editing an approved file un-approves it.
+22. A `.js` function module types nothing. Every parameter is an untyped slot that
+    accepts anything, so a wrong argument reaches the code instead of the linter.
+23. A module contributes its EXPORTS, not its filename — an exported OBJECT
+    contributes its keys and the filename contributes nothing, so `confidence.ts`
+    exporting `{ confidence: {...} }` gives `confidence.score`, not
+    `confidence.confidence.score`.

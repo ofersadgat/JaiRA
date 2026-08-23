@@ -6,7 +6,8 @@
 (§15), a conversation is read by ref (§16), snapshots pin the resolved
 definition (§11), failures travel as data (§5), the built-in operation library ships
 (§3, `builtins.ts`), and higher-order operations run (§3.5). Arithmetic gained SYNTAX on top of the
-built-ins it was already spelled with, and a property name may be quoted (§9). What remains is
+built-ins it was already spelled with, and a property name may be quoted (§9). An object literal is a
+literal and a call may WAIT (§18), which together pay §6's laziness debt for guards. What remains is
 `.each` (§17) — which subsumes §3.5's spelling rather than replacing what it does — and the items in
 [TODO.md](TODO.md).
 
@@ -856,6 +857,24 @@ as registry entries, so migrating is deleting cases and registering functions.
 rejects anything unresolved as a wiring bug. Generalizing means `Parameter.lazy` in `ops` plus a thunk
 in `exec`'s input resolution. Tracked in [TODO.md](TODO.md).
 
+### ✅ Point 2 is paid for GUARDS (§18)
+
+The concrete form of "the untaken branch runs" was not in the resolver at all — the resolver has
+short-circuited correctly since it was written. It was in the ENGINE: a round ran every call it could
+find by walking the guard's binding tree, before resolving anything, so `severity > 2 && classify(x)`
+paid for `classify` at severity 1. The walk could not see a short-circuit because it was not
+evaluating anything.
+
+Guard calls are now DEMAND-DRIVEN: resolution reports each call whose result is missing, those run,
+and the guard is resolved again. Not asking for a branch is not running it, which is what §6 wanted,
+and it arrives without `Parameter.lazy` or a thunk in `exec` because nothing is passed unevaluated —
+the round simply asks twice. An operation's INPUT bindings still use the eager walk, where every
+input is going to be read anyway; the remaining debt is a `?:` in an input binding, which pays for
+both branches.
+
+The reason it became urgent is §18: for a computation the eager walk is a wasted call, and for a call
+that WAITS it is a request shown to somebody who should never have seen it.
+
 ---
 
 ## 7. What belongs where
@@ -1518,3 +1537,86 @@ Lint it, or name it in §13.
   `all(.children.k.each.outcome === 'success')` cannot work as written — the array materializes before
   `all` sees it — so the aggregate spelling has to take an `Outcome[]` rather than rely on
   distribution inside a call.
+
+---
+
+## 18. An object literal, and a call that waits — **built**
+
+Two additions that arrived together, because the first exists to make the second readable.
+
+### 18.1 `{ key: value }` is a literal
+
+The grammar had scalar literals and no aggregate one, so a call's arguments were positional and only
+positional. That is fine for `add(a, b)` and wrong for an OPTIONS BAG — a second argument whose shape
+belongs to the first, and which grows over time:
+
+```jsonc
+{ "to": "in_review", "when": "on_user_event('task_drag', { to_state: 'in_review', timeout: 3600 })" }
+```
+
+Keys are bare identifiers or quoted strings, never computed — `get(o, k)` is the spelling for a
+computed read, and two ways to write one would make the static analysis guess which. Values are full
+expressions. A trailing comma is allowed.
+
+**It lowers onto the shape a producer edge already has.** A `FunctionOp`'s `input` IS a record of
+named parameters, so an object literal becomes an edge on `op.record` whose input names are the
+author's keys:
+
+```jsonc
+{ "op": { "kind": "function", "functionRef": "op.record",
+          "input": { "to_state": { "kind": "text", "binding": { "text": "in_review" } } } } }
+```
+
+It is the one resolver with no entry in `OPERATOR_PARAMS`, and that is the point: every other node
+maps ordered arguments onto a signature, and this one has no signature because the author names the
+slots as they fill them. It is strict in every value — `PENDING` or an error in one entry is the
+whole object's answer, since an object holding a sentinel is not one a consumer can read — and it
+types as a closed object with every key required, so a call's options bag is CHECKED against the
+parameter it fills instead of widening to the universal schema.
+
+The AST node is `object`, standing beside `lit`. Deliberately not an `apply`: every application is a
+name plus ORDERED arguments, and an object's are named and unordered — squeezing it in would have
+meant a parallel array of keys riding alongside `args`, which is the same node with a second, silent
+shape.
+
+### 18.2 A call may WAIT
+
+§1.0 said `PENDING` is why embedding an operation in an expression works at all: schedule on first
+evaluation, return `PENDING`, return the value on a later round. That was true of the RESOLVER and
+false of the engine, which awaited every embedded call inside the round that demanded it. For a
+computation that is right. For a call that waits on a person it is not: the round holds open for as
+long as nobody acts, and a round holding open is a state that can neither say what it is waiting for
+nor be woken by anything else.
+
+So a registered function may declare `deferred` (`HostCapabilities`). The engine STARTS such a call,
+records it in flight under the same content hash its result will be read by, and reports `PENDING` —
+the protocol §1.0 described, now actually followed. The loop wakes on a deferred call settling exactly
+as it wakes on a child completing.
+
+Three consequences, each of which is a rule rather than an implementation detail:
+
+- **`PENDING` on a deferred call STOPS a transition list** where every other `PENDING` skips
+  (SPEC §3.3). A guard reading a running child is a question about data; a guard waiting on a person
+  is a decision that has been asked for and not made, and the rules after it are rules about that
+  decision.
+- **A taken transition CONSUMES the answer.** Deferred results live apart from the call memo and are
+  dropped when the instance takes a transition; a call still in flight is cancelled. `callCache`
+  answers "what does this callee compute for these arguments", which is stable for a run and may be
+  durable. "Did the user drag this card" is stable until somebody acts on it, and storing one in the
+  other made a state re-take the same transition on every round. Cancelling matters for the same
+  reason in the other direction: a rule ahead of the waiting one can become true in a later round, and
+  the question it overtook has to be withdrawn from wherever it was asked.
+- **The preparation pass STOPS where the evaluation will.** Guards are prepared in evaluation order —
+  each eligible child's list, then the state's — and the walk ends at the first rule that fires and
+  the first rule that waits. The old pass prepared every guard in the round, which for a deferred call
+  meant registering a wait for a rule the round could not reach: two offers on a board for one
+  decision, one of which does nothing. The cost is that two guards' calls no longer overlap, which is
+  the honest arithmetic — the second is needed only if the first is false.
+- **A call can be told WHICH RULE it is in.** A callee that declares an input named `transition` has
+  `{ to }` bound into it by the loader, from the transition the guard belongs to, unless the author
+  bound it themselves. Without it a function offering somebody the move a rule describes had to be
+  told the destination a second time, in its own options, where it could silently disagree with the
+  rule it sat in. Bound as an ARGUMENT, so it is part of the call's identity: two rules offering the
+  same event to two different places are two calls, and get one registration each.
+
+JaiRA's `on_user_event` is the first user of all of this — see WORKFLOWS.md §7.4.

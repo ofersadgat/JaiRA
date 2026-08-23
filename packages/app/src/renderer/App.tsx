@@ -38,6 +38,7 @@ import type {
   WorkflowLayer,
 } from "@jaira/shared/browser";
 import { Board, lanesOf } from "./board";
+import { dragOffersOf } from "./taskDrag";
 import { ChatListPanel, ChatView, chatProjectOf, conversationsOf, type ChatSurface } from "./chatPane";
 import { isChatWorkflow } from "./chatWorkflow";
 import { ApprovalDialog, InteractionDialog, QuestionDialog } from "./components";
@@ -1540,6 +1541,12 @@ export default function App(): JSX.Element {
                             )
                           }
                           onTaskMenu={(card, x, y) => openTaskMenu(p.project, card, x, y)}
+                          // What the running workflows are WAITING for somebody to do
+                          // (`on_user_event`, WORKFLOWS.md §7.4). Computed per board, because a wait
+                          // is an offer only where both ends of it are on screen: the card, and the
+                          // column its rule names.
+                          dragOffers={dragOffersOf(state.boards[p.project]!, state.userEvents)}
+                          onTaskDrop={(requestId) => void actions.deliverUserEvent(requestId)}
                         />
                       ) : (
                         <p className="empty">No board here yet.</p>

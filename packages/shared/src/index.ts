@@ -22,3 +22,4 @@ export * from "./diffStrategies";
 export * from "./valueViews";
 export * from "./toolVocabulary";
 export * from "./scopes";
+export * from "./userEvents";

@@ -41,6 +41,7 @@ import type {
   JairaTheme,
   PendingApproval,
   PendingQuestion,
+  PendingUserEvent,
   PendingInteraction,
   ProbeResult,
   PushMessage,
@@ -183,6 +184,14 @@ export interface AppState {
   approvals: PendingApproval[];
   /** Mid-run questions a running agent asked (`AskUserQuestion`) — answered, never approved. */
   questions: PendingQuestion[];
+  /**
+   * Transitions waiting on a gesture (`on_user_event`) — what makes a card draggable.
+   *
+   * Not an inbox: nothing here is rendered as a request. The board reads it to decide which cards can
+   * be picked up and which columns will accept them, so the list's only visible effect is an
+   * affordance appearing on a card somebody was already looking at.
+   */
+  userEvents: PendingUserEvent[];
   /** Live event lines for the selected task, newest last. */
   stream: string[];
   /** How much history is stored, for the pruning panel. */
@@ -651,6 +660,7 @@ const EMPTY: AppState = {
   pending: [],
   approvals: [],
   questions: [],
+  userEvents: [],
   stream: [],
   history: null,
   prune: null,
@@ -1548,6 +1558,14 @@ export function useApp() {
     }
   }, [patch, fail]);
 
+  const refreshUserEvents = useCallback(async () => {
+    try {
+      patch({ userEvents: await invoke("userEvent:pending", undefined) });
+    } catch (e) {
+      fail(e);
+    }
+  }, [patch, fail]);
+
   const refreshHistory = useCallback(async () => {
     // Same rule as {@link refreshTasks}: run history belongs to a project, so with none open there is
     // nothing to size.
@@ -1675,6 +1693,7 @@ export function useApp() {
       refreshPending(),
       refreshApprovals(),
       refreshQuestions(),
+      refreshUserEvents(),
       refreshHistory(),
       // Again, now that a project layer exists to lay over the base one.
       refreshConfig(),
@@ -1883,6 +1902,10 @@ export function useApp() {
         case "question:requested":
         case "question:resolved":
           void refreshQuestions();
+          break;
+        case "userEvent:requested":
+        case "userEvent:resolved":
+          void refreshUserEvents();
           break;
         case "run:finished": {
           // The backstop for {@link AppState.producing}. A run's every call is balanced by its own
@@ -2580,6 +2603,21 @@ export function useApp() {
             changeset,
             ...(parentTaskId !== undefined ? { parentTaskId } : {}),
           });
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /**
+       * The gesture happened — a card was dropped on a column a waiting transition was offering it
+       * (`on_user_event`, WORKFLOWS.md §7.4).
+       *
+       * No optimistic move of the card. What a drop does is answer a rule, and where the run goes
+       * next is the workflow's decision, not the board's — so the card moves when the run says it
+       * moved, which arrives on the ordinary board refresh.
+       */
+      deliverUserEvent: async (requestId: string) => {
+        try {
+          await invoke("userEvent:deliver", { requestId });
         } catch (e) {
           fail(e);
         }

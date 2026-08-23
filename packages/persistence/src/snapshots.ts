@@ -45,7 +45,31 @@ interface SnapshotMeta {
    * validated and hashed under.
    */
   ids?: Record<string, string>;
+  /**
+   * The one value standing for every js/ts module this workflow reaches (SPEC §7.5.5).
+   *
+   * Stored because the snapshot hash is computed over it: a module reached by NAME is the one
+   * reference the resolved form does not inline, so without this a task pinned to a snapshot could
+   * run edited code under an unchanged version. Reload puts it back on the bundle, and the hash
+   * check that follows is what proves it round-tripped.
+   *
+   * Absent for a workflow that reaches no module, and absent is not empty — the key is left out of
+   * the hashed document entirely, so every snapshot taken before modules existed keeps its identity.
+   */
+  moduleDigest?: string;
+  /**
+   * Source path → the file inside `_modules/` holding its TRANSPILED output.
+   *
+   * Copying the emit rather than the source is what makes a frozen run actually frozen. A stored
+   * hash can only detect drift and refuse; it cannot execute the version that was approved. It also
+   * removes the compiler from replay, so a later toolchain upgrade cannot change what a pinned run
+   * does.
+   */
+  modules?: Record<string, string>;
 }
+
+/** Where a frozen module's emitted CommonJS lives inside a snapshot. */
+const MODULES_DIR = "_modules";
 
 function assertSafeStateId(stateId: string): void {
   if (stateId.split("/").some((seg) => seg === "" || seg === "." || seg === "..")) {
@@ -148,7 +172,18 @@ export interface SnapshotRef {
   created: boolean;
 }
 
-export function ensureSnapshot(snapshotsDir: string, bundle: WorkflowBundle): SnapshotRef {
+export interface EnsureSnapshotOptions {
+  /**
+   * The frozen module half: source path → emitted CommonJS (SPEC §7.5.5).
+   *
+   * The caller has already folded `FrozenModules.digest` into `bundle.moduleDigest`, so the hash
+   * these files are stored under already accounts for them. Passing the emit without the digest
+   * would store code the identity does not cover, which is the failure this exists to prevent.
+   */
+  modules?: ReadonlyMap<string, string>;
+}
+
+export function ensureSnapshot(snapshotsDir: string, bundle: WorkflowBundle, options: EnsureSnapshotOptions = {}): SnapshotRef {
   const hash = snapshotHash(bundle);
   const dir = join(snapshotsDir, hash);
   if (existsSync(dir)) return { hash, dir, created: false };
@@ -169,10 +204,23 @@ export function ensureSnapshot(snapshotsDir: string, bundle: WorkflowBundle): Sn
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, JSON.stringify(resolved, null, 2) + "\n", "utf8");
   }
+  // The frozen modules, under content-derived names for the same reason an out-of-tree state id is:
+  // a source path is absolute and machine-specific, and a snapshot must stay a self-contained
+  // directory that means the same thing wherever it is read.
+  const modules: Record<string, string> = {};
+  for (const [source, emitted] of options.modules ?? []) {
+    const name = `${createHash("sha256").update(source).digest("hex").slice(0, 16)}.cjs`;
+    modules[source] = name;
+    const file = join(staging, MODULES_DIR, name);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, emitted, "utf8");
+  }
   const meta: SnapshotMeta = {
     rootId: bundle.rootId,
     hash,
     ...(Object.keys(ids).length > 0 ? { ids } : {}),
+    ...(bundle.moduleDigest !== undefined ? { moduleDigest: bundle.moduleDigest } : {}),
+    ...(Object.keys(modules).length > 0 ? { modules } : {}),
   };
   writeFileSync(join(staging, META_FILE), JSON.stringify(meta, null, 2) + "\n", "utf8");
   try {
@@ -208,6 +256,10 @@ export function loadSnapshot(snapshotsDir: string, hash: string): WorkflowBundle
     for (const entry of readdirSync(d, { withFileTypes: true })) {
       const full = join(d, entry.name);
       if (entry.isDirectory()) {
+        // The frozen module emit is not a state file. Skipped by name rather than left to the
+        // `.json` test below, so a `.cjs` that ever gained a `.json` sibling could not be read back
+        // as a state.
+        if (d === dir && entry.name === MODULES_DIR) continue;
         walk(full);
         continue;
       }
@@ -222,12 +274,39 @@ export function loadSnapshot(snapshotsDir: string, hash: string): WorkflowBundle
   };
   walk(dir);
 
-  const bundle: WorkflowBundle = { rootId: meta.rootId, states };
+  // The module digest is part of the identity, so it has to be back on the bundle BEFORE the check
+  // below — a pinned run whose digest went missing would hash to something else and read as corrupt.
+  const bundle: WorkflowBundle = {
+    rootId: meta.rootId,
+    states,
+    ...(meta.moduleDigest !== undefined ? { moduleDigest: meta.moduleDigest } : {}),
+  };
   const actual = snapshotHash(bundle);
   if (actual !== hash) {
     throw new Error(`snapshot '${hash}' is corrupt: contents hash to ${actual}`);
   }
   return bundle;
+}
+
+/**
+ * The frozen module emit stored with a snapshot — source path → emitted CommonJS.
+ *
+ * What a RESUMED run executes. SPEC §7.5.5: a run whose frozen copies no longer match the files on
+ * disk still executes the frozen copies, and reports drift; the choice that offers — continue the
+ * old run, or start a new one against the current code — belongs to the user, so drift surfaces as a
+ * decision rather than as a silent re-compile.
+ */
+export function snapshotModules(snapshotsDir: string, hash: string): Map<string, string> {
+  const dir = join(snapshotsDir, hash);
+  const metaFile = join(dir, META_FILE);
+  if (!existsSync(metaFile)) return new Map();
+  const meta = readJsonFile(metaFile) as SnapshotMeta;
+  const out = new Map<string, string>();
+  for (const [source, name] of Object.entries(meta.modules ?? {})) {
+    const file = join(dir, MODULES_DIR, name);
+    if (existsSync(file)) out.set(source, readFileSync(file, "utf8"));
+  }
+  return out;
 }
 
 export { stateIdFromPath };

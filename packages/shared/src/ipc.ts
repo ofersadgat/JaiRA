@@ -18,6 +18,7 @@ import type { ComponentConfig } from "./components";
 import type { AvailabilitySnapshot, ExecutorInfo, ProbeResult, SecretTarget } from "./executors";
 import type { JairaSettings } from "./settings";
 import type { SchemaViolation } from "./schemas";
+import type { UserEventRequest } from "./userEvents";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type {
   BoardView,
@@ -206,6 +207,17 @@ export interface SubmitQuestionRequest {
 }
 
 /** Answer to a pending interactive request (DESIGN §7.1). */
+/**
+ * A transition waiting on a gesture, as the renderer sees it.
+ *
+ * The hub's own request plus the project it parked in — the same shape every other pending thing in
+ * this file takes, and for the same reason: a request id is only unique because one generator mints
+ * them all, and the reader still has to know whose board it belongs on.
+ */
+export interface PendingUserEvent extends UserEventRequest {
+  project: ProjectRef;
+}
+
 export interface SubmitInteractionRequest {
   requestId: string;
   value: JsonValue;
@@ -1095,6 +1107,17 @@ export interface IpcContract {
   "approval:submit": { request: SubmitApprovalRequest; response: { requestId: string } };
   "question:pending": { request: void; response: PendingQuestion[] };
   "question:submit": { request: SubmitQuestionRequest; response: { requestId: string } };
+  /**
+   * Transitions waiting on a gesture (`on_user_event`) — read by the board to decide which cards can
+   * be picked up and which columns will take them.
+   *
+   * A LIST rather than a request-and-answer pair like the three channels above it, because nothing is
+   * shown when one arrives: the wait changes what the board AFFORDS, and a person answers it by doing
+   * the ordinary thing the affordance now allows.
+   */
+  "userEvent:pending": { request: void; response: PendingUserEvent[] };
+  /** The gesture happened — the card was dropped where this wait was offering. */
+  "userEvent:deliver": { request: { requestId: string }; response: { requestId: string; delivered: boolean } };
   "workflow:browse": { request: { project?: ProjectRef } | void; response: WorkflowBrowser };
   "workflow:read": { request: ReadWorkflowRequest; response: WorkflowSource };
   "workflow:write": { request: WriteWorkflowRequest; response: WorkflowSource };
@@ -1274,6 +1297,8 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "approval:submit",
   "question:pending",
   "question:submit",
+  "userEvent:pending",
+  "userEvent:deliver",
   "workflow:browse",
   "workflow:read",
   "workflow:write",
@@ -1544,6 +1569,8 @@ export type PushMessage =
     }
   | { type: "interaction:requested"; pending: PendingInteraction }
   | { type: "interaction:resolved"; requestId: string }
+  | { type: "userEvent:requested"; request: UserEventRequest }
+  | { type: "userEvent:resolved"; requestId: string }
   | { type: "approval:requested"; pending: PendingApproval }
   | { type: "approval:resolved"; requestId: string; decision: "allow" | "deny" }
   | { type: "question:requested"; pending: PendingQuestion }

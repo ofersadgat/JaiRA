@@ -8,7 +8,9 @@ import type { Failure, FunctionCapabilities, JsonValue } from "@declarative-ai/e
 import { loadBundle, validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
 import { newTaskId, isStartableStatus, type TaskMeta, type TaskStatus } from "@jaira/shared";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "./snapshots";
-import { nodeVfs, workflowLoadOptions } from "./workflowRefs";
+import { freezeForRun, moduleEntriesOf, userModules } from "./userModules";
+import { nodeVfs } from "./vfs";
+import { workflowLoadOptions } from "./workflowRefs";
 import type { Project } from "./project";
 
 export interface CreateTaskInput {
@@ -86,11 +88,16 @@ export interface BeginRunOptions {
  * Transition a task to `running` and pin its workflow version.
  *
  * First run: read live `workflows/`, validate (enforced at task start,
- * DESIGN §5.2), snapshot (§5.3), pin the hash. Re-run after interruption or
- * failure: execute the *pinned* snapshot again from the workflow start
+ * DESIGN §5.2), FREEZE the js/ts modules it reaches (SPEC §7.5.5), snapshot (§5.3), pin the hash.
+ * Re-run after interruption or failure: execute the *pinned* snapshot again from the workflow start
  * (DESIGN §1a item 1) — live workflow edits never affect an existing task.
+ *
+ * **Async because the freeze is.** Verifying what a workflow will run means transpiling its module
+ * closure, and the compiler import is a dynamic one. The alternative — freezing outside and passing
+ * the result in — cannot work: which modules a workflow reaches is only known once the bundle has
+ * loaded, and the bundle loads here.
  */
-export function beginTaskRun(project: Project, taskId: string, options: BeginRunOptions = {}): StartedRun {
+export async function beginTaskRun(project: Project, taskId: string, options: BeginRunOptions = {}): Promise<StartedRun> {
   const nowMs = options.nowMs ?? Date.now();
   const runtime = project.runtime.get(taskId);
   if (!runtime) throw new Error(`unknown task '${taskId}'`);
@@ -114,7 +121,7 @@ export function beginTaskRun(project: Project, taskId: string, options: BeginRun
     // still snapshotted, so a re-run of this task replays the same definition through the branch
     // above rather than depending on the caller synthesizing an identical one.
     bundle = options.bundle;
-    const snap = ensureSnapshot(project.paths.snapshotsDir, bundle);
+    const snap = await snapshotWithModules(project, bundle);
     hash = snap.hash;
     dir = snap.dir;
   } else {
@@ -141,9 +148,10 @@ export function beginTaskRun(project: Project, taskId: string, options: BeginRun
       const detail = report.errors.map((e) => `${e.stateId} ${e.path}: ${e.message}`).join("\n  ");
       throw new Error(`workflow validation failed for '${meta.workflow}':\n  ${detail}`);
     }
-    const snap = ensureSnapshot(project.paths.snapshotsDir, bundle);
+    const snap = await snapshotWithModules(project, bundle);
     hash = snap.hash;
     dir = snap.dir;
+    bundle = snap.bundle;
   }
 
   const runId = project.db.transaction(() => {
@@ -153,6 +161,42 @@ export function beginTaskRun(project: Project, taskId: string, options: BeginRun
   })();
 
   return { meta, runId, bundle, snapshotHash: hash, snapshotDir: dir, pinned };
+}
+
+/**
+ * Freeze whatever js/ts modules this bundle reaches, then snapshot it (SPEC §7.5.5).
+ *
+ * The ORDER is the whole content of this function. `FrozenModules.digest` has to be on the bundle
+ * before `snapshotHash` runs, because a module reached by name is the one reference the resolved
+ * form does not inline — so it must reach the identity some other way or a pinned task would run
+ * edited code under an unchanged version. Snapshotting first and folding the digest in after would
+ * store the emit under a hash that does not account for it.
+ *
+ * A workflow that reaches no module takes the early return and is snapshotted exactly as before,
+ * digest key absent — which is what keeps every snapshot taken before this feature identical.
+ */
+async function snapshotWithModules(
+  project: Project,
+  bundle: WorkflowBundle,
+): Promise<{ hash: string; dir: string; bundle: WorkflowBundle }> {
+  const entries = moduleEntriesOf(bundle);
+  if (entries.length === 0) {
+    const snap = ensureSnapshot(project.paths.snapshotsDir, bundle);
+    return { hash: snap.hash, dir: snap.dir, bundle };
+  }
+  const modules = userModules();
+  if (modules === undefined) {
+    // The bundle names a module symbol, which means the loader resolved one, which means this
+    // process built the pair. Reaching here would be a wiring bug rather than an authoring one, so it
+    // says so instead of failing later with something about an unregistered function.
+    throw new Error(
+      `workflow '${bundle.rootId}' calls js/ts functions (${entries.join(", ")}) but this process never called prepareUserModules()`,
+    );
+  }
+  const frozen = await freezeForRun(modules, entries);
+  const withDigest: WorkflowBundle = { ...bundle, moduleDigest: frozen.digest };
+  const snap = ensureSnapshot(project.paths.snapshotsDir, withDigest, { modules: frozen.emitted });
+  return { hash: snap.hash, dir: snap.dir, bundle: withDigest };
 }
 
 export type RunEndStatus = Extract<TaskStatus, "completed" | "failed" | "canceled">;

@@ -34,6 +34,8 @@ import {
   baseSource,
   baseStateView,
   beginTaskRun,
+  userModules,
+  prepareUserModules,
   gitFor,
   boardForState,
   boardView,
@@ -124,6 +126,7 @@ import {
   planAgentTools,
   functionNamesOf,
   InteractionHub,
+  UserEventHub,
   defaultExecutorTree,
   modelRouterOptions,
   probeModelRoutes,
@@ -133,6 +136,8 @@ import {
   JAIRA_TOOLS,
   usableRouteKeys,
   newRegistry,
+  registerUserFunctions,
+  prepareUserFunctions,
   NodeExec,
   parseFakeRules,
   policyCanEscalate,
@@ -247,6 +252,7 @@ import type {
   PendingApproval,
   PendingInteraction,
   PendingQuestion,
+  PendingUserEvent,
   ProbeResult,
   PruneRequest,
   PruneResult,
@@ -308,6 +314,7 @@ export interface AppServiceOptions {
   nextInteractionId?: () => string;
   nextApprovalId?: () => string;
   nextQuestionId?: () => string;
+  nextUserEventId?: () => string;
   /**
    * Read a crashed call's native session files at recovery. Default: the real
    * `~/.claude/projects` reader — a seam for the same reason every other file-I/O boundary here has
@@ -638,6 +645,7 @@ export class AppService {
   private interactionSeq = 0;
   private approvalSeq = 0;
   private questionSeq = 0;
+  private userEventSeq = 0;
   private readonly requestOwner = new Map<string, string>();
   /**
    * The JSON-editor schema machinery, built on first use.
@@ -780,7 +788,7 @@ export class AppService {
    * Built per session rather than once, so a gate in one project cannot be answered by a request id
    * minted in another — and so closing a project rejects only its own parked calls.
    */
-  private hubsFor(key: string): { hub: InteractionHub; approvals: ApprovalHub; questions: QuestionHub } {
+  private hubsFor(key: string): { hub: InteractionHub; approvals: ApprovalHub; questions: QuestionHub; userEvents: UserEventHub } {
     const hub = new InteractionHub({
       onRequest: (request) => this.publishInteraction(key, request),
       onResolved: (requestId) => {
@@ -834,7 +842,26 @@ export class AppService {
       },
       nextId: this.options.nextQuestionId ?? (() => `question-${++this.questionSeq}`),
     });
-    return { hub, approvals, questions };
+    /**
+     * Transitions waiting on a gesture — the fourth channel, and the one with no dialog.
+     *
+     * Published as a LIST rather than as a request the renderer has to answer: nothing is shown when
+     * a wait arrives. The board consults what is waiting to decide which cards can be picked up, so
+     * the only visible effect is that a card becomes draggable — and the only way to answer is to
+     * drop it somewhere.
+     */
+    const userEvents = new UserEventHub({
+      onRequest: (request) => {
+        this.requestOwner.set(request.requestId, key);
+        this.publish({ type: "userEvent:requested", request });
+      },
+      onResolved: (requestId) => {
+        this.requestOwner.delete(requestId);
+        this.publish({ type: "userEvent:resolved", requestId });
+      },
+      nextId: this.options.nextUserEventId ?? (() => `event-${++this.userEventSeq}`),
+    });
+    return { hub, approvals, questions, userEvents };
   }
 
   /**
@@ -899,6 +926,11 @@ export class AppService {
     const already = this.sessions.get(key);
     if (already !== undefined) return { dir: already.dir, recovered: [] };
     const project = openProject(dir, { baseDir: this.baseDir });
+    // js/ts function modules (SPEC §7.5), built once for the process: the TypeScript compiler is the
+    // single `await`, and everything after it is synchronous — which is what lets the SYNC
+    // `loadBundle` behind every view consult it. Idempotent, so opening a second project costs
+    // nothing; `rebuild` is what a later approval or a changed file needs.
+    await prepareUserModules(project.paths, { searchPath: project.config.workflows.path });
     const session = new ProjectSession({ key, kind: "user", project, ...this.hubsFor(key) });
     this.sessions.set(key, session);
     this.log({
@@ -2002,8 +2034,12 @@ export class AppService {
       // hub, like every other component — which is the §4.1 guarantee.
       registerChangesetFunctions(registry);
     }
+    // The workflow's OWN TypeScript functions (SPEC §7.5), merged rather than wrapped: a resolved
+    // symbol is already a registry entry carrying its capabilities, signature and error contract.
+    const userFns = userModules();
+    if (userFns !== undefined) registerUserFunctions(registry, userFns.userFunctions);
 
-    const started = beginTaskRun(project, taskId, {
+    const started = await beginTaskRun(project, taskId, {
       functions: registry.functions,
       ...(opts.bundle !== undefined ? { bundle: opts.bundle } : {}),
     });
@@ -2085,6 +2121,13 @@ export class AppService {
       if (!registry.functions.has(name)) open.hub.register(registry, name, taskId);
       scripted?.registerWildcard(registry, name);
     }
+
+    // `on_user_event` is registered for EVERY run, not only for a bundle that names it. Unlike the
+    // functions above it is not a state's operation, so it appears nowhere in `functionNamesOf` — it
+    // is called from inside a transition guard, which is a binding and not a name this could walk to.
+    // Registering it unconditionally costs a map entry and is what makes a guard that calls it work
+    // in any workflow rather than in the ones a walker happened to recognise.
+    open.userEvents.register(registry, taskId);
 
     const fakeRules = opts.fake !== undefined ? parseFakeRules(opts.fake) : undefined;
     // The scope floor, compiled into a delegated agent's OWN permission rules and folded over every
@@ -2224,6 +2267,9 @@ export class AppService {
 
     void (async () => {
       try {
+        // Compile the workflow's own TypeScript before anything calls it — the step SPEC §7.5.5
+        // puts on the far side of the approval gate `beginTaskRun`'s freeze already ran.
+        if (userFns !== undefined) await prepareUserFunctions(userFns.userFunctions);
         const result = await executeWorkflow({
           bundle: started.bundle,
           inputs: started.meta.inputs ?? {},
@@ -3478,6 +3524,30 @@ export class AppService {
       throw new Error(`no pending question '${requestId}'`);
     }
     return { requestId };
+  }
+
+  /**
+   * Transitions waiting on a gesture, across every open project — what makes a card draggable.
+   *
+   * Every session's, not the focused one's: a board can be looking at any project, and a wait that
+   * did not travel with the list would be a card that silently refused to be picked up.
+   */
+  pendingUserEvents(): PendingUserEvent[] {
+    return [...this.sessions.entries()].flatMap(([key, s]) =>
+      s.userEvents.list().map((request) => ({ ...request, project: this.refOf(key) })),
+    );
+  }
+
+  /**
+   * The gesture happened.
+   *
+   * `delivered: false` rather than a throw for an id nobody is holding, because that is a race and not
+   * a mistake: a card can be dropped a moment after its run moved on, and the honest answer is that
+   * there was nothing there to tell. Routed by OWNER, exactly as the other three channels are.
+   */
+  deliverUserEvent(requestId: string): { requestId: string; delivered: boolean } {
+    const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
+    return { requestId, delivered: owner?.userEvents.deliver(requestId) ?? false };
   }
 
   /**

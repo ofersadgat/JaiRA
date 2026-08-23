@@ -75,6 +75,11 @@ jaira.db
 jaira.db-wal
 jaira.db-shm
 snapshots/
+
+# Machine-local: what this disk has agreed to RUN (SPEC §7.5.5). An approval is a
+# statement about a file on ONE disk, so syncing it would let one machine confer
+# trust on the rest.
+approvals.local.json
 `;
 
 /** Create the `.jaira/` layout (DESIGN §3). Idempotent; keeps an existing config. */
