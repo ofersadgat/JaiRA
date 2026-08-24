@@ -5,6 +5,14 @@
  * state's authored surface arrives as the op's `config` input. This module is the
  * contract both sides agree on:
  *
+ * ## Where a config comes from, which has two answers
+ *
+ * A component's authored surface IS `operation.args`, flat — there is no `config` key wrapping it,
+ * and a reader that looked for one got `undefined` for every component ever parked. At RUN time it
+ * is parsed from what the function actually received, which is those args merged with the state's
+ * resolved inputs into one namespace. That merge is why a config field may never NAME another
+ * input: the name and the value collide. See {@link changesetInputOf}.
+ *
  *  - {@link parseComponentConfig} reads what the *author* wrote, so a malformed
  *    state file fails with a clear message instead of rendering an empty dialog.
  *  - {@link validateComponentResult} checks what the *user* submitted before it
@@ -105,8 +113,6 @@ export interface ConfirmActionConfig {
 export interface UserApproveChangesetConfig {
   component: "user-approve-changeset";
   prompt: string;
-  /** Which of the state's inputs holds the changeset to review. */
-  changeset: string;
   /**
    * What the tree currently holds — `proposal` for a worktree an agent already edited, `base` for a
    * sync whose edits exist only as data. Decides which decisions are no-ops when applied (§4.1's
@@ -249,7 +255,6 @@ export function parseComponentConfig(component: ComponentName, raw: unknown): Co
       return {
         component,
         prompt,
-        changeset: str(config["changeset"], "user-approve-changeset.changeset", "changeset"),
         tree,
       };
     }
@@ -289,6 +294,43 @@ const bad = (errors: string): ResultCheck => ({ ok: false, errors });
  * "every change you were shown, decided" — which only the changeset the state resolved can judge.
  * Without inputs the check degrades to shape-only, which a caller that has them should not accept.
  */
+/**
+ * Which of a state's inputs IS the changeset — decided by SHAPE, never by a configured name.
+ *
+ * The name approach is what this replaced, and it could not work: a component's config is parsed
+ * from `operation.args`, and a function receives those args merged with the state's resolved inputs
+ * into one namespace — so a field naming an input collided with the input it named. Authoring
+ * `changeset: "changeset"` to point at the changeset slot overwrote the changeset with the string
+ * `"changeset"`, which cost CHANGESETS.md §5.3's pin and made every decision validate against a word.
+ *
+ * A changeset is recognisable: {@link changesetOf} demands a resolvable `source` and a `changes`
+ * array whose every entry carries a unique id, a path and a known action. A prompt, a tree name or
+ * a plan document does not accidentally satisfy that, so the input that parses IS the one — and a
+ * state is free to call its slot whatever it likes.
+ *
+ * Two of them parsing is refused rather than resolved by picking: a review that silently judged the
+ * wrong changeset is the failure this whole path exists to prevent.
+ */
+export function changesetInputOf(inputs: Record<string, unknown>): { changeset?: Changeset; error?: string } {
+  const found: Array<{ name: string; changeset: Changeset }> = [];
+  let lastError: string | undefined;
+  for (const [name, value] of Object.entries(inputs)) {
+    // Only an object can be one, and asking `changesetOf` about a string produces a message about
+    // the string rather than about the input that was actually missing.
+    if (value === null || typeof value !== "object" || Array.isArray(value)) continue;
+    try {
+      found.push({ name, changeset: changesetOf(value) });
+    } catch (e) {
+      lastError = (e as Error).message;
+    }
+  }
+  if (found.length === 1) return { changeset: found[0]!.changeset };
+  if (found.length > 1) {
+    return { error: `several inputs hold a changeset (${found.map((f) => f.name).join(", ")}) — one state, one review` };
+  }
+  return { error: `no input holds a changeset${lastError === undefined ? "" : `: ${lastError}`}` };
+}
+
 export function validateComponentResult(
   config: ComponentConfig,
   value: unknown,
@@ -300,14 +342,10 @@ export function validateComponentResult(
   const result = value as Record<string, unknown>;
   switch (config.component) {
     case "user-approve-changeset": {
-      let changeset: Changeset | undefined;
       if (inputs !== undefined) {
-        try {
-          changeset = changesetOf(inputs[config.changeset]);
-        } catch (e) {
-          return bad(`the state's '${config.changeset}' input is not a changeset: ${(e as Error).message}`);
-        }
-        const checked = checkDecisions(changeset, value);
+        const found = changesetInputOf(inputs);
+        if (found.changeset === undefined) return bad(found.error ?? "no input holds a changeset");
+        const checked = checkDecisions(found.changeset, value);
         return checked.ok ? { ok: true } : bad(checked.errors);
       }
       // Shape-only, for a caller with no inputs in hand.

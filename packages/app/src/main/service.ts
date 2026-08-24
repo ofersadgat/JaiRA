@@ -1300,9 +1300,15 @@ export class AppService {
     // Parse the authored config here, once, so the renderer receives a normalized
     // contract instead of re-deriving it — and so a malformed state file surfaces
     // as a parse error on the request rather than an empty dialog.
+    //
+    // From `request.inputs` itself, not from `request.inputs["config"]`. There is no `config` key
+    // and there never was: a component's authored surface IS `operation.args` — which is what
+    // `componentConfigIssues` lints — and a function receives its args merged with the state's
+    // resolved inputs, flat. Reading a key nothing writes meant `pending.config` was undefined for
+    // every component ever parked, and the renderer got `configError` instead of a contract.
     if (isComponentName(request.component)) {
       try {
-        pending.config = parseComponentConfig(request.component, request.inputs["config"]);
+        pending.config = parseComponentConfig(request.component, request.inputs);
       } catch (e) {
         pending.configError = (e as Error).message;
       }
@@ -1317,7 +1323,7 @@ export class AppService {
     const request = owner?.hub.list().find((r) => r.requestId === requestId);
     if (!request || !isComponentName(request.component)) return undefined;
     try {
-      return { config: parseComponentConfig(request.component, request.inputs["config"]), inputs: request.inputs };
+      return { config: parseComponentConfig(request.component, request.inputs), inputs: request.inputs };
     } catch {
       return undefined;
     }

@@ -18,6 +18,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  changesetInputOf,
   changesetOf,
   diffStrategyFor,
   mimeOfPath,
@@ -116,12 +117,12 @@ type Drafts = Record<string, { decision?: DecisionKind; comment: string; content
 
 function ChangesetReview({ ctx }: { ctx: MountContext }): JSX.Element {
   const parsed = useMemo((): { changeset?: Changeset; error?: string } => {
-    try {
-      return { changeset: changesetOf(ctx.inputs[ctx.config.changeset]) };
-    } catch (e) {
-      return { error: (e as Error).message };
-    }
-  }, [ctx.inputs, ctx.config.changeset]);
+    // By SHAPE, not by a configured name — see `changesetInputOf`, and the collision that made a
+    // name impossible. The renderer and the validator ask the same question of the same inputs, so
+    // what a person is shown and what their answer is judged against cannot come apart.
+    const found = changesetInputOf(ctx.inputs);
+    return found.changeset === undefined ? { error: found.error ?? "no input holds a changeset" } : { changeset: found.changeset };
+  }, [ctx.inputs]);
 
   const [drafts, setDrafts] = useState<Drafts>({});
   const [expanded, setExpanded] = useState<string | undefined>(undefined);

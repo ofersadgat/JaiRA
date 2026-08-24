@@ -112,14 +112,37 @@ describe("user-approve-changeset (CHANGESETS.md §4.1)", () => {
     changes: [{ id: "c1", path: "a.txt", action: "update", before: "a", after: "b" }],
   };
 
-  it("normalizes its config with the doc's defaults: slot 'changeset', tree 'proposal'", () => {
+  it("normalizes its config with the doc's default tree, and names no slot", () => {
+    // There is no `changeset` field any more. Which input holds the changeset is decided by SHAPE
+    // (`changesetInputOf`) — a config field naming an input could not work, because args and
+    // resolved inputs share one namespace and the name overwrote the thing it named.
     expect(parse("user-approve-changeset", {})).toEqual({
       component: "user-approve-changeset",
       prompt: "Review the proposed changes",
-      changeset: "changeset",
       tree: "proposal",
     });
     expect(() => parse("user-approve-changeset", { tree: "sideways" })).toThrow(/base.*proposal/);
+  });
+
+  it("finds the changeset among the inputs whatever the slot is called", () => {
+    const config = parse("user-approve-changeset", {});
+    const answer = { decisions: [{ id: "c1", decision: "merged" }] };
+    // A slot named anything at all, beside inputs that are plainly not changesets.
+    const inputs = { prompt: "Review", tree: "proposal", proposal: changeset, plan_doc: { title: "x" } };
+    expect(validateComponentResult(config, answer, inputs).ok).toBe(true);
+  });
+
+  it("refuses rather than guesses when two inputs are changesets, or none is", () => {
+    const config = parse("user-approve-changeset", {});
+    const answer = { decisions: [{ id: "c1", decision: "merged" }] };
+    // One state, one review: picking one of two would risk judging the wrong set of changes.
+    const two = validateComponentResult(config, answer, { a: changeset, b: changeset });
+    expect(two.ok).toBe(false);
+    expect(two.ok === false && two.errors).toMatch(/several inputs hold a changeset/);
+
+    const none = validateComponentResult(config, answer, { prompt: "Review", tree: "proposal" });
+    expect(none.ok).toBe(false);
+    expect(none.ok === false && none.errors).toMatch(/no input holds a changeset/);
   });
 
   it("validates a result against the CHANGESET it was asked about, not just a shape", () => {

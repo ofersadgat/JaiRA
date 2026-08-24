@@ -347,11 +347,14 @@ export function changesetReviewFiles(options: ChangesetReviewOptions = {}): Reco
       operation: {
         kind: "function",
         function: USER_APPROVE_CHANGESET,
-        args: {
-          prompt: options.prompt ?? "Review the proposed changes",
-          changeset: "changeset",
-          tree,
-        },
+        // NO `changeset` arg. It meant "the input slot named changeset", and an arg and a state's
+        // input share ONE namespace — so naming the slot overwrote what was in it with its own name.
+        //
+        // That silently unmade CHANGESETS.md §5.3, whose whole point is that the changeset lands in
+        // `request_json` so a worktree-produced one survives the worktree moving. It also broke the
+        // answer check: the gate's decisions were validated against the string `"changeset"`.
+        // Compare the sibling `apply` state, whose request pins the changeset correctly.
+        args: { prompt: options.prompt ?? "Review the proposed changes", tree },
       },
     },
     [`${CHANGESET_REVIEW_ID}/status`]: {
@@ -509,7 +512,8 @@ export function changesetReviewLoopFiles(options: ChangesetReviewLoopOptions = {
       operation: {
         kind: "function",
         function: USER_APPROVE_CHANGESET,
-        args: { prompt: options.prompt ?? "Review the proposed changes", changeset: "changeset", tree },
+        // No `changeset` arg — see the note on the non-looping gate above.
+        args: { prompt: options.prompt ?? "Review the proposed changes", tree },
       },
     },
     [`${CHANGESET_REVIEW_LOOP_ID}/status`]: {
