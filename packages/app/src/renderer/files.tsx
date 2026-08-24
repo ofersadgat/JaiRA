@@ -306,7 +306,7 @@ export function FileTreePanel({
   /**
    * The folded branches, by the same `layer:path` key, and how to fold or unfold one.
    *
-   * Controlled when both are supplied — the shell keeps them in `settings.json`, so the shape you
+   * Controlled when both are supplied — the shell keeps them in `user-settings.json`, so the shape you
    * left the tree in is the shape it opens in — and local otherwise, which keeps this panel usable
    * on its own. Same arrangement as the JSON editor's wrap preference, for the same reason: a
    * component that REQUIRED a store would be a component you could not render without one.
@@ -319,7 +319,7 @@ export function FileTreePanel({
   busy: boolean;
   /** Project-layer operations are impossible without one, so they are offered disabled, not hidden. */
   hasProject: boolean;
-  /** Open any file in the panel — a state, a prompt, `config.json`, anything the registry can render. */
+  /** Open any file in the panel — a state, a prompt, `settings.json`, anything the registry can render. */
   onSelect: (node: FileNode) => void;
   /** Open an existing state's file. */
   onOpen: (stateId: string, layer: WorkflowLayer) => void;

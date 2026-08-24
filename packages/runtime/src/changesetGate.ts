@@ -347,11 +347,17 @@ export function changesetReviewFiles(options: ChangesetReviewOptions = {}): Reco
       operation: {
         kind: "function",
         function: USER_APPROVE_CHANGESET,
-        args: {
-          prompt: options.prompt ?? "Review the proposed changes",
-          changeset: "changeset",
-          tree,
-        },
+        // NO `changeset` arg. `componentConfigOf` already defaults `config.changeset` to
+        // `"changeset"` — the NAME of the input to validate against — and passing it explicitly
+        // named the slot at the cost of destroying what was in it: an arg and an input share one
+        // namespace, so `changeset: "changeset"` overwrote the pinned changeset with its own name.
+        //
+        // That silently unmade CHANGESETS.md §5.3, whose whole point is that the changeset lands in
+        // `request_json` so a worktree-produced one survives the worktree moving. It also broke the
+        // answer check: `validateComponentResult` reads `inputs[config.changeset]` and was handed
+        // the string `"changeset"`, so every decision was judged against something that is not a
+        // changeset. Compare the sibling `apply` state, whose request pins it correctly.
+        args: { prompt: options.prompt ?? "Review the proposed changes", tree },
       },
     },
     [`${CHANGESET_REVIEW_ID}/status`]: {
@@ -509,7 +515,8 @@ export function changesetReviewLoopFiles(options: ChangesetReviewLoopOptions = {
       operation: {
         kind: "function",
         function: USER_APPROVE_CHANGESET,
-        args: { prompt: options.prompt ?? "Review the proposed changes", changeset: "changeset", tree },
+        // No `changeset` arg — see the note on the non-looping gate above.
+        args: { prompt: options.prompt ?? "Review the proposed changes", tree },
       },
     },
     [`${CHANGESET_REVIEW_LOOP_ID}/status`]: {

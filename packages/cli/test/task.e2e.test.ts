@@ -55,7 +55,7 @@ async function createPlanningTask(): Promise<string> {
 describe("jaira task lifecycle (e2e, temp project)", () => {
   it("create → start → completed, with snapshot and EngineEvent journal", async () => {
     const taskId = await createPlanningTask();
-    expect(existsSync(join(dir, ".jaira", "tasks", `${taskId}.json`))).toBe(true);
+    expect(existsSync(join(dir, ".jaira", "system", "tasks", `${taskId}.json`))).toBe(true);
 
     const started = await cli(["task", "start", taskId, "--fake", JSON.stringify(happyRules())]);
     expect(started.code).toBe(0);
@@ -69,7 +69,7 @@ describe("jaira task lifecycle (e2e, temp project)", () => {
       const runtime = project.runtime.get(taskId);
       expect(runtime?.status).toBe("completed");
       expect(runtime?.snapshotHash).toBeDefined();
-      expect(existsSync(join(dir, ".jaira", "snapshots", runtime!.snapshotHash!, "feature", "plan.json"))).toBe(
+      expect(existsSync(join(dir, ".jaira", "system", "snapshots", runtime!.snapshotHash!, "feature", "plan.json"))).toBe(
         true,
       );
       const runs = project.runtime.listRuns(taskId);

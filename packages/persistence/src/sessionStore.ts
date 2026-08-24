@@ -58,9 +58,24 @@ import {
   type StoredRecord,
 } from "@declarative-ai/exec";
 import type { JairaDb } from "./db";
+import type { ConversationLog, PositionRow, RecordRow, SessionRow } from "./conversationFile";
 
 /** `<id>@<position>` — the ref spelling upstream uses, restated because both halves must agree. */
 const join = (id: string, seq: number): string => `${id}@${seq}`;
+
+/**
+ * How a position finds its record: the record's OWN key, never the rowid the database assigned.
+ *
+ * `IS` rather than `=` on the two scope columns, because both are nullable — an unscoped store keys
+ * by the bare id — and `= NULL` is never true. Written once because it appears in every read that
+ * crosses the two tables, and four columns silently mistyped in one of them is a join that quietly
+ * returns nothing.
+ *
+ * Uniqueness of the tuple is enforced by `operation_records_natural` (migration 8), which is what
+ * makes this a lookup rather than a fan-out.
+ */
+export const ON_RECORD = `r.record_id = p.record_id AND r.attempt = p.attempt
+                   AND r.task_id IS p.task_id AND r.run_id IS p.run_id`;
 
 /** Split on the LAST `@`: a compaction mints `planning~compact1`, and a ref into it carries two. */
 function split(ref: string): [string, number | undefined] {
@@ -120,10 +135,52 @@ export interface SessionScope {
 export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore {
   private minted = 0;
 
+  /**
+   * `log` is present only when `config.storage.conversations` puts them in files (DESIGN §4.4), and
+   * `sessionStoreFor` is the constructor that decides — building one by hand with a db and a scope
+   * gets a store that writes to the table only, which is what every read-side caller wants and what
+   * a write-side one must not accidentally get. That is the whole reason the helper exists.
+   */
   constructor(
     private readonly db: JairaDb,
     private readonly scope: SessionScope = {},
+    private readonly log?: ConversationLog,
   ) {}
+
+  // --- the file half ------------------------------------------------------------
+  //
+  // Every one of these re-READS the row it just wrote and appends that, rather than reconstructing
+  // what it thinks it wrote. One extra SELECT per write, and in exchange the file cannot drift from
+  // the table by a field somebody forgot to mirror — which, with thirteen columns and five writers,
+  // is not a hypothetical.
+
+  private logRecordRow(rowid: number | bigint): void {
+    if (this.log === undefined) return;
+    const row = this.db
+      .prepare(
+        `SELECT record_id, task_id, run_id, attempt, status, request_json, result_json, error_json,
+                metrics_json, session_outcome_json, provider_session_id, started_at, ended_at
+           FROM operation_records WHERE id = ?`,
+      )
+      .get(rowid) as RecordRow | undefined;
+    if (row !== undefined) this.log.append({ kind: "record", row });
+  }
+
+  private logPosition(sessionKey: string, seq: number): void {
+    if (this.log === undefined) return;
+    const row = this.db
+      .prepare(`SELECT session_id, seq, task_id, run_id, record_id, attempt FROM session_positions WHERE session_id = ? AND seq = ?`)
+      .get(sessionKey, seq) as PositionRow | undefined;
+    if (row !== undefined) this.log.append({ kind: "position", row });
+  }
+
+  private logSession(sessionKey: string): void {
+    if (this.log === undefined) return;
+    const row = this.db.prepare(`SELECT id, parent, cursor, created_at FROM sessions WHERE id = ?`).get(sessionKey) as
+      | SessionRow
+      | undefined;
+    if (row !== undefined) this.log.append({ kind: "session", row });
+  }
 
   // --- SessionStore ------------------------------------------------------------
 
@@ -190,21 +247,31 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // holds transcripts is session_positions, and an unplaced call never touches it.
     const at = stub.session;
     if (at === undefined) {
-      this.insertRecord(stub);
+      this.logRecordRow(this.insertRecord(stub).rowid);
       return;
     }
     this.branch(at.id, { cursor: this.cursorOf(at.id) });
     try {
       // One transaction: the record and its position claim land together, so a lost race leaves no
       // orphaned record behind the PositionTaken it reports.
+      let placed!: { recordId: string; attempt: number; rowid: number | bigint };
       this.db
         .transaction(() => {
-          const recordId = this.insertRecord(stub);
+          placed = this.insertRecord(stub);
           this.db
-            .prepare(`INSERT INTO session_positions (session_id, seq, operation_record_id) VALUES (?, ?, ?)`)
-            .run(this.k(at.id), at.seq, recordId);
+            .prepare(
+              `INSERT INTO session_positions (session_id, seq, task_id, run_id, record_id, attempt)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+            )
+            .run(this.k(at.id), at.seq, this.scope.taskId ?? null, this.scope.runId ?? null, placed.recordId, placed.attempt);
         })
         .immediate();
+      // AFTER the transaction, and only once it committed: the claim is what decides whether this
+      // call owns the position at all, so appending before it would put a turn in the file for a
+      // call that went on to fork instead.
+      this.logSession(this.k(at.id));
+      this.logRecordRow(placed.rowid);
+      this.logPosition(this.k(at.id), at.seq);
     } catch (e) {
       // The primary key IS the claim, so a duplicate is the position being held rather than a fault.
       // Reported as the class the session layer forks on, never as a database error.
@@ -269,6 +336,9 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
         Date.now(),
         row.id,
       );
+    // The settled state, appended whole. Last line wins on replay, so the `open` line this
+    // supersedes needs no rewriting — which is the property that lets the format stay append-only.
+    this.logRecordRow(row.id);
   }
 
   /**
@@ -292,7 +362,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     const row = this.db
       .prepare(
         `SELECT r.id AS id, r.request_json AS request_json FROM session_positions p
-           JOIN operation_records r ON r.id = p.operation_record_id
+           JOIN operation_records r ON ${ON_RECORD}
           WHERE p.session_id = ? AND p.seq = ? AND r.status = 'open'
           ORDER BY r.id DESC LIMIT 1`,
       )
@@ -311,6 +381,10 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
           WHERE id = ? AND status = 'open'`,
       )
       .run(JSON.stringify(withOpening(value, row.request_json)), providerSessionId ?? null, row.id);
+    // A partial is a real state of the record, so it is appended like any other. A run that streams
+    // ten flushes writes ten lines and replays as the tenth: the file grows, and it never has to be
+    // rewritten in place — which is the trade the append-only format is making.
+    this.logRecordRow(row.id);
   }
 
   bySession(session: string, upTo?: number): StoredRecord[] {
@@ -464,6 +538,9 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     if (value !== undefined && (value === null || typeof value !== "object" || Array.isArray(value))) return;
     const merged = { ...existing, value: { ...((value ?? {}) as object), ...captured } };
     this.db.prepare(`UPDATE operation_records SET result_json = ? WHERE id = ?`).run(JSON.stringify(merged), recordRowId);
+    // A recovered capture is a change to the record like any other — and one that arrives long after
+    // the run, which is exactly when a file that missed it would be the version anybody reads.
+    this.logRecordRow(recordRowId);
   }
 
   // --- Internals ---------------------------------------------------------------
@@ -477,10 +554,8 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * a record the same way whatever state it is in — and the alternative was found the hard way, since
    * a process killed between `open` and the first flush leaves a row that no later write ever reaches.
    */
-  private insertRecord(stub: RecordStub): number | bigint {
-    const attempt = this.db
-      .prepare(`SELECT COUNT(*) AS n FROM operation_records WHERE record_id = ? AND task_id IS ? AND run_id IS ?`)
-      .get(stub.id, this.scope.taskId ?? null, this.scope.runId ?? null) as { n: number };
+  private insertRecord(stub: RecordStub): { recordId: string; attempt: number; rowid: number | bigint } {
+    const attempt = this.attemptFor(stub.id);
     const request = stub.source === undefined ? null : JSON.stringify(stub.source);
     const opening = openingMessage(request, []);
     const info = this.db
@@ -492,12 +567,31 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
         stub.id,
         this.scope.taskId ?? null,
         this.scope.runId ?? null,
-        attempt.n + 1,
+        attempt,
         request,
         opening.length === 0 ? null : JSON.stringify({ value: { messages: opening } }),
         stub.startMs ?? Date.now(),
       );
-    return info.lastInsertRowid;
+    // The KEY, not the rowid. A caller that needs to point at this record — a position claim — must
+    // point at something a replay reproduces, and `lastInsertRowid` is precisely what it does not
+    // (migration 8). The rowid rides along anyway, for the one caller that only needs to re-read
+    // the row it just wrote in THIS connection — which is a different question from identity.
+    return { recordId: stub.id, attempt, rowid: info.lastInsertRowid };
+  }
+
+  /**
+   * Which attempt this record id is up to, within the scope.
+   *
+   * Counted rather than tracked: a retry reuses the id, and the row already on disk is the only
+   * thing that knows how many came before — including ones written by a previous process. It is
+   * also the half of the natural key that makes it a key, since a content id repeats whenever the
+   * same operation is dispatched twice.
+   */
+  private attemptFor(recordId: string): number {
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM operation_records WHERE record_id = ? AND task_id IS ? AND run_id IS ?`)
+      .get(recordId, this.scope.taskId ?? null, this.scope.runId ?? null) as { n: number };
+    return row.n + 1;
   }
 
   /** Walk the lineage, taking each ancestor's records below the cursor its child took. */
@@ -564,26 +658,40 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // A distinct conversation, so the origin keeps meaning exactly what every ref into it meant.
     const derived = `${id}~${word}${++this.minted}`;
     this.branch(derived, { cursor: 0 });
+    const recordId = `${derived}:0`;
+    let rowid!: number | bigint;
     this.db
       .transaction(() => {
+        // The attempt is COUNTED here as it is everywhere else. It used to be left to default to 1,
+        // which was invisible until the natural key became a key: `minted` restarts with the store,
+        // so two derivations of one session id inside a run both claimed the first attempt.
+        const attempt = this.attemptFor(recordId);
         const info = this.db
           .prepare(
-            `INSERT INTO operation_records (record_id, task_id, run_id, status, result_json, started_at, ended_at)
-             VALUES (?, ?, ?, 'completed', ?, ?, ?)`,
+            `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, result_json, started_at, ended_at)
+             VALUES (?, ?, ?, ?, 'completed', ?, ?, ?)`,
           )
           .run(
-            `${derived}:0`,
+            recordId,
             this.scope.taskId ?? null,
             this.scope.runId ?? null,
+            attempt,
             JSON.stringify({ value: { messages } }),
             Date.now(),
             Date.now(),
           );
         this.db
-          .prepare(`INSERT OR REPLACE INTO session_positions (session_id, seq, operation_record_id) VALUES (?, 0, ?)`)
-          .run(this.k(derived), info.lastInsertRowid);
+          .prepare(
+            `INSERT OR REPLACE INTO session_positions (session_id, seq, task_id, run_id, record_id, attempt)
+             VALUES (?, 0, ?, ?, ?, ?)`,
+          )
+          .run(this.k(derived), this.scope.taskId ?? null, this.scope.runId ?? null, recordId, attempt);
+        rowid = info.lastInsertRowid;
       })
       .immediate();
+    this.logSession(this.k(derived));
+    this.logRecordRow(rowid);
+    this.logPosition(this.k(derived), 0);
     return join(derived, 1);
   }
 
@@ -604,9 +712,13 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   }
 
   private branch(id: string, branch: Branch): void {
-    this.db
+    const info = this.db
       .prepare(`INSERT OR IGNORE INTO sessions (id, parent, cursor, created_at) VALUES (?, ?, ?, ?)`)
       .run(this.k(id), branch.parent === undefined ? null : this.k(branch.parent), branch.cursor, Date.now());
+    // Only when it actually inserted. `OR IGNORE` means most calls are no-ops — `resolve` re-asserts
+    // a branch on every turn — and appending each of those would write a line per model call for a
+    // row that has not changed since the conversation began.
+    if (info.changes > 0) this.logSession(this.k(id));
   }
 
   private branchOf(id: string): Branch | undefined {
@@ -630,7 +742,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
         `SELECT p.seq AS seq, r.record_id AS record_id, r.status AS status, r.result_json AS result_json,
                 r.session_outcome_json AS session_outcome_json, r.provider_session_id AS provider_session_id,
                 r.request_json AS request_json
-           FROM session_positions p JOIN operation_records r ON r.id = p.operation_record_id
+           FROM session_positions p JOIN operation_records r ON ${ON_RECORD}
           WHERE p.session_id = ? ${upTo === undefined ? "" : "AND p.seq < ?"} ORDER BY p.seq`,
       )
       .all(...(upTo === undefined ? [this.k(session)] : [this.k(session), upTo])) as Array<{

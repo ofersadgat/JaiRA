@@ -135,7 +135,7 @@ describe("what can serve a call", () => {
 describe("defaultExecutorTree — the refusal that reported the bug", () => {
   it("no longer refuses a prompt workflow just because nothing names a model", () => {
     // This is the exact call the sync panel makes. It used to throw
-    // "no model configured: set models.default in .jaira/config.json".
+    // "no model configured: set models.default in .jaira/settings.json".
     const tree = defaultExecutorTree(config({}), syncBundle(), { secrets: secretsWith({}) });
     expect(Object.keys((tree.prompt as { routes?: Record<string, unknown> }).routes ?? {})).toContain("claude-cli");
   });

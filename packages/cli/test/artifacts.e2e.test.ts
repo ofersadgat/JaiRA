@@ -53,7 +53,7 @@ async function cli(args: string[]): Promise<{ code: number; out: string; err: st
 }
 
 function configure(artifacts: Record<string, unknown>): void {
-  writeFileSync(jairaPaths(dir).configFile, JSON.stringify({ artifacts }, null, 2), "utf8");
+  writeFileSync(jairaPaths(dir).settingsFile, JSON.stringify({ artifacts }, null, 2), "utf8");
 }
 
 /** Create and run a task, returning its id and the run report. */
@@ -90,7 +90,7 @@ describe("a returned artifact reaches the filesystem", () => {
     configure({ destination: "$CENTRAL" });
     const { taskId } = await runTask();
 
-    expect(existsSync(join(dir, "jaira-artifacts", taskId, "summary.md"))).toBe(true);
+    expect(existsSync(join(dir, ".jaira", "system", "artifacts", taskId, "summary.md"))).toBe(true);
     expect(existsSync(join(dir, "summary.md"))).toBe(false);
   });
 
@@ -98,7 +98,7 @@ describe("a returned artifact reaches the filesystem", () => {
     configure({ destination: "$CENTRAL_FLAT" });
     const { taskId } = await runTask();
     // <instanceId>-<slot>.<ext>, with the instance the engine assigned.
-    const dirPath = join(dir, "jaira-artifacts", taskId);
+    const dirPath = join(dir, ".jaira", "system", "artifacts", taskId);
     expect(existsSync(dirPath)).toBe(true);
     const files = readFileSync(join(dirPath, "1-summary.md"), "utf8");
     expect(files).toContain("Widgets");

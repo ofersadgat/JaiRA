@@ -78,14 +78,13 @@ export interface SyncHolder {
  * Which kind of project this is.
  *
  * `shared` is the SELECTED root opened as a project in its own right, so a workflow authored in
- * `<root>/workflows` has somewhere for its runs to be recorded. `system` is JaiRA's own — the
- * description sync and anything else it runs for itself — pinned to a fixed directory so that
- * history survives repointing the root, which the shared project's deliberately does not.
+ * `<root>/workflows` has somewhere for its runs to be recorded — and so does JaiRA itself, whose
+ * description sync and conformance check are runs of the same kind against the same root.
  *
- * Neither is ever the FOCUSED session: a window with no user project open must answer "list the
- * tasks" with nothing, not with one of these.
+ * It is never the FOCUSED session: a window with no user project open must answer "list the tasks"
+ * with nothing, not with this.
  */
-export type SessionKind = "user" | "shared" | "system";
+export type SessionKind = "user" | "shared";
 
 export interface ProjectSessionOptions {
   key: string;

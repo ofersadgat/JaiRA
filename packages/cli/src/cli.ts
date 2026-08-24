@@ -455,7 +455,7 @@ function assertCapabilities(
     throw new Error(
       `${issues.map((i) => `${i.stateId}: ${i.message}`).join("; ")}\n` +
         "  run this task in the JaiRA app, which can answer approvals, or set policy.builtins to false " +
-        "in .jaira/config.json if this workspace is disposable",
+        "in .jaira/settings.json if this workspace is disposable",
     );
   }
 }

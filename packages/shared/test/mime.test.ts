@@ -74,9 +74,9 @@ describe("mimeOfPath", () => {
     expect(mimeFallbacks(WORKFLOW_DESCRIPTION)).toEqual([WORKFLOW_DESCRIPTION, "text/markdown", "text/plain"]);
   });
 
-  it("only calls the root config.json config — a nested one is just JSON", () => {
-    expect(mimeOfPath("config.json")).toBe(CONFIG_JSON);
-    expect(mimeOfPath("skills/review/config.json")).toBe("application/json");
+  it("only calls the root settings.json config — a nested one is just JSON", () => {
+    expect(mimeOfPath("settings.json")).toBe(CONFIG_JSON);
+    expect(mimeOfPath("skills/review/settings.json")).toBe("application/json");
   });
 
   it("classifies the file types the tree actually holds", () => {

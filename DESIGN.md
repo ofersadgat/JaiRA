@@ -16,7 +16,7 @@ These were confirmed with the project owner and anchor everything below:
 | Execution environment | Per-project: Windows-native or WSL2 (distro-selectable) |
 | Safety enforcement | Per-adapter translation of one canonical policy into each provider's native mechanism, with capability flags for what each adapter can actually enforce |
 | Structured outputs | Engine-derived output contract per state; channel chosen per adapter capability; engine-side validation with a bounded repair loop |
-| Artifact location | Reserved Git-tracked `jaira-artifacts/` directory, overridable per project |
+| Artifact location | `.jaira/system/artifacts/`, overridable per project |
 
 ## 1a. Status Update — 2026-07-17
 
@@ -90,7 +90,7 @@ workflow-level crash recovery. Deviations from this document as drafted:
    `transitions`, `artifacts`, `conversations`, `command_log`) are deferred to
    the phases that need them (step-level resume, agent operations, policy).
 3. **Task files carry root workflow `inputs`.** §12 said title/description
-   (+ optional issue artifact); generalized: `.jaira/tasks/<id>.json` stores an
+   (+ optional issue artifact); generalized: `.jaira/system/tasks/<id>.json` stores an
    `inputs` object fixed at creation and passed to the workflow root on every
    run (the §9 planning workflow's `issue` input rides in it).
 4. **Single-owner recovery.** Recovery runs on every project open: any task
@@ -124,7 +124,7 @@ workflow-level crash recovery. Deviations from this document as drafted:
    is canceled by SIGINT in the owning process (engine abort → `canceled`
    recorded on the way out). A cross-process cancel channel arrives with the
    app (phase 3).
-6. **Snapshot format** (§5.3): `.jaira/snapshots/<hash>/` holds the bundle's
+6. **Snapshot format** (§5.3): `.jaira/system/snapshots/<hash>/` holds the bundle's
    transitive closure as authored state files (loader-derived `id` stripped —
    hash-neutral) plus a `.meta.json` carrying the root id; written to a
    staging dir and renamed (crash-safe); re-hashed and verified against the
@@ -132,7 +132,7 @@ workflow-level crash recovery. Deviations from this document as drafted:
 7. **The scripted fake executor and scripted InteractionPort are shipped CLI
    features** (`--fake <rules>`, `--interactions <responses>`), mirroring
    ai-exec's test fakes — not test-only code. This is the permanent headless
-   debugging surface (§14 closing note). Real providers use `config.json`'s
+   debugging surface (§14 closing note). Real providers use `settings.json`'s
    `providers` map via `llmCallBinding` + `@ai-exec/llm`.
 8. **Output repair default**: the CLI passes `repairTurns: 2` (§7.5) unless
    overridden with `--repair-turns`.
@@ -769,18 +769,38 @@ For a JaiRA project rooted at `<project>/`:
 ```text
 <project>/
   .jaira/                     engine-owned; agents denied all access
-    config.json               project config (runners, exec env, policy, artifact dir)
+    settings.json           how this project runs (models, exec env, policy, artifacts)
     workflows/                state files (authoritative, user-edited)
       feature.json
       feature/plan.json
       feature/plan/critique.json
-    snapshots/<hash>/         immutable pinned copies of workflow trees (§9)
-    tasks/<taskId>.json       task metadata (human-readable half of hybrid storage)
-    jaira.db                  SQLite: all execution state and history
     skills/                   project skill library (§7.4)
-  jaira-artifacts/            default artifact root; Git-tracked; agent-writable
-    <taskId>/...
+    system/                   everything JaiRA generates — see below
+      jaira.db                SQLite: all execution state and history
+      snapshots/<hash>/       immutable pinned copies of workflow trees (§9)
+      tasks/<taskId>.json     task metadata (human-readable half of hybrid storage)
+      logs/                   the app's own diagnostics
+      artifacts/<taskId>/...  default artifact root (§7.6)
+      sync.json               the last agreed document ↔ workflow state (§11.2)
 ```
+
+**One line runs through `.jaira/`, and `system/` draws it.** Beside it —
+`workflows/`, `functions/`, `skills/`, `prompts/`, `settings.json` — is what a
+person authors: hand-edited, versioned, and the thing a root is *for*. Inside it
+is what JaiRA writes for itself: nobody authors it and nobody should have to look
+at it. The two used to be interleaved, so a root showed a person three authored
+directories next to a database, a WAL file, a snapshot cache and a pile of run
+logs, with nothing in the layout saying which were theirs.
+
+Most of `system/` is derived per-checkout state and is gitignored by name —
+`jaira.db*`, `snapshots/`, `logs/`, `artifacts/`, `approvals.local.json`. Two
+things in it are *not*, for different reasons. `sync.json` holds content hashes of
+the description and the state files, so it means the same thing on a teammate's
+machine as on this one — a genuinely shared record. `tasks/` is left unignored
+only because it is small and hand-editable; it is **not** usefully committed,
+since `taskSummaries` walks `task_runtime` and decorates from the file, so a task
+file arriving through a pull with no row beside it is invisible. That is why the
+ignore file names entries rather than the directory.
 
 Worktrees live **outside** the project directory (agents are scoped to a
 worktree that must not contain `.jaira/`):
@@ -789,9 +809,9 @@ worktree that must not contain `.jaira/`):
 <project-parent>/.jaira-worktrees/<projectName>/<taskId>/
 ```
 
-The engine maintains the worktree ↔ task mapping in SQLite. `jaira-artifacts/`
-exists inside each worktree like any other tracked directory; artifact merges
-across branches are ordinary Git merges.
+The engine maintains the worktree ↔ task mapping in SQLite. Artifacts anchor on
+the **project's** `system/artifacts`, not the worktree's, so `git worktree
+remove` does not take a run's output with it.
 
 State files use plain `.json` extension; the state ID is derived from the path
 (§15, Q2/Q3).
@@ -804,25 +824,29 @@ settings):
 
 ```text
 ~/.jaira/                     the shared layer; the same shape as a project's
-  config.json                 defaults every project inherits
-  settings.json               user preferences (theme, layout) — NOT project config
+  settings.json               defaults every project inherits (same file, layered under)
+  user-settings.json          this person's theme, fonts and layout — NOT project settings
   workflows/                  state files every project can reach
   functions/                  operation documents every project can reach
   skills/                     shared skill library
-  .env / .env.local           machine-local credentials (see §8.1)
+  .env / .env.local           machine-local credentials (see §8.1); a project's
+                              own pair sits in <project>/.jaira, ahead of these
+  system/                     everything JaiRA generates for this root
+    jaira.db                  the root's runs (see below)
+    snapshots/                pinned versions of the workflows they ran
+    tasks/                    their task files
+    logs/                     the app's own diagnostics
+    artifacts/                what those runs produced ($ARTIFACT_DIR under $SYSTEM)
+    sync.json                 the last agreed document ↔ workflow state
+    approvals.local.json      what this disk has agreed to run (§7.5.5)
 ```
 
-It holds the **authored** things every project can reach — and, since JaiRA
-gained workflows of its own, a `jaira.db`, a `snapshots/` and a `tasks/` beside
-them:
+The base has no `.jaira/` inside it — it *is* one — so `system/` sits directly
+under the root, which is what makes the two layouts the same shape one level
+down.
 
-```
-  jaira.db                    JaiRA's own runs (see below)
-  snapshots/                  pinned versions of the workflows they ran
-  tasks/                      their task files
-```
-
-This amends the rule that stood here. It read: *"There is no database and no
+It holds the **authored** things every project can reach and, since JaiRA gained
+workflows of its own, a database beside them. This amends the rule that stood here. It read: *"There is no database and no
 snapshot cache here: runs belong to a project, and putting one machine's history
 behind every project would be a shared mutable pile with no owner."* The
 reasoning is still right; the conclusion stopped following. JaiRA runs workflows
@@ -836,7 +860,7 @@ So it is a pile with an owner, and the ownership is enforced rather than
 asserted:
 
 - **A task created here may not name a branch.** `createTask` refuses one, so a
-  system run can never take a worktree. `worktreesDir` is the single field
+  run recorded here can never take a worktree. `worktreesDir` is the single field
   `baseAsProjectPaths` still fabricates, and nothing resolves it.
 - **It is never the focused project.** A window with no project open answers
   "list the tasks" with nothing, not with one of these — which is the whole point
@@ -844,28 +868,19 @@ asserted:
 - **It opens on first use, not at startup.** Someone who never runs a sync never
   gets a database. The failure of that open is reported rather than fatal.
 
-**Two owners, not one.** The pile above turned out to be holding two kinds of run
-with different LIFETIMES, and one project could not be both:
+**One owner, not two.** This pile briefly had two, on the argument that it was
+holding two kinds of run with different lifetimes: `"shared"`, the selected root
+as a project, whose runs a root switch is *supposed* to leave behind; and
+`"system"`, JaiRA's own, pinned to the installation so that a description sync's
+history survived exactly that switch. The lifetimes really are different. The
+split still cost more than it bought — two databases inside one root, two boards
+in the Tasks view, and a `system/` directory that meant "JaiRA's project" in one
+breath and "JaiRA's generated files" in the next.
 
-- **`"shared"` — the SELECTED root, as a project.** Runs of the workflows that
-  live in `<root>/workflows`: the library a person authors and runs directly from
-  the Files view. It IS the root, so repointing the root gives a different
-  database and the old library's runs stop being listed. That is correct, not a
-  loss — they were that library's history, and a different root is a different
-  library.
-- **`"system"` — JaiRA's own**, at `<installation>/system/`, where the
-  installation is `JAIRA_HOME`/`~/.jaira` and explicitly *not* the selected root.
-  A description sync is a fact about the installation, so its history has to
-  survive the switch that the shared project's deliberately does not. It has no
-  configuration of its own — the directory holds a database and nothing else — so
-  it borrows the shared root's, because a sync must still call the model the
-  installation is configured with and resolve the credentials it has.
-
-Conflating them meant a sync's bookkeeping travelled with a root switch and sat
-on the same board as a person's own shared runs. Both refuse a branch, because
-neither directory is a checkout. Both appear in the Tasks view as their own
-group, ordered outward from what you are working on: the checkout, the shared
-library it draws workflows from, then JaiRA's own behind both.
+So: **one root, one project.** `"shared"` is the only reserved project ref, it
+holds both kinds of run, and `system/` means only the second thing. It refuses a
+branch, because the directory is not a checkout. It appears in the Tasks view as
+its own group, after the checkout you are working in.
 
 Everything derives from one list — the **layer roots**,
 `[<project>/.jaira, ~/.jaira]` (`jairaPaths().roots`):
@@ -884,8 +899,8 @@ Everything derives from one list — the **layer roots**,
   That is what makes a project file an **override** rather than a
   differently-named second state. See EXPRESSIONS.md §4.1 for the identity rule
   this replaced and why.
-Configuration layers separately, by **document merge**: `~/.jaira/config.json` is
-merged *under* `.jaira/config.json` before parsing, so validation sees exactly
+Configuration layers separately, by **document merge**: `~/.jaira/settings.json` is
+merged *under* `.jaira/settings.json` before parsing, so validation sees exactly
 what a run will use. Objects merge key by key (a project setting only
 `models.default` keeps the base's `agents` and `policy`); arrays replace
 (concatenating `workflows.path` would leave a project no way to remove an entry);
@@ -898,18 +913,29 @@ behaves exactly as it did before this existed.
 
 ### 4.1 Source-of-Truth Split
 
-- **Task metadata → JSON file** `.jaira/tasks/<taskId>.json`: title,
+- **Task metadata → JSON file** `.jaira/system/tasks/<taskId>.json`: title,
   description, labels, workflow root state ID, branch binding, parent task,
   created date. Human-readable and hand-editable while the task is not running.
-  The engine reloads task files on startup and on file change; edits to a
-  running task's execution-relevant fields (workflow, branch) are rejected with
-  a UI warning.
-- **Execution state → SQLite** `.jaira/jaira.db` (WAL mode): everything the
+  There is no watcher and none is needed — `tryRead` reads the file on every
+  summary, so an edit appears on the next refresh.
+  **Not built:** rejecting edits to a running task's execution-relevant fields
+  (workflow, branch) with a UI warning.
+  **The db is the index, not the directory.** `taskSummaries` walks
+  `task_runtime` and decorates each row from its file, so a file with no row is
+  invisible and `TaskFileStore.list()` is called from nowhere. The file buys
+  hand-editing; it does not buy a task that survives being copied somewhere else.
+- **Execution state → SQLite** `.jaira/system/jaira.db` (WAL mode): everything the
   evaluation loop reads or writes. The DB references tasks by ID only and never
   duplicates metadata fields.
 
 Rule: if the evaluator needs it to make a decision, it lives in SQLite. If a
 human needs to read or edit it casually, it lives in the JSON file.
+
+> **Superseded as a fixed rule by §4.4.** The split above is the DEFAULT, not the
+> law: which concerns live in files and which in tables became configuration, on
+> the argument that git cannot merge SQLite and the right answer therefore differs
+> between a shared base root and a checked-in project. §4.4 also retires the two
+> justifications this section leaned on — neither survived checking.
 
 ### 4.2 SQLite Schema (core tables)
 
@@ -1082,6 +1108,204 @@ Side effects (spawning an agent) always happen **after** the transaction that
 records the intent (`operations` row in status `starting`), so a crash between
 record and spawn is detected and retried, never duplicated silently.
 
+### 4.4 Storage Policy — files, tables, or both (built 2026-08-24)
+
+§4.1 drew the file/table line **once, in code, for everyone**: task metadata is a
+file because a human might edit it, everything else is a table. Two arguments
+retired that as a fixed rule.
+
+The first is that the reasons given for the file half did not survive checking.
+"A snapshot must be reachable without the database" is false — the pointer is
+`task_runtime.snapshot_hash`, so a lost database loses the snapshot too. "Task
+files are meant to be committed" is false — `taskSummaries` walks `task_runtime`
+and only decorates from the file, so a task file arriving through a pull with no
+row beside it is invisible. What survived was thin: hand-editing, and one
+baseline (`sync.json`) that genuinely means the same thing after a pull.
+
+The second is that the choice is not the same for every root or every deployment.
+A shared base root is one person's machine and wants a database. A project
+checked into git wants files, because **git cannot merge SQLite** — and that, not
+readability, is the whole argument. Sessions want files for a third reason
+entirely: every other agent tool writes JSONL, and matching them makes JaiRA's
+transcripts readable by things JaiRA did not write.
+
+So it becomes configuration, in `settings.json`, and because that file is layered
+the base can answer `db` while a project answers `file` with nothing extra.
+
+**The file is the truth; the table is an index.** This is the load-bearing
+inversion, and the reason is durability. If the table were a *cache* of the file,
+something would have to flush it back, and every deferred flush policy loses the
+journal on a crash — which is precisely the property `state_machine_events`
+exists to have, since §4.3 replays it. Instead: a write appends to the file
+synchronously **and** mirrors into the table in the same call; startup replays the
+file into a `TEMP` table; nothing is ever flushed because nothing is ever only in
+memory.
+
+**The table half is built** (`persistence/src/shadow.ts`, applied in `openAt`
+before any store is constructed). A `TEMP` table of the same name is created and
+SQLite's name resolution does the rest — an unqualified name resolves to `temp`
+before `main` — so the runtime has one read source and **not one query was
+edited**. The DDL is copied out of `sqlite_master` rather than restated here, so
+it tracks migrations and brings the generated columns and their indexes with it;
+`main.<name>` still reaches the real table, which is what the seed reads.
+
+Two things are dropped and one is not. **Foreign keys go**, because SQLite
+resolves a parent within the child's own database, so a `TEMP` child pointing at
+a `main` parent is not a weaker constraint but an error on every insert — the
+honest statement is that choosing `file` gives up the referential integrity
+SQLite was enforcing, which nothing could preserve once half the rows live in a
+file git may have merged. **Nothing else goes**: primary keys, uniqueness,
+defaults and `NOT NULL` are statements about a single row and survive, so
+`session_positions`'s primary key is still the position claim — per connection
+rather than across processes, which is exactly the trade above and the reason
+`jobs` may never be file-backed.
+
+Seeding the shadow from `main` when no file exists is the **flip path**, not a
+stopgap: turning a concern from `db` to `file` has to start from the rows already
+in the database, or the first open after the change would look like the history
+had been deleted. Rowids come across explicitly, so a seed changes no identity — a
+replay from a file is the case that cannot promise that, which is why nothing
+points at a rowid any more.
+
+```jsonc
+// settings.json — layered, so the base and a project can answer differently
+"storage": {
+  "journal":       "file",   // state_machine_events
+  "conversations": "file",   // operation_records + session_positions
+  "tasks":         "file",   // task_runtime + the task metadata files
+  "artifacts":     "db",     // the artifact map
+  "format":        "claude"  // the session line shape: claude | codex
+}
+```
+
+**Concerns, not tables.** A per-table map would let someone put
+`state_machine_events` in a file and `operation_records` in the database, which
+splits one run's truth across two stores with different durability and different
+merge behaviour, and nothing would catch it. Four concerns, each mapping to its
+tables internally.
+
+**The allowlist is closed, and the omissions are refusals.** A `TEMP` table is
+**per-connection**, so anything whose value is cross-process coordination cannot
+be file-backed:
+
+- **`jobs`** — owner tokens, PIDs, heartbeats. Cross-process liveness is its
+  entire purpose (§4.2a), and it means nothing past a single run.
+- **`job_output`** — debounced chunks of a child's stdout, written on the main
+  thread. Nothing wants it in git.
+
+`session_positions` was on this list and came off it. It does three jobs —
+membership, fork lineage, and the position claim — and only the third is a
+mechanism. The claim's cross-process guarantee is already provided *in front of
+it* by the `jobs` claim, under the one-owner-per-project rule; and an append-only
+session file expresses the claim at LOAD time anyway, because two lines claiming
+`seq` 14 is exactly what a git merge produces and exactly the case the design
+already answers by forking. The check moves from write-time to load-time and
+keeps its meaning. It rests on `jobs` staying a table, which is why that one is
+not negotiable.
+
+**One file per run.** `system/journal/<taskId>/<runId>.jsonl`. This is what makes
+"clean merges" and "shared history" stop being a trade: two people running tasks
+write different filenames, so appends never conflict; and after a pull their run
+files replay into the same journal table, so their runs appear on the board.
+Pruning becomes a file delete rather than a rewrite.
+
+**Built for the journal** (`persistence/src/journalFile.ts`): the recorder appends
+the line and then inserts the row, in that order and synchronously — an event that
+reached the table and not the disk would be an event a replay does not have, which
+is the loss the whole inversion exists to refuse. A line is `type`, an ISO
+`timestamp`, the run coordinates and the event verbatim; `seq` is deliberately
+**not** in it, because it is `AUTOINCREMENT` and a file outlives the database that
+assigned it. Line order is the order, replay re-mints, and files are read task then
+run so a re-minted `seq` still orders a run's events in sequence and a task's runs
+in the order they happened. A line that will not parse is skipped rather than
+thrown — a git merge can leave a conflict marker mid-file, and one unmergeable line
+should cost one event, not the history.
+
+The journal keeps **JaiRA's own line shape** rather than an agent's, and `format`
+does not apply to it. `instance.entered` and `transition.taken` are the state
+machine talking to itself; dressing them as `{type: "assistant"}` to fit somebody
+else's schema would be a lie told for a reader that would make nothing of them
+anyway. `format` governs CONVERSATIONS, which is what those formats are for.
+
+**Two formats, one reader.** Claude Code's line shape is the default —
+`@declarative-ai/agents-api` already models it (`NativeLine`) and
+`nativeCapture.ts` already reads it — with JaiRA's own fields carried under a
+namespaced key that their reader ignores. `format: "codex"` selects Codex's
+instead. **Reading accepts either regardless of the setting**, detected per LINE
+rather than per file, because a project that changes `format` keeps appending to
+the run files it already had and a merge can interleave two people who disagreed.
+
+**Built** (`persistence/src/conversationFile.ts`), with one thing claimed and one
+not. Claimed: every line carries the right envelope, so those readers walk the
+file and keep JaiRA's rows whole (`nativeLinesOf` keeps unknown line types by
+design). Not claimed: Claude Code's UI will not RENDER these as a conversation —
+that needs each turn emitted as its own `{type: "user" | "assistant", message}`
+line, which is a further step and one worth doing against a real session file
+rather than from memory. The codex envelope is the right shape family and has not
+been checked against a real rollout either. Both are in TODO.
+
+The update problem is what makes this concern harder than the journal, and the
+answer is that a line is the row's **current state, whole**, with replay keeping
+the last line per key. No deltas and no in-place edits: a record that opens,
+streams ten partials and settles writes twelve lines and replays as the twelfth.
+It costs size and buys the property that matters — a file only ever grows, so two
+people appending to one run conflict on nothing. Compaction, if it is ever wanted,
+is a rewrite of a file nobody is appending to and needs no change to the reader.
+
+**`both` keeps its index across a close, and checks it.** The file is still the
+truth; the table copy simply persists so startup can skip the replay. It shipped
+with no staleness check at all — a `git pull` moved the files under a persisted
+index and nothing noticed — and now records a FINGERPRINT of what it was built
+from: size and mtime per file, deliberately not a content hash, because the point
+is to cost less than the replay it avoids and a checkout that changes a file's
+bytes without changing either is not a thing git does. Wrong in the safe direction
+either way: a fingerprint that fails to match costs one replay, which is what
+would have happened without it.
+
+So a file-backed concern picks one of three outcomes at open, in order: **reuse**
+(`both`, and the fingerprint matches), **replay** (there are files — and under
+`both` the result is written back with a new fingerprint), **seed** (there are no
+files, so the concern has just been switched on and the history is still in the
+database). The write-back empties children before parents: `main` keeps its
+foreign keys even though the shadow drops them.
+
+**Pruning deletes the files.** Not "drops them from the index" — the file goes. If
+it was committed, removing it from git is the user's action, and JaiRA does not
+touch the index on their behalf. The alternative (prune locally, file survives in
+git) means a pruned run returns on the next pull, which is a prune that does not
+prune. Built: `prune` removes each pruned run's file and `deleteTask` removes the
+task's directory, both AFTER the rows and outside the transaction — a filesystem
+does not roll back, and a journal file with no run row is recoverable noise where a
+run row with no journal is a run whose history silently reads as empty.
+
+**`system/` stops being gitignored**, which is the point of all of it: once files
+are the truth there is nothing derived left to hide. Two exceptions survive, and
+they are the two that motivated ignoring the directory in the first place —
+`jaira.db`, now a rebuildable index and still an unmergeable binary, and `logs/`,
+which is machine noise that conflicts on every line.
+
+**The prerequisite is built (migration 8).**
+`session_positions.operation_record_id` was a foreign key to `operation_records.id`,
+an `INTEGER PRIMARY KEY AUTOINCREMENT` — db-assigned, and therefore re-minted on
+every replay, pointing every position row at the wrong record, silently, because
+the ids would all still be valid. It references the stable id now. That id already
+existed: upstream's `withRecord` stamps `<sessionId>:<seq>` on a record that claims
+a position and `hashOperation(op)` on one that does not, and both are stable
+because operations are immutable. It is not unique on its own — an identical
+operation dispatched twice hashes identically, which is why `attempt` exists — so
+the key is `(task_id, run_id, record_id, attempt)`, carried as four columns on the
+position row and enforced by `operation_records_natural`. The tuple rather than a
+string built from it, because a delimiter-joined key would have to claim
+`record_id` never contains the delimiter and nothing enforces that.
+
+Three things fell out of it. For a PLACED record `record_id` is literally
+`session_id:seq`, so those rows were carrying a rowid that duplicated the pair the
+position table already keys on. The two DELETEs that used to reach through
+`operation_record_id` with a subquery are now a `WHERE task_id = ?` and a
+`WHERE run_id = ?`. And `derive` — which inserted its record with no `attempt` at
+all and so always wrote 1 — now counts like every other writer; that was invisible
+until the natural key became a key.
+
 ## 5. Workflow Loading, Validation, and Snapshots
 
 ### 5.1 Loader
@@ -1113,7 +1337,7 @@ and **enforced** at task start (snapshot creation fails on errors). Checks:
 
 At task start the engine collects the transitive closure of state files from
 the root state, computes `snapshot_hash = sha256(sorted [(relPath, contentHash)])`,
-and copies the files into `.jaira/snapshots/<hash>/` if not already present
+and copies the files into `.jaira/system/snapshots/<hash>/` if not already present
 (content-addressed, deduplicated across tasks). The task pins `snapshot_hash`;
 the Git commit hash of the project at start time is recorded alongside when
 available. Execution always reads from the snapshot. Migration of a running
@@ -1290,7 +1514,7 @@ interpolate as worktree-relative paths plus an instruction to read the file —
 
 Transcripts live in the run's session store, keyed by logical session id, and are
 readable as data through a `{ conversation }` binding. They are **not** written to
-`jaira-artifacts/…` — no artifact file is written at all yet (§7.5).
+`.jaira/system/artifacts/…` — no artifact file is written at all yet (§7.5).
 
 ### 7.4 Skill Operations
 
@@ -1315,7 +1539,7 @@ Derived from the state's output schema at operation start:
   `ArtifactRef` — `{ artifact: true, name: "<state>#<instance>.<slot>", format,
   content }` — held in memory for the run. A blob operation output fills exactly
   one produced slot.
-  **Not built:** the pre-assigned `jaira-artifacts/<taskId>/<instanceId>-<name>.<ext>`
+  **Not built:** the pre-assigned `system/artifacts/<taskId>/<instanceId>-<name>.<ext>`
   path, the "write X to path P" prompt injection, the post-run existence/format
   check, and the content hash. `config.artifactDir` is parsed and unused. §7.6 is
   the design that replaces this bullet.
@@ -1348,10 +1572,10 @@ separates them, and one string then expresses all four — plus combinations no
 enumeration would have listed:
 
 ```jsonc
-// .jaira/config.json — replaces the flat `artifactDir` string
+// .jaira/settings.json — replaces the flat `artifactDir` string
 "artifacts": {
-  "destination": "$DEFAULT",    // or "$CENTRAL", "$JAIRA/artifacts/$TASK_ID/$RELPATH", "virtual:", …
-  "dir": "jaira-artifacts",     // what $ARTIFACT_DIR expands to
+  "destination": "$DEFAULT",    // or "$CENTRAL", "$SYSTEM/out/$TASK_ID/$RELPATH", "virtual:", …
+  "dir": "artifacts",           // what $ARTIFACT_DIR expands to, under $SYSTEM
   "inlineMaxBytes": 65536       // below this, keep content inline for cheap bindings
 }
 ```
@@ -1361,7 +1585,7 @@ enumeration would have listed:
 | As written — wherever the agent asked | `$DEFAULT` |
 | Central, relative path preserved | `$CENTRAL` |
 | Central, flat and derived | `$CENTRAL_FLAT` |
-| Out of the repo entirely | `$JAIRA/artifacts/$TASK_ID/$RELPATH` |
+| Out of the tree entirely | `/var/artifacts/$TASK_ID/$RELPATH` |
 | Virtual — memory only (today's behaviour) | `virtual:` |
 
 **Scheme = backend.** `virtual:` is memory; `file:` is the filesystem and is
@@ -1378,8 +1602,14 @@ editable:
 | Alias | Expands to |
 | --- | --- |
 | `$DEFAULT` | `$WORKTREE/$RELPATH` |
-| `$CENTRAL` | `$WORKTREE/$ARTIFACT_DIR/$TASK_ID/$RELPATH` |
-| `$CENTRAL_FLAT` | `$WORKTREE/$ARTIFACT_DIR/$TASK_ID/$INSTANCE_ID-$SLOT.$EXT` |
+| `$CENTRAL` | `$SYSTEM/$ARTIFACT_DIR/$TASK_ID/$RELPATH` |
+| `$CENTRAL_FLAT` | `$SYSTEM/$ARTIFACT_DIR/$TASK_ID/$INSTANCE_ID-$SLOT.$EXT` |
+
+The central placements anchor on `$SYSTEM` — the **project's** generated-state
+directory — rather than on the worktree. Artifacts are what a run produced, not
+what a person authored, so they belong with the rest of what JaiRA writes for
+itself; and anchoring on the project rather than the worktree means `git worktree
+remove` does not take them with it.
 
 *Base variables:*
 
@@ -1388,7 +1618,8 @@ editable:
 | `$WORKTREE` | the task's worktree root (project dir if the task is unbound) |
 | `$PROJECT` | the project root |
 | `$JAIRA` | `<project>/.jaira` |
-| `$ARTIFACT_DIR` | `artifacts.dir`, default `jaira-artifacts` |
+| `$SYSTEM` | `<project>/.jaira/system` — everything JaiRA generates (§3) |
+| `$ARTIFACT_DIR` | `artifacts.dir`, default `artifacts`; a name under `$SYSTEM` |
 | `$TASK_ID`, `$RUN_ID`, `$INSTANCE_ID`, `$STATE_ID`, `$SLOT` | run coordinates |
 | `$RELPATH` | the logical path the agent used, relative to the workspace |
 | `$BASENAME`, `$EXT` | decomposition of `$RELPATH` |
@@ -1403,8 +1634,8 @@ Three rules keep it safe and portable:
   `$WORKTREE` is not one string: a WSL project's agent sees `/mnt/c/…` where the
   host sees `C:\…`, so substitution happens *after* choosing the view.
 - **Anchor on variables, not a leading slash.** A leading `/` is ambiguous on
-  Windows; `$WORKTREE`/`$PROJECT`/`$JAIRA` say exactly what is meant. A template
-  with no anchor variable is relative to the workspace root.
+  Windows; `$WORKTREE`/`$PROJECT`/`$JAIRA`/`$SYSTEM` say exactly what is meant. A
+  template with no anchor variable is relative to the workspace root.
 
 `$JAIRA` remains viable only because of decision 2: agents are policy-denied from
 `.jaira/**`, so nothing but JaiRA could write there.
@@ -1590,7 +1821,7 @@ Every executor still carries `enabled` and `models` in common (`config.agents.*`
 
 And where a kind takes one:
 
-- **`credential`.** *Names* a secret; it never holds one. `config.json` is
+- **`credential`.** *Names* a secret; it never holds one. `settings.json` is
   committed source, so a key written there is a key in everyone's checkout and
   in the history forever. The parser refuses a value containing whitespace with
   that reason spelled out, because it is the single easiest way to leak one.
@@ -1598,21 +1829,34 @@ And where a kind takes one:
 The value is resolved when it is needed, first hit wins:
 
 ```text
-  1. the OS keychain          Electron safeStorage, encrypted at rest — app only
-  2. <project>/.env.local     this checkout, not committed
-  3. <project>/.env           this checkout, possibly committed
-  4. <base>/.env.local        the machine, for every project
-  5. <base>/.env              the machine, for every project
-  6. the process environment  CI, a shell that exported it, a wrapper script
+  1. the OS keychain              Electron safeStorage, encrypted at rest — app only
+  2. <project>/.jaira/.env.local  this checkout's JaiRA config, not committed
+  3. <project>/.jaira/.env        this checkout's JaiRA config, possibly committed
+  4. <project>/.env.local         this checkout, not committed
+  5. <project>/.env               this checkout, possibly committed
+  6. <base>/.env.local            the machine, for every project
+  7. <base>/.env                  the machine, for every project
+  8. the process environment      CI, a shell that exported it, a wrapper script
 ```
 
 Narrowest to widest, which is the only order that lets a project-specific key
 beat a machine-wide default. The keychain leads because it is the one link that
 is not plaintext on disk; the environment trails because it is the one JaiRA
 cannot see the provenance of. **The CLI has no keychain** — `safeStorage` is
-Electron's — and that is why links 2–6 exist: the app must never be the only
+Electron's — and that is why links 2–8 exist: the app must never be the only
 place a credential can live, or a workflow would run in the app and fail on the
 command line for reasons nothing reports.
+
+**A checkout has two places, and `.jaira/` is the narrower.** The base root's
+pair sits in `~/.jaira`, so the same pair in a project belongs in
+`<project>/.jaira` — that is what makes the two layouts read the same. The
+repository root keeps its links because that is where a `.env` a project already
+had for its own tooling actually is, and asking someone to move theirs in order
+to be found would be the wrong way round. `.jaira/` wins between them: a key put
+there was put there *for JaiRA*, where one at the repository root may be shared
+with everything else the project runs. `jaira init` gitignores
+`.jaira/.env.local` and deliberately not `.jaira/.env` — the `.local` suffix is
+the whole convention for "this machine's".
 
 `probeExecutor` health-checks one without running it: `--version` (the one
 invocation these binaries all support, that exits immediately, and that cannot
@@ -1671,7 +1915,7 @@ XOR reasoning — neither of which the box told you, and both of which it would
 accept and then fail on at run time. Unknown keys survive in a JSON escape hatch,
 so the form is never lossy.
 
-**Configuration** is the rest of `config.json` — artifacts, where commands run,
+**Configuration** is the rest of `settings.json` — artifacts, where commands run,
 the safety policy, memoization, workflow lookup — and it is a FORM. It was a raw
 JSON editor, which is the same failure the LLM config box had: it makes the user
 the parser. You had to already know the field is `inlineMaxBytes` and not
@@ -1744,8 +1988,8 @@ of thing and equally visible in a record.
 ```
 
 `credential` NAMES a secret and never holds one, resolved through the same chain an executor's is (OS
-keychain → `.env.local`/`.env` beside the project → the same two in the base root → the process
-environment). That chain is the point: before this existed `createModelRouter()` was called with no
+keychain → the `.env.local`/`.env` pair in the project's `.jaira/`, then the pair at its root → the
+same two in the base root → the process environment). That chain is the point: before this existed `createModelRouter()` was called with no
 options at all, so the provider SDKs read `process.env` and a key kept anywhere else never reached
 them. `presets` feed declarative-ai's named-config registry, which a state selects with
 `operation.configRef` — a mechanism that predates this block and only lacked somewhere to write the
@@ -1820,7 +2064,7 @@ Two rules make it usable, and they are the whole design:
    every usable provider and every working agent.
 2. **A change pins only what changed.** Writing a rate limit onto the `anthropic`
    route stores exactly that, so an agent installed tomorrow still gets a route by
-   itself. Materializing the resolved tree into `config.json` on first edit would
+   itself. Materializing the resolved tree into `settings.json` on first edit would
    freeze today's answer into everyone's configuration, and they would never pick
    up a better one.
 
@@ -1974,7 +2218,7 @@ interface Exec { spawn(cmd, args, opts: { cwd, env, execEnv }): Child }
 `execEnv: "windows"` uses native spawn; `{ wsl: "Ubuntu" }` wraps as
 `wsl.exe -d Ubuntu --cd <linuxCwd> -- <cmd …>`. A `PathMapper` converts
 between Windows and WSL views (`C:\…` ↔ `/mnt/c/…`, `\\wsl$\<distro>\…` ↔
-`/…`). Projects declare `execEnvironment` in `.jaira/config.json`; a WSL
+`/…`). Projects declare `execEnvironment` in `.jaira/settings.json`; a WSL
 project is stored on the WSL filesystem, the engine reads its files for
 display via `\\wsl$` UNC paths, and runs all git/agent commands inside the
 distro (running git against `\\wsl$` from Windows is slow and
@@ -1995,7 +2239,7 @@ removed (`git worktree remove`) when the task completes and the user confirms.
 
 ### 10.1 Canonical Policy Model
 
-One project-level policy in `.jaira/config.json`, compiled per run:
+One project-level policy in `.jaira/settings.json`, compiled per run:
 
 ```ts
 interface Policy {
@@ -2466,7 +2710,7 @@ run-record requirements of spec §10.2.
   so a split dragged while maximised survives the window being restored.
 - **Remembered layout**: how you arranged the window survives closing it. Every
   divider you drag, every fold you close, and every branch of the Files tree or
-  the Tasks board you collapse is stored in `~/.jaira/settings.json` beside the
+  the Tasks board you collapse is stored in `~/.jaira/user-settings.json` beside the
   theme — one person, one machine, never a checkout, so a layout preference can
   never arrive through a pull request. What it is NOT is a fourth configuration
   layer: the file holds three maps keyed by an id the renderer owns (a size, a
@@ -2479,7 +2723,7 @@ run-record requirements of spec §10.2.
   branch created after the file was written must never appear folded. And the
   window OWNS the layout once it has read it: the file seeds it at startup and
   is written back a beat after each gesture (plus once more on the way out), so
-  a `settings.json` re-read — one happens on every project open — cannot snap a
+  a `user-settings.json` re-read — one happens on every project open — cannot snap a
   divider back to where it was before the drag.
 - **One chrome for every editor**: a bar of standing facts on top, the document
   in the middle, Save and Revert underneath. Each editing surface scrolls
@@ -2750,7 +2994,7 @@ would be testing the wrong screen.
 ## 12. Task Lifecycle and Board Semantics
 
 - Task creation: title/description (+ optional issue artifact), workflow root
-  state, optional branch binding → `.jaira/tasks/<id>.json` + `task_runtime`
+  state, optional branch binding → `.jaira/system/tasks/<id>.json` + `task_runtime`
   row, status `queued`.
 - Start: snapshot workflows (§5.3), materialize worktree if bound (§9.2),
   create root instance, enqueue `task.start`.

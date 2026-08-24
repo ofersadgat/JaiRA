@@ -68,7 +68,7 @@ function fake(over: Parameters<typeof syncRules>[0] extends infer T ? Partial<T>
 }
 
 const descriptionFile = (): string => join(dir, ".jaira", ...WORKFLOW_DESCRIPTION_PATH.split("/"));
-const syncFile = (): string => join(dir, ".jaira", "sync.json");
+const syncFile = (): string => join(dir, ".jaira", "system", "sync.json");
 
 const REWRITTEN = "# Planning\n\nGoals, then a plan, then a critique by a model.\n";
 
@@ -720,9 +720,9 @@ describe("the shared root, with no project open", () => {
       documentChanged: false,
       statesChanged: false,
     });
-    // In `~/.jaira/sync.json` and not in any project's — a machine-global document whose history
-    // was scattered across checkouts would have a different answer in every window.
-    expect(existsSync(baseFile("sync.json"))).toBe(true);
+    // In `~/.jaira/system/sync.json` and not in any project's — a machine-global document whose
+    // history was scattered across checkouts would have a different answer in every window.
+    expect(existsSync(baseFile("system", "sync.json"))).toBe(true);
 
     // And a shared state moving is drift the shared description is answerable for.
     bare.writeWorkflow({ stateId: "feature/plan/goals", layer: "base", text: '{"label":"Goals, revised"}' });
@@ -855,10 +855,9 @@ describe("what a system run tells the window", () => {
 
       const runNews = pushes.filter((m) => m.type === "run:finished" || m.type === "engine:event");
       expect(runNews.length).toBeGreaterThan(0);
-      // Every one names the SYSTEM project, never the open user project — which is what lets the
-      // window tell "my tasks changed" from "JaiRA's did". JaiRA's own project is its own directory
-      // now, beside the root rather than being it, so that a root switch does not take it along.
-      for (const m of runNews) expect(m.project).toBe(join(home, "shared", "system"));
+      // Every one names the BASE root, never the open user project — which is what lets the window
+      // tell "my tasks changed" from "the root's did".
+      for (const m of runNews) expect(m.project).toBe(join(home, "shared"));
       expect(runNews.some((m) => m.project === dir)).toBe(false);
     } finally {
       await bare.close();
@@ -921,9 +920,8 @@ describe("a base-layer sync with no project open", () => {
         (m.type === "store:invalidate" && (m.scope === "tasks" || m.scope === "board" || m.scope === "task")),
     );
     expect(projectScoped.length).toBeGreaterThan(0);
-    // JaiRA's own project, which is a directory beside the root rather than the root itself: a
-    // description sync is about the installation, so its history must not move when the root does.
-    for (const m of projectScoped) expect(m.project).toBe(join(base, "system"));
+    // The base root, where a sync is recorded — never the user project, which may not even be open.
+    for (const m of projectScoped) expect(m.project).toBe(base);
   });
 });
 
@@ -1011,17 +1009,16 @@ describe("the Tasks view's groups", () => {
   it("lists every project it can draw a board for, the user's first", async () => {
     const groups = service.listProjects();
 
-    // Three now, outward from what you are working on: the checkout, the shared library it can draw
-    // workflows from, and JaiRA's own runs behind both.
-    expect(groups.map((g) => g.kind)).toEqual(["user", "shared", "system"]);
+    // Two, outward from what you are working on: the checkout, and the shared root it can draw
+    // workflows from — which is also where JaiRA's own runs are recorded.
+    expect(groups.map((g) => g.kind)).toEqual(["user", "shared"]);
     expect(groups[0]).toMatchObject({ project: dir, kind: "user" });
     expect(groups[1]).toMatchObject({ kind: "shared" });
-    expect(groups[2]).toMatchObject({ label: "JaiRA", kind: "system" });
   });
 
   it("counts each group's own tasks, not the other's", async () => {
-    // Its OWN base root: this suite shares one, and JaiRA's project lives in it — so a count against
-    // the shared one would be a count of every sync the file has run.
+    // Its OWN base root: this suite shares one, and every sync is recorded in it — so a count
+    // against the shared one would be a count of every sync the file has run.
     const home = mkdtempSync(join(tmpdir(), "jaira-groups-"));
     const own = new AppService({ watchWorkflows: false, baseDir: join(home, "shared") });
     try {
@@ -1036,8 +1033,8 @@ describe("the Tasks view's groups", () => {
 
       const groups = own.listProjects();
       expect(groups.find((g) => g.kind === "user")?.tasks).toBe(1);
-      // The sync's task is JaiRA's, and appears only under JaiRA.
-      expect(groups.find((g) => g.kind === "system")?.tasks).toBe(1);
+      // The sync's task is the root's, and appears only under the root.
+      expect(groups.find((g) => g.kind === "shared")?.tasks).toBe(1);
     } finally {
       await own.close();
       rmSync(home, { recursive: true, force: true });
@@ -1046,7 +1043,7 @@ describe("the Tasks view's groups", () => {
 
   it("draws a real board for JaiRA's own project — columns and cards, not a summary", async () => {
     await syncDocument();
-    const system = service.listProjects().find((g) => g.kind === "system")!.project;
+    const system = service.listProjects().find((g) => g.kind === "shared")!.project;
 
     // Roots first, which is where a group opens: one column per workflow it has run.
     const roots = service.boardRoots({ project: system });
@@ -1060,7 +1057,7 @@ describe("the Tasks view's groups", () => {
 
   it("reads a task's detail from the project it belongs to", async () => {
     await syncDocument();
-    const system = service.listProjects().find((g) => g.kind === "system")!.project;
+    const system = service.listProjects().find((g) => g.kind === "shared")!.project;
     const taskId = service.listSystemTasks()[0]!.taskId;
 
     // A task id is a rowid in ONE database. Unscoped, this is "unknown task" — which is what selecting
@@ -1071,7 +1068,7 @@ describe("the Tasks view's groups", () => {
 
   it("drills each group independently", async () => {
     await syncDocument();
-    const system = service.listProjects().find((g) => g.kind === "system")!.project;
+    const system = service.listProjects().find((g) => g.kind === "shared")!.project;
 
     // Drilling JaiRA's board says nothing about the checkout's — each group keeps its own level,
     // because looking into one is not a statement about the other.

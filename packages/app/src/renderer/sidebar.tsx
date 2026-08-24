@@ -99,9 +99,9 @@ export interface SidebarView {
 export interface SidebarProject {
   /** The directory — what every project-scoped call names. */
   project: string;
-  /** Its basename, or the role name for the two that have one. */
+  /** Its basename, or the root's own path for the one that has a role name. */
   label: string;
-  kind: "user" | "shared" | "system";
+  kind: "user" | "shared";
   /**
    * The colour that stands for this project, as a CSS variable reference — see `hueOf`.
    *

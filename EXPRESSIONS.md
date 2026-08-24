@@ -888,7 +888,7 @@ that the layering is already settled by the code rather than open for negotiatio
 | **`ops`** | `Parameter.lazy` as a declaration (deferred, §6). `Signature` on registry entries — optional, not a prerequisite (§3.4). |
 | **`exec`** | **Nothing.** Dispatch, memoization, capability gating, retry, cancellation and error-as-data are built. A thunk representation only if §6's generalization happens. |
 | **`hw`** | Everything else: expression→tree desugaring; operators as `RESOLVER_REFS`; callee reference resolution to an embedded document; `path` as an ordered default root; engine dispatch for author-embedded ops; reifying `Failure` into the data plane; `inferExpr` reading declared signatures; the source-map sidecar; the loader restructure (§9). |
-| **JaiRA** | `path` in `.jaira/config.json` and its `$INHERITED` merge; the `Vfs` overlay serving `$/functions`; built-in op documents; lint output showing where a callee resolved and what it shadowed. |
+| **JaiRA** | `path` in `.jaira/settings.json` and its `$INHERITED` merge; the `Vfs` overlay serving `$/functions`; built-in op documents; lint output showing where a callee resolved and what it shadowed. |
 
 ---
 

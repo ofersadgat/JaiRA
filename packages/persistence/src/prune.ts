@@ -20,6 +20,9 @@
  */
 import type { HistorySize, PruneResult } from "@jaira/shared";
 import type { Project } from "./project";
+import { removeJournal } from "./journalFile";
+import { removeConversations } from "./conversationFile";
+import { isFileBacked } from "./shadow";
 
 // The view models live in `@jaira/shared` so the renderer can name them too.
 export type { HistorySize, PrunePlanEntry, PruneResult } from "@jaira/shared";
@@ -115,10 +118,7 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
       // they reference the records, and a position whose record is gone is a claim on nothing.
       // This also covers the UNPLACED records §5.2's unconditional recording writes (the retention
       // question of CHANGESETS.md §10.5 lands here, in the surface that already prunes).
-      const dropPositions = project.db.prepare(
-        `DELETE FROM session_positions
-          WHERE operation_record_id IN (SELECT id FROM operation_records WHERE run_id = ?)`,
-      );
+      const dropPositions = project.db.prepare(`DELETE FROM session_positions WHERE run_id = ?`);
       const dropRecords = project.db.prepare(`DELETE FROM operation_records WHERE run_id = ?`);
       // A branch with no records left AND no descendant pointing at it. Both conditions matter, and
       // the first one alone is actively destructive:
@@ -157,6 +157,20 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
         removed = dropSessions.run(before).changes;
       } while (removed > 0);
     })();
+    // The FILES, after the rows and outside the transaction — a filesystem does not roll back, and a
+    // journal file with no run row is recoverable noise where a run row with no journal is a run
+    // whose history silently reads as empty.
+    //
+    // Deleted rather than dropped from the index, which is the decision §4.4 records: a prune that
+    // left the file would see the run return on the next pull, which is a prune that does not prune.
+    // If the file was committed, removing it from git is the user's action and JaiRA does not touch
+    // the index on their behalf.
+    if (isFileBacked(project.config.storage.journal)) {
+      for (const run of runs) removeJournal(project.paths.journalDir, run.taskId, run.runId);
+    }
+    if (isFileBacked(project.config.storage.conversations)) {
+      for (const run of runs) removeConversations(project.paths.conversationsDir, run.taskId, run.runId);
+    }
   }
 
   return { runs, events: totals.events, commands: totals.commands, skippedTasks, dryRun };

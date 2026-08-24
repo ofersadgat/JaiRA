@@ -51,7 +51,7 @@ afterEach(async () => {
 /** A task whose "worktree" is the project checkout itself — the shape, without materializing one. */
 function worktreeTask(): string {
   const taskId = service.createTask({ title: "Do the work", workflow: "feature/plan", inputs: { issue: "x" } }).taskId;
-  const db = new Database(join(dir, ".jaira", "jaira.db"));
+  const db = new Database(join(dir, ".jaira", "system", "jaira.db"));
   try {
     db.prepare(`UPDATE task_runtime SET worktree_path = ? WHERE task_id = ?`).run(dir, taskId);
   } finally {

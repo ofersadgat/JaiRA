@@ -38,7 +38,7 @@ function agentTools(destination: string): { write: Tool; read: Tool; store: Memo
       worktree: dir,
       project: dir,
       jaira: join(dir, ".jaira"),
-      artifactDir: "jaira-artifacts",
+      artifactDir: "artifacts",
       taskId: "t-1",
       instanceId: 3,
       slot: "out",
@@ -61,7 +61,7 @@ describe("what the agent can tell", () => {
     expect(readBack).toEqual({ path: "notes/design.md", content: "v1" });
 
     // …while the bytes are demonstrably somewhere else.
-    expect(existsSync(join(dir, "jaira-artifacts", "t-1", "notes", "design.md"))).toBe(true);
+    expect(existsSync(join(dir, ".jaira", "system", "artifacts", "t-1", "notes", "design.md"))).toBe(true);
     expect(existsSync(join(dir, "notes", "design.md"))).toBe(false);
   });
 

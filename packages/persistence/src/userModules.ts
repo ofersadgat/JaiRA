@@ -71,9 +71,12 @@ interface ApprovalFile {
 /**
  * The machine-local record of what may run, backed by one JSON file.
  *
- * A plain file rather than a table in the database, for the same reason `sync.json` is one: it is
- * read before any project is open — the symbol index is built at process start, ahead of knowing
- * which project this is — and it spans every project on the disk rather than belonging to one.
+ * A plain file rather than a table in the database, and the reason is its own rather than shared
+ * with `sync.json` as this used to claim: an approval is keyed by ABSOLUTE PATH and spans every
+ * project on the disk, so there is no one project's database it could belong to. It is also read
+ * before any project is open — the symbol index is built at process start, ahead of knowing which
+ * project this is. Neither of those is true of `sync.json`, which is per-layer and read from an
+ * open session like anything else.
  */
 export interface Approvals extends ApprovalStore {
   /** Record this file's current bytes as approved. */

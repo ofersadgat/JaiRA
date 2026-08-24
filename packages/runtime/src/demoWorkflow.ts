@@ -174,9 +174,11 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
         decision: { schema: { type: "string", enum: ["approve", "request_changes", "block"] } },
         comments: { schema: { type: "string", format: "markdown" }, optional: true },
       },
-      // The human gate is an interactive host FUNCTION — a plain FunctionOp whose
-      // authored surface rides in `config`. JaiRA's renderer backs this in phase 4;
-      // headless runs script it with `--interactions`.
+      // The human gate is an interactive host FUNCTION — a plain FunctionOp whose authored surface
+      // IS `operation.args`, flat. (This said "rides in `config`", which no reader ever agreed
+      // with: the lint parses `op.args` and the function receives args merged with the state's
+      // inputs. The service believed the comment and looked up a `config` key nothing writes.)
+      // JaiRA's renderer backs this in phase 4; headless runs script it with `--interactions`.
       operation: {
         kind: "function",
         function: HUMAN_REVIEW_FUNCTION,

@@ -12,6 +12,10 @@ import { freezeForRun, moduleEntriesOf, userModules } from "./userModules";
 import { nodeVfs } from "./vfs";
 import { workflowLoadOptions } from "./workflowRefs";
 import type { Project } from "./project";
+import { removeTaskJournal } from "./journalFile";
+import { removeTaskConversations } from "./conversationFile";
+import { removeTaskRows } from "./rowFile";
+import { isFileBacked } from "./shadow";
 
 export interface CreateTaskInput {
   title: string;
@@ -28,10 +32,9 @@ export function createTask(project: Project, input: CreateTaskInput, nowMs = Dat
   // Neither project that is not a checkout takes a worktree, and this is where that is ENFORCED
   // rather than promised. Neither directory is a git repository, so a bound task in one would fail
   // inside `ensureWorkspace` at start — a refusal at creation says the same thing where it can still
-  // be acted on. Both kinds, not just `system`: the shared root gained its own project and inherited
-  // exactly the same non-checkout-ness.
+  // be acted on. The base root is not a checkout, so a task recorded there can never take one.
   if (project.kind !== "project" && input.branch !== undefined) {
-    throw new Error(`a ${project.kind} task cannot be bound to a branch — ${project.kind === "shared" ? "the shared root" : "JaiRA's own project"} is not a checkout`);
+    throw new Error(`a ${project.kind} task cannot be bound to a branch — the shared root is not a checkout`);
   }
   const meta: TaskMeta = {
     id: input.id ?? newTaskId(),
@@ -267,17 +270,22 @@ export function deleteTask(project: Project, taskId: string): void {
     project.db.prepare(`DELETE FROM command_log WHERE task_id = ?`).run(taskId);
     project.db.prepare(`DELETE FROM job_output WHERE job_id IN (${jobs})`).run(taskId, taskId);
     project.db.prepare(`DELETE FROM jobs WHERE task_id = ? OR run_id IN (${runs})`).run(taskId, taskId);
-    project.db
-      .prepare(
-        `DELETE FROM session_positions
-          WHERE operation_record_id IN (SELECT id FROM operation_records WHERE task_id = ?)`,
-      )
-      .run(taskId);
+    // Straight off the position row since migration 8: it carries the scope its record does, so the
+    // subquery that used to reach through `operation_record_id` has nothing left to do.
+    project.db.prepare(`DELETE FROM session_positions WHERE task_id = ?`).run(taskId);
     project.db.prepare(`DELETE FROM operation_records WHERE task_id = ?`).run(taskId);
     project.db.prepare(`DELETE FROM artifacts WHERE task_id = ?`).run(taskId);
     project.db.prepare(`DELETE FROM runs WHERE task_id = ?`).run(taskId);
     project.db.prepare(`DELETE FROM task_runtime WHERE task_id = ?`).run(taskId);
   })();
+  // The task's journal files, for the reason `prune` deletes a run's: with the file as the truth, a
+  // deletion that left it behind is a task that returns on the next pull (DESIGN §4.4).
+  if (isFileBacked(project.config.storage.journal)) removeTaskJournal(project.paths.journalDir, taskId);
+  if (isFileBacked(project.config.storage.conversations)) {
+    removeTaskConversations(project.paths.conversationsDir, taskId);
+  }
+  if (isFileBacked(project.config.storage.tasks)) removeTaskRows(project.paths.taskRowsDir, taskId);
+  if (isFileBacked(project.config.storage.artifacts)) removeTaskRows(project.paths.artifactRowsDir, taskId);
   // The file after the rows: a crash between the two leaves a task file with no runtime row, which
   // `list` still shows and a re-created row could adopt — recoverable, unlike the reverse order,
   // where the rows would describe a task no file can name.

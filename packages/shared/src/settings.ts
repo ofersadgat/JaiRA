@@ -1,14 +1,32 @@
 /**
- * User settings — `~/.jaira/settings.json` (the shared base root, DESIGN §3).
+ * User settings — `~/.jaira/user-settings.json` (the shared base root, DESIGN §3).
  *
- * Deliberately NOT `config.json`. Project config describes how a project runs and is committed with
- * it: models, policy, executors, the search path. This file describes how the app looks to ONE
- * person on ONE machine, so it belongs to the base root and never to a checkout. Keeping the two
- * apart is why a theme preference cannot arrive through a pull request.
+ * Deliberately NOT `settings.json`. That file describes how a PROJECT runs and is committed with it:
+ * models, policy, executors, the search path. This one describes how the app looks to ONE person on
+ * ONE machine, so it belongs to the base root and never to a checkout. Keeping the two apart is why
+ * a theme preference cannot arrive through a pull request.
+ *
+ * The pair used to be `config.json` and `settings.json`, and those two words carried no direction —
+ * nothing in "config" says it is the shared one, nothing in "settings" says it is the private one.
+ * The qualifier does that work now.
  *
  * Everything here is types and pure functions, so the renderer can import it: the file is READ and
  * WRITTEN in the main process, and the parsed value crosses IPC.
  */
+
+/**
+ * How a project RUNS: models, executors, policy, artifacts, the search path.
+ *
+ * Layered — the base's is merged under a project's before parsing — and committed with the project,
+ * because it describes the project rather than the person at it.
+ *
+ * Here rather than beside the rest of the `.jaira/` layout because the renderer needs it and
+ * `paths.ts` is Node-only; it is re-exported from there, where the layout lives.
+ */
+export const SETTINGS_FILE_NAME = "settings.json";
+
+/** The file this module is about — see the note above on why the names are a pair. */
+export const USER_SETTINGS_FILE_NAME = "user-settings.json";
 
 /** Which palette the renderer paints. */
 export type JairaTheme = "light" | "dark";

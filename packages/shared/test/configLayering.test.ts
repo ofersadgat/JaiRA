@@ -1,5 +1,5 @@
 /**
- * Laying a project's `config.json` over the shared base root's (DESIGN §3).
+ * Laying a project's `settings.json` over the shared base root's (DESIGN §3).
  *
  * Three merge rules, and each was chosen because the alternative is worse. The tests below state
  * which alternative, because that is the part a future reader cannot recover from the code.
@@ -118,7 +118,7 @@ describe("the merged document is what gets validated", () => {
   });
 
   it("refuses a credential that looks like a value rather than a name", () => {
-    // The single easiest way to end up with a secret committed in config.json.
+    // The single easiest way to end up with a secret committed in settings.json.
     expect(() => parseConfig({ agents: { codex: { credential: "sk-ant secret value" } } })).toThrow(
       /must NAME a secret, not hold one/,
     );
@@ -139,5 +139,79 @@ describe("the merged document is what gets validated", () => {
 
   it("refuses a non-boolean enabled", () => {
     expect(() => parseConfig({ agents: { codex: { enabled: "yes" } } })).toThrow(/enabled must be a boolean/);
+  });
+});
+
+/**
+ * Where each kind of run state lives (DESIGN §4.4).
+ *
+ * The parser's whole job is the refusals. A mode that is silently accepted and then ignored is a
+ * person believing their process claims are in git — so the tests below are mostly about what it
+ * will NOT take, and about the fact that each no says why.
+ */
+describe("config.storage", () => {
+  it("defaults to the database, which is what the engine actually does today", () => {
+    // Defaulting a concern to `file` before the writer exists would be a setting that lies.
+    expect(parseConfig({}).storage).toEqual({
+      journal: "db",
+      conversations: "db",
+      tasks: "db",
+      artifacts: "db",
+      format: "claude",
+    });
+  });
+
+  it("takes a partial block and leaves the rest at the default", () => {
+    expect(parseConfig({ storage: { journal: "file", format: "codex" } }).storage).toEqual({
+      journal: "file",
+      conversations: "db",
+      tasks: "db",
+      artifacts: "db",
+      format: "codex",
+    });
+  });
+
+  it("refuses the two tables that cannot be file-backed, by name and with the reason", () => {
+    // Not "unknown key". A replayed table is TEMP and therefore per-connection, so anything whose
+    // value is cross-process coordination cannot live in a file — and being told that is the
+    // difference between fixing the config and trying a different spelling.
+    expect(() => parseConfig({ storage: { jobs: "file" } })).toThrow(/cross-process/);
+    expect(() => parseConfig({ storage: { job_output: "file" } })).toThrow(/main thread/);
+    // Even asking for them in the database is refused: the answer is that they are not a choice.
+    expect(() => parseConfig({ storage: { jobs: "db" } })).toThrow(/cannot be chosen/);
+  });
+
+  it("points a plausible-but-wrong concern at the one that covers it", () => {
+    expect(() => parseConfig({ storage: { events: "file" } })).toThrow(/spelled `journal`/);
+    expect(() => parseConfig({ storage: { sessions: "file" } })).toThrow(/conversations/);
+    expect(() => parseConfig({ storage: { snapshots: "file" } })).toThrow(/addressed by content/);
+  });
+
+  it("refuses a concern it has never heard of, and lists the ones it knows", () => {
+    expect(() => parseConfig({ storage: { nonsense: "file" } })).toThrow(
+      /journal, conversations, tasks, artifacts/,
+    );
+  });
+
+  it("refuses a mode and a format that are not modes or formats", () => {
+    expect(() => parseConfig({ storage: { journal: "jsonl" } })).toThrow(/file, db, both/);
+    expect(() => parseConfig({ storage: { format: "openai" } })).toThrow(/claude, codex/);
+    expect(() => parseConfig({ storage: [] })).toThrow(/must be an object/);
+  });
+
+  it("layers, which is the point of it being here rather than in code", () => {
+    // The base is one machine and wants a database; a project checked into git wants files, because
+    // git cannot merge SQLite. Both are expressible only because `settings.json` layers.
+    const merged = mergeConfigDocuments(
+      { storage: { journal: "db", conversations: "db", format: "claude" } },
+      { storage: { journal: "file", conversations: "file" } },
+    );
+    expect(parseConfig(merged).storage).toEqual({
+      journal: "file",
+      conversations: "file",
+      tasks: "db",
+      artifacts: "db",
+      format: "claude",
+    });
   });
 });

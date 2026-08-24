@@ -12,7 +12,7 @@ import { basename, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { blockedRules, happyRules, HUMAN_REVIEW_FUNCTION, specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
-import { jairaBasePaths, SHARED_SESSION, SYSTEM_SESSION, systemProjectDir, type PushMessage } from "@jaira/shared";
+import { jairaBasePaths, SHARED_SESSION, type PushMessage } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import { AppService } from "../src/main/service";
 
@@ -422,14 +422,15 @@ describe("sessions — one process, several projects", () => {
 });
 
 /**
- * JaiRA's own project — the shared root, opened when something first needs it.
+ * The base root as a project — opened when something first needs it.
  *
- * The two properties worth defending: it is never what the project-free channels answer for (or a
- * window with no project open would list JaiRA's tasks as the user's), and it survives a checkout
- * being switched underneath it (or a sync in flight against it would be abandoned by an unrelated
- * action).
+ * It holds runs of the workflows a person keeps in `<root>/workflows` and JaiRA's own — a
+ * description sync, the conformance check — in one database, because one root is one project. The
+ * two properties worth defending: it is never what a project-free channel answers for (or a window
+ * with no project open would list the root's tasks as the user's), and it survives a checkout being
+ * switched underneath it (or a sync in flight against it would be abandoned by an unrelated action).
  */
-describe("the system project", () => {
+describe("the base root as a project", () => {
   it("is not opened merely by constructing a service", async () => {
     const home = mkdtempSync(join(tmpdir(), "jaira-sys-"));
     const base = join(home, "shared");
@@ -493,10 +494,11 @@ describe("the system project", () => {
         project: SHARED_SESSION,
       });
 
-      // Recorded in the ROOT's own project and nowhere else. Not JaiRA's: that one holds the
-      // installation's own runs and must survive a root switch, which these deliberately do not.
+      // Recorded in the ROOT's own project and nowhere else — `listSystemTasks` reads that same
+      // project, which is the point of there being one: a run of a shared workflow has a home
+      // whether or not a checkout is open, and an unqualified read still refuses to guess.
       expect(bare.listTasks(SHARED_SESSION).map((t) => t.taskId)).toEqual([task.taskId]);
-      expect(bare.listSystemTasks()).toEqual([]);
+      expect(bare.listSystemTasks().map((t) => t.taskId)).toEqual([task.taskId]);
       expect(() => bare.listTasks()).toThrow(/no project is open/);
 
       const { runId } = await bare.startTask({
@@ -515,21 +517,18 @@ describe("the system project", () => {
   });
 
   /**
-   * The property the whole split exists for.
+   * What a root IS.
    *
-   * Shared runs belong to the ROOT: repoint it and they are not yours any more, because a different
-   * root is a different library with a different history. JaiRA's own runs are about the
-   * installation and must survive exactly that switch. One project could not be both.
+   * Runs recorded against a root belong to it: repoint the root and they are not yours any more,
+   * because a different root is a different library with a different history.
    */
-  it("leaves a root's tasks behind when the root is repointed, but keeps JaiRA's own", async () => {
+  it("leaves a root's tasks behind when the root is repointed", async () => {
     const home = mkdtempSync(join(tmpdir(), "jaira-roots-"));
     const first = new AppService({ publish: () => undefined, baseDir: join(home, "one"), watchWorkflows: false });
     const second = new AppService({
       publish: () => undefined,
+      // The same installation, a different selected root — which is what repointing IS.
       baseDir: join(home, "two"),
-      // The same installation, a different selected root — which is what repointing IS. Passed
-      // explicitly here because a test's `baseDir` otherwise stands in for the whole installation.
-      systemDir: join(home, "system"),
       watchWorkflows: false,
     });
     try {
@@ -546,12 +545,17 @@ describe("the system project", () => {
     }
   });
 
-  it("keeps JaiRA's own project out of the selected root entirely", () => {
-    // So that repointing the root cannot take it along — the directory is beside the root, not in
-    // it, and `systemProjectDir` is the one place that decides where.
+  it("keeps everything it generates under the root's system/ directory", () => {
+    // The line inside a root: what a person authors at the top, what JaiRA writes one level down.
     // `resolve`d, so the expectation is too — on Windows a rooted path still gains a drive letter.
     const install = resolve(join(tmpdir(), "install"));
-    expect(systemProjectDir({ JAIRA_HOME: install })).toBe(join(install, "system"));
+    const paths = jairaBasePaths(install);
+
+    expect(paths.workflowsDir).toBe(join(install, "workflows"));
+    expect(paths.systemDir).toBe(join(install, "system"));
+    for (const generated of [paths.dbFile, paths.tasksDir, paths.snapshotsDir, paths.logsDir, paths.syncFile]) {
+      expect(generated.startsWith(paths.systemDir)).toBe(true);
+    }
   });
 
   it("shows a shared SUBSTATE what has run through it, not just the root", async () => {

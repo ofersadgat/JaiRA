@@ -32,7 +32,7 @@ const record = (over: Partial<ArtifactRecord> = {}): ArtifactRecord => ({
   taskId: "t-1",
   runId: 3,
   logicalPath: "docs/plan.md",
-  physicalPath: join(dir, "jaira-artifacts", "t-1", "docs", "plan.md"),
+  physicalPath: join(dir, ".jaira", "system", "artifacts", "t-1", "docs", "plan.md"),
   content: "# plan",
   hash: "abc123",
   bytes: 6,
@@ -101,7 +101,7 @@ describe("the tools against the durable store", () => {
         worktree: dir,
         project: dir,
         jaira: join(dir, ".jaira"),
-        artifactDir: "jaira-artifacts",
+        artifactDir: "artifacts",
         taskId: "t-1",
       },
     };

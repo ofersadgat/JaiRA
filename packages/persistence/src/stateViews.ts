@@ -19,7 +19,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative, sep } from "node:path";
 import { parseReferencedFile, stateFilePath } from "@declarative-ai/hw";
-import { mimeOfPath } from "@jaira/shared";
+import { mimeOfPath, SETTINGS_FILE_NAME } from "@jaira/shared";
 import type {
   BoardCard,
   BoardView,
@@ -65,7 +65,7 @@ function kindOf(relPath: string, name: string): FileKind {
   if (top === "workflows") return isStateFile(name) ? "workflow" : "other";
   if (top === "prompts") return "prompt";
   if (top === "skills") return "skill";
-  if (relPath === "config.json") return "config";
+  if (relPath === SETTINGS_FILE_NAME) return "config";
   return "other";
 }
 

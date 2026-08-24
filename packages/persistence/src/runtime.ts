@@ -5,6 +5,7 @@
 import type { TaskStatus } from "@jaira/shared";
 import { isTerminalStatus } from "@jaira/shared";
 import type { JairaDb } from "./db";
+import type { RowLog } from "./rowFile";
 
 export interface TaskRuntimeRow {
   taskId: string;
@@ -77,7 +78,25 @@ function toRun(row: RawRun): RunRow {
 }
 
 export class RuntimeStore {
-  constructor(private readonly db: JairaDb) {}
+  /**
+   * `log` is present only when `config.storage.tasks` puts them in files (DESIGN §4.4). Every write
+   * below re-reads the row it just changed and appends THAT — never a reconstruction of what it
+   * thinks it wrote, which with eight writers over two tables is how a file drifts from a table.
+   */
+  constructor(
+    private readonly db: JairaDb,
+    private readonly log?: RowLog,
+  ) {}
+
+  private logTask(taskId: string): void {
+    this.log?.appendFrom(this.db, taskId, "task_runtime", "task_id = ?", [taskId]);
+  }
+
+  private logRun(runId: number): void {
+    if (this.log === undefined) return;
+    const row = this.db.prepare(`SELECT task_id FROM runs WHERE id = ?`).get(runId) as { task_id: string } | undefined;
+    if (row !== undefined) this.log.appendFrom(this.db, row.task_id, "runs", "id = ?", [runId]);
+  }
 
   insert(taskId: string, nowMs: number, fields?: { branch?: string }): void {
     this.db
@@ -86,6 +105,7 @@ export class RuntimeStore {
          VALUES (?, 'queued', ?, ?, ?)`,
       )
       .run(taskId, fields?.branch ?? null, nowMs, nowMs);
+    this.logTask(taskId);
   }
 
   get(taskId: string): TaskRuntimeRow | undefined {
@@ -105,6 +125,7 @@ export class RuntimeStore {
       .prepare(`UPDATE task_runtime SET status = ?, updated_at = ? WHERE task_id = ?`)
       .run(status, nowMs, taskId);
     if (res.changes === 0) throw new Error(`no task_runtime row for task '${taskId}'`);
+    this.logTask(taskId);
   }
 
   setSnapshot(taskId: string, snapshotHash: string, nowMs: number): void {
@@ -112,6 +133,7 @@ export class RuntimeStore {
       .prepare(`UPDATE task_runtime SET snapshot_hash = ?, updated_at = ? WHERE task_id = ?`)
       .run(snapshotHash, nowMs, taskId);
     if (res.changes === 0) throw new Error(`no task_runtime row for task '${taskId}'`);
+    this.logTask(taskId);
   }
 
   /** Record the task ↔ worktree mapping (DESIGN §3: it lives in SQLite). */
@@ -120,18 +142,22 @@ export class RuntimeStore {
       .prepare(`UPDATE task_runtime SET worktree_path = ?, updated_at = ? WHERE task_id = ?`)
       .run(worktreePath, nowMs, taskId);
     if (res.changes === 0) throw new Error(`no task_runtime row for task '${taskId}'`);
+    this.logTask(taskId);
   }
 
   clearWorktree(taskId: string, nowMs: number): void {
     this.db
       .prepare(`UPDATE task_runtime SET worktree_path = NULL, updated_at = ? WHERE task_id = ?`)
       .run(nowMs, taskId);
+    this.logTask(taskId);
   }
 
   beginRun(taskId: string, snapshotHash: string, nowMs: number): number {
     const res = this.db
       .prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at) VALUES (?, ?, ?)`)
       .run(taskId, snapshotHash, nowMs);
+    // The id is written down because it is REFERENCED — see the note in `rowFile.ts`.
+    this.logRun(Number(res.lastInsertRowid));
     return Number(res.lastInsertRowid);
   }
 
@@ -145,6 +171,7 @@ export class RuntimeStore {
       .prepare(`UPDATE runs SET ended_at = ?, outcome = ?, outputs_json = ?, failure_json = ? WHERE id = ?`)
       .run(nowMs, outcome, extra?.outputsJson ?? null, extra?.failureJson ?? null, runId);
     if (res.changes === 0) throw new Error(`no run row with id ${runId}`);
+    this.logRun(runId);
   }
 
   listRuns(taskId: string): RunRow[] {
@@ -192,6 +219,14 @@ export class RuntimeStore {
       }
     });
     recover();
+    // Recovery is a write like any other, and one that happens at OPEN — so a file-backed task
+    // whose interruption was never appended would come back `running` on the next open, forever.
+    for (const id of ids) {
+      this.logTask(id);
+      for (const run of this.db.prepare(`SELECT id FROM runs WHERE task_id = ?`).all(id) as Array<{ id: number }>) {
+        this.logRun(run.id);
+      }
+    }
     return ids;
   }
 

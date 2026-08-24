@@ -45,7 +45,7 @@ afterEach(() => {
 describe("project", () => {
   it("initProject creates the .jaira layout with a default config, idempotently", async () => {
     const paths = initProject(dir);
-    for (const p of [paths.workflowsDir, paths.snapshotsDir, paths.tasksDir, paths.skillsDir, paths.configFile]) {
+    for (const p of [paths.workflowsDir, paths.snapshotsDir, paths.tasksDir, paths.skillsDir, paths.settingsFile]) {
       expect(existsSync(p)).toBe(true);
     }
     expect(isProject(dir)).toBe(true);

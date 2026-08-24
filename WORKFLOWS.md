@@ -514,7 +514,7 @@ One structured LLM call.
 - **The operation IS the call**: `model`, `temperature`, `maxOutputTokens` and the
   rest sit directly on it, not nested under a `config` bag. **Models must be
   route-prefixed** — `anthropic/claude-sonnet-5`, not `claude-sonnet-5`. Omit it
-  to inherit `models.default` from `.jaira/config.json`, or set it once in an
+  to inherit `models.default` from `.jaira/settings.json`, or set it once in an
   ancestor's `environment` (§5).
 
 ### 4.2 Function operations
@@ -1322,7 +1322,7 @@ unapproved file*, because a NEW file earlier on the search path changes which mo
 resolves to without touching anything that already existed. Editing an approved file puts
 it back in that state until it is approved again.
 
-Approvals are **machine-local and never synced** (`$BASE/approvals.local.json`,
+Approvals are **machine-local and never synced** (`$BASE/system/approvals.local.json`,
 gitignored): an approval is a statement about a file on one disk, and propagating it would
 let one compromised machine confer trust on the rest. Files under `node_modules/` are
 exempt — their integrity is the lockfile's problem.
@@ -1450,10 +1450,10 @@ Placement is configured per project, not per workflow — the same workflow prod
 files wherever the project wants them (DESIGN §7.6):
 
 ```jsonc
-// .jaira/config.json
+// .jaira/settings.json
 "artifacts": {
   "destination": "$DEFAULT",   // $CENTRAL | $CENTRAL_FLAT | virtual: | a path template
-  "dir": "jaira-artifacts",    // what $ARTIFACT_DIR expands to
+  "dir": "artifacts",          // what $ARTIFACT_DIR expands to, under $SYSTEM
   "inlineMaxBytes": 65536      // above this, content is stored by reference
 }
 ```
@@ -1461,15 +1461,19 @@ files wherever the project wants them (DESIGN §7.6):
 | `destination` | Where a file lands |
 | --- | --- |
 | `$DEFAULT` | `<worktree>/<the path the producer used>` |
-| `$CENTRAL` | `<worktree>/jaira-artifacts/<taskId>/<the path the producer used>` |
-| `$CENTRAL_FLAT` | `<worktree>/jaira-artifacts/<taskId>/<instanceId>-<slot>.<ext>` |
+| `$CENTRAL` | `<project>/.jaira/system/artifacts/<taskId>/<the path the producer used>` |
+| `$CENTRAL_FLAT` | `<project>/.jaira/system/artifacts/<taskId>/<instanceId>-<slot>.<ext>` |
 | `virtual:` | nowhere — content stays in memory and in the run record |
-| anything else | a template over `$WORKTREE`, `$PROJECT`, `$JAIRA`, `$ARTIFACT_DIR`, `$TASK_ID`, `$RUN_ID`, `$INSTANCE_ID`, `$STATE_ID`, `$SLOT`, `$RELPATH`, `$BASENAME`, `$EXT` |
+| anything else | a template over `$WORKTREE`, `$PROJECT`, `$JAIRA`, `$SYSTEM`, `$ARTIFACT_DIR`, `$TASK_ID`, `$RUN_ID`, `$INSTANCE_ID`, `$STATE_ID`, `$SLOT`, `$RELPATH`, `$BASENAME`, `$EXT` |
+
+The central placements anchor on `$SYSTEM` — `<project>/.jaira/system`, where
+everything JaiRA generates lives (DESIGN §3) — rather than on the worktree, so a
+`git worktree remove` does not take a run's output with it.
 
 **An agent never learns where its file went.** JaiRA registers the `write_file` and
 `read_file` tools, so a write goes through the destination and a read of the same
 path comes back — whatever the configuration did with the bytes. Write `docs/plan.md`
-under `$CENTRAL` and it is stored at `jaira-artifacts/<taskId>/docs/plan.md`; read
+under `$CENTRAL` and it is stored at `.jaira/system/artifacts/<taskId>/docs/plan.md`; read
 `docs/plan.md` and you get it. An agent that uses its *own* write tool instead
 bypasses this (see DESIGN §7.6's reconciliation note).
 
@@ -1642,7 +1646,7 @@ other is code that will run, and a model rewriting either straight to disk would
 be a model with commit rights. The document a sync *reads* is the draft too —
 what the editor is showing, not what the file says.
 
-**Which side moved** is answered from `.jaira/sync.json`: the content hash of the
+**Which side moved** is answered from `.jaira/system/sync.json`: the content hash of the
 description and of every state file, as of the last sync that was **accepted**.
 Accepted, not run — a proposal produced and discarded left both sides exactly
 where they were, and recording it would claim they agree when nobody made them.
@@ -1656,8 +1660,8 @@ overwrite the other.
 
 **The layer decides what a description is judged against.** A description in the
 shared root is checked against the *shared root's* workflows and recorded in
-`~/.jaira/sync.json`; a project's is checked against its own and recorded in
-`.jaira/sync.json`. So the shared root syncs with no project open — which is the
+`~/.jaira/system/sync.json`; a project's is checked against its own and recorded in
+`.jaira/system/sync.json`. So the shared root syncs with no project open — which is the
 mode shared workflows are written in — and gets the same answer in every window.
 Judging a machine-global document against whichever checkout happened to be open
 would make its status change per window, and would scatter one document's
@@ -1721,7 +1725,7 @@ Three things follow, and they are what make the rule real rather than stated:
   a delegated state, the panel says "in step", and the honest answer is nowhere
   on screen.
 
-`.jaira/sync.json` holds one record per description, keyed by document path, and
+`.jaira/system/sync.json` holds one record per description, keyed by document path, and
 each record covers only the states that document owns. Settling one workflow
 neither disturbs another's baseline nor makes an unrelated edit read as drift.
 

@@ -52,7 +52,7 @@ const AGENT_WORKFLOW = {
 };
 
 function writeConfig(config: Record<string, unknown>): void {
-  writeFileSync(jairaPaths(dir).configFile, JSON.stringify(config, null, 2), "utf8");
+  writeFileSync(jairaPaths(dir).settingsFile, JSON.stringify(config, null, 2), "utf8");
 }
 
 /**

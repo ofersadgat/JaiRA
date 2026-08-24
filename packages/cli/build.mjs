@@ -7,7 +7,11 @@
  * external — `external` is exactly this package's `dependencies`, so declaring a
  * dependency and externalizing it are the same act and cannot drift apart.
  *
- * better-sqlite3 has no choice in the matter: it is a native addon.
+ * better-sqlite3 has no choice in the matter: it is a native addon. So does `typescript`, for a less
+ * obvious reason: `@declarative-ai/hw` reaches the TS compiler through `import("typescript")` to
+ * transpile a `.ts` callee, esbuild follows that dynamic import and inlines the whole compiler, and
+ * tsc's own `require("fs")` then throws `Dynamic require of "fs" is not supported` at import time —
+ * before the CLI has printed anything. Declaring it as a dependency is what externalizes it.
  */
 import { build } from "esbuild";
 import { copyFile, rm } from "node:fs/promises";

@@ -185,10 +185,10 @@ describe("the project a parked review reads against", () => {
     expect(pending.taskId).toBe(result.reviewTaskId);
     expect(pending.subjectProject).toBe(base);
     // The other stamp, and the reason there are two: `taskId` is a rowid in the project the request
-    // PARKED in — JaiRA's own, which is where a sync review runs — and the inbox strip needs that
+    // PARKED in — the base root, which is where a sync review runs — and the inbox strip needs that
     // one to resolve the row it draws (SHELL.md §2.4). With no project open at all, it is still an
     // answer, which is the case a focused-project guess had nothing to say about.
-    expect(pending.project).toBe(bare.listProjects().find((p) => p.kind === "system")!.project);
+    expect(pending.project).toBe(bare.listProjects().find((p) => p.kind === "shared")!.project);
 
     // What the reviewer does with it: read what a proposed path holds right now.
     const current = await bare.readUri({ uri: "$PROJECT/workflows/workflow.md", project: pending.subjectProject });

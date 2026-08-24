@@ -156,7 +156,12 @@ describe("the whole gate: tool call → policy → verdict", () => {
 describe("a produced artifact needs permission like anything else", () => {
   const artifactTools = (approve: Approver, authored?: Parameters<typeof gateTools>[0]["authored"]) => {
     const registry = newRegistry();
-    registerFileTools(registry, { vars: { taskId: "t", worktree: dir } } as never);
+    // The full variable set, not a cast-away half of one: `show_artifact` always places under the
+    // artifact directory, which hangs off `$SYSTEM` — so an absent `jaira` resolved a relative
+    // "undefined/system" against the process cwd and wrote into the repository.
+    registerFileTools(registry, {
+      vars: { taskId: "t", worktree: dir, project: dir, jaira: join(dir, ".jaira"), artifactDir: "artifacts" },
+    } as never);
     return gateTools({
       registry,
       names: ["show_artifact"],

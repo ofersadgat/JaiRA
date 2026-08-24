@@ -11,6 +11,7 @@
  */
 import type { ArtifactRecord, ArtifactStore } from "@jaira/runtime";
 import type { JairaDb } from "./db";
+import type { RowLog } from "./rowFile";
 
 interface RawArtifact {
   task_id: string;
@@ -50,7 +51,11 @@ function toRecord(row: RawArtifact): ArtifactRecord {
 }
 
 export class SqliteArtifactStore implements ArtifactStore {
-  constructor(private readonly db: JairaDb) {}
+  /** `log` is present only when `config.storage.artifacts` puts the MAP in files (DESIGN §4.4). */
+  constructor(
+    private readonly db: JairaDb,
+    private readonly log?: RowLog,
+  ) {}
 
   /** Upsert: rewriting a logical path replaces the record, so a read gets the latest. */
   put(record: ArtifactRecord): void {
@@ -88,6 +93,12 @@ export class SqliteArtifactStore implements ArtifactStore {
         record.interactive === true ? 1 : 0,
         record.createdAt,
       );
+    // Re-read rather than reconstructed: `put` is an upsert, so what the row now holds is not
+    // simply what was passed — the conflict branch decides.
+    this.log?.appendFrom(this.db, record.taskId, "artifacts", "task_id = ? AND logical_path = ?", [
+      record.taskId,
+      record.logicalPath,
+    ]);
   }
 
   get(taskId: string, logicalPath: string): ArtifactRecord | undefined {

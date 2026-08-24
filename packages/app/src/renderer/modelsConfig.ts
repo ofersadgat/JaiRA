@@ -2,7 +2,7 @@
  * Editing `config.models` inside one configuration layer — the settings surface DESIGN §8.3 needed.
  *
  * Until now the only way to say which model a prompt state should use was to type `models.default`
- * into `config.json` by hand, and the only way to point a provider at a key kept somewhere other than
+ * into `settings.json` by hand, and the only way to point a provider at a key kept somewhere other than
  * the process environment was to not do it at all. That is the gap this closes: a form's values become
  * a patch against the raw document of the layer being edited.
  *

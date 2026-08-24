@@ -84,8 +84,8 @@ describe("ensureWorkspace", () => {
     const workspace = await ensureWorkspace(project, taskId);
     expect(existsSync(join(workspace.root, ".jaira", "workflows"))).toBe(true);
     // The derived state is not carried, because init gitignores it.
-    expect(existsSync(join(workspace.root, ".jaira", "jaira.db"))).toBe(false);
-    expect(existsSync(join(workspace.root, ".jaira", "snapshots"))).toBe(false);
+    expect(existsSync(join(workspace.root, ".jaira", "system", "jaira.db"))).toBe(false);
+    expect(existsSync(join(workspace.root, ".jaira", "system", "snapshots"))).toBe(false);
   });
 
   it("is idempotent — a re-run reuses the existing worktree", async () => {

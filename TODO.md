@@ -22,7 +22,7 @@ assumption breaks.
       renders it.
 - [ ] **A sync's findings are not kept.** The check and the sync it drives
       (WORKFLOWS.md §11.1–11.2) print and propose; nothing stores the report, so "which
-      requirements regressed since last time" still has no answer — `.jaira/sync.json`
+      requirements regressed since last time" still has no answer — `.jaira/system/sync.json`
       records only the content hashes the two sides last agreed on, not what was found.
       It is also one model's judgement, so it complements `lint` and never replaces it:
       a `conforms` verdict is evidence, not proof.
@@ -148,12 +148,99 @@ tool, and both producers go through one placement rule. What that left behind:
       product and never should. `pruneHistory` does not touch `artifacts` at all yet.
 - [ ] **Detail-panel artifacts list + markdown preview, and a conversation viewer**
       (§11.1). The data exists now; the views do not.
-- [ ] **`jaira init` does not gitignore the artifact directory.** With the default
-      `$DEFAULT` destination artifacts land in the worktree, which is intended (git
-      versions them per SPEC §4.6) — but a project choosing `$CENTRAL` may want
-      `jaira-artifacts/` ignored, and nothing offers that.
+- [x] **The artifact directory is gitignored.** `$CENTRAL` now lands under
+      `.jaira/system/artifacts/`, which `jaira init`'s `.gitignore` names. The
+      default `$DEFAULT` destination still writes into the worktree, which is
+      intended — git versions those per SPEC §4.6.
 
 ## Designed, not yet built
+
+**Storage policy — files, tables, or both** ([DESIGN.md](DESIGN.md) §4.4). Which
+concerns live on disk and which in SQLite becomes a layered `settings.json` block,
+so a shared base root can answer `db` while a checked-in project answers `file` —
+the argument being that git cannot merge SQLite. The file is the truth and a
+`TEMP` table is an index replayed from it, so the runtime keeps one read source
+and every existing query is unchanged. Journal and conversations become
+one JSONL per run in Claude Code's line shape (Codex's as an option; reading
+accepts either), which is also what makes JaiRA transcripts readable by tooling
+JaiRA did not write.
+
+Build order:
+
+- [x] **Prerequisite: `session_positions` onto the stable record id** (migration
+      8). Its FK was to `operation_records.id`, an AUTOINCREMENT that replay
+      re-mints; the key is now `(task_id, run_id, record_id, attempt)`, carried on
+      the position row and enforced by `operation_records_natural`. Worth doing on
+      its own merits, and it was: two DELETEs lost their subqueries, and `derive`
+      turned out never to have set `attempt`.
+- [x] **The `storage` block: parsed, layered, and refusing.** `config.storage`
+      takes `file | db | both` per concern plus `format: claude | codex`, defaults
+      to `db` everywhere (a concern defaulting to `file` before the writer exists
+      would be a setting that lies), and merges through the ordinary layer rules.
+      `jobs` and `job_output` are refused BY NAME with the reason rather than as
+      unknown keys, and so are the plausible misspellings (`events`, `sessions`,
+      `snapshots`). It has a section in the settings form, so it is not a JSON box.
+- [x] **Shadow tables on open** (`persistence/src/shadow.ts`). A file-backed
+      concern gets a `TEMP` table of the same name, and SQLite resolves an
+      unqualified name to `temp` before `main` — so no query in the codebase
+      changed. The DDL is COPIED out of `sqlite_master` rather than restated, so
+      it tracks migrations and brings the generated columns and indexes with it;
+      foreign keys are stripped, because a temp child cannot resolve a main parent
+      and would error on every insert. Seeding from `main` is the flip path and
+      stays correct once files exist: no file ⇒ start from the rows already there.
+      **The gap:** nothing writes the files yet, so a file-backed concern is
+      durable to READ and not to write — rows a run appends go with the connection.
+      `db` is the default everywhere for that reason.
+- [x] **The JSONL writer, for the JOURNAL** (`persistence/src/journalFile.ts`).
+      One file per run, appended synchronously before the row is inserted, replayed
+      on open, unparseable lines skipped. The journal keeps JaiRA's own line shape
+      and `format` does not apply to it — `instance.entered` is not a conversation
+      turn. Round-tripped in tests by deleting the database and reopening.
+- [x] **The conversation writer** (`persistence/src/conversationFile.ts`). One file
+      per run holding all three tables' rows — records, positions, lineage — as
+      append-only lines, folded LAST-WINS per key on replay, which is how an
+      updated row survives a format that may never rewrite in place. `format`
+      chooses the envelope and detection is per LINE, so a file that changed
+      dialect mid-way, or a merge of two people who disagreed, still reads.
+      `sessionStoreFor` is now the only constructor for a session store, because
+      one built by hand writes to the table and not the file.
+- [x] **Conversation turns are emitted as native lines.** A settled record writes
+      its turns in the other tool's own shape beside its `jaira.*` rows — Claude's
+      `{uuid, parentUuid, sessionId, timestamp, type, userType, isSidechain,
+      message}` and Codex's `response_item` / `message` with typed content blocks.
+      Both were read off REAL files (`~/.claude/projects/**`, `~/.codex/sessions/**`)
+      rather than written from memory, which corrected the codex row envelope: it
+      is `{timestamp, type, payload}`, not `at`. Turn lines are decorative to JaiRA
+      and load-bearing to them — replay ignores them entirely, so a merge that
+      drops one costs a foreign reader a bubble and costs JaiRA nothing. Emitted at
+      the SETTLE only, or a streaming call would spray transcripts.
+- [x] **Pruning deletes the files.** `prune` removes each pruned run's file and
+      `deleteTask` the task's directory — after the rows, outside the transaction.
+      A committed file is the user's to `git rm`.
+- [x] **The `tasks` and `artifacts` writers** (`persistence/src/rowFile.ts`) — one
+      generic last-wins row log, since neither needs a dialect and both are plainly
+      rows. `runs.id` IS written down, unlike the journal's `seq`, because it is
+      referenced by the journal, the command log, the jobs table and every
+      conversation position; re-minting it would point all of them at the wrong run.
+      Recovery's interruption is appended too, or a crashed file-backed task would
+      come back `running` on every open forever.
+- [ ] `tasks: "file"` does not yet subsume `system/tasks/<id>.json`. That metadata
+      file is still written unconditionally; it predates the setting and holds what
+      a person hand-edits, which is a different question from where the row lives.
+- [x] **`system/` is committed now**, and the ignore list INVERTED: it names what
+      stays out rather than what comes in. Out: the database (a rebuildable index
+      and an unmergeable binary, and a worktree checkout would copy a stale one
+      into every worktree) and `logs/` (this machine talking to itself, conflicting
+      on every line) — plus `approvals.local.json`, which must never travel at all.
+      In, and this is the change: `snapshots/` and `artifacts/` too.
+
+- [x] **`both` has a staleness check.** It records a fingerprint — size and mtime
+      per file, not a content hash, so it costs less than the replay it avoids —
+      and compares before trusting the persisted index. Three outcomes in order:
+      reuse (fingerprint matches), replay (there are files), seed (there are none).
+      The write-back empties children before parents, because `main` keeps its
+      foreign keys even though the shadow drops them.
+
 
 [EXPRESSIONS.md](EXPRESSIONS.md) — an expression is a tree of producer edges, the
 operator set is a registry, and a callee is an ordinary reference resolved along a

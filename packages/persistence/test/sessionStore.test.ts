@@ -289,6 +289,72 @@ describe("the migration runner", () => {
     }
   });
 
+it("moves a position onto the record's own key, and renumbers attempts so that key is one", async () => {
+    // The point of migration 8, and the reason it exists ahead of DESIGN §4.4: a position pointed at
+    // `operation_records.id`, which the database mints — so a store rebuilt from files re-mints every
+    // one of them and every position silently names the wrong record.
+    //
+    // Rewound rather than hand-written, like the repair test above: the current schema, with the
+    // position table put back into its pre-8 shape and two records of one id both claiming the first
+    // attempt, which is exactly what `derive` used to write.
+    const file = join(dir, "positions.db");
+    const before = openDb(file);
+    const said = (text: string): string => JSON.stringify({ value: { messages: [turn(text)] } }).replace(/'/g, "''");
+    before.exec(`
+      DROP INDEX IF EXISTS operation_records_natural;
+      DROP TABLE session_positions;
+      CREATE TABLE session_positions (
+        session_id TEXT NOT NULL, seq INTEGER NOT NULL,
+        operation_record_id INTEGER NOT NULL REFERENCES operation_records(id),
+        PRIMARY KEY (session_id, seq));
+      INSERT INTO sessions (id, parent, cursor, created_at) VALUES ('t1/1/conv', NULL, 0, 1);
+      INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, result_json, started_at)
+        VALUES ('conv:0', 't1', 1, 1, 'completed', '${said("first")}', 1);
+      INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, result_json, started_at)
+        VALUES ('conv:0', 't1', 1, 1, 'completed', '${said("second")}', 2);
+      INSERT INTO session_positions (session_id, seq, operation_record_id)
+        SELECT 't1/1/conv', 0, MIN(id) FROM operation_records;
+      PRAGMA user_version = 7;
+    `);
+    before.close();
+
+    const after = openDb(file);
+    try {
+      // The duplicate is gone, in insertion order — which is attempt order, and what `insertRecord`
+      // would have computed had `derive` asked it.
+      expect(after.prepare(`SELECT attempt FROM operation_records ORDER BY id`).all()).toEqual([
+        { attempt: 1 },
+        { attempt: 2 },
+      ]);
+      // The position carries the record's own key now, scope included.
+      expect(after.prepare(`SELECT * FROM session_positions`).all()).toEqual([
+        { session_id: "t1/1/conv", seq: 0, task_id: "t1", run_id: 1, record_id: "conv:0", attempt: 1 },
+      ]);
+      // And it still finds its record — the assertion the rowid used to carry, now carried by the
+      // four columns and made unambiguous by `operation_records_natural`.
+      const reader = new SqliteSessionStore(after, { taskId: "t1", runId: 1 }) as unknown as Store;
+      expect(await reader.messages("conv")).toEqual([turn("first")]);
+    } finally {
+      after.close();
+    }
+  });
+
+  it("refuses a second record claiming an attempt another already holds", () => {
+    // The invariant the join rests on. Nothing wrote a duplicate before — `insertRecord` counts — but
+    // nothing stopped one either, and a position row matching two records fans out into a transcript
+    // with a turn in it twice.
+    const insert = (attempt: number): void =>
+      void db
+        .prepare(
+          `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, started_at)
+           VALUES ('dup:0', 't9', 1, ?, 'open', 1)`,
+        )
+        .run(attempt);
+    insert(1);
+    expect(() => insert(1)).toThrow(/UNIQUE/);
+    insert(2); // a genuine retry is not a duplicate
+  });
+
   it("gives every interrupted record already on disk the message it was called with", async () => {
     // Built with the store, then rewound to what the old writer left — the streamed turns alone, on a
     // database that has not seen migration 7. Rewinding beats hand-writing a version-6 schema: the row
@@ -419,17 +485,17 @@ describe("stateSessions — a run the process died inside", () => {
     ).run(runId, JSON.stringify({ instanceId, stateId, op: "prompt" }), at);
   };
   const record = (runId: number, recordId: string, status = "failed"): void => {
-    const info = db
-      .prepare(
-        `INSERT INTO operation_records (record_id, task_id, run_id, status, started_at) VALUES (?, 't3', ?, ?, 5)`,
-      )
-      .run(recordId, runId, status);
+    db.prepare(
+      `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, started_at)
+       VALUES (?, 't3', ?, 1, ?, 5)`,
+    ).run(recordId, runId, status);
+    // The position points at the record's own KEY, not at a rowid — migration 8. Written out here
+    // rather than through the store because these rows stand in for a process that died mid-run.
     const cut = recordId.lastIndexOf(":");
-    db.prepare(`INSERT INTO session_positions (session_id, seq, operation_record_id) VALUES (?, ?, ?)`).run(
-      recordId.slice(0, cut),
-      Number(recordId.slice(cut + 1)),
-      info.lastInsertRowid,
-    );
+    db.prepare(
+      `INSERT INTO session_positions (session_id, seq, task_id, run_id, record_id, attempt)
+       VALUES (?, ?, 't3', ?, ?, 1)`,
+    ).run(recordId.slice(0, cut), Number(recordId.slice(cut + 1)), runId, recordId);
   };
 
   it("recovers the in-flight call from its own record, and says it was interrupted", () => {
@@ -748,12 +814,18 @@ describe("recovering an interrupted call's own transcript", () => {
   const scoped = () => new SqliteSessionStore(db, { taskId: "t1", runId: 1 });
 
   const crashed = (over: { status?: string; handle?: string | null; result?: string | null } = {}): number => {
+    // Each call is a distinct ATTEMPT of the same record id, and says so — the natural key
+    // (`operation_records_natural`, migration 8) is what makes a position row's join unambiguous, so
+    // three rows all claiming attempt 1 is now the contradiction it always was.
+    const { n } = db
+      .prepare(`SELECT COUNT(*) AS n FROM operation_records WHERE record_id = 's:0' AND task_id = 't1' AND run_id = 1`)
+      .get() as { n: number };
     const info = db
       .prepare(
-        `INSERT INTO operation_records (record_id, task_id, run_id, status, provider_session_id, result_json, started_at)
-         VALUES ('s:0', 't1', 1, ?, ?, ?, 900)`,
+        `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, provider_session_id, result_json, started_at)
+         VALUES ('s:0', 't1', 1, ?, ?, ?, ?, 900)`,
       )
-      .run(over.status ?? "failed", over.handle === undefined ? "prov-1" : over.handle, over.result ?? null);
+      .run(n + 1, over.status ?? "failed", over.handle === undefined ? "prov-1" : over.handle, over.result ?? null);
     return Number(info.lastInsertRowid);
   };
 

@@ -48,38 +48,32 @@ import type {
 /**
  * Which project a task-scoped call is about. Absent ⇒ the focused one.
  *
- * Two values are reserved, and they are the only way to reach the projects they name because the
- * focus never points at either: {@link SHARED_SESSION} is the selected root opened as a project, and
- * {@link SYSTEM_SESSION} is JaiRA's own. `shared` is what makes a workflow living in
- * `<root>/workflows` runnable at all — the run has to be recorded somewhere, and recording it in
- * whichever checkout happened to be open is how a shared library becomes one project's clutter.
+ * One value is reserved, and it is the only way to reach the project it names because the focus
+ * never points there: {@link SHARED_SESSION} is the selected root opened as a project. It is what
+ * makes a workflow living in `<root>/workflows` runnable at all — the run has to be recorded
+ * somewhere, and recording it in whichever checkout happened to be open is how a shared library
+ * becomes one project's clutter.
  */
 export type ProjectRef = string;
 
 /**
- * The reserved value of {@link ProjectRef} that names JaiRA's OWN project.
+ * The reserved value of {@link ProjectRef} that names the BASE root opened as a project.
  *
- * Aliases rather than paths, because a caller asking for one is asking for a role — "wherever this
- * machine keeps JaiRA's runs" — and must not have to know where it was put. Re-exported from
- * `paths.ts`, which is where the rest of the path vocabulary lives, but defined here because the
- * renderer sends them and `paths.ts` is Node-only.
+ * An alias rather than a path, because a caller asking for it is asking for a role — "wherever this
+ * machine keeps the shared library and its runs" — and must not have to know where that was put.
+ * Re-exported from `paths.ts`, which is where the rest of the path vocabulary lives, but defined
+ * here because the renderer sends it and `paths.ts` is Node-only.
  *
- * `system` and {@link SHARED_SESSION} are two projects and the difference is their LIFETIME:
+ * It holds two kinds of run and there is one database for both: runs of the workflows a person
+ * authors in `~/.jaira/workflows`, and JaiRA's own — a description sync, summarization, the
+ * conformance check.
  *
- *  - **system** holds JaiRA's own runs — a description sync, and whatever else it comes to run for
- *    itself. Those happen whatever root is selected, because they are about the installation. It
- *    therefore lives at a fixed location that a root switch does not move.
- *  - **shared** holds runs of the workflows in the ROOT — the shared library a person authors in
- *    `~/.jaira/workflows`. Point the root somewhere else and those runs are not yours any more: a
- *    different root is a different library with a different history, and none of the old tasks
- *    should still be listed.
- *
- * Conflating them meant a sync's bookkeeping travelled with a root switch and sat on the same board
- * as a person's own shared runs. They are separate databases now.
+ * **There used to be a second alias**, `system`, for JaiRA's own runs, pinned to the default root so
+ * that repointing the root could not carry a sync's bookkeeping off with a library it was not about.
+ * The lifetimes are genuinely different and the split still cost more than it bought: two databases
+ * inside one root, two boards, and a `system/` directory that meant "JaiRA's project" where it now
+ * means "JaiRA's generated files". One root, one project.
  */
-export const SYSTEM_SESSION = "system";
-
-/** The reserved {@link ProjectRef} for the selected root, opened as a project. See {@link SYSTEM_SESSION}. */
 export const SHARED_SESSION = "shared";
 
 export interface CreateTaskRequest {
@@ -283,7 +277,7 @@ export interface PruneRequest {
  * The two configuration layers, as the settings UI addresses them.
  *
  * `base` is the shared root behind every project on this machine; `project` is this checkout's own
- * `.jaira/config.json`, laid over it. Every write names its layer explicitly — there is no "current"
+ * `.jaira/settings.json`, laid over it. Every write names its layer explicitly — there is no "current"
  * layer — because "did I just change this project or every project?" is precisely the question a
  * settings screen must never leave ambiguous.
  */
@@ -291,7 +285,7 @@ export type ConfigLayer = "base" | "project";
 
 /** Both layers as authored, plus what they add up to. */
 export interface ConfigView {
-  /** The raw document of each layer, or null when that layer has no `config.json`. */
+  /** The raw document of each layer, or null when that layer has no `settings.json`. */
   base: JsonValue | null;
   project: JsonValue | null;
   /** Base merged under project, parsed and defaulted — what a run would actually use. */
@@ -903,7 +897,7 @@ export interface IpcContract {
    * Separate from `project:open` rather than a flag on it, because the two differ in what they may
    * do to a directory somebody picked in a file dialog. Opening reads; this one writes a layout into
    * a folder chosen a moment ago, and a channel whose name says so is one a reviewer can find.
-   * Idempotent, and it keeps an existing `config.json`.
+   * Idempotent, and it keeps an existing `settings.json`.
    */
   "project:init": { request: { dir: string }; response: { dir: string; recovered: string[] } };
   /**
@@ -978,13 +972,12 @@ export interface IpcContract {
   /** A task's run, read back out of the journal as turns. */
   "task:conversation": { request: { taskId: string; project?: string }; response: ConversationView };
   /**
-   * JaiRA's OWN runs — the syncs, and whatever else it comes to run for itself (DESIGN §3.1).
+   * The BASE root's runs — a person's shared workflows, and JaiRA's own syncs (DESIGN §3.1).
    *
-   * A separate channel rather than a flag on `task:list`, because the two answer different questions
-   * and mixing them is the pollution the system project exists to prevent. Empty, never an error: a
-   * window with no project open still has these, which is the whole point of them having a home.
+   * A separate channel rather than a flag on `task:list` because it takes no project: a window with
+   * no project open still has these, which is the whole point of them having a home. Empty, never an
+   * error, when the root cannot be opened.
    */
-  /** JaiRA's OWN runs — {@link SYSTEM_SESSION}'s. Empty, never an error, when it cannot be opened. */
   "task:system": { request: void; response: TaskSummary[] };
   /** Every project this window can draw a board for — the user's, and JaiRA's own. */
   "project:list": { request: void; response: ProjectSummary[] };

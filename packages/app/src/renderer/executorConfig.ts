@@ -3,7 +3,7 @@
  *
  * The Executors pane used to be able to write exactly one field — `enabled` — and everything else
  * about an executor (its binary, codex's sandbox, a generic CLI's argv, and above all WHICH secret
- * its credential is looked up under) had to be typed into `config.json` by hand. That is the gap
+ * its credential is looked up under) had to be typed into `settings.json` by hand. That is the gap
  * this module closes: it turns a form's values into a patch against the raw document of the layer
  * being edited.
  *
@@ -311,7 +311,7 @@ export function parseAllow(text: string): string[] | undefined {
   return lines.length > 0 ? lines : undefined;
 }
 
-/** A secret NAME, not a secret — the same rule `config.json`'s parser enforces, checked early. */
+/** A secret NAME, not a secret — the same rule `settings.json`'s parser enforces, checked early. */
 export function checkCredentialName(name: string): void {
   if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(name)) {
     throw new Error(

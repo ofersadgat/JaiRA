@@ -732,7 +732,7 @@ const SYNC_PROGRESS_LIMIT = 60;
  */
 const STRUCTURAL_EVENTS = new Set(["instance.entered", "instance.terminated", "operation.completed", "operation.failed"]);
 /**
- * How long the layout has to stop changing before it is written to `settings.json`, in ms.
+ * How long the layout has to stop changing before it is written to `user-settings.json`, in ms.
  *
  * Long enough that a drag is one write rather than several hundred, short enough that letting go of
  * a divider and quitting immediately still saves — which is the case the `pagehide` flush exists to
@@ -819,7 +819,7 @@ export function useApp() {
   /**
    * A settings document from main, with THIS window's layout kept.
    *
-   * Every write to `settings.json` answers with the whole file, and the layout inside it is up to
+   * Every write to `user-settings.json` answers with the whole file, and the layout inside it is up to
    * {@link UI_WRITE_DELAY} out of date — a divider dragged and the theme flipped a moment later
    * would answer with the width from before the drag and snap the pane back. Same rule as
    * {@link refreshSettings}: the file seeds the layout once, and the window owns it after that.
@@ -3029,7 +3029,7 @@ export function useApp() {
           const next = await invoke("config:write", { layer, config: config as never, ...inLayer(layer === "base" ? "base" : "project") });
           patch({ config: next, busy: false });
           await refreshConfig();
-          // `config.json` is the one editor that does not save through `saveDoc` — it writes a
+          // `settings.json` is the one editor that does not save through `saveDoc` — it writes a
           // parsed document so main can validate it — so its draft has to be released here. Only
           // when the open file IS that layer's config: the Settings pane calls this too, and it has
           // no business clearing an edit to whatever the Files view happens to have open.
@@ -3391,7 +3391,7 @@ export function useApp() {
       /**
        * Turn word wrap on or off in the JSON editor.
        *
-       * Written through to `settings.json` like the theme is, so the choice outlives the window. The
+       * Written through to `user-settings.json` like the theme is, so the choice outlives the window. The
        * local patch lands first: waiting for the round-trip would make the toggle feel like it had
        * not registered, and a failed write leaves the setting where the file says it is on next read.
        */

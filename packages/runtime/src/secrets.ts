@@ -1,7 +1,7 @@
 /**
  * Where an executor's credential comes from (DESIGN §8.1).
  *
- * `config.json` names a secret; it never holds one. That split exists because project config is
+ * `settings.json` names a secret; it never holds one. That split exists because project config is
  * COMMITTED source — a key written there is a key in everyone's checkout and in the history
  * forever. So the name is configuration and the value is looked up, here, at the moment it is
  * needed.
@@ -9,12 +9,14 @@
  * The chain, first hit wins:
  *
  * ```text
- *   1. the OS keychain          Electron's safeStorage, encrypted at rest — app only
- *   2. <project>/.env.local     this checkout, not committed
- *   3. <project>/.env           this checkout, possibly committed
- *   4. <base>/.env.local        the machine, for every project
- *   5. <base>/.env              the machine, for every project
- *   6. the process environment  CI, a shell that exported it, a wrapper script
+ *   1. the OS keychain              Electron's safeStorage, encrypted at rest — app only
+ *   2. <project>/.jaira/.env.local  this checkout's JaiRA config, not committed
+ *   3. <project>/.jaira/.env        this checkout's JaiRA config, possibly committed
+ *   4. <project>/.env.local         this checkout, not committed
+ *   5. <project>/.env               this checkout, possibly committed
+ *   6. <base>/.env.local            the machine, for every project
+ *   7. <base>/.env                  the machine, for every project
+ *   8. the process environment      CI, a shell that exported it, a wrapper script
  * ```
  *
  * The order is narrowest-to-widest, which is the only order that lets a specific answer beat a
@@ -23,6 +25,13 @@
  * is not plaintext on disk, and the environment trails because it is the one JaiRA cannot see the
  * provenance of.
  *
+ * **A checkout has TWO places, and `.jaira/` is the narrower.** The base root's `.env` sits in
+ * `~/.jaira`, so the same file in a project belongs in `<project>/.jaira` — that is what makes the
+ * two layouts read the same. The repository root keeps its links because that is where a `.env` a
+ * project already had for its own tooling actually is, and asking someone to move theirs in order
+ * to be found would be the wrong way round. So `.jaira/` wins: a key put there was put there FOR
+ * JaiRA, where one at the repository root may be shared with everything else the project runs.
+ *
  * The CLI has no keychain — `safeStorage` is Electron's, and there is no way to reach it from a
  * plain Node process. That is not a gap to work around: it is why entries 2–6 exist and why the
  * app must never be the ONLY place a credential can live, or a workflow would run in the app and
@@ -30,7 +39,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { SecretOrigin, SecretSource } from "@jaira/shared";
+import { JAIRA_DIR_NAME, type SecretOrigin, type SecretSource } from "@jaira/shared";
 
 // The wire shapes live in `shared` so the renderer can name them without importing this Node-only
 // package; the behaviour lives here.
@@ -42,7 +51,11 @@ export interface SecretHit extends SecretOrigin {
 }
 
 export interface SecretResolverOptions {
-  /** The project's own directory — `.env.local` / `.env` sit directly in it. */
+  /**
+   * The project's own directory. Four links come from it: the pair inside its `.jaira/`, then the
+   * pair at its root. The `.jaira/` path is derived rather than passed, so a caller cannot spell
+   * the engine's directory a second way.
+   */
   projectDir?: string;
   /** The shared base root (`~/.jaira`). */
   baseDir?: string;
@@ -104,6 +117,8 @@ export class SecretResolver {
     this.links = [
       ...(projectDir !== undefined
         ? ([
+            { source: "project-jaira-env-local", file: join(projectDir, JAIRA_DIR_NAME, ".env.local") },
+            { source: "project-jaira-env", file: join(projectDir, JAIRA_DIR_NAME, ".env") },
             { source: "project-env-local", file: join(projectDir, ".env.local") },
             { source: "project-env", file: join(projectDir, ".env") },
           ] as FileLink[])
