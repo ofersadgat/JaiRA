@@ -95,6 +95,17 @@ export interface SchemaJsonEditorProps {
   schemaId: string | null;
   onSchema: (schemaId: string | null) => void;
   /**
+   * `true` ⇒ the schema is a property of what is being edited, not a choice — show it, do not offer
+   * to change it.
+   *
+   * A `.json` file on disk answers to whatever schema its author says it does, so the picker is a
+   * question worth asking. A `fill_form` config answers to `fill_form`'s contract or to nothing, and
+   * offering the state schemas beside it would be offering nine wrong answers. Such schemas are also
+   * registered unpickable, so a picker rendered here would show a blank selection while validating
+   * against something — which reads as "no schema" and is worse than no picker.
+   */
+  lockedSchema?: boolean;
+  /**
    * Word wrap, and where the preference is kept.
    *
    * Controlled when both are supplied — the app stores it in `user-settings.json`, so it survives a
@@ -148,6 +159,7 @@ export function SchemaJsonEditor({
   validate,
   schemaId,
   onSchema,
+  lockedSchema = false,
   wrap,
   onWrap,
   reference,
@@ -532,17 +544,26 @@ export function SchemaJsonEditor({
           differs (a schema picker here, a path and a tab switch on the state form); that it is one
           quiet line of chrome above the text, and never part of the document, does not. */}
       <div className="edit-bar schema-bar">
-        <label className="schema-pick">
-          <span className="sub">Schema</span>
-          <select value={schemaId ?? ""} onChange={(e) => onSchema(e.target.value === "" ? null : e.target.value)}>
-            <option value="">none — plain JSON</option>
-            {listSchemas().map((option) => (
-              <option key={option.id} value={option.id} title={option.hint}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        {lockedSchema ? (
+          <span className="schema-pick">
+            <span className="sub">Schema</span>
+            <span className="chip" title={entry?.hint ?? ""}>
+              {entry?.label ?? "none — plain JSON"}
+            </span>
+          </span>
+        ) : (
+          <label className="schema-pick">
+            <span className="sub">Schema</span>
+            <select value={schemaId ?? ""} onChange={(e) => onSchema(e.target.value === "" ? null : e.target.value)}>
+              <option value="">none — plain JSON</option>
+              {listSchemas().map((option) => (
+                <option key={option.id} value={option.id} title={option.hint}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {entry ? (
           <>
             {/* Merges rather than replaces, so it is safe on a document with content in it — which

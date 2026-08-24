@@ -59,6 +59,15 @@ export interface SchemaEntry {
    * the file. The skeleton writes these; the reference panel marks them; the validator ignores them.
    */
   expected: readonly string[];
+  /**
+   * `false` ⇒ registered but NOT offered in the picker, and never auto-detected for a file.
+   *
+   * The registry answers two questions with one map: "what may I hold this FILE to" (the picker) and
+   * "check this text against schema X" (`schema:validate`, which resolves by id). A component
+   * config is the second without being the first — it is a fragment of a state file, never a file —
+   * and putting it in the picker would offer nine choices that are wrong for every `.json` on disk.
+   */
+  pickable?: boolean;
 }
 
 // --- the binding forms every leaf admits ------------------------------------
@@ -472,9 +481,9 @@ export function registerSchema(entry: SchemaEntry): void {
   REGISTRY.set(entry.id, entry);
 }
 
-/** Everything in the picker, in registration order. */
+/** Everything in the picker, in registration order — see {@link SchemaEntry.pickable}. */
 export function listSchemas(): SchemaEntry[] {
-  return [...REGISTRY.values()];
+  return [...REGISTRY.values()].filter((entry) => entry.pickable !== false);
 }
 
 export function schemaById(id: string): SchemaEntry | undefined {

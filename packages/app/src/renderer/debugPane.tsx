@@ -31,8 +31,10 @@ import type {
   SessionRef,
   SessionView,
   TaskDetail,
+  ValidateSchemaResult,
 } from "@jaira/shared/browser";
 import { Badge } from "./board";
+import { ComponentGallery } from "./componentGallery";
 import { Conversation, TaskPanel } from "./detail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestFiles } from "./debugWorkflow";
 import { SessionPanel } from "./session";
@@ -135,6 +137,8 @@ export interface DebugPaneProps {
   onDismissError: () => void;
   onOpenState: (stateId: string) => void;
   onShowSession: (instanceId: number | null) => void;
+  /** The schema check the gallery's JSON editors validate through — the store's. */
+  validateSchema: (schemaId: string, text: string) => Promise<ValidateSchemaResult | null>;
 }
 
 export function DebugPane({
@@ -155,6 +159,7 @@ export function DebugPane({
   onDismissError,
   onOpenState,
   onShowSession,
+  validateSchema,
 }: DebugPaneProps): JSX.Element {
   const files = selfTestFiles();
   // The detail panel is only about the self-test when the selection still IS the self-test. Clicking
@@ -168,7 +173,10 @@ export function DebugPane({
   const edited = debug.files.filter((f) => f.exists && !f.matches).length;
 
   return (
-    <div className="debug-view">
+    // `view` is what makes this a two-column grid the height of the viewport — without it the
+    // columns laid out as blocks and the middle one had no height to scroll INSIDE, so a pane
+    // longer than the window simply ran off the bottom of it.
+    <div className="view debug-view">
       <div className="col mid debug">
         <header className="debug-head">
           <h2>Workflow self-test</h2>
@@ -352,6 +360,22 @@ export function DebugPane({
             <Conversation conversation={conversation} />
           </section>
         ) : null}
+
+        {/* The other half of the same question. The self-test above proves a workflow RUNS; this
+            proves the surfaces it can park at RENDER — and it needs no project, no provider and no
+            run to do it, which is why it sits below rather than behind a button. */}
+        <section className="debug-gallery">
+          <h3>Component gallery</h3>
+          <p className="sub">
+            Every surface a run can put in front of you, with nothing behind it: the six built-in UI
+            components a state&apos;s <code>operation.function</code> may name, the fallback for one
+            it may not, and the two dialogs JaiRA raises on its own — a command approval and an
+            agent&apos;s question. Each card renders the REAL dialog from the config beside it, so
+            editing the config is editing what you see, and answering it shows what a state&apos;s
+            declared outputs would receive.
+          </p>
+          <ComponentGallery validateSchema={validateSchema} />
+        </section>
       </div>
 
       <aside className="col panel">

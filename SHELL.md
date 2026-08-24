@@ -429,6 +429,15 @@ there is no panel at 46px to put them in, and losing them there would leave a
 mode of the window with no way to reach the log. For the same reason ⚙ in the
 rail opens the *column* rather than a view whose navigation cannot be drawn.
 
+**The panel stays open for everything it holds.** It used to be open on
+`view === "settings"` alone, so clicking Logs or Debug — rows *inside* the panel
+— shut the panel that had just been used to reach them, taking the way back and
+the way to the other one with it. It is open on any view the panel contains, and
+the section list stays with it: the panel is that row's drawer, and a header over
+an empty column is not a smaller version of it. What "back" means follows the same
+rule — the view the window was showing before the panel was opened, never Logs or
+Debug, or the arrow would lead back into the panel.
+
 - **One project expanded**, derived from the address. Never persisted — see the
   precedent in `uiState.ts`, where `SHUT.folders` is deliberately keyed per
   *layer* and not per checkout, because the alternative "grows without bound as

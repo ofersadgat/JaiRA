@@ -269,8 +269,11 @@ export function Sidebar({
     const here = view === v.id && inScope;
     // A drawer belongs to the view it is under, so it is only ever open on the view you are on —
     // and never at all while the column is a strip of glyphs with no room for it.
-    // Shown while this is the view, and never otherwise. That is the whole rule — see `panel`.
-    const drawer = v.panel !== undefined && here && !collapsed;
+    //
+    // The panel's header is the one exception, and it is the same rule read properly: the panel IS
+    // that row's drawer, and it stays open while you are in anything the panel holds. Closing it on
+    // the way to Logs left the panel a header over an empty column, with no way back to a section.
+    const drawer = v.panel !== undefined && (here || mode?.back !== undefined) && !collapsed;
     const acts = collapsed ? [] : (v.acts ?? []);
     return (
       <Fragment key={v.id}>
@@ -404,7 +407,11 @@ export function Sidebar({
    * Only while the column has width for it: in the rail there is no room for a panel, so ⚙ opens the
    * column first (see the rail's own footer).
    */
-  const settingsPanel = view === "settings" && !collapsed;
+  // Open for everything the panel HOLDS, not for Settings alone: Logs and Debug live inside it, so a
+  // panel that closed the moment one of them was clicked took its own contents off the screen — and
+  // with them the way back and the way to the other one. Derived from the rows rather than from a
+  // list of ids, so a row added to the panel stays in it.
+  const settingsPanel = !collapsed && (view === settings.id || footer.some((row) => row.id === view));
 
   return (
     <nav className={`sidebar${collapsed ? " shut" : ""}`}>

@@ -6207,6 +6207,131 @@ textarea.cfg-input {
    gets a fixed height so the sections under it stay reachable without a hunt. */
 .debug-transcript .session { height: 320px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 
+/* --- the component gallery (DESIGN §11.3) ---
+   A card per surface, each holding three bands: what it is, the config that drives it, and the
+   dialog that config produces. One column rather than a tiled grid — these are dialogs, and a dialog
+   shown at half width is a dialog whose layout you have not actually seen. */
+.gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.gallery-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  background: var(--panel);
+}
+.gallery-head { display: flex; flex-direction: column; gap: 3px; }
+/* The component on the left, its configuration on the right. A container query rather than a media
+   one: this card lives in a column whose width is the sidebar's business, not the window's. */
+.gallery-card { container-type: inline-size; }
+.gallery-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 34%);
+  gap: 10px;
+  align-items: stretch;
+}
+/* The right column's height comes from the LEFT one. The config is taken out of the flow against
+   this box (`inset: 0` below), so however long the document is it cannot stretch the card — it
+   scrolls beside the dialog instead. The floor is for the short components: a `confirm_action` is
+   two buttons tall, and a 60px scroller is not somewhere anyone can edit. */
+.gallery-side {
+  position: relative;
+  min-height: 320px;
+}
+@container (max-width: 720px) {
+  /* No room for two columns: stack them, and give the config a height of its own since there is no
+     longer a dialog beside it to take one from. */
+  .gallery-body { grid-template-columns: minmax(0, 1fr); }
+  .gallery-side { position: static; min-height: 0; }
+  .gallery-card .gallery-config { position: static; max-height: 420px; }
+}
+.gallery-head h4 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(var(--size-app) * 13 / 12.5);
+}
+.gallery-head .sub { margin: 0; max-width: 80ch; line-height: 1.5; }
+.gallery-head .mono { font-family: var(--font-data); font-size: calc(var(--size-data) * 11 / 12); }
+.gallery-config {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  overflow: auto;
+}
+/* The one row that must stay put while the document under it scrolls: it holds the view switch and
+   the reset, and a switch you have to scroll back up to reach is a switch you stop using. */
+.gallery-config-head { position: sticky; top: 0; z-index: 1; background: var(--panel-2); }
+.gallery-config-head { display: flex; align-items: center; gap: 10px; }
+/* Truncated rather than wrapped: it is a caption on a row of controls, and a caption that takes a
+   second line pushes the switch it captions around as the column is resized. */
+.gallery-config-head .sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The editor takes what the column has left, and never less than this — it is the one control here
+   whose usefulness is its height. */
+.gallery-json { display: flex; flex: 1 1 auto; min-height: 240px; }
+/* The dialogs are modal by construction. Neutralising the backdrop's positioning is the whole trick
+   — nothing about the dialog itself changes, so what is on screen is what the modal shows. */
+.gallery-stage {
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  overflow-x: auto;
+  min-width: 0;
+}
+.gallery-stage .modal-backdrop {
+  position: static;
+  inset: auto;
+  background: none;
+  display: block;
+  z-index: auto;
+  place-items: start;
+}
+.gallery-stage .modal {
+  min-width: 0;
+  max-width: 100%;
+  box-shadow: none;
+}
+.gallery-result { display: flex; flex-direction: column; gap: 6px; }
+.gallery-result-head { display: flex; align-items: center; gap: 8px; }
+.gallery-result .outputs { margin: 0; max-height: 220px; overflow: auto; }
+
+/* --- an array in a schema-driven form ---
+   A row per item, the item's own controls on the left and what you can do to the ROW on the right.
+   The buttons are last because they are about position and removal, which is a smaller question than
+   what the item says. */
+/* A list states what it is above itself, not beside itself — see the block rule in `SchemaForm`. */
+.cfg-block > .cfg-field {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+.cfg-list { display: flex; flex: 1 1 auto; flex-direction: column; gap: 6px; min-width: 0; }
+.cfg-list-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.cfg-list-body { flex: 1 1 auto; min-width: 0; }
+.cfg-list-acts { display: flex; gap: 2px; flex: none; }
+.cfg-list-acts button { padding: 2px 7px; }
+.cfg-list-add { display: flex; }
+
 /* --- running a state from the inspector --- */
 /* The two sections sit at the top of a 220–680px column, so everything here is fighting for width:
    labels above boxes rather than beside them, and one row per previous run. */

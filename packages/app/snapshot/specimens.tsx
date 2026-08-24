@@ -12,8 +12,10 @@
 import { useMemo, useState, type JSX, type ReactNode } from "react";
 import type { BoardCard, BoardView, FileTree } from "@jaira/shared/browser";
 import { defaultAppearance } from "@jaira/shared/browser";
+import { GALLERY_SURFACES } from "@jaira/shared/browser";
 import { AppearancePane } from "../src/renderer/appearancePane";
 import { Board } from "../src/renderer/board";
+import { ComponentGallery } from "../src/renderer/componentGallery";
 import { Pill, Pills } from "../src/renderer/pill";
 import { Sidebar, type SidebarAct } from "../src/renderer/sidebar";
 import { StateGraphView } from "../src/renderer/stateGraphView";
@@ -473,6 +475,27 @@ function StatePanelSpecimen(): JSX.Element {
   );
 }
 
+/**
+ * Two cards of the Debug view's component gallery.
+ *
+ * Two rather than nine because a frame tall enough for all of them is a frame nobody can read at the
+ * size the type actually is. These two are the pair that carries the rest: a decision component
+ * whose config is a LIST — the case the schema form used to render as an empty text box — and the
+ * changeset gate, which mounts itself into a host node rather than returning an element, so a
+ * picture of it is the only check that the host is still holding it right.
+ *
+ * `validateSchema` answers nothing: the check is an IPC round trip, and there is no main process
+ * behind a snapshot. A null answer is the same one the editor gets while a real check is in flight.
+ */
+function GallerySpecimen(): JSX.Element {
+  const shown = GALLERY_SURFACES.filter((s) => s.id === "choose_option" || s.id === "user-approve-changeset");
+  return (
+    <div className="col mid debug" style={{ overflow: "auto" }}>
+      <ComponentGallery validateSchema={async () => null} surfaces={shown} />
+    </div>
+  );
+}
+
 export interface Specimen {
   id: string;
   /**
@@ -499,4 +522,5 @@ export const SPECIMENS: readonly Specimen[] = [
   { id: "appearance", figure: "07 · Appearance", width: 430, height: 620, node: <AppearanceSpecimen /> },
   { id: "graph", figure: "— · The state graph", width: 980, height: 560, node: <GraphSpecimen /> },
   { id: "state-panel", figure: "— · A child in the panel", width: 480, height: 560, node: <StatePanelSpecimen /> },
+  { id: "gallery", figure: "— · The component gallery", width: 940, height: 620, node: <GallerySpecimen /> },
 ];

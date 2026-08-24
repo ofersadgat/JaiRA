@@ -2991,6 +2991,44 @@ session transcript and the journal viewer are the same components Tasks and File
 render. A debug view that drew its own version of the screen it exists to test
 would be testing the wrong screen.
 
+#### 11.3.1 The component gallery — every surface, with nothing behind it
+
+The self-test answers *does a workflow run*. The gallery under it answers the
+question a run cannot answer cheaply: *what does the thing it parks at look like,
+and what does an answer to it return?* A UI state's entire visible behaviour comes
+from a config an author writes inside a state file, and the only way to see one
+was to author that file, start a run and wait for the engine to reach it.
+
+**One card per surface, and the three kinds are distinguished.** The six built-in
+components a state's `operation.function` may name (§7.1) are `interaction`
+cards; the raw-JSON fallback for a function that is NOT built in is a seventh,
+because a typo in `operation.function` is a thing you should be able to
+recognise; and the two dialogs JaiRA raises on its own — a command approval
+(§10.2) and a running agent's question — are `approval` and `question`. All three
+are things that appear in front of a person, which is what the gallery is a
+gallery of; only the first is a component in the engine's sense, and the cards say
+so rather than blurring it.
+
+**It renders the real dialog.** Each card parses its config with
+`parseComponentConfig` — the call main makes on a live gate — hands the result to
+the same `InteractionDialog` the real gate renders, and checks a submitted answer
+with `validateComponentResult`, which is what main runs before an answer may enter
+the engine. A malformed config therefore produces the authoring error a run would
+produce, in the same words. The only thing missing is the engine.
+
+**The config is editable two ways, and it is one document.** A form generated
+from the surface's schema, and the app's JSON editor validating against that same
+schema — the state editor's Form/JSON switch, meaning the same thing. The schemas
+are registered so `schema:validate` can resolve them by id, and registered
+*unpickable*: a component config is a fragment of a state file, never a file, so it
+must never be an answer to "what schema is this `.json`".
+
+**The changeset gate gets a fixture, not a mock.** Its changeset carries each
+change's content inline, so the reviewer reads exactly what it reads in a real
+review; the drift check is the one thing it cannot do offline, and a host that
+supplies no reader gets no badges rather than wrong ones — the reviewer already
+treats an unreadable path as silence.
+
 ## 12. Task Lifecycle and Board Semantics
 
 - Task creation: title/description (+ optional issue artifact), workflow root

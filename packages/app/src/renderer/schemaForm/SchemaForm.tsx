@@ -5,7 +5,8 @@
  *
  *  1. a `$type` registry hit renders with that dedicated widget, which owns its own labels and layout;
  *  2. an object/class flattens `allOf` and recurses over `properties`;
- *  3. a primitive maps to a number / enum / boolean / text control.
+ *  3. an array renders its items as rows, each recursing;
+ *  4. a primitive maps to a number / enum / boolean / text control.
  *
  * Labels and tooltips come from the presentation map (resolved against the IMMEDIATE container's
  * `$type`), never from the renderer. What differs from the original is only the styling seam: this
@@ -24,6 +25,52 @@ import type { Schema, SchemaFormContext } from "./types";
 
 function isObjectSchema(s: Schema): boolean {
   return s["type"] === "object" || s["properties"] !== undefined || s["allOf"] !== undefined;
+}
+
+function isArraySchema(s: Schema): boolean {
+  return s["type"] === "array" || s["items"] !== undefined;
+}
+
+/**
+ * A branch of an `anyOf`/`oneOf`, chosen by what the value ALREADY is.
+ *
+ * The alternative — a discriminator control, "is this a string or an object?" — asks the reader
+ * about a distinction the format has deliberately made invisible: a `choose_option` option may be
+ * written as a bare string or as a labelled object, and both are the same option. So the value
+ * decides, an absent value takes the first branch (the spelling the schema puts first is the one it
+ * recommends), and nothing here can silently retype a value the author wrote the other way.
+ */
+function variantFor(schema: Schema, value: unknown): Schema {
+  const branches = (schema["anyOf"] ?? schema["oneOf"]) as Schema[] | undefined;
+  if (branches === undefined || branches.length === 0) return schema;
+  const actual =
+    value === null || value === undefined
+      ? undefined
+      : Array.isArray(value)
+        ? "array"
+        : typeof value === "object"
+          ? "object"
+          : typeof value;
+  const hit =
+    actual === undefined
+      ? undefined
+      : branches.find((b) => {
+          if (actual === "array") return isArraySchema(b);
+          if (actual === "object") return isObjectSchema(b);
+          return b["type"] === actual;
+        });
+  return hit ?? branches[0]!;
+}
+
+/** What a newly added array item starts as — empty of content, right in shape. */
+function seedFor(schema: Schema): unknown {
+  const variant = variantFor(schema, undefined);
+  if (isArraySchema(variant)) return [];
+  if (isObjectSchema(variant)) return {};
+  if (variant["type"] === "boolean") return false;
+  if (variant["type"] === "number") return 0;
+  if (Array.isArray(variant["enum"])) return (variant["enum"] as string[])[0] ?? "";
+  return "";
 }
 
 /**
@@ -51,7 +98,7 @@ function flatten(
 }
 
 export function SchemaForm({
-  schema,
+  schema: declared,
   value,
   onChange,
   ctx,
@@ -64,6 +111,8 @@ export function SchemaForm({
   /** The `$type` of the schema declaring THIS node, for presentation lookup of its members. */
   containerType?: string;
 }): JSX.Element {
+  // A node written as a choice of shapes is resolved against the value it holds — see `variantFor`.
+  const schema = variantFor(declared, value);
   const $type = schema["$type"] as string | undefined;
 
   // 1) A registered widget owns its own labels and layout.
@@ -105,10 +154,14 @@ export function SchemaForm({
               />
             </Field>
           );
-          // A nested object or a widget member is a full-width block; primitives are grid cells.
-          if (widgetFor(subType) || isObjectSchema(sub)) {
+          // A nested object, a list or a widget member is a full-width block; primitives are grid
+          // cells. A list gets the stacked treatment on top of that: its rows carry their own
+          // controls, and squeezing them into the right-hand rail of a two-column field leaves the
+          // label column empty and the rows unreadable.
+          const held = variantFor(sub, obj[key]);
+          if (widgetFor(subType) || isObjectSchema(held) || isArraySchema(held)) {
             return (
-              <div key={key} className="cfg-span">
+              <div key={key} className={isArraySchema(held) ? "cfg-span cfg-block" : "cfg-span"}>
                 {field}
               </div>
             );
@@ -119,7 +172,73 @@ export function SchemaForm({
     );
   }
 
-  // 3) Primitives.
+  // 3) Array → a row per item, each recursing.
+  //
+  // Without this an array fell through to the text control, which showed an empty box for a list of
+  // five options and replaced the whole list with a string the moment anybody typed in it. The
+  // controls are add / remove / reorder because order is part of what an array MEANS here: options
+  // are buttons left to right, and fields are a form top to bottom.
+  if (isArraySchema(schema)) {
+    const items = ((schema["items"] as Schema | undefined) ?? {}) as Schema;
+    const list = Array.isArray(value) ? (value as unknown[]) : [];
+    const write = (next: unknown[]): void => onChange(next);
+    const swap = (i: number, j: number): void => {
+      const next = [...list];
+      [next[i], next[j]] = [next[j], next[i]];
+      write(next);
+    };
+    return (
+      <div className="cfg-list">
+        {list.map((item, i) => (
+          // Index-keyed, and it has to be: the items have no identity of their own, and a key
+          // derived from content would remount the row being typed in on every keystroke.
+          <div className="cfg-list-row" key={i}>
+            <div className="cfg-list-body">
+              <SchemaForm
+                schema={items}
+                value={item}
+                onChange={(next) =>
+                  // An emptied primitive comes back `undefined`, which JSON would write as `null` in
+                  // an array. A hole is not what "I cleared this box" means, so it reseeds instead.
+                  write(list.map((held, j) => (j === i ? (next === undefined ? seedFor(items) : next) : held)))
+                }
+                ctx={{ ...ctx, path: `${ctx.path}[${i}]` }}
+                containerType={items["$type"] as string | undefined}
+              />
+            </div>
+            <div className="cfg-list-acts">
+              <button className="ghost" title="move up" disabled={ctx.disabled === true || i === 0} onClick={() => swap(i, i - 1)}>
+                ↑
+              </button>
+              <button
+                className="ghost"
+                title="move down"
+                disabled={ctx.disabled === true || i === list.length - 1}
+                onClick={() => swap(i, i + 1)}
+              >
+                ↓
+              </button>
+              <button
+                className="ghost"
+                title="remove"
+                disabled={ctx.disabled === true}
+                onClick={() => write(list.filter((_, j) => j !== i))}
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        ))}
+        <div className="cfg-list-add">
+          <button className="ghost" disabled={ctx.disabled === true} onClick={() => write([...list, seedFor(items)])}>
+            + add
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 4) Primitives.
   if (Array.isArray(schema["enum"])) {
     return (
       <SelectInput

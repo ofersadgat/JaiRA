@@ -270,6 +270,9 @@ const ROOT_VIEWS: readonly SidebarView[] = [
 /** Every nav row, for the lookups that do not care which group a view is in. */
 const ALL_VIEWS: readonly SidebarView[] = [...VIEWS, ...FOOTER_VIEWS];
 
+/** The views that live INSIDE the settings panel — see `beforeSettings` and the sidebar's own rule. */
+const PANEL_VIEWS: ReadonlySet<string> = new Set<string>(["settings", ...FOOTER_VIEWS.map((v) => v.id)]);
+
 /**
  * The window's name, for the taskbar and the window switcher.
  *
@@ -461,7 +464,10 @@ export default function App(): JSX.Element {
    */
   const beforeSettings = useRef<View>("files");
   useEffect(() => {
-    if (view !== "settings") beforeSettings.current = view;
+    // Every view the settings panel holds is excluded, not Settings alone. Logs and Debug are
+    // reached from inside it, so recording one as "where I was" would make the way out lead back
+    // into the panel — the arrow would do nothing and there would be no way back to your work.
+    if (!PANEL_VIEWS.has(view)) beforeSettings.current = view;
   }, [view]);
 
   /**
@@ -1226,7 +1232,19 @@ export default function App(): JSX.Element {
     panel: (
       <ul className="sections">
         {SECTIONS.filter((s) => !s.needsProject || state.at !== null).map(({ id, label }) => (
-          <li key={id} className={state.section === id ? "sel" : undefined} onClick={() => actions.setSection(id)}>
+          <li
+            key={id}
+            // Only while Settings is what you are LOOKING at. The list stays drawn in Logs and in
+            // Debug — it is the panel's, not the view's — and a row marked selected there claimed
+            // the window was showing Providers while it was showing the log.
+            className={view === "settings" && state.section === id ? "sel" : undefined}
+            onClick={() => {
+              actions.setSection(id);
+              // From Logs or Debug this row is a way BACK into Settings, so it has to go there.
+              // Remembering the section without showing it would be a click that did nothing.
+              actions.setView("settings");
+            }}
+          >
             {label}
           </li>
         ))}
@@ -1686,6 +1704,7 @@ export default function App(): JSX.Element {
               onDismissError={actions.debugDismissError}
               onOpenState={(stateId) => void actions.openWorkflow(stateId, "base")}
               onShowSession={actions.showSession}
+              validateSchema={actions.validateSchema}
             />
           ) : null}
 
