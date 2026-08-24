@@ -334,8 +334,8 @@ describe("fileTree", () => {
     expect(names).not.toContain("snapshots");
     expect(names).not.toContain("tasks");
     // The database and its write-ahead companions sit at the root rather than in a directory, so
-    // they need excluding by name — they were three rows of unopenable noise above `config.json`.
+    // they need excluding by name — they were three rows of unopenable noise above `settings.json`.
     expect(names.filter((n) => n.startsWith("jaira.db"))).toEqual([]);
-    expect(names).toContain("config.json");
+    expect(names).toContain("settings.json");
   });
 });

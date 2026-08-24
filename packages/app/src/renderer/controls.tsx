@@ -26,7 +26,7 @@ import { useState, type JSX, type ReactNode } from "react";
  *
  * `param` is the config path this writes (`models.default`, `routes.local.baseURL`), rendered in
  * monospace at the end of the hint. It is not decoration — it is the only thing connecting a pretty
- * label to the `config.json` a user may also be editing by hand, and to the error message the parser
+ * label to the `settings.json` a user may also be editing by hand, and to the error message the parser
  * produces when the value is wrong. It sits under the label rather than beside it because a label,
  * a key and a "set here" mark on one line is three claims on the reader before the sentence that
  * says what the setting DOES.

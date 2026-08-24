@@ -48,7 +48,7 @@ function tools(destination: string, inlineMaxBytes = 65_536) {
       worktree: dir,
       project: dir,
       jaira: join(dir, ".jaira"),
-      artifactDir: "jaira-artifacts",
+      artifactDir: "artifacts",
       taskId: "t-1",
       runId: 1,
       instanceId: 7,
@@ -79,7 +79,7 @@ describe("the round trip, under every destination", () => {
       const written = await call(write, { path: "docs/plan.md", content: "# the plan" });
       // The agent is told about the path IT used, never the physical one.
       expect(written).toMatchObject({ path: "docs/plan.md" });
-      expect(JSON.stringify(written)).not.toContain("jaira-artifacts");
+      expect(JSON.stringify(written)).not.toContain("system/artifacts");
 
       const readBack = await call(read, { path: "docs/plan.md" });
       expect(readBack).toMatchObject({ path: "docs/plan.md", content: "# the plan" });
@@ -92,7 +92,7 @@ describe("placement", () => {
     const { write } = tools("$CENTRAL");
     await call(write, { path: "docs/plan.md", content: "x" });
 
-    expect(existsSync(join(dir, "jaira-artifacts", "t-1", "docs", "plan.md"))).toBe(true);
+    expect(existsSync(join(dir, ".jaira", "system", "artifacts", "t-1", "docs", "plan.md"))).toBe(true);
     // NOT at the path the agent used.
     expect(existsSync(join(dir, "docs", "plan.md"))).toBe(false);
   });
@@ -100,7 +100,7 @@ describe("placement", () => {
   it("derives the filename when the destination says to", async () => {
     const { write } = tools("$CENTRAL_FLAT");
     await call(write, { path: "docs/plan.md", content: "x" });
-    expect(existsSync(join(dir, "jaira-artifacts", "t-1", "7-plan_doc.md"))).toBe(true);
+    expect(existsSync(join(dir, ".jaira", "system", "artifacts", "t-1", "7-plan_doc.md"))).toBe(true);
   });
 
   it("writes nothing to disk under virtual:", async () => {
@@ -129,7 +129,7 @@ describe("the record", () => {
     expect(record.hash).toBe("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
     expect(record.bytes).toBe(5);
     expect(record.content).toBe("hello");
-    expect(record.physicalPath).toContain("jaira-artifacts");
+    expect(record.physicalPath).toContain("artifacts");
   });
 
   it("drops the inline copy for a large file, so the journal does not carry it", async () => {
@@ -163,7 +163,7 @@ describe("refusals", () => {
     // Checked on what the agent asked for, because that is what the author wrote
     // policy against and what an approval dialog would show.
     const { write, read } = tools("$CENTRAL");
-    expect(await call(write, { path: ".jaira/config.json", content: "{}" })).toMatchObject({
+    expect(await call(write, { path: ".jaira/settings.json", content: "{}" })).toMatchObject({
       error: expect.stringContaining("may not write"),
     });
     expect(await call(read, { path: ".jaira/jaira.db" })).toMatchObject({ error: expect.stringContaining(".jaira") });
@@ -191,7 +191,7 @@ describe("registration", () => {
         worktree: dir,
         project: dir,
         jaira: join(dir, ".jaira"),
-        artifactDir: "jaira-artifacts",
+        artifactDir: "artifacts",
         taskId: "t-1",
       },
     });
@@ -282,7 +282,7 @@ describe("show_artifact", () => {
     // Under the ARTIFACT directory, not the workspace path the producer named — even though the
     // configured destination is `$DEFAULT`, which for `write_file` means the workspace itself.
     expect(existsSync(join(dir, "mockups", "dash.html"))).toBe(false);
-    expect(readFileSync(join(dir, "jaira-artifacts", "t-1", "mockups", "dash.html"), "utf8")).toBe("<h1>hi</h1>");
+    expect(readFileSync(join(dir, ".jaira", "system", "artifacts", "t-1", "mockups", "dash.html"), "utf8")).toBe("<h1>hi</h1>");
   });
 
   it("cannot overwrite source — the property that makes it read-only", async () => {
@@ -305,7 +305,7 @@ describe("show_artifact", () => {
   it("writes nothing at all when the project chose a virtual destination", async () => {
     const { show, read } = tools("virtual:");
     await call(show, { path: "mockups/dash.html", content: "<h1>hi</h1>" });
-    expect(existsSync(join(dir, "jaira-artifacts"))).toBe(false);
+    expect(existsSync(join(dir, ".jaira", "system", "artifacts"))).toBe(false);
     // Still round-trips, because the map is what answers — the illusion holds here too.
     expect(await call(read, { path: "mockups/dash.html" })).toMatchObject({ content: "<h1>hi</h1>" });
   });

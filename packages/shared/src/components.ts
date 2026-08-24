@@ -301,7 +301,9 @@ const bad = (errors: string): ResultCheck => ({ ok: false, errors });
  * from `operation.args`, and a function receives those args merged with the state's resolved inputs
  * into one namespace — so a field naming an input collided with the input it named. Authoring
  * `changeset: "changeset"` to point at the changeset slot overwrote the changeset with the string
- * `"changeset"`, which cost CHANGESETS.md §5.3's pin and made every decision validate against a word.
+ * `"changeset"`, which cost CHANGESETS.md §5.3's pin and made every decision validate against a
+ * word. Two different patches to that collision were tried before the answer turned out to be that
+ * the question was wrong.
  *
  * A changeset is recognisable: {@link changesetOf} demands a resolvable `source` and a `changes`
  * array whose every entry carries a unique id, a path and a known action. A prompt, a tree name or

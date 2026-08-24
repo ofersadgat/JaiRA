@@ -179,13 +179,13 @@ function Artifacts({ effective, locked, stated, set }: Writer): JSX.Element {
         <Field
           label="Artifact directory"
           param="artifacts.dir"
-          hint="What $ARTIFACT_DIR expands to, relative to the workspace."
+          hint="What $ARTIFACT_DIR expands to, inside the root's system/ directory."
           set={stated("artifacts.dir")}
         >
           <TextInput
             value={typeof artifacts["dir"] === "string" ? (artifacts["dir"] as string) : ""}
             mono
-            placeholder="jaira-artifacts"
+            placeholder="artifacts"
             disabled={locked}
             onChange={(v) => set("artifacts.dir", v === "" ? undefined : v)}
           />

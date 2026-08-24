@@ -73,8 +73,8 @@ npm run jaira -- workflow check workflow.md      # …and is it the workflow you
 
 Workflow state files live in `.jaira/workflows/` (state id = path, e.g.
 `feature/plan.json` → `feature/plan`). `task start` validates, snapshots the
-workflow into `.jaira/snapshots/<hash>/`, pins the hash, and records the
-engine's event stream in `.jaira/jaira.db`; interrupted tasks (crash, kill)
+workflow into `.jaira/system/snapshots/<hash>/`, pins the hash, and records the
+engine's event stream in `.jaira/system/jaira.db`; interrupted tasks (crash, kill)
 are detected on the next open and re-run from the workflow start against the
 pinned snapshot.
 
@@ -102,7 +102,7 @@ last agreed, and nothing it produces is written — the rewrite lands as an unsa
 edit in the editor, the proposed state files as unsaved edits against their own
 rows in the tree ([WORKFLOWS.md §11.2](WORKFLOWS.md)).
 
-Real runs read `.jaira/config.json`: `models.default` supplies the model for
+Real runs read `.jaira/settings.json`: `models.default` supplies the model for
 states that name none, and must be route-prefixed
 (`anthropic/claude-sonnet-5`, `openrouter/openai/gpt-5`) — routing is explicit
 in declarative-ai and a bare id is a fail-fast error. Calls execute via
@@ -164,7 +164,7 @@ is a policy rule (phase 6), not a side effect of the layout. `jaira init` writes
 `.jaira/.gitignore` for the derived half (`jaira.db*`, `snapshots/`).
 
 To run a project's git and agents inside WSL instead of natively, set
-`execEnvironment` in `.jaira/config.json`:
+`execEnvironment` in `.jaira/settings.json`:
 
 ```json
 { "execEnvironment": { "wsl": "Ubuntu-22.04" } }
@@ -176,7 +176,7 @@ against `\\wsl$` — that is slow and permission-fragile.
 
 ### Real providers
 
-Set a route-prefixed model — `models.default` in `.jaira/config.json`, or a
+Set a route-prefixed model — `models.default` in `.jaira/settings.json`, or a
 state's `operation.config.model` — and export `ANTHROPIC_API_KEY` (or
 `OPENROUTER_API_KEY`); keys live in the environment, never in the repo. Without
 `--fake`, prompt states execute through `@declarative-ai/promptop` over

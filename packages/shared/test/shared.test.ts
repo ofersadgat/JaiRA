@@ -50,7 +50,7 @@ describe("parseTaskMeta", () => {
 
 describe("config", () => {
   it("defaults artifactDir, and refuses the retired models.default", () => {
-    expect(parseConfig({}).artifactDir).toBe("jaira-artifacts");
+    expect(parseConfig({}).artifactDir).toBe("artifacts");
     expect(parseConfig({})).toEqual(defaultConfig());
     expect(() => parseConfig({ models: "nope" })).toThrow(/must be an object/);
     expect(() => parseConfig([])).toThrow(/object/);

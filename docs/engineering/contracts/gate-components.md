@@ -33,6 +33,7 @@ all.
 | --- | --- | --- |
 | The answer is arithmetic | a `function` state | A gate spends attention; arithmetic doesn't need it |
 | The person should write, not approve | `edit_markdown` | Their words are faster than a revision round |
+| The decision is WHERE the task goes next | `on_user_event` in a transition guard ([WORKFLOWS.md §7.4](../../../WORKFLOWS.md)) | A gate is a state the task sits in and a dialog it has to answer. "Which column does this belong in" is already a gesture the board offers — the card is dragged, and no state, no dialog and no interruption is needed to record it |
 
 ## Where this fits
 

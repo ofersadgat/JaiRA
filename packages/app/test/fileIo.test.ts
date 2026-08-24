@@ -47,8 +47,8 @@ describe("file:read", () => {
     expect(doc.mime).toBe(WORKFLOW_JSON);
   });
 
-  it("gives config.json its own type, which is what puts the effective view above it", () => {
-    expect(service.readFile({ layer: "project", path: "config.json" }).mime).toBe(CONFIG_JSON);
+  it("gives settings.json its own type, which is what puts the effective view above it", () => {
+    expect(service.readFile({ layer: "project", path: "settings.json" }).mime).toBe(CONFIG_JSON);
   });
 
   it("reports a file that does not exist yet rather than throwing", () => {

@@ -4,8 +4,8 @@
  * Every divider you drag, every fold you close and every branch of the two trees you collapse is a
  * statement about how you want to work, and until this file existed all of them were `useState` —
  * so all of them were undone by closing the window, and several by switching views. The value is
- * stored in `settings.json` beside the theme (see {@link JairaUiState}), which is the only place it
- * could go: a pane width belongs to one person on one machine, and putting it in `config.json` would
+ * stored in `user-settings.json` beside the theme (see {@link JairaUiState}), which is the only place it
+ * could go: a pane width belongs to one person on one machine, and putting it in `settings.json` would
  * mean a layout preference could arrive through a pull request.
  *
  * ## Why ids rather than fields

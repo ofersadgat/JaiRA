@@ -1,5 +1,5 @@
 /**
- * The rest of `config.json`, declared — so the settings screen is a FORM rather than a JSON box.
+ * The rest of `settings.json`, declared — so the settings screen is a FORM rather than a JSON box.
  *
  * Providers and Executors have purpose-built screens because they are what people configure daily.
  * Everything else — where artifacts go, whether calls are memoized, which distro commands run in,
@@ -34,8 +34,9 @@ export interface ConfigSectionSpec {
  * The sections, in the order the screen offers them.
  *
  * Artifacts first because it is the one with a real decision in it; the exec environment next because
- * it is the one that is wrong most often on Windows; memo and workflows after, because most projects
- * never touch them.
+ * it is the one that is wrong most often on Windows; storage after those, because it is the decision
+ * a project makes once when it decides whether its run history is shared; memo and workflows last,
+ * because most projects never touch them.
  */
 export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
   {
@@ -86,6 +87,51 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
           title: "WSL distro",
           description:
             "Empty runs everything natively. Named, git and agents run INSIDE that distro — deliberately not Windows git against \\\\wsl$, which is slow and permission-fragile.",
+        },
+      },
+    },
+  },
+  {
+    key: "storage",
+    title: "Storage",
+    hint: "Which run state lives in files and which in the database — files merge in git, SQLite does not.",
+    schema: {
+      $type: "storage",
+      type: "object",
+      properties: {
+        journal: {
+          type: "string",
+          enum: ["file", "db", "both"],
+          title: "journal",
+          description:
+            "The engine's event stream. In a file it is one JSONL per run, which two people can append to on one branch without conflicting; in the database it is one table nobody can merge.",
+        },
+        conversations: {
+          type: "string",
+          enum: ["file", "db", "both"],
+          title: "conversations",
+          description:
+            "Every model call and the transcripts they make up. In files these are readable by tooling JaiRA did not write, which is most of the reason to choose it.",
+        },
+        tasks: {
+          type: "string",
+          enum: ["file", "db", "both"],
+          title: "tasks",
+          description: "What was asked for, and where each run of it got to.",
+        },
+        artifacts: {
+          type: "string",
+          enum: ["file", "db", "both"],
+          title: "artifact map",
+          description:
+            "The map from what a producer said it wrote to where the bytes went. The bytes themselves are already files and are not affected by this.",
+        },
+        format: {
+          type: "string",
+          enum: ["claude", "codex"],
+          title: "session line shape",
+          description:
+            "Which agent's JSONL a file-backed conversation is WRITTEN in. Reading accepts either whatever this says, because a repository outlives a preference.",
         },
       },
     },

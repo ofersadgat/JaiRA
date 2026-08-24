@@ -85,6 +85,24 @@ describe("the lookup chain", () => {
     expect(resolverOf().lookup("KEY")).toMatchObject({ value: "local", source: "project-env-local" });
   });
 
+  it("prefers the project's .jaira/ pair over the pair at its root", () => {
+    // A checkout has two places, and `.jaira/` is the narrower: a key put there was put there FOR
+    // JaiRA, where one at the repository root may be shared with everything else the project runs.
+    mkdirSync(join(projectDir, ".jaira"), { recursive: true });
+    write(join(projectDir, ".jaira"), ".env", "KEY=for-jaira");
+    write(projectDir, ".env.local", "KEY=for-the-repo");
+
+    expect(resolverOf().lookup("KEY")).toMatchObject({ value: "for-jaira", source: "project-jaira-env" });
+  });
+
+  it("prefers .jaira/.env.local over .jaira/.env, exactly as the root pair does", () => {
+    mkdirSync(join(projectDir, ".jaira"), { recursive: true });
+    write(join(projectDir, ".jaira"), ".env.local", "KEY=local");
+    write(join(projectDir, ".jaira"), ".env", "KEY=committed");
+
+    expect(resolverOf().lookup("KEY")).toMatchObject({ value: "local", source: "project-jaira-env-local" });
+  });
+
   it("prefers the project over the shared root — the reason the order is narrowest first", () => {
     write(projectDir, ".env", "KEY=this-project");
     write(baseDir, ".env.local", "KEY=every-project");

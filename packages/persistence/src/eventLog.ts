@@ -13,6 +13,7 @@
  */
 import type { EngineEvent, Persistence } from "@declarative-ai/hw";
 import type { JairaDb } from "./db";
+import { appendJournal } from "./journalFile";
 
 export interface StoredEvent {
   seq: number;
@@ -37,7 +38,14 @@ interface RawEvent {
 }
 
 export class SqliteEventLog {
-  constructor(private readonly db: JairaDb) {}
+  /**
+   * `journalDir` is given only when `config.storage.journal` puts the journal in files (DESIGN §4.4).
+   * Absent means the table is the truth, which is the default and what every open did before.
+   */
+  constructor(
+    private readonly db: JairaDb,
+    private readonly journalDir?: string,
+  ) {}
 
   /** A `Persistence` implementation scoped to one task run. */
   recorder(taskId: string, runId: number): Persistence {
@@ -45,8 +53,22 @@ export class SqliteEventLog {
       `INSERT INTO state_machine_events (task_id, run_id, instance_id, type, payload_json, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
     );
+    const journalDir = this.journalDir;
     return {
       record: (event: EngineEvent, atMs: number): void => {
+        // The FILE first, and synchronously. It is the truth when there is one, so an event that
+        // reached the table and not the disk would be an event a replay does not have — the exact
+        // shape of loss the design refuses by not making the table a write-back cache.
+        if (journalDir !== undefined) {
+          appendJournal(journalDir, {
+            type: event.type,
+            timestamp: new Date(atMs).toISOString(),
+            taskId,
+            runId,
+            ...(event.instanceId !== undefined ? { instanceId: event.instanceId } : {}),
+            event,
+          });
+        }
         insert.run(taskId, runId, event.instanceId ?? null, event.type, JSON.stringify(event), atMs);
       },
     };

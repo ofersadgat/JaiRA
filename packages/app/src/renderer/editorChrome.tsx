@@ -1,7 +1,7 @@
 /**
  * The bar every editing surface ends with.
  *
- * Four editors — plain text, JSON, `config.json`, the state form — ask the same two questions of
+ * Four editors — plain text, JSON, `settings.json`, the state form — ask the same two questions of
  * whoever is looking at them: what am I about to write, and how do I take it back? Each used to
  * answer them its own way. The state form had a lone Save at the bottom of a document-length page,
  * so the button scrolled out of sight exactly when the form was long enough to need it, and there

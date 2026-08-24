@@ -429,10 +429,11 @@ repository.
 
 > Implemented per DESIGN §7.6: placement is a configurable destination URI
 > (`virtual:`, or a `file:` path template such as `$CENTRAL` or
-> `$WORKTREE/jaira-artifacts/$TASK_ID/$RELPATH`), defaulting to the task worktree
-> so git versions artifacts per branch exactly as this section describes. JaiRA
-> owns the agent's `write_file`/`read_file` tools, so it controls where the bytes
-> land while the agent keeps seeing its own path.
+> `$WORKTREE/out/$TASK_ID/$RELPATH`), defaulting to the task worktree so git
+> versions artifacts per branch exactly as this section describes. `$CENTRAL`
+> instead collects them under `.jaira/system/artifacts/`, which git does not
+> track. JaiRA owns the agent's `write_file`/`read_file` tools, so it controls
+> where the bytes land while the agent keeps seeing its own path.
 
 ### 4.7 Conversations
 

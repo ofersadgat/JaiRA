@@ -3476,6 +3476,20 @@ button.crumb-sep.open {
 .column:hover {
   border-color: var(--rule);
 }
+/* A DROP TARGET, while a card is in the air (`on_user_event`). Only the columns whose rule would
+   actually accept this card get the dashed accent edge, so the board answers "where can this go"
+   before the person has to try it — and every other column stays exactly as it was, which is the
+   other half of the same answer. */
+.column.drop-target {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+/* Under the pointer, with the fill the drop would land in. The dash says "this one will take it";
+   the fill says "let go now" — two steps of the same gesture, and the second only where the cursor
+   is. */
+.column.drop-over {
+  background: var(--fill-ghost-selected);
+}
 /* A full-bleed band on --panel-3, which is the same idiom the settings sections use for a section
    head: the strip of a different ground says "the column starts here", and the hairline under it
    says what is inside it. The header stays put while the cards move under it, which is what makes a
@@ -3615,6 +3629,15 @@ button.crumb-sep.open {
 }
 .card:last-child {
   margin-bottom: 0;
+}
+/* A card a waiting transition has offered a move. `grab` is the whole affordance: no badge, no
+   handle, nothing added to a card that is already carrying a title, a pill and a place — the cursor
+   is what says "this one you can move", and it says it exactly when it is true. */
+.card-draggable {
+  cursor: grab;
+}
+.card-draggable:active {
+  cursor: grabbing;
 }
 .card:hover {
   background: var(--fill-ghost-selected);

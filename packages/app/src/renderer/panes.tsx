@@ -1,5 +1,5 @@
 /**
- * The Configuration section: the raw `config.json` of a layer, and what the layers add up to.
+ * The Configuration section: the raw `settings.json` of a layer, and what the layers add up to.
  *
  * The escape hatch, and deliberately only that. Providers and Executors are the screens for the two
  * things anyone configures day to day; this is where the rest of the document lives — the policy
@@ -13,7 +13,7 @@
  * Rendering only; every write goes through the store and is validated in the main process.
  */
 import { useState, type JSX } from "react";
-import { CONFIG_JSON, type ConfigLayer, type ConfigView, type FileSource } from "@jaira/shared/browser";
+import { CONFIG_JSON, SETTINGS_FILE_NAME, type ConfigLayer, type ConfigView, type FileSource } from "@jaira/shared/browser";
 import type { Drafts, SetDraft } from "./drafts";
 import { ConfigEdit, ConfigEffectiveView } from "./fileSurfaces";
 import type { FileSurfaceContext, FileSurfaceProps } from "./fileTypes";
@@ -57,10 +57,10 @@ export function LayerPicker({
 }
 
 /**
- * The settings pane: each layer's `config.json`.
+ * The settings pane: each layer's `settings.json`.
  *
  * The editor and the effective view are the SAME components the Files view renders when you click
- * `config.json` in the tree — `application/vnd.jaira.config+json` registers both, and this pane
+ * `settings.json` in the tree — `application/vnd.jaira.config+json` registers both, and this pane
  * borrows them rather than keeping a second textarea in sync with the first. That fold-in is the
  * point: two editors over one file is how they drift, and one of them ends up missing the parse
  * check or the layer notice.
@@ -135,11 +135,11 @@ export function SettingsPane({
   // pane has never had them.
   const doc: FileSource = {
     layer,
-    path: "config.json",
+    path: SETTINGS_FILE_NAME,
     file,
     mime: CONFIG_JSON,
     text: "",
-    // Whether the layer has a `config.json` on disk, not whether it has a path — the shared root
+    // Whether the layer has a `settings.json` on disk, not whether it has a path — the shared root
     // always has one, and normally no file behind it until somebody saves here for the first time.
     exists: (layer === "base" ? config.base : config.project) !== null,
   };

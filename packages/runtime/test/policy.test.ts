@@ -146,10 +146,10 @@ describe("authored rules", () => {
 describe("isDeniedPath", () => {
   it("denies .jaira wherever it appears", () => {
     // §1g item 5: a worktree normally contains .jaira/, so this is the enforcement.
-    for (const p of [".jaira/config.json", "C:\\repo\\.jaira\\jaira.db", "/repo/.jaira", "sub/.jaira/tasks/x.json"]) {
+    for (const p of [".jaira/settings.json", "C:\\repo\\.jaira\\jaira.db", "/repo/.jaira", "sub/.jaira/tasks/x.json"]) {
       expect(isDeniedPath(p), p).toBe(true);
     }
-    for (const p of ["src/index.ts", "jaira-artifacts/x.md", "notjaira/x", ".jairaish/x"]) {
+    for (const p of ["src/index.ts", "artifacts/x.md", "notjaira/x", ".jairaish/x"]) {
       expect(isDeniedPath(p), p).toBe(false);
     }
   });
@@ -186,7 +186,7 @@ describe("compilePolicy", () => {
   });
 
   it("denies .jaira/ by path, for command and file tools alike", async () => {
-    expect(await verdict(OPEN, "bash", { command: "cat .jaira/config.json" })).toBe("deny");
+    expect(await verdict(OPEN, "bash", { command: "cat .jaira/settings.json" })).toBe("deny");
     expect(await verdict({ tools: { write_file: "smart" } }, "write_file", { path: ".jaira/tasks/x.json" })).toBe("deny");
     expect(await verdict({ tools: { write_file: "smart" } }, "write_file", { path: "src/x.ts" })).toBe("ask");
   });

@@ -34,6 +34,8 @@ import {
   baseSource,
   baseStateView,
   beginTaskRun,
+  userModules,
+  prepareUserModules,
   gitFor,
   boardForState,
   boardView,
@@ -65,7 +67,7 @@ import {
   loadLayeredConfig,
   openProject,
   openSharedProject,
-  openSystemProject,
+  sessionStoreFor,
   JobOutputSink,
   jobOutput,
   SqliteMemoCache,
@@ -124,6 +126,7 @@ import {
   planAgentTools,
   functionNamesOf,
   InteractionHub,
+  UserEventHub,
   defaultExecutorTree,
   modelRouterOptions,
   probeModelRoutes,
@@ -133,6 +136,8 @@ import {
   JAIRA_TOOLS,
   usableRouteKeys,
   newRegistry,
+  registerUserFunctions,
+  prepareUserFunctions,
   NodeExec,
   parseFakeRules,
   policyCanEscalate,
@@ -188,8 +193,6 @@ import {
   changesetOf,
   parseChangesetSource,
   jairaBasePaths,
-  SYSTEM_DIR_NAME,
-  systemProjectDir,
   DEFAULT_EXECUTOR,
   mergeConfigDocuments,
   mimeOfPath,
@@ -201,8 +204,8 @@ import {
   resolveExecutorTree,
   schemaById,
   sessionKey,
+  JAIRA_DIR_NAME,
   SHARED_SESSION,
-  SYSTEM_SESSION,
   validateComponentResult,
   WORKFLOW_JSON,
   unnamedRouteOf,
@@ -247,6 +250,7 @@ import type {
   PendingApproval,
   PendingInteraction,
   PendingQuestion,
+  PendingUserEvent,
   ProbeResult,
   PruneRequest,
   PruneResult,
@@ -308,6 +312,7 @@ export interface AppServiceOptions {
   nextInteractionId?: () => string;
   nextApprovalId?: () => string;
   nextQuestionId?: () => string;
+  nextUserEventId?: () => string;
   /**
    * Read a crashed call's native session files at recovery. Default: the real
    * `~/.claude/projects` reader — a seam for the same reason every other file-I/O boundary here has
@@ -331,15 +336,6 @@ export interface AppServiceOptions {
   keychain?: KeychainPort;
   /** Override the shared base root. Defaults to the saved setting, then `JAIRA_HOME`, then `~/.jaira`. */
   baseDir?: string;
-  /**
-   * Override where JaiRA's OWN project lives.
-   *
-   * Separate from {@link baseDir} because they answer different questions: `baseDir` is the root a
-   * person selected and may repoint, while this is the installation's own corner, which a repoint
-   * must not move. Defaults from `baseDir` when that is given explicitly and from the installation
-   * otherwise — see the constructor.
-   */
-  systemDir?: string;
   /**
    * Show a file in the OS file manager, injected by the Electron main process.
    *
@@ -623,7 +619,7 @@ export class AppService {
    * The open projects, by {@link sessionKey}.
    *
    * A map rather than a field, because a process holds several: the user's work, and — from the
-   * moment JaiRA's own runs became tasks — the system project behind it. Keyed by canonical
+   * moment JaiRA's own runs became tasks — the base root behind it. Keyed by canonical
    * directory so two spellings of one path cannot become two `better-sqlite3` handles on one file.
    */
   private readonly sessions = new Map<string, ProjectSession>();
@@ -638,6 +634,7 @@ export class AppService {
   private interactionSeq = 0;
   private approvalSeq = 0;
   private questionSeq = 0;
+  private userEventSeq = 0;
   private readonly requestOwner = new Map<string, string>();
   /**
    * The JSON-editor schema machinery, built on first use.
@@ -652,18 +649,10 @@ export class AppService {
 
   constructor(private readonly options: AppServiceOptions = {}) {
     this.baseDir = jairaBasePaths(options.baseDir ?? settingsBaseDir()).baseDir;
-    // Where JaiRA's OWN project lives, which must not move when the root does.
-    //
-    // Defaulted from the INSTALLATION (`systemProjectDir`, i.e. `JAIRA_HOME`/`~/.jaira`) rather than
-    // from `this.baseDir`, because `this.baseDir` is the SELECTED root and moving with it is exactly
-    // what this project must not do. An explicit `baseDir` is the one exception: passing it means
-    // "the whole installation is here" — which is what a test means by it, and what keeps two
-    // services in one process from sharing a database.
-    this.systemDir =
-      options.systemDir ??
-      (options.baseDir !== undefined ? join(jairaBasePaths(options.baseDir).baseDir, SYSTEM_DIR_NAME) : systemProjectDir());
     this.diagnostics = new Diagnostics({
-      dir: join(this.baseDir, "logs"),
+      // Under the root's `system/` with the rest of what JaiRA writes for itself, rather than beside
+      // the workflows a person authors — see `SYSTEM_DIR_NAME`.
+      dir: jairaBasePaths(this.baseDir).logsDir,
       publish: (entry) => this.publish({ type: "log:entry", entry }),
     });
     // The checks that decide what can answer a prompt run BY THEMSELVES, from here on. They used to
@@ -673,32 +662,14 @@ export class AppService {
   }
 
   /**
-   * The shared root as JaiRA's own project, opened the first time something needs it.
+   * The SELECTED root as a project — where a run of a shared workflow is recorded, and where JaiRA's
+   * own runs go.
    *
-   * ON FIRST USE rather than in the constructor, which is where this started. Opening it eagerly made
-   * merely CONSTRUCTING a service create `~/.jaira` and a database inside it — so a person who never
-   * runs a sync still gets one, and every caller that constructs a service becomes responsible for
-   * closing a handle it never asked for. First use is the honest trigger: the runs this project holds
-   * are JaiRA's own, and until one is asked for there is nothing to hold.
-   *
-   * The guarantee that mattered survives: a system run works with NO user project open, because this
-   * does not consult one. And it still cannot take the app down — a corrupt database, a native ABI
-   * mismatch or a read-only home leaves {@link systemError} set and everything else running.
+   * This one IS the root, so repointing the root gives a different database and the old library's
+   * runs stop being listed — correct, because they were that library's.
    *
    * Keyed by the base directory's own key, so pointing `JAIRA_PROJECT` at `~/.jaira` finds this
    * session rather than opening a second handle on the same file.
-   */
-  private systemSession(): ProjectSession | undefined {
-    return this.roleSession("system");
-  }
-
-  /**
-   * The SELECTED root as a project — where a run of a shared workflow is recorded.
-   *
-   * Distinct from {@link systemSession} by lifetime, which is the whole reason there are two. This
-   * one IS the root, so repointing the root gives a different database and the old library's runs
-   * stop being listed — correct, because they were that library's. JaiRA's own project is pinned
-   * elsewhere so a sync's history does not go with them.
    */
   private sharedSession(): ProjectSession | undefined {
     return this.roleSession("shared");
@@ -721,18 +692,22 @@ export class AppService {
   }
 
   /**
-   * One of the two role projects, opened the first time something needs it.
+   * The role project, opened the first time something needs it.
    *
    * ON FIRST USE rather than in the constructor, which is where this started. Opening eagerly made
    * merely CONSTRUCTING a service create directories and a database — so a person who never runs a
    * sync still gets one, and every caller that constructs a service becomes responsible for closing
    * a handle it never asked for. First use is the honest trigger.
    *
-   * The guarantee that mattered survives: either works with NO user project open, because neither
-   * consults one. And neither can take the app down — a corrupt database, a native ABI mismatch or a
-   * read-only home leaves {@link roleError} set for that role and everything else running.
+   * The guarantee that mattered survives: it works with NO user project open, because it does not
+   * consult one. And it cannot take the app down — a corrupt database, a native ABI mismatch or a
+   * read-only home leaves {@link roleError} set and everything else running.
+   *
+   * Still parameterized by role, with one role left: what it does is "open the project that is
+   * addressed by name rather than by directory", and a second such role is a plausible thing to
+   * want again.
    */
-  private roleSession(role: "shared" | "system"): ProjectSession | undefined {
+  private roleSession(role: "shared"): ProjectSession | undefined {
     const open = [...this.sessions.values()].find((s) => s.kind === role);
     if (open !== undefined) return open;
     // Never AFTER `close()`. A late read — a queued `job:output`, a base-layer `syncStatus` racing the
@@ -742,13 +717,9 @@ export class AppService {
     // directories — on every keystroke in a file the sync panel happens to be watching.
     if (this.roleError[role] !== undefined) return undefined;
     try {
-      const project =
-        role === "system"
-          ? openSystemProject({ baseDir: this.baseDir, systemDir: this.systemDir })
-          : openSharedProject({ baseDir: this.baseDir });
-      // Keyed by the directory each actually opened, so pointing `JAIRA_PROJECT` at the root finds
-      // the shared session rather than opening a second handle on the same file — and so the two
-      // roles cannot collide on one key even when the root is the default.
+      const project = openSharedProject({ baseDir: this.baseDir });
+      // Keyed by the directory it actually opened, so pointing `JAIRA_PROJECT` at the root finds
+      // this session rather than opening a second handle on the same file.
       const key = sessionKey(project.paths.projectDir);
       const session = new ProjectSession({ key, kind: role, project, ...this.hubsFor(key) });
       this.sessions.set(key, session);
@@ -769,10 +740,7 @@ export class AppService {
    * Held rather than thrown (see {@link roleSession}) and reported where it matters: a run refuses
    * with this rather than with whatever the missing session would have produced three layers in.
    */
-  private readonly roleError: { shared?: string; system?: string } = {};
-
-  /** Where JaiRA's own project lives — see the constructor. */
-  private readonly systemDir: string;
+  private readonly roleError: { shared?: string } = {};
 
   /**
    * The hubs one session parks on, wired to publish through this service.
@@ -780,7 +748,7 @@ export class AppService {
    * Built per session rather than once, so a gate in one project cannot be answered by a request id
    * minted in another — and so closing a project rejects only its own parked calls.
    */
-  private hubsFor(key: string): { hub: InteractionHub; approvals: ApprovalHub; questions: QuestionHub } {
+  private hubsFor(key: string): { hub: InteractionHub; approvals: ApprovalHub; questions: QuestionHub; userEvents: UserEventHub } {
     const hub = new InteractionHub({
       onRequest: (request) => this.publishInteraction(key, request),
       onResolved: (requestId) => {
@@ -834,7 +802,26 @@ export class AppService {
       },
       nextId: this.options.nextQuestionId ?? (() => `question-${++this.questionSeq}`),
     });
-    return { hub, approvals, questions };
+    /**
+     * Transitions waiting on a gesture — the fourth channel, and the one with no dialog.
+     *
+     * Published as a LIST rather than as a request the renderer has to answer: nothing is shown when
+     * a wait arrives. The board consults what is waiting to decide which cards can be picked up, so
+     * the only visible effect is that a card becomes draggable — and the only way to answer is to
+     * drop it somewhere.
+     */
+    const userEvents = new UserEventHub({
+      onRequest: (request) => {
+        this.requestOwner.set(request.requestId, key);
+        this.publish({ type: "userEvent:requested", request });
+      },
+      onResolved: (requestId) => {
+        this.requestOwner.delete(requestId);
+        this.publish({ type: "userEvent:resolved", requestId });
+      },
+      nextId: this.options.nextUserEventId ?? (() => `event-${++this.userEventSeq}`),
+    });
+    return { hub, approvals, questions, userEvents };
   }
 
   /**
@@ -899,6 +886,11 @@ export class AppService {
     const already = this.sessions.get(key);
     if (already !== undefined) return { dir: already.dir, recovered: [] };
     const project = openProject(dir, { baseDir: this.baseDir });
+    // js/ts function modules (SPEC §7.5), built once for the process: the TypeScript compiler is the
+    // single `await`, and everything after it is synchronous — which is what lets the SYNC
+    // `loadBundle` behind every view consult it. Idempotent, so opening a second project costs
+    // nothing; `rebuild` is what a later approval or a changed file needs.
+    await prepareUserModules(project.paths, { searchPath: project.config.workflows.path });
     const session = new ProjectSession({ key, kind: "user", project, ...this.hubsFor(key) });
     this.sessions.set(key, session);
     this.log({
@@ -941,7 +933,7 @@ export class AppService {
     const { project } = session;
     let recoveredAny = false;
     for (const taskId of project.recovered) {
-      const store = new SqliteSessionStore(project.db);
+      const store = sessionStoreFor(project);
       let rows: ReturnType<SqliteSessionStore["recoverable"]>;
       try {
         rows = store.recoverable(taskId);
@@ -1039,7 +1031,7 @@ export class AppService {
    * one project is authored — could not be synced from an app that had no way to give it a project
    * to be synced against.
    *
-   * `initProject` is idempotent and keeps an existing `config.json`, so pointing this at a directory
+   * `initProject` is idempotent and keeps an existing `settings.json`, so pointing this at a directory
    * that is already a project is an open, not an overwrite.
    */
   async init(dir: string): Promise<{ dir: string; recovered: string[] }> {
@@ -1076,10 +1068,10 @@ export class AppService {
   }
 
   /**
-   * Close every open session — user projects first, JaiRA's own last.
+   * Close every open session — user projects first, the base root last.
    *
    * The order is load-bearing for the same reason a session drains its runs before closing its
-   * database: a system run can be ABOUT a user project (a sync of its description resolves that
+   * database: a run recorded in the root can be ABOUT a user project (a sync of its description resolves that
    * project's config and reads its workflows), so tearing the target down first would leave the run
    * settling against a closed handle.
    */
@@ -1093,7 +1085,7 @@ export class AppService {
   /** Whether {@link close} has run. A closed service answers; it does not re-open anything. */
   private closed = false;
 
-  /** Every user project, leaving JaiRA's own open. What switching a checkout does. */
+  /** Every user project, leaving the base root open. What switching a checkout does. */
   private async closeUserSessions(): Promise<void> {
     for (const session of [...this.sessions.values()]) {
       if (session.kind === "user") await this.closeSession(session.key);
@@ -1127,16 +1119,14 @@ export class AppService {
    * The renderer does not rely on it — every call from there names its project, because the project
    * is the head of the address it is standing on.
    *
-   * `"system"` and `"shared"` are reserved and address those two projects by role, which is the only
-   * way to reach either — they are never what a bare directory resolves to, and never what this
-   * answers with no ref.
+   * `"shared"` is reserved and addresses the base root by role, which is the only way to reach it —
+   * it is never what a bare directory resolves to, and never what this answers with no ref.
    */
   private sessionOf(ref?: string): ProjectSession | undefined {
     if (ref === undefined) {
       const open = this.userSessions();
       return open.length === 1 ? open[0] : undefined;
     }
-    if (ref === SYSTEM_SESSION) return this.systemSession();
     if (ref === SHARED_SESSION) return this.sharedSession();
     return this.sessions.get(sessionKey(ref));
   }
@@ -1187,7 +1177,7 @@ export class AppService {
   /**
    * Publish something that is ABOUT one project, stamped with which.
    *
-   * The stamp is what lets a window ignore news it cannot act on. Without it, a run in JaiRA's own
+   * The stamp is what lets a window ignore news it cannot act on. Without it, a run in the base
    * project invalidated "tasks", and a window with no user project open dutifully asked for a task
    * list it has none of — which throws, by design, because a task cannot exist without a project.
    */
@@ -1231,7 +1221,7 @@ export class AppService {
 
   /** The child processes one run started, newest last. */
   listJobs(request: { project?: string; taskId?: string; runId?: number } = {}): JobRow[] {
-    // No silent fall-through to JaiRA's own project: a job id is a rowid in ONE database, so answering
+    // No silent fall-through to the base root: a job id is a rowid in ONE database, so answering
     // an unqualified ask with the system project's rows would show an unrelated process under an id
     // the caller took from somewhere else.
     const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
@@ -1285,7 +1275,7 @@ export class AppService {
       inputs: request.inputs,
     };
     // Which project this request's file reads are about, when the session it parked in is not it.
-    // See `ProjectSession.subjectProject`: a review runs in JaiRA's own project and reads another's.
+    // See `ProjectSession.subjectProject`: a review runs in the base root and reads another project's.
     const subject = owner?.subjectProject.get(pending.taskId);
     if (subject !== undefined) pending.subjectProject = subject;
     // A changeset gate parked by a REVIEW task is about the task whose worktree it reviews — the
@@ -1343,15 +1333,15 @@ export class AppService {
   }
 
   /**
-   * JaiRA's OWN runs — the syncs, and whatever else it comes to run for itself.
+   * The BASE root's runs — a person's shared workflows, and JaiRA's own syncs.
    *
-   * A separate read rather than a flag on {@link listTasks}, because the two answer different
-   * questions and mixing them is the pollution the system project exists to prevent. Empty rather
-   * than an error when JaiRA's project could not be opened: nothing has run, which is an answer.
+   * A separate read rather than a flag on {@link listTasks} because it names no project: a window
+   * with nothing open still has these. Empty rather than an error when the root could not be opened:
+   * nothing has run, which is an answer.
    */
   listSystemTasks(): TaskSummary[] {
-    const system = this.sessionOf(SYSTEM_SESSION);
-    return system === undefined ? [] : taskSummaries(system.project);
+    const shared = this.sessionOf(SHARED_SESSION);
+    return shared === undefined ? [] : taskSummaries(shared.project);
   }
 
   /**
@@ -1607,7 +1597,7 @@ export class AppService {
     }
     // Scoped to the RUN that wrote it: a session id is instance-scoped and instance ids restart on
     // every run, so an unscoped read would find whichever run happened to write that id last.
-    const store = new SqliteSessionStore(session.project.db, { taskId: request.taskId, runId: row.runId });
+    const store = sessionStoreFor(session.project, { taskId: request.taskId, runId: row.runId });
     const record = store.at(row.sessionId, row.seq);
     if (record === undefined) {
       return { ...base, empty: "this run was recorded before conversations were kept" };
@@ -1668,7 +1658,7 @@ export class AppService {
   }
 
   taskDetail(taskId: string, project?: string): TaskDetail {
-    // Scoped, because the Tasks view now shows JaiRA's own runs beside the project's and selecting one
+    // Scoped, because the Tasks view now shows the root's runs beside the project's and selecting one
     // must read the database it actually lives in.
     return taskDetailView(this.session(project).project, taskId, this.viewOptions());
   }
@@ -1689,7 +1679,6 @@ export class AppService {
     // Materialized first, so the shared root is in the answer before anything has run in it — the
     // same reason `listProjects` does it.
     this.sharedSession();
-    this.systemSession();
     const wanted = request?.workflows === undefined ? undefined : new Set(request.workflows);
     const out: ProjectTask[] = [];
     for (const session of this.sessions.values()) {
@@ -1702,7 +1691,7 @@ export class AppService {
   }
 
   /**
-   * Every project this window can draw a board for — the user's, and JaiRA's own.
+   * Every project this window can draw a board for — the user's, and the base root.
    *
    * One group per project rather than one merged board: a board is per workflow ROOT, and columns
    * from two projects side by side would be columns of different things.
@@ -1712,7 +1701,6 @@ export class AppService {
     // used it. A window that shows JaiRA's board only after a sync has run is a window that cannot be
     // used to watch the first one.
     this.sharedSession();
-    this.systemSession();
     const out: ProjectSummary[] = [];
     for (const session of this.sessions.values()) {
       const tasks = taskSummaries(session.project);
@@ -1741,7 +1729,7 @@ export class AppService {
         // the whole of it: `~/.jaira` is what a person calls that place and what every document here
         // calls it, where the bare basename `.jaira` names nothing and collides with any project that
         // happens to have one. A root pointed elsewhere still prints its own directory.
-        label: session.kind === "system" ? "JaiRA" : session.kind === "shared" ? shortRoot(session.dir) : basename(session.dir),
+        label: session.kind === "shared" ? shortRoot(session.dir) : basename(session.dir),
         kind: session.kind,
         tasks: tasks.length,
         running: running.size,
@@ -1754,9 +1742,9 @@ export class AppService {
           .map((t) => ({ taskId: t.taskId, status: t.status, updatedAt: t.updatedAt })),
       });
     }
-    // The user's work first, then the shared library, then JaiRA's own — outward from what you are
-    // working on to the background it runs against.
-    const rank = (kind: ProjectSummary["kind"]): number => (kind === "user" ? 0 : kind === "shared" ? 1 : 2);
+    // The user's work first, then the shared root — outward from what you are working on to the
+    // background it runs against.
+    const rank = (kind: ProjectSummary["kind"]): number => (kind === "user" ? 0 : 1);
     return out.sort((a, b) => (rank(a.kind) === rank(b.kind) ? a.label.localeCompare(b.label) : rank(a.kind) - rank(b.kind)));
   }
 
@@ -1813,7 +1801,7 @@ export class AppService {
    * Create a task, in the focused project or in one it names.
    *
    * `request.project` exists for the shared root. A state under `~/.jaira/workflows` belongs to the
-   * machine rather than to a checkout, so its runs are recorded in JaiRA's own project — the same
+   * machine rather than to a checkout, so its runs are recorded in the root's own project — the same
    * routing a base-layer description sync already uses, and the reason the Files view can offer Run
    * on a shared workflow with no user project open at all.
    */
@@ -2008,8 +1996,12 @@ export class AppService {
       // hub, like every other component — which is the §4.1 guarantee.
       registerChangesetFunctions(registry);
     }
+    // The workflow's OWN TypeScript functions (SPEC §7.5), merged rather than wrapped: a resolved
+    // symbol is already a registry entry carrying its capabilities, signature and error contract.
+    const userFns = userModules();
+    if (userFns !== undefined) registerUserFunctions(registry, userFns.userFunctions);
 
-    const started = beginTaskRun(project, taskId, {
+    const started = await beginTaskRun(project, taskId, {
       functions: registry.functions,
       ...(opts.bundle !== undefined ? { bundle: opts.bundle } : {}),
     });
@@ -2092,6 +2084,13 @@ export class AppService {
       scripted?.registerWildcard(registry, name);
     }
 
+    // `on_user_event` is registered for EVERY run, not only for a bundle that names it. Unlike the
+    // functions above it is not a state's operation, so it appears nowhere in `functionNamesOf` — it
+    // is called from inside a transition guard, which is a binding and not a name this could walk to.
+    // Registering it unconditionally costs a map entry and is what makes a guard that calls it work
+    // in any workflow rather than in the ones a walker happened to recognise.
+    open.userEvents.register(registry, taskId);
+
     const fakeRules = opts.fake !== undefined ? parseFakeRules(opts.fake) : undefined;
     // The scope floor, compiled into a delegated agent's OWN permission rules and folded over every
     // prompt call. This is the run path's half of the rule compiler: the chat path emits the same
@@ -2128,7 +2127,7 @@ export class AppService {
     // throttle, so a crash loses at most one flush window of finished turns. The store is scoped
     // exactly as the run's own record store is — same task, same run — which is what makes the
     // position key match the row `withRecord` claimed.
-    const liveStore = new SqliteSessionStore(project.db, { taskId, runId: started.runId });
+    const liveStore = sessionStoreFor(project, { taskId, runId: started.runId });
     const liveFlush = new LiveTurnFlusher(() => {
       const snap = open.liveTurns.snapshot(taskId);
       if (snap === null || snap.sessionId === undefined || snap.seq === undefined) return;
@@ -2169,7 +2168,7 @@ export class AppService {
     // The SUMMARIZER gets the raw executor: it runs out of band, and its deltas are not a state
     // speaking — narrating a compaction as though it were the answer would be a lie in the viewer.
     const { modes: _summaryModes, ...session } = sessionServicesFor(started.bundle, promptSummarizer(prompt), {
-      inner: new SqliteSessionStore(project.db, { taskId, runId: started.runId }),
+      inner: sessionStoreFor(project, { taskId, runId: started.runId }),
     });
     // A delegated agent's record is its stream, and its stream is not its whole story: the agent's
     // own session file holds the context injections, `toolUseResult` records and line threading that
@@ -2230,6 +2229,9 @@ export class AppService {
 
     void (async () => {
       try {
+        // Compile the workflow's own TypeScript before anything calls it — the step SPEC §7.5.5
+        // puts on the far side of the approval gate `beginTaskRun`'s freeze already ran.
+        if (userFns !== undefined) await prepareUserFunctions(userFns.userFunctions);
         const result = await executeWorkflow({
           bundle: started.bundle,
           inputs: started.meta.inputs ?? {},
@@ -2491,7 +2493,7 @@ export class AppService {
     if (!Number.isInteger(seq)) return undefined;
     // Scoped to the RUN that wrote it, exactly as sessionView is: a session id is instance-scoped
     // and instance ids restart every run, so an unscoped read finds whichever run wrote that id last.
-    const store = new SqliteSessionStore(open.project.db, { taskId, runId });
+    const store = sessionStoreFor(open.project, { taskId, runId });
     // The position is where the NEXT turn goes, so the last one written is the seq below it.
     const record = store.at(id, seq - 1) ?? store.at(id, seq);
     // `record.value` is the ENVELOPE; the `LlmOutput` is its own `value` inside it — the same nesting
@@ -2730,7 +2732,7 @@ export class AppService {
     // The WIRED executor, not a bare one. Summarizing through `buildPromptExecutor()` with no options
     // is a router with no tree, no routes and no keys, so a conversation in `summary` mode would
     // compact through something that cannot reach a provider.
-    const liveStore = new SqliteSessionStore(project.db, { taskId: request.taskId, runId: context.runId });
+    const liveStore = sessionStoreFor(project, { taskId: request.taskId, runId: context.runId });
     const stores = sessionServicesFor(context.bundle, promptSummarizer(prompt), { inner: liveStore });
     // The same capture `startRun` wires: a chat turn is a real delegated call, and its record would
     // otherwise be the one kind missing the agent's own session lines.
@@ -3152,7 +3154,7 @@ export class AppService {
         // it if this run's records are what it names. Not checked against the current session id —
         // every edit forks a new branch, so turns before an earlier edit legitimately carry the id
         // the conversation had then.
-        const store = new SqliteSessionStore(project.db, { taskId, runId: run.id });
+        const store = sessionStoreFor(project, { taskId, runId: run.id });
         const seq = Number(branchAt.slice(branchAt.lastIndexOf("@") + 1));
         if (!Number.isInteger(seq) || store.at(sessionOf(branchAt), seq) === undefined) {
           throw new NoConversationHere(`'${branchAt}' is not a message in this conversation`);
@@ -3218,7 +3220,7 @@ export class AppService {
       if (e instanceof NoConversationHere) return null;
       throw e;
     }
-    const store = new SqliteSessionStore(project.db, { taskId: request.taskId, runId: context.runId });
+    const store = sessionStoreFor(project, { taskId: request.taskId, runId: context.runId });
     const rows = store.transcript(context.position);
 
     const turns: SessionTurn[] = [];
@@ -3487,6 +3489,30 @@ export class AppService {
   }
 
   /**
+   * Transitions waiting on a gesture, across every open project — what makes a card draggable.
+   *
+   * Every session's, not the focused one's: a board can be looking at any project, and a wait that
+   * did not travel with the list would be a card that silently refused to be picked up.
+   */
+  pendingUserEvents(): PendingUserEvent[] {
+    return [...this.sessions.entries()].flatMap(([key, s]) =>
+      s.userEvents.list().map((request) => ({ ...request, project: this.refOf(key) })),
+    );
+  }
+
+  /**
+   * The gesture happened.
+   *
+   * `delivered: false` rather than a throw for an id nobody is holding, because that is a race and not
+   * a mistake: a card can be dropped a moment after its run moved on, and the honest answer is that
+   * there was nothing there to tell. Routed by OWNER, exactly as the other three channels are.
+   */
+  deliverUserEvent(requestId: string): { requestId: string; delivered: boolean } {
+    const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
+    return { requestId, delivered: owner?.userEvents.deliver(requestId) ?? false };
+  }
+
+  /**
    * The live turn a task is streaming right now — everything `session:turn` has carried for the
    * call in flight, re-readable by a viewer that navigated away and back. `null` ⇒ nothing is
    * streaming, which after the record lands is the ordinary answer.
@@ -3525,7 +3551,7 @@ export class AppService {
 
   /**
    * User preferences (theme). Readable with NO project open — they belong to the person, not to a
-   * checkout, which is why they live in the shared root rather than in `.jaira/config.json`.
+   * checkout, which is why they live in the shared root rather than in `.jaira/settings.json`.
    */
   readSettings(): JairaSettings {
     return readSettingsFile(this.baseDir);
@@ -3541,7 +3567,7 @@ export class AppService {
    */
   writeSettings(patch: Partial<JairaSettings>): JairaSettings {
     const next: JairaSettings = { ...this.readSettings(), ...patch };
-    const file = jairaBasePaths(this.baseDir).settingsFile;
+    const file = jairaBasePaths(this.baseDir).userSettingsFile;
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, "utf8");
     return next;
@@ -3558,8 +3584,8 @@ export class AppService {
    */
   readConfig(project?: string): ConfigView {
     const base = jairaBasePaths(this.baseDir);
-    const projectFile = this.sessionOf(project)?.project.paths.configFile;
-    const baseDoc = readJsonIfPresent(base.configFile);
+    const projectFile = this.sessionOf(project)?.project.paths.settingsFile;
+    const baseDoc = readJsonIfPresent(base.settingsFile);
     const projectDoc = projectFile !== undefined ? readJsonIfPresent(projectFile) : null;
     return {
       base: baseDoc,
@@ -3567,21 +3593,21 @@ export class AppService {
       // Parsed, so the UI shows defaults filled in rather than the sparse document — "what will
       // actually happen" is the question this pane exists to answer.
       //
-      // `?? {}` is load-bearing: with NEITHER layer holding a `config.json` the merge is undefined,
+      // `?? {}` is load-bearing: with NEITHER layer holding a `settings.json` the merge is undefined,
       // and parsing that threw "config must be a JSON object" — so the one state where a person has
       // configured nothing yet was the state where the settings screen could not be read at all.
       // Two absent layers mean the built-in defaults, which is what an empty document parses to.
       effective: parseConfig(
         mergeConfigDocuments(baseDoc ?? undefined, projectDoc ?? undefined) ?? {},
       ) as unknown as JsonValue,
-      baseFile: base.configFile,
+      baseFile: base.settingsFile,
       projectFile: projectFile ?? "",
       baseDir: base.baseDir,
     };
   }
 
   /**
-   * Replace one layer's `config.json`.
+   * Replace one layer's `settings.json`.
    *
    * Validated BEFORE writing, and validated as it will actually be read — the project layer is
    * checked merged over the base, because a project document that is only valid on its own would
@@ -3609,9 +3635,9 @@ export class AppService {
     let file: string;
     if (request.layer === "base") {
       initBase(base.baseDir);
-      file = base.configFile;
+      file = base.settingsFile;
     } else {
-      file = this.p(request.project).paths.configFile;
+      file = this.p(request.project).paths.settingsFile;
     }
     writeFileSync(file, `${JSON.stringify(request.config, null, 2)}\n`, "utf8");
     // The open project holds a PARSED copy, and everything downstream of this write reads that copy
@@ -3806,10 +3832,14 @@ export class AppService {
       else keychain.set(request.name, request.value);
       return { name: request.name, target: request.target };
     }
+    // The project's `.jaira/.env.local`, which is the FIRST project link of the chain (DESIGN §8.1)
+    // and the one `jaira init` gitignores. It used to be the repository root's, which still works —
+    // it is link four — but writing a secret to a file JaiRA does not ignore, when there is one it
+    // does, is the wrong default to hand somebody who just typed a key into a form.
     const file =
       request.target === "base-env-local"
         ? join(jairaBasePaths(this.baseDir).baseDir, ".env.local")
-        : join(this.requireProjectDir(request.project), ".env.local");
+        : join(this.requireProjectDir(request.project), JAIRA_DIR_NAME, ".env.local");
     writeEnvEntry(file, request.name, request.value);
     return { name: request.name, target: request.target };
   }
@@ -3997,7 +4027,7 @@ export class AppService {
    * Read any file under a layer root as text.
    *
    * The path-addressed generalisation of {@link readWorkflow}, and the channel the Files view opens
-   * everything through — a prompt, a skill's markdown, a state file, `config.json`. Containment is
+   * everything through — a prompt, a skill's markdown, a state file, `settings.json`. Containment is
    * {@link layerFile}'s, the same check the write surface rests on, so a `path` from the renderer
    * cannot reach outside the root it names.
    *
@@ -4249,7 +4279,7 @@ export class AppService {
       if (source.table !== "operation_records") {
         throw new Error(`'${uri}' addresses table '${source.table}' — only operation_records is addressable`);
       }
-      const store = new SqliteSessionStore(project.db, {
+      const store = sessionStoreFor(project, {
         ...(request.taskId !== undefined ? { taskId: request.taskId } : {}),
         ...(request.runId !== undefined ? { runId: request.runId } : {}),
       });
@@ -4607,15 +4637,15 @@ export class AppService {
     const config = target?.project.config ?? this.effectiveConfig();
     const secrets = this.secretResolver(target);
 
-    // WHERE THE RUN IS RECORDED. JaiRA's own project, always — so a sync works with no user project
-    // open, and never appears on a board somebody else owns. Without it there is nowhere to journal,
-    // and the run falls back to what it did before it was a task at all.
-    const system = this.sessionOf(SYSTEM_SESSION);
+    // WHERE THE RUN IS RECORDED. The base root, always — so a sync works with no user project open,
+    // and never appears on a board somebody else owns. Without it there is nowhere to journal, and
+    // the run falls back to what it did before it was a task at all.
+    const system = this.sessionOf(SHARED_SESSION);
     if (system === undefined) {
       // Refused rather than run unrecorded. An unjournaled sync is what this used to be, and its
       // failures were unreadable — running one anyway would quietly restore that, and the person
       // would have no way to tell which kind of sync they had just watched fail.
-      throw new Error(`JaiRA's own project could not be opened, so a sync cannot be recorded: ${this.roleError.system}`);
+      throw new Error(`the shared root could not be opened, so a sync cannot be recorded: ${this.roleError.shared}`);
     }
 
     this.log({
@@ -4818,11 +4848,11 @@ export class AppService {
       throw new Error(`the worktree matches ${request.base ?? "HEAD"} — there is nothing to review`);
     }
 
-    // Recorded in JaiRA's own project, like a sync — and refused rather than run unrecorded, for
-    // the same reason (§5.3: the record is what pins the changeset once the worktree moves on).
-    const system = this.sessionOf(SYSTEM_SESSION);
+    // Recorded in the base root, like a sync — and refused rather than run unrecorded, for the
+    // same reason (§5.3: the record is what pins the changeset once the worktree moves on).
+    const system = this.sessionOf(SHARED_SESSION);
     if (system === undefined) {
-      throw new Error(`JaiRA's own project could not be opened, so a review cannot be recorded: ${this.roleError.system}`);
+      throw new Error(`the shared root could not be opened, so a review cannot be recorded: ${this.roleError.shared}`);
     }
     const meta = session.project.tasks.tryRead(request.taskId);
     const rootId = request.loop === true ? CHANGESET_REVIEW_LOOP_ID : CHANGESET_REVIEW_ID;
@@ -4884,9 +4914,9 @@ export class AppService {
     if (changeset.changes.length === 0) throw new Error("the proposal has no changes to review");
     const root = request.layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject(request.project).paths.jairaDir;
 
-    const system = this.sessionOf(SYSTEM_SESSION);
+    const system = this.sessionOf(SHARED_SESSION);
     if (system === undefined) {
-      throw new Error(`JaiRA's own project could not be opened, so a review cannot be recorded: ${this.roleError.system}`);
+      throw new Error(`the shared root could not be opened, so a review cannot be recorded: ${this.roleError.shared}`);
     }
     // The description the proposal exists to satisfy, for the respond rounds. Read from disk: the
     // draft the sync itself read is the renderer's, and by the time a comment comes back the disk
@@ -4959,7 +4989,7 @@ export class AppService {
     // time per holder, so "the one running" is unambiguous without being told.
     const running = this.syncHolders().filter((h) => h.syncTask !== undefined);
     if (running.length === 0) return { canceled: false };
-    const system = this.sessionOf(SYSTEM_SESSION);
+    const system = this.sessionOf(SHARED_SESSION);
     // Cancelled as the TASK it is, so the row settles as `canceled` and the claim is released —
     // rather than aborting the work and leaving the record saying it is still going.
     for (const holder of running) if (system !== undefined) this.cancelTaskIn(system, holder.syncTask!);
@@ -5121,7 +5151,7 @@ export class AppService {
    * memory, exactly as it was before it had a database.
    */
   private syncHolder(layer: WorkflowLayer): SyncHolder {
-    const session = layer === "base" ? this.sessionOf(SYSTEM_SESSION) : this.sessionOf();
+    const session = layer === "base" ? this.sessionOf(SHARED_SESSION) : this.sessionOf();
     return session ?? this.detachedSync;
   }
 
@@ -5443,7 +5473,7 @@ export class AppService {
   private effectiveConfig(): JairaConfigOf {
     const open = this.sessionOf();
     if (open) return open.project.config;
-    const doc = readJsonIfPresent(jairaBasePaths(this.baseDir).configFile);
+    const doc = readJsonIfPresent(jairaBasePaths(this.baseDir).settingsFile);
     return parseConfig(doc ?? {});
   }
 
@@ -5517,7 +5547,7 @@ function settingsBaseDir(): string | undefined {
 }
 
 function readSettingsFile(baseDir: string): JairaSettings {
-  const file = jairaBasePaths(baseDir).settingsFile;
+  const file = jairaBasePaths(baseDir).userSettingsFile;
   if (!existsSync(file)) return defaultSettings();
   try {
     return parseSettings(JSON.parse(readFileSync(file, "utf8")));

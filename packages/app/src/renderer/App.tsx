@@ -38,6 +38,7 @@ import type {
   WorkflowLayer,
 } from "@jaira/shared/browser";
 import { Board, lanesOf } from "./board";
+import { dragOffersOf } from "./taskDrag";
 import { ChatListPanel, ChatView, chatProjectOf, conversationsOf, type ChatSurface } from "./chatPane";
 import { isChatWorkflow } from "./chatWorkflow";
 import { ApprovalDialog, InteractionDialog, QuestionDialog } from "./components";
@@ -163,7 +164,7 @@ function PinnedPane({ pinned, onClose }: { pinned: PinnedValue; onClose: () => v
  * The bar above every settings section: which layer is being edited, and when the checks last ran.
  *
  * One component rather than a picker in each pane, and it is where the no-project rule lives. With
- * no project open there is no `.jaira/config.json` to write, so the switch is not merely disabled —
+ * no project open there is no `.jaira/settings.json` to write, so the switch is not merely disabled —
  * it is ABSENT, along with every mention of "this project". A control offering a choice that cannot
  * be made is worse than no control: the old screen showed the switch, let it be clicked, and then
  * explained in a notice that nothing could be saved.
@@ -410,7 +411,7 @@ export default function App(): JSX.Element {
   /**
    * The remembered layout — every pane size, fold and collapsed branch in the window.
    *
-   * It reads out of `settings.json` (see `uiState.ts`) rather than out of `useState`, which is the
+   * It reads out of `user-settings.json` (see `uiState.ts`) rather than out of `useState`, which is the
    * one thing that makes a dragged divider or a folded branch outlive the window. Held per CONTROL
    * rather than per view: the layout of Files has nothing to say about the layout of Tasks, and one
    * tree width dragged narrow should not follow you into a board.
@@ -482,13 +483,13 @@ export default function App(): JSX.Element {
   /**
    * The projects the SIDEBAR lists, and the colour each one wears.
    *
-   * JaiRA's own project is not among them. It runs its workflows out of the shared root, so one
+   * JaiRA's own runs are not a row of their own. They happen against the shared root, so the one
    * `~/.jaira` row is the whole of "the machine's own" as far as somewhere to stand is concerned —
-   * two rows for one place is two answers to "where am I". Its RUNS are still everywhere they were:
-   * the root's Tasks board sections by project and draws one for it, which is where a description
-   * sync belongs — filed under JaiRA rather than mixed into a checkout.
+   * two rows for one place is two answers to "where am I". Those runs are still everywhere they
+   * were: the root's Tasks board draws them under it, which is where a description sync belongs —
+   * filed under JaiRA rather than mixed into a checkout.
    */
-  const shownProjects = useMemo(() => state.projects.filter((p) => p.kind !== "system"), [state.projects]);
+  const shownProjects = state.projects;
   /** Directory → hue, for the surfaces that draw a project they did not enumerate. */
   const projectHues = useMemo(
     () => Object.fromEntries(state.projects.map((p, i) => [p.project, hueOf(p.kind, i)])),
@@ -1540,6 +1541,12 @@ export default function App(): JSX.Element {
                             )
                           }
                           onTaskMenu={(card, x, y) => openTaskMenu(p.project, card, x, y)}
+                          // What the running workflows are WAITING for somebody to do
+                          // (`on_user_event`, WORKFLOWS.md §7.4). Computed per board, because a wait
+                          // is an offer only where both ends of it are on screen: the card, and the
+                          // column its rule names.
+                          dragOffers={dragOffersOf(state.boards[p.project]!, state.userEvents)}
+                          onTaskDrop={(requestId) => void actions.deliverUserEvent(requestId)}
                         />
                       ) : (
                         <p className="empty">No board here yet.</p>

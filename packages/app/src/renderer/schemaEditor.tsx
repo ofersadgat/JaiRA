@@ -97,7 +97,7 @@ export interface SchemaJsonEditorProps {
   /**
    * Word wrap, and where the preference is kept.
    *
-   * Controlled when both are supplied — the app stores it in `settings.json`, so it survives a
+   * Controlled when both are supplied — the app stores it in `user-settings.json`, so it survives a
    * restart — and falls back to local state otherwise, which keeps the component usable anywhere.
    */
   wrap?: boolean;

@@ -18,7 +18,7 @@ const vars: DestinationVars = {
   worktree: "/work/repo",
   project: "/work/project",
   jaira: "/work/project/.jaira",
-  artifactDir: "jaira-artifacts",
+  artifactDir: "artifacts",
   taskId: "t-1",
   runId: 4,
   instanceId: 7,
@@ -60,8 +60,10 @@ describe("schemes", () => {
 describe("aliases", () => {
   it("expands the three one-word placements", () => {
     expect(resolve("$DEFAULT", "docs/plan.md")).toMatch(/\/work\/repo\/docs\/plan\.md$/);
-    expect(resolve("$CENTRAL", "docs/plan.md")).toMatch(/repo\/jaira-artifacts\/t-1\/docs\/plan\.md$/);
-    expect(resolve("$CENTRAL_FLAT", "docs/plan.md")).toMatch(/repo\/jaira-artifacts\/t-1\/7-plan_doc\.md$/);
+    // `$CENTRAL` anchors on `$SYSTEM` — the PROJECT's generated-state directory — rather than on
+    // the worktree, so what a run produced outlives the worktree it ran in.
+    expect(resolve("$CENTRAL", "docs/plan.md")).toMatch(/\.jaira\/system\/artifacts\/t-1\/docs\/plan\.md$/);
+    expect(resolve("$CENTRAL_FLAT", "docs/plan.md")).toMatch(/\.jaira\/system\/artifacts\/t-1\/7-plan_doc\.md$/);
   });
 
   it("lets an alias be extended rather than requiring a new mode", () => {
@@ -110,7 +112,7 @@ describe("containment", () => {
       resolve("$CENTRAL", "../../src/index.ts");
     } catch (e) {
       // The root reported is the task's artifact directory, not the repo.
-      expect((e as Error).message.replace(/\\/g, "/")).toMatch(/root '.*jaira-artifacts\/t-1'/);
+      expect((e as Error).message.replace(/\\/g, "/")).toMatch(/root '.*system\/artifacts\/t-1'/);
     }
   });
 
@@ -118,7 +120,7 @@ describe("containment", () => {
     // `$CENTRAL_FLAT` ends `$INSTANCE_ID-$SLOT.$EXT`; cutting the prefix at `$EXT`
     // rather than at the preceding `/` would produce the non-directory root
     // `…/7-plan_doc.` and reject every path.
-    expect(resolve("$CENTRAL_FLAT", "docs/plan.md")).toMatch(/jaira-artifacts\/t-1\/7-plan_doc\.md$/);
+    expect(resolve("$CENTRAL_FLAT", "docs/plan.md")).toMatch(/artifacts\/t-1\/7-plan_doc\.md$/);
   });
 
   it("refuses a CONFIG value that climbs out of the anchor", () => {
@@ -152,11 +154,14 @@ describe("substitution", () => {
   });
 
   it("resolves in whatever path view it is handed (the WSL case)", () => {
-    // Substitution happens here, not at parse time, because $WORKTREE is not one
-    // string: the distro sees /mnt/c/… where the host sees C:\….
-    const distro = resolve("$CENTRAL", "plan.md", { worktree: "/mnt/c/work/repo" });
-    expect(distro).toMatch(/repo\/jaira-artifacts\/t-1\/plan\.md$/);
+    // Substitution happens here, not at parse time, because an anchor is not one string: the distro
+    // sees /mnt/c/… where the host sees C:\…. `$SYSTEM` is derived from `$JAIRA` by string for the
+    // same reason — joining a distro path with a Windows separator would corrupt it.
+    const distro = resolve("$CENTRAL", "plan.md", { jaira: "/mnt/c/work/project/.jaira" });
+    expect(distro).toMatch(/\.jaira\/system\/artifacts\/t-1\/plan\.md$/);
     expect(distro.startsWith("/mnt/c")).toBe(true);
+
+    expect(resolve("$DEFAULT", "plan.md", { worktree: "/mnt/c/work/repo" })).toBe("/mnt/c/work/repo/plan.md");
   });
 
   it("derives $BASENAME and $EXT from the logical path", () => {

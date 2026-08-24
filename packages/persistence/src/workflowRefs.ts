@@ -15,48 +15,34 @@
  * same trust boundary an absolute artifact destination sits on. Nothing an agent produces reaches
  * this path.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { LoadBundleOptions, Vfs } from "@declarative-ai/hw";
 import { stateFilePath } from "@declarative-ai/hw";
 import { parseJsonText, workflowSearchPath, type JairaPaths } from "@jaira/shared";
+import { hostCalleeSignatures } from "@jaira/runtime";
+
+import { userModules } from "./userModules";
+import { nodeVfs } from "./vfs";
 
 /**
- * The filesystem references resolve against (REFERENCES.md §1.1).
+ * The callees JaiRA ships — a bare name every workflow can call without authoring a file.
  *
- * Listings are cached for the life of one load: resolution asks for the same directory once per
- * reference into it, and a workflow with a shared type library asks a lot. Caching also makes one
- * load SELF-CONSISTENT — a file appearing mid-load cannot change what an earlier reference meant.
+ * DERIVED from the registration the run itself uses (`hostCalleeSignatures`), not restated here.
+ * That is the whole point of SPEC §7.5's unification: a registry entry declares its own slots, so
+ * the thing the loader binds arguments against and the thing the engine dispatches are one object.
+ * This used to be a hand-written map of operation DOCUMENTS, and the drift it allowed was not
+ * hypothetical — the option carrying it was removed upstream and every `on_user_event` guard in the
+ * tree silently stopped resolving, with nothing but a typecheck to say so.
  *
- * Entries are matched case-sensitively even on Windows, so a workflow resolves identically wherever
- * it runs rather than inheriting the host's rules.
+ * Computed once: it is the same answer for every project, and building a throwaway registry per
+ * `loadBundle` call would be work with no question behind it.
  */
-export function nodeVfs(): Vfs {
-  const listings = new Map<string, readonly string[]>();
-  return {
-    list(dir) {
-      const cached = listings.get(dir);
-      if (cached !== undefined) return cached;
-      let names: readonly string[];
-      try {
-        names = readdirSync(dir, { withFileTypes: true })
-          .filter((e) => e.isFile())
-          .map((e) => e.name);
-      } catch {
-        names = [];
-      }
-      listings.set(dir, names);
-      return names;
-    },
-    read(path) {
-      try {
-        return readFileSync(path, "utf8");
-      } catch {
-        return undefined;
-      }
-    },
-  };
-}
+const HOST_FUNCTIONS = hostCalleeSignatures();
+
+// `nodeVfs` moved to ./vfs so `userModules` can share it without a cycle; re-exported
+// because it is part of this module's published surface.
+export { nodeVfs } from "./vfs";
 
 export interface WorkflowRefOptions {
   /** Where bare references hang off. Defaults to the project's `.jaira/workflows`. */
@@ -107,9 +93,32 @@ export function workflowLoadOptions(paths: JairaPaths, options: WorkflowRefOptio
     // Shadowing is this project's override mechanism, so it is not news. Without this the lint
     // surface would carry one warning per overridden state, which is how a warning stops being read.
     shadowing: "override",
+    // The operations JaiRA itself supplies, as a CONTRIBUTOR on the search path (SPEC §7.1) —
+    // consulted where the path finds nothing, so `on_user_event('task_drag')` resolves in any
+    // workflow without a file anybody had to create, and a project that puts its own
+    // `functions/on_user_event.json` on the path still wins.
+    functions: HOST_FUNCTIONS,
+    // js/ts function modules (SPEC §7.5). Both halves come from the pair this process built at
+    // startup, and BOTH are omitted when it did not: a loader that can find a symbol and cannot type
+    // it would report "not an operation document" about a file that is perfectly good, so the two
+    // travel together or not at all. Absent ⇒ no module contributes anything, which is exactly the
+    // behavior that predates the feature.
+    ...userModuleOptions(),
     ...(options.onWarn !== undefined ? { onWarn: options.onWarn } : {}),
     ...(options.onReferencedFile !== undefined ? { onReferencedFile: options.onReferencedFile } : {}),
   };
+}
+
+/**
+ * The module half of the load options, from the process-wide pair.
+ *
+ * Read here rather than passed in by every caller because there are four call sites and none of them
+ * has an opinion: whether modules resolve is a property of the PROCESS having built a compiler, not
+ * of which project is being loaded.
+ */
+function userModuleOptions(): Pick<LoadBundleOptions, "symbols" | "userFunctions"> {
+  const modules = userModules();
+  return modules === undefined ? {} : { symbols: modules.symbols, userFunctions: modules.userFunctions };
 }
 
 /**

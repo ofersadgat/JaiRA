@@ -19,6 +19,7 @@
  *    string: a WSL project's agent sees `/mnt/c/…` where the host sees `C:\…`.
  */
 import { isAbsolute, join, normalize, relative as relPath, resolve as resolvePath } from "node:path";
+import { SYSTEM_DIR_NAME } from "@jaira/shared";
 
 /** The backend a destination names. */
 export type ArtifactScheme = "virtual" | "file";
@@ -30,7 +31,7 @@ export interface DestinationVars {
   project: string;
   /** `<project>/.jaira`. */
   jaira: string;
-  /** `config.artifacts.dir`. */
+  /** `config.artifacts.dir`, a name relative to `$SYSTEM`. */
   artifactDir: string;
   taskId: string;
   runId?: number | string;
@@ -58,8 +59,8 @@ export interface Destination {
  */
 export const DESTINATION_ALIASES: Readonly<Record<string, string>> = {
   DEFAULT: "$WORKTREE/$RELPATH",
-  CENTRAL: "$WORKTREE/$ARTIFACT_DIR/$TASK_ID/$RELPATH",
-  CENTRAL_FLAT: "$WORKTREE/$ARTIFACT_DIR/$TASK_ID/$INSTANCE_ID-$SLOT.$EXT",
+  CENTRAL: "$SYSTEM/$ARTIFACT_DIR/$TASK_ID/$RELPATH",
+  CENTRAL_FLAT: "$SYSTEM/$ARTIFACT_DIR/$TASK_ID/$INSTANCE_ID-$SLOT.$EXT",
 };
 
 /** Base variables, resolved from {@link DestinationVars} plus the logical path. */
@@ -67,6 +68,7 @@ const BASE_VARIABLES = [
   "WORKTREE",
   "PROJECT",
   "JAIRA",
+  "SYSTEM",
   "ARTIFACT_DIR",
   "TASK_ID",
   "RUN_ID",
@@ -79,7 +81,7 @@ const BASE_VARIABLES = [
 ] as const;
 
 /** Variables that anchor a template to a root; one must lead, or the path is workspace-relative. */
-const ANCHORS = new Set(["WORKTREE", "PROJECT", "JAIRA"]);
+const ANCHORS = new Set(["WORKTREE", "PROJECT", "JAIRA", "SYSTEM"]);
 
 /**
  * Variables derived from the producer's own path — the agent-controlled part.
@@ -195,6 +197,11 @@ export function resolveDestination(
     WORKTREE: vars.worktree,
     PROJECT: vars.project,
     JAIRA: vars.jaira,
+    // Derived rather than passed, so a caller cannot spell the generated-state directory a second
+    // way. A forward slash, not `join`: `vars.jaira` may be the DISTRO's view of the path
+    // (`/mnt/c/...`) and joining that with a Windows separator would corrupt it — the same reason
+    // substitution happens here rather than at parse time.
+    SYSTEM: `${vars.jaira}/${SYSTEM_DIR_NAME}`,
     ARTIFACT_DIR: vars.artifactDir,
     TASK_ID: sanitizeSegment(vars.taskId),
     RUN_ID: vars.runId !== undefined ? sanitizeSegment(String(vars.runId)) : "",

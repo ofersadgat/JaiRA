@@ -394,7 +394,7 @@ export function RenderedFileView({ doc }: FileSurfaceProps): JSX.Element {
 // --- configuration -----------------------------------------------------------
 
 /**
- * `config.json`, seen as what it actually decides.
+ * `settings.json`, seen as what it actually decides.
  *
  * The document alone cannot answer the question anyone opening it has — the shared root supplies
  * every field this file does not, so what runs is the two layers merged with the defaults filled in.

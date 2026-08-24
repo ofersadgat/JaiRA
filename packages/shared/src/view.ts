@@ -585,8 +585,8 @@ export interface ProjectSummary {
   project: string;
   /** What to call it in a group header. */
   label: string;
-  /** `shared` is the selected root as a project; `system` is JaiRA's own. See `SHARED_SESSION`. */
-  kind: "user" | "shared" | "system";
+  /** `shared` is the selected root as a project — the machine's, not a checkout. See `SHARED_SESSION`. */
+  kind: "user" | "shared";
   tasks: number;
   /** Running, INCLUDING the ones parked on a person — see {@link waiting}, which is a subset. */
   running: number;

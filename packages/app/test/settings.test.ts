@@ -8,7 +8,7 @@
  *  - **a write must not be able to escape its root.** A state id arrives from the renderer, which
  *    is the untrusted half of the IPC boundary, and `../../..` is a perfectly good relative path.
  *  - **a write must not be able to brick the project.** Configuration is validated before it is
- *    written, because an unloadable `config.json` would leave the app unable to open the project it
+ *    written, because an unloadable `settings.json` would leave the app unable to open the project it
  *    was just configured with.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -69,11 +69,11 @@ describe("user settings", () => {
   it("persists a change and reads it back", () => {
     expect(service.writeSettings({ theme: "dark" })).toMatchObject({ theme: "dark" });
     expect(service.readSettings().theme).toBe("dark");
-    expect(existsSync(join(baseDir, "settings.json"))).toBe(true);
+    expect(existsSync(join(baseDir, "user-settings.json"))).toBe(true);
   });
 
   it("falls back to defaults rather than throwing on a corrupt file", () => {
-    writeFileSync(join(baseDir, "settings.json"), "{ not json", "utf8");
+    writeFileSync(join(baseDir, "user-settings.json"), "{ not json", "utf8");
 
     // A broken preferences file must never stop the app opening.
     expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, seen: {} }, appearance: defaultAppearance() });
@@ -90,7 +90,7 @@ describe("user settings", () => {
   });
 
   it("reads a settings file written before wrapJson existed", () => {
-    writeFileSync(join(baseDir, "settings.json"), JSON.stringify({ theme: "dark" }), "utf8");
+    writeFileSync(join(baseDir, "user-settings.json"), JSON.stringify({ theme: "dark" }), "utf8");
     expect(service.readSettings()).toEqual({ theme: "dark", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, seen: {} }, appearance: defaultAppearance() });
   });
 
@@ -128,7 +128,7 @@ describe("user settings", () => {
 
   it("drops layout entries of the wrong shape rather than the whole layout", () => {
     writeFileSync(
-      join(baseDir, "settings.json"),
+      join(baseDir, "user-settings.json"),
       JSON.stringify({
         theme: "dark",
         ui: {
@@ -177,11 +177,11 @@ describe("opening and creating projects", () => {
   });
 
   it("treats init on an existing project as an open, keeping its config", async () => {
-    writeFileSync(join(dir, ".jaira", "config.json"), JSON.stringify({ memo: { enabled: true } }), "utf8");
+    writeFileSync(join(dir, ".jaira", "settings.json"), JSON.stringify({ memo: { enabled: true } }), "utf8");
 
     await service.init(dir);
 
-    expect(JSON.parse(readFileSync(join(dir, ".jaira", "config.json"), "utf8"))).toEqual({ memo: { enabled: true } });
+    expect(JSON.parse(readFileSync(join(dir, ".jaira", "settings.json"), "utf8"))).toEqual({ memo: { enabled: true } });
   });
 
   it("answers null from the directory picker when there is no dialog to show", async () => {
@@ -216,7 +216,7 @@ describe("configuration", () => {
     // The shared root is machine-global and exists before any checkout — it is what somebody
     // configures FIRST. A read that needed a project made the Settings view claim there was nothing
     // to edit, for both layers.
-    writeFileSync(join(baseDir, "config.json"), JSON.stringify({ memo: { enabled: true } }), "utf8");
+    writeFileSync(join(baseDir, "settings.json"), JSON.stringify({ memo: { enabled: true } }), "utf8");
 
     const view = service.readConfig();
 
@@ -231,7 +231,7 @@ describe("configuration", () => {
   it("writes and lists the shared layer with no project open", () => {
     service.writeConfig({ layer: "base", config: { agents: { claudeCli: { enabled: false } } } });
 
-    expect(JSON.parse(readFileSync(join(baseDir, "config.json"), "utf8"))).toMatchObject({
+    expect(JSON.parse(readFileSync(join(baseDir, "settings.json"), "utf8"))).toMatchObject({
       agents: { claudeCli: { enabled: false } },
     });
     // Executors are answered from the base document too, so the pane is not empty either.
@@ -251,8 +251,8 @@ describe("configuration with a project", () => {
   });
 
   it("reports both layers and the merged result", () => {
-    writeFileSync(join(baseDir, "config.json"), JSON.stringify({ memo: { enabled: true } }), "utf8");
-    writeFileSync(join(dir, ".jaira", "config.json"), JSON.stringify({ artifactDir: "from-project" }), "utf8");
+    writeFileSync(join(baseDir, "settings.json"), JSON.stringify({ memo: { enabled: true } }), "utf8");
+    writeFileSync(join(dir, ".jaira", "settings.json"), JSON.stringify({ artifactDir: "from-project" }), "utf8");
 
     const view = service.readConfig();
 
@@ -265,32 +265,32 @@ describe("configuration with a project", () => {
   it("writes the base layer, creating the shared root if needed", () => {
     service.writeConfig({ layer: "base", config: { memo: { enabled: true } } });
 
-    expect(JSON.parse(readFileSync(join(baseDir, "config.json"), "utf8"))).toEqual({ memo: { enabled: true } });
+    expect(JSON.parse(readFileSync(join(baseDir, "settings.json"), "utf8"))).toEqual({ memo: { enabled: true } });
   });
 
   it("writes the project layer without copying the base's values into it", () => {
-    writeFileSync(join(baseDir, "config.json"), JSON.stringify({ memo: { enabled: true } }), "utf8");
+    writeFileSync(join(baseDir, "settings.json"), JSON.stringify({ memo: { enabled: true } }), "utf8");
 
     service.writeConfig({ layer: "project", config: { artifactDir: "mine" } });
 
     // Only what was authored: saving the MERGED document would freeze today's base values into the
     // project and quietly sever it from future base changes.
-    expect(JSON.parse(readFileSync(join(dir, ".jaira", "config.json"), "utf8"))).toEqual({ artifactDir: "mine" });
+    expect(JSON.parse(readFileSync(join(dir, ".jaira", "settings.json"), "utf8"))).toEqual({ artifactDir: "mine" });
   });
 
   it("refuses an invalid document and leaves the file untouched", () => {
-    const before = readFileSync(join(dir, ".jaira", "config.json"), "utf8");
+    const before = readFileSync(join(dir, ".jaira", "settings.json"), "utf8");
 
     expect(() =>
       service.writeConfig({ layer: "project", config: { executors: { default: { prompt: { kind: "wizard" } } } } }),
     ).toThrow(/router, provider, agent/);
-    expect(readFileSync(join(dir, ".jaira", "config.json"), "utf8")).toBe(before);
+    expect(readFileSync(join(dir, ".jaira", "settings.json"), "utf8")).toBe(before);
   });
 
   it("validates the project layer AS MERGED, not on its own", () => {
     // A base that turns generic CLIs into a list and a project that adds a malformed entry: only
     // the merged document shows the problem, and the merged document is what a run reads.
-    writeFileSync(join(baseDir, "config.json"), JSON.stringify({ agents: { genericCli: [{ command: "a" }] } }), "utf8");
+    writeFileSync(join(baseDir, "settings.json"), JSON.stringify({ agents: { genericCli: [{ command: "a" }] } }), "utf8");
 
     expect(() =>
       service.writeConfig({ layer: "project", config: { agents: { genericCli: [{ command: "" }] } } }),

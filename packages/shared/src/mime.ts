@@ -17,6 +17,7 @@
  * not be built without opening every file in it, and the one case it would resolve better —
  * extensionless text — is rare enough in `.jaira/` to be worth the plain-text default instead.
  */
+import { SETTINGS_FILE_NAME } from "./settings";
 
 /** A state file the workflow editor can author: parsed, linted, written through `workflow:write`. */
 export const WORKFLOW_JSON = "application/vnd.jaira.workflow+json";
@@ -31,7 +32,7 @@ export const WORKFLOW_JSON = "application/vnd.jaira.workflow+json";
  */
 export const WORKFLOW_YAML = "application/vnd.jaira.workflow+yaml";
 
-/** A layer's `config.json`. Its viewer is the *effective* configuration, which is not a file at all. */
+/** A layer's `settings.json`. Its viewer is the *effective* configuration, which is not a file at all. */
 export const CONFIG_JSON = "application/vnd.jaira.config+json";
 
 /**
@@ -158,7 +159,7 @@ function extensionOf(name: string): string {
  * The MIME type of a path relative to a layer root.
  *
  * `relPath` is root-relative with forward slashes, which is what makes the vendor types decidable:
- * `workflows/` and a bare `config.json` are positions, not extensions, and a classifier that only
+ * `workflows/` and a bare `settings.json` are positions, not extensions, and a classifier that only
  * saw the file name would have to guess at both.
  */
 export function mimeOfPath(relPath: string, isDirectory = false): string {
@@ -167,7 +168,7 @@ export function mimeOfPath(relPath: string, isDirectory = false): string {
   const name = relPath.slice(relPath.lastIndexOf("/") + 1);
   const ext = extensionOf(name);
 
-  if (relPath === "config.json") return CONFIG_JSON;
+  if (relPath === SETTINGS_FILE_NAME) return CONFIG_JSON;
   if (isWorkflowDescription(relPath)) return WORKFLOW_DESCRIPTION;
   if (relPath.startsWith("workflows/")) {
     if (ext === "json") return WORKFLOW_JSON;

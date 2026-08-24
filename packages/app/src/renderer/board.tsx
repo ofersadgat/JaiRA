@@ -11,9 +11,10 @@
  * part in it: a guard that jumps backwards is control flow, and letting it reorder the columns would
  * turn the board's shape into something you cannot read left to right.
  */
-import type { JSX, MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import { useState, type DragEvent as ReactDragEvent, type JSX, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { BoardCard, BoardView, InstanceStatus, TaskStatus } from "@jaira/shared/browser";
 import { Pill, PILL_WORD, pillKindOf } from "./pill";
+import { canDrag, requestFor, NO_DRAG_OFFERS, type DragOffers } from "./taskDrag";
 
 /**
  * The four things a card in a column can be DOING, in the order work moves through them.
@@ -167,6 +168,8 @@ export function Tile({
   onSelect,
   onDrill,
   onMenu,
+  onDragStart,
+  onDragEnd,
 }: {
   /** Colours the stripe and picks the badge glyph. Absent ⇒ neither, for a card of something with
       no state of its own to report. */
@@ -185,13 +188,25 @@ export function Tile({
   onDrill?: (() => void) | undefined;
   /** Right-click, where the card has verbs to offer. The Tasks view opens its menu here. */
   onMenu?: ((e: ReactMouseEvent) => void) | undefined;
+  /**
+   * PICKING THE CARD UP, when a waiting transition has offered the move (`on_user_event`).
+   *
+   * Present is what makes the card draggable at all — a card nothing is waiting on cannot be
+   * lifted, because there would be nowhere for it to land and no meaning in it landing there.
+   */
+  onDragStart?: ((e: ReactDragEvent) => void) | undefined;
+  onDragEnd?: (() => void) | undefined;
 }): JSX.Element {
+  const draggable = onDragStart !== undefined;
   return (
     <div
       // No `card-${status}` any more: every rule that read it was colouring the left stripe or the
       // status word, and both are the trailing pill's job now. A class nothing styles is a hook the
       // next person has to check before they can change anything.
-      className={`card${selected === true ? " card-selected is-active" : ""}`}
+      className={`card${selected === true ? " card-selected is-active" : ""}${draggable ? " card-draggable" : ""}`}
+      // Only where something is waiting for it. `draggable` on every card would offer a gesture that
+      // does nothing almost everywhere, and an affordance that usually lies is worse than none.
+      {...(draggable ? { draggable: true, onDragStart, ...(onDragEnd !== undefined ? { onDragEnd } : {}) } : {})}
       onClick={onSelect}
       onDoubleClick={onDrill}
       // A shift-click is a range-select gesture here, and the browser's own reading of it — extend
@@ -239,6 +254,7 @@ export function Column({
   empty,
   tip,
   onOpen,
+  drop,
   children,
 }: {
   name: ReactNode;
@@ -250,10 +266,42 @@ export function Column({
   tip?: string;
   /** Walking into the column itself, where that means anything. */
   onOpen?: (() => void) | undefined;
+  /**
+   * What a card being dragged right now would mean here.
+   *
+   * `accepts` is whether THIS column is one of the targets the dragged card was offered — so a
+   * column lights up only where dropping would actually answer a waiting rule, and every other
+   * column stays inert rather than accepting a gesture it would have to discard.
+   */
+  drop?: { accepts: boolean; onDrop: () => void } | undefined;
   children?: ReactNode;
 }): JSX.Element {
+  // Whether the pointer is over THIS column, which is a different fact from whether the column would
+  // take the card: one says where the cursor is, the other what would happen if it let go.
+  const [over, setOver] = useState(false);
+  const accepts = drop?.accepts === true;
   return (
-    <section className="column" {...(onOpen !== undefined ? { onDoubleClick: onOpen } : {})} {...(tip !== undefined ? { title: tip } : {})}>
+    <section
+      className={`column${accepts ? " drop-target" : ""}${accepts && over ? " drop-over" : ""}`}
+      {...(onOpen !== undefined ? { onDoubleClick: onOpen } : {})}
+      {...(tip !== undefined ? { title: tip } : {})}
+      {...(accepts
+        ? {
+            // `preventDefault` on drag-over IS the acceptance: without it the browser refuses the
+            // drop and the card springs back, which reads as the app rejecting the move.
+            onDragOver: (e: ReactDragEvent) => {
+              e.preventDefault();
+              setOver(true);
+            },
+            onDragLeave: () => setOver(false),
+            onDrop: (e: ReactDragEvent) => {
+              e.preventDefault();
+              setOver(false);
+              drop?.onDrop();
+            },
+          }
+        : {})}
+    >
       <h4>
         {/* The order this child RUNS in, as a number and not a chip. A bordered box around a digit
             is the loudest thing in a heading whose job is to name a place, and the columns are laid
@@ -382,12 +430,17 @@ export function Card({
   onSelect,
   onDrill,
   onMenu,
+  onDragStart,
+  onDragEnd,
 }: {
   card: BoardCard;
   selected: boolean;
   onSelect: (e: ReactMouseEvent) => void;
   onDrill?: () => void;
   onMenu?: (e: ReactMouseEvent) => void;
+  /** Present only when a waiting transition has offered this card a move — see {@link Tile}. */
+  onDragStart?: (() => void) | undefined;
+  onDragEnd?: (() => void) | undefined;
 }): JSX.Element {
   // The card's own status — the one the board is actually about, which for a task inside a workflow
   // is where it is NOW rather than what the task as a whole is doing.
@@ -440,6 +493,18 @@ export function Card({
       onSelect={onSelect}
       onDrill={onDrill}
       onMenu={onMenu}
+      {...(onDragStart !== undefined
+        ? {
+            onDragStart: (e: ReactDragEvent) => {
+              // Something has to be on the transfer or Firefox refuses the drag outright; the task
+              // id is the honest payload even though the board reads its own state for the drop.
+              e.dataTransfer.setData("text/plain", card.taskId);
+              e.dataTransfer.effectAllowed = "move";
+              onDragStart();
+            },
+          }
+        : {})}
+      {...(onDragEnd !== undefined ? { onDragEnd } : {})}
     />
   );
 }
@@ -465,6 +530,8 @@ export function Board({
   onDrill,
   onOpenTask,
   onTaskMenu,
+  dragOffers = NO_DRAG_OFFERS,
+  onTaskDrop,
 }: {
   board: BoardView;
   selected: string | null;
@@ -489,7 +556,23 @@ export function Board({
   onOpenTask?: ((card: BoardCard) => void) | undefined;
   /** Right-clicking a card. The caller owns the menu — the board only says which card, and where. */
   onTaskMenu?: ((card: BoardCard, x: number, y: number) => void) | undefined;
+  /**
+   * The moves waiting transitions are offering, by task (`on_user_event`, WORKFLOWS.md §7.4).
+   *
+   * Empty by default, which is the Files view's answer and the honest one for any board that is not
+   * looking at live work: no card is draggable unless something is actually waiting for it to be.
+   */
+  dragOffers?: DragOffers;
+  /** A card was dropped on a column that was offering it a place. The caller answers the wait. */
+  onTaskDrop?: ((requestId: string, card: BoardCard) => void) | undefined;
 }): JSX.Element {
+  /**
+   * The card being dragged right now, so the columns can say which of them would take it.
+   *
+   * Held here rather than per column, because the answer is a property of the PAIR — this card, that
+   * column — and only the board sees both.
+   */
+  const [dragging, setDragging] = useState<BoardCard | null>(null);
   /** What double-clicking this card does: open the run, else follow its path one level down. */
   const drillOf = (card: BoardCard): (() => void) | undefined => {
     if (onOpenTask !== undefined) return () => onOpenTask(card);
@@ -503,6 +586,24 @@ export function Board({
   // belongs on a second row rather than off the right-hand edge. A level BELOW a root is a sequence
   // the engine advances through, and wrapping that would break the one thing the order means.
   const roots = board.level === "";
+  /**
+   * What a drop on this column would do, while a card is in the air.
+   *
+   * `undefined` when nothing is being dragged, so a column that is not part of a gesture in progress
+   * carries no drop handlers at all rather than handlers that decline.
+   */
+  const dropFor = (columnKey: string): { accepts: boolean; onDrop: () => void } | undefined => {
+    const card = dragging;
+    if (card === null || onTaskDrop === undefined) return undefined;
+    const requestId = requestFor(dragOffers, card.taskId, columnKey);
+    return {
+      accepts: requestId !== undefined,
+      onDrop: () => {
+        setDragging(null);
+        if (requestId !== undefined) onTaskDrop(requestId, card);
+      },
+    };
+  };
   return (
     <div className="board-body">
       <div className={`columns${roots ? " wrap" : ""}`}>
@@ -515,6 +616,7 @@ export function Board({
             empty="—"
             tip={`double-click to open ${column.stateId}`}
             onOpen={() => onDrill(column.stateId)}
+            {...(dropFor(column.key) !== undefined ? { drop: dropFor(column.key)! } : {})}
           >
             <Lanes
               cards={column.cards}
@@ -528,6 +630,9 @@ export function Board({
                     onSelect={(e) => onSelectTask(card.taskId, e)}
                     {...(drill !== undefined ? { onDrill: drill } : {})}
                     {...(onTaskMenu !== undefined ? { onMenu: menuHandler(card, onTaskMenu) } : {})}
+                    {...(onTaskDrop !== undefined && canDrag(dragOffers, card.taskId)
+                      ? { onDragStart: () => setDragging(card), onDragEnd: () => setDragging(null) }
+                      : {})}
                   />
                 );
               }}

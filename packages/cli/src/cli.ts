@@ -7,7 +7,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { loadBundle, validateBundle } from "@declarative-ai/hw";
+import { loadBundle, validateBundle, moduleHash as moduleHashOf } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/exec";
 import { registerCliChangesetReviewer } from "./changesetReviewer";
 import {
@@ -20,6 +20,8 @@ import {
   initProject,
   lintErrors,
   openProject,
+  prepareUserModules,
+  userModules,
   ensureWorkspace,
   gitFor,
   historySize,
@@ -74,6 +76,7 @@ import {
   enabledGenericAgents,
   registerAgentRuntimes,
   registerChangesetFunctions,
+  UserEventHub,
   registerCommandFunction,
   registerGenericAgents,
   USER_APPROVE_CHANGESET,
@@ -84,6 +87,8 @@ import {
   CHANGESET_REVIEW_LOOP_ID,
   withinWorkspace,
   registerTools,
+  registerUserFunctions,
+  prepareUserFunctions,
   samePathKey,
   ScriptedFunctions,
   sessionServicesFor,
@@ -123,6 +128,9 @@ const USAGE = `usage:
   jaira prune [--older-than <days>] [--keep-runs <n>] [--apply] [--project <dir>]
   jaira workflow list [--json] [--project <dir>]
   jaira workflow lint [--json] [--project <dir>]
+  jaira functions list [--json] [--project <dir>]
+  jaira functions approve <file>... [--project <dir>]
+  jaira functions revoke <file>... [--project <dir>]
   jaira workflow check [<description.md>] [--workflow <rootStateId>]... [--model <id>]
             [--json] [--fake <json|@file>] [--repair-turns <n>] [--project <dir>]
 `;
@@ -151,6 +159,8 @@ async function dispatch(argv: string[], io: CliIo): Promise<number> {
       return cmdBoard(rest, io);
     case "prune":
       return cmdPrune(rest, io);
+    case "functions":
+      return cmdFunctions(rest, io);
     case "workflow": {
       const [sub, ...wfRest] = rest;
       switch (sub) {
@@ -231,8 +241,17 @@ function projectDirOf(values: { project?: string }, io: CliIo): string {
   return resolve(io.cwd, values.project ?? ".");
 }
 
-function openWithRecoveryNote(dir: string, io: CliIo): Project {
+/**
+ * Open a project, and build this process's js/ts function support while we are at it.
+ *
+ * The single choke point every command goes through, which is why the module pair is built HERE
+ * rather than in `dispatch`: the project directory is parsed per command, and `prepareUserModules`
+ * needs the layer roots to know which `functions/` directories to index. Building it once per
+ * process is idempotent, so the fifteen callers cost one compiler between them.
+ */
+async function openWithRecoveryNote(dir: string, io: CliIo): Promise<Project> {
   const project = openProject(dir);
+  await prepareUserModules(project.paths, { searchPath: project.config.workflows.path });
   if (project.recovered.length > 0) {
     io.stderr(`recovered ${project.recovered.length} interrupted task(s): ${project.recovered.join(", ")}\n`);
   }
@@ -350,8 +369,24 @@ function buildRunEnvironment(
     wiring.interactions.register(registry);
     for (const name of functionNamesOf(bundle)) wiring.interactions.registerWildcard(registry, name);
   }
+  /**
+   * `on_user_event` — registered here so a guard that calls it RESOLVES, and answering `false`
+   * because nobody is watching.
+   *
+   * A hub with no `onRequest` is the unattended case, and its answer is the honest one: the gesture
+   * did not happen. Leaving it unregistered would fail the run at its first such guard with "no
+   * function is registered", which reads as a broken workflow rather than as a workflow whose
+   * optional human step nobody took.
+   */
+  new UserEventHub().register(registry);
   // The changeset application step and its status helper (CHANGESETS.md §4.2), same as the app.
   registerChangesetFunctions(registry);
+  // The workflow's OWN TypeScript functions (SPEC §7.5). Merged rather than wrapped — a resolved
+  // symbol is already a registry entry carrying its capabilities, its signature and the
+  // errors-as-data contract. Only what this bundle resolved is here, and a workflow that names no
+  // module merges nothing.
+  const modules = userModules();
+  if (modules !== undefined) registerUserFunctions(registry, modules.userFunctions);
   // The terminal reviewer (§8.4): the same registered function, answered at a CLI prompt — the hub
   // is process-local, so this needs no new channel. Only when nothing scripted it and a person is
   // actually attached; headless, an unanswerable gate should fail the state, not hang the run.
@@ -420,7 +455,7 @@ function assertCapabilities(
     throw new Error(
       `${issues.map((i) => `${i.stateId}: ${i.message}`).join("; ")}\n` +
         "  run this task in the JaiRA app, which can answer approvals, or set policy.builtins to false " +
-        "in .jaira/config.json if this workspace is disposable",
+        "in .jaira/settings.json if this workspace is disposable",
     );
   }
 }
@@ -492,6 +527,10 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
     const { registry, prompt, session, summaryModes } = buildRunEnvironment(bundle, config, wiring, undefined, projectDir);
     warnSummaryConflicts(summaryModes, io);
     assertCapabilities(registry, bundle, config);
+    // Compile the workflow's own TypeScript before anything calls it. Deliberately the LAST step
+    // before the run: `prepare()` is what turns resolved functions into runnable ones, and SPEC
+    // §7.5.5 puts that on the far side of the approval gate `beginTaskRun` already ran.
+    await prepareResolvedFunctions();
     const result = await executeWorkflow({
       bundle,
       inputs,
@@ -508,7 +547,7 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
   // machinery `task start` uses — a run row, the journal, run-scoped conversations, the job claim,
   // artifacts. "Ad-hoc" now means only that nobody had to name it first; the invariant it upholds
   // is that everything durable has a run.
-  const project = openWithRecoveryNote(projectDir, io);
+  const project = await openWithRecoveryNote(projectDir, io);
   try {
     // Validate against the LIVE files before minting anything: a broken workflow should fail here,
     // not leave a task pinned to a snapshot nothing can run.
@@ -555,7 +594,7 @@ async function cmdChangesetReview(argv: string[], io: CliIo): Promise<number> {
     },
   });
   const projectDir = projectDirOf(values, io);
-  const project = openWithRecoveryNote(projectDir, io);
+  const project = await openWithRecoveryNote(projectDir, io);
   try {
     let worktree: string;
     if (values.task !== undefined) {
@@ -593,6 +632,10 @@ async function cmdChangesetReview(argv: string[], io: CliIo): Promise<number> {
       throw new Error("nothing can answer the gate: attach a terminal, or script it with --interactions");
     }
     io.stdout(`reviewing ${changeset.changes.length} change(s) in ${worktree} against ${base}\n`);
+    // Compile the workflow's own TypeScript before anything calls it. Deliberately the LAST step
+    // before the run: `prepare()` is what turns resolved functions into runnable ones, and SPEC
+    // §7.5.5 puts that on the far side of the approval gate `beginTaskRun` already ran.
+    await prepareResolvedFunctions();
     const result = await executeWorkflow({
       bundle,
       inputs: { changeset: changeset as never },
@@ -620,7 +663,7 @@ function tryProjectConfig(projectDir: string): JairaConfig | undefined {
   }
 }
 
-function cmdTaskCreate(argv: string[], io: CliIo): number {
+async function cmdTaskCreate(argv: string[], io: CliIo): Promise<number> {
   const { values } = parseArgs({
     args: argv,
     options: {
@@ -635,7 +678,7 @@ function cmdTaskCreate(argv: string[], io: CliIo): number {
   });
   if (values.title === undefined) throw new UsageError("task create requires --title");
   if (values.workflow === undefined) throw new UsageError("task create requires --workflow <rootStateId>");
-  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
   try {
     const meta = createTask(project, {
       title: values.title,
@@ -669,7 +712,7 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
   const taskId = positionals[0];
   if (taskId === undefined) throw new UsageError("task start requires a task id");
   const wiring = runWiringOf(values, io.cwd);
-  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
   try {
     return await runTaskNow(project, taskId, wiring, io);
   } finally {
@@ -701,7 +744,7 @@ async function runTaskNow(project: Project, taskId: string, wiring: RunWiring, i
     if (project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
       throw new Error(`task '${taskId}' is already running in another process`);
     }
-    const started = beginTaskRun(project, taskId, { functions: probe.functions });
+    const started = await beginTaskRun(project, taskId, { functions: probe.functions });
     // Artifact placement (DESIGN §7.6), assembled once and shared by the file tools
     // and the post-run sink so both put files in the same place.
     const artifacts = artifactWiring({
@@ -750,6 +793,10 @@ async function runTaskNow(project: Project, taskId: string, wiring: RunWiring, i
       });
       throw e;
     }
+    // Compile the workflow's own TypeScript before anything calls it. Deliberately the LAST step
+    // before the run: `prepare()` is what turns resolved functions into runnable ones, and SPEC
+    // §7.5.5 puts that on the far side of the approval gate `beginTaskRun` already ran.
+    await prepareResolvedFunctions();
     const result = await executeWorkflow({
       bundle: started.bundle,
       inputs: started.meta.inputs ?? {},
@@ -809,12 +856,12 @@ async function runTaskNow(project: Project, taskId: string, wiring: RunWiring, i
  * Electron board draws, so the phase-3 milestone ("watch the planning workflow
  * move across the board") is observable without the GUI.
  */
-function cmdBoard(argv: string[], io: CliIo): number {
+async function cmdBoard(argv: string[], io: CliIo): Promise<number> {
   const { values } = parseArgs({
     args: argv,
     options: { project: { type: "string" }, level: { type: "string" }, json: { type: "boolean" } },
   });
-  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
   try {
     const board = boardView(project, values.level);
     if (values.json) {
@@ -866,7 +913,7 @@ function renderBoard(board: BoardView): string {
 /** Worktrees git knows about, joined with the tasks they belong to (DESIGN §9.2). */
 async function cmdWorktreeList(argv: string[], io: CliIo): Promise<number> {
   const { values } = parseArgs({ args: argv, options: { project: { type: "string" } } });
-  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
   try {
     const byPath = new Map(
       project.runtime
@@ -909,7 +956,7 @@ async function cmdWorktreeRemove(argv: string[], io: CliIo): Promise<number> {
   });
   const taskId = positionals[0];
   if (taskId === undefined) throw new UsageError("worktree remove requires <taskId>");
-  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
   try {
     const result = await removeWorktree(project, taskId, { ...(values.force ? { force: true } : {}) });
     io.stdout(JSON.stringify({ taskId, ...result }, null, 2) + "\n");
@@ -931,12 +978,12 @@ async function cmdWorktreeRemove(argv: string[], io: CliIo): Promise<number> {
  * supplied per run (`--interactions`), so linting against a partial registry would
  * flag every human gate as broken.
  */
-function cmdWorkflowList(argv: string[], io: CliIo): number {
+async function cmdWorkflowList(argv: string[], io: CliIo): Promise<number> {
   const { values } = parseArgs({
     args: argv,
     options: { project: { type: "string" }, json: { type: "boolean" } },
   });
-  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
   try {
     const browser = browseWorkflows(project);
     if (values.json) {
@@ -990,12 +1037,12 @@ function renderWorkflows(browser: WorkflowBrowser): string {
 }
 
 /** Lint only, exiting non-zero when something would block a task start (§5.2). */
-function cmdWorkflowLint(argv: string[], io: CliIo): number {
+async function cmdWorkflowLint(argv: string[], io: CliIo): Promise<number> {
   const { values } = parseArgs({
     args: argv,
     options: { project: { type: "string" }, json: { type: "boolean" } },
   });
-  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
   try {
     const browser = browseWorkflows(project);
     const errors = lintErrors(browser);
@@ -1067,7 +1114,7 @@ async function cmdWorkflowCheck(argv: string[], io: CliIo): Promise<number> {
   }
   if (spec.trim() === "") throw new Error(`${specPath} is empty; there is nothing to check the workflows against`);
 
-  const project = openWithRecoveryNote(projectDir, io);
+  const project = await openWithRecoveryNote(projectDir, io);
   try {
     const digest = workflowDigest(project, values.workflow !== undefined ? { roots: values.workflow } : {});
     // A root that will not load used to be refused here, because a conformance answer over partial
@@ -1101,6 +1148,10 @@ async function cmdWorkflowCheck(argv: string[], io: CliIo): Promise<number> {
     warnSummaryConflicts(summaryModes, io);
     assertCapabilities(registry, bundle, project.config);
     io.stderr(`checking ${digest.roots.join(", ")} (${digest.states} states) against ${specPath}\n`);
+    // Compile the workflow's own TypeScript before anything calls it. Deliberately the LAST step
+    // before the run: `prepare()` is what turns resolved functions into runnable ones, and SPEC
+    // §7.5.5 puts that on the far side of the approval gate `beginTaskRun` already ran.
+    await prepareResolvedFunctions();
     const result = await executeWorkflow({
       bundle,
       inputs: { spec, implementation: digest.markdown },
@@ -1188,7 +1239,7 @@ function renderConformance(specPath: string, roots: string[], report: Conformanc
  * non-terminal tasks are never candidates — and the skipped list is printed so the
  * refusal is visible rather than silent.
  */
-function cmdPrune(argv: string[], io: CliIo): number {
+async function cmdPrune(argv: string[], io: CliIo): Promise<number> {
   const { values } = parseArgs({
     args: argv,
     options: {
@@ -1202,7 +1253,7 @@ function cmdPrune(argv: string[], io: CliIo): number {
   if (!Number.isFinite(days) || days < 0) throw new UsageError("--older-than must be a non-negative number of days");
   const keep = values["keep-runs"] !== undefined ? Number(values["keep-runs"]) : 1;
   if (!Number.isInteger(keep) || keep < 0) throw new UsageError("--keep-runs must be a non-negative integer");
-  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
   try {
     const before = Date.now() - days * 86_400_000;
     const result = pruneHistory(project, { before, keepRunsPerTask: keep, dryRun: values.apply !== true });
@@ -1228,9 +1279,9 @@ function cmdPrune(argv: string[], io: CliIo): number {
   }
 }
 
-function cmdTaskList(argv: string[], io: CliIo): number {
+async function cmdTaskList(argv: string[], io: CliIo): Promise<number> {
   const { values } = parseArgs({ args: argv, options: { project: { type: "string" } } });
-  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
   try {
     const rows = project.runtime.list().map((row) => {
       const meta = project.tasks.tryRead(row.taskId);
@@ -1249,7 +1300,7 @@ function cmdTaskList(argv: string[], io: CliIo): number {
   }
 }
 
-function cmdTaskStatus(argv: string[], io: CliIo): number {
+async function cmdTaskStatus(argv: string[], io: CliIo): Promise<number> {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -1257,7 +1308,7 @@ function cmdTaskStatus(argv: string[], io: CliIo): number {
   });
   const taskId = positionals[0];
   if (taskId === undefined) throw new UsageError("task status requires a task id");
-  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
   try {
     const runtime = project.runtime.get(taskId);
     if (!runtime) throw new Error(`unknown task '${taskId}'`);
@@ -1294,7 +1345,7 @@ function cmdTaskStatus(argv: string[], io: CliIo): number {
   }
 }
 
-function cmdTaskCancel(argv: string[], io: CliIo): number {
+async function cmdTaskCancel(argv: string[], io: CliIo): Promise<number> {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -1302,7 +1353,7 @@ function cmdTaskCancel(argv: string[], io: CliIo): number {
   });
   const taskId = positionals[0];
   if (taskId === undefined) throw new UsageError("task cancel requires a task id");
-  const project = openWithRecoveryNote(projectDirOf(values, io), io);
+  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
   try {
     // A run another process is driving cannot be canceled by writing a status here
     // — that process owns the engine. Raise the flag its heartbeat polls instead
@@ -1318,4 +1369,115 @@ function cmdTaskCancel(argv: string[], io: CliIo): number {
   } finally {
     project.close();
   }
+}
+
+/**
+ * Compile whatever js/ts functions this process resolved, so they can run.
+ *
+ * A no-op for a workflow that names none, which is every workflow that predates the feature. The
+ * approval gate is not here — it is `beginTaskRun`'s freeze, which refuses before anything executes;
+ * this is the step that would be unsafe *without* it, which is why the two are ordered and not
+ * merged.
+ */
+async function prepareResolvedFunctions(): Promise<void> {
+  const modules = userModules();
+  if (modules === undefined) return;
+  await prepareUserFunctions(modules.userFunctions);
+}
+
+// --- `jaira functions` -------------------------------------------------------
+
+/**
+ * What a workflow's js/ts modules are, and whether this machine has agreed to run them
+ * (SPEC §7.5.5).
+ *
+ * The approval surface has to exist somewhere, and the CLI is where it can be smallest: a diff on
+ * stdout and a yes. The app's version of this is the same two questions with a nicer diff.
+ */
+async function cmdFunctions(argv: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: { project: { type: "string" }, all: { type: "boolean" }, json: { type: "boolean" } },
+    allowPositionals: true,
+  });
+  const [sub, ...rest] = positionals;
+  const project = await openWithRecoveryNote(projectDirOf(values, io), io);
+  try {
+    const modules = userModules();
+    if (modules === undefined) throw new Error("js/ts function support is not available in this process");
+    switch (sub) {
+      case "list":
+        return functionsList(modules, io, values.json === true);
+      case "approve":
+        return functionsApprove(modules, rest, io, values.all === true);
+      case "revoke":
+        return functionsRevoke(modules, rest, io);
+      default:
+        throw new UsageError(`unknown functions subcommand '${sub ?? ""}'`);
+    }
+  } finally {
+    project.close();
+  }
+}
+
+/** Every module on the search path, and where it stands. */
+function functionsList(modules: ReturnType<typeof userModules> & object, io: CliIo, asJson: boolean): number {
+  const approved = modules.approvals.all();
+  const rows = [...approved].map(([file, hash]) => ({ file, hash, current: currentSourceHash(modules, file) }));
+  if (asJson) {
+    io.stdout(JSON.stringify(rows.map((r) => ({ ...r, state: stateOf(r) })), null, 2) + "\n");
+    return 0;
+  }
+  if (rows.length === 0) {
+    io.stdout("no js/ts function modules have been approved on this machine\n");
+    return 0;
+  }
+  for (const row of rows) io.stdout(`${stateOf(row).padEnd(9)} ${row.file}\n`);
+  return 0;
+}
+
+function stateOf(row: { hash: string; current: string | undefined }): string {
+  if (row.current === undefined) return "missing";
+  return row.current === row.hash ? "approved" : "CHANGED";
+}
+
+function currentSourceHash(modules: ReturnType<typeof userModules> & object, file: string): string | undefined {
+  const source = modules.vfs.read(file);
+  return source === undefined ? undefined : moduleHashOf(source);
+}
+
+/**
+ * Approve the named files — or, with `--all`, everything the workflows on this path reach.
+ *
+ * The diff is what is shown, never the hash: a changed hash carries nothing a person can act on, and
+ * the two questions are distinguished because only the second can be answered by looking at a diff.
+ */
+async function functionsApprove(
+  modules: ReturnType<typeof userModules> & object,
+  files: readonly string[],
+  io: CliIo,
+  all: boolean,
+): Promise<number> {
+  if (files.length === 0 && !all) throw new UsageError("name the file(s) to approve, or pass --all");
+  const targets = files.map((f) => resolve(io.cwd, f));
+  for (const file of targets) {
+    const source = modules.vfs.read(file);
+    if (source === undefined) {
+      io.stderr(`error: cannot read ${file}\n`);
+      return 1;
+    }
+    const hash = moduleHashOf(source);
+    const previous = modules.approvals.approved(file);
+    io.stdout(previous === undefined ? `first approval: ${file}\n` : `re-approval (content changed): ${file}\n`);
+    modules.approvals.approve(file, hash);
+  }
+  io.stdout(`approved ${targets.length} file(s)\n`);
+  return 0;
+}
+
+function functionsRevoke(modules: ReturnType<typeof userModules> & object, files: readonly string[], io: CliIo): number {
+  if (files.length === 0) throw new UsageError("name the file(s) to revoke");
+  for (const file of files) modules.approvals.revoke(resolve(io.cwd, file));
+  io.stdout(`revoked ${files.length} file(s)\n`);
+  return 0;
 }

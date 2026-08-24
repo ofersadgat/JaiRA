@@ -16,12 +16,17 @@ import {
   mergeConfigDocuments,
   parseConfig,
   readJsonFile,
-  systemProjectDir,
+  SYSTEM_DIR_NAME,
   type JairaBasePaths,
   type JairaConfig,
   type JairaPaths,
 } from "@jaira/shared";
 import { openDb, type JairaDb } from "./db";
+import { applyStorage, isFileBacked, type ShadowReport } from "./shadow";
+import { journalFiles, replayJournal } from "./journalFile";
+import { conversationFiles, ConversationLog, replayConversations } from "./conversationFile";
+import { ARTIFACT_ROWS, fingerprintOf, replayRows, RowLog, rowFiles, TASK_ROWS } from "./rowFile";
+import { SqliteSessionStore, type SessionScope } from "./sessionStore";
 import { SqliteArtifactStore } from "./artifactStore";
 import { CommandLog } from "./commandLog";
 import { JobStore, type JobRow } from "./jobs";
@@ -31,14 +36,14 @@ import { TaskFileStore } from "./taskStore";
 
 export interface Project {
   /**
-   * A user's checkout, or JaiRA's own.
+   * A user's checkout, or the base root.
    *
-   * `system` is the shared root opened as a project in its own right, so JaiRA's workflows — the
-   * description sync, summarization, the conformance check — have somewhere to be recorded. It is
-   * not a decoration: `createTask` refuses a branch on one, which is what keeps those runs out of
-   * anybody's worktrees.
+   * `shared` is the base opened as a project in its own right, so both the workflows a person keeps
+   * in `<root>/workflows` and JaiRA's own — the description sync, summarization, the conformance
+   * check — have somewhere to be recorded. It is not a decoration: `createTask` refuses a branch on
+   * one, which is what keeps those runs out of anybody's worktrees.
    */
-  kind: "project" | "shared" | "system";
+  kind: "project" | "shared";
   paths: JairaPaths;
   config: JairaConfig;
   db: JairaDb;
@@ -51,6 +56,9 @@ export interface Project {
   artifacts: SqliteArtifactStore;
   /** Process claims and child processes (DESIGN §4.2a). */
   jobs: JobStore;
+  /** What `config.storage` did to this connection — see {@link applyStorage}. Empty when everything
+   *  is in the database, which is the default. */
+  storage: ShadowReport;
   /** Task ids marked `interrupted` by recovery during this open. */
   recovered: string[];
   /**
@@ -64,28 +72,63 @@ export interface Project {
 /**
  * What of `.jaira/` should NOT be committed.
  *
- * `workflows/`, `tasks/` and `skills/` are source — hand-edited and worth
- * versioning. The database and the snapshot cache are derived per-checkout state:
- * committing them would put one machine's run history into everyone's tree, and
- * (because a worktree checkout mirrors the branch) would copy a stale database
- * into every task worktree.
+ * `workflows/` and `skills/` are source — hand-edited and worth versioning, and they sit outside
+ * `system/` for exactly that reason. `system/` used to be ignored wholesale on the argument that it
+ * was derived per-checkout state, and DESIGN §4.4 retired that: once a concern's truth is a JSONL
+ * git can merge, there is nothing derived left to hide, and hiding it would defeat the point of
+ * choosing files at all. So the list INVERTED — it names what stays out rather than what comes in.
+ *
+ * Two things stay out:
+ *
+ *  - **The database.** It is a rebuildable index of those files now, and an unmergeable binary
+ *    either way; committing it would also copy a stale one into every task worktree, since a
+ *    worktree checkout mirrors the branch.
+ *  - **`logs/`.** This machine talking to itself, conflicting on every line.
+ *
+ * Everything else is meant to be committed — which for `snapshots/` and `artifacts/` is a change,
+ * and a deliberate one: a snapshot is content-addressed and immutable, so two people producing the
+ * same one produce the same bytes, and an artifact is a run's output that its own project may well
+ * want to keep. A project that disagrees can ignore either in its own `.gitignore`; what it cannot
+ * do is un-ignore something this file hid from it.
+ *
+ * `.env.local` is here because `.jaira/` became a place credentials live (DESIGN §8.1) the moment it
+ * became the FIRST project link of the secret chain. Its sibling `.env` is deliberately not ignored:
+ * the `.local` suffix is the whole convention for "this machine's", and a project that wants to
+ * commit a non-secret default has to be able to.
  */
-const JAIRA_GITIGNORE = `# Derived state — see DESIGN §3. Workflows, tasks and skills ARE meant to be committed.
-jaira.db
-jaira.db-wal
-jaira.db-shm
-snapshots/
+const SYS = SYSTEM_DIR_NAME;
+const JAIRA_GITIGNORE = `# Two files, and everything else under ${SYS}/ is meant to be COMMITTED —
+# see DESIGN §4.4. Once a concern's truth is a JSONL that git can merge, there is
+# nothing derived left to hide, and hiding it would defeat the point of choosing files.
+#
+# The database is what survives: it is a rebuildable index of those files now, and an
+# unmergeable binary either way. The logs are this machine talking to itself and would
+# conflict on every line.
+${SYS}/jaira.db
+${SYS}/jaira.db-wal
+${SYS}/jaira.db-shm
+${SYS}/logs/
+
+# Machine-local: what this disk has agreed to RUN (SPEC §7.5.5). An approval is a
+# statement about a file on ONE disk, so syncing it would let one machine confer
+# trust on the rest.
+${SYS}/approvals.local.json
+
+# Credentials. .env.local is machine-local by convention and is the first project link of the
+# secret chain (DESIGN §8.1). Its sibling .env is deliberately NOT ignored: a project that wants
+# to commit a non-secret default has to be able to.
+.env.local
 `;
 
 /** Create the `.jaira/` layout (DESIGN §3). Idempotent; keeps an existing config. */
 export function initProject(projectDir: string): JairaPaths {
   const paths = jairaPaths(projectDir);
   mkdirSync(paths.workflowsDir, { recursive: true });
+  mkdirSync(paths.skillsDir, { recursive: true });
   mkdirSync(paths.snapshotsDir, { recursive: true });
   mkdirSync(paths.tasksDir, { recursive: true });
-  mkdirSync(paths.skillsDir, { recursive: true });
-  if (!existsSync(paths.configFile)) {
-    writeFileSync(paths.configFile, JSON.stringify(defaultConfig(), null, 2) + "\n", "utf8");
+  if (!existsSync(paths.settingsFile)) {
+    writeFileSync(paths.settingsFile, JSON.stringify(defaultConfig(), null, 2) + "\n", "utf8");
   }
   const ignoreFile = join(paths.jairaDir, ".gitignore");
   if (!existsSync(ignoreFile)) writeFileSync(ignoreFile, JAIRA_GITIGNORE, "utf8");
@@ -101,7 +144,7 @@ export function isProject(projectDir: string): boolean {
  *
  * Created eagerly rather than on first use so the directory a user is told to put shared workflows
  * in actually exists — an empty `~/.jaira/workflows` is a working answer to "where do these go?",
- * where a missing one is a question. No `config.json` is written: an absent base config means "no
+ * where a missing one is a question. No `settings.json` is written: an absent base config means "no
  * base layer", which is a different and better default than one full of defaults that then silently
  * override nothing.
  */
@@ -110,8 +153,8 @@ export function initBase(baseDir?: string): JairaBasePaths {
   mkdirSync(base.workflowsDir, { recursive: true });
   mkdirSync(base.functionsDir, { recursive: true });
   mkdirSync(base.skillsDir, { recursive: true });
-  // Run state for JaiRA's own project. Created with the rest so the layout is whole after one call,
-  // rather than half-created until the first system run happens to need the other half.
+  // Run state for the base opened as a project. Created with the rest so the layout is whole after
+  // one call, rather than half-created until the first run happens to need the other half.
   mkdirSync(base.snapshotsDir, { recursive: true });
   mkdirSync(base.tasksDir, { recursive: true });
   // The same rule a project's `.jaira/` follows, for a stronger reason: plenty of people keep their
@@ -134,7 +177,7 @@ export function initBase(baseDir?: string): JairaBasePaths {
  * directory with no `.jaira/`, and the base has none — its directories sit directly under it.
  * `jairaPaths(baseDir)` would therefore look for `~/.jaira/.jaira/workflows`. `worktreesDir` would
  * resolve beside a home directory that is not a git repository. And `loadLayeredConfig` would merge
- * the base config with ITSELF, since for this layout `paths.configFile` and `paths.base.configFile`
+ * the base config with ITSELF, since for this layout `paths.settingsFile` and `paths.base.settingsFile`
  * are the same file — harmless today only because merging a document over itself is idempotent, and
  * a trap the moment a merge rule stops being.
  *
@@ -143,46 +186,35 @@ export function initBase(baseDir?: string): JairaBasePaths {
 export function openSharedProject(opts?: { now?: () => number; staleMs?: number; baseDir?: string }): Project {
   const base = initBase(opts?.baseDir);
   const paths = baseAsProjectPaths(base.baseDir);
-  const doc = existsSync(paths.configFile) ? readJsonFile(paths.configFile) : undefined;
+  const doc = existsSync(paths.settingsFile) ? readJsonFile(paths.settingsFile) : undefined;
   return openAt(paths, doc === undefined ? defaultConfig() : parseConfig(doc), "shared", opts);
 }
 
 /**
- * JaiRA's OWN project — the one a root switch must not move.
- *
- * A fixed directory under the DEFAULT root ({@link systemProjectDir}), not the selected one. A
- * description sync is a fact about the installation, so its history has to outlive a person
- * repointing their shared library; and it must not sit on the same board as that library's runs,
- * which is what giving JaiRA's runs their own project was for in the first place.
- *
- * Its config is the SHARED root's, not its own: the system directory holds a database and nothing
- * else, and a sync still has to resolve the models and credentials the installation is configured
- * with rather than a bare default.
- */
-export function openSystemProject(opts?: {
-  now?: () => number;
-  staleMs?: number;
-  /** The SELECTED root — where the config and credentials come from. */
-  baseDir?: string;
-  /** Where JaiRA's own project lives. Defaults to {@link systemProjectDir}; see the note there. */
-  systemDir?: string;
-}): Project {
-  const base = initBase(opts?.baseDir);
-  const paths = baseAsProjectPaths(opts?.systemDir ?? systemProjectDir());
-  mkdirSync(paths.projectDir, { recursive: true });
-  const configFile = jairaBasePaths(base.baseDir).configFile;
-  const doc = existsSync(configFile) ? readJsonFile(configFile) : undefined;
-  return openAt(paths, doc === undefined ? defaultConfig() : parseConfig(doc), "system", opts);
-}
-
-/**
- * The effective configuration: the shared base root's `config.json` with the project's laid over it
+ * The effective configuration: the shared base root's `settings.json` with the project's laid over it
  * (DESIGN §3). Absent files are empty layers, so a machine with no base root behaves exactly as
  * before one existed.
  */
+/**
+ * A session store wired to whatever `config.storage.conversations` says.
+ *
+ * THE constructor for one, and the reason it exists rather than nine `new SqliteSessionStore(db, …)`
+ * calls: a store built by hand writes to the table and not to the file, which is invisible until the
+ * database is thrown away and the conversations are not there. An unscoped store — no task, no run —
+ * gets no log because it has nothing to name a file by; it is a read of one run already narrowed.
+ */
+export function sessionStoreFor(project: Project, scope: SessionScope = {}): SqliteSessionStore {
+  const filed = isFileBacked(project.config.storage.conversations);
+  const log =
+    filed && scope.taskId !== undefined && scope.runId !== undefined
+      ? new ConversationLog(project.paths.conversationsDir, project.config.storage.format, scope.taskId, scope.runId)
+      : undefined;
+  return new SqliteSessionStore(project.db, scope, log);
+}
+
 export function loadLayeredConfig(paths: JairaPaths): JairaConfig {
-  const base = existsSync(paths.base.configFile) ? readJsonFile(paths.base.configFile) : undefined;
-  const project = existsSync(paths.configFile) ? readJsonFile(paths.configFile) : undefined;
+  const base = existsSync(paths.base.settingsFile) ? readJsonFile(paths.base.settingsFile) : undefined;
+  const project = existsSync(paths.settingsFile) ? readJsonFile(paths.settingsFile) : undefined;
   if (base === undefined && project === undefined) return defaultConfig();
   return parseConfig(mergeConfigDocuments(base, project));
 }
@@ -214,7 +246,27 @@ function openAt(
 ): Project {
   const now = opts?.now ?? Date.now;
   const db = openDb(paths.dbFile);
-  const runtime = new RuntimeStore(db);
+  // BEFORE anything reads. A file-backed concern is served by a `TEMP` table standing in front of
+  // its `main` counterpart (DESIGN §4.4), and a store constructed against the connection first would
+  // have prepared its statements against the table it is meant to shadow.
+  const storage = applyStorage(db, config.storage, {
+    journal: () => replayJournal(db, paths.journalDir),
+    conversations: () => replayConversations(db, paths.conversationsDir),
+    tasks: () => replayRows(db, paths.taskRowsDir, TASK_ROWS),
+    artifacts: () => replayRows(db, paths.artifactRowsDir, ARTIFACT_ROWS),
+  }, {
+    // What `both` compares against, so a `git pull` under a persisted index is noticed.
+    journal: () => fingerprintOf(journalFiles(paths.journalDir).map((f) => f.file)),
+    conversations: () => fingerprintOf(conversationFiles(paths.conversationsDir)),
+    tasks: () => fingerprintOf(rowFiles(paths.taskRowsDir)),
+    artifacts: () => fingerprintOf(rowFiles(paths.artifactRowsDir)),
+  });
+  // Only a file-backed concern gets a directory to write to — a recorder handed one would otherwise
+  // append to files nothing replays, which is a slower way of writing to /dev/null.
+  const journalDir = isFileBacked(config.storage.journal) ? paths.journalDir : undefined;
+  const taskLog = isFileBacked(config.storage.tasks) ? new RowLog(paths.taskRowsDir) : undefined;
+  const artifactLog = isFileBacked(config.storage.artifacts) ? new RowLog(paths.artifactRowsDir) : undefined;
+  const runtime = new RuntimeStore(db, taskLog);
   const jobs = new JobStore(db, opts?.staleMs);
 
   // Read orphans BEFORE reaping: the rows are the only record those processes ever
@@ -233,12 +285,13 @@ function openAt(
     db,
     tasks: new TaskFileStore(paths.tasksDir),
     runtime,
-    events: new SqliteEventLog(db),
+    events: new SqliteEventLog(db, journalDir),
     commands: new CommandLog(db),
-    artifacts: new SqliteArtifactStore(db),
+    artifacts: new SqliteArtifactStore(db, artifactLog),
     jobs,
     recovered,
     orphans,
+    storage,
     close: () => db.close(),
   };
 }

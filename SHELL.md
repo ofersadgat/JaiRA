@@ -540,6 +540,32 @@ Sorting is unchanged and already correct: `LANES` is
 `["running", "paused", "not-started", "finished"]` and the finished lane is
 re-sorted newest-first by `endedAtOf`.
 
+#### Dragging a card, where a workflow asked for it
+
+A running workflow can park a transition on a gesture (`on_user_event`,
+WORKFLOWS.md §7.4). The board's whole response is an **affordance**, and
+deliberately nothing else:
+
+- The card gets `cursor: grab` and becomes draggable. No badge, no handle, no
+  entry in an inbox — a card already carries a title, a pill and a place, and
+  a fourth mark saying "this one can be moved" would be a manual printed on the
+  machine again. A `paused` pill is already saying the run is waiting on a
+  person; the cursor says what for.
+- While a card is in the air, the columns its rules name are outlined with a
+  **dashed accent border**, and the one under the pointer takes the ghost fill.
+  Two steps of one gesture: which columns will take it, and which is about to.
+  Every other column is left exactly as it was, which is the other half of the
+  answer.
+- Nothing moves on drop. The card moves when the RUN moves, on the next board
+  refresh — a workflow decides where a task goes, and a board that slid the card
+  across optimistically would be claiming an outcome it does not own.
+
+Which cards these are is read off the waits the running workflows have
+published, never off the workflow file: a wait exists only because the engine
+reached the call, so a rule's own conditions have already been checked by the
+thing that owns checking them. A drag is offered only where both ends are on
+screen — the card, and a column whose key the rule names at this board level.
+
 **Required fix:** the comment above `.card::before` reserves the left edge for
 "run status down a column of cards" — that reservation is the only reason the
 edge survived the last pass. Change the comment with the code, or the stylesheet

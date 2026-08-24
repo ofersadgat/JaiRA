@@ -4,6 +4,10 @@ export * from "./eventLog";
 export * from "./taskStore";
 export * from "./snapshots";
 export * from "./project";
+export * from "./shadow";
+export * from "./journalFile";
+export * from "./conversationFile";
+export * from "./rowFile";
 export * from "./lifecycle";
 export * from "./projection";
 export * from "./runLabel";
@@ -17,6 +21,9 @@ export * from "./prune";
 export * from "./workflows";
 export * from "./digest";
 export * from "./workflowRefs";
+// js/ts function modules: the approval store, the process-wide symbol index, and the freeze
+// (SPEC §7.5.5).
+export * from "./userModules";
 export * from "./workflowSync";
 export * from "./descriptions";
 export * from "./artifactStore";

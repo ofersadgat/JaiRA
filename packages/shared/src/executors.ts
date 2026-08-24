@@ -95,6 +95,8 @@ export const EXECUTOR_KINDS: Record<ExecutorKind, ExecutorKindSpec> = {
 /** Which link of the secret chain supplied a credential. */
 export type SecretSource =
   | "keychain"
+  | "project-jaira-env-local"
+  | "project-jaira-env"
   | "project-env-local"
   | "project-env"
   | "base-env-local"
@@ -109,7 +111,7 @@ export type SecretSource =
  */
 export interface SecretOrigin {
   source: SecretSource;
-  /** The file that supplied it, for the four file-backed sources. */
+  /** The file that supplied it, for the six file-backed sources. */
   file?: string;
 }
 
@@ -213,6 +215,8 @@ export const SUGGESTED_CREDENTIALS: Record<string, string> = {
 /** Human wording for a source, for a UI that has only the origin to show. */
 export const SECRET_SOURCE_LABELS: Record<SecretSource, string> = {
   keychain: "OS keychain",
+  "project-jaira-env-local": "project .jaira/.env.local",
+  "project-jaira-env": "project .jaira/.env",
   "project-env-local": "project .env.local",
   "project-env": "project .env",
   "base-env-local": "shared .env.local",
@@ -231,6 +235,6 @@ export type SecretTarget = "keychain" | "project-env-local" | "base-env-local";
 
 export const SECRET_TARGET_LABELS: Record<SecretTarget, string> = {
   keychain: "OS keychain (encrypted)",
-  "project-env-local": "this project's .env.local",
+  "project-env-local": "this project's .jaira/.env.local",
   "base-env-local": "the shared root's .env.local",
 };

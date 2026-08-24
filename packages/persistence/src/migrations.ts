@@ -225,7 +225,97 @@ export const MIGRATIONS: Migration[] = [
     // the same shape, so nothing downstream has to know which era a record was written in.
     run: (db) => void repairInterruptedRecords(db),
   },
+  {
+    version: 8,
+    note: "keyed a conversation position by the record's own id, not by a rowid the database assigns",
+    // `session_positions.operation_record_id` pointed at `operation_records.id`, an
+    // `INTEGER PRIMARY KEY AUTOINCREMENT`. That is a key the DATABASE mints, and it is the one kind
+    // that cannot survive being rebuilt: DESIGN §4.4 has the journal and the conversation store
+    // replayed out of files into a temp table, and a replay re-mints every rowid — leaving every
+    // position row pointing at the wrong record. Silently, because the ids are all still valid.
+    //
+    // The stable id was there the whole time. Upstream's `withRecord` stamps `<sessionId>:<seq>` on
+    // a record that claims a position and `hashOperation(op)` on one that does not, and both are
+    // stable because operations are immutable. What it is NOT is unique on its own: an identical
+    // operation dispatched twice hashes identically, which is exactly why `attempt` exists. So the
+    // key is the four columns together — and for a PLACED record `record_id` is literally
+    // `session_id:seq`, so those rows were carrying a rowid that duplicated the very pair the
+    // position table already keys on.
+    //
+    // The tuple rather than a synthetic string built from it: a delimiter-joined key would have to
+    // claim that `record_id` never contains the delimiter, and nothing enforces that. Four columns
+    // in a join read worse and assert less.
+    //
+    // `task_id` and `run_id` are NULLABLE — a store with no scope keys by the bare id — and SQLite
+    // treats every NULL in a UNIQUE index as distinct, so unscoped rows are not constrained by it.
+    // That is the honest outcome rather than a gap to paper over: an unscoped store is a read of one
+    // run that has already been narrowed, and it writes nothing.
+    run: (db) => keyPositionsByRecord(db),
+  },
 ];
+
+/**
+ * Migration 8's rebuild — see the note there for why the rowid had to go.
+ *
+ * A function rather than `sql`, and the reason is the second rule in this file's header: make a step
+ * idempotent where SQLite lets you. `ALTER TABLE … RENAME` cannot be guarded by `IF NOT EXISTS`, so
+ * a step that structurally rebuilds a table runs exactly once or fails loudly — and there is a
+ * legitimate caller that re-runs it, since the session-store tests build a database with the current
+ * schema and then rewind `user_version` to stand in for an older one. Asking the table what shape it
+ * is in is both cheaper and more honest than asking the version marker, which is a claim about the
+ * database that anything can rewrite.
+ */
+function keyPositionsByRecord(db: JairaDb): void {
+  const columns = db.prepare(`SELECT name FROM pragma_table_info('session_positions')`).all() as Array<{ name: string }>;
+  if (columns.some((c) => c.name === "record_id")) return; // already this shape
+
+  // Renumber first, because the index below is UNIQUE and a database holding a duplicate would
+  // refuse to migrate at all. This is the ordinal `insertRecord` computes anyway — count the rows
+  // already in the group, add one — restated over the rows on disk, so for everything written
+  // through that path it is a no-op and rowid order IS attempt order.
+  //
+  // What it repairs is `derive`, which inserted its record with no `attempt` column and therefore
+  // always wrote 1. Two derivations of one session id in a run left two rows claiming the first
+  // attempt; `derive` counts like everything else now.
+  db.exec(`
+    WITH ranked AS (
+      SELECT id, ROW_NUMBER() OVER (PARTITION BY task_id, run_id, record_id ORDER BY id) AS n
+        FROM operation_records
+    )
+    UPDATE operation_records
+       SET attempt = (SELECT n FROM ranked WHERE ranked.id = operation_records.id);
+
+    -- What makes the join well defined. Without it a position row could match two records and fan
+    -- out — the failure the rowid was preventing by accident rather than by design.
+    CREATE UNIQUE INDEX IF NOT EXISTS operation_records_natural
+      ON operation_records(task_id, run_id, record_id, attempt);
+
+    ALTER TABLE session_positions RENAME TO session_positions_by_rowid;
+    DROP INDEX IF EXISTS session_positions_record;
+
+    CREATE TABLE session_positions (
+      session_id  TEXT NOT NULL,
+      seq         INTEGER NOT NULL,
+      task_id     TEXT,
+      run_id      INTEGER,
+      record_id   TEXT NOT NULL,
+      attempt     INTEGER NOT NULL,
+      PRIMARY KEY (session_id, seq)
+    );
+    CREATE INDEX IF NOT EXISTS session_positions_record
+      ON session_positions(task_id, run_id, record_id, attempt);
+
+    -- An INNER join, so a position whose record is already gone is dropped rather than carried
+    -- forward as a row naming nothing. The foreign key made that state unreachable; this is the one
+    -- moment it could still be observed, and the answer is to not migrate it.
+    INSERT INTO session_positions (session_id, seq, task_id, run_id, record_id, attempt)
+      SELECT p.session_id, p.seq, r.task_id, r.run_id, r.record_id, r.attempt
+        FROM session_positions_by_rowid p
+        JOIN operation_records r ON r.id = p.operation_record_id;
+
+    DROP TABLE session_positions_by_rowid;
+  `);
+}
 
 /**
  * Bring one database up to date. Called on every open, and a no-op once it is.

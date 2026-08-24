@@ -47,7 +47,7 @@ function persist(outputs: unknown, destination = "$CENTRAL") {
       worktree: dir,
       project: dir,
       jaira: join(dir, ".jaira"),
-      artifactDir: "jaira-artifacts",
+      artifactDir: "artifacts",
       taskId: "t-1",
     },
     runId: 2,
@@ -93,7 +93,7 @@ describe("placement", () => {
     const written = persist({ plan: artifact("feature.plan#1.plan_doc", "# hello") });
 
     expect(written).toHaveLength(1);
-    const path = join(dir, "jaira-artifacts", "t-1", "plan_doc.md");
+    const path = join(dir, ".jaira", "system", "artifacts", "t-1", "plan_doc.md");
     expect(readFileSync(path, "utf8")).toBe("# hello");
     expect(store.get("t-1", "plan_doc.md")).toMatchObject({
       physicalPath: path,
@@ -107,7 +107,7 @@ describe("placement", () => {
 
   it("uses the instance and slot the name carries, so $CENTRAL_FLAT works", () => {
     persist({ plan: artifact("feature.plan#9.plan_doc", "x") }, "$CENTRAL_FLAT");
-    expect(existsSync(join(dir, "jaira-artifacts", "t-1", "9-plan_doc.md"))).toBe(true);
+    expect(existsSync(join(dir, ".jaira", "system", "artifacts", "t-1", "9-plan_doc.md"))).toBe(true);
   });
 
   it("writes nothing under virtual: but still records the content", () => {

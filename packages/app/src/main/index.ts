@@ -235,6 +235,8 @@ const handlers: Record<IpcChannel, Handler> = {
   "approval:pending": (() => service.pendingApprovals()) as Handler,
   "approval:submit": ((request: { requestId: string; decision: "allow" | "deny"; scope?: never }) =>
     service.submitApproval(request.requestId, request.decision, request.scope)) as Handler,
+  "userEvent:pending": (() => service.pendingUserEvents()) as Handler,
+  "userEvent:deliver": ((request: { requestId: string }) => service.deliverUserEvent(request.requestId)) as Handler,
   "question:pending": (() => service.pendingQuestions()) as Handler,
   "question:submit": ((request: { requestId: string; answers?: Record<string, string | string[]> }) =>
     service.submitQuestion(request.requestId, request.answers)) as Handler,

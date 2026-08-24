@@ -493,7 +493,7 @@ export function defaultExecutorTree(
   throw new Error(
     answer.routes.length === 0
       ? "nothing can answer a prompt here: enable an agent executor (claude-cli needs no API key), or " +
-        "add a provider key under models.routes — in Settings, or in .jaira/config.json"
+        "add a provider key under models.routes — in Settings, or in .jaira/settings.json"
       : `no default model: ${answer.routes.map((r) => `'${r}'`).join(", ")} serve only the models a state names, ` +
         "and these states name none. Give one of those routes a model, set one on the default executor, or " +
         "enable an agent executor — an agent picks its own.",

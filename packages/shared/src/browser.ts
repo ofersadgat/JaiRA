@@ -28,5 +28,6 @@ export * from "./references";
 export * from "./changeset";
 export * from "./diffStrategies";
 export * from "./valueViews";
+export * from "./userEvents";
 export * from "./toolVocabulary";
 export * from "./scopes";

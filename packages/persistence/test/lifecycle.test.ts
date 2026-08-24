@@ -43,9 +43,9 @@ afterEach(() => {
 });
 
 describe("project", () => {
-  it("initProject creates the .jaira layout with a default config, idempotently", () => {
+  it("initProject creates the .jaira layout with a default config, idempotently", async () => {
     const paths = initProject(dir);
-    for (const p of [paths.workflowsDir, paths.snapshotsDir, paths.tasksDir, paths.skillsDir, paths.configFile]) {
+    for (const p of [paths.workflowsDir, paths.snapshotsDir, paths.tasksDir, paths.skillsDir, paths.settingsFile]) {
       expect(existsSync(p)).toBe(true);
     }
     expect(isProject(dir)).toBe(true);
@@ -55,13 +55,13 @@ describe("project", () => {
 });
 
 describe("task lifecycle", () => {
-  it("create → start → finish, snapshotting the workflow at start", () => {
+  it("create → start → finish, snapshotting the workflow at start", async () => {
     const p = open();
     const meta = createTask(p, { title: "T", workflow: "wf", inputs: { x: "hello" } });
     expect(p.runtime.get(meta.id)?.status).toBe("queued");
     expect(p.tasks.read(meta.id).inputs).toEqual({ x: "hello" });
 
-    const started = beginTaskRun(p, meta.id);
+    const started = await beginTaskRun(p, meta.id);
     expect(started.pinned).toBe(false);
     expect(p.runtime.get(meta.id)?.status).toBe("running");
     expect(p.runtime.get(meta.id)?.snapshotHash).toBe(started.snapshotHash);
@@ -72,10 +72,10 @@ describe("task lifecycle", () => {
     const run = p.runtime.listRuns(meta.id)[0];
     expect(run).toMatchObject({ outcome: "success", outputsJson: '{"y":"done"}' });
     // Terminal task cannot start again.
-    expect(() => beginTaskRun(p, meta.id)).toThrow(/completed/);
+    await expect(() => beginTaskRun(p, meta.id)).rejects.toThrow(/completed/);
   });
 
-  it("starts despite an unrelated half-saved state file", () => {
+  it("starts despite an unrelated half-saved state file", async () => {
     // Regression: `readWorkflowFiles` threw on the first unparsable file, so one
     // scratch file the workflow never references blocked EVERY task start. Only the
     // root's transitive closure matters.
@@ -83,24 +83,24 @@ describe("task lifecycle", () => {
     writeFileSync(join(p.paths.workflowsDir, "scratch.json"), "{ half-written", "utf8");
     const meta = createTask(p, { title: "T", workflow: "wf", inputs: { x: "hello" } });
 
-    const started = beginTaskRun(p, meta.id);
+    const started = await beginTaskRun(p, meta.id);
 
     expect(p.runtime.get(meta.id)?.status).toBe("running");
     // The broken file is not in the snapshot either — it was never part of the bundle.
     expect(existsSync(join(p.paths.snapshotsDir, started.snapshotHash, "scratch.json"))).toBe(false);
   });
 
-  it("names the unreadable files when the workflow itself will not load", () => {
+  it("names the unreadable files when the workflow itself will not load", async () => {
     const p = open();
     writeFileSync(join(p.paths.workflowsDir, "wf.json"), "{ broken", "utf8");
     const meta = createTask(p, { title: "T", workflow: "wf", inputs: { x: "hello" } });
     // "unknown state 'wf'" alone would hide the real cause, so the parse error rides
     // along with it.
-    expect(() => beginTaskRun(p, meta.id)).toThrow(/unreadable files/);
+    await expect(() => beginTaskRun(p, meta.id)).rejects.toThrow(/unreadable files/);
     expect(p.runtime.get(meta.id)?.status).toBe("queued");
   });
 
-  it("enforces validation at task start and leaves the task queued on failure", () => {
+  it("enforces validation at task start and leaves the task queued on failure", async () => {
     const p = open();
     const badDir = join(p.paths.workflowsDir);
     mkdirSync(badDir, { recursive: true });
@@ -110,15 +110,15 @@ describe("task lifecycle", () => {
       "utf8",
     );
     const meta = createTask(p, { title: "B", workflow: "bad" });
-    expect(() => beginTaskRun(p, meta.id)).toThrow(/validation failed/);
+    await expect(() => beginTaskRun(p, meta.id)).rejects.toThrow(/validation failed/);
     expect(p.runtime.get(meta.id)?.status).toBe("queued");
     expect(p.runtime.listRuns(meta.id)).toHaveLength(0);
   });
 
-  it("re-runs an interrupted task from the pinned snapshot, even after workflow edits", () => {
+  it("re-runs an interrupted task from the pinned snapshot, even after workflow edits", async () => {
     let p = open();
     const meta = createTask(p, { title: "T", workflow: "wf", inputs: { x: "hello" } });
-    const started = beginTaskRun(p, meta.id);
+    const started = await beginTaskRun(p, meta.id);
     const firstHash = started.snapshotHash;
     p.close(); // crash: never finished
     project = undefined;
@@ -131,7 +131,7 @@ describe("task lifecycle", () => {
     expect(p.runtime.get(meta.id)?.status).toBe("interrupted");
     expect(p.runtime.listRuns(meta.id)[0]?.outcome).toBe("interrupted");
 
-    const rerun = beginTaskRun(p, meta.id);
+    const rerun = await beginTaskRun(p, meta.id);
     expect(rerun.pinned).toBe(true);
     expect(rerun.snapshotHash).toBe(firstHash);
     expect(rerun.bundle.states["wf"]?.label).toBe("Wf"); // pinned content, not the edit
@@ -140,21 +140,21 @@ describe("task lifecycle", () => {
     expect(p.runtime.listRuns(meta.id)).toHaveLength(2);
   });
 
-  it("cancel is terminal and closes dangling runs", () => {
+  it("cancel is terminal and closes dangling runs", async () => {
     const p = open();
     const meta = createTask(p, { title: "T", workflow: "wf" });
-    beginTaskRun(p, meta.id);
+    await beginTaskRun(p, meta.id);
     cancelTask(p, meta.id);
     expect(p.runtime.get(meta.id)?.status).toBe("canceled");
     expect(p.runtime.listRuns(meta.id)[0]?.outcome).toBe("canceled");
     expect(() => cancelTask(p, meta.id)).toThrow(/already canceled/);
-    expect(() => beginTaskRun(p, meta.id)).toThrow(/canceled/);
+    await expect(() => beginTaskRun(p, meta.id)).rejects.toThrow(/canceled/);
   });
 
-  it("deletes a finished task: rows, journal, jobs, artifacts, and the JSON file", () => {
+  it("deletes a finished task: rows, journal, jobs, artifacts, and the JSON file", async () => {
     const p = open();
     const meta = createTask(p, { title: "T", workflow: "wf", inputs: { x: "hi" } });
-    const started = beginTaskRun(p, meta.id);
+    const started = await beginTaskRun(p, meta.id);
     // One row in everything that hangs off a task, so the cascade is actually exercised.
     p.events.recorder(meta.id, started.runId).record({ type: "instance.entered", instanceId: 1, stateId: "wf", inputs: {} }, Date.now());
     p.commands.record({ taskId: meta.id, runId: started.runId, tool: "bash", command: "ls", decision: "allowed", decidedBy: "policy" });
@@ -178,19 +178,19 @@ describe("task lifecycle", () => {
     expect(p.db.pragma("foreign_key_check")).toEqual([]);
   });
 
-  it("refuses to delete a running task, and leaves it intact", () => {
+  it("refuses to delete a running task, and leaves it intact", async () => {
     const p = open();
     const meta = createTask(p, { title: "T", workflow: "wf" });
-    beginTaskRun(p, meta.id);
+    await beginTaskRun(p, meta.id);
     expect(() => deleteTask(p, meta.id)).toThrow(/running/);
     expect(p.runtime.get(meta.id)?.status).toBe("running");
     expect(p.tasks.tryRead(meta.id)).toBeDefined();
   });
 
-  it("deletes an interrupted task — pruning protects it, deleting is the user declining to resume", () => {
+  it("deletes an interrupted task — pruning protects it, deleting is the user declining to resume", async () => {
     let p = open();
     const meta = createTask(p, { title: "T", workflow: "wf" });
-    beginTaskRun(p, meta.id);
+    await beginTaskRun(p, meta.id);
     p.close(); // crash: never finished
     project = undefined;
     p = open();
@@ -201,17 +201,17 @@ describe("task lifecycle", () => {
     expect(p.runtime.listRuns(meta.id)).toHaveLength(0);
   });
 
-  it("delete is an error for an unknown task", () => {
+  it("delete is an error for an unknown task", async () => {
     const p = open();
     expect(() => deleteTask(p, "t-nowhere000")).toThrow(/unknown task/);
   });
 
-  it("rejects duplicate ids and unknown workflows", () => {
+  it("rejects duplicate ids and unknown workflows", async () => {
     const p = open();
     const meta = createTask(p, { title: "T", workflow: "wf", id: "t-fixed00000" });
     expect(() => createTask(p, { title: "T2", workflow: "wf", id: meta.id })).toThrow(/already exists/);
     const missing = createTask(p, { title: "M", workflow: "does/not/exist" });
-    expect(() => beginTaskRun(p, missing.id)).toThrow(/not found/);
+    await expect(() => beginTaskRun(p, missing.id)).rejects.toThrow(/not found/);
   });
 });
 

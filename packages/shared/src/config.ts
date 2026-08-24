@@ -1,5 +1,5 @@
 /**
- * Project config — `.jaira/config.json` (DESIGN §3).
+ * Project config — `.jaira/settings.json` (DESIGN §3).
  *
  * Since the declarative-ai ops redesign a state names its model directly in
  * `operation.config.model`, so the old `providers` map (name → llm-call config,
@@ -66,7 +66,7 @@ export interface JairaModelRoute {
    *
    * Resolved through the same chain every executor credential uses (OS keychain,
    * `.env.local`/`.env` beside the project, then the base root, then the process
-   * environment), because `config.json` is committed source and a key written into it
+   * environment), because `settings.json` is committed source and a key written into it
    * is a key in everyone's checkout.
    */
   credential?: string;
@@ -127,7 +127,7 @@ export type JairaExecEnvironment = "windows" | { wsl: string };
  *
  * `credential` names a SECRET, never holds one. The value is resolved at run time through the
  * lookup chain (OS keychain, then `.env.local`/`.env` beside the project, then the same two in the
- * base root, then the process environment), because `config.json` is committed source and a key in
+ * base root, then the process environment), because `settings.json` is committed source and a key in
  * it is a key in everyone's checkout.
  */
 /**
@@ -241,9 +241,9 @@ export interface JairaAgentConfig {
  * `file:` path (the scheme is implicit) built from a closed variable set.
  */
 export interface JairaArtifactConfig {
-  /** e.g. `$DEFAULT`, `$CENTRAL`, `$JAIRA/artifacts/$TASK_ID/$RELPATH`, `virtual:`. */
+  /** e.g. `$DEFAULT`, `$CENTRAL`, `$SYSTEM/out/$TASK_ID/$RELPATH`, `virtual:`. */
   destination: string;
-  /** What `$ARTIFACT_DIR` expands to. */
+  /** What `$ARTIFACT_DIR` expands to — a name under `$SYSTEM`, not a path from the checkout root. */
   dir: string;
   /**
    * Keep content inline below this size, so bindings and prompts stay cheap.
@@ -291,6 +291,8 @@ export interface JairaConfig {
   artifactDir: string;
   /** Where artifacts are stored (DESIGN §7.6). */
   artifacts: JairaArtifactConfig;
+  /** Which kinds of run state live on disk and which in SQLite (DESIGN §4.4). */
+  storage: JairaStorageConfig;
   /** Durable memoization of model calls — off unless asked for. */
   memo: JairaMemoConfig;
   execEnvironment: JairaExecEnvironment;
@@ -345,7 +347,14 @@ export const DEFAULT_WORKFLOW_PATH_SPELLING = [
   "$BASE/functions",
 ];
 
-export const DEFAULT_ARTIFACT_DIR = "jaira-artifacts";
+/**
+ * What `$ARTIFACT_DIR` expands to, and therefore where `$CENTRAL` puts things: `<root>/system/artifacts`.
+ *
+ * It was `jaira-artifacts`, at the top of the checkout, and the prefix was doing the work this
+ * directory now does — saying whose files these are. Under `system/` with the rest of what the
+ * engine writes for itself, the qualifier is redundant and the clutter is gone from the tree.
+ */
+export const DEFAULT_ARTIFACT_DIR = "artifacts";
 
 /**
  * Durable memoization of model calls.
@@ -360,6 +369,110 @@ export interface JairaMemoConfig {
   enabled: boolean;
 }
 
+/**
+ * Where each kind of run state lives — on disk, in SQLite, or both (DESIGN §4.4).
+ *
+ * §4.1 drew this line once, in code, for everyone. It became configuration because the right answer
+ * is not the same in every root: a shared base root is one machine and wants a database, while a
+ * project checked into git wants files, because **git cannot merge SQLite**. That, and not
+ * readability, is the whole argument. Because `settings.json` layers, the base can answer `db` and a
+ * project `file` with nothing extra to write.
+ *
+ * A `file` concern keeps the FILE as its truth and replays it into a temp table on open, so the
+ * runtime still has one read source and every query is unchanged. `both` means the same, plus the
+ * table copy persisting across a close so startup can skip the replay — **with no staleness check**,
+ * deliberately and provisionally (§4.4). It is not a second source of truth.
+ */
+export type JairaStorageMode = "file" | "db" | "both";
+
+/** The line shape a file-backed conversation is written in. Reading accepts either, whatever this says. */
+export type JairaSessionFormat = "claude" | "codex";
+
+/**
+ * The concerns a storage mode can be chosen for — and, by omission, the ones it cannot.
+ *
+ * CONCERNS, not tables. A per-table map would let someone put `state_machine_events` in a file and
+ * `operation_records` in the database, which splits one run's truth across two stores with different
+ * durability and different merge behaviour, and nothing would catch it.
+ *
+ * `jobs` and `job_output` are absent on purpose and {@link parseStorage} says so by name: a replayed
+ * table is `TEMP` and therefore per-connection, so anything whose value is cross-process
+ * coordination cannot be file-backed. Process claims are exactly that (DESIGN §4.2a), and they mean
+ * nothing past a single run.
+ */
+export const STORAGE_CONCERNS = ["journal", "conversations", "tasks", "artifacts"] as const;
+export type JairaStorageConcern = (typeof STORAGE_CONCERNS)[number];
+
+/** What each concern covers, for an error message and for anyone reading the config. */
+export const STORAGE_CONCERN_TABLES: Record<JairaStorageConcern, string> = {
+  journal: "state_machine_events",
+  conversations: "operation_records + session_positions",
+  tasks: "task_runtime + the task metadata files",
+  artifacts: "the artifact map",
+};
+
+/** Why a concern that looks like one is refused. Named, because "unknown key" explains nothing. */
+const STORAGE_REFUSED: Record<string, string> = {
+  jobs: "process claims are cross-process by definition and a replayed table is per-connection (DESIGN §4.2a)",
+  job_output: "a child's output is debounced chunks written on the main thread, and nothing wants it in git",
+  jobOutput: "a child's output is debounced chunks written on the main thread, and nothing wants it in git",
+  sessions: "the lineage rows hang off `conversations` — choose that",
+  events: "spelled `journal`",
+  snapshots: "a snapshot is already a directory of files, addressed by content",
+};
+
+export interface JairaStorageConfig extends Record<JairaStorageConcern, JairaStorageMode> {
+  format: JairaSessionFormat;
+}
+
+/**
+ * Everything in the database, which is what the engine does today.
+ *
+ * Defaulting a concern to `file` before the writer exists would be a setting that lies, so the
+ * default describes the built behaviour and the file half arrives with the code that honours it.
+ *
+ * One caveat worth stating rather than discovering: `tasks` reads `db` and a `system/tasks/<id>.json`
+ * is written anyway. That file predates this setting and is unconditional; it comes under the
+ * setting when the writer lands.
+ */
+export function defaultStorage(): JairaStorageConfig {
+  return { journal: "db", conversations: "db", tasks: "db", artifacts: "db", format: "claude" };
+}
+
+const MODES: readonly JairaStorageMode[] = ["file", "db", "both"];
+const FORMATS: readonly JairaSessionFormat[] = ["claude", "codex"];
+
+function parseStorage(raw: unknown): JairaStorageConfig {
+  const out = defaultStorage();
+  if (raw === undefined) return out;
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("config.storage must be an object");
+  }
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (key === "format") {
+      if (!FORMATS.includes(value as JairaSessionFormat)) {
+        throw new Error(`config.storage.format must be one of ${FORMATS.join(", ")}`);
+      }
+      out.format = value as JairaSessionFormat;
+      continue;
+    }
+    // The refusal is the point, and it is LOUD: a concern silently accepted and then ignored is a
+    // person believing their process claims are in git.
+    const refused = STORAGE_REFUSED[key];
+    if (refused !== undefined) {
+      throw new Error(`config.storage.${key} cannot be chosen — ${refused}`);
+    }
+    if (!STORAGE_CONCERNS.includes(key as JairaStorageConcern)) {
+      throw new Error(`config.storage.${key} is not a storage concern (${STORAGE_CONCERNS.join(", ")})`);
+    }
+    if (!MODES.includes(value as JairaStorageMode)) {
+      throw new Error(`config.storage.${key} must be one of ${MODES.join(", ")}`);
+    }
+    out[key as JairaStorageConcern] = value as JairaStorageMode;
+  }
+  return out;
+}
+
 export function defaultConfig(): JairaConfig {
   return {
     models: {},
@@ -371,6 +484,7 @@ export function defaultConfig(): JairaConfig {
       inlineMaxBytes: DEFAULT_INLINE_MAX_BYTES,
       askAboveBytes: DEFAULT_ASK_ABOVE_BYTES,
     },
+    storage: defaultStorage(),
     execEnvironment: "windows",
     policy: {},
     agents: {},
@@ -476,7 +590,7 @@ function parseArtifacts(raw: unknown, artifactDir: string): JairaArtifactConfig 
  *
  * `credential` is checked to be a plain name because it is looked up as one. Accepting a value that
  * *looks* like a key here would be the single easiest way to end up with a secret committed in
- * `config.json`, so a string containing whitespace is refused with the reason spelled out.
+ * `settings.json`, so a string containing whitespace is refused with the reason spelled out.
  */
 function checkExecutorFields(
   spec: Record<string, unknown>,
@@ -637,7 +751,7 @@ function genericCliName(entry: unknown): string {
 }
 
 /**
- * Lay a project's `config.json` over the shared base root's (DESIGN §3).
+ * Lay a project's `settings.json` over the shared base root's (DESIGN §3).
  *
  * Merged as raw DOCUMENTS, before parsing, so validation sees exactly the configuration that will be
  * used and an error names a field rather than an internal merge artefact.
@@ -862,6 +976,7 @@ export function parseConfig(raw: unknown): JairaConfig {
     memo: parseMemo(cfg["memo"]),
     artifactDir,
     artifacts: parseArtifacts(cfg["artifacts"], artifactDir),
+    storage: parseStorage(cfg["storage"]),
     execEnvironment: parseExecEnvironment(cfg["execEnvironment"]),
     policy: (rawPolicy as Record<string, JsonValue> | undefined) ?? {},
     agents: parseAgents(cfg["agents"]),

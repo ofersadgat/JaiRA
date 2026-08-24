@@ -21,6 +21,7 @@ import {
   type WorkflowShape,
 } from "./projection";
 import { loadSnapshot, readWorkflowFiles } from "./snapshots";
+import { ON_RECORD } from "./sessionStore";
 import { workflowShape } from "./shape";
 
 export interface ViewOptions {
@@ -320,7 +321,7 @@ function interruptedSessions(project: Project, taskId: string, runId?: number): 
       project.db
         .prepare(
           `SELECT r.record_id AS record_id, r.status AS status FROM operation_records r
-           JOIN session_positions p ON p.operation_record_id = r.id
+           JOIN session_positions p ON ${ON_RECORD}
           WHERE r.task_id = ? AND r.run_id = ?
           ORDER BY r.id`,
         )

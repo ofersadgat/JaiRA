@@ -7,7 +7,7 @@
  * silently stopped tracking the shared root, which is the failure these functions exist to prevent.
  *
  * The other half is that whatever comes out must still LOAD: every document built here is run
- * through the real `parseConfig`, because a settings screen that writes an unloadable `config.json`
+ * through the real `parseConfig`, because a settings screen that writes an unloadable `settings.json`
  * leaves the app unable to open the project it was just configured with.
  */
 import { describe, expect, it } from "vitest";

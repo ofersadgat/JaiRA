@@ -46,3 +46,6 @@ export * from "./chatTurn";
 export * from "./liveHandles";
 export * from "./changesets";
 export * from "./changesetGate";
+export * from "./userEvents";
+// A workflow's own TypeScript functions, as ordinary registry entries (SPEC §7.5).
+export * from "./userFunctions";

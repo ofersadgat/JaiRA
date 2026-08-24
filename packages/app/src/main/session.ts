@@ -17,7 +17,7 @@
 import type { FSWatcher } from "node:fs";
 import type { Project } from "@jaira/persistence";
 import { LiveCalls } from "@jaira/runtime";
-import type { ApprovalHub, ApprovalRequest, InteractionHub, QuestionHub } from "@jaira/runtime";
+import type { ApprovalHub, ApprovalRequest, InteractionHub, QuestionHub, UserEventHub } from "@jaira/runtime";
 import type { SyncDirection, WorkflowLayer } from "@jaira/shared";
 import { LiveTurnLog } from "./liveTurns";
 
@@ -78,14 +78,13 @@ export interface SyncHolder {
  * Which kind of project this is.
  *
  * `shared` is the SELECTED root opened as a project in its own right, so a workflow authored in
- * `<root>/workflows` has somewhere for its runs to be recorded. `system` is JaiRA's own — the
- * description sync and anything else it runs for itself — pinned to a fixed directory so that
- * history survives repointing the root, which the shared project's deliberately does not.
+ * `<root>/workflows` has somewhere for its runs to be recorded — and so does JaiRA itself, whose
+ * description sync and conformance check are runs of the same kind against the same root.
  *
- * Neither is ever the FOCUSED session: a window with no user project open must answer "list the
- * tasks" with nothing, not with one of these.
+ * It is never the FOCUSED session: a window with no user project open must answer "list the tasks"
+ * with nothing, not with this.
  */
-export type SessionKind = "user" | "shared" | "system";
+export type SessionKind = "user" | "shared";
 
 export interface ProjectSessionOptions {
   key: string;
@@ -94,6 +93,7 @@ export interface ProjectSessionOptions {
   hub: InteractionHub;
   approvals: ApprovalHub;
   questions: QuestionHub;
+  userEvents: UserEventHub;
 }
 
 export class ProjectSession {
@@ -187,6 +187,14 @@ export class ProjectSession {
   /** Mid-run questions (`AskUserQuestion`) — the call IS the question, so not an approval. */
   readonly questions: QuestionHub;
   /**
+   * Transitions waiting on a gesture — `on_user_event`, the seam that makes a card draggable.
+   *
+   * The fourth inbox channel and the only one with no inbox: the other three park something and ask
+   * for an answer, where this one parks a RULE and offers the move it describes through the board a
+   * person is already looking at. Nothing is shown until they reach for the card.
+   */
+  readonly userEvents: UserEventHub;
+  /**
    * The live turn each running task is streaming — main's copy of the renderer's `liveTurn`, held
    * where navigation cannot lose it and served back over `session:live`. See {@link LiveTurnLog}.
    */
@@ -213,6 +221,7 @@ export class ProjectSession {
     this.hub = options.hub;
     this.approvals = options.approvals;
     this.questions = options.questions;
+    this.userEvents = options.userEvents;
   }
 
   get dir(): string {
@@ -237,6 +246,9 @@ export class ProjectSession {
     // A parked question parks the agent's tool loop just as hard — dismissed, the agent proceeds
     // on its own judgment, which is the honest answer from a project that is going away.
     this.questions.dismissAll();
+    // A wait on a gesture nobody can make any more answers `false`: the transitions behind it get
+    // their turn, which is what an author's fallback rule is for.
+    this.userEvents.declineAll();
     // A sync in flight is one of the live runs below, so aborting it needs nothing special here. What
     // does go is the proposal it was about to produce, which belongs to a project that is going away.
     this.syncTask = undefined;

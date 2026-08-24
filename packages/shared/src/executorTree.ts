@@ -18,7 +18,7 @@
  *
  * **2. A change pins only what changed.** Writing a rate limit onto the `anthropic` route stores
  * exactly that, so installing another agent tomorrow still adds a route by itself. The alternative —
- * materializing the resolved tree into `config.json` on first edit — freezes today's answer into
+ * materializing the resolved tree into `settings.json` on first edit — freezes today's answer into
  * everyone's configuration, and they never pick up a better one.
  *
  * That pair is why the settings screen can show the whole tree expanded while the file stays a few

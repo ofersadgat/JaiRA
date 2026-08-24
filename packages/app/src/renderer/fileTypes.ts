@@ -320,7 +320,7 @@ export interface FileSurfaceContext {
    *
    * Four functions rather than the state itself, and that is what keeps the coupling one-way: a
    * surface asks for the size of a named pane and reports a new one, and never learns that the
-   * answer is stored in `settings.json` or what else is in there beside it.
+   * answer is stored in `user-settings.json` or what else is in there beside it.
    *
    * Optional, like the draft store and for the same reason — a surface rendered outside the shell
    * (the settings panes do this) still has to work, and falls back to its own state.
