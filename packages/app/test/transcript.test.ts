@@ -806,3 +806,107 @@ describe("a tool result, out of the envelope the transport put it in", () => {
     expect(resultValueOf(mcp('{"path": "a.html", "cont') as never)).toBe('{"path": "a.html", "cont');
   });
 });
+
+/**
+ * A message that is not prose but the call's structured output, serialized.
+ *
+ * Main decides WHICH turn that is (see `structuredOutput.test.ts`); this is the other half — the
+ * value reaching the entry the viewer draws, at the turn main named and at no other.
+ */
+describe("a structured output that arrived as text", () => {
+  const value = { matched: false, working_set: ["docs/product/index.md"] } as JsonValue;
+  const schema = { type: "object" } as JsonValue;
+  const withOutput = (outputs: SessionView["outputs"]): TranscriptEntry[] =>
+    entriesOf({
+      ...session([
+        { role: "user", text: "does the catalog cover this?" },
+        { role: "assistant", text: JSON.stringify(value) },
+      ]),
+      ...(outputs !== undefined ? { outputs } : {}),
+    });
+
+  const messages = (entries: TranscriptEntry[]) => entries.filter((e) => e.kind === "message");
+
+  it("carries the value and the schema onto the message at that turn", () => {
+    const said = messages(withOutput([{ turn: 1, value, schema }]));
+    expect(said[1]).toMatchObject({ role: "assistant", output: { value, schema } });
+    // The text stays. It is what the model actually wrote, and the `Source` toggle over every
+    // assistant message is what a reader gets back to it with.
+    expect(said[1]).toMatchObject({ text: JSON.stringify(value) });
+  });
+
+  it("leaves every other message alone", () => {
+    const said = messages(withOutput([{ turn: 1, value, schema }]));
+    expect(said[0]).toMatchObject({ role: "user" });
+    expect("output" in said[0]!).toBe(false);
+  });
+
+  it("renders as text when main named no output — which is most conversations", () => {
+    expect(messages(withOutput(undefined)).every((m) => !("output" in m))).toBe(true);
+  });
+
+  it("places it by TURN index, not by position in the entry list", () => {
+    // The entries are a weave — thoughts, tool rows and journal facts are in here too — so the two
+    // coordinates are different numbers, and an output placed by the wrong one lands on the wrong
+    // message. See `MessageEntry.turn`.
+    const entries = entriesOf({
+      ...session([
+        { role: "assistant", parts: [{ type: "thinking", thinking: "checking" }] },
+        { role: "user", text: "and now?" },
+        { role: "assistant", text: JSON.stringify(value) },
+      ]),
+      outputs: [{ turn: 2, value }],
+    });
+    const carried = entries.filter((e) => e.kind === "message" && e.output !== undefined);
+    expect(carried).toHaveLength(1);
+    expect(carried[0]).toMatchObject({ turn: 2, output: { value } });
+  });
+});
+
+/**
+ * The other delivery route: a tool call whose arguments ARE the output.
+ *
+ * The row stays — it is a real call with a real id — and the value rides the `shown` slot, the same
+ * one a page a call produced does. Attaching by CALL ID rather than by position is what makes that
+ * work across a thread: `tool_use` and `tool_result` are on different turns, and records concatenate.
+ */
+describe("a structured output that arrived through a tool", () => {
+  const value = { passed: true, verdict: "it reads as a greeting" } as JsonValue;
+  const parts = [
+    { type: "tool-call", toolCallId: "c1", toolName: "read_file", args: { path: "a.ts" } },
+    { type: "tool-result", toolCallId: "c1", result: { bytes: 4 } },
+    { type: "tool-call", toolCallId: "c2", toolName: "StructuredOutput", args: value },
+    { type: "tool-result", toolCallId: "c2", result: "Structured output provided successfully" },
+  ];
+  const built = (): ToolEntry[] =>
+    entriesOf({
+      ...session([{ role: "assistant", parts }] as never),
+      outputs: [{ callId: "c2", value, name: "verdict" }],
+    }).filter((e): e is ToolEntry => e.kind === "tool");
+
+  it("lands the value on the call main named, and on no other", () => {
+    const [read, delivered] = built();
+    expect(read).toMatchObject({ name: "read_file" });
+    expect(read!.output).toBeUndefined();
+    expect(delivered).toMatchObject({ name: "StructuredOutput", output: { value, name: "verdict" } });
+  });
+
+  it("leaves the call's own arguments and result intact", () => {
+    // The row is not replaced, so nothing about the call is lost — including the acknowledgement,
+    // which is uninformative and is still what the record says came back.
+    const delivered = built()[1]!;
+    expect(delivered.args).toEqual(value);
+    expect(delivered.result).toBe("Structured output provided successfully");
+    expect(delivered.ok).toBe(true);
+  });
+
+  it("survives the fold, however early in the loop it was called", () => {
+    // Agent transports emit it mid-loop and then go on to summarise, so the answer is routinely the
+    // oldest interesting row in a long block — exactly what the fold hides. See `unfoldable`.
+    const answer: ToolEntry = { kind: "tool", name: "StructuredOutput", summary: "", callId: "c2", output: { value } };
+    const noise: ToolEntry[] = Array.from({ length: 9 }, (_, i) => ({ kind: "tool", name: "bash", summary: `step ${i}` }));
+    const kept = unfoldable([answer, ...noise], 5).map(({ entry }) => entry);
+    expect(kept).toContain(answer);
+    expect(kept).toHaveLength(6);
+  });
+});

@@ -19,7 +19,15 @@
  * identical: they are the same thing.
  */
 import type { JsonValue } from "@declarative-ai/json";
-import { writingPath, type ConversationTurn, type InstanceNode, type SessionTurn, type SessionView, type WritingTool } from "@jaira/shared/browser";
+import {
+  writingPath,
+  type ConversationTurn,
+  type InstanceNode,
+  type SessionOutput,
+  type SessionTurn,
+  type SessionView,
+  type WritingTool,
+} from "@jaira/shared/browser";
 
 // --- entries ------------------------------------------------------------------
 
@@ -42,6 +50,16 @@ export interface MessageEntry {
    * record did not supply: a live fragment has no turn yet, and a journal entry never will.
    */
   turn?: number;
+  /**
+   * Set when this message's text IS the operation's structured output, serialized — the value it was
+   * read as, and the schema it was declared with. See `SessionOutput`.
+   *
+   * The message keeps its {@link text}, and that is the point rather than an oversight: the value is
+   * what gets drawn, the text is what the model actually wrote, and the `Source` toggle already over
+   * every assistant message is what moves between them. Only ever present when the two are provably
+   * the same thing — main matches them by equality, never by shape.
+   */
+  output?: { value: JsonValue; schema?: JsonValue; name?: string };
 }
 
 /** One tool call and its result, paired. Collapsed to a line until asked. */
@@ -76,6 +94,16 @@ export interface ToolEntry {
    * agent kept for itself (split stdout/stderr, file metadata, structured patches).
    */
   detail?: JsonValue;
+  /**
+   * Set when this call's ARGUMENTS are the operation's structured output — the way an agent
+   * transport delivers one. See `SessionOutput`.
+   *
+   * The row stays and the value is drawn beneath it, exactly as a page a call produced is: the call
+   * happened, it has an id and a result, and matching it is the weaker of the two claims main makes
+   * (a genuine tool whose arguments equalled the output would look identical). Drawing the value
+   * under the row costs a duplicate if that ever happens; replacing the row would cost a call.
+   */
+  output?: { value: JsonValue; schema?: JsonValue; name?: string };
 }
 
 /**
@@ -460,6 +488,8 @@ function messageOf(
   toolRecord?: JsonValue,
   /** Which turn of the session this is — carried onto the message entry. See {@link MessageEntry.turn}. */
   index?: number,
+  /** Set when this turn's text is the call's structured output. See {@link MessageEntry.output}. */
+  output?: { value: JsonValue; schema?: JsonValue; name?: string },
 ): Array<TranscriptEntry | ResultPart> {
   const entries: Array<TranscriptEntry | ResultPart> = [];
   const hasText = turn.text !== undefined && turn.text.length > 0;
@@ -493,6 +523,7 @@ function messageOf(
       ...(at !== undefined ? { at } : {}),
       ...(turn.text !== undefined ? { text: turn.text } : {}),
       ...(index !== undefined ? { turn: index } : {}),
+      ...(output !== undefined ? { output } : {}),
     });
   }
   for (const part of parts) {
@@ -873,12 +904,34 @@ export function entriesOf(
     }
     return undefined;
   };
+  // Where the call's structured output actually is — see `SessionOutput`. Two indexes because there
+  // are two places it can be, and a `SessionOutput` sets exactly one of them.
+  const outputs = { turn: new Map<number, SessionOutput>(), call: new Map<string, SessionOutput>() };
+  for (const out of session?.outputs ?? []) {
+    if (out.turn !== undefined) outputs.turn.set(out.turn, out);
+    else if (out.callId !== undefined) outputs.call.set(out.callId, out);
+  }
   const turns = session?.turns ?? [];
   for (const [i, turn] of turns.entries()) {
     for (; nextEvent < stored.length && stored[nextEvent]!.index <= i; nextEvent++) {
       said.push(...eventEntry(stored[nextEvent]!.event));
     }
-    said.push(...messageOf(turn, undefined, drainFor(turn), i));
+    const output = outputs.turn.get(i);
+    said.push(
+      ...messageOf(
+        turn,
+        undefined,
+        drainFor(turn),
+        i,
+        output === undefined
+          ? undefined
+          : {
+              value: output.value,
+              ...(output.schema !== undefined ? { schema: output.schema } : {}),
+              ...(output.name !== undefined ? { name: output.name } : {}),
+            },
+      ),
+    );
   }
   // Whatever the file said after the last turn — a title, bookkeeping. Envelopes that never found a
   // turn are dropped here: an annotation lost beats a conversation misattributed.
@@ -982,6 +1035,17 @@ export function entriesOf(
   for (const entry of entries) {
     if (entry.kind !== "tool" || entry.callId === undefined) continue;
     if (chains[entry.callId] !== undefined || liveChains[entry.callId] !== undefined) entry.sidechain = entry.callId;
+    // And the call that DELIVERED the output, when a transport delivered it that way. Marked in the
+    // same pass and by the same key as a doorway, because it is the same kind of fact: something
+    // about this call that only the record either side of the conversation could know.
+    const output = outputs.call.get(entry.callId);
+    if (output !== undefined) {
+      entry.output = {
+        value: output.value,
+        ...(output.schema !== undefined ? { schema: output.schema } : {}),
+        ...(output.name !== undefined ? { name: output.name } : {}),
+      };
+    }
   }
   return entries;
 }

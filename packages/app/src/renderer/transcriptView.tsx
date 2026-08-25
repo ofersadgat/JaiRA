@@ -355,7 +355,22 @@ function Tool({
               />
             ),
           }
-        : {})}
+        : entry.output !== undefined
+          ? {
+              // The call that DELIVERED the operation's output, drawn rather than folded — the same
+              // argument the artifact above makes, about the same slot. This row is the agent's way
+              // of terminating with a value, so what is behind its triangle is not evidence for the
+              // answer, it IS the answer; what reads as a result ("Structured output provided
+              // successfully") is an acknowledgement carrying no information at all.
+              shown: (
+                <ValueView
+                  value={entry.output.value}
+                  label={entry.output.name ?? "output"}
+                  {...(entry.output.schema !== undefined ? { hint: { schema: entry.output.schema } } : {})}
+                />
+              ),
+            }
+          : {})}
       body={
         <>
           {/* The subagent's conversation, first: it is what this call DID, and the arguments and
@@ -562,7 +577,7 @@ function foldsAt(count: number): number {
 }
 
 /**
- * Which rows of a block survive the fold — the last {@link SHOWN}, and every page produced before
+ * Which rows of a block survive the fold — the last {@link SHOWN}, and every ANSWER produced before
  * them.
  *
  * The exemption is the fold's own rule taken seriously. It hides the older half because the question
@@ -571,6 +586,12 @@ function foldsAt(count: number): number {
  * drew six pages and then read four files would have folded five of the six away — the transcript
  * saying, of work the model did on request, that it was too old to look at.
  *
+ * A call that delivered the operation's structured output is exempt by the same argument, and by
+ * more of it: a page is a piece of the answer and that call IS the answer, so folding it would hide
+ * the one row the state exists to produce behind "12 earlier steps". Agent transports emit it
+ * mid-loop rather than last (the model goes on to summarise afterwards), so this is not a rare
+ * shape — it is where the row normally sits.
+ *
  * Indices are into the WHOLE block, and travel with the rows: they are the render keys, and a
  * slice-relative key hands one row's open/closed state to a different row every time the fold moves.
  */
@@ -578,7 +599,8 @@ export function unfoldable(entries: readonly WorkEntry[], hidden: number): Array
   const rows = entries.map((entry, index) => ({ entry, index }));
   if (hidden === 0) return rows;
   return rows.filter(
-    ({ entry, index }) => index >= hidden || (entry.kind === "tool" && producedArtifact(entry.result) !== undefined),
+    ({ entry, index }) =>
+      index >= hidden || (entry.kind === "tool" && (entry.output !== undefined || producedArtifact(entry.result) !== undefined)),
   );
 }
 
@@ -637,6 +659,13 @@ function WorkBlockView({
  * instruction is a bubble on the right, the way every chat client has arranged it for twenty years.
  * A system prompt is neither — it is the frame the run was given, so it is quiet, full width, and
  * marked with the one label a reader would not otherwise guess.
+ *
+ * A fourth case is not a shape but a CLAIM about what the words are. An operation that declares a
+ * structured output can still be answered in text — the model writes the JSON as its message and
+ * upstream binds it — and the answer then arrived as a paragraph of `{"matched": false, …}` put
+ * through a markdown renderer, which is the least readable form of the one thing the state exists to
+ * produce. Where main can prove the text IS the value (see `SessionOutput`), the value is drawn
+ * instead, through the same {@link ValueView} every other value in the app goes through.
  */
 function Message({ entry, onEdit }: { entry: MessageEntry; onEdit?: EditMessage | undefined }): JSX.Element {
   // Only a message the host can NAME a position for is editable, which is why this asks rather than
@@ -651,6 +680,13 @@ function Message({ entry, onEdit }: { entry: MessageEntry; onEdit?: EditMessage 
    * a table that did not parse are all invisible in the rendering and obvious in the source. It
    * lives in the hover meta rather than in a permanent control: this is a check you make
    * occasionally, and a button over every paragraph the model wrote is chrome that never rests.
+   *
+   * It carries the same weight for a structured output, and it has to. `ValueView` offers a toggle
+   * only where a value has more than one reading, and a plain object has exactly one — so the drawn
+   * value would otherwise be a dead end, and its JSON view is a re-serialization rather than what
+   * the model typed. Nothing is hidden by that (the two are equal by construction, which is the only
+   * reason the message is replaced at all), but "what did it actually write" is still a question
+   * somebody asks, and this is where every other message answers it.
    */
   const [source, setSource] = useState(false);
   const meta = (
@@ -685,6 +721,14 @@ function Message({ entry, onEdit }: { entry: MessageEntry; onEdit?: EditMessage 
         {said ? (
           source ? (
             <pre className="ts-text">{entry.text}</pre>
+          ) : entry.output !== undefined ? (
+            // The declared schema goes with it, which is what lets a slot that says `text/markdown`
+            // render as a document rather than as a quoted string — see `ViewHint.schema`.
+            <ValueView
+              value={entry.output.value}
+              label={entry.output.name ?? "output"}
+              {...(entry.output.schema !== undefined ? { hint: { schema: entry.output.schema } } : {})}
+            />
           ) : (
             <Markdown text={entry.text ?? ""} fence={drawFence} />
           )

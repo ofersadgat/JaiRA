@@ -787,8 +787,80 @@ export interface SessionView {
    * in file order. Absent for a record closed before capture existed, or a transport with no file.
    */
   native?: Array<{ index: number; line: JsonValue }>;
+  /**
+   * The turns that ARE a structured output rather than prose — see {@link SessionOutput}.
+   *
+   * A list keyed by turn index rather than one field, for the same reason {@link providerEvents} and
+   * {@link native} are: a chat thread is a chain of records, each with an output of its own, and a
+   * single slot would be able to describe only the last one.
+   */
+  outputs?: SessionOutput[];
   /** Set when the state ran in no conversation at all — a function op, or a run before this existed. */
   empty?: string;
+}
+
+/**
+ * A turn whose text is not prose but the operation's declared output, serialized.
+ *
+ * ## Two ways a model delivers one, and neither of them looked like a value
+ *
+ * **In TEXT.** A model with no structured-output tool writes the JSON as its message and upstream
+ * binds it. Both facts end up in the record — the message the model wrote, and the value it was read
+ * as — and the conversation only ever showed the first, so a state that produced four labelled
+ * fields rendered as a paragraph of `{"matched": false, "match_reason": …}` run through a markdown
+ * renderer. {@link turn} names that message.
+ *
+ * **Through a TOOL.** An agent transport exposes a tool whose arguments are the output, and calling
+ * it is how the agent terminates with a value. That reached the transcript as an ordinary tool row —
+ * a collapsed grey line, the value behind a disclosure triangle, and a result reading "Structured
+ * output provided successfully" — which is the whole point of the call, folded away, next to an
+ * acknowledgement that is not information. {@link callId} names that call.
+ *
+ * Exactly one of the two is set. The value and the schema are the same either way, which is the
+ * point: how the model happened to hand it over is a fact about the transport, not about the answer.
+ *
+ * ## Identity, never inference
+ *
+ * A turn is named here only when its text parses AND equals the value the record bound, exactly. A
+ * call is named only when its arguments equal it. Not "the operation declares JSON and this looks
+ * like JSON": that rule would relabel a model's prose about a value as the value, and — worse —
+ * would present an output the binding REJECTED as though it had been accepted.
+ *
+ * The two are read differently downstream for a reason that follows from that. A message is
+ * REPLACED, because equality means there is nothing in the text that is not in the value. A call is
+ * not: its row stays and the value is drawn beneath it, the way a page a tool produced is (see
+ * `producedArtifact`). Matching a call is the weaker claim of the two — a genuine tool whose
+ * arguments happen to equal the output would be indistinguishable — and the cost of being wrong
+ * should be a value shown twice, never a call that vanished from the record.
+ *
+ * Absent for records that keep only their messages — a scripted fake, a value-mode core whose
+ * payload was projected away inside the call (see `projectValue`). There is no bound value to check
+ * against, and a rendering that cannot be checked is the thing this deliberately does not do.
+ */
+export interface SessionOutput {
+  /** Index into {@link SessionView.turns} — which turn's text is this value. */
+  turn?: number;
+  /**
+   * The provider's id for the tool call whose ARGUMENTS are this value.
+   *
+   * Globally unique, and that is why it is an id rather than a position: unlike {@link turn} it
+   * needs no shifting when records are concatenated into a thread.
+   */
+  callId?: string;
+  /** What the record bound, which is what gets drawn. */
+  value: JsonValue;
+  /** The output slot's declared schema, when the request pinned one — `ViewHint.schema`. */
+  schema?: JsonValue;
+  /**
+   * Which slot this filled, when the request named one.
+   *
+   * The label over the drawn value, and the one word a reader could not otherwise guess: a block of
+   * JSON where a paragraph was says that the model answered structurally, and `plan_doc` says what
+   * it answered WITH. It is also what gives the value a head at all — a plain object has one
+   * rendering, so `ValueView` draws no toggle and hence no row to hang "download" or "open in the
+   * context panel" off, and those are worth more here than on any tool result.
+   */
+  name?: string;
 }
 
 /**

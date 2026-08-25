@@ -236,6 +236,7 @@ import type {
   ProjectSummary,
   ProjectTask,
   RunMetrics,
+  SessionOutput,
   SessionRef,
   SessionTurn,
   SessionView,
@@ -1828,6 +1829,10 @@ export class AppService {
     const sidechains = sidechainsOf(record.value);
     const providerEvents = recordEventsOf(record.value);
     const native = nativeOf(record.value);
+    // Against the turns as RENDERED, not the record's raw messages: `turnsSaidBy` can append the
+    // half-written tail of an interrupted call, and an index measured before that would name a
+    // different turn than the one the viewer counts to.
+    const output = structuredOutputOf(record, turns);
     return {
       ...base,
       ...(record.externalId !== undefined ? { providerSessionId: record.externalId } : {}),
@@ -1837,6 +1842,7 @@ export class AppService {
       ...(sidechains !== undefined ? { sidechains } : {}),
       ...(providerEvents !== undefined ? { providerEvents } : {}),
       ...(native !== undefined ? { native } : {}),
+      ...(output !== undefined ? { outputs: [output] } : {}),
     };
   }
 
@@ -3438,6 +3444,7 @@ export class AppService {
     const sidechains: Record<string, SessionTurn[]> = {};
     const providerEvents: Array<{ index: number; event: JsonValue }> = [];
     const native: Array<{ index: number; line: JsonValue }> = [];
+    const outputs: SessionOutput[] = [];
     /** Per branch: the turn its own rows begin at, so a fork can be reported as a turn index. */
     const begins = new Map<string, number>();
     for (const [i, row] of rows.entries()) {
@@ -3447,10 +3454,16 @@ export class AppService {
       // own `materialize` adds records up exactly this way to build the history a provider is
       // replayed, and a reader that disagreed with it would be describing a different conversation
       // from the one the model is having.
-      turns.push(...turnsSaidBy(row));
+      const said = turnsSaidBy(row);
+      turns.push(...said);
       // The run's own call is not a message somebody typed — editing it means running the task
       // again with different inputs, which is a different verb in a different place.
       if (i > 0) points.push({ turn: at, at: `${sessionOf(context.position)}@${row.seq}` });
+      // A TURN index is record-relative, so it shifts onto the thread by where that record started —
+      // the same arithmetic the two index families below do. A call id needs no shifting: it is the
+      // provider's own id and is unique across the whole thread, which is why it is not a position.
+      const output = structuredOutputOf(row, said);
+      if (output !== undefined) outputs.push(output.turn !== undefined ? { ...output, turn: output.turn + at } : output);
       for (const [call, chain] of Object.entries(sidechainsOf(row.value) ?? {})) sidechains[call] = chain;
       // Both index families count TURNS within their own record, so they are shifted onto the thread
       // by where that record started.
@@ -3471,6 +3484,7 @@ export class AppService {
       ...(Object.keys(sidechains).length > 0 ? { sidechains } : {}),
       ...(providerEvents.length > 0 ? { providerEvents } : {}),
       ...(native.length > 0 ? { native } : {}),
+      ...(outputs.length > 0 ? { outputs } : {}),
       ...(turns.length === 0 ? { empty: "this conversation has not said anything yet" } : {}),
     };
     /**
@@ -5993,6 +6007,77 @@ function partialOf(value: JsonValue | undefined): { text?: string; thinking?: st
   const partial = (value as { value?: { partial?: { text?: string; thinking?: string } } } | undefined)?.value?.partial;
   if (partial === undefined || (partial.text === undefined && partial.thinking === undefined)) return undefined;
   return partial;
+}
+
+/**
+ * Where a record's structured output actually IS — see {@link SessionOutput}.
+ *
+ * Every half of this is already in the record and none of it was reachable from the read side. The
+ * bound value sits at `value.value.value`: the row wraps an `LlmOutput`, and that carries the value
+ * the call was read as beside the messages it produced. The schema and the slot's name sit on
+ * `request.output`, pinned when the record was opened and never recomputed.
+ *
+ * Two places are searched, in the order a reader would want them found. A MESSAGE whose text parses
+ * and equals the bound value is the answer written as prose-shaped JSON, and the LAST such turn
+ * wins — the answer is the last thing a call says, and a model that quoted the same value earlier
+ * quoted it, whereas the final turn IS it. Failing that, a TOOL CALL whose arguments equal it: the
+ * agent transports deliver a structured output by calling a tool with the value as its input, and
+ * that reached the transcript as a collapsed grey row.
+ *
+ * Text first, and it only matters in a case that should not arise (a call that both wrote the value
+ * and passed it to a tool). The message is what a reader is looking at, so it wins.
+ *
+ * Objects and arrays only. A `kind: "text"` output binds to the string the model wrote, so every
+ * assistant turn in a text-mode call would match trivially — and the "structured" rendering of a
+ * string is markdown, which is already what a message gets. Nothing to gain and a renderer to lose.
+ * Real records make this concrete: five of them declare a `json` output with no schema and bind the
+ * agent's whole PROSE answer, and a rule that keyed off the declaration would quote all five.
+ *
+ * Never matched on the tool's NAME, for the reason `producedArtifact` does not either: the name
+ * belongs to whichever transport ran, a name test would have to be kept in step with every one of
+ * them, and it would answer wrongly the first time it was not.
+ *
+ * Exported for its own test: it is the whole of the decision, and the surfaces that call it are
+ * database-shaped.
+ */
+export function structuredOutputOf(
+  row: { value?: JsonValue; request?: JsonValue },
+  said: readonly SessionTurn[],
+): SessionOutput | undefined {
+  const llm = (row.value as { value?: { value?: JsonValue; toolCalls?: JsonValue } } | undefined)?.value;
+  const bound = llm?.value;
+  if (bound === undefined || bound === null || typeof bound !== "object") return undefined;
+  const wanted = JSON.stringify(bound);
+  const slot = (row.request as { output?: { schema?: JsonValue; name?: unknown } } | undefined)?.output;
+  const found = (where: { turn: number } | { callId: string }): SessionOutput => ({
+    ...where,
+    value: bound,
+    ...(slot?.schema !== undefined ? { schema: slot.schema } : {}),
+    ...(typeof slot?.name === "string" && slot.name.length > 0 ? { name: slot.name } : {}),
+  });
+
+  for (let i = said.length - 1; i >= 0; i -= 1) {
+    const turn = said[i]!;
+    if (turn.role !== "assistant" || turn.text === undefined) continue;
+    let parsed: JsonValue;
+    try {
+      parsed = JSON.parse(turn.text) as JsonValue;
+    } catch {
+      continue;
+    }
+    if (JSON.stringify(parsed) === wanted) return found({ turn: i });
+  }
+
+  // `LlmOutput.toolCalls` rather than the turns' parts: it is the normalised list — one shape
+  // whatever the transport put on the wire — and the id in it is the same id the viewer pairs by.
+  const calls = Array.isArray(llm?.toolCalls) ? (llm.toolCalls as JsonValue[]) : [];
+  for (let i = calls.length - 1; i >= 0; i -= 1) {
+    const call = calls[i] as { toolCallId?: unknown; input?: JsonValue } | null;
+    if (call === null || typeof call !== "object") continue;
+    if (typeof call.toolCallId !== "string" || call.toolCallId.length === 0) continue;
+    if (JSON.stringify(call.input) === wanted) return found({ callId: call.toolCallId });
+  }
+  return undefined;
 }
 
 /** The record's subagent conversations, as turns — `LlmOutput.sidechains`, read the way `turns` is. */
