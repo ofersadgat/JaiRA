@@ -108,6 +108,23 @@ export interface JairaSettings {
    */
   ui: JairaUiState;
   /**
+   * The projects this window had open when it was last closed, in the order they were opened.
+   *
+   * A window holds several projects at once (SHELL.md §2.2) and nothing evicts one, so "which
+   * projects are open" is a statement a person makes by opening them — and until this existed it was
+   * a statement the app forgot on every quit, leaving a window that had been worked in all week
+   * opening on nothing.
+   *
+   * Here rather than in a project's `settings.json` for the reason everything else in this file is:
+   * which checkouts one person has open on one machine is not a property of any of them, and a list
+   * of absolute paths is the last thing that should arrive through a pull request. Oldest first, so
+   * the last entry is the project opened most recently — which is where a restored window stands.
+   *
+   * Losing it costs a re-open and nothing else, so it is read the way the layout is: entries that no
+   * longer name a project are dropped rather than raised (see `AppService.restore`).
+   */
+  projects: string[];
+  /**
    * Where the shared base root lives, when it is not `~/.jaira`.
    *
    * Stored so the choice survives a restart without an environment variable. `JAIRA_HOME` still
@@ -194,7 +211,7 @@ export function defaultAppearance(): Appearance {
 }
 
 export function defaultSettings(): JairaSettings {
-  return { theme: "light", wrapJson: false, ui: defaultUiState(), appearance: defaultAppearance() };
+  return { theme: "light", wrapJson: false, ui: defaultUiState(), appearance: defaultAppearance(), projects: [] };
 }
 
 /** No layout remembered yet — every control opens at its own default. */
@@ -228,6 +245,7 @@ export function parseSettings(raw: unknown): JairaSettings {
     wrapJson: doc["wrapJson"] === true,
     ui: parseUiState(doc["ui"]),
     appearance: parseAppearance(doc["appearance"]),
+    projects: parseProjects(doc["projects"]),
     ...(typeof baseDir === "string" && baseDir.length > 0 ? { baseDir } : {}),
   };
 }
@@ -298,6 +316,20 @@ function parseUiState(raw: unknown): JairaUiState {
     if (typeof at === "number" && Number.isFinite(at) && at > 0) ui.seen[taskId] = at;
   }
   return ui;
+}
+
+/**
+ * The remembered project list, keeping only entries that are plausibly paths.
+ *
+ * Order-preserving and de-duplicated: the list is "what was open", and the same directory twice
+ * would be one project opened twice — which the service treats as a no-op anyway, so keeping the
+ * duplicate would only make the file lie about what happened. Nothing here checks the disk; whether
+ * a path still names a project is a question for whoever opens it, and answering it in a pure parser
+ * would make reading a preferences file depend on which drives are mounted.
+ */
+function parseProjects(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.filter((dir): dir is string => typeof dir === "string").map((dir) => dir.trim()).filter((dir) => dir.length > 0))];
 }
 
 /** A JSON object as a record, or an empty one for anything else — including arrays and null. */

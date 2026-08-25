@@ -63,7 +63,7 @@ afterEach(async () => {
 describe("user settings", () => {
   it("defaults to the light theme, with no project open", () => {
     // Preferences belong to the person, not the checkout — the theme must apply on an empty window.
-    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, seen: {} }, appearance: defaultAppearance() });
+    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, seen: {} }, appearance: defaultAppearance(), projects: [] });
   });
 
   it("persists a change and reads it back", () => {
@@ -76,7 +76,7 @@ describe("user settings", () => {
     writeFileSync(join(baseDir, "user-settings.json"), "{ not json", "utf8");
 
     // A broken preferences file must never stop the app opening.
-    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, seen: {} }, appearance: defaultAppearance() });
+    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, seen: {} }, appearance: defaultAppearance(), projects: [] });
   });
 
   it("keeps the JSON editor's wrap preference, and defaults it off", () => {
@@ -91,7 +91,19 @@ describe("user settings", () => {
 
   it("reads a settings file written before wrapJson existed", () => {
     writeFileSync(join(baseDir, "user-settings.json"), JSON.stringify({ theme: "dark" }), "utf8");
-    expect(service.readSettings()).toEqual({ theme: "dark", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, seen: {} }, appearance: defaultAppearance() });
+    expect(service.readSettings()).toEqual({ theme: "dark", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, seen: {} }, appearance: defaultAppearance(), projects: [] });
+  });
+
+  it("reads a hand-edited project list without throwing any of it away", () => {
+    writeFileSync(
+      join(baseDir, "user-settings.json"),
+      // A path that is not a string, an empty one, one with stray whitespace, and the same project
+      // twice — which would be one project opened twice, and is a no-op anyway.
+      JSON.stringify({ projects: [42, "", "  /work/one  ", "/work/two", "/work/two"] }),
+      "utf8",
+    );
+
+    expect(service.readSettings().projects).toEqual(["/work/one", "/work/two"]);
   });
 
   /**
@@ -184,6 +196,30 @@ describe("opening and creating projects", () => {
     expect(JSON.parse(readFileSync(join(dir, ".jaira", "settings.json"), "utf8"))).toEqual({ memo: { enabled: true } });
   });
 
+  /**
+   * "Is this a project?", asked before anything is done about it.
+   *
+   * The read the app needs to offer to SET UP a folder rather than refuse it. Matching on the text
+   * of the error `open` throws would work until somebody rewords it, and would still not tell a
+   * folder that has never been set up apart from one whose database will not open.
+   */
+  it("reports what a directory is without opening or creating anything", async () => {
+    const fresh = mkdtempSync(join(tmpdir(), "jaira-app-inspect-"));
+    const gone = join(fresh, "nowhere");
+    try {
+      expect(service.inspect(dir)).toMatchObject({ dir, exists: true, project: true, open: false });
+      expect(service.inspect(fresh)).toMatchObject({ exists: true, project: false, open: false });
+      expect(service.inspect(gone)).toMatchObject({ exists: false, project: false, open: false });
+      // The read is a read: a folder asked about is still not a project.
+      expect(existsSync(join(fresh, ".jaira"))).toBe(false);
+
+      await service.open(dir);
+      expect(service.inspect(dir).open).toBe(true);
+    } finally {
+      rmSync(fresh, { recursive: true, force: true });
+    }
+  });
+
   it("answers null from the directory picker when there is no dialog to show", async () => {
     // The headless case. A service with no `chooseDirectory` port must not throw here: the renderer
     // treats null as "the user dismissed it", which is the right thing to do either way.
@@ -208,6 +244,101 @@ describe("opening and creating projects", () => {
     expect(seen[0]?.buttonLabel).toBe("Open");
     expect(seen[1]?.buttonLabel).toBe("Set up here");
     await picking.close();
+  });
+});
+
+/**
+ * What the window had open, across a quit (SHELL.md §2.2, {@link JairaSettings.projects}).
+ *
+ * A window holds several projects and nothing evicts one, so opening a project is a statement that
+ * outlives the session it was made in — and until this existed, quitting silently retracted it: the
+ * app came back on an empty shell with no way to say which checkouts had been in it.
+ */
+describe("remembering the projects that were open", () => {
+  it("records a project as it opens, in the order they were opened", async () => {
+    const second = mkdtempSync(join(tmpdir(), "jaira-app-second-"));
+    try {
+      initProject(second);
+      await service.open(dir);
+      await service.open(second);
+
+      expect(service.readSettings().projects).toEqual([dir, second]);
+
+      // Re-opening one already open changes nothing — not its position, and not the file. The list
+      // is the same shape as the open sessions, so what a restart reproduces is the window that was
+      // quit rather than one re-sorted by whatever was clicked last.
+      await service.open(dir);
+      expect(service.readSettings().projects).toEqual([dir, second]);
+    } finally {
+      // Before the directory goes: an open project holds its database, and Windows will not unlink
+      // a file that is still mapped.
+      await service.close();
+      rmSync(second, { recursive: true, force: true });
+    }
+  });
+
+  it("re-opens them on the next start, in the order they were opened", async () => {
+    const second = mkdtempSync(join(tmpdir(), "jaira-app-restore-"));
+    try {
+      initProject(second);
+      await service.open(second);
+      await service.open(dir);
+      await service.close();
+
+      // A second process against the same base root — which is exactly what the next launch is.
+      const restarted = new AppService({ baseDir, watchWorkflows: false, keychain: fakeKeychain() });
+      try {
+        expect(await restarted.restore()).toEqual({ opened: [second, dir], forgotten: [] });
+        // Last opened, so it is where the window stands.
+        expect(restarted.current()?.dir).toBe(dir);
+        expect(restarted.listProjects().map((p) => p.project)).toContain(second);
+      } finally {
+        await restarted.close();
+      }
+    } finally {
+      rmSync(second, { recursive: true, force: true });
+    }
+  });
+
+  it("forgets a remembered directory that is no longer a project", async () => {
+    const gone = mkdtempSync(join(tmpdir(), "jaira-app-gone-"));
+    initProject(gone);
+    await service.open(gone);
+    await service.open(dir);
+    await service.close();
+    rmSync(gone, { recursive: true, force: true });
+
+    const restarted = new AppService({ baseDir, watchWorkflows: false, keychain: fakeKeychain() });
+    try {
+      // Deleted on purpose, so it is dropped rather than retried — and retried forever, with an
+      // error on the screen about a folder the person got rid of.
+      expect(await restarted.restore()).toEqual({ opened: [dir], forgotten: [gone] });
+      expect(restarted.readSettings().projects).toEqual([dir]);
+    } finally {
+      await restarted.close();
+    }
+  });
+
+  it("keeps a project whose whole filesystem is missing, rather than forgetting a drive that is offline", async () => {
+    // The distinction `existsSync` on the project alone cannot draw: an unmounted drive and a
+    // deleted folder both answer "no". Asking the PARENT separates them — a project deleted out of a
+    // directory that is still there is gone for good, and one on a volume that is not mounted this
+    // morning will be back this afternoon.
+    const offline = join("Z:", "not-mounted", "checkout");
+    service.writeSettings({ projects: [offline] });
+
+    expect(await service.restore()).toEqual({ opened: [], forgotten: [] });
+    expect(service.readSettings().projects).toEqual([offline]);
+  });
+
+  it("leaves the rest of the preferences alone", async () => {
+    service.writeSettings({ theme: "dark", ui: { panes: { "files.tree": 310 }, open: {}, modes: {}, shut: {}, seen: {} } });
+    await service.open(dir);
+
+    // The list is written by main while the renderer owns the layout — a project open must not cost
+    // somebody the divider they dragged a moment ago.
+    expect(service.readSettings()).toMatchObject({ theme: "dark", projects: [dir] });
+    expect(service.readSettings().ui.panes["files.tree"]).toBe(310);
   });
 });
 

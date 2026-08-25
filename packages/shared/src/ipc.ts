@@ -933,6 +933,16 @@ export interface IpcContract {
    * stays the one deciding which of those happens and can report the failure with the path in hand.
    */
   "project:choose": { request: { mode: "open" | "init" } | void; response: { dir: string } | null };
+  /**
+   * What a directory IS, before anything is done to it: does it exist, does it hold a `.jaira/`, is
+   * it already open here.
+   *
+   * The read behind the offer to set a folder up. Opening a directory that is not a project yet is
+   * an ordinary thing to do — it is how every project starts — and answering it with the error
+   * `project:open` throws made the app's own "Open project…" produce a red toast for it. Asked
+   * first, the renderer can offer `project:init` instead of reporting a failure.
+   */
+  "project:inspect": { request: { dir: string }; response: { dir: string; exists: boolean; project: boolean; open: boolean } };
   "project:current": { request: void; response: { dir: string } | null };
   /**
    * One project's tasks. Absent `project` ⇒ the focused one, and no project open is an ERROR.
@@ -1289,6 +1299,7 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "project:open",
   "project:init",
   "project:choose",
+  "project:inspect",
   "project:current",
   "task:list",
   "task:all",

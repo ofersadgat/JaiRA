@@ -127,6 +127,40 @@ The general form is §2.4's, and it is worth stating as a rule: *a cross-project
 surface may not let main resolve a project.* Focus resolution is a convenience
 for a window with one checkout, and this shell is not that window.
 
+### 2.6 Opening one, and having it still be there tomorrow
+
+Two consequences of §2.2 that the model implies and the app did not do.
+
+**A folder with no `.jaira/` is an offer, not an error.** `project:open` refuses
+one — it has to; there is no database to open — and the app used to hand that
+message to the toast, so picking a checkout that had never been set up told the
+person to go and run `jaira init` in a terminal. The order is now *ask, then
+act*: `project:inspect` reports what a directory is (exists / is a project / is
+already open) without touching it, and "not a project yet" becomes a dialog
+offering `project:init` on the same path. "New project…" is unchanged and does
+not ask — it already means *write a layout here*.
+
+**Which projects are open survives the quit.** Opening a project adds a session
+and nothing evicts it (§2.3), which makes "these are the projects I work in" a
+statement a person makes by opening them — and one the app retracted on every
+quit. The list rides in `user-settings.json` as `projects`, beside the theme and
+the layout, for the same reason they do: which checkouts one person has open on
+one machine is not a property of any of them, and a list of absolute paths must
+never arrive through a pull request. `AppService.restore()` re-opens them at
+startup, before the window exists, in the order they were opened — so the last
+one is where the address stands, and a directory named on the command line is
+opened after them and wins.
+
+Restoring is best-effort, and the failures differ. A directory that is gone from
+a filesystem that is plainly there — deleted, moved, or its `.jaira/` removed,
+with its parent still on disk — is **forgotten**: it went on purpose, and
+retrying it every morning would put an error on the screen about a folder nobody
+has. Everything else is logged and **kept** — a locked database, or a whole
+volume that is not mounted this morning, is a temporary condition, and amnesia is
+the wrong punishment for one. Asking the *parent* is what draws that line;
+`existsSync` on the project alone answers "no" for an unmounted `Z:` and for a
+deleted folder alike.
+
 ---
 
 ## 3. The two voices

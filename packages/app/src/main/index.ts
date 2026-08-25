@@ -196,6 +196,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "project:init": ((request: { dir: string }) => service.init(resolve(request.dir))) as Handler,
   "project:choose": ((request: { mode?: "open" | "init" } | undefined) =>
     service.chooseProject(request?.mode ?? "open")) as Handler,
+  "project:inspect": ((request: { dir: string }) => service.inspect(request.dir)) as Handler,
   "project:current": (() => service.current()) as Handler,
   "task:list": ((request: { project?: string } | undefined) => service.listTasks(request?.project)) as Handler,
   "task:detail": ((request: { taskId: string; project?: string }) => service.taskDetail(request.taskId, request.project)) as Handler,
@@ -521,6 +522,14 @@ void app.whenReady().then(async () => {
   // would otherwise summon it back over the layout.
   Menu.setApplicationMenu(null);
   registerIpc();
+  // The projects this window had open when it was last quit, before the one the command line names:
+  // restoring first keeps the list's own order (oldest to newest) and leaves an explicitly requested
+  // directory opened LAST, which is what `service.current()` hands the window to stand at.
+  try {
+    await service.restore();
+  } catch (e) {
+    console.error(`failed to re-open the remembered projects: ${(e as Error).message}`);
+  }
   const dir = startupProject();
   if (dir) {
     try {

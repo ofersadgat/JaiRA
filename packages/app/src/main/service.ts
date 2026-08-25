@@ -60,6 +60,7 @@ import {
   finishTaskRun,
   historySize,
   initProject,
+  isProject,
   // Aliased: this module has its own `isUnder` for dot-separated JSON-schema paths, which is a
   // different question with a different answer for the same two strings.
   isUnder as isUnderState,
@@ -911,7 +912,105 @@ export class AppService {
     // A project brings its own config layer, so what was available a moment ago is not what is
     // available now: it can name different routes, different credentials, and different executors.
     if (this.options.probeOnStart === true) this.kickAvailability();
+    // Last, and only once the open has actually worked: the list is "what this window had open", and
+    // remembering a directory the open threw on would be a project that fails to open on every start
+    // from now on.
+    this.remember(project.paths.projectDir);
     return { dir: project.paths.projectDir, recovered: project.recovered };
+  }
+
+  /**
+   * Re-open the projects this person last had open (see {@link JairaSettings.projects}).
+   *
+   * Called once at startup, BEFORE the window exists, for the same reason the startup directory is
+   * opened there: a window that paints and then acquires its projects one by one is a window that
+   * flashes an empty shell over work that was never closed.
+   *
+   * Best-effort per entry, and the failures are treated differently. A directory that is gone from a
+   * filesystem that is plainly THERE — deleted, moved, or its `.jaira/` removed, with its parent
+   * still on disk — is FORGOTTEN, because it will never open again and retrying it every start would
+   * keep an error on the screen about a folder the person got rid of on purpose. Everything else is
+   * logged and KEPT: a locked database, or a whole drive that is not mounted this morning, is a
+   * temporary condition, and permanent amnesia is the wrong punishment for it. That is the one
+   * distinction `existsSync` alone cannot draw — an unmounted `Z:` and a deleted folder both answer
+   * "no" — so the parent is what is asked.
+   *
+   * The order of the list is preserved, so the project opened most recently is opened last and is
+   * therefore the one {@link current} hands the window to stand at.
+   */
+  async restore(): Promise<{ opened: string[]; forgotten: string[] }> {
+    const opened: string[] = [];
+    const forgotten: string[] = [];
+    for (const dir of this.readSettings().projects) {
+      if (!isProject(dir)) {
+        if (existsSync(dirname(dir))) forgotten.push(dir);
+        else {
+          this.log({
+            level: "warn",
+            source: "project",
+            message: `${dir} is not reachable, so it stays in the list rather than being forgotten`,
+            project: sessionKey(dir),
+          });
+        }
+        continue;
+      }
+      try {
+        const result = await this.open(dir);
+        opened.push(result.dir);
+      } catch (e) {
+        this.log({
+          level: "warn",
+          source: "project",
+          message: `could not re-open ${dir}: ${(e as Error).message}`,
+          project: sessionKey(dir),
+        });
+      }
+    }
+    if (forgotten.length > 0) this.writeSettings({ projects: this.readSettings().projects.filter((dir) => !forgotten.includes(dir)) });
+    return { opened, forgotten };
+  }
+
+  /**
+   * What a directory IS, before anything is done to it.
+   *
+   * The read behind "this folder is not a project yet — set it up?". Without it the only way to
+   * learn that a chosen folder has no `.jaira/` was to try to open it and match on the message of
+   * the error that came back, which makes an ordinary answer ("not one yet") indistinguishable from
+   * a real failure and puts a red toast in front of a person who has done nothing wrong.
+   *
+   * Reads and nothing else — it neither opens nor creates, which is what lets the renderer ask the
+   * question before deciding which of those to do.
+   */
+  inspect(dir: string): { dir: string; exists: boolean; project: boolean; open: boolean } {
+    const at = resolvePath(dir);
+    return { dir: at, exists: existsSync(at), project: isProject(at), open: this.sessions.has(sessionKey(at)) };
+  }
+
+  /**
+   * Add a project to the remembered list, newest last.
+   *
+   * One already in the list stays exactly where it is, and that is the rule that keeps this list the
+   * same shape as {@link userSessions}: both are "opened in this order", so a restored window is the
+   * window that was quit rather than one whose projects have been re-sorted by whatever was clicked
+   * last. It also makes re-opening an open project as free here as it is there — the session is
+   * already the one being returned, and the preferences file is not written again to say so.
+   *
+   * Never fatal. A preferences file that cannot be written is a project that will not be remembered,
+   * which must not be a project that will not open.
+   */
+  private remember(dir: string): void {
+    try {
+      const kept = this.readSettings().projects;
+      if (kept.some((at) => sessionKey(at) === sessionKey(dir))) return;
+      this.writeSettings({ projects: [...kept, dir] });
+    } catch (e) {
+      this.log({
+        level: "warn",
+        source: "project",
+        message: `could not remember ${dir} as open: ${(e as Error).message}`,
+        project: sessionKey(dir),
+      });
+    }
   }
 
   /**

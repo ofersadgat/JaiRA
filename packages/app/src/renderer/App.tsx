@@ -1840,6 +1840,22 @@ export default function App(): JSX.Element {
       {taskMenu !== null ? <ContextMenu anchor={taskMenu} onClose={() => setTaskMenu(null)} /> : null}
       {taskAsk !== null ? <AskDialog spec={taskAsk} onCancel={() => setTaskAsk(null)} /> : null}
 
+      {/* A folder that is not a project YET. The same dialog every other "are you sure" uses, and
+          deliberately not `danger`: this creates a directory beside the person's work rather than
+          taking anything away, and it is the one gesture that turns a checkout into somewhere JaiRA
+          can run. Dismissing leaves the folder exactly as it was found. */}
+      {state.initPrompt !== null ? (
+        <AskDialog
+          spec={{
+            title: `Set up JaiRA in ${projectName(state.initPrompt)}?`,
+            note: `${state.initPrompt} is not a JaiRA project yet. Setting it up creates a .jaira/ folder there for its workflows, settings and run history. Nothing else in the folder is touched.`,
+            confirmLabel: "Set up project",
+            onConfirm: () => void actions.initProject(),
+          }}
+          onCancel={actions.dismissInit}
+        />
+      ) : null}
+
       {/* Right-click on CONTENT — a selection, a picture, a link — anywhere in the window, including
           inside an artifact frame. Mounted once and unconditionally: see `pointerMenu.tsx` on why a
           menu that exists in some views and not others is one people stop reaching for. */}

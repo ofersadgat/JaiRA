@@ -199,6 +199,15 @@ export interface AppState {
   /** The last prune plan (dry run) or applied result — never auto-applied. */
   prune: PruneReport | null;
   error: string | null;
+  /**
+   * A directory somebody chose to open that is not a project yet, held until they answer.
+   *
+   * Not an error, which is the point of it having its own field. A folder with no `.jaira/` is how
+   * every project starts, so the answer to picking one is an offer to set it up — `project:init` on
+   * the same path — and not a red toast quoting the message `project:open` throws. Null when there is
+   * no such question outstanding.
+   */
+  initPrompt: string | null;
   busy: boolean;
 
   // --- settings, executors and workflow authoring ---------------------------
@@ -665,12 +674,13 @@ const EMPTY: AppState = {
   history: null,
   prune: null,
   error: null,
+  initPrompt: null,
   busy: false,
   // Light until the saved preference says otherwise, matching the stylesheet's own default so the
   // first paint and the loaded setting agree in the common case. The layout starts EMPTY rather than
   // at the defaults: an absent id means "whatever this control opens at", so the first paint is the
   // default layout without this having to restate what those numbers are.
-  settings: { theme: "light", wrapJson: false, ui: emptyUiState(), appearance: defaultAppearance() },
+  settings: { theme: "light", wrapJson: false, ui: emptyUiState(), appearance: defaultAppearance(), projects: [] },
   config: null,
   executors: [],
   probes: {},
@@ -2675,13 +2685,42 @@ export function useApp() {
       openProject: async (dir: string) => {
         patch({ busy: true, error: null });
         try {
-          await invoke("project:open", { dir });
+          // Asked before opening, so "not a project yet" can be an offer rather than a failure —
+          // see {@link AppState.initPrompt}. An already-open project is opened again anyway: main
+          // answers with the session it has, which is the cheapest way to say "you are already
+          // there" without this having to know.
+          const what = await invoke("project:inspect", { dir });
+          if (!what.project) {
+            patch({ busy: false, initPrompt: what.dir });
+            return;
+          }
+          await invoke("project:open", { dir: what.dir });
           patch({ busy: false, selected: null, detail: null });
           await refreshAll();
         } catch (e) {
           fail(e);
         }
       },
+      /**
+       * Set up the folder the person was offered, and open it.
+       *
+       * The path comes from {@link AppState.initPrompt} rather than from the click, so the directory
+       * written into is the one the dialog named — a second argument would be a second chance to
+       * disagree with what was on screen.
+       */
+      initProject: async () => {
+        const dir = ref.current.initPrompt;
+        if (dir === null) return;
+        patch({ busy: true, error: null, initPrompt: null });
+        try {
+          await invoke("project:init", { dir });
+          patch({ busy: false, selected: null, detail: null });
+          await refreshAll();
+        } catch (e) {
+          fail(e);
+        }
+      },
+      dismissInit: () => patch({ initPrompt: null }),
       /**
        * Pick a directory, then open or set up whatever was picked.
        *
@@ -2697,6 +2736,17 @@ export function useApp() {
           if (picked === null) {
             patch({ busy: false });
             return;
+          }
+          // "Open" on a folder that is not a project yet asks rather than fails: picking a checkout
+          // that has never been set up is how a project starts, and refusing it was the app telling
+          // someone to go and run `jaira init` in a terminal. "New project…" already means "write a
+          // layout here", so it does not ask.
+          if (mode === "open") {
+            const what = await invoke("project:inspect", { dir: picked.dir });
+            if (!what.project) {
+              patch({ busy: false, initPrompt: what.dir });
+              return;
+            }
           }
           await invoke(mode === "init" ? "project:init" : "project:open", { dir: picked.dir });
           patch({ busy: false, selected: null, detail: null });
