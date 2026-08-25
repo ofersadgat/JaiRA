@@ -3508,9 +3508,24 @@ button.crumb-sep.open {
   border-radius: 8px 8px 0 0;
   color: var(--dim);
 }
-/* The cards' own padding, so the band above can go edge to edge. */
+/* The panel is describing THIS column. The same accent edge a selected card gets, on the box rather
+   than on a row, because what is selected here is the place and not anything in it. Clicking
+   ANYWHERE in the column that is not a card is what puts it here — including the `—` of an empty
+   one, which is most of the target on exactly the columns nothing has run in yet. */
+.column.sel {
+  border-color: var(--accent);
+}
+.column.sel > h4 {
+  color: var(--fg);
+  background: var(--fill-ghost-selected);
+}
+/* The cards' own padding, so the band above can go edge to edge. The body takes the column's spare
+   height rather than ending at its content, so the click that selects the column has the whole track
+   under it — an empty column was a heading, a `—`, and a stretch of section nobody would think to
+   aim at. */
 .column-body {
   display: flex;
+  flex: 1;
   flex-direction: column;
   min-height: 0;
   padding: 6px;
@@ -4605,7 +4620,7 @@ span.issue-warn {
   right: 0;
   top: calc(100% + 6px);
   z-index: 20;
-  width: 320px;
+  width: 340px;
   display: grid;
   gap: 8px;
   padding: 12px;
@@ -4613,6 +4628,15 @@ span.issue-warn {
   border: 1px solid var(--line);
   border-radius: 10px;
   box-shadow: var(--lift);
+}
+/* The picked workflow's own inputs, however many it declares. The popover holds the picker and the
+   button still; only the boxes between them scroll, so a workflow with nine inputs does not push the
+   Create button off the bottom of the window. */
+.new-task-fields {
+  display: grid;
+  gap: 8px;
+  max-height: 46vh;
+  overflow-y: auto;
 }
 
 /* --- settings --- */

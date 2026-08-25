@@ -66,6 +66,7 @@ import {
   FileTreePanel,
   FolderInspector,
   RunInspector,
+  StateInspector,
   TaskInspector,
 } from "./files";
 // Imported for its registrations: this is what puts markdown, JSON, YAML, states and config into the
@@ -959,6 +960,51 @@ export default function App(): JSX.Element {
   })();
 
   /**
+   * The same surface for the workflow the TASKS view has selected — a board column, not a file.
+   *
+   * Built here beside the Files view's for the reason that one is built here: assembling a run is
+   * knowing where a task is recorded and which list its history reads, and neither belongs in a
+   * column that draws an inspector.
+   *
+   * Where it differs from the file's is the routing. A file's layer decides its project — a shared
+   * state runs in JaiRA's own — but a COLUMN was clicked on a particular board, and a shared root is
+   * a column on every board that can reach it. So the project is the group's, which is the board the
+   * card would appear on, and `exists` is unconditional: the listing is built from files on disk.
+   *
+   * Absent while the inputs are still being read, so the Run section appears once rather than
+   * appearing first as "this file does not parse" — see {@link AppState.workflowForms}, where
+   * `undefined` is "not asked yet" and `null` is the file, read and refused.
+   */
+  const workflowRunSurface: RunSurface | undefined = ((): RunSurface | undefined => {
+    const stateId = state.taskWorkflow;
+    if (stateId === null) return undefined;
+    const fields = state.workflowForms[stateId];
+    if (fields === undefined) return undefined;
+    const project = state.taskWorkflowProject;
+    const summary = state.projects.find((p) => p.project === project);
+    return {
+      fields,
+      values: { ...initialRunValues(fields ?? []), ...(state.runValues[stateId] ?? {}) },
+      target: {
+        ...(project !== null && project !== state.at ? { project } : {}),
+        label: summary?.label ?? projectName(project),
+        open: project !== null,
+      },
+      ...(project !== null ? { targetDir: project } : {}),
+      exists: true,
+      // A board column is a file on disk by construction. There is no editor here to have unsaved
+      // edits in — the one that could is in the other view, describing whatever IT has open.
+      dirty: false,
+      busy: state.busy,
+      tasks: summary?.kind === "shared" ? state.sharedTasks : state.tasks,
+      selected: state.selected,
+      onChange: (name, text) => actions.setRunValue(stateId, name, text),
+      onRun: (title, inputs) => void actions.runState(stateId, title, inputs, project ?? undefined),
+      onSelectTask: actions.select,
+    };
+  })();
+
+  /**
    * Everything a file surface may need beyond the file itself.
    *
    * Assembled here, once, rather than threaded through {@link FilePanel}: the panel decides geometry
@@ -1361,7 +1407,17 @@ export default function App(): JSX.Element {
                   {/* Only the focused project can be created into: a task belongs to a checkout, and
                       JaiRA's own runs are started by JaiRA. */}
                   {(state.taskFocus ?? atProject) === state.at && state.at !== null ? (
-                    <NewTask onCreate={actions.createTask} busy={state.busy} />
+                    <NewTask
+                      workflows={state.workflows}
+                      // Both maps whole, keyed by state id: WHICH workflow is picked is the popover's
+                      // own state, so it is the popover that looks the two up.
+                      forms={state.workflowForms}
+                      values={state.runValues}
+                      busy={state.busy}
+                      onPick={actions.pickWorkflow}
+                      onChange={actions.setRunValue}
+                      onCreate={(workflow, inputs) => void actions.createTask(workflow, inputs)}
+                    />
                   ) : null}
                 </>
               }
@@ -1546,6 +1602,13 @@ export default function App(): JSX.Element {
                           selectedSet={picked !== null && picked.project === p.project ? pickedSet! : undefined}
                           numbered={state.boards[p.project]!.level !== ""}
                           onSelectTask={(taskId, e) => pickTask(p.project, taskId, e)}
+                          // Clicking a COLUMN describes the state it stands for, in the panel that
+                          // describes whatever was last clicked — the Files view's answer to clicking
+                          // a state in the tree, reached from the board instead. The project travels
+                          // with it: a shared root is a column on every board, and the run the panel
+                          // would start belongs to the one it was clicked on.
+                          onSelectColumn={(stateId) => actions.selectWorkflow(stateId, p.project)}
+                          selectedColumn={state.taskWorkflowProject === p.project ? state.taskWorkflow : null}
                           onDrill={(level) => actions.drillProject(p.project, level)}
                           // Double-clicking a COLUMN opens that state and every task in it;
                           // double-clicking a CARD opens that one run. The level a run is walked into
@@ -1603,6 +1666,15 @@ export default function App(): JSX.Element {
                 */}
                 {pinned !== null ? (
                   <PinnedPane pinned={pinned} onClose={() => setPinned(null)} />
+                ) : state.taskWorkflow !== null ? (
+                  // A COLUMN is what was last clicked, so the column is what the panel is about — the
+                  // same inspector the Files view puts beside a state, with the same sections in the
+                  // same order, because it is the same question asked from the other view. Selecting
+                  // a card takes it back; see `selectWorkflow`.
+                  <StateInspector
+                    state={state.taskState}
+                    {...(workflowRunSurface !== undefined ? { run: workflowRunSurface } : {})}
+                  />
                 ) : detail ? (
                   <TaskContext
                     detail={detail}

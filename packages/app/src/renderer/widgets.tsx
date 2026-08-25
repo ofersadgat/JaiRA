@@ -6,26 +6,91 @@
  * year ends up looking as urgent as one that is blocking a run.
  */
 import { useState, type JSX } from "react";
-import type { HistorySize } from "@jaira/shared/browser";
+import type { JsonValue } from "@declarative-ai/json";
+import type { HistorySize, WorkflowEntry } from "@jaira/shared/browser";
+import { SelectInput } from "./controls";
+import { InputRow } from "./runPanel";
+import {
+  createBlocker,
+  initialRunValues,
+  isFilled,
+  runInputsOf,
+  type RunField,
+  type RunValues,
+} from "./runForm";
 import type { PruneReport } from "./store";
 
 /**
  * Create a task.
  *
- * A popover rather than a permanent form: creating a task is an act, not a state, and three inputs
- * parked in the chrome are three inputs in the way for everything else you do.
+ * A popover rather than a permanent form: creating a task is an act, not a state, and a form parked
+ * in the chrome is a form in the way of everything else you do.
+ *
+ * Two boxes are gone from it and one arrived, and all three changes are the same change — the form
+ * now asks the WORKFLOW what it needs instead of guessing.
+ *
+ *  - **No title.** A title typed before the work exists is a name for something nobody has seen. The
+ *    one people actually want is `feature/plan #3`, which is derivable, so it is derived — the same
+ *    title the Files view's Run button generates, so a task made from either surface reads the same
+ *    on the board. See `createTask` in the store.
+ *  - **The workflow is a picker.** It was free text, which is a box you can only fill from memory
+ *    and which reports a typo as a failed run rather than as an empty list.
+ *  - **`Issue / input` is gone.** It was one box named after the one input the first workflow ever
+ *    written happened to declare, sent as `{issue: …}` whatever the state actually asked for. What
+ *    replaces it is the state's own `inputs`, as the same controls the Run form draws them with:
+ *    a `boolean` gets a checkbox, a `number` a numeric box, a bound slot says what it is bound to.
+ *
+ * So the form has no fields of its own until a workflow is picked, and that is the honest shape:
+ * everything below the picker is a question the picked workflow asked.
  */
 export function NewTask({
-  onCreate,
+  workflows,
+  forms,
+  values,
   busy,
+  onPick,
+  onChange,
+  onCreate,
 }: {
-  onCreate: (title: string, workflow: string, issue: string) => void;
+  /** Every root that can be started here, in the order the picker lists them. */
+  workflows: WorkflowEntry[];
+  /**
+   * What each workflow declares it needs, by state id — see `AppState.workflowForms`.
+   *
+   * The whole map rather than the picked one's entry, because WHICH is picked is this component's
+   * own state: a popover that is shut has no workflow picked, and lifting that into the store would
+   * be remembering a question that was asked and abandoned. Three values per key and all three
+   * distinct: absent is "not read yet", which is a state the form spends a round trip in and must
+   * not render as "this file does not parse". See {@link createBlocker}.
+   */
+  forms: Record<string, RunField[] | null>;
+  /** What has been typed, by state id then by input name — see `AppState.runValues`. */
+  values: Record<string, RunValues>;
   busy: boolean;
+  /** A workflow was picked: read its inputs. */
+  onPick: (stateId: string) => void;
+  onChange: (stateId: string, name: string, text: string) => void;
+  onCreate: (workflow: string, inputs: Record<string, JsonValue>) => void;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
-  const [title, setTitle] = useState("");
   const [workflow, setWorkflow] = useState("");
-  const [issue, setIssue] = useState("");
+
+  const picked = workflows.find((entry) => entry.rootId === workflow);
+  const errors = picked?.issues.filter((issue) => issue.severity === "error").length ?? 0;
+  const fields = workflow.length === 0 ? undefined : forms[workflow];
+  // Declared defaults underneath, what has been typed over the top — the same sparse merge the Files
+  // view's run form does, against the same map, so one workflow's boxes hold one set of answers
+  // wherever they are filled in.
+  const boxes: RunValues = { ...initialRunValues(fields ?? []), ...(values[workflow] ?? {}) };
+  const read = runInputsOf(fields ?? [], boxes);
+  const blocked = createBlocker({ workflow, fields, inputs: read, busy });
+  const bad = new Map(read.bad.map((box) => [box.name, box.reason]));
+  const filled = (fields ?? []).filter(isFilled);
+
+  const pick = (stateId: string): void => {
+    setWorkflow(stateId);
+    if (stateId.length > 0) onPick(stateId);
+  };
 
   return (
     <div className="new-task-wrap">
@@ -37,36 +102,87 @@ export function NewTask({
           className="new-task-pop"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!title.trim() || !workflow.trim()) return;
-            onCreate(title.trim(), workflow.trim(), issue.trim());
-            setTitle("");
-            setIssue("");
+            if (blocked !== null) return;
+            onCreate(workflow, read.inputs);
+            // The picked workflow stays. Creating one task from a workflow is the strongest available
+            // evidence about which workflow the next one comes from, and the boxes are held in the
+            // store per state id, so re-opening the form finds what was typed.
             setOpen(false);
           }}
         >
           <label className="field">
-            <span>Title</span>
-            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="what to do" autoFocus />
-          </label>
-          <label className="field">
             <span>Workflow</span>
-            <input
+            <SelectInput
               value={workflow}
-              onChange={(e) => setWorkflow(e.target.value)}
-              placeholder="root state id, e.g. feature/plan"
+              options={[
+                // First and empty, so an unfilled picker reads as a question rather than as a
+                // workflow somebody chose. `SelectInput` puts nothing here by itself.
+                ["choose a workflow…", ""],
+                ...workflows.map(
+                  (entry): [string, string] => [entry.label ?? entry.rootId, entry.rootId],
+                ),
+              ]}
+              onChange={pick}
             />
           </label>
-          <label className="field">
-            <span>Issue / input</span>
-            <input value={issue} onChange={(e) => setIssue(e.target.value)} placeholder="optional" />
-          </label>
+
+          {/* What LINTING says about the workflow, and a warning rather than a refusal — the same
+              call the Run button makes the other way. A state with errors will fail, and it should
+              fail where it fails rather than behind a disabled button in a popover with no room to
+              say which of five errors it means. The Files view is where they are readable. */}
+          {picked?.loadError !== undefined ? (
+            <div className="notice bad">{picked.loadError}</div>
+          ) : errors > 0 ? (
+            <div className="notice warn">
+              {errors} validation error{errors === 1 ? "" : "s"} — it will start, and probably fail.
+            </div>
+          ) : null}
+
+          {/* Everything below is the picked workflow's own question. Nothing at all before one is
+              picked: boxes that belong to no state would be boxes nobody can answer. */}
+          {workflow.length === 0 ? (
+            <div className="sub">Its inputs appear here.</div>
+          ) : fields === undefined ? (
+            <div className="sub">reading its inputs…</div>
+          ) : fields === null ? (
+            <div className="notice bad">That workflow&apos;s file does not parse, so its inputs cannot be read.</div>
+          ) : fields.length === 0 ? (
+            <div className="sub">This workflow declares no inputs.</div>
+          ) : (
+            <div className="new-task-fields">
+              {fields.map((field) => (
+                <InputRow
+                  key={field.name}
+                  field={field}
+                  value={boxes[field.name] ?? ""}
+                  error={bad.get(field.name)}
+                  onChange={(text) => onChange(workflow, field.name, text)}
+                />
+              ))}
+            </div>
+          )}
+
           <div className="pane-actions">
-            <button type="submit" className="primary" disabled={busy || !title.trim() || !workflow.trim()}>
+            <button
+              type="submit"
+              className="primary"
+              disabled={blocked !== null}
+              title={blocked ?? `creates ${workflow}`}
+            >
               Create
             </button>
             <button type="button" className="ghost" onClick={() => setOpen(false)}>
               Cancel
             </button>
+            {/* Why it is off, in the place the Run form says it — and the count of boxes when it is
+                not, which is the one thing a form with no title left to read says about itself. */}
+            {blocked !== null ? (
+              <span className="sub ellip">{blocked}</span>
+            ) : filled.length > 0 ? (
+              <span className="sub ellip">
+                {filled.length} input{filled.length === 1 ? "" : "s"}
+              </span>
+            ) : null}
           </div>
         </form>
       ) : null}

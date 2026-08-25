@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import type { BoardCard, SessionRef, StateView, TaskSummary } from "@jaira/shared/browser";
 import {
+  createBlocker,
   initialRunValues,
   instanceAt,
   isFilled,
@@ -19,6 +20,7 @@ import {
   runInputsOf,
   runTargetOf,
   runTitle,
+  workflowMimeOf,
   type RunContext,
   type RunField,
 } from "../src/renderer/runForm";
@@ -387,5 +389,95 @@ describe("which project a read names", () => {
     // Absent, not the directory: `undefined` means "the focused project", which is what every
     // task-scoped channel already defaults to.
     expect(runTargetOf("project", "/home/me/repo").project).toBeUndefined();
+  });
+});
+
+/**
+ * The New-task form, which is the run form with no file open.
+ *
+ * Same boxes, same reading of them, and two things it cannot borrow: the MIME comes from the file's
+ * own name rather than from a tree that classified it, and the button is refused for the two things
+ * a picker can be wrong about instead of for the six a document can.
+ *
+ * The state under test throughout is the third one — "not read yet". A form that reports a round
+ * trip in flight as "this file does not parse" is a form that accuses the user's workflow of being
+ * broken for as long as the read takes, and then quietly stops.
+ */
+describe("starting a run with nothing open", () => {
+  it("reads a workflow's spelling from its own file name", () => {
+    expect(workflowMimeOf("/home/me/.jaira/workflows/feature/plan.yaml")).toBe(WORKFLOW_YAML);
+    expect(workflowMimeOf("C:\repo\.jaira\workflows\plan.yml")).toBe(WORKFLOW_YAML);
+    expect(workflowMimeOf("/home/me/.jaira/workflows/plan.json")).toBe(WORKFLOW_JSON);
+  });
+
+  it("treats an unrecognised extension as JSON, which is what a state is", () => {
+    expect(workflowMimeOf("/tmp/plan")).toBe(WORKFLOW_JSON);
+  });
+
+  it("parses a YAML workflow into the same boxes as its JSON twin", () => {
+    const yaml = "inputs:\n  issue:\n    description: what to do\n  depth:\n    schema:\n      type: integer\n    default: 3\n";
+    const fields = runFieldsOf(yaml, WORKFLOW_YAML);
+    expect(fields?.map((f) => [f.name, f.control, f.required])).toEqual([
+      ["issue", "json", true],
+      ["depth", "number", false],
+    ]);
+  });
+
+  const blockerFor = (over: Partial<Parameters<typeof createBlocker>[0]> = {}): string | null =>
+    createBlocker({
+      workflow: "feature/plan",
+      fields: [],
+      inputs: { inputs: {}, missing: [], bad: [] },
+      busy: false,
+      ...over,
+    });
+
+  it("asks for a workflow before anything else", () => {
+    expect(blockerFor({ workflow: "" })).toBe("choose a workflow");
+    // Whitespace is not a choice. The picker cannot produce it, but the blocker is what the button
+    // reads and it must not be the only thing standing between a stray value and a failed create.
+    expect(blockerFor({ workflow: "   " })).toBe("choose a workflow");
+  });
+
+  it("distinguishes 'not read yet' from 'does not parse'", () => {
+    expect(blockerFor({ fields: undefined })).toBe("reading its inputs");
+    expect(blockerFor({ fields: null })).toBe("that workflow's file does not parse");
+  });
+
+  it("names the required inputs that are still empty, and the first bad one", () => {
+    expect(blockerFor({ inputs: { inputs: {}, missing: ["issue"], bad: [] } })).toBe("issue is required");
+    expect(blockerFor({ inputs: { inputs: {}, missing: ["issue", "depth"], bad: [] } })).toBe(
+      "issue, depth are required",
+    );
+    expect(
+      blockerFor({ inputs: { inputs: {}, missing: [], bad: [{ name: "depth", reason: "'x' is not a number" }] } }),
+    ).toBe("depth: 'x' is not a number");
+  });
+
+  it("lets a workflow with no inputs through, and refuses one mid-create", () => {
+    expect(blockerFor()).toBeNull();
+    expect(blockerFor({ busy: true })).toBe("busy");
+  });
+
+  it("does not refuse a workflow for its lint results, which it has none of", () => {
+    // Deliberate, and the opposite of `runBlocker`: this form has no state view to read issues from,
+    // and a workflow with errors starts here exactly as it always did — failing where it fails.
+    const errored = { workflow: "feature/plan", fields: fieldsOf(PLAN), busy: false };
+    const filled = { issue: "ship it", depth: "3", wired: "ignored" };
+    expect(createBlocker({ ...errored, inputs: runInputsOf(errored.fields, filled) })).toBeNull();
+  });
+
+  it("numbers the title from the runs this workflow has already had", () => {
+    const task = (workflow: string): TaskSummary =>
+      ({ taskId: `#${workflow}`, title: workflow, workflow, status: "completed", updatedAt: 1 }) as TaskSummary;
+    const tasks = [task("feature/plan"), task("feature/plan"), task("chat/agent")];
+    // What `createTask` generates: the same count the Run button's title uses, so a task made from
+    // either surface reads the same on the board.
+    expect(runTitle("feature/plan", runHistoryOf("feature/plan", tasks, null).startedHere.length)).toBe(
+      "feature/plan #3",
+    );
+    expect(runTitle("nothing/yet", runHistoryOf("nothing/yet", tasks, null).startedHere.length)).toBe(
+      "nothing/yet #1",
+    );
   });
 });

@@ -2505,6 +2505,38 @@ run-record requirements of spec §10.2.
   shared, so restyling one of them left the other looking like the app it used to
   be. `Tile` and `Column` are that shared chrome; each board supplies what goes
   inside, which for a run is the inputs it was called with.
+- **A column is a place, and clicking one says what that place is** (Tasks view):
+  a board column stands for a state — a whole workflow at the root listing, a
+  declared child below one — and until it had a click, the only thing on that
+  screen the panel could describe was a card. So the panel had nothing to say
+  about the place every card in front of you was sitting in, while the SAME state
+  opened in the Files view had a whole column of it: its declared inputs, its
+  validation, what it will run on, where control goes next, and a button to run
+  it. It is the same inspector, reached from the board instead of from the tree.
+  Single click describes, double click still walks in — the pair the rest of the
+  app already uses. Anywhere in the column that is not a CARD: the heading alone
+  was the obvious target and the wrong one, because an empty column is a heading
+  and a `—`, so the columns nothing has run in yet — exactly the ones somebody is
+  about to start a run in — were the hardest to hit. A card stops the click
+  because a card is a thing inside the place and speaks for itself. The card and the column are ONE subject between them: clicking
+  either takes the panel off the other, because two selections in one column is
+  how a panel comes to describe something nobody is looking at. The project
+  travels with the click, since a shared root is a column on every board that can
+  reach it and "this workflow" names no single place without one.
+- **The New-task form asks the workflow, not the person**: it had three free-text
+  boxes — a title, a workflow id, and one input named `issue` after the first
+  workflow that happened to declare one, sent as `{issue: …}` whatever the state
+  actually asked for. All three are the same mistake. The workflow is a PICKER
+  over the roots that exist here, so a typo is an absent option rather than a
+  failed run. The inputs are the picked state's own `inputs`, drawn with the same
+  controls and read with the same rules as the Files view's Run form — one module,
+  so a `number` box cannot mean two things in two places. And there is no title:
+  one typed before the work exists is a name for something nobody has seen, and
+  the one anybody wants is `feature/plan #3`, which is derivable and is derived
+  the same way the Run button derives it. What the form refuses for is narrower
+  than what the Run button refuses for, deliberately: a picker has no lint results
+  to read, so a workflow with errors starts and fails where it always failed, with
+  the count said in the popover rather than hidden behind a disabled button.
 - **A composite has two honest readings, so they are a toggle**: the board answers
   *where is everything* (a column per declared child, the workflow's shape); the
   conversation answers *what did it say* (the state's own operation, then its

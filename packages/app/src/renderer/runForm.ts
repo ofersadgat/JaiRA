@@ -22,6 +22,7 @@ import { parse as parseYaml } from "yaml";
 import type { JsonValue } from "@declarative-ai/json";
 import {
   SHARED_SESSION,
+  WORKFLOW_JSON,
   WORKFLOW_YAML,
   type BoardCard,
   type SessionRef,
@@ -370,4 +371,57 @@ export function runHistoryOf(stateId: string, tasks: TaskSummary[], state: State
   }
   passedThrough.sort((a, b) => b.updatedAt - a.updatedAt);
   return { startedHere, passedThrough };
+}
+
+// --- starting a run with nothing open ----------------------------------------
+
+/**
+ * The MIME of a workflow file, from the file's own name.
+ *
+ * `workflow:read` answers with an ABSOLUTE path and no type, because a state id is enough to find
+ * one and the caller normally knows what it asked for. The new-task form does not: it is handed a
+ * root id from the picker and has to parse whatever spelling that root happens to be written in.
+ * The rule is the one {@link mimeOfPath} applies to a file under `workflows/`, restated for a path
+ * that is not root-relative — and defaulting to JSON, because that is what a state with no
+ * recognised extension is.
+ */
+export function workflowMimeOf(file: string): string {
+  const ext = file.slice(file.lastIndexOf(".") + 1).toLowerCase();
+  return ext === "yaml" || ext === "yml" ? WORKFLOW_YAML : WORKFLOW_JSON;
+}
+
+/** What the new-task form needs to know about itself before it may be submitted. */
+export interface CreateContext {
+  /** The root chosen in the picker; empty while none is. */
+  workflow: string;
+  /**
+   * Its declared inputs.
+   *
+   * Three values, and the third is the one that matters: `undefined` is "not read yet", which is a
+   * real state the form spends a round trip in and which must not be reported as an unparseable
+   * file. `null` is that file, read and refused.
+   */
+  fields: RunField[] | null | undefined;
+  inputs: RunInputs;
+  busy: boolean;
+}
+
+/**
+ * Why the new-task form's button is off, or `null` when it is not.
+ *
+ * The sibling of {@link runBlocker}, ordered by the same rule — what a person can act on first —
+ * and deliberately NOT the same function. This form has no open file, no lint result and no layer:
+ * it is a picker and the boxes that picker produced, and the two things it can refuse for are the
+ * ones a picker can be wrong about. Lint is left to the panel that has a state view to read it
+ * from; a workflow with errors can be started here and will fail where it always did.
+ */
+export function createBlocker({ workflow, fields, inputs, busy }: CreateContext): string | null {
+  if (workflow.trim().length === 0) return "choose a workflow";
+  if (fields === undefined) return "reading its inputs";
+  if (fields === null) return "that workflow's file does not parse";
+  if (inputs.missing.length > 0)
+    return `${inputs.missing.join(", ")} ${inputs.missing.length === 1 ? "is" : "are"} required`;
+  if (inputs.bad.length > 0) return `${inputs.bad[0]!.name}: ${inputs.bad[0]!.reason}`;
+  if (busy) return "busy";
+  return null;
 }

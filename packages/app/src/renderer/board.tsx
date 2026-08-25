@@ -254,6 +254,8 @@ export function Column({
   empty,
   tip,
   onOpen,
+  onSelect,
+  selected = false,
   drop,
   children,
 }: {
@@ -266,6 +268,22 @@ export function Column({
   tip?: string;
   /** Walking into the column itself, where that means anything. */
   onOpen?: (() => void) | undefined;
+  /**
+   * Describing the column — the STATE it stands for — rather than walking into it.
+   *
+   * A single click, beside the double-click that drills, and the pair reads the way it does
+   * everywhere else in this app: clicking a thing says what it is, opening it goes there.
+   *
+   * ANYWHERE IN THE COLUMN that is not a card. The heading alone was the obvious place to put it and
+   * the wrong one: an empty column is a heading and a `—`, and the `—` is most of the target — so
+   * the columns with nothing in them, which are exactly the ones somebody is about to start a run
+   * in, were the hardest ones to click. A card stops the click because a card is a thing INSIDE the
+   * place and speaks for itself; everything else — the band, the gap between two cards, the
+   * placeholder, a lane heading — is the place.
+   */
+  onSelect?: (() => void) | undefined;
+  /** The panel is describing this column right now. */
+  selected?: boolean;
   /**
    * What a card being dragged right now would mean here.
    *
@@ -280,9 +298,22 @@ export function Column({
   // take the card: one says where the cursor is, the other what would happen if it let go.
   const [over, setOver] = useState(false);
   const accepts = drop?.accepts === true;
+  /**
+   * The click, minus the clicks that belong to a card.
+   *
+   * A guard here rather than `stopPropagation` on the card, because the card is shared with the run
+   * board and with the trays — three callers, only one of which has a column selection to protect,
+   * and a swallowed event is invisible to the two that do not want it swallowed. Read off the target
+   * so it holds however deep the card's own markup goes.
+   */
+  const pick = (e: ReactMouseEvent): void => {
+    if ((e.target as Element).closest(".card") !== null) return;
+    onSelect?.();
+  };
   return (
     <section
-      className={`column${accepts ? " drop-target" : ""}${accepts && over ? " drop-over" : ""}`}
+      className={`column${selected ? " sel" : ""}${accepts ? " drop-target" : ""}${accepts && over ? " drop-over" : ""}`}
+      {...(onSelect !== undefined ? { onClick: pick } : {})}
       {...(onOpen !== undefined ? { onDoubleClick: onOpen } : {})}
       {...(tip !== undefined ? { title: tip } : {})}
       {...(accepts
@@ -527,6 +558,8 @@ export function Board({
   numbered = true,
   trays = true,
   onSelectTask,
+  onSelectColumn,
+  selectedColumn = null,
   onDrill,
   onOpenTask,
   onTaskMenu,
@@ -544,6 +577,16 @@ export function Board({
   trays?: boolean;
   /** The click event rides along so a caller can read shift/ctrl for range and toggle selection. */
   onSelectTask: (taskId: string, e: ReactMouseEvent) => void;
+  /**
+   * A COLUMN was clicked — describe the state it stands for.
+   *
+   * Absent in the Files view, which is already standing on a state and whose right-hand column is
+   * already describing one; there, a column heading that swapped the inspector onto a child would be
+   * a click that navigates without moving the address.
+   */
+  onSelectColumn?: ((stateId: string) => void) | undefined;
+  /** Which column the panel is describing, by state id. */
+  selectedColumn?: string | null;
   onDrill: (stateId: string) => void;
   /**
    * Double-clicking a CARD, where that means something other than drilling its state.
@@ -614,8 +657,14 @@ export function Board({
             {...(numbered ? { seq: index + 1 } : {})}
             count={column.cards.length}
             empty="—"
-            tip={`double-click to open ${column.stateId}`}
+            tip={
+              onSelectColumn === undefined
+                ? `double-click to open ${column.stateId}`
+                : `click to describe ${column.stateId}, double-click to open it`
+            }
             onOpen={() => onDrill(column.stateId)}
+            {...(onSelectColumn !== undefined ? { onSelect: () => onSelectColumn(column.stateId) } : {})}
+            selected={column.stateId === selectedColumn}
             {...(dropFor(column.key) !== undefined ? { drop: dropFor(column.key)! } : {})}
           >
             <Lanes

@@ -56,6 +56,7 @@ import type {
   WorkflowSyncResult,
   WorkflowSyncStatus,
   TaskSummary,
+  WorkflowEntry,
   WorkflowLayer,
   WorkflowSource,
 } from "@jaira/shared/browser";
@@ -89,7 +90,16 @@ import {
 import { applyModelPatch, type ModelPatch } from "./modelsConfig";
 import type { FileSelection } from "./files";
 import type { EditorTab } from "./editorChrome";
-import { instanceAt, newestRunOf, runTargetOf } from "./runForm";
+import {
+  instanceAt,
+  newestRunOf,
+  runFieldsOf,
+  runHistoryOf,
+  runTargetOf,
+  runTitle,
+  workflowMimeOf,
+  type RunField,
+} from "./runForm";
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestFiles, selfTestScript } from "./debugWorkflow";
 import { CHAT_AGENT, CHAT_STATES, chatWorkflowFiles, titleOf } from "./chatWorkflow";
@@ -292,6 +302,68 @@ export interface AppState {
    * panel for the reason the drafts are: the inspector unmounts on the next click in the tree.
    */
   runValues: Record<string, Record<string, string>>;
+
+  /**
+   * Every workflow ROOT that can be started here, as the picker lists them.
+   *
+   * The New-task form used to ask for the root id as free text, which is a box you can only fill
+   * from memory and which reports a typo as "unknown state" after the click. Held in the store
+   * rather than fetched by the popover because the popover is unmounted whenever it is shut, and a
+   * round trip on every open is a picker that appears empty and then fills in.
+   *
+   * The FOCUSED project's, plus the shared root's — which is what `workflow:browse` answers and what
+   * the board's root listing draws its columns from. Refetched on the same `workflows` invalidation
+   * the tree and the lint surface use, so a root added on disk appears in the picker.
+   */
+  workflows: WorkflowEntry[];
+
+  /**
+   * What a workflow DECLARES it needs, keyed by state id — the boxes its form draws.
+   *
+   * Read from the saved file through `workflow:read`, exactly as the Files inspector reads them from
+   * the open document, so one workflow asked about in two places produces one form. Three values per
+   * key and all three are distinct: absent is "never asked", `null` is "asked, and the file does not
+   * parse", and an array is the answer — a state with no inputs being the empty one.
+   *
+   * A CACHE, and deliberately not cleared on a `workflows` invalidation: what is stale here is one
+   * file's inputs, and re-reading every workflow anyone has looked at because an unrelated one was
+   * saved is a round trip per keystroke of somebody else's editing. Whatever the picker or the panel
+   * selects is re-read on selection, which is the moment the answer is about to be shown.
+   */
+  workflowForms: Record<string, RunField[] | null>;
+
+  /**
+   * The workflow the Tasks view has SELECTED — a column, not a card.
+   *
+   * The Tasks board's columns are states: whole workflows at the root listing, and children of one
+   * below it. Clicking a card has always described the run; clicking the place the run sits in used
+   * to describe nothing at all, and the same state opened in the Files view had a whole panel — its
+   * inputs, its validation, its history, a button to run it. This is that panel, reached from the
+   * board.
+   *
+   * It OUTRANKS the selected task while it is set, and is cleared by selecting a task, because the
+   * two are one column with one subject: the last thing clicked is what the panel is about.
+   */
+  taskWorkflow: string | null;
+  /**
+   * WHICH project's board that column was clicked on.
+   *
+   * A workflow root is listed on every board that can reach it — the shared library's roots appear
+   * as columns on each open checkout — so "this workflow" is not a place by itself. The project is
+   * where a run started from the panel would be recorded and which task list its history reads, and
+   * getting it from the group the click came from is the only way it can be right for a root that is
+   * on three boards at once.
+   */
+  taskWorkflowProject: string | null;
+  /**
+   * The state view behind {@link taskWorkflow}.
+   *
+   * Its own field rather than the Files view's {@link state}, which looks like a duplicate and is
+   * not: that one is tied to the open FILE, and having a click on a board column rewrite it would
+   * leave the Files inspector describing a state its tree is not standing on the next time it is
+   * opened.
+   */
+  taskState: StateView | null;
 
   /**
    * Where the open description and the state files stand, and the last proposal.
@@ -697,6 +769,11 @@ const EMPTY: AppState = {
   editorTab: {},
   editorTabLast: "form",
   runValues: {},
+  workflows: [],
+  workflowForms: {},
+  taskWorkflow: null,
+  taskWorkflowProject: null,
+  taskState: null,
   doc: null,
   dir: null,
   view: "tasks",
@@ -993,6 +1070,63 @@ export function useApp() {
   }, [patch]);
 
   /**
+   * Every workflow root that can be started here — what the New-task picker offers.
+   *
+   * Scoped to the FOCUSED project, which is the one a new task would be created in. `workflow:browse`
+   * answers with the shared root's workflows beside it, exactly as the board's root listing does, so
+   * the picker and the columns list the same set of things.
+   *
+   * Quiet on failure, like the tree beside it: with no project open the honest answer is the shared
+   * root's alone, and an error toast on a read nobody asked for is noise about a state the screen
+   * already shows.
+   */
+  const refreshWorkflows = useCallback(async () => {
+    try {
+      const browser = await invoke("workflow:browse", ref.current.at !== null ? { project: ref.current.at } : {});
+      patch({ workflows: browser.workflows });
+    } catch {
+      patch({ workflows: [] });
+    }
+  }, [patch]);
+
+  /**
+   * One workflow's declared inputs, read from the file on disk.
+   *
+   * The same reading the Files inspector does of the OPEN document, made available to the two places
+   * that have a state id and no file open: the New-task picker, and a column clicked on the board.
+   * Through `workflow:read` rather than `file:read` because a state id is all either of them has —
+   * and the layer comes from the browse listing, so a project file that shadows a shared one is read
+   * as the project's, which is the copy that would actually run.
+   *
+   * The MIME is derived from the file's own name; see {@link workflowMimeOf}. Nothing is patched
+   * while the read is in flight, so a form already showing one workflow's boxes keeps them until the
+   * next answer lands rather than blanking between the two.
+   */
+  const refreshWorkflowForm = useCallback(
+    async (stateId: string | null) => {
+      if (stateId === null) return;
+      const entry = ref.current.workflows.find((w) => w.rootId === stateId);
+      // A state the browse listing has no row for is a column below a root, not a root — still a
+      // state with inputs, and `project` is the layer to look in for one.
+      const layer: WorkflowLayer = entry?.layer ?? "project";
+      try {
+        const source = await invoke("workflow:read", { stateId, layer, ...inLayer(layer) });
+        patch({
+          workflowForms: {
+            ...ref.current.workflowForms,
+            [stateId]: runFieldsOf(source.text, workflowMimeOf(source.file)),
+          },
+        });
+      } catch {
+        // Unreadable is unparseable as far as a form is concerned: there are no boxes either way, and
+        // the one thing the caller must not do is offer a Create button over a state it cannot read.
+        patch({ workflowForms: { ...ref.current.workflowForms, [stateId]: null } });
+      }
+    },
+    [patch, inLayer],
+  );
+
+  /**
    * The selected state's view.
    *
    * Silent on failure rather than raising a toast: the tree can point at a state whose file the user
@@ -1011,6 +1145,27 @@ export function useApp() {
       } catch {
         patch({ state: null });
         return null;
+      }
+    },
+    [patch],
+  );
+
+  /**
+   * The same read, for the state the TASKS view has selected.
+   *
+   * A second field rather than a second caller of {@link refreshState}, because the two subjects move
+   * independently: the Files inspector describes the state the tree is standing on, and clicking a
+   * column on the board must not rewrite it. Same channel, same silence on failure.
+   */
+  const refreshTaskState = useCallback(
+    async (stateId: string | null) => {
+      if (stateId === null) return patch({ taskState: null });
+      try {
+        patch({
+          taskState: await invoke("state:view", { stateId, ...(ref.current.at !== null ? { project: ref.current.at } : {}) }),
+        });
+      } catch {
+        patch({ taskState: null });
       }
     },
     [patch],
@@ -1695,6 +1850,7 @@ export function useApp() {
       refreshAvailability(),
       refreshProjects(),
       refreshSharedTasks(),
+      refreshWorkflows(),
     ]);
     if (!current) return;
     await Promise.all([
@@ -1709,6 +1865,9 @@ export function useApp() {
       refreshConfig(),
       // Again, now that a project supplies a second root to walk.
       refreshTree(),
+      // And again for the same reason: the picker lists the focused project's roots beside the shared
+      // ones, and the pass above ran before there was a focused project to ask about.
+      refreshWorkflows(),
       refreshDetail(ref.current.selected),
       refreshState(ref.current.stateId),
       refreshAllConversations(),
@@ -1727,6 +1886,7 @@ export function useApp() {
     refreshConfig,
     refreshAvailability,
     refreshTree,
+    refreshWorkflows,
     refreshDetail,
     refreshState,
   ]);
@@ -1802,6 +1962,9 @@ export function useApp() {
             // and it used to refresh neither — so a run started from the Run button sat there at
             // whatever the panel last happened to fetch until something touched the board.
             void refreshState(ref.current.stateId);
+            // And the Tasks view's, which is the same panel with its own subject — a run started from
+            // a board column belongs in the history section right under the button that started it.
+            void refreshTaskState(ref.current.taskWorkflow);
             // JaiRA's own lists too. They are not project-scoped, so they are refreshed for an
             // invalidate about ANY project — including the system one, whose invalidates the guard
             // above drops.
@@ -1837,6 +2000,12 @@ export function useApp() {
           if (message.scope === "workflows") {
             void refreshTree();
             void refreshState(ref.current.stateId);
+            // A root added, renamed or deleted on disk changes what the New-task picker may offer, and
+            // a picker listing a state that no longer exists is a Create button that fails on click.
+            void refreshWorkflows();
+            // Whatever the Tasks view is describing, for the reason the Files view's state view is
+            // refreshed above: the two are the same panel reached from two boards.
+            void refreshTaskState(ref.current.taskWorkflow);
           }
           if (message.scope === "config") void refreshConfig();
           // The checks main runs by itself have landed. Nothing asked for them, so nothing is waiting
@@ -2052,7 +2221,9 @@ export function useApp() {
     refreshHistory,
     refreshConfig,
     refreshTree,
+    refreshWorkflows,
     refreshState,
+    refreshTaskState,
     refreshConversation,
     refreshSession,
   ]);
@@ -2096,6 +2267,10 @@ export function useApp() {
         patch({
           selected: taskId,
           selectedProject: taskId === null ? null : (at ?? null),
+          // One column, one subject: a card clicked takes the panel back off whatever workflow was
+          // being described. See {@link AppState.taskWorkflow}.
+          taskWorkflow: null,
+          taskWorkflowProject: null,
           stream: [],
           sessions: {},
           // A trail names one task's instances (see `trail.ts`), so arriving at another task starts
@@ -2192,7 +2367,13 @@ export function useApp() {
        * See {@link AppState.taskFocus}. Nothing is fetched — every group's board is already loaded,
        * because the listing draws them all.
        */
-      focusProject: (project: string | null) => patch({ taskFocus: project, at: project }),
+      focusProject: (project: string | null) => {
+        patch({ taskFocus: project, at: project });
+        // Except the picker's list, which is per project: the New-task button is offered only in the
+        // focused one, and a picker still listing the last project's roots would create tasks from
+        // workflows this one may not even have.
+        void refreshWorkflows();
+      },
 
       /**
        * Put the address on a project — what clicking a project row in the sidebar does.
@@ -2218,6 +2399,7 @@ export function useApp() {
           trailState: null,
         });
         void refreshTree();
+        void refreshWorkflows();
         void refreshConfig();
         void refreshTasks();
         void refreshHistory();
@@ -2278,6 +2460,9 @@ export function useApp() {
           selected: taskId,
           selectedProject: project,
           taskFocus: project,
+          // A run walked into is the subject now — see {@link AppState.taskWorkflow}.
+          taskWorkflow: null,
+          taskWorkflowProject: null,
           stream: [],
           sessions: {},
           trail: [],
@@ -2360,16 +2545,67 @@ export function useApp() {
         void refreshBoard(level);
       },
       dismissError: () => patch({ error: null }),
-      createTask: async (title: string, workflow: string, issue: string) => {
+
+      /**
+       * Which workflow the New-task form is filling in, and the boxes that go with it.
+       *
+       * Two steps rather than one because the second is a round trip: picking a root is instant, and
+       * its declared inputs arrive a moment later into {@link AppState.workflowForms}, where the form
+       * reads them. Nothing is cleared in between — see {@link refreshWorkflowForm} — so switching
+       * between two workflows does not flash an empty form.
+       *
+       * The picked root is not held here. It is the form's own state: a popover that is closed has no
+       * workflow picked, and remembering one across an open would be answering a question that was
+       * asked and abandoned.
+       */
+      pickWorkflow: (stateId: string) => void refreshWorkflowForm(stateId),
+
+      /**
+       * Describe a WORKFLOW in the Tasks panel — the board's answer to clicking a file in the tree.
+       *
+       * A board column is a state, and until this the only thing on the Tasks view a click could
+       * describe was a card. So the panel had nothing to say about the place every card in front of
+       * you was sitting in, while the same state opened in the Files view had its inputs, its
+       * validation, its dependants and a button to run it.
+       *
+       * The task selection is CLEARED, not kept: one column, one subject, and the last thing clicked
+       * is what it is about. `select` does the same in the other direction.
+       */
+      selectWorkflow: (stateId: string | null, project?: string) => {
+        patch({
+          taskWorkflow: stateId,
+          taskWorkflowProject: stateId === null ? null : (project ?? ref.current.at),
+          ...(stateId === null ? { taskState: null } : { selected: null, selectedProject: null, stream: [] }),
+        });
+        if (stateId === null) return;
+        void refreshTaskState(stateId);
+        void refreshWorkflowForm(stateId);
+      },
+
+      /**
+       * Create a task, from the workflow picked and the boxes its inputs produced.
+       *
+       * No title is asked for, and that is the point of the form's shape: a title typed before the
+       * work exists is a name for something nobody has seen yet, and the one anybody actually wants
+       * — `feature/plan #3` — is derivable. Generated exactly as the Files view's Run button
+       * generates it ({@link runTitle}), from the runs this workflow has already had here, so a task
+       * made from either surface reads the same on the board. Renaming one is a row's own menu item.
+       *
+       * In the FOCUSED project, which is the only project the button is offered in (see `App.tsx`)
+       * and the one whose board the new card appears on.
+       */
+      createTask: async (workflow: string, inputs: Record<string, JsonValue>) => {
         patch({ busy: true, error: null });
         try {
           const summary = await invoke("task:create", {
-            title,
+            title: runTitle(workflow, runHistoryOf(workflow, ref.current.tasks, null).startedHere.length),
             workflow,
-            ...(issue ? { inputs: { issue } } : {}),
+            ...(Object.keys(inputs).length > 0 ? { inputs } : {}),
           });
-          patch({ busy: false, selected: summary.taskId });
-          await Promise.all([refreshTasks(), refreshBoard(), refreshDetail(summary.taskId)]);
+          // Selected before anything else lands, for the reason `runState` does it: the panels that
+          // follow a task have to be pointed at it to show its beginning rather than its middle.
+          patch({ busy: false, selected: summary.taskId, taskWorkflow: null, taskWorkflowProject: null });
+          await Promise.all([refreshTasks(), refreshBoard(), refreshProjects(), refreshDetail(summary.taskId)]);
         } catch (e) {
           fail(e);
         }
@@ -3821,6 +4057,9 @@ export function useApp() {
       afterFileChange,
       refreshTrailState,
       seedTrail,
+      refreshWorkflowForm,
+      refreshWorkflows,
+      refreshTaskState,
     ],
   );
 

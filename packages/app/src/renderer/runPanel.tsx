@@ -33,8 +33,12 @@ import {
  * The boxes are never disabled, `busy` or not — only the button is. A run takes as long as it takes,
  * and the useful thing to do while one is going is to set up the next one with an input changed;
  * greying the form out for the duration would take that away for no safety in return.
+ *
+ * Exported because the New-task popover asks for the same thing: a workflow's declared inputs, as
+ * boxes. Two renderings of one slot would be two places for a `number` box to disagree about what
+ * `""` means, which is the class of bug this whole module exists to keep out of the run.
  */
-function InputRow({
+export function InputRow({
   field,
   value,
   error,
