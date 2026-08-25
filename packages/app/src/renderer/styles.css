@@ -2602,6 +2602,12 @@ button.side-twist:hover:not(:disabled) {
 .slot-row.binding-row {
   grid-template-columns: minmax(0, 1fr) 14px minmax(0, 1.4fr) auto;
 }
+/* A wire and, under it, what came down it — grouped so the pair reads as one entry, the same way a
+   slot and its disclosure do. */
+.binding-group {
+  display: grid;
+  gap: 2px;
+}
 .slot-row.permission-row {
   grid-template-columns: minmax(0, 1fr) 92px auto;
 }
@@ -7161,6 +7167,155 @@ textarea.cfg-input {
   justify-content: flex-end;
   flex: none;
 }
+
+/* The other pinned surface: a state's configuration as one run had it. Same shape as the state
+   panel — it takes the column and scrolls inside itself — because it is the same editor. */
+.config-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+.config-panel > .sb-gutter {
+  flex: none;
+  padding: 0;
+}
+/*
+ * The editor takes everything under the header, and scrolls INSIDE itself.
+ *
+ * The same rule `.state-panel` gives the same component, and for a reason that only shows up on two
+ * of the three tabs: the form scrolls in its own box, but the graph and the JSON document ask their
+ * parent for a height (`flex: 1; min-height: 0`). Given none — a column that sized itself to its
+ * content and scrolled as a whole — the drawing came out zero pixels tall, so the graph tab was a
+ * legend, a toolbar, and nothing else.
+ */
+.config-panel > .pane.editor {
+  flex: 1;
+  min-height: 0;
+}
+.config-panel .sub.warn {
+  color: var(--warn);
+}
+
+/*
+ * A form rendered as a READING — see `reading.ts`.
+ *
+ * The controls that CHANGE anything are not rendered at all, so nothing here hides a button. What is
+ * left is the boxes that carry values, and this is what stops them from looking like an invitation:
+ * a disabled input in a reading is a line of text that happens to be in a box's position, so it
+ * keeps the grid and loses the chrome.
+ */
+fieldset.reading {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.reading input:disabled,
+.reading textarea:disabled,
+.reading select:disabled {
+  background: none;
+  border-color: transparent;
+  color: var(--fg);
+  opacity: 1;
+  padding-left: 0;
+  padding-right: 0;
+  cursor: text;
+}
+/*
+ * The JSON tab is a document rather than a field.
+ *
+ * It keeps its box — a page of unbordered monospace running into the panel's edge reads as the
+ * panel's own text — and it TAKES THE PANE rather than sitting in a 340px well with its own
+ * scrollbar inside a scrolling column. Two scrollbars for one document is one too many, and the
+ * shorter box was showing eleven lines of a state that is sixty.
+ *
+ * Sized by the pane, so `field-sizing: content` is explicitly off: a five-hundred-line state would
+ * otherwise make the box the length of the document.
+ *
+ * Its own class rather than a descendant of `.reading`, because it is deliberately NOT inside that
+ * fieldset: the form is what a reading makes inert, and a document you cannot select is a document
+ * you cannot copy a line out of.
+ */
+.reading-doc {
+  flex: 1;
+  min-height: 0;
+  border-color: var(--line);
+  padding: 8px 10px;
+  field-sizing: fixed;
+  overflow: auto;
+  resize: none;
+}
+.reading select:disabled {
+  appearance: none;
+}
+/*
+ * A textarea in a reading is a paragraph, not a well.
+ *
+ * `field-sizing: content` makes it the height of what it holds, which is what kills both the empty
+ * six-row box under a one-line prompt and the scrollbar over a clipped one. Where it is not
+ * supported the `rows` fallback is what it always was — a box of a fixed height — which is the
+ * behaviour this replaces rather than a regression.
+ *
+ * The grabber goes regardless: a corner you can drag on something you cannot type into is a control
+ * that does nothing twice over.
+ */
+.reading textarea:disabled {
+  field-sizing: content;
+  resize: none;
+  overflow: hidden;
+}
+/* A placeholder is a prompt to fill something in. In a reading the box is empty because the state
+   said nothing, and grey example text there reads as what it says. */
+.reading input:disabled::placeholder,
+.reading textarea:disabled::placeholder {
+  color: transparent;
+}
+/* A type said in words wraps rather than ellipsing: `artifact · text/markdown` is two short words
+   and a side panel is narrow, and half of a media type tells you less than a second line costs. */
+.reading .slot-type-custom {
+  white-space: normal;
+  overflow: visible;
+  cursor: default;
+}
+
+/*
+ * The value a binding produced, in the block under the row that declares it — see `readValue.tsx`.
+ *
+ * The form's own field, not a control of its own: the same label-over-box shape as `default` and
+ * `description`, which is what it sits beside. What it does differently is GROW — a value is a
+ * document as often as it is a word, and a fixed box for a plan is a box with a plan hidden in it.
+ */
+.field.run-value > span {
+  color: var(--accent);
+}
+.value-box {
+  min-width: 0;
+  /* Wraps like prose and keeps the line breaks it was written with — the two things a value needs
+     and a one-line input cannot do. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* Tall enough for a paragraph, and scrolling past that rather than making the panel a mile long.
+     A value that hits this is a document, and reading a document in a side panel is what the
+     scrollbar is for. */
+  max-height: 260px;
+  overflow: auto;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--panel-2);
+  font-size: calc(var(--size-data) * 11.5 / 12);
+}
+/* Uncollapsed in a reading: the value is the one fact somebody opened the panel for, and a twisty
+   per slot is a click per slot to read it. */
+.slot-more.open {
+  display: block;
+}
 /* The editor inside it is the same component the Files view puts below a board, so it wants the same
    thing: everything left over, scrolling on its own. */
 .state-panel > .pane.editor {
@@ -7916,6 +8071,60 @@ textarea.cfg-input {
 .sb-session.sb-none {
   font-family: inherit;
   font-style: italic;
+}
+
+/* Which workflow opened this conversation, as somewhere to go. Sized to the session id beside it and
+   dimmed until it is pointed at: the gutter is a label, and two accented names on it would compete
+   with the transcript underneath for the eye. */
+.sb-workflow {
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--dim);
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.sb-workflow:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+/* A failure with no panel to appear in — see `BandNote`. Written ON the grey, between the sheets,
+   because that is what it is: the state it names never opened a conversation, so there is no page
+   for it to be a line of. No border and no card for the same reason — a box here would read as one
+   more thing that ran, and nothing ran. */
+.sb-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  min-width: 0;
+}
+.sb-note {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 4px;
+  min-width: 0;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+  color: var(--bad);
+}
+.sb-note-icon {
+  flex: none;
+  align-self: center;
+  color: var(--bad);
+}
+/* The state, then what happened to it. Monospaced and dimmed: it is a name, and the sentence beside
+   it is the thing being read. */
+.sb-note-state {
+  flex: none;
+  max-width: 30%;
+  color: var(--dim);
+}
+.sb-note-text {
+  min-width: 0;
+  /* Wraps. A blocked child's reason is a sentence about wiring — `input 'framing': producer output
+     has no 'winner'` — and truncating it to one line loses the half that says what to fix. */
+  overflow-wrap: anywhere;
 }
 
 /* The layout control, in the corner of the band's own grey rather than in a row of its own. Hover

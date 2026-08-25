@@ -17,6 +17,7 @@
  * what it does is replace a six-line prompt with a one-line path.
  */
 import type { JSX } from "react";
+import { useReadOnly } from "./reading";
 import { isKnownRef } from "./completions";
 
 /**
@@ -53,7 +54,10 @@ export function LinkToggle({
   /** True when the value is a shape the form shows read-only — there is nothing to toggle. */
   disabled?: boolean;
   onToggle: (linked: boolean) => void;
-}): JSX.Element {
+}): JSX.Element | null {
+  // Linking MOVES a value into a file — an edit, and one of the larger ones the form makes. There is
+  // nothing for it to do in a reading, where the value is already wherever it is.
+  if (useReadOnly()) return null;
   return (
     <button
       type="button"

@@ -79,6 +79,7 @@ import {
   pruneHistory,
   rootsBoard,
   stateHashes,
+  effectiveState,
   stateSlots,
   stateView,
   taskDetailView,
@@ -133,6 +134,7 @@ import {
   probeModelRoutes,
   agentPromptRoutes,
   agentPromptRouteNames,
+  agentRouteVendors,
   knownModels,
   JAIRA_TOOLS,
   usableRouteKeys,
@@ -215,6 +217,7 @@ import {
   presetOf,
   ALWAYS_GRANTED_TOOLS,
   withAlwaysGranted,
+  isTerminalStatus,
 } from "@jaira/shared";
 import { Diagnostics } from "./diagnostics";
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
@@ -276,6 +279,8 @@ import type {
   SchemaViolation,
   StateSlots,
   StateView,
+  EffectiveState,
+  EffectiveStateValues,
   DetectSchemaResult,
   ValidateSchemaRequest,
   ValidateSchemaResult,
@@ -855,6 +860,15 @@ export class AppService {
    * otherwise start its own round of socket connects while the previous one was still open.
    */
   private availabilityRun?: Promise<AvailabilitySnapshot>;
+
+  /**
+   * The re-run promised to whoever asked while a pass was already going — see
+   * {@link AppService.refreshAvailability}.
+   *
+   * One, not a queue: any number of requests arriving during one pass are all answered by a single
+   * follow-up, because they all want the same thing — an answer computed after the change they made.
+   */
+  private availabilityAgain?: Promise<AvailabilitySnapshot>;
 
   /**
    * The resolved shared root, used by the settings, secret and workflow surfaces.
@@ -1567,6 +1581,102 @@ export class AppService {
     // Only when the shared project could not be opened at all. Then what the view CANNOT know —
     // references, drift, runs — is marked rather than reported as empty (see `StateView.fileOnly`).
     return baseStateView(baseDir, stateId, this.stateViewOptions(), browseBaseWorkflows(baseDir));
+  }
+
+  /**
+   * One state as the loader resolved it — the effective configuration of that state.
+   *
+   * `taskId` is what makes this a fact about a RUN rather than about a file: a task pins the
+   * workflow it started against, so the state that ran is in that snapshot, and the state on disk is
+   * whatever it has been edited into since. Asked without one — from a state file open in the Files
+   * view — disk is the only copy there is and the only one meant.
+   *
+   * The snapshot is read out of the project that HOLDS the task, which is the same project the
+   * browser comes from, so a shared workflow's run reads its own recorded copy rather than whichever
+   * checkout happens to be focused.
+   */
+  effectiveState(request: { stateId: string; taskId?: string; instanceId?: number; project?: string }): EffectiveState {
+    const open = this.session(request.project);
+    const project = open.project;
+    const run = request.taskId === undefined ? undefined : project.runtime.listRuns(request.taskId).at(-1);
+    const pinned =
+      request.taskId === undefined
+        ? undefined
+        : // The task's own pin first: it is what a re-run would use, and what the board reports drift
+          // against. The last run's is the fallback for a task whose row carries none.
+          (project.runtime.get(request.taskId)?.snapshotHash ?? run?.snapshotHash);
+    const document = effectiveState(project, request.stateId, this.browseWorkflowsIn(open), {
+      ...(pinned !== undefined ? { snapshotHash: pinned } : {}),
+    });
+    if (request.taskId === undefined || run === undefined) return document;
+    const values = this.runValuesOf(open, request.taskId, run.id, request.stateId, request.instanceId);
+    return values === undefined ? document : { ...document, values };
+  }
+
+  /**
+   * What ONE execution of a state actually held — the values behind its bindings.
+   *
+   * Read, never derived. Each field is something already written down: `instance.entered` carries
+   * the inputs the engine resolved on the way in, `operation.completed` names the record whose
+   * result is what the call returned, and a child's own `instance.entered` carries what the wiring
+   * on this state produced for it. A published output whose binding is an expression over children
+   * is deliberately absent — evaluating it is the engine's job, and a service guessing at it would
+   * be inventing a fact rather than reporting one.
+   *
+   * The LAST execution when the caller names none: a loop runs one state several times, and the
+   * pass somebody has clicked through from is the one they were reading.
+   */
+  private runValuesOf(
+    open: ProjectSession,
+    taskId: string,
+    runId: number,
+    stateId: string,
+    instanceId?: number,
+  ): EffectiveStateValues | undefined {
+    const events = open.project.events.list(taskId, { runId });
+    const entered = events.filter(
+      (stored) => stored.event.type === "instance.entered" && stored.event.stateId === stateId,
+    );
+    const mine =
+      instanceId === undefined
+        ? entered.at(-1)
+        : entered.find((stored) => (stored.event as { instanceId: number }).instanceId === instanceId);
+    if (mine === undefined) return undefined;
+    const id = (mine.event as { instanceId: number }).instanceId;
+    const inputs = (mine.event as { inputs?: Record<string, JsonValue> }).inputs;
+
+    // Every child of THIS instance, by the key it was mounted under — the other end of the wiring
+    // table. A child that ran twice reports its latest pass, for the same reason this state does.
+    const children: Record<string, Record<string, JsonValue>> = {};
+    for (const stored of events) {
+      const event = stored.event as {
+        type: string;
+        parentInstanceId?: number;
+        childKey?: string;
+        stateId?: string;
+        inputs?: Record<string, JsonValue>;
+      };
+      if (event.type !== "instance.entered" || event.parentInstanceId !== id) continue;
+      const key = event.childKey ?? event.stateId;
+      if (key !== undefined && event.inputs !== undefined) children[key] = event.inputs;
+    }
+
+    // Through the record's POSITION, the way `sessionView` reaches the same row. A settled
+    // `operation.completed` also carries a content id, and it is the wrong key here: a record that
+    // sat in a conversation — which every prompt op does — is stored under `#i<instance>:<seq>`, and
+    // only an unplaced one is filed under its content hash.
+    const placed = this.sessionHistory({ taskId, runId, project: open.key }).find((row) => row.instanceId === id);
+    const output =
+      placed === undefined
+        ? undefined
+        : sessionStoreFor(open.project, { taskId, runId }).at(placed.sessionId, placed.seq)?.value;
+
+    return {
+      instanceId: id,
+      ...(inputs !== undefined ? { inputs } : {}),
+      ...(output !== undefined ? { output } : {}),
+      ...(Object.keys(children).length > 0 ? { children } : {}),
+    };
   }
 
   /**
@@ -2486,7 +2596,7 @@ export class AppService {
     const plan = chatPlanFor(context.path, request.overrides ?? {});
     // Built ONCE and shared with `effectiveOf`: it lists the routes on offer here and supplies the
     // pinned/unnamed-route fallback there, and `defaultTree` compiles the whole prompt tree.
-    const router = this.defaultTree(open.project.config, context.bundle, false, this.secretResolver(open)).prompt as {
+    const router = this.defaultTree(open.project.config, context.bundle, false, this.secretResolver(open), false).prompt as {
       defaults?: Record<string, JsonValue>;
       routes?: Record<string, JairaPromptNode>;
     };
@@ -2564,7 +2674,7 @@ export class AppService {
     // machine where somebody needs to read it: the one where they have to pick a route by hand
     // before the first message can go anywhere. The routes and defaults come from the configuration
     // either way; the bundle only decides whether to throw.
-    const router = this.defaultTree(open.project.config, { rootId: request.stateId, states: {} }, false, this.secretResolver(open))
+    const router = this.defaultTree(open.project.config, { rootId: request.stateId, states: {} }, false, this.secretResolver(open), false)
       .prompt as {
       defaults?: Record<string, JsonValue>;
       routes?: Record<string, JairaPromptNode>;
@@ -3540,11 +3650,32 @@ export class AppService {
       // Another process is driving it. Raise the flag its heartbeat polls — cross-
       // process cancel needs no socket, unlike answering a parked gate (§4.2a).
       session.project.jobs.requestCancel(taskId, Date.now());
-    } else {
+    } else if (this.cancelable(session, taskId)) {
       cancelTask(session.project, taskId);
       this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
     }
     return { taskId };
+  }
+
+  /**
+   * Is there anything left to cancel — or has this task already stopped on its own?
+   *
+   * A cancel arriving from the UI is a REQUEST, and `cancelTask` is a state TRANSITION; the gap
+   * between those two is a race nobody can close. The button is rendered from a snapshot, and a task
+   * that fails between the render and the click is still showing one. Pressing it then threw
+   * `task 't-…' is already failed` out of the IPC handler and into the main process log — an
+   * unhandled error for a user who asked for a thing to not be running, about a thing that was not
+   * running.
+   *
+   * So the request is IDEMPOTENT here, where it is a request. `cancelTask` keeps its refusal, and
+   * the CLI keeps getting it: `jaira cancel` on a finished task is someone stating something untrue
+   * about a task they named, and telling them is the useful answer. An unknown task still throws on
+   * both paths — that one is not a race, it is a wrong id.
+   */
+  private cancelable(session: ProjectSession, taskId: string): boolean {
+    const row = session.project.runtime.get(taskId);
+    if (row === undefined) throw new Error(`unknown task '${taskId}'`);
+    return !isTerminalStatus(row.status);
   }
 
   // --- interaction -----------------------------------------------------------
@@ -3790,11 +3921,33 @@ export class AppService {
    * on disk) are nearly free; the two that are not (a socket to a local server, `--version` on a
    * binary) are bounded and run concurrently.
    *
-   * Concurrent with itself only once: a second call while one is in flight joins the first rather
-   * than starting a second round of connects.
+   * Concurrent with itself only once: a second call while one is in flight does not start a second
+   * round of connects. It does not JOIN the first either, and that distinction is the whole of a bug
+   * this had:
+   *
+   * The reason to ask again is almost always that the INPUTS changed — a project opened, a
+   * credential was written — and a pass that started before the change cannot answer a question
+   * about what came after it. Joining meant inheriting a stale answer. Which is what happened at
+   * every startup: the constructor probes with no project open, so the secret chain has no project
+   * `.env.local` and every remote route reports "no key"; the project then opens, kicks a refresh
+   * exactly because "a project brings its own config layer" — and that refresh joined the
+   * project-less pass already in flight and adopted its verdict. Settings opened showing `anthropic`
+   * and `openrouter` as not working, and pressing Recheck "fixed" it: by then nothing was in flight,
+   * so the button got the fresh pass that project-open should have had.
+   *
+   * So a request that arrives mid-pass is promised a FOLLOW-UP pass instead, and gets that one's
+   * answer. Coalesced to one follow-up however many arrive, and re-armed if more arrive during it.
    */
   async refreshAvailability(): Promise<AvailabilitySnapshot> {
-    if (this.availabilityRun !== undefined) return this.availabilityRun;
+    if (this.availabilityRun !== undefined) {
+      // `catch` rather than `then`: a pass that THREW must still be followed by the one that was
+      // asked for, or one failed socket connect strands every later request behind it forever.
+      this.availabilityAgain ??= this.availabilityRun.catch(() => undefined).then(() => {
+        this.availabilityAgain = undefined;
+        return this.refreshAvailability();
+      });
+      return this.availabilityAgain;
+    }
     const run = this.computeAvailability().finally(() => {
       this.availabilityRun = undefined;
     });
@@ -3816,6 +3969,9 @@ export class AppService {
     const tree = resolveExecutorTree(config.executors[DEFAULT_EXECUTOR], {
       providers: usableRouteKeys(config.models, secrets),
       agents: Object.keys(agentPromptRouteNames(config.agents)).filter((name) => available.has(name)),
+      // Whose models each agent answers for, so the settings screen shows the same routing the run
+      // will do — a bare `claude-sonnet-5` resolving to `claude-cli` is a property of the tree.
+      vendors: agentRouteVendors(config.agents),
     });
     this.availability = { routes, executors, tree, checkedAt: Date.now() };
     this.publish({ type: "store:invalidate", scope: "availability" });
@@ -3834,11 +3990,21 @@ export class AppService {
     bundle: WorkflowBundle,
     fake: boolean,
     secrets: SecretResolver = this.secretResolver(),
+    /**
+     * Whether an unservable prompt should REFUSE, which only a caller about to run one wants.
+     *
+     * The readers below build this tree to render it — which routes exist, what fills a call the
+     * composer has not overridden. They must not inherit a start-time refusal: a workflow naming a
+     * model this machine cannot reach is a run that will not start, and it should say so when
+     * somebody starts it, not by leaving the chat panel unable to describe itself.
+     */
+    refuse = true,
   ): JairaOperationNode {
     const available = this.availableExecutors();
     return defaultExecutorTree(config, bundle, {
       fake,
       secrets,
+      refuse,
       ...(available !== undefined ? { available } : {}),
     });
   }

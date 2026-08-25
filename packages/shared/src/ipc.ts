@@ -358,6 +358,63 @@ export interface WorkflowSource {
   exists: boolean;
 }
 
+/**
+ * One state as a RUN had it — see `effectiveState` in `@jaira/persistence`.
+ *
+ * Two things a `WorkflowSource` alone cannot say, which is why this exists beside it.
+ *
+ * WHICH COPY. A run pins its workflow (DESIGN §5.3), so the state it executed lives in that
+ * snapshot and the state on disk is whatever it has been edited into since. {@link from} says which
+ * of the two came back, and a reader of a week-old failure needs that stated rather than assumed.
+ *
+ * WHAT WENT THROUGH IT. A binding says where a value comes from; {@link values} is what came, this
+ * once. The form has always shown the first and never the second.
+ */
+export interface EffectiveState {
+  stateId: string;
+  /**
+   * Whether the document below is still the one that RAN.
+   *
+   *  - `pinned` — the run's snapshot is the workflow as it stands, so this file is what executed.
+   *  - `moved` — the workflow has changed since; this is the file as it is now, and the run's copy
+   *    of it is gone. A snapshot keeps the LOWERED states, which no form can draw (see
+   *    `effectiveState`), so there is no third document to offer.
+   *  - `disk` — no run was named, and the question does not arise.
+   */
+  from: "pinned" | "moved" | "disk";
+  /** The snapshot the run pinned, when there was a run. */
+  snapshotHash?: string;
+  /** The workflow root whose closure contains it, when one does. */
+  rootId?: string;
+  /**
+   * The state's own document, as that copy holds it — what the editor renders.
+   *
+   * Absent when the bundle has no such state: renamed, or belonging to another root. That is an
+   * answer, and a caller should say so rather than draw an empty form.
+   */
+  source?: WorkflowSource;
+  /**
+   * What ONE execution of it recorded. Absent when the caller named no run.
+   *
+   * Nothing here is derived: each field is a value the journal or the operation record already
+   * holds. A published output whose binding is an expression over children is deliberately NOT
+   * evaluated — that is the engine's job, and a panel guessing at it would be inventing a fact.
+   */
+  values?: EffectiveStateValues;
+}
+
+/** The values behind one execution's bindings — see {@link EffectiveState.values}. */
+export interface EffectiveStateValues {
+  /** Which execution these are. A loop runs one state several times, and each pass had its own. */
+  instanceId: number;
+  /** The inputs the engine resolved on the way in, by slot name (`instance.entered`). */
+  inputs?: Record<string, JsonValue>;
+  /** What the operation returned, when it completed — the record's own result. */
+  output?: JsonValue;
+  /** Each child's recorded inputs, by the key this state mounted it under. */
+  children?: Record<string, Record<string, JsonValue>>;
+}
+
 export interface WriteWorkflowRequest {
   stateId: string;
   layer: WorkflowLayer;
@@ -1005,6 +1062,21 @@ export interface IpcContract {
    * from the response, which is how a half-typed reference is reported.
    */
   "state:slots": { request: { stateIds: string[]; project?: ProjectRef }; response: Record<string, StateSlots> };
+  /**
+   * One state as the loader resolved it — what a panel describing a RUN shows.
+   *
+   * `taskId` decides which copy: with one, the state is read out of that task's pinned snapshot,
+   * which is what the run actually executed; without one, out of the files on disk now. See
+   * {@link EffectiveState.from}, which reports which of the two came back.
+   *
+   * `instanceId` names WHICH execution the values are from, since a loop runs one state several
+   * times. Without it the newest execution of that state in the run is used, which is what somebody
+   * clicking through from a conversation is looking at.
+   */
+  "state:effective": {
+    request: { stateId: string; taskId?: string; instanceId?: number; project?: ProjectRef };
+    response: EffectiveState;
+  };
   /** A task's run, read back out of the journal as turns. */
   "task:conversation": { request: { taskId: string; project?: string }; response: ConversationView };
   /**
@@ -1315,6 +1387,7 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "files:tree",
   "state:view",
   "state:slots",
+  "state:effective",
   "task:conversation",
   "task:system",
   "project:list",

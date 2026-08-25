@@ -7,7 +7,7 @@
  * been perfectly good, produces a run that starts, does the wrong thing, and reports success.
  */
 import { describe, expect, it } from "vitest";
-import type { BoardCard, SessionRef, StateView, TaskSummary } from "@jaira/shared/browser";
+import type { BoardCard, SessionRef, StateView, TaskSummary, WorkflowEntry } from "@jaira/shared/browser";
 import {
   createBlocker,
   initialRunValues,
@@ -20,6 +20,8 @@ import {
   runInputsOf,
   runTargetOf,
   runTitle,
+  runValuesOf,
+  workflowLayerOf,
   workflowMimeOf,
   type RunContext,
   type RunField,
@@ -106,6 +108,25 @@ describe("reading a state's inputs", () => {
 
   it("opens every box at its declared default", () => {
     expect(initialRunValues(fieldsOf(PLAN))).toMatchObject({ issue: "", depth: "3", strict: "" });
+  });
+
+  /**
+   * The form describing a run that ALREADY happened — what the workflow link in a conversation's
+   * gutter opens. The round trip is the property: what a run was called with, put in the boxes, has
+   * to read back as the same inputs.
+   */
+  it("fills the boxes with what one run was actually called with", () => {
+    const fields = fieldsOf(PLAN);
+    const called = { issue: "fix the parser", depth: 7, strict: true, tags: ["a", "b"] };
+    const values = runValuesOf(fields, called);
+    // Prose as prose. Quoting it would put a pair of quotes in a textarea somebody is about to edit.
+    expect(values["issue"]).toBe("fix the parser");
+    expect(values["depth"]).toBe("7");
+    expect(values["strict"]).toBe("true");
+    expect(values["tags"]).toBe('["a","b"]');
+    // A slot the run carried nothing for keeps its default — which is what actually applied.
+    expect(values["shape"]).toBe("");
+    expect(runInputsOf(fields, values).inputs).toEqual(called);
   });
 });
 
@@ -479,5 +500,41 @@ describe("starting a run with nothing open", () => {
     expect(runTitle("nothing/yet", runHistoryOf("nothing/yet", tasks, null).startedHere.length)).toBe(
       "nothing/yet #1",
     );
+  });
+});
+
+/**
+ * Which layer a state's file is in — the question the run form has to answer before it can read one.
+ *
+ * The bug this closes: only ROOTS have a row in the browse listing, so every state below one was
+ * assumed to be the project's. A workflow living in the shared root — which is where they normally
+ * live once more than one checkout uses them — then had its children read out of a project directory
+ * that has no such file, and a missing file reads back as empty text. The panel reported "this file
+ * does not parse" about a file it had never opened.
+ */
+describe("finding a state's layer", () => {
+  const entry = (patch: Partial<WorkflowEntry> & Pick<WorkflowEntry, "rootId" | "layer">): WorkflowEntry =>
+    ({ states: [], issues: [], taskIds: [], driftedTasks: [], ...patch }) as WorkflowEntry;
+
+  const WORKFLOWS = [
+    entry({ rootId: "feature", layer: "base", states: ["feature", "feature/product", "feature/product/context"] }),
+    entry({ rootId: "local", layer: "project", states: ["local", "local/step"] }),
+  ];
+
+  it("takes a root's own row, which says which copy would run", () => {
+    expect(workflowLayerOf(WORKFLOWS, "feature")).toBe("base");
+    expect(workflowLayerOf(WORKFLOWS, "local")).toBe("project");
+  });
+
+  it("takes a child's layer from the root that lists it — the bug", () => {
+    expect(workflowLayerOf(WORKFLOWS, "feature/product/context")).toBe("base");
+    expect(workflowLayerOf(WORKFLOWS, "local/step")).toBe("project");
+  });
+
+  it("falls back to the project for a state no root lists", () => {
+    // Not a wrong answer so much as the only one available — and the caller checks it against the
+    // disk, which is what makes an unlisted state readable at all.
+    expect(workflowLayerOf(WORKFLOWS, "nobody/knows")).toBe("project");
+    expect(workflowLayerOf([], "feature")).toBe("project");
   });
 });

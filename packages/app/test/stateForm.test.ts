@@ -503,6 +503,32 @@ describe("state-level fields", () => {
     expect(out["environment"]).toEqual({ kind: "prompt", model: "critic" });
   });
 
+  it("reads the environment's own kind, which nothing used to carry", () => {
+    // The whole of the bug: a block spelling `{"kind": "prompt", "model": …}` rendered the model and
+    // no sign of the kind. It survived a save, because the fields merge over what was there — so it
+    // was a kind you could see the effects of and never the value.
+    expect(formOf({ environment: { kind: "prompt", model: "claude-sonnet-5" } }).environmentKind).toBe("prompt");
+    expect(formOf({ environment: { session: "review" } }).environmentKind).toBe("");
+    expect(formOf({}).environmentKind).toBe("");
+  });
+
+  it("writes the environment's kind, and writes none for 'inherited'", () => {
+    const doc = { environment: { kind: "prompt", model: "claude-sonnet-5" } };
+    expect(round(doc, { environmentKind: "function" })["environment"]).toEqual({
+      kind: "function",
+      model: "claude-sonnet-5",
+    });
+    // Blank states none — an environment that settles no kind is what a pure composite supplying
+    // only a session wants, and it must stay expressible.
+    expect(round(doc, { environmentKind: "" })["environment"]).toEqual({ model: "claude-sonnet-5" });
+  });
+
+  it("drops an environment whose last field AND kind are gone", () => {
+    const doc = { environment: { kind: "prompt" } };
+    const form = formOf(doc);
+    expect(round(doc, { environment: form.environment!, environmentKind: "" })["environment"]).toBeUndefined();
+  });
+
   it("keeps an environment on a state with no operation of its own", () => {
     // Declaring a session on a pure composite is the ordinary way to give a whole subtree one
     // conversation, and the engine reads it there specifically.

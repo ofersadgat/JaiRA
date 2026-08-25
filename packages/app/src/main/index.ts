@@ -215,6 +215,8 @@ const handlers: Record<IpcChannel, Handler> = {
     service.stateView(request.stateId, request.project)) as Handler,
   "state:slots": ((request: { stateIds: string[]; project?: string }) =>
     service.stateSlots(request.stateIds, request.project)) as Handler,
+  "state:effective": ((request: Parameters<typeof service.effectiveState>[0]) =>
+    service.effectiveState(request)) as Handler,
   "task:conversation": ((request: { taskId: string; project?: string }) => service.conversation(request.taskId, request.project)) as Handler,
   "task:system": (() => service.listSystemTasks()) as Handler,
   "project:list": (() => service.listProjects()) as Handler,

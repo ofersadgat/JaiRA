@@ -218,6 +218,18 @@ export interface FileSurfaceContext {
    */
   onWalkIntoSidechain?: ((node: InstanceNode, call: string, name: string) => void) | undefined;
   /**
+   * Describe the WORKFLOW a conversation was opened by, with that run's own values against it.
+   *
+   * What the link in a session panel's gutter does. The subject is a state and the scope is one
+   * execution of it, which is why both travel: the panel it lands in is the state inspector, and
+   * `instanceId` is what fills its run form with what this pass was actually called with instead of
+   * with the slots' defaults.
+   *
+   * Optional, like every other navigation on this bag — a surface rendered outside the shell has no
+   * column to describe anything in, and the gutter then shows the session id alone.
+   */
+  onOpenWorkflow?: ((stateId: string, instanceId: number) => void) | undefined;
+  /**
    * Walk SIDEWAYS: replace the path from `index` down with this run.
    *
    * What a chevron's menu does — picking a sibling of a level you are already standing on is not a

@@ -68,30 +68,59 @@ function isEnabled(route: JairaModelRoute | undefined): boolean {
  * `config.models.routes` → `ModelRouterOptions`, with credentials resolved.
  *
  * The value never leaves this process: `SecretResolver.lookup` is called here, in the main process,
- * and what crosses IPC to any UI is only the ORIGIN (`describe`). A route naming no credential is left
- * alone rather than defaulted, so the SDK's own `process.env` fallback still applies — which is what
- * keeps every existing setup working with no config at all.
+ * and what crosses IPC to any UI is only the ORIGIN (`describe`). A route naming no credential falls
+ * back on the CONVENTIONAL variable, resolved through the same chain — see {@link remoteKeyFor} for
+ * why asking the chain rather than leaving it to the SDK is the whole point.
  */
 export function modelRouterOptions(models: JairaModelConfig = {}, secrets?: SecretResolver): ModelRouterOptions {
   const routes = models.routes ?? {};
   const options: ModelRouterOptions = {};
+  /**
+   * This route's key, resolved — from the credential it NAMES, or from the conventional variable.
+   *
+   * The second half was missing, and the gap it left is the one that took the longest to see. A
+   * route naming no credential was "left alone rather than defaulted, so the SDK's own `process.env`
+   * fallback still applies" — but {@link routeUsable} does NOT ask `process.env`. It asks the secret
+   * CHAIN for the same conventional variable, and the chain reads a keychain and four `.env` files
+   * the SDK has never heard of.
+   *
+   * So the two halves disagreed exactly where it hurt: a key in `.env.local` made the route count as
+   * usable, the route was derived, a call dispatched to it — and the provider, handed no key and
+   * looking only at `process.env`, failed with `AI_LoadAPIKeyError` in four milliseconds. Judging a
+   * route by one source and serving it from another is the bug; asking the chain in both places is
+   * the fix, and it leaves the `process.env` case working because the chain's last link IS the
+   * environment.
+   */
   const keyFor = (route: JairaModelRoute | undefined): string | undefined =>
-    route?.credential !== undefined ? secrets?.lookup(route.credential)?.value : undefined;
+    route?.credential === undefined ? undefined : secrets?.lookup(route.credential)?.value;
 
-  const anthropic = isEnabled(routes["anthropic"]) ? routes["anthropic"] : undefined;
-  const anthropicKey = keyFor(anthropic);
+  /**
+   * One REMOTE route's key, by its route name — which is what carries the conventional variable.
+   *
+   * Read off `routes[key]` rather than a pre-filtered local, because `isEnabled(x) ? x : undefined`
+   * spells "turned off" and "never configured" the same way, and here they are opposites: a route
+   * nobody configured should still find `ANTHROPIC_API_KEY`, and one somebody turned OFF must not.
+   * Collapsing them handed a disabled route its key — caught by the test that says so.
+   */
+  const remoteKeyFor = (key: string): string | undefined => {
+    const route = routes[key];
+    if (!isEnabled(route)) return undefined;
+    const name = route?.credential ?? ROUTE_ENV_VAR[key];
+    return name === undefined ? undefined : secrets?.lookup(name)?.value;
+  };
+
+  const anthropicKey = remoteKeyFor("anthropic");
   if (anthropicKey !== undefined) options.anthropicApiKey = anthropicKey;
 
   const openai = isEnabled(routes["openai"]) ? routes["openai"] : undefined;
-  const openAiKey = keyFor(openai);
+  const openAiKey = remoteKeyFor("openai");
   if (openAiKey !== undefined) options.openAiApiKey = openAiKey;
   // A base URL is a legitimate thing to set on this route rather than a local-only idea: Azure
   // OpenAI and every gateway in front of it speak the same protocol, so pointing the route at one
   // is configuration rather than a route of its own.
   if (openai?.baseURL !== undefined) options.openAiBaseURL = openai.baseURL;
 
-  const openrouter = isEnabled(routes["openrouter"]) ? routes["openrouter"] : undefined;
-  const openRouterKey = keyFor(openrouter);
+  const openRouterKey = remoteKeyFor("openrouter");
   if (openRouterKey !== undefined) options.openRouterApiKey = openRouterKey;
 
   const local = isEnabled(routes["local"]) ? routes["local"] : undefined;
@@ -269,16 +298,11 @@ export function normaliseAgentModel(name: string, inner: PromptRoute): PromptRou
 }
 
 /**
- * A glob over model ids: `*` matches any run of characters, everything else is literal.
- *
- * Every other regex metacharacter is escaped, `?` included — a model id is full of dots and dashes
- * (`claude-haiku-4-5`), and a pattern that quietly meant "any character" where the author wrote a dot
- * would be a limit that admits more than it says.
+ * Re-exported, not defined here: {@link matchesModel} moved to `@jaira/shared` when the routing that
+ * reads an `allow` list moved there too. It stays exported from this module because it has always
+ * been part of `@jaira/runtime`'s surface, and a move is not a reason to break an import.
  */
-export function matchesModel(pattern: string, model: string): boolean {
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
-  return new RegExp(`^${escaped}$`).test(model);
-}
+export { matchesModel } from "@jaira/shared";
 
 function isPlainObject(value: unknown): value is Record<string, JsonValue> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -293,6 +317,7 @@ function isPlainObject(value: unknown): value is Record<string, JsonValue> {
  */
 const ROUTE_ENV_VAR: Record<string, string> = {
   anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY",
   openrouter: "OPENROUTER_API_KEY",
 };
 
@@ -562,6 +587,28 @@ export function agentPromptRouteNames(agents: JairaAgentConfig = {}): Record<str
   if (adapters.includes("sdk")) out[AGENT_SDK] = true;
   if (adapters.includes("codex")) out[AGENT_CODEX] = true;
   for (const spec of enabledGenericAgents(agents)) out[spec.name ?? AGENT_GENERIC_CLI] = true;
+  return out;
+}
+
+/**
+ * Whose models each agent route serves — the `vendors` half of `ExecutorAvailability`.
+ *
+ * A fact about the BINARY, which is why it is derived here rather than configured: `claude-cli` is
+ * the `claude` program, so it answers for Anthropic's models and there is nothing for anyone to
+ * decide. It is what lets a state say `claude-sonnet-5` and reach the CLI, and — the half that
+ * matters more — what stops the same id reaching `codex-cli` because it happened to sort first.
+ *
+ * A generic CLI gets NO entry, deliberately. JaiRA does not know what binary someone pointed it at
+ * or which models that binary knows, and the cost of guessing is a call silently routed to a program
+ * that has never heard of the model. Such a route joins the candidates by stating an `allow` list —
+ * which is somebody saying it rather than JaiRA assuming it.
+ */
+export function agentRouteVendors(agents: JairaAgentConfig = {}): Record<string, string> {
+  const out: Record<string, string> = {};
+  const adapters = enabledAdapters(agents);
+  if (adapters.includes("cli")) out[AGENT_CLI] = "anthropic";
+  if (adapters.includes("sdk")) out[AGENT_SDK] = "anthropic";
+  if (adapters.includes("codex")) out[AGENT_CODEX] = "openai";
   return out;
 }
 

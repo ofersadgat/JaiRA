@@ -130,6 +130,76 @@ describe("the ordering fix — a router's defaults are applied BEFORE dispatch",
   });
 });
 
+describe("a bare model id reaches the route that serves it", () => {
+  /**
+   * The failure this was written for, end to end.
+   *
+   * JaiRA's own feature workflow pinned `anthropic/claude-sonnet-5` on every phase parent, so 27
+   * inherited leaves went to the provider path on a machine whose only credential was a `claude`
+   * login. Each one failed in four milliseconds with `AI_LoadAPIKeyError`, permanently, after the
+   * run had already started. Written bare, the same id names the same model and lets the machine
+   * answer who serves it.
+   */
+  it("sends 'claude-sonnet-5' to the CLI agent, prefix written in", async () => {
+    const cli = leaf();
+    const tree = resolveExecutorTree(undefined, {
+      providers: [],
+      agents: ["claude-cli"],
+      vendors: { "claude-cli": "anthropic" },
+    }).prompt!;
+    const built = buildPromptTree(tree, { agents: { "claude-cli": cli.executor } });
+
+    await built.start(promptOp("claude-sonnet-5"), {} as never).result;
+    // Not merely dispatched THERE — the chosen route is written into the id, because everything
+    // downstream reads the model and a bare one would be a second spelling of the same call.
+    expect(cli.seen).toEqual([{ model: "claude-cli/claude-sonnet-5" }]);
+  });
+
+  it("prefers the agent over a provider that could also serve the family", async () => {
+    const cli = leaf();
+    const tree = resolveExecutorTree(undefined, {
+      providers: ["anthropic"],
+      agents: ["claude-cli"],
+      vendors: { "claude-cli": "anthropic" },
+    }).prompt!;
+    const built = buildPromptTree(tree, { agents: { "claude-cli": cli.executor } });
+
+    await built.start(promptOp("claude-sonnet-5"), {} as never).result;
+    // An agent route runs on a subscription already signed in: among transports that can serve the
+    // call, the one needing no key wins. Naming `anthropic/…` is how you override that.
+    expect(cli.seen).toEqual([{ model: "claude-cli/claude-sonnet-5" }]);
+  });
+
+  it("still refuses a route the author NAMED but this machine cannot reach", async () => {
+    const cli = leaf();
+    const tree = resolveExecutorTree(undefined, {
+      providers: [],
+      agents: ["claude-cli"],
+      vendors: { "claude-cli": "anthropic" },
+    }).prompt!;
+    const built = buildPromptTree(tree, { agents: { "claude-cli": cli.executor } });
+
+    const result = await built.start(promptOp("anthropic/claude-sonnet-5"), {} as never).result;
+    // Rerouting this would be overruling the author. It goes to the provider fallback and is refused
+    // there, which is where the true reason — no key — is known.
+    expect(cli.seen).toEqual([]);
+    expect(reasonOf(result)).toBeTruthy();
+  });
+
+  it("never hands a bare id to an agent that does not serve its family", async () => {
+    const codex = leaf();
+    const tree = resolveExecutorTree(undefined, {
+      providers: [],
+      agents: ["codex-cli"],
+      vendors: { "codex-cli": "openai" },
+    }).prompt!;
+    const built = buildPromptTree(tree, { agents: { "codex-cli": codex.executor } });
+
+    await built.start(promptOp("claude-sonnet-5"), {} as never).result;
+    expect(codex.seen).toEqual([]);
+  });
+});
+
 describe("building each level", () => {
   const available = { providers: ["anthropic"], agents: ["claude-cli"] };
 

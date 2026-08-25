@@ -11,7 +11,7 @@
  * Rendering only. Every write goes through `applyForm`, which MERGES rather than rebuilds — see
  * `stateForm` for why that distinction is the whole safety property.
  */
-import { useEffect, useMemo, useRef, useState, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import {
   type ExecutorInfo,
   type FileTree,
@@ -34,6 +34,8 @@ import {
   type TransitionRow,
 } from "./stateForm";
 import { EditorActions, type EditorTab } from "./editorChrome";
+import { useReadOnly, useRunReading } from "./reading";
+import { ReadValue } from "./readValue";
 import { StateGraphView } from "./stateGraphView";
 import { anchorFor, fieldClass, FLASH_MS, formIssues, markFor, NO_ISSUES, type FormIssues } from "./issues";
 import type { UiSurface } from "./fileTypes";
@@ -97,8 +99,28 @@ function moved<T>(rows: readonly T[], from: number, to: number): T[] {
   return next;
 }
 
+/**
+ * What the tabs draw INTO — inert in a reading, and nothing at all otherwise.
+ *
+ * A wrapper rather than a class on the editor, because the thing that must stay live is the tab bar
+ * above it: `disabled` on a `fieldset` reaches every control inside, which is exactly why it has to
+ * enclose the body alone.
+ */
+function Body({ readOnly, children }: { readOnly: boolean; children: ReactNode }): JSX.Element {
+  return readOnly ? (
+    <fieldset className="reading" disabled>
+      {children}
+    </fieldset>
+  ) : (
+    <>{children}</>
+  );
+}
+
 /** The ↑/↓ pair, shown wherever the order of a table means something. */
-function Reorder({ index, count, onMove }: { index: number; count: number; onMove: (to: number) => void }): JSX.Element {
+function Reorder({ index, count, onMove }: { index: number; count: number; onMove: (to: number) => void }): JSX.Element | null {
+  // Order still MEANS something in a reading — first match wins, children run in sequence — but the
+  // control that changes it has nothing to do there, and a pair of dead arrows per row is two.
+  if (useReadOnly()) return null;
   return (
     <span className="reorder">
       <button type="button" className="ghost sm" title="move up" disabled={index === 0} onClick={() => onMove(index - 1)}>
@@ -148,6 +170,12 @@ function BindingTable({
   issues: FormIssues;
   onChange: (rows: BindingRow[]) => void;
 }): JSX.Element {
+  const readOnly = useReadOnly();
+  const reading = useRunReading();
+  // `children.<key>.inputs` — the key is what the recorded values are filed under, and this path is
+  // the only place the table is told which child it is wiring.
+  const childKey = /^children\.([^.]+)\.inputs$/.exec(path ?? "")?.[1];
+  const wired = childKey === undefined ? undefined : reading?.children?.[childKey];
   const edit = (index: number, patch: Partial<BindingRow>): void =>
     onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   const byName = new Map(slots.map((slot) => [slot.name, slot]));
@@ -173,9 +201,11 @@ function BindingTable({
       <div className="slots-head">
         <span>Inputs</span>
         <span className="sub">wired into the child&apos;s declared slots</span>
-        <button type="button" className="ghost sm" onClick={() => onChange([...rows, emptyBindingRow()])}>
-          + Wire
-        </button>
+        {readOnly ? null : (
+          <button type="button" className="ghost sm" onClick={() => onChange([...rows, emptyBindingRow()])}>
+            + Wire
+          </button>
+        )}
       </div>
       {rows.length === 0 ? (
         <div className="sub">
@@ -196,7 +226,8 @@ function BindingTable({
           const rowMark = rowPath === undefined ? "" : fieldClass(issues, rowPath);
           const absent = unwired ? missing : "";
           return (
-            <div key={i} {...(rowPath === undefined ? { className: base } : markFor(issues, rowPath, base))}>
+            <div key={i} className="binding-group">
+            <div {...(rowPath === undefined ? { className: base } : markFor(issues, rowPath, base))}>
               <input
                 className={absent.trim()}
                 value={row.name}
@@ -219,14 +250,19 @@ function BindingTable({
                 title={row.structured === true ? REF_HINT : slot?.description}
                 onChange={(e) => edit(i, { value: e.target.value })}
               />
-              <button
-                type="button"
-                className="ghost sm"
-                title="remove"
-                onClick={() => onChange(rows.filter((_, j) => j !== i))}
-              >
-                ✕
-              </button>
+              {readOnly ? null : (
+                <button
+                  type="button"
+                  className="ghost sm"
+                  title="remove"
+                  onClick={() => onChange(rows.filter((_, j) => j !== i))}
+                >
+                  ✕
+                </button>
+              )}
+              </div>
+              {/* What the child was actually called with — the other half of the wire. */}
+              <ReadValue value={wired?.[row.name.trim()]} />
             </div>
           );
         })
@@ -312,6 +348,7 @@ function ChildrenTable({
   issues: FormIssues;
   onChange: (rows: ChildRow[]) => void;
 }): JSX.Element {
+  const readOnly = useReadOnly();
   const edit = (index: number, patch: Partial<ChildRow>): void =>
     onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   const pathOf = (row: ChildRow): string | undefined =>
@@ -345,9 +382,11 @@ function ChildrenTable({
       <div className="slots-head">
         <span>Children</span>
         <span className="sub">{rows.length > 1 ? "in run order" : ""}</span>
-        <button type="button" className="ghost sm" onClick={() => onChange([...rows, emptyChildRow()])}>
-          + Add
-        </button>
+        {readOnly ? null : (
+          <button type="button" className="ghost sm" onClick={() => onChange([...rows, emptyChildRow()])}>
+            + Add
+          </button>
+        )}
       </div>
       {rows.length === 0 ? (
         <div className="sub">none — this state runs its own operation and nothing below it</div>
@@ -399,30 +438,44 @@ function ChildrenTable({
                   </span>
                 ) : null}
               </span>
-              <label
-                className="slot-opt"
-                title="in the sequence: the cursor walks into it. Off means it runs only if a transition names it."
-              >
-                <input
-                  type="checkbox"
-                  checked={row.inSpine}
-                  onChange={(e) => edit(i, { inSpine: e.target.checked })}
-                />
-                spine
-              </label>
-              <label className="slot-opt" title="SPEC §10.4: starting this child does not block the sequence">
-                <input type="checkbox" checked={row.async} onChange={(e) => edit(i, { async: e.target.checked })} />
-                async
-              </label>
+              {/* Said, not switched, and only when true — the same rule the `optional` box follows in
+                  `slotTable.tsx`. An unticked pair on every child is a column of empty boxes
+                  reporting that nothing was ticked. */}
+              {readOnly ? (
+                <>
+                  {row.inSpine ? <span className="slot-opt sub">in the sequence</span> : null}
+                  {row.async ? <span className="slot-opt sub">async</span> : null}
+                </>
+              ) : (
+                <>
+                  <label
+                    className="slot-opt"
+                    title="in the sequence: the cursor walks into it. Off means it runs only if a transition names it."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={row.inSpine}
+                      onChange={(e) => edit(i, { inSpine: e.target.checked })}
+                    />
+                    spine
+                  </label>
+                  <label className="slot-opt" title="SPEC §10.4: starting this child does not block the sequence">
+                    <input type="checkbox" checked={row.async} onChange={(e) => edit(i, { async: e.target.checked })} />
+                    async
+                  </label>
+                </>
+              )}
               <Reorder index={i} count={rows.length} onMove={(to) => onChange(moved(rows, i, to))} />
-              <button
-                type="button"
-                className="ghost sm"
-                title="remove"
-                onClick={() => onChange(rows.filter((_, j) => j !== i))}
-              >
-                ✕
-              </button>
+              {readOnly ? null : (
+                <button
+                  type="button"
+                  className="ghost sm"
+                  title="remove"
+                  onClick={() => onChange(rows.filter((_, j) => j !== i))}
+                >
+                  ✕
+                </button>
+              )}
             </div>
             {/* NOT behind a disclosure, and that is the point of the row existing at all: a child
                 with a required input does not run until it is wired, `seedRequiredBindings` puts a
@@ -441,6 +494,10 @@ function ChildrenTable({
                 environment and the child's own, so it is a default the child may still override.
                 Folded away because it is genuinely optional — most mounts take what they inherit —
                 and open the moment this one says anything of its own. */}
+            {readOnly &&
+            row.environment.kind === "" &&
+            row.environment.functionRef.length === 0 &&
+            row.environment.model.length === 0 ? null : (
             <details
               className="slot-more"
               open={
@@ -490,6 +547,7 @@ function ChildrenTable({
                 anything else on this mount&apos;s environment is kept as written — edit it on the JSON tab
               </div>
             </details>
+            )}
           </div>
           );
         })
@@ -520,6 +578,7 @@ function TransitionsTable({
   issues: FormIssues;
   onChange: (rows: TransitionRow[]) => void;
 }): JSX.Element {
+  const readOnly = useReadOnly();
   const edit = (index: number, patch: Partial<TransitionRow>): void =>
     onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   return (
@@ -539,9 +598,11 @@ function TransitionsTable({
       <div className="slots-head">
         <span>Transitions</span>
         <span className="sub">{rows.length > 1 ? "first match wins" : ""}</span>
-        <button type="button" className="ghost sm" onClick={() => onChange([...rows, { when: "", to: "" }])}>
-          + Add
-        </button>
+        {readOnly ? null : (
+          <button type="button" className="ghost sm" onClick={() => onChange([...rows, { when: "", to: "" }])}>
+            + Add
+          </button>
+        )}
       </div>
       {rows.length === 0 ? (
         <div className="sub">none — the state terminates when its children are done</div>
@@ -571,14 +632,16 @@ function TransitionsTable({
               onChange={(e) => edit(i, { to: e.target.value })}
             />
             <Reorder index={i} count={rows.length} onMove={(to) => onChange(moved(rows, i, to))} />
-            <button
-              type="button"
-              className="ghost sm"
-              title="remove"
-              onClick={() => onChange(rows.filter((_, j) => j !== i))}
-            >
-              ✕
-            </button>
+            {readOnly ? null : (
+              <button
+                type="button"
+                className="ghost sm"
+                title="remove"
+                onClick={() => onChange(rows.filter((_, j) => j !== i))}
+              >
+                ✕
+              </button>
+            )}
           </div>
         ))
       )}
@@ -721,6 +784,7 @@ export function WorkflowEditor({
    * the document is unmodified again the moment it does. Comparing against the mount value instead
    * would leave the editor claiming unsaved changes forever after the first save.
    */
+  const readOnly = useReadOnly();
   const onDisk = source.text || "{}";
   const held = onDraft
     ? (draft ?? null)
@@ -1003,6 +1067,10 @@ export function WorkflowEditor({
         </div>
       </div>
 
+      {/* The DRAWING is never made inert. Nothing in it edits the state — its own controls pan, zoom
+          and fit, which are ways of looking rather than ways of changing — and a graph you cannot
+          zoom in a column this narrow is a picture of a state rather than a reading of one. It was
+          inside the reading's fieldset for one round, which disabled all three buttons. */}
       {tab === "graph" ? (
         <StateGraphView
           text={text}
@@ -1034,6 +1102,14 @@ export function WorkflowEditor({
             This file is not valid JSON ({parseError}) — fix it on the JSON tab to use the form.
           </div>
         ) : (
+          /*
+            The FORM is what a reading makes inert, and `fieldset[disabled]` is the one element that
+            does it in a single move — including for whatever somebody adds here later without
+            reading this file. The controls that would change the state are not rendered at all (see
+            `reading.ts`); this is the backstop for the boxes that remain, which show values and must
+            not take any.
+          */
+          <Body readOnly={readOnly}>
           <div className="form" ref={formRef}>
             {/* Once per form: several controls below reference these by id, and two of them are
                 rendered twice (the operation block and the environment block). */}
@@ -1048,24 +1124,30 @@ export function WorkflowEditor({
             {/* The state's own prose. Labels beside the boxes rather than above them: they are two
                 words each, and stacked they doubled the height of the one part of the form that is
                 never the reason anyone opened it. */}
+            {/* A reading shows what the state SAYS. An empty box under a label is how a form invites
+                you to fill one in, and there is nothing to fill in here. */}
             <div className="identity">
-              <label className="field inline">
-                <span>Label</span>
-                <input
-                  value={form.label}
-                  placeholder="a short name — what the board shows"
-                  onChange={(e) => editForm({ label: e.target.value })}
-                />
-              </label>
-              <label className="field inline">
-                <span>Description</span>
-                <textarea
-                  rows={2}
-                  value={form.description}
-                  placeholder="an author's note — also useful prompt context"
-                  onChange={(e) => editForm({ description: e.target.value })}
-                />
-              </label>
+              {readOnly && form.label.length === 0 ? null : (
+                <label className="field inline">
+                  <span>Label</span>
+                  <input
+                    value={form.label}
+                    placeholder="a short name — what the board shows"
+                    onChange={(e) => editForm({ label: e.target.value })}
+                  />
+                </label>
+              )}
+              {readOnly && form.description.length === 0 ? null : (
+                <label className="field inline">
+                  <span>Description</span>
+                  <textarea
+                    rows={2}
+                    value={form.description}
+                    placeholder="an author's note — also useful prompt context"
+                    onChange={(e) => editForm({ description: e.target.value })}
+                  />
+                </label>
+              )}
             </div>
 
             {/* Slots belong to the STATE, so they are offered whether or not it has an operation —
@@ -1126,6 +1208,9 @@ export function WorkflowEditor({
                   inline label pushes its control 86px to the right of them. The Kind picker then sat
                   further in than the Prompt box whose existence it decides, which reads as a nesting
                   level that is not there. */}
+              {/* A picker showing "inherited" is a picker showing that nothing was picked. The
+                  reading's answer to "what kind of operation is this" is the block below it. */}
+              {readOnly && form.operationKind === "inherit" ? null : (
               <label
                 {...(form.operationKind === "" || form.operationKind === "ref"
                   ? markFor(marks, "operation", "field")
@@ -1147,6 +1232,7 @@ export function WorkflowEditor({
                   <option value="ref">linked — a block held in another file</option>
                 </select>
               </label>
+              )}
               {form.operationKind === "ref" ? (
                 <div className="field">
                   {/* Object position: the bare string IS the reference, no `{"$ref": …}` wrapper
@@ -1206,37 +1292,64 @@ export function WorkflowEditor({
 
             {/* The DEFAULTS layer. Offered on every state, including a pure composite: declaring a
                 session here is the ordinary way to give a whole subtree one conversation. */}
+            {readOnly && form.environment === null ? null : (
             <div className="slots">
               <div className="slots-head">
                 <span>Environment</span>
                 <span className="sub">defaults for this state and every descendant</span>
-                <button
-                  type="button"
-                  className="ghost sm"
-                  onClick={() => editForm({ environment: form.environment === null ? EMPTY_OPERATION_FIELDS : null })}
-                >
-                  {form.environment === null ? "+ Add" : "Remove"}
-                </button>
+                {/* The block's own `kind`, which nothing rendered before: a file reading
+                    `{"kind": "prompt", "model": …}` showed the model and no sign of the first half,
+                    so an inherited kind was one you could neither see nor change. Blank states
+                    none, which is what a defaults layer supplying only a session wants. */}
+                {form.environment === null ? null : (
+                  <select
+                    value={form.environmentKind}
+                    title="what this layer declares its descendants' operations to be"
+                    onChange={(e) => editForm({ environmentKind: e.target.value as FormModel["environmentKind"] })}
+                  >
+                    <option value="">kind: inherited</option>
+                    <option value="prompt">kind: prompt</option>
+                    <option value="function">kind: function</option>
+                  </select>
+                )}
+                {readOnly ? null : (
+                  <button
+                    type="button"
+                    className="ghost sm"
+                    onClick={() => editForm({ environment: form.environment === null ? EMPTY_OPERATION_FIELDS : null })}
+                  >
+                    {form.environment === null ? "+ Add" : "Remove"}
+                  </button>
+                )}
               </div>
               {form.environment === null ? (
                 <div className="sub">none — this state adds no defaults to what it inherits</div>
               ) : (
                 <OperationFieldsEditor
                   form={form.environment}
-                  show={{ prompt: true, function: true }}
+                  // Both halves, because a defaults layer may legitimately supply either — but the
+                  // kind above narrows what is worth showing, so a layer declared `function` stops
+                  // offering a prompt and a model it would never use.
+                  show={{
+                    prompt: form.environmentKind !== "function",
+                    function: form.environmentKind !== "prompt",
+                  }}
                   targets={targets}
                   bindingListId={BINDING_TARGETS_ID}
                   onChange={(environment: OperationFieldsForm) => editForm({ environment })}
                 />
               )}
             </div>
+            )}
 
+            {readOnly && form.limits.maxIterations.length === 0 && form.limits.timeout.length === 0 ? null : (
             <div {...markFor(marks, "limits", "slots")}>
               <div className="slots-head">
                 <span>Limits</span>
                 <span className="sub">how far this state may go before it is stopped</span>
               </div>
               <div className="row-controls">
+                {readOnly && form.limits.maxIterations.length === 0 ? null : (
                 <label className="field">
                   <span>Max iterations</span>
                   <input
@@ -1248,6 +1361,8 @@ export function WorkflowEditor({
                     onChange={(e) => editForm({ limits: { ...form.limits, maxIterations: e.target.value } })}
                   />
                 </label>
+                )}
+                {readOnly && form.limits.timeout.length === 0 ? null : (
                 <label className="field">
                   <span>Timeout</span>
                   <input
@@ -1259,17 +1374,29 @@ export function WorkflowEditor({
                     onChange={(e) => editForm({ limits: { ...form.limits, timeout: e.target.value } })}
                   />
                 </label>
+                )}
               </div>
             </div>
+            )}
 
-            <div className="sub">
-              A plain reference is editable here — 🔗 links a value to a file and unlinking gives back
-              what was inline. Anything richer than that (a reference with sibling overrides, a
-              computed binding) is kept exactly as written and shown read-only; edit those on the
-              JSON tab.
-            </div>
+            {/* Advice about EDITING, which is not what a reading is for. */}
+            {readOnly ? null : (
+              <div className="sub">
+                A plain reference is editable here — 🔗 links a value to a file and unlinking gives back
+                what was inline. Anything richer than that (a reference with sibling overrides, a
+                computed binding) is kept exactly as written and shown read-only; edit those on the
+                JSON tab.
+              </div>
+            )}
           </div>
+          </Body>
         )
+      ) : readOnly ? (
+        // The document, as a document. `SchemaJsonEditor` below is an authoring surface — a schema
+        // picker, a validation report, a field reference — and every part of it is about writing
+        // this file correctly. A reading wants the text: selectable, copyable, scrolling in its own
+        // box, and taking no input.
+        <textarea className="code-editor tall reading-doc" spellCheck={false} value={text} readOnly />
       ) : validateSchema ? (
         // Schema-aware: the picker defaults to the state schema, because that is unambiguously what
         // this file is. It stays a choice rather than being forced — a state whose operation is a
@@ -1300,7 +1427,12 @@ export function WorkflowEditor({
 
       {/* The same bar the JSON editor and the file editors wear, for the same reason they wear it:
           this form is a page long, and a Save that lives at the bottom of a page is a Save that is
-          only visible when there is nothing left to fill in. See `editorChrome`. */}
+          only visible when there is nothing left to fill in. See `editorChrome`.
+
+          Absent altogether in a reading — not disabled. A greyed-out Save at the foot of a panel
+          describing a run that finished last week is an offer about a document nobody is editing,
+          and it takes a row of the column to make it. */}
+      {readOnly ? null : (
       <EditorActions
         // A file that is not on disk yet has a pending change whether or not anything was typed:
         // its existence. Without the second clause the panel offers "saving creates it" beside a
@@ -1316,6 +1448,7 @@ export function WorkflowEditor({
       >
         {source.exists ? null : <span className="sub">new file — saving creates it</span>}
       </EditorActions>
+      )}
     </div>
     </LinkReaderProvider>
   );

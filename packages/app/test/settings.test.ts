@@ -652,12 +652,53 @@ describe("availability", () => {
     expect(pushes.some((m) => m.type === "store:invalidate" && m.scope === "availability")).toBe(true);
   });
 
-  it("collapses concurrent refreshes into one pass", async () => {
-    // Two settings saved a second apart would otherwise each open their own round of connects while
-    // the previous one was still in flight.
+  it("answers a refresh asked for mid-pass with a LATER pass, not the one already running", async () => {
+    // The bug this replaced a `toBe` assertion for. Joining looks like the same thing and is not: the
+    // reason to ask again is that the inputs changed, and a pass that started before the change
+    // cannot answer a question about what came after it.
+    //
+    // Which is what happened at every startup. The constructor probes before any project is open, so
+    // the secret chain has no project `.env.local` and every remote route reports "no key". The
+    // project then opens and kicks a refresh precisely because it brings its own config layer — and
+    // that refresh joined the project-less pass and adopted its verdict. Settings opened showing
+    // `anthropic` and `openrouter` as not working, and Recheck "fixed" it only because by then
+    // nothing was in flight.
+    pushes.length = 0;
     const [first, second] = await Promise.all([service.refreshAvailability(), service.refreshAvailability()]);
 
-    expect(first).toBe(second);
+    expect(second).not.toBe(first);
+    expect(second.checkedAt).toBeGreaterThanOrEqual(first.checkedAt);
+    // And it is the newest one that is cached, so opening Settings reads the later answer.
+    expect(service.readAvailability()).toBe(second);
+  });
+
+  it("still bounds a burst: many requests during one pass share ONE follow-up", async () => {
+    // The property the old `toBe` was really defending, and it survives. Saving a URL and then a
+    // credential a second apart must not open its own round of socket connects each — but the LAST
+    // write's effect still has to be observed, which is why the answer is two passes rather than one.
+    pushes.length = 0;
+    await Promise.all([
+      service.refreshAvailability(),
+      service.refreshAvailability(),
+      service.refreshAvailability(),
+      service.refreshAvailability(),
+    ]);
+
+    // One invalidate per pass that actually ran.
+    const passes = pushes.filter((m) => m.type === "store:invalidate" && m.scope === "availability").length;
+    expect(passes).toBe(2);
+  });
+
+  it("re-arms, so a request during the FOLLOW-UP gets one of its own", async () => {
+    pushes.length = 0;
+    const first = service.refreshAvailability();
+    const second = service.refreshAvailability();
+    await first;
+    // `second` is the follow-up and is now the one in flight; asking again must not join it either.
+    const third = service.refreshAvailability();
+    await Promise.all([second, third]);
+
+    expect(await third).not.toBe(await second);
   });
 
   /**

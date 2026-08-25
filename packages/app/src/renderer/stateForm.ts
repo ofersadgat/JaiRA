@@ -81,6 +81,17 @@ export interface ChildRow {
  */
 export type OperationKind = "" | "ref" | "inherit" | "prompt" | "function";
 
+/**
+ * What an `environment` block declares its descendants' operations to BE.
+ *
+ * Narrower than {@link OperationKind} because two of those cannot happen here. A defaults layer is
+ * never a `ref` — it is a block or it is absent — and it has no ""/absent case of its own: the block
+ * exists (the form offers Add/Remove for that) and the only question is whether it settles a kind.
+ * `""` is therefore "states none", which is a real and common shape: an `environment` that supplies
+ * only a `session` has no business declaring every descendant a prompt.
+ */
+export type EnvironmentKind = "" | "prompt" | "function";
+
 /** One transition off the state. `to` is a child key or a `terminate.*` outcome. */
 export interface TransitionRow {
   /** Guard expression. Empty is unconditional — and that is a real, useful shape. */
@@ -120,6 +131,16 @@ export interface FormModel {
    * an empty one: only a state that declares `operation` gets one at all.
    */
   environment: OperationFieldsForm | null;
+  /**
+   * The `environment` block's own `kind` — the field {@link environment} does not carry, for the
+   * same reason {@link operation} does not carry the operation's.
+   *
+   * It was not carried by ANYTHING before, which is why a block reading
+   * `{"kind": "prompt", "model": …}` rendered with no sign of the first half. The value survived a
+   * save — `applyOperationFields` merges over what was there — so this was invisibility rather than
+   * loss, but an inherited kind you cannot see is one you cannot change either.
+   */
+  environmentKind: EnvironmentKind;
   limits: LimitsForm;
   inputs: SlotRow[];
   outputs: SlotRow[];
@@ -134,6 +155,7 @@ export const EMPTY_FORM: FormModel = {
   operationRef: "",
   operation: EMPTY_OPERATION_FIELDS,
   environment: null,
+  environmentKind: "",
   limits: { maxIterations: "", timeout: "" },
   inputs: [],
   outputs: [],
@@ -250,6 +272,12 @@ function operationKindOf(operation: unknown): OperationKind {
   return kind === "prompt" || kind === "function" ? kind : "inherit";
 }
 
+/** An `environment` block's declared kind. Anything that is not one of the two states none. */
+function environmentKindOf(environment: unknown): EnvironmentKind {
+  const kind = asRecord(environment)["kind"];
+  return kind === "prompt" || kind === "function" ? kind : "";
+}
+
 /** Read the form's fields out of a parsed state document. */
 export function formOf(doc: unknown): FormModel {
   if (doc === null || typeof doc !== "object" || Array.isArray(doc)) return EMPTY_FORM;
@@ -272,6 +300,7 @@ export function formOf(doc: unknown): FormModel {
     operationRef: operationKind === "ref" ? (typeof operation === "string" ? operation : JSON.stringify(operation)) : "",
     operation: op,
     environment: state["environment"] === undefined ? null : operationFieldsOf(state["environment"]),
+    environmentKind: environmentKindOf(state["environment"]),
     limits: {
       maxIterations: typeof limits["max_iterations"] === "number" ? String(limits["max_iterations"]) : "",
       timeout: typeof limits["timeout"] === "number" ? String(limits["timeout"]) : "",
@@ -414,6 +443,11 @@ export function applyForm(doc: unknown, form: FormModel): unknown {
   if (form.environment === null) delete state["environment"];
   else {
     const environment = applyOperationFields(state["environment"], form.environment);
+    // Beside the fields rather than among them, exactly as the operation block's kind is. `""`
+    // writes none — a defaults layer that supplies a session and settles no kind is the ordinary
+    // shape for a pure composite, and forcing one on it would declare every descendant a prompt.
+    if (form.environmentKind === "") delete environment["kind"];
+    else environment["kind"] = form.environmentKind;
     if (isEmptyBlock(environment)) delete state["environment"];
     else state["environment"] = environment;
   }

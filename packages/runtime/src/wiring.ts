@@ -49,6 +49,7 @@ import type { Approver, AskUser, ExecPolicy } from "@declarative-ai/permissions"
 import {
   DEFAULT_EXECUTOR,
   resolveExecutorTree,
+  namedModelAnswer,
   unnamedModelAnswer,
   type JairaConfig,
   type JairaOperationNode,
@@ -56,7 +57,7 @@ import {
 } from "@jaira/shared";
 import { ScriptedFakeExecutor, type FakeRule } from "./fakeExecutor";
 import { buildPromptTree, withSecurityFloor } from "./executorTree";
-import { agentPromptRouteNames, usableRouteKeys } from "./modelRoutes";
+import { agentPromptRouteNames, agentRouteVendors, usableRouteKeys } from "./modelRoutes";
 import type { StackedExecutor } from "./executorStack";
 import type { SecretResolver } from "./secrets";
 
@@ -74,6 +75,24 @@ export function modelNamesOf(bundle: WorkflowBundle): string[] {
     }
   }
   return [...names].sort();
+}
+
+/**
+ * True when some prompt state names NO model — the states a default has to answer for.
+ *
+ * The complement of {@link modelNamesOf} rather than a count against it: one workflow can do both,
+ * and the two questions have different fixes. A named model that nothing serves is refused by name;
+ * a state naming none needs a route that picks its own.
+ */
+export function hasUnnamedPromptModel(bundle: WorkflowBundle): boolean {
+  return Object.values(bundle.states).some((def) => {
+    const op = def.operation;
+    if (op === undefined || op.kind !== "prompt") return false;
+    const config = op.config;
+    const model =
+      config !== null && typeof config === "object" && !Array.isArray(config) ? config.model : undefined;
+    return typeof model !== "string" || model === "";
+  });
 }
 
 /** True when any state runs a `PromptOp` — i.e. when the run needs a model at all. */
@@ -464,21 +483,66 @@ export function defaultExecutorTree(
      * and must not refuse over a check it never ran.
      */
     available?: ReadonlySet<string>;
+    /**
+     * Throw when nothing here can serve this bundle's prompts. Absent ⇒ true.
+     *
+     * The refusal belongs to STARTING a run, not to building a tree, and the two have different
+     * callers. A screen rendering the routes on offer — the composer's model picker, a settings
+     * page — asks for the same tree and must never be the thing that raises "no route serves
+     * 'planner'": it is not about to call anything, and a chat panel that cannot open because a
+     * workflow names a model it cannot reach has turned a run-time refusal into a UI outage.
+     */
+    refuse?: boolean;
   },
 ): JairaOperationNode {
   const agents = Object.keys(agentPromptRouteNames(config.agents)).filter(
     (name) => opts?.available === undefined || opts.available.has(name),
   );
   const providers = opts?.fake ? [] : usableRouteKeys(config.models, opts?.secrets);
-  const tree = resolveExecutorTree(config.executors[DEFAULT_EXECUTOR], { providers, agents });
+  // `vendors` is what makes a BARE model id routable: it says which agent answers for whose models,
+  // so `claude-sonnet-5` reaches `claude-cli` and never reaches `codex-cli`.
+  const tree = resolveExecutorTree(config.executors[DEFAULT_EXECUTOR], {
+    providers,
+    agents,
+    vendors: agentRouteVendors(config.agents),
+  });
 
   // A scripted run answers every prompt itself, and a workflow of only function states never calls a
-  // model — neither has anything to refuse over.
-  if (opts?.fake || !hasPromptOp(bundle)) return tree;
-  // Every state naming its own model is a complete answer on its own; what needs a default is a state
-  // that names none — which is how JaiRA's own workflows are written, deliberately, so they run on
-  // whatever this machine has.
-  if (modelNamesOf(bundle).length > 0) return tree;
+  // model — neither has anything to refuse over. Nor does a caller that only wants to READ the tree.
+  if (opts?.fake || opts?.refuse === false || !hasPromptOp(bundle)) return tree;
+  // Every model a state NAMES has to be one something here can serve. This used to read "any state
+  // naming a model is a complete answer on its own" and return — which skipped the whole check for
+  // any bundle in which one state named one model. A workflow naming `anthropic/…` on a machine with
+  // no Anthropic key therefore started, and failed permanently at its first prompt with an API-key
+  // error from inside a provider SDK. Naming a model answers *which model*; it never answered
+  // *and can anything here serve it*.
+  //
+  // Checked against a tree built from every CONFIGURED agent, not the probed ones — which is the
+  // same call `registerAgentRuntimes` already makes for the function path, where codex is registered
+  // whether or not its binary is present so that a state naming it fails with codex's own "could not
+  // be started". A missing binary is a fact about this moment; a route with no credential is a fact
+  // about the configuration. Only the second is worth refusing a whole run over, and refusing one
+  // because an optional lens's binary is not installed today would stop seven phases that never
+  // reach it.
+  const configured = resolveExecutorTree(config.executors[DEFAULT_EXECUTOR], {
+    providers,
+    agents: Object.keys(agentPromptRouteNames(config.agents)),
+    vendors: agentRouteVendors(config.agents),
+  });
+  const unserved = modelNamesOf(bundle)
+    .map((model) => namedModelAnswer(configured.prompt, model))
+    .filter((answer): answer is { answers: false; reason: string } => !answer.answers);
+  if (unserved.length > 0) {
+    throw new Error(
+      unserved.length === 1
+        ? unserved[0]!.reason
+        : `these states name models nothing here serves — ${unserved.map((u) => u.reason).join("; also, ")}`,
+    );
+  }
+  // What is left is a state naming NO model, which is how JaiRA's own workflows are written,
+  // deliberately, so they run on whatever this machine has. A bundle with none has nothing left to
+  // refuse over.
+  if (!hasUnnamedPromptModel(bundle)) return tree;
   // Whether anything here answers a state that names NO model. That is the failure worth catching at
   // the start: unanswered, the call lands in the provider fallback and is reported as an empty model
   // from inside the SDK, several layers under the state that asked.

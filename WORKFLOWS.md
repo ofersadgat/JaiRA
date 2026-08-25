@@ -780,13 +780,29 @@ the same rule.
   does not claim is passed through to the call configuration, which is how this
   works without a loader change.
 
-⚠️ **`model` names who ANSWERS, not just which weights.** The `{route}/…` prefix
-selects the executor: `anthropic/claude-sonnet-5` calls the provider,
-`claude-cli/sonnet` runs the CLI agent on its own subscription and needs no API
-key (DESIGN §8.3). The part after the prefix reaches the transport with the
-prefix stripped, so `sonnet` is what `claude` is asked for. A state naming no
-model inherits the project's chosen default, which is chosen rather than
-required — a prompt workflow runs on a machine that has only an agent installed.
+⚠️ **`model` names who ANSWERS, not just which weights.** There are three things
+you can write, and the difference is how much of the decision you are taking:
+
+| What you write | What it means |
+| --- | --- |
+| `claude-sonnet-5` | **Prefer this.** The model, with the transport left open. JaiRA reads the family off the name and picks a route that serves it, **preferring an agent** — an agent runs on a subscription already signed in, so this is the spelling that works on a machine with `claude` installed and no API key. |
+| `claude-cli/sonnet` | The model **and** the route. Use it when the route is the point — a lens that must be codex, a call that must go to the provider. Refused, by name, when that route is not configured here. |
+| *(nothing)* | Whatever this machine has. The project's default environment fills it in, and failing that the router answers with any route that can pick its own model. |
+
+The part after a prefix reaches the transport with the prefix stripped, so
+`sonnet` is what `claude` is asked for (DESIGN §8.3). A bare id gets the chosen
+prefix written back into it before the call, so everything downstream — a memo
+key, a price table, a diagnostic — still sees one spelling.
+
+**Prefer the bare form in a workflow you intend to share.** Which model a state
+wants is yours to say; which transport reaches it is a fact about somebody's
+machine, and a workflow that states both is unrunnable everywhere the second one
+is wrong. JaiRA's own feature workflow pinned `anthropic/claude-sonnet-5` on
+every phase parent, and on a machine whose only credential was a `claude` login,
+27 inherited leaves failed at their first call with a missing-API-key error.
+
+A model nothing here can serve is refused when the run **starts**, naming the
+state and both ways out — never at the first call, four layers down.
 
 ### 5.2 How each field merges
 

@@ -4,7 +4,7 @@
  * All three are `Record<string, ParameterDecl>`, so all three get the same rows. See `slotForm` for
  * why sharing the shape also closes WORKFLOWS.md §4.3's "single most common silent failure".
  */
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import {
   ANY_TYPE,
   DEFAULT_MEDIA_TYPE,
@@ -17,6 +17,8 @@ import { NO_ISSUES, fieldClass, markFor, type FormIssues } from "./issues";
 import { LinkInput, LinkToggle } from "./links";
 import { LinkPreview } from "./linkPreview";
 import { emptySlotRow, type SlotRow } from "./slotForm";
+import { slotValueOf, useReadOnly, useRunReading } from "./reading";
+import { ReadValue } from "./readValue";
 
 /**
  * The type control on one slot row: the vocabulary, a `list of` toggle, and an artifact's media type.
@@ -46,6 +48,7 @@ export function SlotTypePicker({
   /** Set or clear this slot's type reference. `null` unlinks. Absent ⇒ no link control. */
   onLink?: (ref: string | null) => void;
 }): JSX.Element {
+  const readOnly = useReadOnly();
   if (row.spread === true) {
     // A spread declares N slots, each keeping the child's own schema and optionality. There is no
     // one type here to pick.
@@ -103,6 +106,19 @@ export function SlotTypePicker({
     );
   }
   const type = row.type;
+  // A reading says the type in words. The picker is three controls — a vocabulary, a `list of`
+  // switch, a media type — which together answer one question, and at the width of a side panel they
+  // answer it as `artifact ☐ list text/`. A sentence fits where a control row does not, and an
+  // unticked switch is a fact the sentence simply does not mention.
+  if (readOnly) {
+    return (
+      <span className={`slot-type-custom${mark}`} title={SLOT_TYPES.find((t) => t.name === type.name)?.hint}>
+        {type.list ? "list of " : ""}
+        {SLOT_TYPES.find((t) => t.name === type.name)?.label ?? type.name}
+        {type.name === "artifact" && (type.mediaType ?? "").length > 0 ? ` · ${type.mediaType}` : ""}
+      </span>
+    );
+  }
   return (
     <span className="slot-type">
       {/* The mark goes on the SELECT, which is the control that decides the schema — not on the
@@ -171,6 +187,53 @@ function summarizeSchema(text: string): string {
  * empty boxes of screen for them. `default` is more than a convenience — it is the documented
  * opt-out from the §7.2 reachability rule, and so the one fix for a whole class of lint error.
  */
+/**
+ * What hangs under a slot row: its default, its description, and — in a reading — its value.
+ *
+ * A DISCLOSURE while the form is a form, because those are three things you fill in occasionally and
+ * a table of open boxes is a table nobody can scan. Not a disclosure in a reading: the value is the
+ * one fact somebody opened the panel for, and putting it behind a twisty makes them click for it
+ * once per slot. Nothing at all when a reading has none of the three, which is most slots on most
+ * states.
+ */
+/** A control with its name over it in a reading, and bare in a form — see the call site. */
+function Boxed({ readOnly, label, children }: { readOnly: boolean; label: string; children: ReactNode }): JSX.Element {
+  return readOnly ? (
+    <label className="field">
+      <span>{label}</span>
+      {children}
+    </label>
+  ) : (
+    <>{children}</>
+  );
+}
+
+function SlotMore({
+  readOnly,
+  hasDefault,
+  hasDescription,
+  value,
+  children,
+}: {
+  readOnly: boolean;
+  hasDefault: boolean;
+  hasDescription: boolean;
+  /** The recorded value, only to decide whether there is anything to show. */
+  value: unknown;
+  children: ReactNode;
+}): JSX.Element | null {
+  if (!readOnly) {
+    return (
+      <details className="slot-more" open={hasDefault || hasDescription}>
+        <summary>default &amp; description</summary>
+        {children}
+      </details>
+    );
+  }
+  if (!hasDefault && !hasDescription && value === undefined) return null;
+  return <div className="slot-more open">{children}</div>;
+}
+
 export function SlotTable({
   title,
   rows,
@@ -212,7 +275,11 @@ export function SlotTable({
   /** This state's diagnostics — see `issues`. */
   issues?: FormIssues;
   onChange: (rows: SlotRow[]) => void;
-}): JSX.Element {
+}): JSX.Element | null {
+  // A reading of a run rather than an editor over a file — see `reading.ts`. Both are false and null
+  // in the Files view, where this table is exactly what it always was.
+  const readOnly = useReadOnly();
+  const reading = useRunReading();
   const edit = (index: number, patch: Partial<SlotRow>): void =>
     onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   /** True when this row's empty binding is a MEANING rather than a blank — see `emptyBindingMeans`. */
@@ -235,13 +302,19 @@ export function SlotTable({
         return { ...row, typeRef: ref };
       }),
     );
+  // A table with nothing in it, in a reading, is a heading over the word "none". The form needs it —
+  // that is where you add the first row — and a reading of a state that declares no operation inputs
+  // is better off not mentioning operation inputs.
+  if (readOnly && rows.length === 0) return null;
   return (
     <div {...(path === undefined ? { className: "slots" } : markFor(issues, path, "slots"))}>
       <div className="slots-head">
         <span>{title}</span>
-        <button type="button" className="ghost sm" onClick={() => onChange([...rows, emptySlotRow()])}>
-          + Add
-        </button>
+        {readOnly ? null : (
+          <button type="button" className="ghost sm" onClick={() => onChange([...rows, emptySlotRow()])}>
+            + Add
+          </button>
+        )}
       </div>
       {rows.length === 0 ? (
         <div className="sub">none declared</div>
@@ -255,7 +328,7 @@ export function SlotTable({
             <span>Type</span>
             <span>{emptyBindingMeans === undefined ? "Binding — where the value comes from" : `Binding — empty means ${emptyBindingMeans}`}</span>
             {optional ? <span /> : null}
-            <span />
+            {readOnly ? null : <span />}
           </div>
           {rows.map((row, i) => {
           const rowPath = pathOf(row);
@@ -304,41 +377,69 @@ export function SlotTable({
                 onChange={(e) => edit(i, { binding: e.target.value })}
               />
               {optional ? (
-                <label className="slot-opt" title="SPEC §4.1: a slot is required unless it says otherwise">
-                  <input
-                    type="checkbox"
-                    checked={row.optional}
-                    onChange={(e) => edit(i, { optional: e.target.checked })}
-                  />
-                  opt
-                </label>
+                readOnly ? (
+                  // Said, not switched — and only when it is true. An empty checkbox labelled `opt`
+                  // beside every required slot is a column of boxes reporting that nothing was
+                  // ticked. SPEC §4.1: a slot is required unless it says otherwise, so the reading
+                  // says the otherwise.
+                  <span className="slot-opt sub">{row.optional ? "optional" : ""}</span>
+                ) : (
+                  <label className="slot-opt" title="SPEC §4.1: a slot is required unless it says otherwise">
+                    <input
+                      type="checkbox"
+                      checked={row.optional}
+                      onChange={(e) => edit(i, { optional: e.target.checked })}
+                    />
+                    opt
+                  </label>
+                )
               ) : null}
-              <button
-                type="button"
-                className="ghost sm"
-                title="remove"
-                onClick={() => onChange(rows.filter((_, j) => j !== i))}
-              >
-                ✕
-              </button>
+              {readOnly ? null : (
+                <button
+                  type="button"
+                  className="ghost sm"
+                  title="remove"
+                  onClick={() => onChange(rows.filter((_, j) => j !== i))}
+                >
+                  ✕
+                </button>
+              )}
             </div>
-            <details className="slot-more" open={row.default.length > 0 || row.description.length > 0}>
-              <summary>default &amp; description</summary>
+            <SlotMore
+              readOnly={readOnly}
+              hasDefault={row.default.length > 0}
+              hasDescription={row.description.length > 0}
+              value={slotValueOf(reading, path, row.name, row.binding)}
+            >
               <div className="row-controls">
-                <input
-                  value={row.default}
-                  placeholder="default — also the opt-out from the reachability rule"
-                  spellCheck={false}
-                  title="JSON, or plain text for a string: significant, 3, [&quot;a&quot;]"
-                  onChange={(e) => edit(i, { default: e.target.value })}
-                />
-                <input
-                  value={row.description}
-                  placeholder="description"
-                  onChange={(e) => edit(i, { description: e.target.value })}
-                />
+                {/* What this slot actually held, beside what it declares — see `readValue.tsx`. */}
+                <ReadValue value={slotValueOf(reading, path, row.name, row.binding)} />
+                {/* Labelled in a reading, bare in the form. A form's boxes are told apart by their
+                    placeholders, and a placeholder is the one thing a filled box does not show — so
+                    a reading of a slot with a default of `3` beside a value of `3` was two identical
+                    numbers, one of them unexplained. */}
+                {readOnly && row.default.length === 0 ? null : (
+                  <Boxed readOnly={readOnly} label="default">
+                    <input
+                      value={row.default}
+                      placeholder="default — also the opt-out from the reachability rule"
+                      spellCheck={false}
+                      title="JSON, or plain text for a string: significant, 3, [&quot;a&quot;]"
+                      onChange={(e) => edit(i, { default: e.target.value })}
+                    />
+                  </Boxed>
+                )}
+                {readOnly && row.description.length === 0 ? null : (
+                  <Boxed readOnly={readOnly} label="description">
+                    <input
+                      value={row.description}
+                      placeholder="description"
+                      onChange={(e) => edit(i, { description: e.target.value })}
+                    />
+                  </Boxed>
+                )}
               </div>
-            </details>
+            </SlotMore>
             {/* A linked TYPE is the same trade as a linked prompt: the schema moved to another file
                 and this row shows its path. So it shows what that file says, too. */}
             {row.typeRef !== undefined && row.typeRef.length > 0 ? <LinkPreview reference={row.typeRef} /> : null}

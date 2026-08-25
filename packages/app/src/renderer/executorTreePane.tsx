@@ -290,7 +290,7 @@ function RouterNode({ node, path, ctx }: { node: JairaRouterNode; path: string; 
           <Field
             label="Default model"
             param={`${path}.defaults.model`}
-            hint="Prefixed, because this is what the routing below dispatches on. Empty leaves the choice to the state."
+            hint="A bare id routes to whatever serves that family below; prefix it to insist on one route. Empty leaves the choice to the state. The same block as Settings → Default environment."
             set={ctx.pinned(`${path}.defaults.model`)}
           >
             <TextInput

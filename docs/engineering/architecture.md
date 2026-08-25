@@ -75,9 +75,14 @@ These are not conventions. Crossing one is a design change, not a refactor.
   → 130). Both are cached side by side under `build/abi/<abi>/` and each runtime
   loads its own, so the app and the tests can run at once. `npm install` fetches
   both; `npm run abi` redoes it.
-- **Model ids are route-prefixed.** `anthropic/claude-sonnet-5`, not
-  `claude-sonnet-5`. Routing is explicit in declarative-ai and a bare id is a
-  fail-fast error.
+- **A model id may name its route, and need not.** `anthropic/claude-sonnet-5`
+  pins the route and is refused where that route has no credential; bare
+  `claude-sonnet-5` is placed by its FAMILY — JaiRA finds a route that serves
+  Anthropic's models, preferring an agent, because an agent runs on a
+  subscription and needs no key. Routing is still explicit below JaiRA:
+  declarative-ai's router only ever sees a prefixed id, because the prefix
+  JaiRA chose is written into the call. A bare id nothing can place is refused
+  when the run starts, by name.
 - **Interaction responses key on function name, not state id.** A UI state is an
   ordinary `FunctionOp`, so `--interactions` is keyed by the registered function.
 

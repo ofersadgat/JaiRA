@@ -44,6 +44,8 @@ import { createPromptExecutor, PromptRouterExecutor } from "@declarative-ai/prom
 import { createModelRouter, type ModelRouterOptions } from "@declarative-ai/llm";
 import { emptyWorkflowMetrics, mergeWorkflowMetrics, type WorkflowMetrics } from "@declarative-ai/hw";
 import {
+  isRoutePrefixed,
+  routeForBareModel,
   unnamedRouteOf,
   type JairaAgentNode,
   type JairaExecutorSteps,
@@ -168,41 +170,70 @@ function buildRouterNode(
     Object.keys(routes).length === 0
       ? fallback
       : new PromptRouterExecutor({ routes, fallback });
-  // A call that names no model has chosen no prefix, so there is nothing to dispatch on — the router
-  // is free to answer it with any route that can, and {@link unnamedRouteOf} takes the first. Left to
-  // dispatch it would go to the fallback: a different executor answering as if it were the one that
-  // could have. A call that DOES name a prefix still dispatches, so `anthropic/…` on a machine with
-  // only `claude-cli` is refused by the route that owns that prefix rather than quietly rerouted.
-  const unnamed = unnamedRouteOf(node.routes);
-  const router = unnamed === undefined ? dispatching : unnamedTo(routes[unnamed]!, dispatching);
+  const router = resolvingTo(routes, node, dispatching);
 
   // OUTSIDE the router, so a default model a state did not name is filled in BEFORE the prefix is read.
   return node.defaults === undefined ? router : withPromptDefaults(node.defaults, router);
 }
 
-/** Send a prompt that names no model to `only`; everything else dispatches as usual. */
-function unnamedTo(only: StackedExecutor, dispatching: StackedExecutor): StackedExecutor {
-  const route = only;
-  const router = dispatching;
-  const pick = (op: Operation<InlineFamily>): typeof route => {
-    if (op.kind !== "prompt") return router;
+/**
+ * Choose the route that can actually serve each call, for the two ids prefix dispatch cannot place.
+ *
+ * `PromptRouterExecutor` dispatches on the model id's prefix, which is exact and is right for an id
+ * that HAS one. Two kinds of call arrive without one, and both used to land on the fallback — the
+ * provider path — which is a different executor answering as if it were the one that could have.
+ *
+ *  - **No model at all.** Nothing was chosen, so the router is free to answer with any route that
+ *    can, and `unnamedRouteOf` takes the first. This is how every workflow JaiRA ships is written.
+ *  - **A BARE model id** — `claude-sonnet-5`. The author chose the model and left the transport
+ *    open. `routeForBareModel` finds who serves that family, preferring an agent, because an agent
+ *    route runs on a subscription and needs no key. This is the case that made a workflow naming
+ *    real models unrunnable on a machine that had `claude` installed and no API key.
+ *
+ * An id that names a route still DISPATCHES, untouched: `anthropic/…` on a machine with only
+ * `claude-cli` is refused by the route that owns that prefix rather than quietly rerouted. An author
+ * who named their route meant it, and the refusal is the honest answer.
+ *
+ * When nothing qualifies the op travels on to `dispatching` unchanged, so the fallback produces the
+ * authoritative error it already produces — which for a bare id says exactly what is missing.
+ */
+function resolvingTo(
+  routes: Record<string, StackedExecutor>,
+  node: JairaRouterNode,
+  dispatching: StackedExecutor,
+): StackedExecutor {
+  const unnamed = unnamedRouteOf(node.routes);
+  const resolve = (op: Operation<InlineFamily>): { target: StackedExecutor; op: Operation<InlineFamily> } => {
+    if (op.kind !== "prompt") return { target: dispatching, op };
     const config = isObject(op.config) ? (op.config as Record<string, JsonValue>) : {};
-    return typeof config["model"] === "string" && config["model"] !== "" ? router : route;
+    const asked = typeof config["model"] === "string" ? config["model"] : "";
+    if (asked === "") {
+      const only = unnamed === undefined ? undefined : routes[unnamed];
+      return { target: only ?? dispatching, op };
+    }
+    if (isRoutePrefixed(asked, node.routes)) return { target: dispatching, op };
+    const prefix = routeForBareModel(node.routes, asked);
+    const target = prefix === undefined ? undefined : routes[prefix];
+    if (prefix === undefined || target === undefined) return { target: dispatching, op };
+    // The chosen prefix is WRITTEN INTO the id rather than only used to pick. Everything downstream
+    // reads the model — a route's own `allow` check, a memo key, a price table, a diagnostic, the
+    // provider path's parser — and a bare id there would be a second spelling of the same call and
+    // an unparseable one for half of those readers.
+    return { target, op: { ...op, config: { ...config, model: `${prefix}/${asked}` } as JsonValue } };
   };
   return {
-    capabilities: router.capabilities,
-    metrics: router.metrics,
-    // Answered by whoever would answer the CALL, or a state's capabilities would be read off the
-    // fallback while the work went somewhere else.
-    ...(router.capabilitiesFor !== undefined || route.capabilitiesFor !== undefined
-      ? {
-          capabilitiesFor: (op: Operation<InlineFamily>) => {
-            const target = pick(op);
-            return target.capabilitiesFor?.(op) ?? target.capabilities;
-          },
-        }
-      : {}),
-    start: (op: Operation<InlineFamily>, ctx: ExecServices) => pick(op).start(op, ctx),
+    capabilities: dispatching.capabilities,
+    metrics: dispatching.metrics,
+    // Answered by whoever would answer the CALL, and about the op AS RESOLVED — a state's
+    // capabilities would otherwise be read off the fallback while the work went somewhere else.
+    capabilitiesFor: (op: Operation<InlineFamily>) => {
+      const picked = resolve(op);
+      return picked.target.capabilitiesFor?.(picked.op) ?? picked.target.capabilities;
+    },
+    start: (op: Operation<InlineFamily>, ctx: ExecServices) => {
+      const picked = resolve(op);
+      return picked.target.start(picked.op, ctx);
+    },
   };
 }
 

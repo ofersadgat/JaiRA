@@ -215,6 +215,8 @@ export interface JairaProviderNode extends JairaPromptNodeBase {
   model?: string;
   /** Patterns the asked-for model must match. Absent ⇒ anything. */
   allow?: string[];
+  /** Whose models this route serves — see {@link JairaAgentNode.vendor}. */
+  vendor?: string;
 }
 
 /** One agent runtime — an SDK, a CLI, codex, a configured generic. `kind` is optional for the same
@@ -225,6 +227,21 @@ export interface JairaAgentNode extends JairaPromptNodeBase {
   agent?: string;
   model?: string;
   allow?: string[];
+  /**
+   * WHOSE models this route serves — `anthropic`, `openai`, … — which is what makes a BARE model id
+   * resolvable (see {@link routeForBareModel}).
+   *
+   * Derived rather than authored for everything JaiRA ships: `claude-cli` serves Anthropic's models
+   * because that is what the binary is, and saying so in configuration would be asking someone to
+   * write down a fact about a program they did not write. It is statable for the same reason
+   * `provider` is — a route of your own has no table to be looked up in.
+   *
+   * Absent ⇒ this route answers no bare id. That refusal is deliberate: an agent with no stated
+   * vendor is one whose model vocabulary nothing here knows, and sending `claude-sonnet-5` to it
+   * because it happened to sort first is the silent misrouting this whole mechanism exists to
+   * prevent. Name it with `allow` and it becomes a candidate again.
+   */
+  vendor?: string;
 }
 
 /** What is installed and reachable, which is what a derived tree is derived FROM. */
@@ -233,6 +250,148 @@ export interface ExecutorAvailability {
   providers: string[];
   /** Agent runtimes that are enabled and working — `claude-cli`, … */
   agents: string[];
+  /**
+   * route name → whose models it serves, for the agent routes (see {@link JairaAgentNode.vendor}).
+   *
+   * Supplied by the caller rather than looked up here because only the caller knows what each agent
+   * IS: `claude-cli` is a KIND of executor before it is a name, and the kind is what decides whose
+   * models it can answer for. Provider routes need no entry — a route called `anthropic` serves
+   * Anthropic by construction, which is what {@link ROUTE_VENDORS} records.
+   */
+  vendors?: Record<string, string>;
+}
+
+/**
+ * Whose models each PROVIDER route serves.
+ *
+ * Only the two single-vendor fleets are here, and that is the whole content of the table: a route
+ * named after a vendor serves that vendor. `openrouter`, `local` and `embedded` are deliberately
+ * absent — they are multi-vendor by construction, and a bare `claude-sonnet-5` arriving at one of
+ * them would have to be spelled the way THAT route spells it (`anthropic/claude-sonnet-5` on
+ * OpenRouter, whatever the server was started with locally). Guessing that spelling is exactly the
+ * silent misrouting {@link routeForBareModel} refuses to do; an `allow` list on such a route states
+ * it, and is honoured.
+ */
+export const ROUTE_VENDORS: Record<string, string> = { anthropic: "anthropic", openai: "openai" };
+
+/**
+ * A glob over model ids: `*` matches any run of characters, everything else is literal.
+ *
+ * Every other regex metacharacter is escaped, `?` included — a model id is full of dots and dashes
+ * (`claude-haiku-4-5`), and a pattern that quietly meant "any character" where the author wrote a dot
+ * would be a limit that admits more than it says.
+ *
+ * Here rather than in `runtime` because the routing that reads an `allow` list is here now: a route's
+ * patterns decide which model ids it can serve, and that question is answered while resolving the
+ * tree as well as while running against it.
+ */
+export function matchesModel(pattern: string, model: string): boolean {
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+  return new RegExp(`^${escaped}$`).test(model);
+}
+
+/** The provider routes that exist but serve no single vendor — see {@link ROUTE_VENDORS}. */
+const MULTI_VENDOR_ROUTES = new Set(["openrouter", "local", "embedded"]);
+
+/**
+ * The vendor a BARE model id belongs to — `claude-sonnet-5` → `anthropic`.
+ *
+ * Prefix matching over the families that exist, which is the same shape the model catalog's own
+ * `displayProviderFor` uses and for the same reason: a model id's family is legible from its name,
+ * and the alternative — a table of every model ever shipped — is a list that is wrong the week
+ * after it is written.
+ *
+ * `undefined` for a name nothing here recognizes, which is a real answer rather than a failure: the
+ * caller then has no vendor to match on and is left with what somebody STATED (`allow`), which is
+ * the only honest thing to route on.
+ */
+export function vendorOfModel(model: string): string | undefined {
+  const bare = (model.includes("/") ? model.slice(model.lastIndexOf("/") + 1) : model).toLowerCase();
+  if (bare.startsWith("claude")) return "anthropic";
+  if (bare.startsWith("gpt") || bare.startsWith("codex") || /^o[1-9]/.test(bare)) return "openai";
+  if (bare.startsWith("gemini") || bare.startsWith("palm")) return "google";
+  if (bare.startsWith("llama")) return "meta";
+  if (bare.startsWith("mistral") || bare.startsWith("mixtral") || bare.startsWith("magistral")) return "mistral";
+  if (bare.startsWith("deepseek")) return "deepseek";
+  if (bare.startsWith("grok")) return "xai";
+  if (bare.startsWith("qwen")) return "qwen";
+  return undefined;
+}
+
+/**
+ * Does this model id NAME its route, or is it bare?
+ *
+ * The test is whether the first segment is a route that exists — in this tree, or in the model-route
+ * vocabulary the provider fallback owns. That second half is what keeps `anthropic/claude-sonnet-5` a
+ * PREFIXED id on a machine with no Anthropic key: the route is unreachable, but the author still
+ * named it, and quietly sending their call somewhere else is overruling them rather than helping
+ * them. It goes to the route that owns the prefix and is refused there — for want of a key, which is
+ * the true reason.
+ *
+ * `openrouter/openai/gpt-5` is prefixed by its FIRST segment; the rest is that route's own id, and
+ * may hold as many slashes as it likes.
+ */
+export function isRoutePrefixed(model: string, routes: Record<string, JairaPromptNode> | undefined): boolean {
+  const slash = model.indexOf("/");
+  if (slash <= 0) return false;
+  const head = model.slice(0, slash);
+  return head in (routes ?? {}) || head in ROUTE_VENDORS || MULTI_VENDOR_ROUTES.has(head);
+}
+
+/**
+ * Which route serves a BARE model id — `claude-sonnet-5` → `claude-cli`, where one is installed.
+ *
+ * This is the half of routing that was missing. A model id had to name its route, so a workflow that
+ * wanted to say WHICH MODEL had to say who serves it too — and those are two decisions belonging to
+ * two different people. An author knows they want Sonnet; whether this machine reaches Sonnet through
+ * a subscription CLI or an API key is the operator's business. Pinning it in the workflow is what
+ * made JaiRA's own feature workflow unrunnable on a machine that had `claude` installed and no key.
+ *
+ * ## The order, and why agents come first
+ *
+ * Candidates are tried agents-first. That is the opposite of {@link unnamedRouteOf}'s order, and the
+ * difference is what the call actually asked for. A state naming NO model has expressed no
+ * preference at all, so a route somebody configured a model onto wins — somebody stated that. A
+ * state naming a BARE model has stated the only half it cares about and left the transport open;
+ * among the transports that can serve it, the one that needs no credential and bills nobody is the
+ * one to reach for. Naming the prefix is then how you override it.
+ *
+ * ## What "can serve it" means
+ *
+ * Two answers, in order of how much somebody said:
+ *
+ *  1. An `allow` list that matches. Somebody wrote down which models this route answers for, so it
+ *     answers for this one, whatever the name looks like. This is also the only way a `local`,
+ *     `embedded` or generic route becomes a candidate at all.
+ *  2. Failing that, a `vendor` equal to the model's family. `claude-cli` serves `claude-*`;
+ *     `codex-cli` does not — which is the case that makes this a MATCH rather than a preference.
+ *     Under a plain preference order, a bare `claude-sonnet-5` on a machine where codex sorts first
+ *     would be handed to a binary that has never heard of it, and fail somewhere unhelpful.
+ *
+ * A route whose `allow` list does not match is out even when its vendor would have matched: the list
+ * is a restriction, and reading past it would be reading past the operator who wrote it.
+ *
+ * `undefined` when nothing qualifies. The caller leaves the id alone and the provider fallback
+ * produces the authoritative error, which already says what a bare id is missing.
+ */
+export function routeForBareModel(
+  routes: Record<string, JairaPromptNode> | undefined,
+  model: string,
+): string | undefined {
+  const vendor = vendorOfModel(model);
+  const entries = Object.entries(routes ?? {});
+  const serves = (node: JairaPromptNode): boolean => {
+    // A router nested under a prefix is a route in its own right, and what it serves is whatever its
+    // own routes do — a question this would have to recurse to answer. Left out rather than guessed
+    // at: nothing derives one, so reaching this at all means somebody built it by hand.
+    if (node.kind === "router") return false;
+    const leaf = node as JairaProviderNode | JairaAgentNode;
+    if (leaf.allow !== undefined) return leaf.allow.some((pattern) => matchesModel(pattern, model));
+    return vendor !== undefined && leaf.vendor === vendor;
+  };
+  const pick = (kind: "agent" | "provider"): string | undefined =>
+    entries.find(([, node]) => node.kind === kind && serves(node))?.[0];
+  return pick("agent") ?? pick("provider");
 }
 
 /** The name of the executor every UI-initiated operation uses when nothing says otherwise. */
@@ -280,8 +439,18 @@ function resolvePromptNode(node: JairaPromptNode | undefined, available: Executo
   // Derived first, so an overlay entry REFINES a route rather than replacing the set. That is the
   // whole adaptive property: pinning a rate limit on one provider must not stop a newly installed
   // agent from getting a route tomorrow.
-  for (const provider of available.providers) routes[provider] = { kind: "provider", provider };
-  for (const agent of available.agents) routes[agent] = { kind: "agent", agent };
+  // Each derived route carries WHOSE models it serves, which is what makes a bare model id
+  // resolvable (`routeForBareModel`). Derived rather than authored: a route called `anthropic`
+  // serves Anthropic by construction, and an agent's vendor is a fact about the binary that the
+  // caller looked up from its kind.
+  for (const provider of available.providers) {
+    const vendor = ROUTE_VENDORS[provider];
+    routes[provider] = { kind: "provider", provider, ...(vendor === undefined ? {} : { vendor }) };
+  }
+  for (const agent of available.agents) {
+    const vendor = available.vendors?.[agent];
+    routes[agent] = { kind: "agent", agent, ...(vendor === undefined ? {} : { vendor }) };
+  }
   for (const [prefix, override] of Object.entries(router.routes ?? {})) {
     routes[prefix] = mergePromptNode(routes[prefix], override, prefix, available);
   }
@@ -358,6 +527,62 @@ export function unnamedModelAnswer(
   if (router.defaults?.["model"] !== undefined) return { answers: true };
   if (unnamedRouteOf(router.routes) !== undefined) return { answers: true };
   return { answers: false, routes: Object.keys(router.routes ?? {}) };
+}
+
+/**
+ * Will this prompt half answer a state that NAMES this model — and if not, why not?
+ *
+ * The named-model twin of {@link unnamedModelAnswer}, and it exists because the start-time check had
+ * a hole shaped exactly like the failure it was written to prevent. The rule was "any state naming a
+ * model is a complete answer on its own", so a bundle in which SOME state named a model skipped the
+ * check entirely. A workflow naming `anthropic/…` on a machine with no Anthropic key therefore
+ * started happily and failed permanently at its first prompt, four layers down, with a message from
+ * inside a provider SDK about an API key — for a run the user had watched start.
+ *
+ * Naming a model answers "which model"; it never answered "and can anything here serve it".
+ *
+ * Three ways it is yes: the prompt half is pinned to a leaf (which owns whatever it is given), the id
+ * names a route that exists, or the id is bare and {@link routeForBareModel} finds one for it.
+ */
+export function namedModelAnswer(
+  node: JairaPromptNode | undefined,
+  model: string,
+): { answers: true; route?: string } | { answers: false; reason: string } {
+  if (node === undefined) return { answers: false, reason: "there is no prompt executor configured" };
+  // A pinned leaf is not a router and has no prefixes to miss: every call reaches it, and what it
+  // then makes of the model is its own business (an `allow` list refuses at the call, by name).
+  if (node.kind === "provider" || node.kind === "agent") return { answers: true };
+
+  const routes = (node as JairaRouterNode).routes ?? {};
+  const known = Object.keys(routes);
+  const named = known.length === 0 ? "no route is configured here" : `configured routes are ${known.map((r) => `'${r}'`).join(", ")}`;
+
+  if (isRoutePrefixed(model, routes)) {
+    const prefix = model.slice(0, model.indexOf("/"));
+    if (prefix in routes) return { answers: true, route: prefix };
+    // The prefix IS a route word — it is just not one this machine can reach, which for a provider
+    // route means no credential resolved for it. Naming that is the whole point: the alternative is
+    // the message from inside the SDK, which knows about a missing key but not about `claude-cli`.
+    return {
+      answers: false,
+      reason:
+        `'${model}' names the '${prefix}' route, which is not available here — a provider route needs a ` +
+        `key (Settings → Providers, or models.routes.${prefix}.credential). Drop the prefix and write ` +
+        `'${model.slice(prefix.length + 1)}' to let it route to whatever this machine has; ${named}`,
+    };
+  }
+
+  if (routeForBareModel(routes, model) !== undefined) return { answers: true };
+  const vendor = vendorOfModel(model);
+  return {
+    answers: false,
+    reason:
+      vendor === undefined
+        ? `'${model}' names no route and is not a model family JaiRA recognizes, so nothing here claims to ` +
+          `serve it. Prefix it with its route, or add it to a route's 'allow' list; ${named}`
+        : `'${model}' is a ${vendor} model and no route here serves ${vendor} — enable an agent that does ` +
+          `(claude-cli needs no API key), or add a provider key; ${named}`,
+  };
 }
 
 /**

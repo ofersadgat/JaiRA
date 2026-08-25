@@ -34,6 +34,8 @@ import type {
   StateSlots,
   StateTransition,
   StateView,
+  EffectiveState,
+  WorkflowSource,
   WorkflowBrowser,
   WorkflowEntry,
   WorkflowLayer,
@@ -506,6 +508,60 @@ function projectionsFor(project: Project, shape: WorkflowShape | undefined, work
 export function rootContaining(browser: WorkflowBrowser, stateId: string): WorkflowEntry | undefined {
   const candidates = browser.workflows.filter((w) => w.rootId === stateId || w.states.includes(stateId));
   return candidates.find((w) => w.taskIds.length > 0) ?? candidates[0];
+}
+
+/**
+ * One state's document, and whether it is still the one a run executed.
+ *
+ * The form in the side panel is the Files view's, and the Files view's form reads an AUTHORED state
+ * file — names, types, bindings written the way somebody typed them. So this hands back the file.
+ *
+ * ## What a snapshot can and cannot give back
+ *
+ * A run pins its workflow (DESIGN §5.3), and it would be better to hand back the pinned copy of the
+ * file. It cannot: a snapshot stores the LOWERED states — bindings compiled into expression trees,
+ * the inherited environment already folded into each operation — which is what the engine re-runs
+ * and not what a form can draw. `.children.critique.outputs.outcome` does not survive that trip.
+ *
+ * What survives is the pin itself. So the file on disk is what is shown, and {@link
+ * EffectiveState.from} says whether it is still the one that ran: `pinned` when the run's snapshot
+ * is the workflow as it stands, `moved` when the workflow has changed since — which is the case a
+ * reader of an old failure has to be told about rather than left to assume. `disk` is for a caller
+ * that named no run, where the question does not arise.
+ */
+export function effectiveState(
+  project: Project,
+  stateId: string,
+  browser: WorkflowBrowser,
+  options: { snapshotHash?: string } = {},
+): EffectiveState {
+  const owning = rootContaining(browser, stateId);
+  // The same lookup `stateView` makes, and it has to be: the panel and the inspector describe one
+  // file, and a shadowed base copy is not the one that runs.
+  const entry =
+    browser.files.find((f) => f.stateId === stateId && f.shadowed !== true) ??
+    browser.files.find((f) => f.stateId === stateId);
+  const source = ((): WorkflowSource | undefined => {
+    if (entry === undefined) return undefined;
+    const file = join(entry.root, entry.file);
+    if (!existsSync(file)) return undefined;
+    return { stateId, layer: entry.layer, file, text: readFileSync(file, "utf8"), exists: true };
+  })();
+
+  const pinned = options.snapshotHash;
+  const from: EffectiveState["from"] =
+    pinned === undefined ? "disk" : pinned === owning?.snapshotHash ? "pinned" : "moved";
+
+  return {
+    stateId,
+    from,
+    ...(pinned !== undefined ? { snapshotHash: pinned } : {}),
+    ...(owning !== undefined ? { rootId: owning.rootId } : {}),
+    // Absent rather than an empty document: a state id nothing on the search path defines is a real
+    // answer — renamed, or belonging to a root this project does not reach — and an empty form would
+    // read as a state that declares nothing.
+    ...(source !== undefined ? { source } : {}),
+  };
 }
 
 /**

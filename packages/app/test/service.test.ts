@@ -754,3 +754,76 @@ describe("diagnostics", () => {
     expect(service.jobOutput({ jobId: 999 })).toEqual([]);
   });
 });
+
+/**
+ * A state's configuration as ONE RUN had it — what a panel describing a run links to.
+ *
+ * Two claims, and they are the two halves of why this is not just "read the file". It says whether
+ * the file on screen is still the one that RAN, because a task pins its workflow and the file can
+ * move underneath it. And it carries the values that execution actually put through the state —
+ * read from the journal and the operation record, never derived, so a binding the panel cannot
+ * follow comes back absent rather than guessed at.
+ */
+describe("AppService.effectiveState", () => {
+  it("hands back the state's own file, and asks no pin question when no run was named", () => {
+    const view = service.effectiveState({ stateId: "feature/plan/goals" });
+    expect(view.from).toBe("disk");
+    expect(view.rootId).toBe("feature/plan");
+    expect(view.source?.stateId).toBe("feature/plan/goals");
+    expect(JSON.parse(view.source!.text)).toMatchObject({ label: "Goals" });
+    // No run, no values — rather than an empty bag that would read as "this ran and held nothing".
+    expect(view.values).toBeUndefined();
+  });
+
+  it("says the file is the one the run pinned, while it still is", async () => {
+    const taskId = newTask();
+    await service.startTask({ taskId, fake: happyRules(), interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" }] } });
+    await until(() => finished(taskId), "the run to finish");
+
+    const view = service.effectiveState({ stateId: "feature/plan/goals", taskId });
+    expect(view.from).toBe("pinned");
+    expect(view.snapshotHash).toMatch(/^[0-9a-f]{16,}$/);
+  });
+
+  it("says the workflow has MOVED once the file has been edited since", async () => {
+    const taskId = newTask();
+    await service.startTask({ taskId, fake: happyRules(), interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" }] } });
+    await until(() => finished(taskId), "the run to finish");
+
+    const source = service.readWorkflow({ stateId: "feature/plan/goals", layer: "project" });
+    const edited = { ...(JSON.parse(source.text) as Record<string, unknown>), label: "Goals, rewritten" };
+    service.writeWorkflow({ stateId: "feature/plan/goals", layer: "project", text: JSON.stringify(edited, null, 2) });
+
+    // The pinned copy of the FILE is gone — a snapshot keeps lowered states, which no form can draw —
+    // so the honest answer is the file as it stands, said out loud rather than left to be assumed.
+    const view = service.effectiveState({ stateId: "feature/plan/goals", taskId });
+    expect(view.from).toBe("moved");
+    expect(JSON.parse(view.source!.text)).toMatchObject({ label: "Goals, rewritten" });
+  });
+
+  it("carries what that execution put through the state", async () => {
+    const taskId = newTask();
+    await service.startTask({ taskId, fake: happyRules(), interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" }] } });
+    await until(() => finished(taskId), "the run to finish");
+
+    const goals = service.effectiveState({ stateId: "feature/plan/goals", taskId });
+    // The inputs the engine resolved on the way in — the value behind `.inputs.issue`.
+    expect(goals.values?.inputs).toEqual({ issue: "the issue" });
+    expect(goals.values?.instanceId).toBeGreaterThan(0);
+    // And what the call returned, which is where a produced output takes its value from by name.
+    expect(goals.values?.output).toBeDefined();
+
+    // A composite carries the other end of its own wiring: what each child was called with.
+    const parent = service.effectiveState({ stateId: "feature/plan", taskId });
+    expect(Object.keys(parent.values?.children ?? {})).toEqual(
+      expect.arrayContaining(["goals", "context", "critique"]),
+    );
+    expect(parent.values?.children?.["goals"]).toEqual({ issue: "the issue" });
+  });
+
+  it("answers with no document rather than throwing for a state nothing defines", () => {
+    const view = service.effectiveState({ stateId: "feature/plan/nowhere" });
+    expect(view.source).toBeUndefined();
+    expect(view.stateId).toBe("feature/plan/nowhere");
+  });
+});

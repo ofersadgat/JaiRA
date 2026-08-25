@@ -97,6 +97,7 @@ import {
   runHistoryOf,
   runTargetOf,
   runTitle,
+  workflowLayerOf,
   workflowMimeOf,
   type RunField,
 } from "./runForm";
@@ -149,7 +150,7 @@ export function subscribe(listener: (message: PushMessage) => void): () => void 
 }
 
 /** See {@link AppState.inspect}. */
-export type InspectSubject = "path" | "task";
+export type InspectSubject = "path" | "task" | "workflow";
 
 export interface AppState {
   /**
@@ -364,6 +365,15 @@ export interface AppState {
    * opened.
    */
   taskState: StateView | null;
+  /**
+   * WHICH run the workflow being described was reached from, when it was reached from a conversation.
+   *
+   * A workflow inspector opened off a board column describes the state in general — its inputs are
+   * empty boxes waiting for a new run. Opened from a panel's gutter it is describing a conversation
+   * that already happened, and the boxes should hold what that pass was called with. Null is the
+   * general case, which is the one the column click has always produced.
+   */
+  taskWorkflowRun: number | null;
 
   /**
    * Where the open description and the state files stand, and the last proposal.
@@ -773,6 +783,7 @@ const EMPTY: AppState = {
   workflowForms: {},
   taskWorkflow: null,
   taskWorkflowProject: null,
+  taskWorkflowRun: null,
   taskState: null,
   doc: null,
   dir: null,
@@ -1105,12 +1116,30 @@ export function useApp() {
   const refreshWorkflowForm = useCallback(
     async (stateId: string | null) => {
       if (stateId === null) return;
-      const entry = ref.current.workflows.find((w) => w.rootId === stateId);
-      // A state the browse listing has no row for is a column below a root, not a root — still a
-      // state with inputs, and `project` is the layer to look in for one.
-      const layer: WorkflowLayer = entry?.layer ?? "project";
+      /**
+       * WHICH layer holds this state's file — asked of the listing first, and of the disk after.
+       *
+       * The listing's answer is {@link workflowLayerOf}'s, and it is a guess for anything below a
+       * root. `exists` is what settles it: a read that found nothing is re-asked of the other layer
+       * rather than reported as a parse failure — which is what a missing file used to become here,
+       * since it reads back as empty text and empty text is a state with no inputs in it.
+       */
+      const guess = workflowLayerOf(ref.current.workflows, stateId);
+      const read = (layer: WorkflowLayer): Promise<WorkflowSource> =>
+        invoke("workflow:read", { stateId, layer, ...inLayer(layer) });
       try {
-        const source = await invoke("workflow:read", { stateId, layer, ...inLayer(layer) });
+        let source = await read(guess);
+        if (!source.exists) {
+          // Its own catch: the other layer may not be reachable at all — `project` with no project
+          // open is an error, not an empty file — and a failed second look must leave the first
+          // answer standing rather than turning it into "this does not parse".
+          try {
+            const elsewhere = await read(guess === "project" ? "base" : "project");
+            if (elsewhere.exists) source = elsewhere;
+          } catch {
+            /* the guess was the only layer that could be asked */
+          }
+        }
         patch({
           workflowForms: {
             ...ref.current.workflowForms,
@@ -2271,6 +2300,7 @@ export function useApp() {
           // being described. See {@link AppState.taskWorkflow}.
           taskWorkflow: null,
           taskWorkflowProject: null,
+          taskWorkflowRun: null,
           stream: [],
           sessions: {},
           // A trail names one task's instances (see `trail.ts`), so arriving at another task starts
@@ -2463,6 +2493,7 @@ export function useApp() {
           // A run walked into is the subject now — see {@link AppState.taskWorkflow}.
           taskWorkflow: null,
           taskWorkflowProject: null,
+          taskWorkflowRun: null,
           stream: [],
           sessions: {},
           trail: [],
@@ -2575,9 +2606,40 @@ export function useApp() {
         patch({
           taskWorkflow: stateId,
           taskWorkflowProject: stateId === null ? null : (project ?? ref.current.at),
+          // A column names a state and nothing narrower, so whatever run the panel was last scoped
+          // to is not this one — see {@link AppState.taskWorkflowRun}.
+          taskWorkflowRun: null,
+          // Letting go of the workflow subject is going back to the rule — the panel describes the
+          // end of the address again. Only from `workflow`: a click that lands on a column while the
+          // panel is describing a task must not quietly change what Back means there.
+          ...(stateId === null && ref.current.inspect === "workflow" ? { inspect: "path" as const } : {}),
           ...(stateId === null ? { taskState: null } : { selected: null, selectedProject: null, stream: [] }),
         });
         if (stateId === null) return;
+        void refreshTaskState(stateId);
+        void refreshWorkflowForm(stateId);
+      },
+
+      /**
+       * Describe the workflow ONE conversation was opened by — the link in a session panel's gutter.
+       *
+       * Two things separate it from {@link selectWorkflow}, and both come from where it is clicked.
+       *
+       * The task stays selected. A column click is somebody leaving a card behind; this is somebody
+       * reading a run and asking what the state behind it says, and dropping the selection would
+       * take away both the conversation they were reading and the way back to it.
+       *
+       * The panel is scoped to the RUN: `taskWorkflowRun` is what fills the inspector's run form
+       * with the inputs this pass was actually called with, and the run history beside it marks this
+       * task because `selected` is still pointing at it.
+       */
+      inspectWorkflow: (stateId: string, instanceId: number, project?: string) => {
+        patch({
+          inspect: "workflow",
+          taskWorkflow: stateId,
+          taskWorkflowProject: project ?? ref.current.selectedProject ?? ref.current.at,
+          taskWorkflowRun: instanceId,
+        });
         void refreshTaskState(stateId);
         void refreshWorkflowForm(stateId);
       },
@@ -2604,7 +2666,7 @@ export function useApp() {
           });
           // Selected before anything else lands, for the reason `runState` does it: the panels that
           // follow a task have to be pointed at it to show its beginning rather than its middle.
-          patch({ busy: false, selected: summary.taskId, taskWorkflow: null, taskWorkflowProject: null });
+          patch({ busy: false, selected: summary.taskId, taskWorkflow: null, taskWorkflowProject: null, taskWorkflowRun: null });
           await Promise.all([refreshTasks(), refreshBoard(), refreshProjects(), refreshDetail(summary.taskId)]);
         } catch (e) {
           fail(e);

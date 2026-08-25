@@ -19,16 +19,26 @@ import {
   EXECUTOR_NODES,
   functionAllowed,
   isPinned,
+  isRoutePrefixed,
+  namedModelAnswer,
   parseFunctionRule,
   pin,
   resolveExecutorTree,
+  routeForBareModel,
   unnamedModelAnswer,
   unnamedRouteOf,
+  vendorOfModel,
+  type ExecutorAvailability,
   type JairaOperationNode,
+  type JairaPromptNode,
   type JairaRouterNode,
 } from "../src/executorTree";
 
-const available = { providers: ["anthropic", "local"], agents: ["claude-cli", "codex-cli"] };
+const available = {
+  providers: ["anthropic", "local"],
+  agents: ["claude-cli", "codex-cli"],
+  vendors: { "claude-cli": "anthropic", "codex-cli": "openai" },
+};
 const routerOf = (tree: JairaOperationNode): JairaRouterNode => tree.prompt as JairaRouterNode;
 
 describe("the step catalogue", () => {
@@ -79,8 +89,10 @@ describe("resolveExecutorTree — absent means derived", () => {
 
   it("gives each derived route the identity of what it routes to", () => {
     const routes = routerOf(resolveExecutorTree(undefined, available)).routes ?? {};
-    expect(routes["anthropic"]).toEqual({ kind: "provider", provider: "anthropic" });
-    expect(routes["claude-cli"]).toEqual({ kind: "agent", agent: "claude-cli" });
+    // Identity is the prefix AND whose models it serves: the second half is what makes a bare
+    // model id routable, and a route that did not carry it could only be reached by name.
+    expect(routes["anthropic"]).toEqual({ kind: "provider", provider: "anthropic", vendor: "anthropic" });
+    expect(routes["claude-cli"]).toEqual({ kind: "agent", agent: "claude-cli", vendor: "anthropic" });
   });
 
   /** The adaptive property, stated as directly as it can be. */
@@ -106,7 +118,7 @@ describe("resolveExecutorTree — absent means derived", () => {
     const route = routerOf(resolveExecutorTree(overlay, available)).routes?.["claude-cli"];
 
     // The identity came from what was derived; only the model was stated.
-    expect(route).toEqual({ kind: "agent", agent: "claude-cli", model: "opus" });
+    expect(route).toEqual({ kind: "agent", agent: "claude-cli", model: "opus", vendor: "anthropic" });
   });
 
   it("takes a route the overlay invents, which is how a project names its own", () => {
@@ -381,5 +393,101 @@ describe("function rules", () => {
     expect(BUILTIN_FUNCTIONS.every((f) => f.what.length > 0)).toBe(true);
     // A workflow registers a sub-workflow under its own state id, so an unknown name must be legal.
     expect(() => parseConfig({ executors: { x: { function: { rules: ["+my_workflow/step"] } } } })).not.toThrow();
+  });
+});
+
+describe("a bare model id finds its own route", () => {
+  const routes = (): Record<string, JairaPromptNode> =>
+    (resolveExecutorTree(undefined, available).prompt as JairaRouterNode).routes ?? {};
+
+  it("reads a model's family off its name, and admits when it cannot", () => {
+    expect(vendorOfModel("claude-sonnet-5")).toBe("anthropic");
+    expect(vendorOfModel("gpt-5")).toBe("openai");
+    expect(vendorOfModel("o3-mini")).toBe("openai");
+    // A full OpenRouter id is read by its LAST segment, which is the model — the vendor slug in
+    // front of it is that route's spelling, not part of the name.
+    expect(vendorOfModel("anthropic/claude-opus-4-8")).toBe("anthropic");
+    expect(vendorOfModel("something-nobody-has-shipped")).toBeUndefined();
+  });
+
+  it("tells a prefixed id from a bare one, including a route it cannot reach", () => {
+    expect(isRoutePrefixed("claude-cli/sonnet", routes())).toBe(true);
+    expect(isRoutePrefixed("claude-sonnet-5", routes())).toBe(false);
+    // `openrouter` is a route word even where no such route was derived — which is what keeps an
+    // author's stated route stated rather than quietly rerouted.
+    expect(isRoutePrefixed("openrouter/openai/gpt-5", {})).toBe(true);
+  });
+
+  it("prefers the agent that serves the family over the provider that also would", () => {
+    // Both `anthropic` and `claude-cli` can serve it. The agent wins: it runs on a subscription
+    // already signed in, so it is the route that needs no key and bills nobody.
+    expect(routeForBareModel(routes(), "claude-sonnet-5")).toBe("claude-cli");
+  });
+
+  it("never hands a model to an agent that does not serve its family", () => {
+    // The case a plain preference order gets wrong: with codex sorting first, a bare Claude id
+    // would reach a binary that has never heard of it and fail somewhere unhelpful.
+    expect(routeForBareModel({ "codex-cli": { kind: "agent", agent: "codex-cli", vendor: "openai" } },
+      "claude-sonnet-5")).toBeUndefined();
+    expect(routeForBareModel(routes(), "gpt-5")).toBe("codex-cli");
+  });
+
+  it("takes an allow list as the last word, in both directions", () => {
+    const only = {
+      "my-cli": { kind: "agent", agent: "my-cli", allow: ["llama-*"] },
+    } as Record<string, JairaPromptNode>;
+    // A route with no vendor JaiRA knows becomes a candidate by SAYING which models it answers for.
+    expect(routeForBareModel(only, "llama-4-scout")).toBe("my-cli");
+    expect(routeForBareModel(only, "claude-sonnet-5")).toBeUndefined();
+    // And a list that does not match rules the route out even where its vendor would have matched:
+    // the list is a restriction, and reading past it would be reading past whoever wrote it.
+    const capped = {
+      "claude-cli": { kind: "agent", agent: "claude-cli", vendor: "anthropic", allow: ["*opus*"] },
+    } as Record<string, JairaPromptNode>;
+    expect(routeForBareModel(capped, "claude-sonnet-5")).toBeUndefined();
+    expect(routeForBareModel(capped, "claude-opus-4-8")).toBe("claude-cli");
+  });
+
+  it("leaves an unroutable id alone rather than guessing", () => {
+    expect(routeForBareModel(routes(), "something-nobody-has-shipped")).toBeUndefined();
+  });
+});
+
+describe("namedModelAnswer — can anything here serve the model this state named", () => {
+  const promptOf = (a: ExecutorAvailability): JairaPromptNode => resolveExecutorTree(undefined, a).prompt!;
+
+  it("refuses a prefixed route that is not available, and names both ways out", () => {
+    // The exact failure this was written for: a workflow pinned to `anthropic/…` on a machine whose
+    // Anthropic route has no key. It used to start and fail at its first prompt, from inside an SDK.
+    const cliOnly = { providers: [], agents: ["claude-cli"], vendors: { "claude-cli": "anthropic" } };
+    const answer = namedModelAnswer(promptOf(cliOnly), "anthropic/claude-sonnet-5");
+    expect(answer.answers).toBe(false);
+    if (answer.answers) return;
+    expect(answer.reason).toContain("'anthropic' route, which is not available here");
+    expect(answer.reason).toContain("'claude-sonnet-5'");
+  });
+
+  it("accepts the same model written bare, because something here does serve it", () => {
+    const cliOnly = { providers: [], agents: ["claude-cli"], vendors: { "claude-cli": "anthropic" } };
+    expect(namedModelAnswer(promptOf(cliOnly), "claude-sonnet-5")).toEqual({ answers: true });
+  });
+
+  it("accepts a prefixed id whose route IS available", () => {
+    expect(namedModelAnswer(promptOf(available), "claude-cli/default")).toEqual({
+      answers: true,
+      route: "claude-cli",
+    });
+  });
+
+  it("refuses a bare model whose family nothing here serves, and says whose it is", () => {
+    const cliOnly = { providers: [], agents: ["claude-cli"], vendors: { "claude-cli": "anthropic" } };
+    const answer = namedModelAnswer(promptOf(cliOnly), "gpt-5");
+    expect(answer.answers).toBe(false);
+    if (answer.answers) return;
+    expect(answer.reason).toContain("is a openai model and no route here serves openai");
+  });
+
+  it("lets a pinned leaf answer for whatever it is given — it has no prefixes to miss", () => {
+    expect(namedModelAnswer({ kind: "agent", agent: "claude-cli" }, "anything-at-all")).toEqual({ answers: true });
   });
 });

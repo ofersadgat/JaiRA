@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { InstanceNode, SessionRef } from "@jaira/shared/browser";
-import { bandsOf, piecesOf } from "../src/renderer/sessionBands";
+import { bandsOf, piecesOf, type BandNote, type SessionPiece } from "../src/renderer/sessionBands";
 import { SessionBandsView } from "../src/renderer/sessionPanels";
 
 const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
@@ -161,5 +161,77 @@ describe("what a conversation draws", () => {
     ]);
     const html = draw(parent, [ref(2, "planning", 0, 10), ref(3, "planning", 11, 20)]);
     expect(html).not.toContain("said by #1");
+  });
+});
+
+/**
+ * The errors that belong to no conversation, and the way out to the workflow behind one.
+ *
+ * Both are about the GREY between the sheets. A failure in a state that never opened a session has
+ * no panel to be a line of, and the session id a panel is named by says nothing about what the
+ * conversation is — so the background carries the one and the gutter carries the other.
+ */
+const note = (patch: Partial<BandNote> & Pick<BandNote, "seq" | "at" | "text">): BandNote => patch;
+
+const drawWith = (
+  parent: InstanceNode | undefined,
+  refs: SessionRef[],
+  extra: { notes?: BandNote[]; onOpenWorkflow?: (piece: SessionPiece) => void },
+): string =>
+  renderToStaticMarkup(
+    createElement(SessionBandsView, {
+      bands: bandsOf(piecesOf(parent, refs, 1)),
+      render: (piece) => createElement("p", null, `said by #${piece.node.instanceId}`),
+      ...extra,
+    }),
+  );
+
+describe("a failure with no panel to appear in", () => {
+  it("writes it on the background, between the conversations, where it happened", () => {
+    const html = drawWith(
+      parentOf([
+        { id: 2, from: 10, to: 20 },
+        { id: 3, from: 30, to: 40 },
+      ]),
+      [ref(2, "planning", 10, 20), ref(3, "review", 30, 40)],
+      { notes: [note({ seq: 1, at: 25, stateId: "plan/draft", text: "input 'framing' is not wired" })] },
+    );
+    expect(html).toContain("sb-note");
+    expect(html).toContain("input &#x27;framing&#x27; is not wired");
+    // Between the two sheets, not inside either: the state it names never said a word.
+    const [first, second] = [html.indexOf("said by #2"), html.indexOf("said by #3")];
+    const at = html.indexOf("sb-note");
+    expect(at).toBeGreaterThan(first);
+    expect(at).toBeLessThan(second);
+  });
+
+  it("is the whole answer when a run failed before it opened any conversation at all", () => {
+    // The case that read as "nothing happened yet": nothing ever became an instance, so there is no
+    // band to hang anything on — and the reason is the only thing there is to show.
+    const html = drawWith(undefined, [], {
+      notes: [note({ seq: 1, at: 5, stateId: "plan", text: "child 'draft' terminated with error" })],
+    });
+    expect(html).toContain("sb-note");
+    expect(html).not.toContain("has not said anything yet");
+  });
+
+  it("still says nothing happened when nothing did", () => {
+    expect(drawWith(undefined, [], {})).toContain("has not said anything yet");
+  });
+});
+
+describe("the workflow behind a conversation", () => {
+  it("names the state that OPENED the session beside its id, as somewhere to go", () => {
+    const html = drawWith(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)], {
+      onOpenWorkflow: () => undefined,
+    });
+    expect(html).toContain("sb-workflow");
+    expect(html).toContain("planning");
+    expect(html).toContain("s2");
+  });
+
+  it("offers no link where the host has no panel to describe one in", () => {
+    const html = drawWith(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)], {});
+    expect(html).not.toContain("sb-workflow");
   });
 });

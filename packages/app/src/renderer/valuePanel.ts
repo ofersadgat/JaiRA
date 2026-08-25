@@ -36,7 +36,14 @@ import type { ServedArtifact, ViewHint } from "@jaira/shared/browser";
 export interface PinnedValue {
   /** What the panel's header calls it: an artifact's path, a payload's label, or a plain noun. */
   title: string;
-  value: unknown;
+  /**
+   * What the panel draws, unless a {@link node} is drawing it instead.
+   *
+   * Optional for exactly that case: a surface that fetches its own document has no value to hand
+   * over at the moment it is pinned, and inventing one — `null`, an empty object — would put a
+   * placeholder into the field the viewer falls back to.
+   */
+  value?: unknown;
   /**
    * A SURFACE to show instead of the value, for the things a viewer cannot express.
    *

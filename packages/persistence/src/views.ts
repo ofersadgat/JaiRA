@@ -417,7 +417,9 @@ export const TIMELINE_LIMIT = 200;
 
 export function taskDetailView(project: Project, taskId: string, options?: ViewOptions): TaskDetail {
   const row = project.runtime.get(taskId);
-  if (!row) throw new Error(`unknown task '${taskId}'`);
+  // With the project, for the reason `conversationView` states: the id is never the surprising
+  // half of this failure — the database it was looked for in is.
+  if (!row) throw new Error(`unknown task '${taskId}' in ${project.paths.projectDir}`);
   const meta = project.tasks.tryRead(taskId);
   const shape = meta ? shapeFor(project, meta.workflow, row.snapshotHash, options)?.shape : undefined;
   const run = latestRun(project, taskId, shape);

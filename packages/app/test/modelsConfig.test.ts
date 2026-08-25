@@ -117,8 +117,12 @@ describe("the text fields", () => {
   });
 
   it("requires a model id to name its route, which is the parser's rule too", () => {
-    expect(() => checkModelId("claude-sonnet-5")).toThrow(/route-prefixed/);
+    // A bare id is legal now: its family places it, and which route serves that family is the
+    // operator's business rather than the author's.
+    expect(() => checkModelId("claude-sonnet-5")).not.toThrow();
     expect(() => checkModelId("claude-cli/sonnet")).not.toThrow();
+    // Neither a route in front nor a family behind — nothing can place this one.
+    expect(() => checkModelId("planner")).toThrow(/names no route/);
     // Empty is legal: it means "choose automatically", not "a bad id".
     expect(() => checkModelId("")).not.toThrow();
   });

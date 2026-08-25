@@ -29,6 +29,7 @@ import {
   type SlotType,
   type StateView,
   type TaskSummary,
+  type WorkflowEntry,
   type WorkflowLayer,
 } from "@jaira/shared/browser";
 import { jsonValueOf } from "./jsonText";
@@ -140,6 +141,29 @@ export function runFieldsOf(text: string, mime: string): RunField[] | null {
 export function initialRunValues(fields: RunField[]): RunValues {
   const values: RunValues = {};
   for (const field of fields) values[field.name] = field.initial;
+  return values;
+}
+
+/**
+ * The boxes filled with what one run was actually CALLED with.
+ *
+ * The inverse of {@link runInputsOf}, and it has to be: the form is text, an instance's inputs are
+ * JSON, and a panel describing a run that has already happened should show the values that run had
+ * rather than the defaults the slots declare. A field the run carried nothing for keeps its
+ * starting value — absent is what "the default applied" looks like from here, and blanking the box
+ * would state the opposite.
+ *
+ * A string is written as itself and everything else as JSON, which is the same pair of rules
+ * `readField` reads back: `text` and `artifact` slots hold prose that would be unreadable quoted,
+ * and a number, a flag or an object is exactly its JSON.
+ */
+export function runValuesOf(fields: RunField[], inputs: Record<string, JsonValue>): RunValues {
+  const values = initialRunValues(fields);
+  for (const field of fields) {
+    const value = inputs[field.name];
+    if (value === undefined) continue;
+    values[field.name] = typeof value === "string" ? value : JSON.stringify(value);
+  }
   return values;
 }
 
@@ -388,6 +412,29 @@ export function runHistoryOf(stateId: string, tasks: TaskSummary[], state: State
 export function workflowMimeOf(file: string): string {
   const ext = file.slice(file.lastIndexOf(".") + 1).toLowerCase();
   return ext === "yaml" || ext === "yml" ? WORKFLOW_YAML : WORKFLOW_JSON;
+}
+
+/**
+ * Which LAYER holds a state's file, as far as the browse listing can say.
+ *
+ * A root is named by a row of its own, and that row is authoritative: it reports the copy that would
+ * actually run, so a project file shadowing a shared one is read as the project's.
+ *
+ * Anything BELOW a root has no row, and used to be assumed to be the project's — which is wrong for
+ * every workflow that lives in the shared root, and a shared workflow with a checkout open is the
+ * ordinary case rather than an exotic one. Reading the wrong layer does not fail loudly: a missing
+ * file reads back as empty text, and empty text is a state with no inputs in it, so the form reported
+ * that the file did not parse without ever having opened one. The root's CLOSURE answers it — a root
+ * lists every state under it — and the root's layer is then the best guess for its children.
+ *
+ * A guess, and it is worth being clear about which part is: a project file may shadow one child of a
+ * shared root and not the rest, and no listing here distinguishes that. The caller settles it against
+ * the disk (`WorkflowSource.exists`) rather than trusting this.
+ */
+export function workflowLayerOf(workflows: readonly WorkflowEntry[], stateId: string): WorkflowLayer {
+  const own = workflows.find((entry) => entry.rootId === stateId);
+  if (own !== undefined) return own.layer;
+  return workflows.find((entry) => entry.states.includes(stateId))?.layer ?? "project";
 }
 
 /** What the new-task form needs to know about itself before it may be submitted. */

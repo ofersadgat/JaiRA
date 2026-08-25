@@ -24,8 +24,11 @@ to apply is a [principle](principles.md), not a standard.
 
 ## Configuration and inputs
 
-- **Model ids are route-prefixed.** `anthropic/claude-sonnet-5`. A bare id is a
-  fail-fast error, not a defaulted route.
+- **Write model ids BARE unless the route is the point.** `claude-sonnet-5`,
+  not `anthropic/claude-sonnet-5`. Which model a state wants is the author's
+  decision; which transport serves it on this machine is the operator's, and a
+  workflow that states both is unrunnable everywhere the second one is wrong.
+  Prefix it only to insist — `claude-cli/sonnet` when the point is the CLI.
 - **Secrets come from the environment.** Never a committed file, never a
   default.
 - **Derived state is gitignored.** `jaira.db*` and `snapshots/` are derived;

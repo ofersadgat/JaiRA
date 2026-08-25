@@ -44,6 +44,10 @@ const config = (over: Partial<JairaConfig>): JairaConfig => ({ ...defaultConfig(
 
 const syncBundle = () => loadBundle(syncWorkflowFiles(), syncRootId("document"));
 
+/** One prompt state that NAMES a model — the shape the start-time check had a hole for. */
+const namedBundle = (model: string) =>
+  loadBundle({ solo: { label: "Solo", operation: { kind: "prompt", prompt: "hi", model } } }, "solo");
+
 describe("modelRouterOptions — config.models.routes → ModelRouterOptions", () => {
   it("RESOLVES a named credential into the router, which is how a keychain key reaches the provider", () => {
     // The gap this closes: `createModelRouter()` used to be called with no options, so it read
@@ -56,10 +60,42 @@ describe("modelRouterOptions — config.models.routes → ModelRouterOptions", (
     expect(options.anthropicApiKey).toBe("sk-ant-xyz");
   });
 
-  it("says nothing when a route names no credential, so the SDK's own env fallback still applies", () => {
+  it("says nothing when NOTHING has the key, so the SDK's own env fallback still applies", () => {
     // Which is what keeps every setup that worked before this existed working with no config at all.
     expect(modelRouterOptions({ routes: { anthropic: {} } }, secretsWith({})).anthropicApiKey).toBeUndefined();
     expect(modelRouterOptions({}).anthropicApiKey).toBeUndefined();
+  });
+
+  it("finds the CONVENTIONAL variable through the chain when config names no credential", () => {
+    // The disagreement this closes, and it is the one that produced a live AI_LoadAPIKeyError.
+    // `routeUsable` asks the secret CHAIN for `ANTHROPIC_API_KEY`, so a key in `.env.local` made the
+    // anthropic route count as usable and a call was dispatched to it — while this function, asking
+    // only about a NAMED credential, handed the provider nothing. The provider then looked at
+    // `process.env`, which knows nothing about `.env.local`, and failed permanently in four
+    // milliseconds. One route judged by one source and served from another.
+    const options = modelRouterOptions({ routes: { anthropic: {} } }, secretsWith({ ANTHROPIC_API_KEY: "sk-ant-env" }));
+    expect(options.anthropicApiKey).toBe("sk-ant-env");
+  });
+
+  it("lets a NAMED credential win over the conventional variable", () => {
+    // Naming one is the more specific statement, and the only reason to name one is to not use the
+    // variable everything else defaults to.
+    const secrets = secretsWith({ ANTHROPIC_API_KEY: "sk-ant-conventional", MY_KEY: "sk-ant-named" });
+    expect(modelRouterOptions({ routes: { anthropic: { credential: "MY_KEY" } } }, secrets).anthropicApiKey).toBe(
+      "sk-ant-named",
+    );
+  });
+
+  it("does the same for the other two remote fleets", () => {
+    const secrets = secretsWith({ OPENAI_API_KEY: "sk-oai", OPENROUTER_API_KEY: "sk-or" });
+    const options = modelRouterOptions({ routes: { openai: {}, openrouter: {} } }, secrets);
+    expect(options.openAiApiKey).toBe("sk-oai");
+    expect(options.openRouterApiKey).toBe("sk-or");
+  });
+
+  it("still says nothing for a route that is turned OFF, whatever the chain holds", () => {
+    const secrets = secretsWith({ ANTHROPIC_API_KEY: "sk-ant-env" });
+    expect(modelRouterOptions({ routes: { anthropic: { enabled: false } } }, secrets).anthropicApiKey).toBeUndefined();
   });
 
   it("maps a local server, its auto-start spec included", () => {
@@ -157,6 +193,54 @@ describe("defaultExecutorTree — the refusal that reported the bug", () => {
     expect(() =>
       defaultExecutorTree(config({ agents, models }), syncBundle(), { secrets: secretsWith({ MY_KEY: "sk-ant-xyz" }) }),
     ).toThrow(/no default model: 'anthropic'/);
+  });
+
+  it("refuses a model whose route this machine cannot reach — the API-key failure, caught at start", () => {
+    // The bug, exactly. JaiRA's feature workflow pinned `anthropic/claude-sonnet-5` on every phase
+    // parent; the machine had a `claude` login and no API key. The check returned early because SOME
+    // state named a model, so the run started and each inherited leaf then failed in four
+    // milliseconds inside `@ai-sdk/anthropic` — permanently, and long after anyone could act on it.
+    expect(() =>
+      defaultExecutorTree(config({}), namedBundle("anthropic/claude-sonnet-5"), { secrets: secretsWith({}) }),
+    ).toThrow(/'anthropic' route, which is not available here/);
+  });
+
+  it("accepts the same model written BARE, because the CLI agent serves that family", () => {
+    // Which is the fix the refusal above recommends, and the whole point of dropping the prefix: the
+    // author says which model, and the machine answers who serves it.
+    const tree = defaultExecutorTree(config({}), namedBundle("claude-sonnet-5"), { secrets: secretsWith({}) });
+    expect(Object.keys((tree.prompt as { routes?: Record<string, unknown> }).routes ?? {})).toContain("claude-cli");
+  });
+
+  it("does not refuse over an agent whose binary a probe could not find", () => {
+    // `available` is what a health check saw a moment ago; a missing binary is a fact about this
+    // moment rather than about the configuration. Refusing seven phases because an optional lens's
+    // binary is not installed today would be refusing a run that never reaches it — and it is the
+    // same call the function path already makes by registering codex whether or not it is present.
+    const tree = defaultExecutorTree(config({}), namedBundle("codex-cli/default"), {
+      secrets: secretsWith({}),
+      available: new Set(["claude-cli"]),
+    });
+    expect(Object.keys((tree.prompt as { routes?: Record<string, unknown> }).routes ?? {})).not.toContain("codex-cli");
+  });
+
+  it("refuses a bare model no configured route serves, and says whose family it is", () => {
+    const agents = { claudeCode: { enabled: false }, claudeCli: { enabled: false }, codex: { enabled: false } };
+    expect(() =>
+      defaultExecutorTree(config({ agents }), namedBundle("claude-sonnet-5"), { secrets: secretsWith({}) }),
+    ).toThrow(/is a anthropic model and no route here serves anthropic/);
+  });
+
+  it("says nothing about models when the caller only wants to READ the tree", () => {
+    // A screen rendering the routes on offer is not about to call anything, and a chat panel that
+    // cannot describe itself because a workflow names an unreachable model is a UI outage standing
+    // in for a run-time refusal.
+    expect(() =>
+      defaultExecutorTree(config({}), namedBundle("anthropic/claude-sonnet-5"), {
+        secrets: secretsWith({}),
+        refuse: false,
+      }),
+    ).not.toThrow();
   });
 
   it("still refuses when genuinely nothing can answer — and names both fixes", () => {

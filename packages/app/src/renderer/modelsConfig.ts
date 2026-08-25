@@ -16,6 +16,7 @@
  *
  * Pure functions over plain documents: no React, no IPC, and therefore testable without either.
  */
+import { vendorOfModel } from "@jaira/shared/browser";
 
 /** A route prefix, and what a form needs to know to render it. */
 export interface RouteSpec {
@@ -189,11 +190,24 @@ export function parseJsonBlock(text: string, label: string): Record<string, unkn
   return parsed;
 }
 
-/** A model id must name its route, which is the one rule the config parser also enforces. */
+/**
+ * Is this a model id anything could route?
+ *
+ * The rule used to be "it must name its route", and that was a rule about the ROUTER rather than
+ * about the id: prefix dispatch was the only dispatch there was, so an id without a prefix could not
+ * be placed. It can now — `routeForBareModel` reads the family off the name and finds a route that
+ * serves it — and requiring the prefix was making every author state a deployment fact they had no
+ * business knowing. `claude-sonnet-5` says which model; whether this machine reaches it through a
+ * subscription CLI or an API key is not the author's decision to write down.
+ *
+ * What is still refused is an id that is NEITHER: no route in front of it, and no family behind it.
+ * Nothing can place that, and finding out at the first call is finding out too late.
+ */
 export function checkModelId(id: string): void {
-  if (id.length > 0 && !id.includes("/")) {
-    throw new Error(
-      `'${id}' must be route-prefixed — 'anthropic/claude-sonnet-5', 'openrouter/openai/gpt-5', or 'claude-cli/sonnet' to run it on the CLI agent`,
-    );
-  }
+  if (id.length === 0 || id.includes("/") || vendorOfModel(id) !== undefined) return;
+  throw new Error(
+    `'${id}' names no route and is not a model family JaiRA recognizes — write a bare id like ` +
+      `'claude-sonnet-5' and it routes to whatever serves it, or name the route ` +
+      `('anthropic/claude-sonnet-5', 'openrouter/openai/gpt-5', 'claude-cli/sonnet')`,
+  );
 }

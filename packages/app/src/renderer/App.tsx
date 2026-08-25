@@ -76,10 +76,11 @@ import type { FileSurfaceContext } from "./fileTypes";
 import { LogsPanel } from "./logs";
 import { LayerPicker, SettingsPane } from "./panes";
 import { ConfigPane } from "./configPane";
+import { ConfigPanel } from "./configPanel";
 import { DebugPane } from "./debugPane";
 import { ProvidersPane } from "./providersPane";
 import { ExecutorsPane } from "./executorsPane";
-import { initialRunValues, runFieldsOf, runTargetOf } from "./runForm";
+import { initialRunValues, runFieldsOf, runTargetOf, runValuesOf } from "./runForm";
 import type { RunSurface } from "./runPanel";
 import { RunModeToggle, RunView, TaskContext } from "./runViews";
 import { Sidebar, type SidebarAct, type SidebarProject, type SidebarView } from "./sidebar";
@@ -102,7 +103,7 @@ import {
 } from "./uiState";
 import { Icon } from "./icons";
 import { History, NewTask } from "./widgets";
-import { useApp, type SettingsSection, type View } from "./store";
+import { invoke, useApp, type SettingsSection, type View } from "./store";
 
 /**
  * How wide each view lets its context panel be dragged while it is describing something.
@@ -982,9 +983,23 @@ export default function App(): JSX.Element {
     if (fields === undefined) return undefined;
     const project = state.taskWorkflowProject;
     const summary = state.projects.find((p) => p.project === project);
+    /**
+     * What this panel's boxes hold.
+     *
+     * Reached from a board column, they are the state's own defaults with whatever has been typed
+     * over them — a form for the NEXT run. Reached from a conversation's gutter, the panel is
+     * describing a run that already happened, so they hold what that run was called with; typing
+     * still wins, because the reason to look at those values beside the Run button is usually to
+     * change one of them and go again.
+     */
+    const run = state.taskWorkflowRun === null ? null : nodeAt(detail?.instances ?? [], state.taskWorkflowRun);
+    const called = run?.inputs;
     return {
       fields,
-      values: { ...initialRunValues(fields ?? []), ...(state.runValues[stateId] ?? {}) },
+      values: {
+        ...(called !== undefined ? runValuesOf(fields ?? [], called) : initialRunValues(fields ?? [])),
+        ...(state.runValues[stateId] ?? {}),
+      },
       target: {
         ...(project !== null && project !== state.at ? { project } : {}),
         label: summary?.label ?? projectName(project),
@@ -1003,6 +1018,58 @@ export default function App(): JSX.Element {
       onSelectTask: actions.select,
     };
   })();
+
+  /**
+   * Put the configuration this run resolves against in the side panel.
+   *
+   * The project is the one HOLDING the run, not the focused one: a shared workflow's runs are
+   * recorded in JaiRA's own project, and reading the open checkout's settings beside one would
+   * describe a document that had nothing to do with it.
+   *
+   * `read` rather than the configuration itself, because the panel outlives the click — see
+   * `configPanel.tsx`. The Settings link is what makes this a reading rather than a dead end.
+   */
+  const openConfigPanel = (
+    stateId: string,
+    of?: { project?: string | null; taskId?: string; instanceId?: number },
+  ): void => {
+    const project = of?.project ?? state.selectedProject ?? state.at;
+    const taskId = of?.taskId;
+    const instanceId = of?.instanceId;
+    setPinned({
+      title: `${stateId.split("/").pop() ?? stateId} · configuration`,
+      node: (
+        <ConfigPanel
+          read={() =>
+            invoke("state:effective", {
+              stateId,
+              ...(taskId !== undefined ? { taskId } : {}),
+              ...(instanceId !== undefined ? { instanceId } : {}),
+              ...(project !== null ? { project } : {}),
+            })
+          }
+          // The form's completions want both of these — the tree for state references, the executor
+          // list for an operation's function. A reading is still the same form.
+          tree={state.tree}
+          executors={state.executors}
+          // And these are what let it show a state WHOLE: a prompt held in another file is the
+          // substance of the state, and a reader that cannot open it shows a path instead.
+          services={{
+            readFile: actions.readFile,
+            readState: actions.readState,
+            loadStateSlots: actions.stateSlots,
+            validateSchema: actions.validateSchema,
+            wrapJson: state.settings.wrapJson,
+            onWrapJson: actions.setWrapJson,
+          }}
+          onOpenState={(id) => {
+            actions.setView("files");
+            actions.selectState(id);
+          }}
+        />
+      ),
+    });
+  };
 
   /**
    * Everything a file surface may need beyond the file itself.
@@ -1039,6 +1106,11 @@ export default function App(): JSX.Element {
     trailState: state.trailState,
     onWalkInto: actions.walkInto,
     onWalkIntoSidechain: actions.walkIntoSidechain,
+    // The link in a session panel's gutter: describe the workflow that opened that conversation,
+    // scoped to the run that opened it. In the project holding the selected task — a shared workflow
+    // reached from a run of it is still that run's project's business.
+    onOpenWorkflow: (stateId: string, instanceId: number) =>
+      actions.inspectWorkflow(stateId, instanceId, state.selectedProject ?? undefined),
     onWalkTo: actions.walkTo,
     onOpenFile: actions.openPath,
     onOpenDir: actions.openDir,
@@ -1479,6 +1551,27 @@ export default function App(): JSX.Element {
                 */}
                 {pinned !== null ? (
                   <PinnedPane pinned={pinned} onClose={() => setPinned(null)} />
+                ) : state.inspect === "workflow" ? (
+                  // The third thing reached by asking: the workflow a conversation on the left was
+                  // opened by, with that run's own values in its form. Same inspector the Tasks view
+                  // puts beside a board column, because it is the same question — what does the state
+                  // behind these words say — asked from where the words are.
+                  <StateInspector
+                    state={state.taskState}
+                    {...(workflowRunSurface !== undefined ? { run: workflowRunSurface } : {})}
+                    onBack={() => actions.selectWorkflow(null)}
+                    // The task is what decides WHICH copy: it pins the workflow, so the state that
+                    // ran is in its snapshot and the state on disk is whatever it has been edited
+                    // into since. See `state:effective`.
+                    onOpenConfig={() =>
+                      state.taskWorkflow !== null
+                        ? openConfigPanel(state.taskWorkflow, {
+                            project: state.taskWorkflowProject,
+                            ...(detail !== null ? { taskId: detail.taskId } : {}),
+                          })
+                        : undefined
+                    }
+                  />
                 ) : state.inspect === "task" ? (
                   <TaskInspector
                     stateId={state.inspectFrom}
@@ -1516,6 +1609,16 @@ export default function App(): JSX.Element {
                       detail ? actions.cancelTask(detail.taskId, state.selectedProject ?? undefined) : undefined
                     }
                     onOpenState={actions.selectState}
+                    // The state this run entered, out of the task's pinned snapshot — which is the
+                    // copy it actually executed, not whatever the file says now.
+                    onOpenConfig={() =>
+                      openConfigPanel(state.trail.at(-1)!.stateId, {
+                        ...(detail !== null ? { taskId: detail.taskId } : {}),
+                        // THIS pass, not the newest one of that state: a loop runs it several times
+                        // and the panel beside it is standing on one of them.
+                        instanceId: state.trail.at(-1)!.instanceId,
+                      })
+                    }
                   />
                 ) : state.dir !== null ? (
                   // A folder is the end of the address too, so it is what the panel describes.
@@ -1525,6 +1628,12 @@ export default function App(): JSX.Element {
                     doc={state.doc}
                     state={state.state}
                     run={runSurface}
+                    // No task, so no pin: this panel describes the open FILE, and the copy it means
+                    // is the one on disk. The focused project rather than the selected task's, for
+                    // the same reason.
+                    {...(state.stateId !== null
+                      ? { onOpenConfig: () => openConfigPanel(state.stateId!, { project: state.at }) }
+                      : {})}
                     onRevealIssue={(path) => setReveal((last) => ({ path, nonce: (last?.nonce ?? 0) + 1 }))}
                   />
                 )}
@@ -1674,6 +1783,18 @@ export default function App(): JSX.Element {
                   <StateInspector
                     state={state.taskState}
                     {...(workflowRunSurface !== undefined ? { run: workflowRunSurface } : {})}
+                    // Only when it was reached by ASKING — the link in a conversation's gutter. A
+                    // column click has a card click as its way back, and an arrow there would offer
+                    // a second answer to a question the board already answers.
+                    {...(state.inspect === "workflow" ? { onBack: () => actions.selectWorkflow(null) } : {})}
+                    onOpenConfig={() =>
+                      state.taskWorkflow !== null
+                        ? openConfigPanel(state.taskWorkflow, {
+                            project: state.taskWorkflowProject,
+                            ...(detail !== null ? { taskId: detail.taskId } : {}),
+                          })
+                        : undefined
+                    }
                   />
                 ) : detail ? (
                   <TaskContext

@@ -11,8 +11,8 @@
  * that appears in two bands was interrupted, and its halves carry the pause and resume marks.
  */
 import { describe, expect, it } from "vitest";
-import type { InstanceNode, SessionRef } from "@jaira/shared/browser";
-import { bandsOf, instancesOf, piecesOf } from "../src/renderer/sessionBands";
+import type { ConversationTurn, InstanceNode, SessionRef } from "@jaira/shared/browser";
+import { bandsOf, instancesOf, notesOf, piecesOf, placeNotes, startersOf } from "../src/renderer/sessionBands";
 
 const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
   status: "completed",
@@ -230,5 +230,99 @@ describe("instancesOf", () => {
     ]);
     const bands = bandsOf(piecesOf(parent, [ref(2, "A", 0, 10), ref(3, "A", 11, 20)], 1));
     expect(instancesOf(bands).sort()).toEqual([2, 3]);
+  });
+});
+
+/**
+ * The failures that no panel can hold.
+ *
+ * The bug this closes: a run whose child was blocked before it could run, or whose composite gave up
+ * because one of its children failed, showed NOTHING about either. Both are journal facts about a
+ * state that never opened a conversation, and the view filtered journal facts by matching a panel's
+ * state — so the only states whose errors could reach the screen were the ones that had not merely
+ * failed to start.
+ */
+const turn = (patch: Partial<ConversationTurn> & Pick<ConversationTurn, "seq" | "kind">): ConversationTurn => ({
+  at: patch.seq * 10,
+  ...patch,
+});
+
+describe("notesOf", () => {
+  const bandsFor = (kids: Array<{ id: number; from: number; to: number }>, refs: SessionRef[]) =>
+    bandsOf(piecesOf(tree(kids), refs, 1));
+
+  it("keeps the failure of a state that never opened a conversation", () => {
+    const bands = bandsFor([{ id: 2, from: 0, to: 10 }], [ref(2, "A", 0, 10)]);
+    const notes = notesOf(
+      [
+        turn({ seq: 1, kind: "failure", stateId: "plan/draft", text: "plan/draft: input 'framing' is not wired", ok: false }),
+        turn({ seq: 2, kind: "operation", stateId: "plan", text: "child 'draft' terminated with error", ok: false }),
+      ],
+      bands,
+    );
+    expect(notes.map((n) => [n.stateId, n.text])).toEqual([
+      // The state id the engine prefixed the reason with is dropped: the note carries it beside the
+      // sentence, and saying it twice is one subject too many.
+      ["plan/draft", "input 'framing' is not wired"],
+      ["plan", "child 'draft' terminated with error"],
+    ]);
+  });
+
+  it("leaves a failure alone when the state that failed has a panel to say it in", () => {
+    const bands = bandsFor([{ id: 2, from: 0, to: 10 }], [ref(2, "A", 0, 10)]);
+    // `s2` is the state the piece ran — its transcript already carries this, and a copy on the
+    // background would be the same sentence twice.
+    const notes = notesOf([turn({ seq: 1, kind: "failure", stateId: "s2", text: "the call failed", ok: false })], bands);
+    expect(notes).toEqual([]);
+  });
+
+  it("ignores everything that is not a failure, and says each one once", () => {
+    const notes = notesOf(
+      [
+        turn({ seq: 1, kind: "transition", stateId: "plan", text: "draft" }),
+        turn({ seq: 2, kind: "operation", stateId: "plan", text: "success", ok: true }),
+        turn({ seq: 3, kind: "failure", stateId: "plan/draft", text: "not wired", ok: false }),
+        turn({ seq: 4, kind: "failure", stateId: "plan/draft", text: "not wired", ok: false }),
+      ],
+      [],
+    );
+    expect(notes.map((n) => n.text)).toEqual(["not wired"]);
+  });
+});
+
+describe("placeNotes", () => {
+  it("puts each note above the band it precedes, and the rest at the end", () => {
+    const bands = bandsOf(piecesOf(tree([
+      { id: 2, from: 10, to: 20 },
+      { id: 3, from: 30, to: 40 },
+    ]), [ref(2, "A", 10, 20), ref(3, "B", 30, 40)], 1));
+    const notes = [
+      { seq: 1, at: 5, text: "before anything ran" },
+      { seq: 2, at: 25, text: "between the two" },
+      { seq: 3, at: 99, text: "how it ended" },
+    ];
+    expect(placeNotes(notes, bands).map((bucket) => bucket.map((n) => n.text))).toEqual([
+      ["before anything ran"],
+      ["between the two"],
+      ["how it ended"],
+    ]);
+  });
+
+  it("gives every note the last bucket when there are no bands at all", () => {
+    expect(placeNotes([{ seq: 1, at: 5, text: "blocked" }], [])).toEqual([[{ seq: 1, at: 5, text: "blocked" }]]);
+  });
+});
+
+describe("startersOf", () => {
+  it("names the run that OPENED each session, not the one that resumed it", () => {
+    const parent = tree([
+      { id: 2, from: 0, to: 10 },
+      { id: 3, from: 11, to: 20 },
+      { id: 4, from: 21, to: 30 },
+    ]);
+    // "A" runs, is interrupted by "B", and comes back — so it has two panels and one starter.
+    const bands = bandsOf(piecesOf(parent, [ref(2, "A", 0, 10), ref(3, "B", 11, 20), ref(4, "A", 21, 30)], 1));
+    expect(startersOf(bands).get("A")?.node.instanceId).toBe(2);
+    expect(startersOf(bands).get("B")?.node.instanceId).toBe(3);
   });
 });

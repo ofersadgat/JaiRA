@@ -52,6 +52,16 @@ export interface SimpleField {
    */
   kinds?: readonly ("prompt" | "function")[];
   /**
+   * Shown with the operation rather than folded into the model-settings disclosure.
+   *
+   * `model` is in the model GROUP because that is what it is — a field of the LLM call — but it is
+   * not a knob, and being filed beside `topK` and `frequencyPenalty` behind a collapsed summary is
+   * what made an `environment` block look like it said nothing. Which model answers is the most
+   * consequential thing a block states, and on an `environment` block it is the thing that decides
+   * who serves every descendant. It belongs where you can see it without opening anything.
+   */
+  prominent?: true;
+  /**
    * Whether the form offers to hold this field as a document REFERENCE rather than a literal.
    *
    * Every string field could legally be one — `{"$ref": …}` is admitted in any string position
@@ -76,8 +86,9 @@ export const SIMPLE_FIELDS: readonly SimpleField[] = [
     placeholder: "read_file, run_command",
     hint: "logical names resolved through the tool registry — an empty list drops the inherited ones" },
   { name: "model", key: "model", type: "string", label: "Model", group: "model",
-    kinds: ["prompt"],
-    placeholder: "anthropic/claude-sonnet-5 (route-prefixed)" },
+    kinds: ["prompt"], prominent: true,
+    placeholder: "claude-sonnet-5, or claude-cli/sonnet to pin the route",
+    hint: "a bare id routes to whatever serves that family here — prefix it to insist on one route" },
   { name: "temperature", key: "temperature", type: "number", label: "Temperature", group: "model", kinds: ["prompt"] },
   { name: "topP", key: "topP", type: "number", label: "Top P", group: "model", kinds: ["prompt"] },
   { name: "topK", key: "topK", type: "number", label: "Top K", group: "model", kinds: ["prompt"] },

@@ -25,6 +25,8 @@ import {
 } from "./operationForm";
 import { NO_ISSUES, fieldClass, markFor, type FormIssues } from "./issues";
 import { LinkInput, LinkToggle } from "./links";
+import { useReadOnly, useRunReading } from "./reading";
+import { ReadValue } from "./readValue";
 import { LinkPreview } from "./linkPreview";
 import { emptySlotRow } from "./slotForm";
 import { SlotTable, SlotTypePicker } from "./slotTable";
@@ -86,11 +88,16 @@ function SimpleFieldControl({
   onChange: (name: string, value: string) => void;
   /** Set or clear this field's reference. `null` unlinks. */
   onLink: (name: string, ref: string | null) => void;
-}): JSX.Element {
+}): JSX.Element | null {
+  const readOnly = useReadOnly();
   const structured = form.structured[spec.name] === true;
   const ref = form.refs[spec.name];
   const linked = ref !== undefined;
   const value = form.fields[spec.name] ?? "";
+  // A form shows every field it COULD hold, because that is how you find the one to fill in. A
+  // reading shows what the state says — and a column of empty boxes labelled Tools, Search path and
+  // Seed buries the two lines that are actually declared.
+  if (readOnly && !linked && !structured && value.trim().length === 0) return null;
   // The linter names a field by its AUTHORED key — `operation.function`, not `operation.functionRef`
   // — which is the whole reason `SimpleField` carries both spellings.
   const mark = path === undefined ? "" : fieldClass(issues, `${path}.${spec.key}`);
@@ -139,6 +146,18 @@ function SimpleFieldControl({
   );
 }
 
+/** Whether anything under "Model settings" was actually tuned — see the fold's own note. */
+function MODEL_KNOBS_SET(form: OperationFieldsForm): boolean {
+  const tuned = SIMPLE_FIELDS.some(
+    (spec) =>
+      spec.group === "model" &&
+      spec.prominent !== true &&
+      ((form.fields[spec.name] ?? "").trim().length > 0 || form.refs[spec.name] !== undefined),
+  );
+  const json = JSON_FIELDS.some((spec) => (form.json[spec.name] ?? "").trim().length > 0);
+  return tuned || json || form.reasoning.effort.length > 0 || form.reasoning.budgetTokens.trim().length > 0;
+}
+
 /** One arbitrary-JSON field. No generated form beats a JSON box for a value nothing has a schema for. */
 function JsonFieldControl({
   spec,
@@ -148,7 +167,9 @@ function JsonFieldControl({
   spec: JsonField;
   form: OperationFieldsForm;
   onChange: (name: string, value: string) => void;
-}): JSX.Element {
+}): JSX.Element | null {
+  // See {@link SimpleFieldControl}: an empty JSON box in a reading is a heading over nothing.
+  if (useReadOnly() && (form.json[spec.name] ?? "").trim().length === 0) return null;
   return (
     <label className="field">
       <span>{spec.label}</span>
@@ -183,7 +204,10 @@ function SessionControl({
   path?: string | undefined;
   issues: FormIssues;
   onChange: (session: SessionForm) => void;
-}): JSX.Element {
+}): JSX.Element | null {
+  // "not declared" is a picker's way of saying nothing was said. In a reading that is a labelled row
+  // reporting the absence of a decision, which the state's silence already reports.
+  if (useReadOnly() && value.mode === "absent") return null;
   return (
     <label {...(path === undefined ? { className: "field" } : markFor(issues, `${path}.session`, "field"))}>
       <span>Session</span>
@@ -221,7 +245,8 @@ function ConversationControl({
 }: {
   value: ConversationForm;
   onChange: (conversation: ConversationForm) => void;
-}): JSX.Element {
+}): JSX.Element | null {
+  if (useReadOnly() && value.mode.length === 0) return null;
   return (
     <label className="field">
       <span>Conversation</span>
@@ -259,20 +284,24 @@ function PermissionsControl({
 }: {
   value: PermissionsForm;
   onChange: (permissions: PermissionsForm) => void;
-}): JSX.Element {
+}): JSX.Element | null {
+  const readOnly = useReadOnly();
+  if (readOnly && value.profile.trim().length === 0 && value.default.length === 0 && value.tools.length === 0) return null;
   const editTool = (index: number, patch: Partial<PermissionToolRow>): void =>
     onChange({ ...value, tools: value.tools.map((row, i) => (i === index ? { ...row, ...patch } : row)) });
   return (
     <div className="slots">
       <div className="slots-head">
         <span>Permissions</span>
-        <button
-          type="button"
-          className="ghost sm"
-          onClick={() => onChange({ ...value, tools: [...value.tools, { tool: "", mode: "ask" }] })}
-        >
-          + Tool
-        </button>
+        {readOnly ? null : (
+          <button
+            type="button"
+            className="ghost sm"
+            onClick={() => onChange({ ...value, tools: [...value.tools, { tool: "", mode: "ask" }] })}
+          >
+            + Tool
+          </button>
+        )}
       </div>
       <div className="row-controls">
         <input
@@ -311,14 +340,16 @@ function PermissionsControl({
               </option>
             ))}
           </select>
-          <button
-            type="button"
-            className="ghost sm"
-            title="remove"
-            onClick={() => onChange({ ...value, tools: value.tools.filter((_, j) => j !== i) })}
-          >
-            ✕
-          </button>
+          {readOnly ? null : (
+            <button
+              type="button"
+              className="ghost sm"
+              title="remove"
+              onClick={() => onChange({ ...value, tools: value.tools.filter((_, j) => j !== i) })}
+            >
+              ✕
+            </button>
+          )}
         </div>
       ))}
     </div>
@@ -358,6 +389,8 @@ export function OperationFieldsEditor({
   issues?: FormIssues;
   onChange: (form: OperationFieldsForm) => void;
 }): JSX.Element {
+  const readOnly = useReadOnly();
+  const reading = useRunReading();
   const setField = (name: string, value: string): void =>
     onChange({ ...form, fields: { ...form.fields, [name]: value } });
   const setJson = (name: string, value: string): void =>
@@ -394,6 +427,24 @@ export function OperationFieldsEditor({
           />
         ))}
 
+      {/* The model-group fields that are not knobs — see `SimpleField.prominent`. WHO ANSWERS is
+          part of what the block says, not a setting to go looking for, and on an `environment`
+          block it is the field that routes every descendant. */}
+      {SIMPLE_FIELDS.filter((spec) => spec.group === "model" && spec.prominent === true)
+        .filter((spec) => show.prompt)
+        .map((spec) => (
+          <SimpleFieldControl
+            key={spec.name}
+            spec={spec}
+            form={form}
+            targets={targets}
+            path={path}
+            issues={issues}
+            onChange={setField}
+            onLink={setRef}
+          />
+        ))}
+
       {/* Untyped by nature — only the function knows what it takes — so a JSON box rather than a
           generated form, and the one position where a reference must be written {"$ref": …}. */}
       {show.function ? <JsonFieldControl spec={JSON_FIELDS[0]!} form={form} onChange={setJson} /> : null}
@@ -415,17 +466,28 @@ export function OperationFieldsEditor({
       {/* §4.4: absent, the loader builds one object slot from the state's produced outputs. A
           delegated agent returns ONE STRING, so its output must be an artifact or the string is read
           as a record of named outputs, finds nothing, and the state fails. */}
+      {readOnly && form.output === null && (path !== "operation" || reading?.output === undefined) ? null : (
       <div {...(path === undefined ? { className: "slots" } : markFor(issues, `${path}.output`, "slots"))}>
         <div className="slots-head">
           <span>Operation output</span>
-          <button
-            type="button"
-            className="ghost sm"
-            onClick={() => onChange({ ...form, output: form.output === null ? emptySlotRow() : null })}
-          >
-            {form.output === null ? "+ Declare" : "Remove"}
-          </button>
+          {readOnly ? null : (
+            <button
+              type="button"
+              className="ghost sm"
+              onClick={() => onChange({ ...form, output: form.output === null ? emptySlotRow() : null })}
+            >
+              {form.output === null ? "+ Declare" : "Remove"}
+            </button>
+          )}
         </div>
+        {/* What the call actually RETURNED. On the declaration of the operation's output rather than
+            on any one slot, because that is what it is: one record, which the produced outputs are
+            then filled from by name.
+
+            Only on the OPERATION. The same editor draws the `environment` defaults layer, which
+            declares what descendants inherit and returns nothing — a result shown there would
+            attribute this state's answer to a block that never ran. */}
+        {path === "operation" ? <ReadValue value={reading?.output} /> : null}
         {form.output === null ? (
           <div className="sub">built from this state&apos;s produced outputs — the operation returns a record</div>
         ) : (
@@ -454,6 +516,7 @@ export function OperationFieldsEditor({
           </div>
         )}
       </div>
+      )}
 
       <SessionControl
         value={form.session}
@@ -461,17 +524,23 @@ export function OperationFieldsEditor({
         issues={issues}
         onChange={(session) => onChange({ ...form, session })}
       />
-      <label className="slot-opt wide" title="always branch, rather than appending when the position is still the head">
-        <input type="checkbox" checked={form.fork} onChange={(e) => onChange({ ...form, fork: e.target.checked })} />
-        fork the session rather than appending
-      </label>
+      {readOnly && !form.fork ? null : (
+        <label className="slot-opt wide" title="always branch, rather than appending when the position is still the head">
+          <input type="checkbox" checked={form.fork} onChange={(e) => onChange({ ...form, fork: e.target.checked })} />
+          fork the session rather than appending
+        </label>
+      )}
 
       <ConversationControl value={form.conversation} onChange={(conversation) => onChange({ ...form, conversation })} />
       <PermissionsControl value={form.permissions} onChange={(permissions) => onChange({ ...form, permissions })} />
 
-      <details className="model-knobs">
+      {/* Thirteen empty boxes when nothing is tuned, which is nearly always. A fold hides them from
+          an author; a reading should not carry them at all — and when it does carry them, it opens
+          them, because a reader is not going to guess that a closed fold has something in it. */}
+      {readOnly && !MODEL_KNOBS_SET(form) ? null : (
+      <details className="model-knobs" open={readOnly}>
         <summary>Model settings</summary>
-        {SIMPLE_FIELDS.filter((spec) => spec.group === "model").map((spec) => (
+        {SIMPLE_FIELDS.filter((spec) => spec.group === "model" && spec.prominent !== true).map((spec) => (
           <SimpleFieldControl
             key={spec.name}
             spec={spec}
@@ -508,6 +577,7 @@ export function OperationFieldsEditor({
           </div>
         </label>
       </details>
+      )}
     </div>
   );
 }

@@ -22,11 +22,34 @@
  * band is there for when that guess is wrong, which it will be on a wide window or a narrow one. It
  * appears on hover because it is a control about the drawing rather than part of the record, and a
  * run with eight bands would otherwise carry eight permanent buttons nobody is looking at.
+ *
+ * ## The grey between the panels is part of the record
+ *
+ * Two things are drawn on it, and both are there because a panel is a conversation and neither of
+ * them happened in one.
+ *
+ * A {@link BandNote} is a failure in a state that never opened a session — a child blocked before it
+ * could run, a composite that gave up because one of its children failed. It goes between the panels
+ * at the point in the run where it happened, which is the only place that is both in time order and
+ * not inside a conversation that did not have it. This is usually the whole error of a failed run,
+ * and until it was drawn here it was on screen nowhere at all.
+ *
+ * The gutter says which workflow a panel's conversation was OPENED by, beside the session id. The id
+ * is a name the engine chose — `default` on most runs — so on its own it tells you which panels share
+ * a context and nothing about what any of them is; the state that started it is the other half, and
+ * it is a place you can go.
  */
-import { useState, type JSX, type ReactNode } from "react";
+import { Fragment, useState, type JSX, type ReactNode } from "react";
 import { Icon } from "./icons";
 import { RunCard } from "./transcriptView";
-import type { SessionBand, SessionPiece, SessionSegment } from "./sessionBands";
+import {
+  placeNotes,
+  startersOf,
+  type BandNote,
+  type SessionBand,
+  type SessionPiece,
+  type SessionSegment,
+} from "./sessionBands";
 
 /** How a band with more than one session is arranged. */
 export type BandLayout = "columns" | "tabs";
@@ -147,6 +170,8 @@ function Sheet({
   segment,
   named = true,
   bare = false,
+  starter,
+  onOpenWorkflow,
   render,
 }: {
   segment: SessionSegment;
@@ -154,6 +179,10 @@ function Sheet({
   named?: boolean;
   /** True when this piece is the whole view and needs no card around it — see {@link isSolo}. */
   bare?: boolean;
+  /** The run that opened this conversation — see {@link startersOf}. */
+  starter?: SessionPiece | undefined;
+  /** Describe that run's workflow beside this. Absent ⇒ no host with a panel to describe it in. */
+  onOpenWorkflow?: ((piece: SessionPiece) => void) | undefined;
   render: (piece: SessionPiece) => ReactNode;
 }): JSX.Element {
   return (
@@ -169,6 +198,21 @@ function Sheet({
             // call that has not settled yet. Both are things that happened.
             <span className="sb-session sb-none">no conversation</span>
           )}
+          {/* WHICH workflow this conversation belongs to, and a way to go read it. A session id is a
+              name the engine chose — `default` on most runs — so on its own the gutter says which
+              panels share a context and nothing about what any of them is. The state that opened it
+              is the missing half, and it is a place: clicking it describes that workflow with this
+              run's own values against it. */}
+          {starter !== undefined && onOpenWorkflow !== undefined ? (
+            <button
+              type="button"
+              className="link sb-workflow ellip"
+              title={`${starter.node.stateId} — describe this run of it`}
+              onClick={() => onOpenWorkflow(starter)}
+            >
+              {starter.node.stateId}
+            </button>
+          ) : null}
         </div>
       ) : null}
       <section className={`sb-sheet${segment.resumed ? " resumed" : ""}${segment.paused ? " paused" : ""}`}>
@@ -213,11 +257,16 @@ function tabNameOf(segment: SessionSegment): string {
 function Band({
   band,
   bare = false,
+  starters,
+  onOpenWorkflow,
   render,
 }: {
   band: SessionBand;
   /** Passed through to the sheet — see {@link isSolo}. Only ever true for a one-segment band. */
   bare?: boolean;
+  /** Who opened each session in the run, by segment key — see {@link startersOf}. */
+  starters: Map<string, SessionPiece>;
+  onOpenWorkflow?: ((piece: SessionPiece) => void) | undefined;
   render: (piece: SessionPiece) => ReactNode;
 }): JSX.Element {
   const [layout, setLayout] = useState<BandLayout | null>(null);
@@ -228,7 +277,13 @@ function Band({
   if (solo) {
     return (
       <div className="sb-band">
-        <Sheet segment={band.segments[0]!} bare={bare} render={render} />
+        <Sheet
+          segment={band.segments[0]!}
+          bare={bare}
+          starter={starters.get(band.segments[0]!.key)}
+          {...(onOpenWorkflow !== undefined ? { onOpenWorkflow } : {})}
+          render={render}
+        />
       </div>
     );
   }
@@ -280,10 +335,50 @@ function Band({
       ) : (
         <div className="sb-columns">
           {band.segments.map((segment) => (
-            <Sheet key={segment.key} segment={segment} render={render} />
+            <Sheet
+              key={segment.key}
+              segment={segment}
+              starter={starters.get(segment.key)}
+              {...(onOpenWorkflow !== undefined ? { onOpenWorkflow } : {})}
+              render={render}
+            />
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * One failure, on the grey between the panels.
+ *
+ * Deliberately not a sheet and not a card. A panel is a conversation, and this is the opposite of
+ * one — the state it names never spoke, which is why it is here rather than inside something. So it
+ * is drawn as an annotation on the background the panels sit on: the same place a note would be
+ * written in the margin of a printed transcript, at the point in the stack where it happened.
+ */
+function NoteRow({ note }: { note: BandNote }): JSX.Element {
+  return (
+    <div className="sb-note" role="note">
+      <Icon name="alert" className="sb-note-icon" />
+      {note.stateId !== undefined ? (
+        <span className="sb-note-state mono ellip" title={note.stateId}>
+          {note.stateId.split("/").pop()}
+        </span>
+      ) : null}
+      <span className="sb-note-text">{note.text}</span>
+    </div>
+  );
+}
+
+/** The notes standing at one point in the stack, or nothing at all. */
+function Notes({ notes }: { notes: readonly BandNote[] }): JSX.Element | null {
+  if (notes.length === 0) return null;
+  return (
+    <div className="sb-notes">
+      {notes.map((note) => (
+        <NoteRow key={`${note.seq}:${note.stateId ?? ""}`} note={note} />
+      ))}
     </div>
   );
 }
@@ -292,20 +387,41 @@ function Band({
 export function SessionBandsView({
   bands,
   render,
+  notes = [],
+  onOpenWorkflow,
   empty,
 }: {
   bands: readonly SessionBand[];
   render: (piece: SessionPiece) => ReactNode;
+  /** Failures with no panel to appear in — see {@link BandNote} and {@link NoteRow}. */
+  notes?: readonly BandNote[];
+  /** Describe the workflow a panel's conversation was opened by — see the gutter in {@link Sheet}. */
+  onOpenWorkflow?: ((piece: SessionPiece) => void) | undefined;
   empty?: string;
 }): JSX.Element {
-  if (bands.length === 0) return <p className="empty">{empty ?? "This run has not said anything yet."}</p>;
+  // Notes even with no bands, and that is the case worth having: a run whose first child was blocked
+  // never opened a conversation at all, so "this run has not said anything yet" was the whole screen
+  // — a true sentence standing where the reason belonged.
+  if (bands.length === 0 && notes.length === 0) return <p className="empty">{empty ?? "This run has not said anything yet."}</p>;
   const bare = isSolo(bands);
+  const placed = placeNotes(notes, bands);
+  const starters = startersOf(bands);
   return (
     <div className="sb">
       <ZigDefs />
       {bands.map((band, i) => (
-        <Band key={`${band.startedAt}:${i}`} band={band} bare={bare} render={render} />
+        <Fragment key={`${band.startedAt}:${i}`}>
+          <Notes notes={placed[i]!} />
+          <Band
+            band={band}
+            bare={bare}
+            starters={starters}
+            {...(onOpenWorkflow !== undefined ? { onOpenWorkflow } : {})}
+            render={render}
+          />
+        </Fragment>
       ))}
+      <Notes notes={placed[bands.length]!} />
     </div>
   );
 }

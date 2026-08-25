@@ -47,7 +47,10 @@ function outcomeText(outcome: unknown, failure: unknown): string {
  */
 export function conversationView(project: Project, taskId: string, options: ConversationOptions = {}): ConversationView {
   const row = project.runtime.get(taskId);
-  if (!row) throw new Error(`unknown task '${taskId}'`);
+  // Named with the project it was looked for IN. A task id is a rowid in one database and every
+  // read about it names that database (see `taskDetailView`) — so when this fires, the useful half
+  // of the report is which one was asked, not which id was missing.
+  if (!row) throw new Error(`unknown task '${taskId}' in ${project.paths.projectDir}`);
   const meta = project.tasks.tryRead(taskId);
   const runs = project.runtime.listRuns(taskId);
   const runId = options.runId ?? runs[runs.length - 1]?.id;

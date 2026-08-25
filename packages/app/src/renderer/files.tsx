@@ -1406,6 +1406,8 @@ export function FilePanel({
 export function StateInspector({
   state,
   run,
+  onBack,
+  onOpenConfig,
   onRevealIssue,
 }: {
   state: StateView | null;
@@ -1417,6 +1419,27 @@ export function StateInspector({
    * its one thing is worse than its absence.
    */
   run?: RunSurface | undefined;
+  /**
+   * Leave this subject — the arrow beside the name.
+   *
+   * Present only where the panel was ASKED to describe a state rather than following the address:
+   * the link in a conversation's gutter takes the column off the run somebody was reading, and a
+   * column that cannot be given back is a one-way trip. Absent where the state IS what the view is
+   * standing on, which has nowhere to go back to.
+   */
+  onBack?: (() => void) | undefined;
+  /**
+   * Read the configuration a run here resolves against, in this column — see `configPanel.tsx`.
+   *
+   * Belongs in Environment, which is the part of this panel that is ALREADY about configuration: it
+   * names an executor, says whether that executor is available, and names a model — every one of
+   * which is decided somewhere else. This is that somewhere else, one click away instead of two
+   * views away.
+   *
+   * Offered even when no executor is named, and that is not an oversight: "inherited" is exactly the
+   * answer that sends somebody looking for what it was inherited FROM.
+   */
+  onOpenConfig?: (() => void) | undefined;
   /**
    * Show the control an issue is about, in the editor beside this panel.
    *
@@ -1430,7 +1453,14 @@ export function StateInspector({
   return (
     <div className="inspector">
       <div className="insp-crumb">
-        <span className="state-id">{state.stateId.split("/").pop()}</span>
+        {onBack !== undefined ? (
+          <button className="link back-arrow" onClick={onBack} title="back to what you were reading">
+            ←
+          </button>
+        ) : null}
+        <span className="state-id ellip" title={state.stateId}>
+          {state.stateId.split("/").pop()}
+        </span>
         <span className="sub">· the state</span>
       </div>
 
@@ -1516,6 +1546,15 @@ export function StateInspector({
             ) : null}
           </dl>
         )}
+        {/* Under both readings above, because it is what both of them rest on — the executor this
+            names and the model beside it are decided by the document behind this link. */}
+        {onOpenConfig !== undefined ? (
+          <div className="pane-actions">
+            <button className="link" onClick={onOpenConfig} title="read what a run here resolves against">
+              the effective configuration
+            </button>
+          </div>
+        ) : null}
       </section>
 
       {state.transitions.length > 0 ? (
@@ -1660,6 +1699,7 @@ export function FileInspector({
   doc,
   state,
   run,
+  onOpenConfig,
   onRevealIssue,
 }: {
   doc: FileSource | null;
@@ -1671,12 +1711,20 @@ export function FileInspector({
    * — which is the whole of "which files get a Run section": the ones that are states.
    */
   run?: RunSurface | undefined;
+  /**
+   * Passed through to {@link StateInspector} too — the same Environment section, so the same link.
+   *
+   * A state's executor is decided by the configuration whichever door you came in through, and a
+   * panel that offered the way to it only when it had been reached from a conversation would be the
+   * same section answering the same question differently depending on where you had been.
+   */
+  onOpenConfig?: (() => void) | undefined;
   /** Passed through to {@link StateInspector} — the only half of this panel with issues to reveal. */
   onRevealIssue?: ((path: string) => void) | undefined;
 }): JSX.Element {
   if (doc === null) return <p className="empty">Select a file.</p>;
   if (state !== null && doc.stateId !== undefined) {
-    return <StateInspector state={state} run={run} onRevealIssue={onRevealIssue} />;
+    return <StateInspector state={state} run={run} onOpenConfig={onOpenConfig} onRevealIssue={onRevealIssue} />;
   }
   return (
     <div className="inspector">
@@ -1842,6 +1890,7 @@ export function RunInspector({
   onStart,
   onCancel,
   onOpenState,
+  onOpenConfig,
 }: {
   /** The run being described. Null ⇒ the trail names an instance this task no longer has. */
   node: InstanceNode | null;
@@ -1859,6 +1908,17 @@ export function RunInspector({
   onStart: () => void;
   onCancel: () => void;
   onOpenState: (stateId: string) => void;
+  /**
+   * Read the configuration this run resolves against, in this column — see `configPanel.tsx`.
+   *
+   * A run names an executor and a model, and where those come from is one question further on. It is
+   * a link rather than a section because the answer is a whole document and this panel is about one
+   * execution; and it lands HERE rather than in Settings because leaving the run to find out what it
+   * ran under is exactly the trip this removes.
+   *
+   * Absent ⇒ no host holding a side panel, and the row is omitted rather than shown inert.
+   */
+  onOpenConfig?: (() => void) | undefined;
 }): JSX.Element {
   const sig = node === null ? null : signatureOf(node);
   // This run's own row, not the task's. `instanceId` is what tells four passes apart, and it is the
@@ -1917,6 +1977,18 @@ export function RunInspector({
                 </dd>
               </Fragment>
             ))}
+            {/* Last, and deliberately below the inputs: what a run was called with is a fact about
+                this execution, and the configuration is the ground all of them stand on. */}
+            {onOpenConfig !== undefined ? (
+              <>
+                <dt>config</dt>
+                <dd>
+                  <button className="link" onClick={onOpenConfig} title="read what this run resolves against">
+                    the effective configuration
+                  </button>
+                </dd>
+              </>
+            ) : null}
           </dl>
         </section>
       )}

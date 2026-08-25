@@ -29,7 +29,7 @@ import { TaskDetailSections, TaskHead } from "./detail";
 import { entriesOf, journalFor, sidechainEntriesOf, signatureOf } from "./transcript";
 import { instanceOf as instanceOfState, nodeAt, prunedTrail, type TrailStep } from "./trail";
 import { Paper, Transcript, durationOf } from "./transcriptView";
-import { bandsOf, instancesOf, piecesOf, type SessionPiece } from "./sessionBands";
+import { bandsOf, instancesOf, notesOf, piecesOf, type SessionPiece } from "./sessionBands";
 import { SessionBandsView } from "./sessionPanels";
 import type { FileSurfaceProps } from "./fileTypes";
 import { Composer } from "./composer";
@@ -209,7 +209,7 @@ export function RunConversation({
    */
   onOpenSidechain?: ((node: InstanceNode, call: string, name: string) => void) | undefined;
 }): JSX.Element {
-  const { conversation, liveTurn, sessions, sessionHistory, onLoadSessions } = context;
+  const { conversation, liveTurn, sessions, sessionHistory, onLoadSessions, onOpenWorkflow } = context;
   const openSidechain = onOpenSidechain ?? context.onWalkIntoSidechain;
   // The history spans every run of the task and instance ids restart on each, so an unscoped join
   // would match this run's `#i2` against three older runs' as well. The instance tree is the latest
@@ -217,6 +217,21 @@ export function RunConversation({
   const runId = detail?.runs[detail.runs.length - 1]?.runId;
   const bands = useMemo(() => bandsOf(piecesOf(parent, sessionHistory, runId)), [parent, sessionHistory, runId]);
   const needed = useMemo(() => instancesOf(bands), [bands]);
+  /**
+   * What went wrong in the states that never opened a conversation.
+   *
+   * The journal is the only record of them, and until this it was filtered per PANEL — a turn reached
+   * the screen by matching a piece's state id, so a child that was blocked before it could run and a
+   * composite that terminated because one of its children failed both matched nothing and were both
+   * dropped. That is the whole error of a failed run, silently absent from the one view somebody
+   * opens to find it.
+   *
+   * The RUN's, not this level's, even when a walk has gone in a few steps: a journal turn names the
+   * state it is about and not the instance, so there is nothing to scope by — and the failures being
+   * shown are a cascade anyway, in which the sentence explaining why a child gave up is on the child
+   * and the one explaining what that cost is on the parent. Each note names its own state.
+   */
+  const notes = useMemo(() => notesOf(conversation?.turns ?? [], bands), [conversation, bands]);
 
   // Every panel is open, so every transcript in them is needed — fetched in one round rather than
   // on expand, which is what the folded card design paid for and this one does not.
@@ -263,7 +278,15 @@ export function RunConversation({
   return (
     <div className="run-convo-wrap">
       <div className="run-convo scroll">
-        <SessionBandsView bands={bands} render={render} empty="This run has not entered a child yet." />
+        <SessionBandsView
+          bands={bands}
+          render={render}
+          notes={notes}
+          {...(onOpenWorkflow !== undefined
+            ? { onOpenWorkflow: (piece: SessionPiece) => onOpenWorkflow(piece.node.stateId, piece.node.instanceId) }
+            : {})}
+          empty="This run has not entered a child yet."
+        />
       </div>
       {/* Pinned below the scroller, not inside it: what you are about to say does not scroll away
           with what was already said. */}

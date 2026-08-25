@@ -29,6 +29,7 @@ import {
   type ConfigView,
 } from "@jaira/shared/browser";
 import { Chip, Disclosure, Field, FieldGrid, Level, NumInput, SelectInput, TextInput } from "./controls";
+import { LlmConfigForm, summariseLlmConfig, type LlmConfigDoc } from "./llmConfigForm";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
 
@@ -89,6 +90,7 @@ export function ConfigPane({ config, layer, busy, editable, onSave, children }: 
     <div className="cfg-pane">
       <Artifacts effective={effective} locked={locked} stated={stated} set={set} />
       <ExecEnvironment effective={effective} locked={locked} stated={stated} set={set} />
+      <DefaultEnvironment effective={effective} locked={locked} stated={stated} set={set} />
       <Policy effective={effective} locked={locked} stated={stated} set={set} />
 
       {CONFIG_SECTIONS.filter((s) => s.key === "memo" || s.key === "workflows").map((section) => (
@@ -203,6 +205,76 @@ function Artifacts({ effective, locked, stated, set }: Writer): JSX.Element {
           />
         </Field>
       </FieldGrid>
+    </section>
+  );
+}
+
+/** Where the project-wide defaults live in the config document — see {@link DefaultEnvironment}. */
+const DEFAULT_ENVIRONMENT = "executors.default.prompt.defaults";
+
+/**
+ * The project's own `environment` block: what fills a call that a state left unsaid.
+ *
+ * A state's `environment` is a defaults layer over its descendants; this is the same idea one level
+ * out, over every state in the project. It was reachable already — the executor tree's router node
+ * carries a `defaults` block and always has — but only by opening Executors, expanding the tree, and
+ * recognizing "Default call settings" as the thing you were looking for. Nobody found it, which for
+ * a setting is the same as not having it.
+ *
+ * So it is surfaced here under the name it has everywhere else, and it writes to the SAME place:
+ * `executors.default.prompt.defaults`. One storage location, two ways in. A second key meaning the
+ * same thing would be a second answer to "what model does this project use by default", and the two
+ * would disagree the first time somebody edited one of them.
+ *
+ * Only the call surface, deliberately. An `environment` may also carry `prompt`, `function` and
+ * `args`, and a project-wide default for any of those is not a default — it is a state's whole
+ * operation, applied to every state that never asked for one.
+ */
+function DefaultEnvironment({ effective, locked, stated, set }: Writer): JSX.Element {
+  const executors = (effective["executors"] ?? {}) as Record<string, unknown>;
+  const prompt = ((executors["default"] as Record<string, unknown> | undefined)?.["prompt"] ?? {}) as Record<string, unknown>;
+  const defaults = (prompt["defaults"] ?? {}) as Record<string, unknown>;
+  const model = typeof defaults["model"] === "string" ? (defaults["model"] as string) : "";
+  const { model: _model, ...knobs } = defaults;
+
+  return (
+    <section className="cfg-group">
+      <header className="cfg-group-head">
+        <h4>Default environment</h4>
+        <p className="cfg-hint">
+          What a state that names nothing is filled in with — the same fields a state&rsquo;s own
+          <code> environment </code> block carries, one level out. Applied UNDER whatever a state
+          says, so naming a field there always wins.
+        </p>
+      </header>
+
+      <Field
+        label="Default model"
+        param={`${DEFAULT_ENVIRONMENT}.model`}
+        hint="A bare id routes to whatever serves that family here — 'claude-sonnet-5' reaches the CLI agent on a machine with no API key. Prefix it ('claude-cli/sonnet') to insist on one route. Empty leaves the choice to the state."
+        set={stated(`${DEFAULT_ENVIRONMENT}.model`)}
+      >
+        <TextInput
+          value={model}
+          mono
+          placeholder="left to the state"
+          disabled={locked}
+          onChange={(v) => set(`${DEFAULT_ENVIRONMENT}.model`, v === "" ? undefined : v)}
+        />
+      </Field>
+
+      <LlmConfigForm
+        value={knobs as LlmConfigDoc}
+        disabled={locked}
+        onChange={(next) => {
+          // The model is written by the field above and merged back here, so editing a knob cannot
+          // drop it — the same shape the executor tree's own defaults editor uses, for the same
+          // reason: `LlmConfigForm` owns every key it renders and would otherwise take the block.
+          const merged = { ...next, ...(model === "" ? {} : { model }) };
+          set(DEFAULT_ENVIRONMENT, Object.keys(merged).length === 0 ? undefined : merged);
+        }}
+      />
+      <p className="cfg-hint">{summariseLlmConfig(knobs as LlmConfigDoc)}</p>
     </section>
   );
 }
