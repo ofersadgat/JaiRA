@@ -42,6 +42,7 @@
     "monaco-editor": "^0.56.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "typescript": "^5.7.2",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
