@@ -219,6 +219,25 @@ function mimeOfSchema(schema: unknown): string | undefined {
  * about which rendering answers the question the reader has. The raw form is always last and always
  * present — it is what the rich one is checked against.
  */
+/**
+ * How an artifact should be EDITED, decided by media type the way `viewsFor` decides how it is read.
+ *
+ * `readonly` is a real answer and the important one: a PNG has no text to edit, and the honest
+ * response is to show it and say so rather than to hand someone a textarea full of base64.
+ *
+ * The type wins over the text for the same reason it does in `viewsFor` — the producer said what it
+ * made, and sniffing is what you do when nobody did. So the markdown sniff fires only where there
+ * is no declared type at all.
+ */
+export function editorKindOf(mime: string | undefined, text: string): "markdown" | "json" | "text" | "readonly" {
+  if (mediaKindOf(mime) !== undefined) return "readonly";
+  // `application/…+json` inherits JSON's editor, the way `mimeFallbacks` walks a vendor type.
+  if (mime !== undefined && (mime === "application/json" || mime.endsWith("+json"))) return "json";
+  if (mime === "text/markdown") return "markdown";
+  if (mime === undefined && looksLikeMarkdown(text)) return "markdown";
+  return "text";
+}
+
 export function viewsFor(value: unknown, hint: ViewHint = {}): ViewId[] {
   // An ARTIFACT is a reference to content rather than the content itself, so it is read as what it
   // carries — with the envelope kept behind it, because the media type and the reference are exactly

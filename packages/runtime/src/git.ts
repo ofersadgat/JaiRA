@@ -166,6 +166,26 @@ export class Git implements GitRead, GitLifecycle {
     return (await this.tryRun(["rev-parse", "--is-inside-work-tree"])) === "true";
   }
 
+  /**
+   * Who git would attribute a commit here to.
+   *
+   * `git config` rather than a config file read, so the whole precedence chain answers — repo, then
+   * global, then system — which is the one that matters: most people set their name once, globally,
+   * and never again per project. `tryRun` throughout because an unset name is the ordinary state of
+   * a fresh machine, not a failure: the caller falls back to a placeholder rather than refusing to
+   * show a name.
+   */
+  async identity(): Promise<{ name?: string; email?: string }> {
+    const [name, email] = await Promise.all([
+      this.tryRun(["config", "--get", "user.name"]),
+      this.tryRun(["config", "--get", "user.email"]),
+    ]);
+    return {
+      ...(name === undefined || name.length === 0 ? {} : { name }),
+      ...(email === undefined || email.length === 0 ? {} : { email }),
+    };
+  }
+
   /** The repository root git itself reports (its own path view). */
   async root(): Promise<string | undefined> {
     return this.tryRun(["rev-parse", "--show-toplevel"]);

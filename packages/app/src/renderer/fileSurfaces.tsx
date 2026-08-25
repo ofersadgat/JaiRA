@@ -10,7 +10,7 @@
  * `text/x-typescript` gets nothing, and therefore gets the plain editor with no viewer above it,
  * which is the correct surface for a file whose source *is* its presentation.
  */
-import { useEffect, useMemo, useState, type JSX } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from "react";
 import { parse as parseYaml } from "yaml";
 import {
   CONFIG_JSON,
@@ -29,6 +29,9 @@ import { docKey, useDraftBox } from "./drafts";
 import { EditorActions, type EditorTab } from "./editorChrome";
 import { registerFileSurface, type FileSurfaceProps } from "./fileTypes";
 import { MarkdownView } from "./markdown";
+
+/** Loaded on first sight of a markdown file — see `valueView.tsx` for why it is not bundled in. */
+const LazyMarkdownEditor = lazy(() => import("./markdownEditor").then((m) => ({ default: m.MarkdownEditor })));
 import { ValueView } from "./valueView";
 import { SchemaJsonEditor, schemaReferenceProps } from "./schemaEditor";
 import { WorkflowEditor } from "./stateEditor";
@@ -48,6 +51,31 @@ import { WorkflowSyncPanel } from "./syncPanel";
  * draft lives in the store, keyed by this file — which is what makes clicking another file in the
  * tree, or spending a minute on the board, something you can do mid-edit.
  */
+/**
+ * Markdown, edited in place (the live-preview editor).
+ *
+ * The same draft box, Save and Revert every other editing surface here uses — only the control in
+ * the middle differs, which is the point of the registry.
+ */
+function MarkdownFileEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.Element {
+  const draft = useDraftBox(context.drafts, context.onDraft, docKey(doc.layer, doc.path), doc.text);
+  return (
+    <div className="file-edit">
+      <Suspense fallback={<MarkdownView doc={doc} busy={busy} onSave={onSave} context={context} />}>
+        <LazyMarkdownEditor text={draft.text} onChange={draft.set} />
+      </Suspense>
+      <EditorActions
+        dirty={draft.dirty || !doc.exists}
+        busy={busy}
+        onSave={() => onSave(draft.text)}
+        onRevert={draft.revert}
+      >
+        {doc.exists ? null : <span className="sub">new file — saving creates it</span>}
+      </EditorActions>
+    </div>
+  );
+}
+
 export function TextEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.Element {
   const draft = useDraftBox(context.drafts, context.onDraft, docKey(doc.layer, doc.path), doc.text);
 
@@ -483,8 +511,11 @@ export function ConfigEdit({ doc, busy, context }: FileSurfaceProps): JSX.Elemen
 
 registerFileSurface("text/plain", "edit", TextEdit);
 
-registerFileSurface("text/markdown", "view", MarkdownView);
-registerFileSurface("text/markdown", "edit", TextEdit);
+// Markdown gets the live-preview editor in BOTH halves — the rendering IS the editor, so a viewer
+// and an editor would be two renderings of one document that can disagree. Registered here rather
+// than special-cased in one caller, which is what "register it to be used everywhere" means: the
+// Files view, the gate components and the value viewer all reach the same component.
+registerFileSurface("text/markdown", "edit", MarkdownFileEdit);
 
 // Any markdown under `workflows/` — each describes the workflow it is named for, and `workflow.md`
 // describes the whole layer. The viewer is the sync panel, which keeps the markdown preview behind a

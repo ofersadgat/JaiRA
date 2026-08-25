@@ -578,7 +578,7 @@ export default function App(): JSX.Element {
     view === "tasks" &&
     detail !== null &&
     pending[0] !== undefined &&
-    pending[0].component === "user-approve-changeset" &&
+    pending[0].component === "review_artifacts" &&
     (pending[0].about === detail.taskId || pending[0].taskId === detail.taskId)
       ? pending[0]
       : null;
@@ -1827,6 +1827,13 @@ export default function App(): JSX.Element {
           error={state.error}
           onSubmit={(value) => actions.answer(pending[0]!.requestId, value)}
           services={reviewerServices}
+          editor={{
+            drafts: state.drafts,
+            onDraft: actions.setDraft,
+            validateSchema: actions.validateSchema,
+            wrapJson: state.settings.wrapJson,
+            onWrapJson: (wrap) => void actions.setWrapJson(wrap),
+          }}
         />
       ) : null}
 

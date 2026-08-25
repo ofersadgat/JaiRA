@@ -14,6 +14,7 @@ export * from "./schemas";
 export * from "./view";
 export * from "./ipc";
 export * from "./components";
+export * from "./reviewNotes";
 export * from "./componentGallery";
 export * from "./conversation";
 export * from "./slotTypes";

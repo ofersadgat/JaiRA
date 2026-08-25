@@ -138,6 +138,7 @@ import {
   newRegistry,
   registerUserFunctions,
   prepareUserFunctions,
+  Git,
   NodeExec,
   parseFakeRules,
   policyCanEscalate,
@@ -173,7 +174,7 @@ import {
   changesetReviewLoopFiles,
   CHANGESET_REVIEW_ID,
   CHANGESET_REVIEW_LOOP_ID,
-  USER_APPROVE_CHANGESET,
+  REVIEW_ARTIFACTS,
   QuestionHub,
   type ApprovalRequest,
   type ExecObserver,
@@ -1281,7 +1282,7 @@ export class AppService {
     // A changeset gate parked by a REVIEW task is about the task whose worktree it reviews — the
     // join the review task's labels carry (`["jaira", "changeset-review", <target>]`), and what
     // lets the reviewer render in the reviewed task's conversation (§8.1's default host).
-    if (request.component === USER_APPROVE_CHANGESET && pending.taskId !== "") {
+    if (request.component === REVIEW_ARTIFACTS && pending.taskId !== "") {
       const labels = owner?.project.tasks.tryRead(pending.taskId)?.labels ?? [];
       const at = labels.indexOf("changeset-review");
       const about = at >= 0 ? labels[at + 1] : undefined;
@@ -1307,7 +1308,7 @@ export class AppService {
   }
 
   /** The parsed contract for a parked request, when it has one — with the request's own inputs,
-   *  because `user-approve-changeset` is validated against the changeset it was asked about. */
+   *  because `review_artifacts` is validated against the changeset it was asked about. */
   private configOf(requestId: string): { config: ComponentConfig; inputs: Record<string, JsonValue> } | undefined {
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
     const request = owner?.hub.list().find((r) => r.requestId === requestId);
@@ -1992,7 +1993,7 @@ export class AppService {
       // gates itself with the same policy (DESIGN §10.1).
       registerCommandFunction(registry, { execEnv: config.execEnvironment, exec });
       // The changeset application step and its status helper (CHANGESETS.md §4.2). The GATE is not
-      // here: `user-approve-changeset` is interactive and reaches the registry only through the
+      // here: `review_artifacts` is interactive and reaches the registry only through the
       // hub, like every other component — which is the §4.1 guarantee.
       registerChangesetFunctions(registry);
     }
@@ -4130,6 +4131,53 @@ export class AppService {
    * still resolve, and an artifact reopened after eviction simply mints a new one.
    */
   private readonly served = new Map<string, { body: string; mediaType: string; interactive: boolean }>();
+
+  /**
+   * Who git would sign a commit as here — the name a review note carries (decision 0002).
+   *
+   * Cached for the process: `git config` spawns, a reviewer writes several notes in a sitting, and
+   * a name that changed mid-session is not a case worth a subprocess per comment. Asked of the
+   * project's own repository so a per-repo identity wins, and answered as `{}` rather than thrown
+   * when there is no project or no git at all — an unsigned note is better than a refused one.
+   */
+  private readonly identities = new Map<string, { name?: string; email?: string }>();
+
+  async gitIdentity(request: { project?: ProjectRef } = {}): Promise<{ name?: string; email?: string }> {
+    const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
+    const dir = session?.project.paths.projectDir;
+    const key = dir ?? "~";
+    const cached = this.identities.get(key);
+    if (cached !== undefined) return cached;
+
+    /**
+     * The project first, then the machine.
+     *
+     * Asking only the project was wrong in the cases that come up most: a review can be ABOUT the
+     * shared root, or a directory that is not a git repository at all, and both answered `{}` — so
+     * every note was signed "you" on a machine whose global `user.name` was sitting right there.
+     * `git config --get` walks repo → global → system by itself; running it somewhere that is not a
+     * repo simply skips the first rung.
+     */
+    let identity: { name?: string; email?: string } = {};
+    if (session !== undefined && dir !== undefined) {
+      try {
+        identity = await gitFor(session.project, dir).identity();
+      } catch {
+        /* Not a repo, or no git. The machine-wide read below is the answer. */
+      }
+    }
+    if (identity.name === undefined) {
+      try {
+        const anywhere = new Git({ exec: new NodeExec(), repoDir: homedir() });
+        const global = await anywhere.identity();
+        identity = { ...global, ...identity };
+      } catch {
+        /* No git on this machine. An unsigned note is better than a refused one. */
+      }
+    }
+    this.identities.set(key, identity);
+    return identity;
+  }
 
   /**
    * Everything one task produced, oldest first — what the artifacts panel lists.

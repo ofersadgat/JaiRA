@@ -79,7 +79,7 @@ import {
   UserEventHub,
   registerCommandFunction,
   registerGenericAgents,
-  USER_APPROVE_CHANGESET,
+  REVIEW_ARTIFACTS,
   worktreeChangeset,
   changesetReviewFiles,
   changesetReviewLoopFiles,
@@ -390,7 +390,7 @@ function buildRunEnvironment(
   // The terminal reviewer (§8.4): the same registered function, answered at a CLI prompt — the hub
   // is process-local, so this needs no new channel. Only when nothing scripted it and a person is
   // actually attached; headless, an unanswerable gate should fail the state, not hang the run.
-  if (!registry.functions.has(USER_APPROVE_CHANGESET) && process.stdin.isTTY === true && process.stdout.isTTY === true) {
+  if (!registry.functions.has(REVIEW_ARTIFACTS) && process.stdin.isTTY === true && process.stdout.isTTY === true) {
     registerCliChangesetReviewer(registry);
   }
   // How prompt states reach whatever answers them — the provider routes with their credentials
@@ -628,7 +628,7 @@ async function cmdChangesetReview(argv: string[], io: CliIo): Promise<number> {
     // buildRunEnvironment registered the apply/status/revise family and, when a terminal is
     // attached and nothing scripted it, the terminal reviewer. Nothing to answer the gate is a
     // refusal HERE, before any work — not a hung run.
-    if (!registry.functions.has(USER_APPROVE_CHANGESET)) {
+    if (!registry.functions.has(REVIEW_ARTIFACTS)) {
       throw new Error("nothing can answer the gate: attach a terminal, or script it with --interactions");
     }
     io.stdout(`reviewing ${changeset.changes.length} change(s) in ${worktree} against ${base}\n`);

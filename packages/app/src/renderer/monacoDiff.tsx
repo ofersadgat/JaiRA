@@ -114,6 +114,34 @@ function editorFont(): { fontFamily: string; fontSize: number } {
   };
 }
 
+import type { PendingSelection } from "./reviewNotes";
+
+/**
+ * What a host can ask of a diff editor that is already on screen.
+ *
+ * Imperative on purpose. Reverting a hunk is not a value the host can compute and hand down — it
+ * needs the editor's own alignment between the two sides, which is derived from the diff algorithm
+ * rather than from the two strings.
+ */
+export interface DiffActions {
+  /**
+   * Put the original's text back over the lines the person has selected.
+   *
+   * Selecting nothing reverts nothing: that case is the CHANGE-level decision, which belongs to the
+   * reviewer rather than to the editor, and doing it silently here would make one button mean two
+   * very different things depending on where the caret happened to be.
+   *
+   * Returns the modified text afterwards, or `null` when there was nothing to do.
+   */
+  revertSelectedLines(): string | null;
+  /** Whether the selection currently covers any changed line — what the button's enabled state reads. */
+  hasChangedSelection(): boolean;
+}
+
+/** The band a diff pane is allowed to occupy before it starts scrolling instead of growing. */
+const MIN_DIFF_HEIGHT = 120;
+const MAX_DIFF_HEIGHT = 620;
+
 export interface MonacoDiffProps {
   original: string;
   modified: string;
@@ -121,6 +149,13 @@ export interface MonacoDiffProps {
   mime: string;
   /** Called with the modified side's full text on every edit — §4.1's `merged.content` feed. */
   onModified?: (text: string) => void;
+  /**
+   * A selection in the modified side, in the terms a review note anchors to — or `null` when there
+   * is none. See the subscription in the body for why this cannot come from the DOM.
+   */
+  onSelect?: (selection: PendingSelection | null) => void;
+  /** Hands the host the actions that only the live editor can perform — see {@link DiffActions}. */
+  onReady?: (actions: DiffActions | null) => void;
   readOnly?: boolean;
   /**
    * Two columns, or one with the removals struck through above the additions.
@@ -133,12 +168,27 @@ export interface MonacoDiffProps {
   sideBySide?: boolean;
 }
 
-export function MonacoDiffPane({ original, modified, mime, onModified, readOnly, sideBySide }: MonacoDiffProps): JSX.Element {
+export function MonacoDiffPane({
+  original,
+  modified,
+  mime,
+  onModified,
+  onSelect,
+  onReady,
+  readOnly,
+  sideBySide,
+}: MonacoDiffProps): JSX.Element {
   const host = useRef<HTMLDivElement>(null);
   // The latest callback, without tearing the editor down per render: the editor is created once per
   // (original, mime) and the subscription reads through the ref.
   const report = useRef(onModified);
   report.current = onModified;
+  const selected = useRef(onSelect);
+  selected.current = onSelect;
+  /** The live editor, for the effects and the imperative actions that outlive its creation. */
+  const editorRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
+  const ready = useRef(onReady);
+  ready.current = onReady;
 
   useEffect(() => {
     const node = host.current;
@@ -149,16 +199,150 @@ export function MonacoDiffPane({ original, modified, mime, onModified, readOnly,
     const editor = monaco.editor.createDiffEditor(node, {
       automaticLayout: true,
       renderSideBySide: sideBySide !== false,
+      // Monaco collapses side-by-side to inline on its own below `renderSideBySideInlineBreakpoint`
+      // (900px by default). The reviewer's detail pane sits under that in the ordinary gate modal, so
+      // the toggle appeared to do nothing at all — the editor was overruling it every time. The
+      // person asking for two columns in a narrow pane knows it will be narrow.
+      useInlineViewWhenSpaceIsLimited: false,
       originalEditable: false,
       readOnly: readOnly === true,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       renderOverviewRuler: false,
+      // The gutter, trimmed to what a diff actually needs.
+      //
+      // Monaco's defaults reserve room for a glyph margin, a folding column, a code-lens strip and
+      // five digits of line number — sensible in an IDE, and in a review pane it is an inch of empty
+      // space between the frame and the first character, doubled because an inline diff draws two
+      // line-number columns.
+      glyphMargin: false,
+      folding: false,
+      lineNumbersMinChars: 3,
+      lineDecorationsWidth: 2,
+      overviewRulerLanes: 0,
+      padding: { top: 6, bottom: 6 },
       theme: themeOf(),
       ...editorFont(),
     });
     editor.setModel({ original: originalModel, modified: modifiedModel });
+    editorRef.current = editor;
     const edits = modifiedModel.onDidChangeContent(() => report.current?.(modifiedModel.getValue()));
+
+    /**
+     * Report a selection in the MODIFIED side, in the same terms a DOM selection is reported.
+     *
+     * Monaco owns its own selection model, so the `selectionchange`/`Range` machinery the rest of
+     * the reviewer anchors notes with sees nothing in here. Without this, moving the detail pane to
+     * Monaco silently removed the ability to comment on a passage of a diff — the feature would
+     * still be there, with nowhere left to use it.
+     *
+     * Offsets come from `getOffsetAt`, which counts into the modified text — the same thing
+     * `ReviewNote.range` means everywhere else. The rect is the editor's own coordinates converted
+     * to the viewport, so the composer opens over the words rather than over the pane's corner.
+     */
+    /**
+     * Size the editor to its content, up to a ceiling, then let it scroll.
+     *
+     * Without this the host is whatever height CSS gave it, so a three-line change sits in a pane
+     * of empty grey and a four-hundred-line one is clipped to the same box. `onDidContentSizeChange`
+     * is the only honest source for the number: it accounts for wrapped lines and for the diff's own
+     * inserted view-zones, which a line count cannot.
+     */
+    const fit = (): void => {
+      const inner = editor.getModifiedEditor();
+      const original = editor.getOriginalEditor();
+      const content = Math.max(inner.getContentHeight(), original.getContentHeight());
+      node.style.height = `${Math.min(Math.max(content + 8, MIN_DIFF_HEIGHT), MAX_DIFF_HEIGHT)}px`;
+      editor.layout();
+    };
+    const sized = [
+      editor.getModifiedEditor().onDidContentSizeChange(fit),
+      editor.getOriginalEditor().onDidContentSizeChange(fit),
+    ];
+    fit();
+
+    /** Every diff hunk the modified-side selection touches. */
+    const touchedChanges = (): monaco.editor.ILineChange[] => {
+      const selection = editor.getModifiedEditor().getSelection();
+      // A CURSOR is not a selection. Without this, resting the caret anywhere inside a hunk turned
+      // the whole-change Revert into a line revert, so refusing a change quietly became editing it.
+      if (selection === null || selection.isEmpty()) return [];
+      return (editor.getLineChanges() ?? []).filter((change) => {
+        const from = Math.min(change.modifiedStartLineNumber, change.modifiedEndLineNumber);
+        const to = Math.max(change.modifiedStartLineNumber, change.modifiedEndLineNumber);
+        return selection.startLineNumber <= to + 1 && selection.endLineNumber >= from - 1;
+      });
+    };
+
+    const picks = editor.getModifiedEditor().onDidChangeCursorSelection((e) => {
+      const report = selected.current;
+      if (report === undefined) return;
+      const model = modifiedModel;
+      const start = model.getOffsetAt(e.selection.getStartPosition());
+      const end = model.getOffsetAt(e.selection.getEndPosition());
+      if (end <= start) {
+        report(null);
+        return;
+      }
+      const quote = model.getValueInRange(e.selection);
+      if (quote.trim().length === 0) {
+        report(null);
+        return;
+      }
+      const inner = editor.getModifiedEditor();
+      const top = inner.getTopForPosition(e.selection.endLineNumber, e.selection.endColumn);
+      const box = node.getBoundingClientRect();
+      const y = box.top + top - inner.getScrollTop();
+      const lineHeight = inner.getOption(monaco.editor.EditorOption.lineHeight);
+      report({
+        quote,
+        start,
+        end,
+        rect: { top: y, bottom: y + lineHeight, left: box.left + 40, right: box.right },
+      });
+    });
+
+    /**
+     * Line-level revert.
+     *
+     * `getLineChanges()` is the editor's own alignment of the two sides, and it is the only thing
+     * that knows which original lines a run of modified lines REPLACED — a pure text diff computed
+     * again out here could disagree with what is drawn, and reverting to something other than what
+     * the person is pointing at is the worst possible outcome for this control.
+     *
+     * Applied bottom-up so that earlier line numbers stay valid while later ones are rewritten.
+     */
+    const actions: DiffActions = {
+      hasChangedSelection: () => touchedChanges().length > 0,
+      revertSelectedLines: () => {
+        const touched = touchedChanges();
+        if (touched.length === 0) return null;
+        const edits: monaco.editor.IIdentifiedSingleEditOperation[] = [];
+        for (const change of [...touched].reverse()) {
+          const insertion = change.originalEndLineNumber < change.originalStartLineNumber;
+          const deletion = change.modifiedEndLineNumber < change.modifiedStartLineNumber;
+          const text = insertion
+            ? ""
+            : `${originalModel
+                .getValueInRange({
+                  startLineNumber: change.originalStartLineNumber,
+                  startColumn: 1,
+                  endLineNumber: change.originalEndLineNumber,
+                  endColumn: originalModel.getLineMaxColumn(change.originalEndLineNumber),
+                })}
+`;
+          // A pure insertion has no modified line to keep, so the whole run goes; a pure deletion has
+          // no modified line to overwrite, so the original text is spliced in at that point.
+          const range = deletion
+            ? new monaco.Range(change.modifiedStartLineNumber + 1, 1, change.modifiedStartLineNumber + 1, 1)
+            : new monaco.Range(change.modifiedStartLineNumber, 1, change.modifiedEndLineNumber + 1, 1);
+          edits.push({ range, text });
+        }
+        modifiedModel.pushEditOperations([], edits, () => null);
+        return modifiedModel.getValue();
+      },
+    };
+    ready.current?.(actions);
 
     // Follow the app's theme while the pane is open — the attribute is the one source of truth.
     // Theme AND typography: both are written onto the root — one as a data attribute, the other as
@@ -171,8 +355,12 @@ export function MonacoDiffPane({ original, modified, mime, onModified, readOnly,
     themes.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "style"] });
 
     return () => {
+      ready.current?.(null);
+      editorRef.current = null;
       themes.disconnect();
       edits.dispose();
+      picks.dispose();
+      for (const s of sized) s.dispose();
       editor.dispose();
       originalModel.dispose();
       modifiedModel.dispose();
@@ -182,6 +370,27 @@ export function MonacoDiffPane({ original, modified, mime, onModified, readOnly,
     // user's cursor.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [original, mime, readOnly, sideBySide]);
+
+  /**
+   * Follow the `modified` prop after creation.
+   *
+   * It is deliberately NOT in the effect above's dependencies — re-creating the editor on every
+   * keystroke would throw away the caret, the scroll position and the undo stack. But that left it
+   * unable to follow a change made from OUTSIDE, which is exactly what "Undo my edits" is: the prop
+   * went back to the proposal and the editor carried on showing the edit.
+   *
+   * Guarded on inequality so this never fights the person typing: an edit they just made is already
+   * the model's value by the time the prop catches up, and writing it back would move their caret.
+   */
+  useEffect(() => {
+    const model = editorRef.current?.getModel()?.modified;
+    if (model === undefined || model === null) return;
+    if (model.getValue() !== modified) {
+      // `pushEditOperations` rather than `setValue`: it keeps the undo stack, so an outside revert
+      // is one more step the person can undo rather than a wall their history stops at.
+      model.pushEditOperations([], [{ range: model.getFullModelRange(), text: modified }], () => null);
+    }
+  }, [modified]);
 
   return <div className="monaco-host" ref={host} />;
 }

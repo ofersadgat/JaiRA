@@ -14,6 +14,7 @@ import {
   formatChangesetSource,
   parseChangesetSource,
   reviewSettled,
+  deriveDecisions,
   type Changeset,
 } from "../src/changeset";
 
@@ -182,10 +183,20 @@ describe("decision validation (§4.1) — the main-process re-check", () => {
     expect((checked as { errors: string }).errors).toContain("ghost");
   });
 
-  it("allows content only on merged — it is the user's own edit, nothing else", () => {
-    const decisions = decideAll("merged").map((d) => (d.id === "c1" ? { ...d, decision: "denied", content: "x" } : d));
-    const checked = checkDecisions(CHANGESET, { decisions });
-    expect((checked as { errors: string }).errors).toContain("merged");
+  it("refuses content on a change that is not being kept — there is nothing left to hold it", () => {
+    for (const decision of ["denied", "reverted"]) {
+      const decisions = decideAll("merged").map((d) => (d.id === "c1" ? { ...d, decision, content: "x" } : d));
+      expect(checkDecisions(CHANGESET, { decisions })).toMatchObject({ ok: false });
+    }
+  });
+
+  it("allows content on every decision that keeps the change (decision 0002)", () => {
+    // `approved` and `comment` matter as much as `merged` here: derivation produces both on a round
+    // that is going back, and the reviewer's own edit has to survive to the next one.
+    for (const decision of ["merged", "approved", "comment"]) {
+      const decisions = decideAll("merged").map((d) => (d.id === "c1" ? { ...d, decision, content: "x" } : d));
+      expect(checkDecisions(CHANGESET, { decisions })).toMatchObject({ ok: true });
+    }
   });
 
   it("a round with comments left is not settled; one without is (§3.3 flow 1)", () => {
@@ -203,5 +214,109 @@ describe("the wire parse", () => {
 
   it("refuses a source nothing could resolve", () => {
     expect(() => changesetOf({ source: "somewhere/on/disk", changes: [] })).toThrow(/refused/);
+  });
+});
+
+/**
+ * Derivation (decision 0002): nobody clicks a decision, so what is tested is the mapping from what
+ * the reviewer DID onto the five kinds, and the one set-level rule that picks between judgement and
+ * application.
+ */
+describe("deriveDecisions", () => {
+  const changes = [
+    { id: "c1", after: "a" },
+    { id: "c2", after: "b" },
+    { id: "c3", after: "c" },
+  ];
+  const note = {
+    artifact: "c2",
+    quote: "b",
+    body: "wrong",
+    author: "Ofer Sadgat",
+    at: "2026-08-24T12:00:00.000Z",
+  };
+
+  it("applies everything when nobody said anything — untouched means approved, and approved means merged", () => {
+    expect(deriveDecisions(changes, {})).toEqual([
+      { id: "c1", decision: "merged" },
+      { id: "c2", decision: "merged" },
+      { id: "c3", decision: "merged" },
+    ]);
+  });
+
+  it("turns an X into a revert on a final round", () => {
+    const decided = deriveDecisions(changes, { c2: { excluded: true } });
+    expect(decided.map((d) => d.decision)).toEqual(["merged", "reverted", "merged"]);
+  });
+
+  it("holds the WHOLE set back the moment one change is commented on", () => {
+    const decided = deriveDecisions(changes, { c2: { comment: "explain this" } });
+    // c1 and c3 are judged, not applied: a round going back must not have written anything first.
+    expect(decided.map((d) => d.decision)).toEqual(["approved", "comment", "approved"]);
+    expect(decided[1]!.comment).toBe("explain this");
+  });
+
+  it("counts an anchored note as a comment, exactly as the whole-change box does", () => {
+    const decided = deriveDecisions(changes, { c2: { notes: [note] } });
+    expect(decided.map((d) => d.decision)).toEqual(["approved", "comment", "approved"]);
+    expect(decided[1]!.notes).toHaveLength(1);
+  });
+
+  it("treats a review-level comment as a comment on everything", () => {
+    const decided = deriveDecisions(changes, {}, "this whole approach is wrong");
+    // Nothing is `comment` — no individual change was singled out — but nothing is applied either.
+    expect(decided.map((d) => d.decision)).toEqual(["approved", "approved", "approved"]);
+    expect(reviewSettled(decided)).toBe(false);
+  });
+
+  it("keeps an X refused on a round that is only being commented on", () => {
+    const decided = deriveDecisions(changes, { c2: { excluded: true } }, "one more pass please");
+    // `denied`, not `comment`: the review-level note blocks the conversion without overwriting a
+    // change's own disposition.
+    expect(decided.map((d) => d.decision)).toEqual(["approved", "denied", "approved"]);
+  });
+
+  it("ignores whitespace in both comment boxes", () => {
+    expect(deriveDecisions(changes, { c2: { comment: "   " } }, "  ").every((d) => d.decision === "merged")).toBe(true);
+  });
+
+  it("carries the reviewer's own edit, and only when it differs from what was proposed", () => {
+    expect(deriveDecisions(changes, { c1: { content: "edited" } })[0]).toEqual({
+      id: "c1",
+      decision: "merged",
+      content: "edited",
+    });
+    expect(deriveDecisions(changes, { c1: { content: "a" } })[0]).toEqual({ id: "c1", decision: "merged" });
+  });
+
+  it("drops an edit on a change that was X'd out — there is nothing left to edit", () => {
+    expect(deriveDecisions(changes, { c1: { excluded: true, content: "edited" } })[0]).toEqual({
+      id: "c1",
+      decision: "reverted",
+    });
+  });
+
+  it("keeps the reviewer's edit across a round that is going back", () => {
+    // The case that widened `checkDecisions`: c1 was edited, c2 was commented on, so c1 lands as
+    // `approved` — not applied, but still holding what the reviewer typed for the next pass.
+    const decided = deriveDecisions(changes, { c1: { content: "edited" }, c2: { comment: "hold on" } });
+    expect(decided[0]).toEqual({ id: "c1", decision: "approved", content: "edited" });
+    // And what comes out is something the main-process check will accept.
+    for (const d of decided) {
+      if (d.content !== undefined) expect(["merged", "approved", "comment"]).toContain(d.decision);
+    }
+  });
+});
+
+describe("reviewSettled reads the applied form", () => {
+  const of = (kinds: string[]): Array<{ id: string; decision: never }> =>
+    kinds.map((decision, i) => ({ id: `c${i}`, decision: decision as never }));
+
+  it("is settled only when every decision was applied", () => {
+    expect(reviewSettled(of(["merged", "reverted"]))).toBe(true);
+    expect(reviewSettled(of(["merged", "comment"]))).toBe(false);
+    // The case the old rule missed: judged but not applied is not settled.
+    expect(reviewSettled(of(["approved", "approved"]))).toBe(false);
+    expect(reviewSettled(of(["merged", "denied"]))).toBe(false);
   });
 });

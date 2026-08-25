@@ -35,6 +35,35 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+describe("identity (decision 0002 — who signs a review note)", () => {
+  it("reads the name and email git would attribute a commit to", async () => {
+    expect(await git.identity()).toEqual({ name: "JaiRA Test", email: "test@example.com" });
+  });
+
+  it("lets a repo-local name win, which is git's own precedence", async () => {
+    await git.run(["config", "user.name", "Someone Else"]);
+    expect((await git.identity()).name).toBe("Someone Else");
+  });
+
+  it("falls through the precedence chain when the repo sets no name of its own", async () => {
+    await git.run(["config", "--unset", "user.name"]);
+    const identity = await git.identity();
+    // Deliberately NOT asserting `undefined`: `--get` walks repo → global → system, and a machine
+    // with a global name still answers. That fall-through is the behaviour this method wants — most
+    // people set their name once, globally — so what is checked is that the repo-local value is
+    // gone, not that the answer went empty.
+    expect(identity.name).not.toBe("JaiRA Test");
+    expect(identity.email).toBe("test@example.com");
+  });
+
+  it("answers rather than throws outside a repository — an unsigned note beats a refused one", async () => {
+    const outside = new Git({ exec, repoDir: dir });
+    // Global config may or may not exist on the machine running this; what matters is that asking
+    // where there is no repo produces an answer instead of an exception.
+    await expect(outside.identity()).resolves.toBeTypeOf("object");
+  });
+});
+
 describe("repository basics", () => {
   it("detects a repo, its root, head and branch", async () => {
     expect(await git.isRepo()).toBe(true);

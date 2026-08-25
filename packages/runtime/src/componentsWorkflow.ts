@@ -85,7 +85,7 @@ export function componentsWorkflowFiles(): Record<string, unknown> {
       outputs: { content: artifact },
       operation: {
         kind: "function",
-        function: "edit_markdown",
+        function: "edit_artifact",
         args: { prompt: "Tidy up the plan.", source: "plan_doc" },
       },
     },

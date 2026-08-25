@@ -27,7 +27,7 @@ import {
   type ResolvedValue,
 } from "@declarative-ai/exec";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
-import { INTERACTIVE, USER_APPROVE_CHANGESET } from "@jaira/runtime";
+import { INTERACTIVE, REVIEW_ARTIFACTS } from "@jaira/runtime";
 
 export interface ReviewerIo {
   input: Readable;
@@ -96,7 +96,7 @@ export async function reviewChangesetOnTerminal(changeset: Changeset, io: Review
 }
 
 /**
- * Register the terminal-backed `user-approve-changeset`. The registry is supplied by the host
+ * Register the terminal-backed `review_artifacts`. The registry is supplied by the host
  * process and nothing inside a workflow can reach it — the same guarantee the hub gives the app
  * (§4.1), kept by the same arrangement.
  */
@@ -105,7 +105,7 @@ export function registerCliChangesetReviewer(
   io: ReviewerIo = { input: process.stdin, output: process.stdout },
 ): void {
   registry.functions.set(
-    USER_APPROVE_CHANGESET,
+    REVIEW_ARTIFACTS,
     hostFunction(async (inputs: FunctionInputs) => {
       try {
         const config = (inputs["config"] ?? {}) as Record<string, unknown>;
@@ -118,7 +118,7 @@ export function registerCliChangesetReviewer(
         if (!checked.ok) return { error: failureOf(new Error(checked.errors)) };
         return { value: { decisions: checked.decisions } as unknown as ResolvedValue };
       } catch (e) {
-        return { error: failureOf(e, USER_APPROVE_CHANGESET) };
+        return { error: failureOf(e, REVIEW_ARTIFACTS) };
       }
     }, INTERACTIVE),
   );

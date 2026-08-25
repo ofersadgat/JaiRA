@@ -256,6 +256,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "uri:read": ((request: Parameters<typeof service.readUri>[0]) => service.readUri(request)) as Handler,
   "artifact:serve": ((request: Parameters<typeof service.serveArtifact>[0]) => service.serveArtifact(request)) as Handler,
   "artifact:list": ((request: Parameters<typeof service.listArtifacts>[0]) => service.listArtifacts(request)) as Handler,
+  "git:identity": ((request: Parameters<typeof service.gitIdentity>[0]) => service.gitIdentity(request)) as Handler,
   "file:find": ((request: Parameters<typeof service.findFiles>[0]) => service.findFiles(request)) as Handler,
   "changeset:review": ((request: Parameters<typeof service.reviewChanges>[0]) => service.reviewChanges(request)) as Handler,
   "changeset:reviewSync": ((request: Parameters<typeof service.reviewSyncChangeset>[0]) =>

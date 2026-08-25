@@ -231,7 +231,7 @@ resurrected into the new view.
 
 ## 4. The gate
 
-### 4.1 `user-approve-changeset`
+### 4.1 `review_artifacts`
 
 An interactive state in the existing sense: an ordinary `FunctionOp` whose function is registered as
 interactive, parked by the [`InteractionHub`](packages/runtime/src/interaction.ts) and answerable
@@ -266,7 +266,7 @@ Given `(source, changeset, decisions)` the resulting files are determined. So th
 a pure function, and splitting it out of the gate is not tidiness — it puts each half on the right
 side of a distinction the execution layer already draws:
 
-| | `user-approve-changeset` | `apply-changeset` |
+| | `review_artifacts` | `apply-changeset` |
 | --- | --- | --- |
 | Entry kind | `host`, interactive | `pure` |
 | `memoizable` | `false` | `true` |

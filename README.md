@@ -130,7 +130,7 @@ which is how the UI is checked without a human at the keyboard.
 ### Human gates
 
 A UI state is a `FunctionOp` naming one of the five built-in components —
-`choose_option`, `review_artifact`, `edit_markdown`, `fill_form`,
+`choose_option`, `review_artifact`, `edit_artifact`, `fill_form`,
 `confirm_action` — with its surface in the state's `config`. When a run reaches
 one it parks, the dialog opens, and the answer is re-validated against the
 component's contract **in the main process** before it can become a workflow

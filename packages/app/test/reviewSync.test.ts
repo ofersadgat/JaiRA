@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
-import { USER_APPROVE_CHANGESET } from "@jaira/runtime";
+import { REVIEW_ARTIFACTS } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
 import type { Changeset, PushMessage } from "@jaira/shared";
 import { AppService } from "../src/main/service";
@@ -62,7 +62,7 @@ describe("changeset:reviewSync", () => {
       path: "workflows/workflow.md",
       changeset: PROPOSAL,
       interactions: {
-        [USER_APPROVE_CHANGESET]: [
+        [REVIEW_ARTIFACTS]: [
           { decisions: [
             { id: "c1", decision: "merged" },
             { id: "c2", decision: "merged" },
@@ -89,7 +89,7 @@ describe("changeset:reviewSync", () => {
       path: "workflows/workflow.md",
       changeset: PROPOSAL,
       interactions: {
-        [USER_APPROVE_CHANGESET]: [
+        [REVIEW_ARTIFACTS]: [
           // Round one: a comment on the prompt file, the document merged — comments keep the round
           // open, so nothing is applied yet.
           { decisions: [
@@ -130,10 +130,14 @@ describe("changeset:reviewSync", () => {
       path: "workflows/workflow.md",
       changeset: PROPOSAL,
       interactions: {
-        [USER_APPROVE_CHANGESET]: [
+        [REVIEW_ARTIFACTS]: [
           { decisions: [
             { id: "c1", decision: "merged" },
-            { id: "c2", decision: "denied" },
+            // `reverted`, not `denied`: decision 0002 narrowed the judgement-only pair to mean "on a
+            // round that is NOT being applied", and this round is. On a `base` tree the outcome is
+            // identical — nothing is written either way — but only the applied form settles, which
+            // is what lets a review-level comment hold a set back with no per-change comment on it.
+            { id: "c2", decision: "reverted" },
           ] } as JsonValue,
         ],
       },
@@ -181,7 +185,7 @@ describe("the project a parked review reads against", () => {
     await until(() => bare.pendingInteractions().length === 1, "the gate to park");
 
     const pending = bare.pendingInteractions()[0]!;
-    expect(pending.component).toBe(USER_APPROVE_CHANGESET);
+    expect(pending.component).toBe(REVIEW_ARTIFACTS);
     expect(pending.taskId).toBe(result.reviewTaskId);
     expect(pending.subjectProject).toBe(base);
     // The other stamp, and the reason there are two: `taskId` is a rowid in the project the request

@@ -18,7 +18,7 @@ import {
   mediaSrcOf,
   totalStats,
   viewsFor,
-} from "../src/valueViews";
+  editorKindOf,} from "../src/valueViews";
 
 describe("which views apply", () => {
   it("offers only JSON for an ordinary value — nothing to toggle to", () => {
@@ -222,5 +222,39 @@ describe("how big a change is", () => {
 
   it("sums a whole proposal for the header figure", () => {
     expect(totalStats([{ after: "a\nb\n" }, { before: "x\n" }])).toEqual({ added: 2, removed: 1 });
+  });
+});
+
+/**
+ * Which editor an artifact gets (decision 0002) — the dispatch that replaced a single textarea.
+ *
+ * The case that matters is `readonly`: `edit_artifact` used to hand back a textarea whatever it was
+ * given, so a PNG arrived as a wall of base64 that a person could edit into nonsense.
+ */
+describe("editorKindOf", () => {
+  it("refuses to edit anything a player would render", () => {
+    for (const mime of ["image/png", "image/svg+xml", "video/mp4", "audio/mpeg"]) {
+      expect(editorKindOf(mime, "")).toBe("readonly");
+    }
+  });
+
+  it("gives JSON its own editor, vendor types included", () => {
+    expect(editorKindOf("application/json", "{}")).toBe("json");
+    expect(editorKindOf("application/vnd.jaira.workflow+json", "{}")).toBe("json");
+  });
+
+  it("gives markdown its own, and lets the DECLARED type beat the text", () => {
+    expect(editorKindOf("text/markdown", "no hashes here")).toBe("markdown");
+    // Declared as plain text, so the markdown-looking body does not overrule it.
+    expect(editorKindOf("text/plain", "# a heading\n\n- a list")).toBe("text");
+  });
+
+  it("sniffs only when nothing declared a type", () => {
+    expect(editorKindOf(undefined, "# a heading\n\n- a list")).toBe("markdown");
+    expect(editorKindOf(undefined, "just a sentence")).toBe("text");
+  });
+
+  it("falls through to the plain editor for source, which is its own presentation", () => {
+    expect(editorKindOf("text/x-typescript", "const a = 1;")).toBe("text");
   });
 });

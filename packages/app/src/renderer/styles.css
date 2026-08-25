@@ -4825,7 +4825,11 @@ button.layer-on:hover:not(:disabled) {
   box-shadow: var(--lift);
 }
 .modal h3 {
-  font-size: calc(var(--size-app) * 14 / 12.5);
+  /* The question is the loudest thing in the dialog. It was one notch above body text, which put it
+     level with the labels under it — and a heading that does not read as one is a heading nobody
+     starts at. */
+  font-size: calc(var(--size-app) * 17 / 12.5);
+  line-height: 1.35;
   text-transform: none;
   letter-spacing: 0;
   color: var(--text);
@@ -4858,9 +4862,20 @@ button.layer-on:hover:not(:disabled) {
 .question-text .chip {
   margin-right: 6px;
 }
+/* Stacked cards when the options explain themselves, a wrapped row of buttons when they are bare
+   words. Both spellings are authored (decision 0002 put gates and agent questions on one control,
+   and a gate's `approve`/`reject` has nothing to explain), and one stacked full-width button
+   reading `approve` is a worse control than a row of three. `:has()` asks the DOM which case it is
+   rather than making the caller declare it. */
 .question-options {
   display: grid;
   gap: 8px;
+  /* Clear of whatever sits above — a comment box drawn first was touching the decision row. */
+  margin-top: 12px;
+}
+.question-options:not(:has(.question-option-desc)) {
+  display: flex;
+  flex-wrap: wrap;
 }
 /* An option is a CHOICE, not a verdict — a card with room for its consequences, not an Allow/Deny. */
 .question-option {
@@ -4870,6 +4885,29 @@ button.layer-on:hover:not(:disabled) {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 8px;
+}
+/* The affirmative choice in a bare row, drawn as the action it is. */
+.question-option.primary {
+  background: var(--fill-accent);
+  border-color: var(--fill-accent);
+  box-shadow: var(--sheen);
+}
+.question-option.primary .question-option-label {
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.question-option.primary:hover {
+  background: var(--fill-accent-hover);
+  border-color: var(--fill-accent-hover);
+}
+
+/* The destructive choice, wherever it came from. Gates could always mark one; agent questions can
+   now carry the same flag, because the control is the same control. */
+.question-option.danger .question-option-label {
+  color: var(--bad);
+}
+.question-option.danger {
+  border-color: color-mix(in srgb, var(--bad) 45%, var(--line));
 }
 .question-option:hover {
   border-color: var(--accent, var(--text));
@@ -4901,6 +4939,419 @@ button.layer-on:hover:not(:disabled) {
   font-family: var(--font-data);
   font-size: calc(var(--size-data) * 12 / 12);
 }
+/* The `review_artifact` viewer: a framed, scrollable well that `ValueView` draws inside.
+   Deliberately NOT `.artifact` — that one is a `<pre>` for the approval dialog's command, and its
+   mono font and pre-wrap are wrong for a rendered markdown page or a picture. */
+.artifact-view {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 12px;
+  max-height: 46vh;
+  overflow: auto;
+}
+
+/* --- the live-preview markdown editor (CodeMirror) --- */
+
+/* The editor is the RENDERING, so it inherits the page's type rather than a code font — the whole
+   point is that it does not look like an editor until you put the caret in a line. */
+.md-editor {
+  font-family: inherit;
+}
+.md-editor .cm-editor {
+  background: none;
+}
+.md-editor .cm-cursor {
+  border-left-color: var(--text);
+}
+.md-editor .cm-selectionBackground,
+.md-editor .cm-content ::selection {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+/* Headings keep the document's own scale rather than the editor's, which is what makes a heading
+   with its `#` hidden read as a heading and not as bold body text. */
+.cm-h1 {
+  font-size: 1.7em;
+  font-weight: 650;
+  line-height: 1.25;
+}
+.cm-h2 {
+  font-size: 1.4em;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.cm-h3 {
+  font-size: 1.18em;
+  font-weight: 650;
+}
+.cm-h4 {
+  font-size: 1.05em;
+  font-weight: 650;
+}
+.cm-strong {
+  font-weight: 700;
+}
+.cm-em {
+  font-style: italic;
+}
+.cm-strike {
+  text-decoration: line-through;
+}
+.cm-code {
+  font-family: var(--font-data);
+  background: var(--panel-2);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+.cm-link {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.cm-quote {
+  color: var(--dim);
+  font-style: italic;
+}
+.cm-list {
+  color: var(--text);
+}
+.cm-rule {
+  color: var(--rule);
+}
+
+/* --- comparing two pictures --- */
+
+.img-diff-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.img-diff figure,
+.img-diff-one {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+.img-diff figcaption,
+.img-diff-one figcaption {
+  color: var(--dim);
+}
+.img-diff img,
+.img-diff-one img {
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+/* Stacked in one box so the two occupy the same pixels — the whole point of the overlay. The
+   checkerboard is what makes a TRANSPARENCY change read as one rather than as a colour change. */
+.img-diff-stack {
+  position: relative;
+  display: inline-block;
+  background-image: linear-gradient(45deg, var(--panel-2) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--panel-2) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--panel-2) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--panel-2) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+.img-diff-stack img:last-child {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.img-diff-mix {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.img-diff-mix input {
+  width: 140px;
+}
+
+/* The step counter above a question in a multi-question batch. */
+.question-step {
+  color: var(--dim);
+  margin: 0 0 6px;
+}
+/* The box that says an option list is a multi-select. On the right, so the labels stay aligned. */
+/* A grid rather than a wrapping flex row: the box has to centre against the WHOLE option, and in a
+   flex row it centres against the first line only — so an option with a description put its box up
+   beside the label instead of level with the middle. */
+.question-option.checkable {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "label box" "desc box";
+  align-items: center;
+  gap: 0 10px;
+}
+.question-option.checkable .question-option-label {
+  grid-area: label;
+}
+.question-option.checkable .question-option-desc {
+  grid-area: desc;
+}
+.question-box {
+  grid-area: box;
+  align-self: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--on-accent);
+}
+.question-box.on {
+  background: var(--fill-accent);
+  border-color: var(--fill-accent);
+}
+.question-box svg {
+  width: 11px;
+  height: 11px;
+  stroke-width: 3;
+}
+
+/* An editable view inside the value viewer — the source form of `edit`. */
+.vv-edit {
+  width: 100%;
+  min-height: 40vh;
+  resize: vertical;
+}
+
+/* Removals and additions inside the markdown editor's diff reading. */
+.cm-del {
+  background: color-mix(in srgb, var(--bad) 16%, transparent);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.cm-add {
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+}
+
+/* --- gate icons (decision 0002) --- */
+
+/* Every glyph here sits beside a word, so it aligns to the text baseline and takes the text's own
+   colour — it is punctuation for the label, not a separate thing on the row. */
+.gate-icon,
+.note-composer svg,
+.note-row svg,
+.question-text svg,
+.question-option-label svg,
+.change-action svg,
+.review-count svg,
+.gate-editor-tabs svg,
+.note-list-head svg,
+.chooser-notes svg {
+  width: 13px;
+  height: 13px;
+  vertical-align: -2px;
+  flex: none;
+}
+/* The title's glyph sits INLINE, not as a flex item.
+   `.modal h3` is already `display: block` with its own type rules, and making it a flex container
+   re-laid the heading out — the icon at one end and the words at the other. A glyph beside a word
+   is punctuation for that word; it aligns to the baseline and stays out of the layout. */
+.modal h3 .gate-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--dim);
+  vertical-align: -2px;
+  margin-right: 4px;
+}
+.change-action,
+.review-count,
+.gate-editor-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+/* The action badge already carries its meaning in colour; the glyph repeats it in shape, which is
+   what makes the row scannable for someone who cannot separate the two hues. */
+.change-action svg {
+  vertical-align: 0;
+}
+
+/* --- edit_artifact on the editor stack (decision 0002) --- */
+
+.gate-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  min-height: 0;
+}
+.gate-editor .code-editor {
+  width: 100%;
+  min-height: 40vh;
+  resize: vertical;
+}
+/* Write / Preview. Two buttons rather than a segmented control because that is what the rest of the
+   app's editors use, and a third spelling of "pick a tab" is a third one to keep in step. */
+.gate-editor-tabs {
+  display: flex;
+  gap: 6px;
+}
+.gate-editor-tabs .selected {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.gate-editor .artifact-view {
+  margin-top: 0;
+  min-height: 40vh;
+}
+
+/* --- anchored review notes (decision 0002) --- */
+
+/* Painted by the Custom Highlight API, so this is the ONLY way the marked passage is drawn — there
+   is no element to style. A wash rather than a block fill: the words underneath still have to be
+   readable, since the point of marking them is that you re-read them. */
+/* The thread under the pointer, drawn louder than the rest. */
+::highlight(jaira-note-hot) {
+  background-color: color-mix(in srgb, var(--warn) 55%, transparent);
+  text-decoration: underline;
+  text-decoration-color: var(--warn);
+  text-underline-offset: 3px;
+}
+::highlight(jaira-note) {
+  background-color: color-mix(in srgb, var(--warn) 26%, transparent);
+  text-decoration: underline;
+  text-decoration-color: var(--warn);
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
+/* Fixed, not absolute: the artifact scrolls inside its own well, and a popover in that flow would
+   ride away from the words it is about. `position: fixed` pins it to the rect the selection
+   reported, which is where the person is looking. */
+.note-composer {
+  position: fixed;
+  z-index: 60;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--lift);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.note-composer-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.note-author {
+  font-weight: 600;
+  color: var(--text);
+}
+.note-icon {
+  color: var(--dim);
+  flex: none;
+}
+.note-quote {
+  margin: 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--warn);
+  color: var(--dim);
+  font-style: italic;
+}
+.note-composer textarea {
+  width: 100%;
+  resize: vertical;
+}
+.note-composer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.note-list {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.note-list-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--panel-2);
+  color: var(--dim);
+}
+.note-row {
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+}
+/* Hovering the thread lights the passage, and hovering the passage lights the thread — the loop that
+   replaces clicking a highlight, which a painted one cannot offer. */
+.note-row.hot {
+  background: var(--fill-ghost-hover);
+}
+.note-row-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+/* One message in the thread: who, then what they said. */
+.note-msg {
+  margin-top: 6px;
+  border-left: 2px solid var(--line);
+  padding-left: 8px;
+}
+.note-msg-by {
+  color: var(--dim);
+  font-weight: 600;
+}
+.note-msg-body {
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.note-reply {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  padding-left: 10px;
+}
+.note-reply input {
+  flex: 1;
+  min-width: 0;
+}
+.note-row-quote {
+  flex: 1;
+  justify-self: start;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--dim);
+  font-style: italic;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.note-row-quote:hover:not(:disabled) {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.note-row-quote:disabled {
+  cursor: default;
+}
+.note-row.orphan .note-row-quote {
+  color: var(--warn);
+  font-style: normal;
+}
+.note-row-remove {
+  flex: none;
+  padding: 0 4px;
+  line-height: 1;
+}
+
 /* --- the changeset reviewer (CHANGESETS.md §8) --- */
 /* A multi-file review needs width the gate modal was never given; the host widens for it. */
 .modal-wide {
@@ -4914,18 +5365,202 @@ button.layer-on:hover:not(:disabled) {
   overflow: auto;
   min-height: 0;
 }
-.changeset-source {
+
+/* --- review_artifacts: a chooser and a detail pane (decision 0002) --- */
+
+/* `container-type` is the whole responsive story. This component is mounted into a node it does not
+   own — a wide modal, a narrow conversation pane — so it cannot ask the VIEWPORT how much room it
+   has, which is what a media query would do. A container query asks the host. */
+.review-artifacts {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 8px;
+}
+.review-head {
   color: var(--dim);
   font-size: calc(var(--size-app) * 12 / 12.5);
-  margin-top: 6px;
 }
-.change-card {
+.review-body {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+}
+/* Below this width the two panes are one column: the chooser on top, capped so it cannot push the
+   thing under review off screen. This is §8.3's constraint kept — the same component still renders
+   in a conversation pane — with the wide case no longer paying for it. */
+@container (max-width: 720px) {
+  .review-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .review-chooser {
+    max-height: 30vh;
+  }
+}
+
+.review-chooser {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: auto;
+  min-height: 0;
+  background: var(--bg);
+}
+.chooser-row {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+.chooser-row:last-child {
+  border-bottom: none;
+}
+.chooser-row.selected {
+  background: var(--fill-ghost-selected);
+}
+/* An excluded change is struck through rather than hidden: it is still part of the review, and a
+   reviewer has to be able to see what they took out in order to put it back. */
+.chooser-row.excluded .chooser-path {
+  text-decoration: line-through;
+  color: var(--dim);
+}
+.chooser-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 6px 8px;
+  cursor: pointer;
+  color: var(--text);
+}
+.chooser-pick:hover {
+  background: var(--fill-ghost-hover);
+}
+.chooser-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.chooser-notes {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--warn);
+  flex: none;
+}
+.chooser-flag {
+  color: var(--warn);
+  flex: none;
+}
+/* The dot for a change nobody has opened — the same fact the summary counts, where the eye is. */
+.chooser-unopened {
+  color: var(--accent);
+  flex: none;
+}
+/* The X is the whole per-change decision surface, so it has to read as one. Dim until wanted, and
+   red on hover, because the gesture means "this one is out". */
+/* The row says what a change became; the detail header is where it is changed. */
+.chooser-state {
+  color: var(--bad);
+  flex: none;
+  padding-right: 8px;
+}
+.chooser-x {
+  flex: none;
+  padding: 4px 6px;
+  line-height: 1;
+  color: var(--dim);
+  border-color: transparent;
+  background: none;
+}
+.chooser-x svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.5;
+  display: block;
+}
+.chooser-row:hover .chooser-x,
+.chooser-x:hover {
+  color: var(--bad);
+}
+.chooser-row.excluded .chooser-x {
+  color: var(--accent);
+}
+
+.review-detail {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px;
-  margin-top: 12px;
+  overflow: auto;
+  min-height: 0;
   background: var(--bg);
 }
+/* Monaco needs a box of its own.
+   `.monaco-host` carries no height — it took one from `.diff-pane`, the floating pane the detail
+   view replaced. Dropping that pane left the editor mounting into a zero-height node, which renders
+   nothing and sets `automaticLayout` measuring a box that never settles. */
+/* No `height` here on purpose.
+   The pane sizes itself to its content in JS (`MonacoDiffPane`'s `fit`), and a height in the
+   stylesheet is a second opinion about the same number — the first version had both, and the
+   stylesheet's 46vh is why a five-line change sat in half a screen of empty grey. Min-height only,
+   so there is a floor before the editor has measured anything. */
+.review-detail .monaco-host {
+  min-height: 120px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.detail-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.detail-spacer {
+  flex: 1;
+}
+
+.review-foot {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.review-comment {
+  width: 100%;
+  resize: vertical;
+}
+.review-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 8px;
+  color: var(--dim);
+}
+.review-count.removed {
+  color: var(--bad);
+}
+.review-count.commented {
+  color: var(--warn);
+}
+/* Deliberately the loudest thing in the row. It is the number a summary would normally omit, and
+   omitting it is what makes one-click approval read as a review. */
+.review-count.unopened {
+  color: var(--accent);
+  font-weight: 600;
+}
+.review-verdict {
+  flex-basis: 100%;
+  font-style: italic;
+}
+
 .change-head {
   display: flex;
   gap: 8px;
@@ -4983,10 +5618,6 @@ button.layer-on:hover:not(:disabled) {
 .diff-add {
   background: color-mix(in srgb, var(--ok) 16%, transparent);
 }
-.change-decisions button.selected {
-  outline: 2px solid var(--accent, var(--text));
-  outline-offset: -1px;
-}
 .change-comment,
 .change-editor {
   width: 100%;
@@ -5020,7 +5651,7 @@ button.link.change-path {
   font-size: calc(var(--size-app) * 13 / 12.5);
   color: var(--text);
 }
-.inline-gate .changeset-review {
+.inline-gate .review-artifacts {
   max-height: 60vh;
   overflow: auto;
 }

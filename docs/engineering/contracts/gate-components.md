@@ -2,17 +2,17 @@
 id: engineering/contracts/gate-components
 type: engineering-contract
 status: proposed
-updated: 2026-08-05
+updated: 2026-08-24
 visibility: public
 kind: api
 owned_by: [engineering/units/interaction-hub]
-consumers: ["every workflow state with a UI gate", "@jaira/app renderer", "--interactions scripting"]
-since: proposed — extends the five shipped components (DESIGN §1f)
+consumers: ["every workflow state with a UI gate", "@jaira/app renderer", "@jaira/cli reviewer", "--interactions scripting"]
+since: proposed — reshaped by [decision 0002](../decisions/0002-one-gate-vocabulary.md)
 ---
 
 # Gate components
 
-The six built-in UI components a `FunctionOp` can name, and what each returns.
+The built-in UI components a `FunctionOp` can name, and what each returns.
 A gate's result lands directly on the state's declared outputs, with no adapter
 in between, so **the result shape is the contract**.
 
@@ -32,96 +32,236 @@ all.
 | Situation | Use | Why |
 | --- | --- | --- |
 | The answer is arithmetic | a `function` state | A gate spends attention; arithmetic doesn't need it |
-| The person should write, not approve | `edit_markdown` | Their words are faster than a revision round |
+| The person should write, not approve | `edit_artifact` | Their words are faster than a revision round |
 | The decision is WHERE the task goes next | `on_user_event` in a transition guard ([WORKFLOWS.md §7.4](../../../WORKFLOWS.md)) | A gate is a state the task sits in and a dialog it has to answer. "Which column does this belong in" is already a gesture the board offers — the card is dragged, and no state, no dialog and no interruption is needed to record it |
 
 ## Where this fits
 
 - **Serves** — every phase's `gate` child.
 - **Neighbors** — the interaction hub owns delivery; this owns shape.
-- **Depends on / used by** — validated in the main process by
-  `validateComponentResult`; authored config by `parseComponentConfig`.
-- **History** — the five shipped in phase 4 (DESIGN §1f). This doc proposes two
-  additions, recorded in
-  [decision 0001](../decisions/0001-decision-brief-gates.md).
+- **Depends on / used by** — re-validated in the main process by
+  `validateComponentResult`; authored config parsed by `parseComponentConfig`.
+- **History** — five shipped in phase 4 (DESIGN §1f); the changeset gate added
+  by CHANGESETS.md §4.1; reshaped into the vocabulary below by
+  [decision 0002](../decisions/0002-one-gate-vocabulary.md).
 
-## Shape — shipped today
+## Shape
+
+Four ideas, composed rather than parallel. `review_artifact` is a viewer plus a
+`choose_option`; `review_artifacts` is a chooser plus a `review_artifact`.
 
 | Component | Returns |
 | --- | --- |
-| `choose_option` | `{ decision, comments? }` |
-| `review_artifact` | `{ decision, comments? }` |
-| `edit_markdown` | `{ content }` |
-| `confirm_action` | `{ confirmed }` |
+| `choose_option` | `{ decision, comments? }`, or `{ answers }` when it carries more than one question |
+| `review_artifact` | `{ decision, comments?, notes? }` |
+| `review_artifacts` | `{ decision?, comments?, decisions: [{ id, decision, comment?, notes?, content? }] }` |
+| `edit_artifact` | `{ content }` |
 | `fill_form` | a flat object of its fields |
-| `user-approve-changeset` | `{ decisions: [{ id, decision, comment?, content? }] }` |
+| `confirm_action` | `{ confirmed }` |
 
 `fill_form` reads a JSON-Schema **subset**: `string` · `number` · `boolean` ·
 `enum`, with `optional`, `default`, `multiline`. Not arbitrary schemas — that is
 what a form can honestly render.
 
-### `user-approve-changeset` (CHANGESETS.md §4.1)
+### `choose_option` — one component, two callers
 
-Config: `{ prompt?, changeset?, tree? }` — `changeset` names the input slot
-holding the changeset (default `"changeset"`), `tree` says what the tree under
-review currently holds (`"proposal"` for a worktree an agent edited, `"base"`
-for a sync whose edits exist only as data). It returns **every change it was
-given, each with a decision** — `merged` / `reverted` / `comment` are what the
-UI offers, `approved` / `denied` exist so a workflow can separate the judgement
-from the application. `content` rides only a `merged` decision: the user's own
-edit, the one non-derivable part of the outcome.
-
-Two things make it unlike the other five:
-
-- **Its result is validated against its input.** A decision anchors to a change
-  id and the set must be complete, so `validateComponentResult` takes the
-  resolved inputs for this component alone.
-- **It mounts itself** (CHANGESETS.md §8.1). The contract is
-  `mount(node, ctx): () => void`, not a React element — the host owns the node
-  (the app widens the gate host for it; the CLI renders it on the terminal,
-  `packages/cli/src/changesetReviewer.ts`), and everything the component needs
-  arrives on an explicit `services` object (§8.2). Built-ins only for now: a
-  third-party mount is a code-execution path into the renderer, and the trust
-  model for that is not designed.
-
-The non-interactive halves are ordinary registered functions:
-`apply-changeset` (the pure application step, §4.2) and
-`changeset-review-status` (derives `settled` until higher-order expressions
-exist, EXPRESSIONS.md §3.5). The loop policy is authored transitions on the
-`changeset/review` workflow, never component code (§4.3).
-
-## Shape — proposed additions
-
-Both are additive. No existing state file changes, and both result shapes stay
-where they are.
-
-### 1. Option objects on `choose_option`
-
-`options` accepts objects as well as bare values:
+A prompt and a set of labelled choices. The **authored** caller is a gate state
+whose `options` the workflow declares; the **agent** caller is a running model's
+`AskUserQuestion`, whose options are its own. The two differ in where the answer
+goes and in whether it is validated against a declared enum — and in nothing a
+person can see, which is why they are not two components.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `value` | yes | What `decision` becomes. A bare string stays shorthand for `{value}`. |
-| `label` | optional | Display text. Defaults to `value`. |
-| `means` | optional | What happens next if this is chosen. |
-| `pros` | optional | Array of strings. |
-| `cons` | optional | Array of strings. |
-| `drives` | optional | The criterion or finding that argues for it. |
-| `recommended` | optional | At most one. Rendered with the confidence reasons beside it. |
+| `prompt` | yes | The question, as the person reads it |
+| `options` | yes | The choices, in order. A bare string is an option whose label is its value |
+| `options[].value` | yes | What `decision` becomes |
+| `options[].label` | no | Display text; defaults to `value` |
+| `options[].description` | no | What choosing it means |
+| `options[].tone` | no | `danger` draws it as the destructive choice |
+| `comments` | no | Offer a free-text field beside the choice |
+| `multiple` | no | Several options may be chosen; `decision` is then an array |
 
-Returns `{ decision, comments? }`, unchanged.
+Both callers normalize to one `Choice` — `choicesOfConfig` for a state,
+`choicesOfQuestions` for an agent — and the renderer draws that and nothing else.
 
-### 2. Multi-select
+**The free-text field has a role, and the role is the only real difference.** A
+gate's `comments` is `alongside`: said in addition to the choice, so clicking an
+option is a complete answer even with text in the box. An agent's "Other" is
+`instead`: the text replaces whatever was picked, so the answer is not complete
+until it is confirmed. Naming the role is what lets one control serve both, and
+it is what decides whether a click submits on the spot.
 
-For decisions that are "which of these", not "which one" — which findings to
-accept, which deliverables to keep, which candidate elements to carry forward.
+**Dismissal** is the one caller-specific affordance. An agent's question can be
+dismissed — "use your own judgment" — because the agent continues either way. A
+gate cannot: its state has declared outputs that must receive a value.
 
-Two ways, and the decision record picks one:
+A multi-select answers with a list, checked the way one value is: every member
+declared, nothing repeated, and never empty — "none of these" is not a choice the
+state offered.
 
-- **`enum` + `multiple: true`** in the `fill_form` subset, returning an array in
-  that field. Smallest change; keeps one form component.
-- **A sixth component, `select_many`**, returning `{ selected[], comments? }`.
-  Clearer contract; one more component to build, validate, and script.
+### `review_artifact` — one artifact, decided
+
+Its decision surface **is** a `choose_option` — the same control, given the
+state's own `options` and its `comments` — so option descriptions and the
+`danger` tone come along without this component knowing about either.
+
+The artifact renders through `ValueView`, the same component every other surface
+uses for a model-produced value, so its view toggle (`viewsFor`) comes along:
+markdown and its source, an image, HTML, a diff. A decision about something you
+cannot see is the failure this component exists to prevent, and a decision about
+something you can only see one way is the same failure a step later.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `prompt` | yes | The question |
+| `artifact` | yes | Which of the state's inputs holds the thing to show |
+| `options` | no | The review-level vocabulary; defaults to `merged` / `reverted` |
+| `comments` | no | Offer a review-level free-text field |
+
+### `review_artifacts` — N artifacts, each decided
+
+A chooser on the left, a `review_artifact` on the right. The changeset gate is
+this component's N-artifact case: each artifact is a change, and therefore
+renders as a diff.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `prompt` | yes | The question |
+| `artifacts` | no | Which input holds the list; absent ⇒ found among the inputs by shape |
+| `options` | no | The review-level vocabulary; defaults to `merged` / `reverted` |
+| `tree` | changesets only | What the files currently hold: `proposal` for a worktree an agent already edited, `base` for a sync whose edits exist only as data |
+
+#### The two layers
+
+A review has a **per-artifact** layer and a **review-level** layer, and they are
+what let the singular and the plural be one component.
+
+The per-artifact vocabulary is fixed and **derived from the gesture**, never
+clicked:
+
+| Gesture | Decision |
+| --- | --- |
+| untouched | `approved` |
+| X'd out of the list | `denied` |
+| commented | `comment` |
+
+Then across the set: **no comment anywhere ⇒ the review is final**, and
+`approved` → `merged`, `denied` → `reverted`. Any comment and nothing is
+applied; the set travels back as judgements. This is why `DecisionKind` has five
+values — `approved`/`denied` are the same dispositions on a round that is not
+being applied, which is what "separate the judgement from the application" means.
+
+`reviewSettled` therefore reads the **applied form** — every decision is
+`merged` or `reverted` — rather than "no decision is `comment`". The difference
+is the review-level comment: a reviewer who writes "this whole approach is
+wrong" and touches no individual change leaves every change `approved`, which
+has no `comment` in it and is plainly not settled. Because the conversion only
+happens when nothing was commented on anywhere, the applied form is exactly the
+signal, with no extra field to carry.
+
+Three rules that make the derivation total:
+
+- **X and comment are mutually exclusive.** X'ing an artifact that carries
+  comments discards them, behind a confirm.
+- **A review-level comment is a comment on everything**, and blocks the
+  conversion to `merged`/`reverted` exactly as a per-artifact one does.
+- **The review-level vocabulary is the author's.** `merged`/`reverted` is the
+  default when a state names no `options`, not a changeset special case — the
+  authored `review_artifact` states offer `approve` / `revise` / `cut`, and
+  `cut` terminates the feature.
+
+Two more things are unlike the other components:
+
+- **Its result is validated against its input.** A decision anchors to an
+  artifact id and the set must be complete, so `validateComponentResult` takes
+  the resolved inputs for this component alone.
+- **It mounts itself** (CHANGESETS.md §8.1). The contract is
+  `mount(node, ctx): () => void`, not a React element — the host owns the node,
+  and everything the component needs arrives on an explicit `services` object
+  (§8.2). Built-ins only for now: a third-party mount is a code-execution path
+  into the renderer, and the trust model for that is not designed.
+
+The non-interactive halves are ordinary registered functions:
+`apply-changeset` (the pure application step, §4.2) and
+`changeset-review-status`, which now derives `settled` from **whether any
+comment exists in the set** rather than from a decision word. The loop policy is
+authored transitions on the `changeset/review` workflow, never component code
+(§4.3).
+
+### `edit_artifact`
+
+The file-surface editor stack, pointed at an artifact: the editor is chosen by
+media type the way the file registry chooses one, edits live in a draft box that
+survives unmount, and Revert means "throw away what I typed".
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `prompt` | yes | The instruction |
+| `source` | no | The input whose content seeds the editor; absent ⇒ start empty |
+
+`editorKindOf` decides which editor by media type, the way `viewsFor` decides
+which readings apply: `markdown` gets a Write/Preview pair, `json` (including
+`…+json`) gets the schema editor, everything text-shaped gets the plain one, and
+`readonly` covers anything a player would render. A declared type beats a sniff
+at the text; the markdown sniff fires only where nothing declared one.
+
+A type with no editor degrades to the `review_artifact` viewer, read-only —
+rather than offering a textarea full of base64. It still submits, handing back
+what it was given: the gate is parked until it receives a value, and "I looked at
+it" is a real answer.
+
+**Save is never disabled**, unlike in a file editor. `EditorActions` refuses to
+save a file with nothing to write, which is right there and wrong here: handing
+the text back unchanged is the normal way to agree with what the model wrote, and
+a disabled button would park the run with no way forward. Revert appears only
+once there is something to throw away.
+
+### Comments
+
+One record, both review components:
+
+```
+{ artifact, quote, range?, side?: "before" | "after", body, author, at }
+```
+
+Anchoring resolves by `quote` first and `range` second, because the quote is
+what the next reader — usually a model — needs anyway, and it survives the
+artifact being regenerated. `side` distinguishes the two halves of a diff.
+`author` comes from `git config user.name`, resolved by the HOST and handed to
+the component — a self-mounting one may not reach the IPC bridge itself (§8.2).
+
+Selection anchoring is offered on text-bearing views only. A rendered image
+takes review-level comments and no anchored ones, rather than pretending a
+region of a picture is a quote. For the same reason every artifact also takes a
+**whole-artifact comment**: an `unshowable` change — a binary file, a rename —
+has no passage to point at and must still be answerable.
+
+`content` — the reviewer's own edit — is allowed on any decision that keeps the
+change (`merged`, `approved`, `comment`) and refused on `denied`/`reverted`. It
+was `merged`-only until derivation made the wider case real: an edit plus
+somebody else's comment elsewhere yields `approved` here, and dropping the edit
+would throw away the reviewer's work between rounds.
+
+### Icons
+
+Every gate carries a glyph beside the word it illustrates, never instead of it —
+`icons.tsx`'s rule, and the reason a component's icon sits next to its wire name
+in the dialog's sub-line rather than in the author's prompt.
+
+| Where | Glyph |
+| --- | --- |
+| `choose_option` | a forking path |
+| `review_artifact` | an eye |
+| `review_artifacts` | two offset sheets |
+| `edit_artifact` | a pencil |
+| `fill_form` | a sheet with fields |
+| `confirm_action` | a check |
+| A change's action | a file marked `+` / `−` / lines, beside `CRE` / `DEL` / `UPD` |
+| The submit summary | check · cross · comment · alert, one per count |
+
+The action glyph repeats in shape what the badge already says in colour, which is
+what makes a chooser row scannable without separating two hues.
 
 ## Errors
 
@@ -130,6 +270,7 @@ Two ways, and the decision record picks one:
 | Undeclared `decision` | Refused in the main process | Fix the state's options |
 | Missing required field | Refused in the main process | Fix the form config |
 | `choose_option` with no options | ERROR at parse time, not an empty dialog | Fix the state file |
+| A `review_artifacts` result missing an artifact | Refused in the main process | The set must be complete |
 
 Re-validation happens in main because the renderer is the untrusted side of the
 IPC boundary; the engine's own output-schema check is a second, independent
@@ -137,15 +278,16 @@ gate.
 
 ## Compatibility
 
-Additive in both directions. Bare-string options keep working; a
-`multiple: true` field is ignored by nothing, because nothing reads it yet.
-`--interactions` scripting keys on **function name**, so scripted answers are
-unaffected.
+The renames — `edit_markdown` → `edit_artifact`,
+`user-approve-changeset` → `review_artifacts` — take **no compatibility path**
+and no alias. A registered function name is a wire contract, but the authored
+surface was one file and the workflows are edited in the same change
+([decision 0002](../decisions/0002-one-gate-vocabulary.md)). `--interactions`
+scripting keys on function name, so scripted answers must be renamed with them.
 
-**Until these land, gates degrade honestly**: option objects render as `enum`
-values with pros and cons folded into the prompt text, and a multi-select
-renders as one boolean per item. Worse to read, same decision, and no state file
-changes when the components catch up.
+`notes` on a review result is additive; `decision` and `comments` keep their
+shapes. The per-artifact decision kinds are unchanged in value and narrowed in
+meaning.
 
 ## Traps
 
@@ -156,3 +298,10 @@ changes when the components catch up.
   ([WORKFLOWS.md §5.2](../../../WORKFLOWS.md)).
 - A `sequence` is a cursor, not a barrier: independent gates park at once. If
   two gates must be answered in order, wire one's output into the other.
+- **Doing nothing is an answer.** Derivation means an untouched artifact is
+  `approved`, so submitting a large review without opening it approves work
+  nobody read. The submit summary counts what was never opened; it is a
+  disclosure, not a guard.
+- The CLI reviewer and the app reviewer are **deliberately different surfaces**
+  from here on. A change to the decision derivation is a change to both; a
+  change to the layout is a change to one.

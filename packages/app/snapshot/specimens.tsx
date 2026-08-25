@@ -488,10 +488,56 @@ function StatePanelSpecimen(): JSX.Element {
  * behind a snapshot. A null answer is the same one the editor gets while a real check is in flight.
  */
 function GallerySpecimen(): JSX.Element {
-  const shown = GALLERY_SURFACES.filter((s) => s.id === "choose_option" || s.id === "user-approve-changeset");
+  const shown = GALLERY_SURFACES.filter((s) => s.id === "choose_option" || s.id === "review_artifacts");
   return (
     <div className="col mid debug" style={{ overflow: "auto" }}>
       <ComponentGallery validateSchema={async () => null} surfaces={shown} />
+    </div>
+  );
+}
+
+/**
+ * The reviewer on its own, wide enough to be read (decision 0002).
+ *
+ * The gallery frame above shows it inside an editor split, which is the right picture of "does the
+ * host still hold a self-mounting component" and the wrong one for "does the review read". This
+ * frame is the second question: a chooser, a diff, and a summary that says what submitting would
+ * do — the three things the card list did not have.
+ *
+ * Also the only check on the container query. The layout collapses to one column below 720px of
+ * CONTAINER width, so a viewport-sized frame proves nothing about it either way; a frame this wide
+ * is the two-pane case, and the `gallery` frame above is narrow enough to be the other one.
+ */
+function ReviewerSpecimen(): JSX.Element {
+  const surface = GALLERY_SURFACES.find((s) => s.id === "review_artifacts")!;
+  return (
+    <div className="col mid debug" style={{ overflow: "auto" }}>
+      <ComponentGallery validateSchema={async () => null} surfaces={[surface]} />
+    </div>
+  );
+}
+
+/**
+ * `edit_artifact` on the app's editor stack (decision 0002).
+ *
+ * Its own frame because what changed is not visible in a list of components: the gallery's document
+ * is markdown, so this is the frame that shows a Write/Preview pair and a Revert where there used to
+ * be one textarea and a Save.
+ */
+function ReviewOneSpecimen(): JSX.Element {
+  const surface = GALLERY_SURFACES.find((s) => s.id === "review_artifact")!;
+  return (
+    <div className="col mid debug" style={{ overflow: "auto" }}>
+      <ComponentGallery validateSchema={async () => null} surfaces={[surface]} />
+    </div>
+  );
+}
+
+function EditorSpecimen(): JSX.Element {
+  const surface = GALLERY_SURFACES.find((s) => s.id === "edit_artifact")!;
+  return (
+    <div className="col mid debug" style={{ overflow: "auto" }}>
+      <ComponentGallery validateSchema={async () => null} surfaces={[surface]} />
     </div>
   );
 }
@@ -523,4 +569,7 @@ export const SPECIMENS: readonly Specimen[] = [
   { id: "graph", figure: "— · The state graph", width: 980, height: 560, node: <GraphSpecimen /> },
   { id: "state-panel", figure: "— · A child in the panel", width: 480, height: 560, node: <StatePanelSpecimen /> },
   { id: "gallery", figure: "— · The component gallery", width: 940, height: 620, node: <GallerySpecimen /> },
+  { id: "reviewer", figure: "— · review_artifacts", width: 1720, height: 900, node: <ReviewerSpecimen /> },
+  { id: "editor", figure: "— · edit_artifact", width: 1180, height: 820, node: <EditorSpecimen /> },
+  { id: "review-one", figure: "— · review_artifact", width: 1180, height: 900, node: <ReviewOneSpecimen /> },
 ];

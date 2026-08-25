@@ -763,7 +763,7 @@ Suggested MVP components:
 
 - `choose_option`
 - `review_artifact`
-- `edit_markdown`
+- `edit_artifact`
 - `fill_form`
 - `confirm_action`
 

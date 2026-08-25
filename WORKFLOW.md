@@ -376,7 +376,7 @@ built by `confidence` from what the phase already produced:
 #### This needs two component changes
 
 Today's contracts (DESIGN §1f) are: `choose_option` and `review_artifact` return
-`{ decision, comments? }`; `edit_markdown` `{ content }`; `confirm_action`
+`{ decision, comments? }`; `edit_artifact` `{ content }`; `confirm_action`
 `{ confirmed }`; `fill_form` a flat object over a JSON-Schema **subset** —
 `string` · `number` · `boolean` · `enum`, with `optional`, `default`,
 `multiline`.
@@ -818,11 +818,11 @@ phases made wrong.
 | 5 | `sweep` | function | Find what is now stale: broken `supersedes` chains, mockups marked `stale`, `proposed` status on shipped work, missing index rows, unresolved ids | `stale` |
 | 6 | `correct` | agent | Fix what the sweep found | `corrections` |
 | 7 | `confidence` | function | Score and reasons (§0.6) | `score`, `reasons`, `must_ask` |
-| 8 | `gate` | human — `edit_markdown` | The person edits the text directly rather than approving someone else's | `final_text` |
+| 8 | `gate` | human — `edit_artifact` | The person edits the text directly rather than approving someone else's | `final_text` |
 | 9 | `publish` | function | Write the guides and corrections | `paths` |
 
 **Loop.** `verify_example` failing → back to step 3, max 3.
-**Gate.** `edit_markdown`, not `review_artifact` — copy is the one artifact where
+**Gate.** `edit_artifact`, not `review_artifact` — copy is the one artifact where
 the reviewer's own words are faster than a round of revision.
 **Artifacts.** `docs/guides/<name>.md` · `docs/reference/<name>.md` · corrections
 across the tree.

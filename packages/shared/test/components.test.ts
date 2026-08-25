@@ -21,13 +21,13 @@ describe("component names", () => {
     expect([...COMPONENT_NAMES]).toEqual([
       "choose_option",
       "review_artifact",
-      "edit_markdown",
+      "edit_artifact",
       "fill_form",
       "confirm_action",
-      "user-approve-changeset",
+      "review_artifacts",
     ]);
     expect(isComponentName("choose_option")).toBe(true);
-    expect(isComponentName("user-approve-changeset")).toBe(true);
+    expect(isComponentName("review_artifacts")).toBe(true);
     expect(isComponentName("nope")).toBe(false);
   });
 });
@@ -80,15 +80,15 @@ describe("parseComponentConfig", () => {
     });
   });
 
-  it("defaults confirm_action labels and edit_markdown source", () => {
+  it("defaults confirm_action labels and edit_artifact source", () => {
     expect(parse("confirm_action", {})).toEqual({
       component: "confirm_action",
       prompt: "Confirm this action",
       confirmLabel: "Confirm",
       cancelLabel: "Cancel",
     });
-    expect(parse("edit_markdown", { source: "plan_doc" })).toEqual({
-      component: "edit_markdown",
+    expect(parse("edit_artifact", { source: "plan_doc" })).toEqual({
+      component: "edit_artifact",
       prompt: "Edit",
       source: "plan_doc",
     });
@@ -106,7 +106,44 @@ describe("parseComponentConfig", () => {
   });
 });
 
-describe("user-approve-changeset (CHANGESETS.md §4.1)", () => {
+describe("anchored notes on a review result (decision 0002)", () => {
+  const config = parse("review_artifact", { artifact: "plan_doc", options: ["approve", "reject"] });
+  const note = {
+    artifact: "plan_doc",
+    quote: "cache the probe",
+    body: "say which cache",
+    author: "Ofer Sadgat",
+    at: "2026-08-24T12:00:00.000Z",
+  };
+
+  it("accepts a decision carrying notes", () => {
+    expect(validateComponentResult(config, { decision: "approve", notes: [note] })).toEqual({ ok: true });
+  });
+
+  it("accepts a decision carrying none — a review with nothing to point at is the normal one", () => {
+    expect(validateComponentResult(config, { decision: "approve" })).toEqual({ ok: true });
+  });
+
+  it("carries notes and the review-level comment together, since a reviewer has both", () => {
+    const checked = validateComponentResult(config, { decision: "reject", comments: "wrong shape", notes: [note] });
+    expect(checked).toEqual({ ok: true });
+  });
+
+  it("refuses a malformed note, naming which one", () => {
+    expect(validateComponentResult(config, { decision: "approve", notes: [{ ...note, body: "" }] })).toMatchObject({
+      ok: false,
+      errors: "notes[0].body must not be empty",
+    });
+  });
+
+  it("refuses notes on choose_option, which shows no artifact to anchor to", () => {
+    const choice = parse("choose_option", { options: ["a", "b"] });
+    expect(validateComponentResult(choice, { decision: "a", notes: [note] })).toMatchObject({ ok: false });
+    expect(validateComponentResult(choice, { decision: "a" })).toEqual({ ok: true });
+  });
+});
+
+describe("review_artifacts (CHANGESETS.md §4.1)", () => {
   const changeset = {
     source: "git:abcd1234",
     changes: [{ id: "c1", path: "a.txt", action: "update", before: "a", after: "b" }],
@@ -116,16 +153,16 @@ describe("user-approve-changeset (CHANGESETS.md §4.1)", () => {
     // There is no `changeset` field any more. Which input holds the changeset is decided by SHAPE
     // (`changesetInputOf`) — a config field naming an input could not work, because args and
     // resolved inputs share one namespace and the name overwrote the thing it named.
-    expect(parse("user-approve-changeset", {})).toEqual({
-      component: "user-approve-changeset",
+    expect(parse("review_artifacts", {})).toEqual({
+      component: "review_artifacts",
       prompt: "Review the proposed changes",
       tree: "proposal",
     });
-    expect(() => parse("user-approve-changeset", { tree: "sideways" })).toThrow(/base.*proposal/);
+    expect(() => parse("review_artifacts", { tree: "sideways" })).toThrow(/base.*proposal/);
   });
 
   it("finds the changeset among the inputs whatever the slot is called", () => {
-    const config = parse("user-approve-changeset", {});
+    const config = parse("review_artifacts", {});
     const answer = { decisions: [{ id: "c1", decision: "merged" }] };
     // A slot named anything at all, beside inputs that are plainly not changesets.
     const inputs = { prompt: "Review", tree: "proposal", proposal: changeset, plan_doc: { title: "x" } };
@@ -133,7 +170,7 @@ describe("user-approve-changeset (CHANGESETS.md §4.1)", () => {
   });
 
   it("refuses rather than guesses when two inputs are changesets, or none is", () => {
-    const config = parse("user-approve-changeset", {});
+    const config = parse("review_artifacts", {});
     const answer = { decisions: [{ id: "c1", decision: "merged" }] };
     // One state, one review: picking one of two would risk judging the wrong set of changes.
     const two = validateComponentResult(config, answer, { a: changeset, b: changeset });
@@ -146,7 +183,7 @@ describe("user-approve-changeset (CHANGESETS.md §4.1)", () => {
   });
 
   it("validates a result against the CHANGESET it was asked about, not just a shape", () => {
-    const config = parse("user-approve-changeset", {});
+    const config = parse("review_artifacts", {});
     const ok = validateComponentResult(config, { decisions: [{ id: "c1", decision: "merged" }] }, { changeset });
     expect(ok.ok).toBe(true);
     // A decision about a change never proposed, and a partial answer, are both refused.
@@ -178,8 +215,8 @@ describe("validateComponentResult", () => {
     expect(validateComponentResult(choose, { decision: "approve", comments: 7 }).ok).toBe(false);
   });
 
-  it("checks edit_markdown and confirm_action results", () => {
-    const edit = parse("edit_markdown", {});
+  it("checks edit_artifact and confirm_action results", () => {
+    const edit = parse("edit_artifact", {});
     expect(validateComponentResult(edit, { content: "# hi" })).toEqual({ ok: true });
     expect(validateComponentResult(edit, { content: 5 }).ok).toBe(false);
 

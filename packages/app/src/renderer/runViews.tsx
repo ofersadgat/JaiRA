@@ -645,7 +645,7 @@ export function TaskContext({
             <p className="reason">
               This state&apos;s <code>{gate.component}</code> config is invalid: {gate.configError}
             </p>
-          ) : gate.config?.component === "user-approve-changeset" ? (
+          ) : gate.config?.component === "review_artifacts" ? (
             <ChangesetGate
               config={gate.config}
               inputs={gate.inputs as Record<string, unknown>}

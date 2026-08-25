@@ -26,7 +26,7 @@ Template: [_templates/engineering-contract.md](../_templates/engineering-contrac
 
 | Contract | Visibility | Owned by | Consumers | Status |
 | --- | --- | --- | --- | --- |
-| [gate-components](contracts/gate-components.md) | public | interaction-hub | Every gate state, the renderer, `--interactions` | proposed |
+| [gate-components](contracts/gate-components.md) | public | interaction-hub | Every gate state, the renderer, the CLI reviewer, `--interactions` | proposed |
 
 ## Decisions
 
@@ -37,6 +37,7 @@ old one. An architecture amendment gets one. Template:
 | # | Decision | Status | Supersedes |
 | --- | --- | --- | --- |
 | [0001](decisions/0001-decision-brief-gates.md) — gates get a decision brief; confidence decides whether to ask | proposed | — |
+| [0002](decisions/0002-one-gate-vocabulary.md) — one gate vocabulary; a review's decisions come from gestures | proposed | — |
 
 ## Exceptions to standards
 

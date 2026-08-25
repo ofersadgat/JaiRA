@@ -158,7 +158,7 @@ export function matchesGlob(pattern: string, value: string): boolean {
 export const BUILTIN_FUNCTIONS: Array<{ name: string; what: string }> = [
   { name: "choose_option", what: "human gate — pick one of several options" },
   { name: "review_artifact", what: "human gate — approve or reject a produced file" },
-  { name: "edit_markdown", what: "human gate — edit a document before it continues" },
+  { name: "edit_artifact", what: "human gate — edit a document before it continues" },
   { name: "fill_form", what: "human gate — supply structured input" },
   { name: "confirm_action", what: "human gate — a yes/no before something irreversible" },
   { name: "read_file", what: "tool — read a file from the workspace" },

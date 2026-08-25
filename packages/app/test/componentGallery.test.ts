@@ -101,7 +101,7 @@ describe("the sample configs", () => {
       if (config.component === "review_artifact") {
         expect(surface.inputs?.[config.artifact], surface.id).toBeTypeOf("string");
       }
-      if (config.component === "edit_markdown" && config.source !== undefined) {
+      if (config.component === "edit_artifact" && config.source !== undefined) {
         expect(surface.inputs?.[config.source], surface.id).toBeTypeOf("string");
       }
     }
@@ -110,15 +110,15 @@ describe("the sample configs", () => {
 
 describe("the changeset fixture", () => {
   it("is found by shape, the way the gate finds its changeset", () => {
-    const surface = GALLERY_SURFACES.find((s) => s.component === "user-approve-changeset")!;
+    const surface = GALLERY_SURFACES.find((s) => s.component === "review_artifacts")!;
     const found = changesetInputOf(surface.inputs as Record<string, unknown>);
     expect(found.error).toBeUndefined();
     expect(found.changeset?.changes.map((c) => c.action)).toEqual(["update", "create", "delete", "update"]);
   });
 
   it("accepts a complete review and refuses a partial one", () => {
-    const surface = GALLERY_SURFACES.find((s) => s.component === "user-approve-changeset")!;
-    const config = parseComponentConfig("user-approve-changeset", surface.sample);
+    const surface = GALLERY_SURFACES.find((s) => s.component === "review_artifacts")!;
+    const config = parseComponentConfig("review_artifacts", surface.sample);
     const inputs = surface.inputs as Record<string, unknown>;
     const decisions = GALLERY_CHANGESET.changes.map((c) => ({ id: c.id, decision: "merged" as const }));
     expect(validateComponentResult(config, { decisions }, inputs).ok).toBe(true);

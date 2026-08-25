@@ -24,6 +24,7 @@
  * decision the way it re-validates every other component result.
  */
 import type { JsonValue } from "@declarative-ai/json";
+import { checkNotes, type ReviewNote } from "./reviewNotes";
 
 // --- the value ---------------------------------------------------------------
 
@@ -94,11 +95,18 @@ export interface Changeset {
 // --- decisions (§4.1) --------------------------------------------------------
 
 /**
- * The five decisions. `merged`/`reverted`/`comment` are what the UI offers; `approved`/`denied`
- * exist so a workflow that separates the judgement from the application can have both. The
- * files-column signal the model reads back: `merged` and `approved` both approve, but only `merged`
- * says the tree now contains the proposal; `denied` and `reverted` both refuse, but only `reverted`
- * says it was rolled back.
+ * The five decisions, on TWO axes rather than one (decision 0002).
+ *
+ *  - **Disposition** — in (`merged`/`approved`) or out (`reverted`/`denied`).
+ *  - **Whether this round is being applied** — `merged`/`reverted` say the tree now reflects the
+ *    answer; `approved`/`denied` are the same judgements on a round that is NOT being applied,
+ *    because somebody left a comment and the set is going back for another pass.
+ *
+ * `comment` is neither: it is "this one needs work", which is why it is the value
+ * {@link reviewSettled} looks for.
+ *
+ * Nobody clicks any of these. {@link deriveDecisions} computes all five from what the reviewer
+ * actually did — which is the point of the pair existing at all.
  */
 export type DecisionKind = "approved" | "merged" | "denied" | "reverted" | "comment";
 
@@ -108,12 +116,26 @@ export interface ChangeDecision {
   /** The change this decides — {@link Change.id}. */
   id: string;
   decision: DecisionKind;
-  /** What the user said about it. Required in spirit for `comment`, allowed everywhere. */
-  comment?: string;
   /**
-   * `merged` only: what the user typed, when they edited the change themselves before accepting it.
-   * The ONLY part of the outcome that is not derivable (§4.1), and therefore the only content the
-   * record has to store.
+   * What the user said about the change AS A WHOLE.
+   *
+   * Not made redundant by {@link notes}: a note points at a passage, and some changes have no
+   * passage to point at — a binary file, a rename, anything `unshowable`. Those can still be
+   * commented on, and this is how.
+   */
+  comment?: string;
+  /** Notes anchored to passages inside the change (decision 0002). */
+  notes?: ReviewNote[];
+  /**
+   * What the user typed, when they edited the change themselves rather than asking for it to be
+   * redone. The ONLY part of the outcome that is not derivable (§4.1), and therefore the only
+   * content the record has to store.
+   *
+   * Allowed on any decision that keeps the change — `merged`, `approved`, `comment` — and refused
+   * on `denied`/`reverted`, where there is no change left to hold it. It was `merged`-only until
+   * derivation (decision 0002) made the wider case real: an edit plus somebody else's comment
+   * elsewhere yields `approved` for THIS change on a round that is not being applied, and dropping
+   * the edit there would silently throw away the reviewer's own work between rounds.
    */
   content?: string;
 }
@@ -123,9 +145,82 @@ export interface ChangesetReview {
   decisions: ChangeDecision[];
 }
 
-/** True when a review round is finished — no `comment` decisions left to answer (§3.3 flow 1). */
+/**
+ * True when a review round is finished and its decisions are ready to apply (§3.3 flow 1).
+ *
+ * "Every decision is in APPLIED form" rather than "no decision is `comment`", and the difference is
+ * the review-level comment (decision 0002). A reviewer who writes "this whole approach is wrong"
+ * and touches no individual change leaves every change `approved` — no `comment` decision anywhere,
+ * yet plainly not settled. {@link deriveDecisions} only converts to `merged`/`reverted` when there
+ * is no comment ANYWHERE, so the applied form is exactly the signal, with nothing extra to carry.
+ *
+ * Compatible with a reviewer that answers explicitly: the CLI offers `merged`/`reverted`/`comment`
+ * and never the judgement-only pair, so a settled CLI review still reads as settled.
+ */
 export function reviewSettled(decisions: readonly ChangeDecision[]): boolean {
-  return decisions.every((d) => d.decision !== "comment");
+  return decisions.every((d) => d.decision === "merged" || d.decision === "reverted");
+}
+
+/** What a reviewer did to one change, before it is turned into a decision. */
+export interface ReviewDraft {
+  /** X'd out of the review — the gesture that means "not this one". */
+  excluded?: boolean;
+  /** A comment on the change as a whole. */
+  comment?: string;
+  /** Notes anchored inside it. */
+  notes?: ReviewNote[];
+  /** The reviewer's own edit, when they rewrote the change before accepting it (§4.1). */
+  content?: string;
+}
+
+/** True when this draft carries anything a model would have to answer. */
+function speaks(draft: ReviewDraft | undefined): boolean {
+  if (draft === undefined) return false;
+  return (draft.comment ?? "").trim().length > 0 || (draft.notes ?? []).length > 0;
+}
+
+/**
+ * Turn what the reviewer DID into decisions (decision 0002).
+ *
+ * Nothing here is chosen from a menu. Per change, the gesture already says which of three states it
+ * is in — untouched, X'd out, or commented — and those map to `approved` / `denied` / `comment`.
+ * Then one rule over the whole set: **if nobody commented anywhere, the review is final**, and the
+ * judgements become applications — `approved` → `merged`, `denied` → `reverted`.
+ *
+ * That set-level rule is a pull request's two verdicts. Comments mean "another pass", and a pass
+ * that is going around again must not have written anything to the tree first.
+ *
+ * `reviewComment` is the review-level box, and it counts as a comment on everything — it blocks the
+ * conversion without overwriting any change's own disposition, so an X'd change stays refused even
+ * on a round that is only being commented on.
+ */
+export function deriveDecisions(
+  changes: readonly Pick<Change, "id" | "after">[],
+  drafts: Readonly<Record<string, ReviewDraft>>,
+  reviewComment?: string,
+): ChangeDecision[] {
+  const judged = changes.map((change): ChangeDecision => {
+    const draft = drafts[change.id];
+    const decision: ChangeDecision =
+      draft?.excluded === true
+        ? { id: change.id, decision: "denied" }
+        : speaks(draft)
+          ? { id: change.id, decision: "comment" }
+          : { id: change.id, decision: "approved" };
+    const comment = (draft?.comment ?? "").trim();
+    if (comment.length > 0) decision.comment = comment;
+    if ((draft?.notes ?? []).length > 0) decision.notes = [...draft!.notes!];
+    // The reviewer's own edit rides only a change that is staying in — and only when it differs
+    // from what was proposed, since content equal to `after` is not an edit.
+    if (draft?.excluded !== true && draft?.content !== undefined && draft.content !== change.after) {
+      decision.content = draft.content;
+    }
+    return decision;
+  });
+
+  const anyComment = judged.some((d) => d.decision === "comment") || (reviewComment ?? "").trim().length > 0;
+  if (anyComment) return judged;
+  return judged.map((d) => ({ ...d, decision: d.decision === "denied" ? "reverted" : "merged" }) as ChangeDecision);
 }
 
 // --- the source grammar (§2) -------------------------------------------------
@@ -410,12 +505,15 @@ export function checkDecisions(changeset: Changeset, value: unknown): { ok: true
     if (decided.has(d["id"])) return bad(`decisions[${i}] decides '${String(d["id"])}' twice`);
     decided.add(d["id"]);
     if (d["comment"] !== undefined && typeof d["comment"] !== "string") return bad(`decisions[${i}].comment must be a string`);
+    const notes = checkNotes(d["notes"]);
+    if (!notes.ok) return bad(`decisions[${i}].${notes.errors}`);
     if (d["content"] !== undefined && typeof d["content"] !== "string") return bad(`decisions[${i}].content must be a string`);
-    if (d["content"] !== undefined && d["decision"] !== "merged") {
-      return bad(`decisions[${i}].content is only meaningful on 'merged' — it is what the user typed before accepting`);
+    if (d["content"] !== undefined && (d["decision"] === "denied" || d["decision"] === "reverted")) {
+      return bad(`decisions[${i}].content is meaningless on '${String(d["decision"])}' — the change is not being kept`);
     }
     const decision: ChangeDecision = { id: d["id"], decision: d["decision"] as DecisionKind };
     if (typeof d["comment"] === "string") decision.comment = d["comment"];
+    if (notes.notes.length > 0) decision.notes = notes.notes;
     if (typeof d["content"] === "string") decision.content = d["content"];
     decisions.push(decision);
   }
@@ -437,13 +535,48 @@ export const CHANGESET_DECISIONS_SCHEMA = {
         properties: {
           id: { type: "string" },
           decision: { type: "string", enum: [...DECISION_KINDS] },
-          comment: { type: "string" },
-          content: { type: "string", description: "merged only: the user's own edit of the change" },
+          comment: { type: "string", description: "about the change as a whole" },
+          notes: {
+            type: "array",
+            description: "notes anchored to passages inside the change (decision 0002)",
+            items: {
+              type: "object",
+              properties: {
+                artifact: { type: "string" },
+                quote: { type: "string" },
+                range: {
+                  type: "object",
+                  properties: { start: { type: "integer" }, end: { type: "integer" } },
+                  required: ["start", "end"],
+                  additionalProperties: false,
+                },
+                side: { type: "string", enum: ["before", "after"] },
+                body: { type: "string" },
+                author: { type: "string" },
+                at: { type: "string" },
+                replies: {
+                  type: "array",
+                  description: "the rest of the conversation about this passage, oldest first",
+                  items: {
+                    type: "object",
+                    properties: { author: { type: "string" }, body: { type: "string" }, at: { type: "string" } },
+                    required: ["author", "body", "at"],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ["artifact", "quote", "body", "author", "at"],
+              additionalProperties: false,
+            },
+          },
+          content: { type: "string", description: "the user's own edit; refused where the change is not kept" },
         },
         required: ["id", "decision"],
         additionalProperties: false,
       },
     },
+    decision: { type: "string", description: "the review-level answer, when the state named options" },
+    comments: { type: "string", description: "the review-level comment — a comment on everything" },
   },
   required: ["decisions"],
   additionalProperties: false,

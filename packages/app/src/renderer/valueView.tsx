@@ -47,6 +47,15 @@ import {
   viewsFor,
 } from "@jaira/shared/browser";
 import { Markdown } from "./markdown";
+/**
+ * Loaded on first sight of a markdown value, never with the view.
+ *
+ * CodeMirror plus the markdown grammar is a few hundred kilobytes, and a transcript that shows one
+ * tool result should not pay for an editor it will never draw. The fallback is the plain renderer,
+ * so the words are on screen while the editor arrives.
+ */
+const MarkdownEditor = lazy(() => import("./markdownEditor").then((m) => ({ default: m.MarkdownEditor })));
+type MarkdownDiff = import("./markdownEditor").MarkdownDiff;
 import { Icon } from "./icons";
 import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
 import { useValuePanel } from "./valuePanel";
@@ -378,6 +387,8 @@ export function ValueView({
   outcomes,
   serve,
   onPrompt,
+  edit,
+  diff,
 }: {
   value: unknown;
   hint?: ViewHint | undefined;
@@ -398,6 +409,25 @@ export function ValueView({
   serve?: ((path: string) => Promise<ServedArtifact>) | undefined;
   /** Where a message from an interactive artifact goes. Absent ⇒ the bridge is not connected. */
   onPrompt?: ((text: string) => void) | undefined;
+  /**
+   * Make the views WRITABLE rather than adding a second mode beside them.
+   *
+   * A "read or write" switch next to a "rendered or source" switch asks the same person the same
+   * kind of question twice, and the two answers are not independent: what you want is to edit the
+   * rendering you are looking at. So editability is a property of the value, supplied here, and
+   * each view renders its editable counterpart when it has one — markdown becomes a live-preview
+   * editor, source becomes a text editor, and a view with no editable form (a picture, a diff)
+   * simply stays as it is.
+   */
+  edit?: ((next: string) => void) | undefined;
+  /**
+   * A change to show ALONGSIDE the value, for the views that can.
+   *
+   * Handed down rather than switched to, which is the whole point: a caller that swapped this
+   * component out for a diff viewer the moment an edit existed re-mounted the editor on the first
+   * keystroke, and the caret went with it. Only the markdown view reads it today.
+   */
+  diff?: MarkdownDiff | undefined;
 }): JSX.Element {
   const views = viewsFor(value, hint ?? {});
   const [picked, setPicked] = useState<ViewId | null>(null);
@@ -462,7 +492,19 @@ export function ValueView({
       if (src !== undefined && kind !== undefined) return <Media src={src} kind={kind} />;
       return <Source value={showing} />;
     }
-    if (view === "markdown") return <Markdown text={String(showing)} />;
+    if (view === "markdown") {
+      // The live-preview editor IS the markdown renderer, read-only when nothing may change it —
+      // one surface with a flag rather than a viewer and an editor that drift apart.
+      return (
+        <Suspense fallback={<Markdown text={String(showing)} />}>
+          <MarkdownEditor
+            text={String(showing)}
+            {...(edit === undefined ? { readOnly: true } : { onChange: edit })}
+            {...(diff === undefined ? {} : { diff })}
+          />
+        </Suspense>
+      );
+    }
     if (view === "html") {
       // The frame only when one was actually granted; otherwise the same page, inert.
       if (frameUrl !== null) return <InteractiveArtifact url={frameUrl} onPrompt={onPrompt} />;
@@ -473,6 +515,16 @@ export function ValueView({
         <Suspense fallback={<div className="diff-pane-loading">loading the editor…</div>}>
           <MonacoCodePane text={String(showing)} mime={mime ?? "text/plain"} />
         </Suspense>
+      );
+    }
+    if (edit !== undefined && typeof showing === "string") {
+      return (
+        <textarea
+          className="code-editor vv-edit"
+          value={showing}
+          spellCheck={false}
+          onChange={(e) => edit(e.target.value)}
+        />
       );
     }
     return <Source value={showing} />;

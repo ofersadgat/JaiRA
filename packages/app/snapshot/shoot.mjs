@@ -155,6 +155,42 @@ const OPENED = [
       return "panel=" + (html.pinned ?? "nothing") + " · opened=" + (html.opened ?? "nothing");
     })()`,
   },
+  // Select a passage in a reviewed artifact and check that the note composer STAYS UP.
+  //
+  // The bug this guards: the composer focuses its own textarea on mount, a textarea owns its
+  // selection, so focusing it collapsed the document's — and the listener read that as "the words
+  // were clicked away" and closed the composer in the same frame. It appeared and vanished, which
+  // reads as a rendering glitch rather than as a logic error, and no unit test in this repo can see
+  // it because there is no DOM to select in. This is the only place it can be checked at all.
+  {
+    name: "note-composer",
+    run: `(() => {
+      // The single-artifact review, not the changeset one: the changeset detail pane is Monaco now,
+      // whose selection lives in its own model rather than in the DOM (see MonacoDiffPane.onSelect).
+      // NOTE: no backticks anywhere in here — this whole block is inside a template literal, and one
+      // stray backtick ends the string and takes the harness down with a parse error.
+      const well = document.querySelector('[data-shot="review-one"] [data-testid="artifact"]');
+      if (!well) return "no artifact well";
+      const walker = document.createTreeWalker(well, NodeFilter.SHOW_TEXT);
+      const node = walker.nextNode();
+      if (!node || node.data.length < 4) return "nothing to select";
+      const range = document.createRange();
+      range.setStart(node, 0);
+      range.setEnd(node, Math.min(20, node.data.length));
+      const live = window.getSelection();
+      live.removeAllRanges();
+      live.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+      // The composer opens when the gesture ENDS, not while it is being made, so a drag that never
+      // lets go opens nothing. Dispatching the release is what makes this a real selection.
+      document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+      return new Promise((done) => setTimeout(() => {
+        const open = document.querySelector('[data-testid="note-composer"]') !== null;
+        done(open ? "composer stayed up" : "COMPOSER VANISHED — the selection was cleared");
+      }, 250));
+    })()`,
+    shot: `[data-shot="review-one"]`,
+  },
   {
     name: "graph-deep",
     shot: `[data-shot="graph"]`,

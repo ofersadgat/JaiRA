@@ -24,7 +24,8 @@ import type { WorkIconName } from "./transcript";
  * runs in the direction that matters: the model decides what a row can BE, and this table fails to
  * compile if it cannot draw one of them. A view is allowed to know about the model. Not the reverse.
  */
-const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send" | "clip" | "model" | "shield" | "anthropic" | "openai" | "lock" | "unlocked" | "star" | "pencil" | "plan" | "columns" | "tabs", string[]> = {
+export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send" | "clip" | "model" | "shield" | "anthropic" | "openai" | "lock" | "unlocked" | "star" | "pencil" | "plan" | "columns" | "tabs" | "comment" | "choice" | "files" | "form"
+  | "fileAdd" | "fileDel" | "fileEdit", string[]> = {
   terminal: ["M4 17l6-6-6-6", "M12 19h8"],
   read: ["M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
   write: ["M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7", "M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"],
@@ -68,6 +69,23 @@ const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send" | "cli
   anthropic: ["M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"],
   check: ["M20 6 9 17l-5-5"],
   cross: ["M18 6 6 18", "M6 6l12 12"],
+  // A speech bubble with a tail — the review note (decision 0002).
+  comment: ["M20 4H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3v4l5-4h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1Z"],
+
+  // The gate components (decision 0002), one glyph each. Every one of them sits beside the
+  // component's NAME — see the module note on why a glyph alone is a guess.
+  /** A path that forks: one decision, taken from a named set. */
+  choice: ["M6 3v6a3 3 0 0 0 3 3h7", "M6 21v-6", "m13 9 3 3-3 3"],
+  /** Two sheets, offset: N artifacts rather than one. */
+  files: ["M8 8h11a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z", "M4 16V4a1 1 0 0 1 1-1h11"],
+  /** A sheet with fields on it. */
+  form: ["M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z", "M8 9h8", "M8 13h8", "M8 17h3"],
+
+  // A change's action, as the reviewer's rows say it. One file outline, three marks: plus, minus,
+  // and two lines for a body that moved. They have to read at 14px beside a three-letter badge.
+  fileAdd: ["M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9Z", "M13 3v6h6", "M12 12v6", "M9 15h6"],
+  fileDel: ["M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9Z", "M13 3v6h6", "M9 15h6"],
+  fileEdit: ["M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9Z", "M13 3v6h6", "M9 13h6", "M9 17h4"],
 };
 
 /**
@@ -80,6 +98,12 @@ export function Icon({ name, className }: { name: keyof typeof PATHS; className?
   return (
     <svg
       className={className}
+      // An inline SVG with a viewBox and no size fills its container — so every call site had to
+      // remember a CSS rule, and the ones that forgot drew a glyph the height of the pane. ATTRIBUTES
+      // rather than a style: they sit below every stylesheet in the cascade, so the contexts that do
+      // want a specific size still win, and the default is simply "as tall as the word beside it".
+      width="1em"
+      height="1em"
       viewBox="0 0 24 24"
       fill={name === "anthropic" || name === "openai" ? "currentColor" : "none"}
       stroke="currentColor"

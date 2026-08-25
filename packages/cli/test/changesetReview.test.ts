@@ -47,7 +47,7 @@ describe("jaira changeset review", () => {
         "review",
         "--interactions",
         JSON.stringify({
-          "user-approve-changeset": [
+          "review_artifacts": [
             { decisions: [
               { id: "c1", decision: "merged" },
               { id: "c2", decision: "reverted" },

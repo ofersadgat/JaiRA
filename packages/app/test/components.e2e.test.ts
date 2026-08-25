@@ -1,5 +1,5 @@
 /**
- * All five built-in components (SPEC §8.1) driven through a real run: each gate
+ * All six built-in components (SPEC §8.1) driven through a real run: each gate
  * parks, is answered through the same channel the UI uses, and its result lands on
  * the state's declared outputs.
  *
@@ -64,7 +64,7 @@ async function answer(component: string, value: JsonValue): Promise<PendingInter
   return gate;
 }
 
-describe("the five built-in components", () => {
+describe("the built-in components", () => {
   it("runs a workflow through every component and collects their results", async () => {
     const taskId = service.createTask({
       title: "Component tour",
@@ -90,9 +90,9 @@ describe("the five built-in components", () => {
     expect(JSON.stringify(review.inputs["plan_doc"])).toContain("# The Plan");
     service.submitInteraction(review.requestId, { decision: "approve" });
 
-    // 3. edit_markdown — seeded from `source`, returns the edited content.
-    const edit = await nextGate("edit_markdown");
-    expect(edit.config).toMatchObject({ component: "edit_markdown", source: "plan_doc" });
+    // 3. edit_artifact — seeded from `source`, returns the edited content.
+    const edit = await nextGate("edit_artifact");
+    expect(edit.config).toMatchObject({ component: "edit_artifact", source: "plan_doc" });
     service.submitInteraction(edit.requestId, { content: "# The Plan (edited)" });
 
     // 4. fill_form — the JSON-Schema subset reaches the UI as typed fields.
@@ -141,7 +141,7 @@ describe("the five built-in components", () => {
     );
     service.submitInteraction(review.requestId, { decision: "reject" });
 
-    const edit = await nextGate("edit_markdown");
+    const edit = await nextGate("edit_artifact");
     expect(() => service.submitInteraction(edit.requestId, { content: 42 })).toThrow(/content must be a string/);
     service.submitInteraction(edit.requestId, { content: "ok" });
 

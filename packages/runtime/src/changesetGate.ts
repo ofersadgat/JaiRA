@@ -3,7 +3,7 @@
  *
  * Three registered names, split exactly where the design splits them:
  *
- *  - **`user-approve-changeset`** is NOT registered here. It is an interactive function, parked by
+ *  - **`review_artifacts`** is NOT registered here. It is an interactive function, parked by
  *    the {@link ../interaction InteractionHub} and answerable only through `interaction:submit` —
  *    the registry is supplied by the host process, nothing running inside a workflow can reach the
  *    hub, and so an agent cannot fabricate a human decision about its own code (§4.1). All this
@@ -52,7 +52,7 @@ import {
 import { withinWorkspace } from "./artifactPath";
 import { changesetDrift } from "./changesets";
 
-export const USER_APPROVE_CHANGESET = "user-approve-changeset";
+export const REVIEW_ARTIFACTS = "review_artifacts";
 export const APPLY_CHANGESET = "apply-changeset";
 export const CHANGESET_REVIEW_STATUS = "changeset-review-status";
 
@@ -346,7 +346,7 @@ export function changesetReviewFiles(options: ChangesetReviewOptions = {}): Reco
       outputs: { decisions: DECISIONS_SLOT },
       operation: {
         kind: "function",
-        function: USER_APPROVE_CHANGESET,
+        function: REVIEW_ARTIFACTS,
         // NO `changeset` arg. It meant "the input slot named changeset", and an arg and a state's
         // input share ONE namespace — so naming the slot overwrote what was in it with its own name.
         //
@@ -511,7 +511,7 @@ export function changesetReviewLoopFiles(options: ChangesetReviewLoopOptions = {
       outputs: { decisions: DECISIONS_SLOT },
       operation: {
         kind: "function",
-        function: USER_APPROVE_CHANGESET,
+        function: REVIEW_ARTIFACTS,
         // No `changeset` arg — see the note on the non-looping gate above.
         args: { prompt: options.prompt ?? "Review the proposed changes", tree },
       },

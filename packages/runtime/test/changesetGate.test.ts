@@ -22,7 +22,7 @@ import {
   registerChangesetFunctions,
   reviewStatusOf,
   reviseChangeset,
-  USER_APPROVE_CHANGESET,
+  REVIEW_ARTIFACTS,
 } from "../src/changesetGate";
 
 const CHANGESET: Changeset = {
@@ -52,7 +52,7 @@ async function run(decisions: JsonValue): Promise<{ outputs: Record<string, Json
   registerChangesetFunctions(registry);
   // The scripted human — in the app this is the InteractionHub, and nothing inside the workflow can
   // reach either; the registry is supplied by the host, which is the §4.1 guarantee.
-  new ScriptedFunctions({ [USER_APPROVE_CHANGESET]: [{ decisions } as JsonValue] }).register(registry);
+  new ScriptedFunctions({ [REVIEW_ARTIFACTS]: [{ decisions } as JsonValue] }).register(registry);
   const result = await executeWorkflow({
     bundle: loadBundle(changesetReviewFiles(), CHANGESET_REVIEW_ID),
     inputs: { changeset: CHANGESET as unknown as JsonValue },
@@ -160,7 +160,7 @@ describe("the LOOPING review workflow (flow 1 whole, §3.3)", () => {
   ): Promise<{ outputs: Record<string, JsonValue>; status: string }> {
     const registry = newRegistry();
     registerChangesetFunctions(registry);
-    new ScriptedFunctions({ [USER_APPROVE_CHANGESET]: gateRounds.map((decisions) => ({ decisions }) as JsonValue) }).register(
+    new ScriptedFunctions({ [REVIEW_ARTIFACTS]: gateRounds.map((decisions) => ({ decisions }) as JsonValue) }).register(
       registry,
     );
     const result = await executeWorkflow({
@@ -219,7 +219,7 @@ describe("the LOOPING review workflow (flow 1 whole, §3.3)", () => {
     const registry = newRegistry();
     registerChangesetFunctions(registry);
     new ScriptedFunctions({
-      [USER_APPROVE_CHANGESET]: [
+      [REVIEW_ARTIFACTS]: [
         [
           { id: "c1", decision: "comment", comment: "please revise" },
           { id: "c2", decision: "merged" },
@@ -289,7 +289,7 @@ describe("the record-id seam (§10.6, settled)", () => {
       const registry = newRegistry();
       registerChangesetFunctions(registry);
       new ScriptedFunctions({
-        [USER_APPROVE_CHANGESET]: [
+        [REVIEW_ARTIFACTS]: [
           { decisions: [
             { id: "c1", decision: "merged" },
             { id: "c2", decision: "merged" },

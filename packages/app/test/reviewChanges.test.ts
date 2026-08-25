@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
-import { NodeExec, Git, USER_APPROVE_CHANGESET } from "@jaira/runtime";
+import { NodeExec, Git, REVIEW_ARTIFACTS } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
 import type { PushMessage } from "@jaira/shared";
 import { AppService } from "../src/main/service";
@@ -73,7 +73,7 @@ describe("changeset:review", () => {
     const result = await service.reviewChanges({
       taskId,
       interactions: {
-        [USER_APPROVE_CHANGESET]: [
+        [REVIEW_ARTIFACTS]: [
           { decisions: [
             { id: "c1", decision: "reverted" },
             { id: "c2", decision: "merged" },
@@ -99,8 +99,8 @@ describe("changeset:review", () => {
     const result = await service.reviewChanges({ taskId });
     await until(() => service.pendingInteractions().length === 1, "the gate to park");
     const pending = service.pendingInteractions()[0]!;
-    expect(pending.component).toBe(USER_APPROVE_CHANGESET);
-    expect(pending.config).toMatchObject({ component: USER_APPROVE_CHANGESET, tree: "proposal" });
+    expect(pending.component).toBe(REVIEW_ARTIFACTS);
+    expect(pending.config).toMatchObject({ component: REVIEW_ARTIFACTS, tree: "proposal" });
     expect(JSON.stringify(pending.inputs)).toContain("notes.md");
     // The join that lets the reviewed task's CONVERSATION host this gate (§8.1's default host):
     // the request parked under the review task, but it is ABOUT the task whose worktree it reviews.

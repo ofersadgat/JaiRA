@@ -540,7 +540,7 @@ string.
 | --- | --- | --- |
 | `choose_option` | UI gate | Renderer-backed; parks the state `waiting_for_user` |
 | `review_artifact` | UI gate | |
-| `edit_markdown` | UI gate | |
+| `edit_artifact` | UI gate | |
 | `fill_form` | UI gate | |
 | `confirm_action` | UI gate | |
 | `claude-code` | Delegated agent, in-process SDK | `policyEnforcement: "callback"` |

@@ -14,7 +14,7 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import type { Changeset } from "./changeset";
-import type { ComponentConfig } from "./components";
+import type { Choice, ComponentConfig } from "./components";
 import type { AvailabilitySnapshot, ExecutorInfo, ProbeResult, SecretTarget } from "./executors";
 import type { JairaSettings } from "./settings";
 import type { SchemaViolation } from "./schemas";
@@ -189,6 +189,32 @@ export interface PendingQuestion {
   /** Where {@link taskId} is recorded. Same reason as {@link PendingApproval.project}. */
   project: ProjectRef;
   at: number;
+}
+
+/**
+ * An agent's questions as the ONE shape the renderer draws (decision 0002).
+ *
+ * The mirror of `choicesOfConfig`: same destination, different origin. Every agent question carries
+ * an "Other" field, and it is `instead` — the text the person types REPLACES the option they
+ * picked, which is what the wire expects and what makes it unlike a gate's `comments`.
+ *
+ * `value` is the option's LABEL rather than an id, because a label is what travels back as the
+ * tool's input. An agent's options are its own words, and there is no declared enum behind them.
+ */
+export function choicesOfQuestions(questions: readonly AgentQuestion[]): Choice[] {
+  return questions.map((q) => {
+    const choice: Choice = {
+      question: q.question,
+      options: q.options.map((o) => ({
+        value: o.label,
+        ...(o.description === undefined ? {} : { description: o.description }),
+      })),
+      freeText: { label: "Other", placeholder: "Type your own answer…", role: "instead" },
+    };
+    if (q.header !== undefined && q.header.length > 0) choice.header = q.header;
+    if (q.multiSelect === true) choice.multiple = true;
+    return choice;
+  });
 }
 
 export interface SubmitQuestionRequest {
@@ -1157,6 +1183,14 @@ export interface IpcContract {
   /** Read one addressable value — see {@link ReadUriRequest}. Refused rather than guessed at. */
   "uri:read": { request: ReadUriRequest; response: UriContent };
   "artifact:serve": { request: ServeArtifactRequest; response: ServedArtifact };
+  /**
+   * Who this machine's git would attribute a commit to — what a review note is signed with.
+   *
+   * Answered from the project's repository so a per-repo `user.name` wins, falling back through
+   * git's own precedence to the global one. Both fields are optional: an unset name is ordinary,
+   * and the renderer shows a placeholder rather than refusing to let you comment.
+   */
+  "git:identity": { request: { project?: ProjectRef }; response: { name?: string; email?: string } };
   /** Everything one task produced, oldest first — what the artifacts panel lists. */
   "artifact:list": { request: { taskId: string; project?: ProjectRef }; response: ArtifactSummary[] };
   /**
@@ -1306,6 +1340,7 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "uri:read",
   "artifact:serve",
   "artifact:list",
+  "git:identity",
   "file:find",
   "changeset:review",
   "changeset:reviewSync",

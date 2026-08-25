@@ -27,16 +27,17 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import { changesetOf, checkDecisions, DECISION_KINDS, type Changeset } from "./changeset";
+import { checkNotes } from "./reviewNotes";
 
 export const COMPONENT_NAMES = [
   "choose_option",
   "review_artifact",
-  "edit_markdown",
+  "edit_artifact",
   "fill_form",
   "confirm_action",
-  // The changeset gate (CHANGESETS.md §4.1) — spelled as the design names it, kebab and all,
-  // because the name is the registered function a workflow's `operation.function` must match.
-  "user-approve-changeset",
+  // N artifacts, each decided — the changeset gate is its N-artifact case (CHANGESETS.md §4.1,
+  // decision 0002). Its implementation is still changeset-shaped; the generalization is staged.
+  "review_artifacts",
 ] as const;
 
 export type ComponentName = (typeof COMPONENT_NAMES)[number];
@@ -49,8 +50,93 @@ export function isComponentName(name: string): name is ComponentName {
 export interface ComponentOption {
   value: string;
   label?: string;
+  /** What choosing it means — a line under the label. Was agent-side only until decision 0002. */
+  description?: string;
+  /**
+   * A glyph beside the label — one of the renderer's icon names.
+   *
+   * A NAME rather than any markup: a component config is authored content, and letting it carry a
+   * path or an SVG would put drawing instructions from a workflow file into a privileged renderer.
+   * An unknown name draws nothing, which is the safe failure.
+   */
+  icon?: string;
   /** Rendered as a destructive/secondary action (e.g. `block`). */
   tone?: "default" | "danger";
+}
+
+/**
+ * The free-text field beside a set of choices, and the two ROLES it plays.
+ *
+ * This is the distinction that kept `choose_option` and `AskUserQuestion` looking like two
+ * components. Both draw a text box next to some buttons; they mean opposite things by it. A gate's
+ * `comments` is said IN ADDITION to the choice, so clicking a button while there is text in the box
+ * is a complete answer. An agent's "Other" is said INSTEAD of the choice, so text in the box
+ * overrides whatever was picked and the answer is not complete until it is confirmed.
+ *
+ * Naming the role is what lets one control serve both — and what decides whether clicking an option
+ * submits on the spot.
+ */
+export interface ChoiceFreeText {
+  /** What the field is called on screen. */
+  label: string;
+  placeholder?: string;
+  role: "alongside" | "instead";
+  /**
+   * Draw the field ABOVE the options rather than below them.
+   *
+   * Declared rather than inferred from the role, because the two components that use `alongside`
+   * want opposite orders and both are right. In `choose_option` the options ARE the content and a
+   * comment is an aside, so it follows them. In `review_artifact` the content is the artifact above
+   * and the options are a decision row at the very bottom — putting the comment under them would
+   * mean typing it after the click that already submitted.
+   */
+  first?: boolean;
+}
+
+/**
+ * One question on screen, whoever asked it (decision 0002).
+ *
+ * The normalized form both callers reduce to: an authored gate state via {@link choicesOfConfig},
+ * and a running agent's `AskUserQuestion` via `choicesOfQuestions` (in `ipc.ts`, which is the side
+ * that knows the wire shape). The renderer draws this and nothing else, which is the whole point —
+ * the two callers differ in where the answer goes, and a person cannot see that.
+ */
+export interface Choice {
+  /** The complete question. Also the key an agent's answers are returned under. */
+  question: string;
+  /** A short chip beside it, e.g. `Library`. */
+  header?: string;
+  options: ComponentOption[];
+  /** Several may be chosen; the answer is then a list. */
+  multiple?: boolean;
+  freeText?: ChoiceFreeText;
+  /** A glyph beside the question. Absent ⇒ the caller's default. */
+  icon?: string;
+  /**
+   * Picking is not answering: the choice is held until a confirm button is pressed.
+   *
+   * The default is the opposite — a single-select answers on the click, which is what makes the
+   * common case one tap. This is for the decisions where a mis-click is expensive, and it is the
+   * author's call rather than a rule about how many options there are.
+   */
+  requireConfirm?: boolean;
+}
+
+/** The one question an authored `choose_option` state asks. */
+export function choicesOfConfig(config: ChooseOptionConfig | ReviewArtifactConfig): Choice[] {
+  const choice: Choice = { question: config.prompt, options: config.options };
+  if (config.icon !== undefined) choice.icon = config.icon;
+  if (config.component === "choose_option" && config.multiple === true) choice.multiple = true;
+  if (config.component === "choose_option" && config.requireConfirm === true) choice.requireConfirm = true;
+  if (config.comments === true) {
+    choice.freeText = {
+      label: "Comments (optional)",
+      role: "alongside",
+      // Only the review: see {@link ChoiceFreeText.first}.
+      ...(config.component === "review_artifact" ? { first: true } : {}),
+    };
+  }
+  return [choice];
 }
 
 /** A field of a `fill_form` schema — the JSON-Schema subset DESIGN §7.1 allows. */
@@ -72,6 +158,12 @@ export interface ChooseOptionConfig {
   options: ComponentOption[];
   /** Offer a free-text comment alongside the choice. */
   comments?: boolean;
+  /** Several options may be chosen; `decision` is then an array (decision 0002). */
+  multiple?: boolean;
+  /** Hold the pick until a confirm button is pressed — see {@link Choice.requireConfirm}. */
+  requireConfirm?: boolean;
+  /** A glyph beside the question. Absent ⇒ a message bubble. */
+  icon?: string;
 }
 
 export interface ReviewArtifactConfig {
@@ -82,10 +174,19 @@ export interface ReviewArtifactConfig {
   /** Decision buttons, supplied by the state config (DESIGN §7.1). */
   options: ComponentOption[];
   comments?: boolean;
+  /** A glyph beside the question. Absent ⇒ the component's own. */
+  icon?: string;
+  /**
+   * Let the reviewer change the artifact, not only judge it.
+   *
+   * The edited text rides back as `content`. Not a duplicate of `edit_artifact`: "approve this, but
+   * with that word fixed" is one gesture in a review and two round trips without it.
+   */
+  editable?: boolean;
 }
 
-export interface EditMarkdownConfig {
-  component: "edit_markdown";
+export interface EditArtifactConfig {
+  component: "edit_artifact";
   prompt: string;
   /** Input name whose content seeds the editor. */
   source?: string;
@@ -110,8 +211,8 @@ export interface ConfirmActionConfig {
  * decision anchors to a change id, and the set must be complete — which is why
  * {@link validateComponentResult} takes the resolved inputs for this component alone.
  */
-export interface UserApproveChangesetConfig {
-  component: "user-approve-changeset";
+export interface ReviewArtifactsConfig {
+  component: "review_artifacts";
   prompt: string;
   /**
    * What the tree currently holds — `proposal` for a worktree an agent already edited, `base` for a
@@ -119,15 +220,27 @@ export interface UserApproveChangesetConfig {
    * files column), and how the UI phrases them.
    */
   tree: "base" | "proposal";
+  /**
+   * The REVIEW-LEVEL vocabulary, on the plural exactly as on the singular (decision 0002).
+   *
+   * Absent ⇒ one Submit, and the per-change decisions carry the whole answer. Present ⇒ the
+   * reviewer also answers a routing question, which lands as `decision` beside `decisions` — the
+   * `approve` / `revise` / `cut` shape the authored `review_artifact` states already use, where
+   * `cut` is not a disposition on any file but a direction for the run.
+   *
+   * Deliberately NOT special-cased for changesets: `merged`/`reverted` is what a state that names
+   * no options gets, and that is a default rather than a different component.
+   */
+  options?: ComponentOption[];
 }
 
 export type ComponentConfig =
   | ChooseOptionConfig
   | ReviewArtifactConfig
-  | EditMarkdownConfig
+  | EditArtifactConfig
   | FillFormConfig
   | ConfirmActionConfig
-  | UserApproveChangesetConfig;
+  | ReviewArtifactsConfig;
 
 // --- parsing the authored config ---------------------------------------------
 
@@ -161,6 +274,10 @@ function options(raw: unknown, where: string): ComponentOption[] {
     const record = asRecord(entry, `${where}[${i}]`);
     const option: ComponentOption = { value: str(record["value"], `${where}[${i}].value`) };
     if (record["label"] !== undefined) option.label = str(record["label"], `${where}[${i}].label`);
+    if (record["description"] !== undefined) {
+      option.description = str(record["description"], `${where}[${i}].description`);
+    }
+    if (record["icon"] !== undefined) option.icon = str(record["icon"], `${where}[${i}].icon`);
     if (record["tone"] !== undefined) {
       const tone = record["tone"];
       if (tone !== "default" && tone !== "danger") {
@@ -219,6 +336,9 @@ export function parseComponentConfig(component: ComponentName, raw: unknown): Co
         options: options(config["options"], "choose_option.options"),
       };
       if (config["comments"] === true) parsed.comments = true;
+      if (config["multiple"] === true) parsed.multiple = true;
+      if (config["require_confirm"] === true) parsed.requireConfirm = true;
+      if (config["icon"] !== undefined) parsed.icon = str(config["icon"], "choose_option.icon");
       return parsed;
     }
     case "review_artifact": {
@@ -231,11 +351,13 @@ export function parseComponentConfig(component: ComponentName, raw: unknown): Co
         options: options(config["options"] ?? config["decisions"], "review_artifact.options"),
       };
       if (config["comments"] === true) parsed.comments = true;
+      if (config["icon"] !== undefined) parsed.icon = str(config["icon"], "review_artifact.icon");
+      if (config["editable"] === true) parsed.editable = true;
       return parsed;
     }
-    case "edit_markdown": {
-      const parsed: EditMarkdownConfig = { component, prompt };
-      if (config["source"] !== undefined) parsed.source = str(config["source"], "edit_markdown.source");
+    case "edit_artifact": {
+      const parsed: EditArtifactConfig = { component, prompt };
+      if (config["source"] !== undefined) parsed.source = str(config["source"], "edit_artifact.source");
       return parsed;
     }
     case "fill_form":
@@ -247,16 +369,17 @@ export function parseComponentConfig(component: ComponentName, raw: unknown): Co
         confirmLabel: str(config["confirmLabel"], "confirm_action.confirmLabel", "Confirm"),
         cancelLabel: str(config["cancelLabel"], "confirm_action.cancelLabel", "Cancel"),
       };
-    case "user-approve-changeset": {
+    case "review_artifacts": {
       const tree = config["tree"] ?? "proposal";
       if (tree !== "base" && tree !== "proposal") {
-        throw new ConfigError(`user-approve-changeset.tree must be "base" or "proposal"`);
+        throw new ConfigError(`review_artifacts.tree must be "base" or "proposal"`);
       }
-      return {
-        component,
-        prompt,
-        tree,
-      };
+      const parsed: ReviewArtifactsConfig = { component, prompt, tree };
+      // `decisions` is the same alias `review_artifact` takes — it reads better in a review state,
+      // and a reviewer should not have to remember which of the two spells it which way.
+      const named = config["options"] ?? config["decisions"];
+      if (named !== undefined) parsed.options = options(named, "review_artifacts.options");
+      return parsed;
     }
   }
 }
@@ -267,13 +390,13 @@ function defaultPrompt(component: ComponentName): string {
       return "Choose an option";
     case "review_artifact":
       return "Review";
-    case "edit_markdown":
+    case "edit_artifact":
       return "Edit";
     case "fill_form":
       return "Fill in the form";
     case "confirm_action":
       return "Confirm this action";
-    case "user-approve-changeset":
+    case "review_artifacts":
       return "Review the proposed changes";
   }
 }
@@ -290,7 +413,7 @@ const bad = (errors: string): ResultCheck => ({ ok: false, errors });
  * push an out-of-contract value (an undeclared decision, a missing field) into a
  * workflow's outputs.
  *
- * `inputs` is consulted by `user-approve-changeset` alone: its contract is not a fixed shape but
+ * `inputs` is consulted by `review_artifacts` alone: its contract is not a fixed shape but
  * "every change you were shown, decided" — which only the changeset the state resolved can judge.
  * Without inputs the check degrades to shape-only, which a caller that has them should not accept.
  */
@@ -343,7 +466,24 @@ export function validateComponentResult(
   }
   const result = value as Record<string, unknown>;
   switch (config.component) {
-    case "user-approve-changeset": {
+    case "review_artifacts": {
+      // The review-level pair, checked the same way `review_artifact`'s is — and only against a
+      // vocabulary the state actually named, so a config with no `options` refuses a decision
+      // rather than accepting an arbitrary word.
+      const level = result["decision"];
+      if (level !== undefined) {
+        if (config.options === undefined) {
+          return bad("result.decision is set, but this state names no options for the review to answer");
+        }
+        if (typeof level !== "string" || !config.options.some((o) => o.value === level)) {
+          return bad(`result.decision '${String(level)}' is not one of: ${config.options.map((o) => o.value).join(", ")}`);
+        }
+      } else if (config.options !== undefined) {
+        return bad(`result.decision is required: this state offers ${config.options.map((o) => o.value).join(", ")}`);
+      }
+      if (result["comments"] !== undefined && typeof result["comments"] !== "string") {
+        return bad("result.comments must be a string when present");
+      }
       if (inputs !== undefined) {
         const found = changesetInputOf(inputs);
         if (found.changeset === undefined) return bad(found.error ?? "no input holds a changeset");
@@ -365,17 +505,51 @@ export function validateComponentResult(
     }
     case "choose_option":
     case "review_artifact": {
+      const named = config.options.map((o) => o.value);
       const decision = result["decision"];
-      if (typeof decision !== "string") return bad("result.decision must be a string");
-      if (!config.options.some((o) => o.value === decision)) {
-        return bad(`result.decision '${decision}' is not one of: ${config.options.map((o) => o.value).join(", ")}`);
+      // A multi-select answers with a LIST, and the list is checked the same way one value is:
+      // every member declared, nothing repeated, and not empty — "none of these" is a decision the
+      // state did not offer, and an empty array is how it would arrive by accident.
+      if (config.component === "choose_option" && config.multiple === true) {
+        if (!Array.isArray(decision)) return bad("result.decision must be an array on a multi-select");
+        if (decision.length === 0) return bad("result.decision must name at least one option");
+        const seen = new Set<string>();
+        for (const value of decision) {
+          if (typeof value !== "string" || !named.includes(value)) {
+            return bad(`result.decision '${String(value)}' is not one of: ${named.join(", ")}`);
+          }
+          if (seen.has(value)) return bad(`result.decision names '${value}' twice`);
+          seen.add(value);
+        }
+      } else {
+        if (typeof decision !== "string") return bad("result.decision must be a string");
+        if (!named.includes(decision)) {
+          return bad(`result.decision '${decision}' is not one of: ${named.join(", ")}`);
+        }
       }
       if (result["comments"] !== undefined && typeof result["comments"] !== "string") {
         return bad("result.comments must be a string when present");
       }
-      return { ok: true };
+      // The reviewer's own edit, and only from a state that offered it: a `content` on a read-only
+      // review is a value nothing on screen could have produced.
+      if (result["content"] !== undefined) {
+        if (config.component !== "review_artifact" || config.editable !== true) {
+          return bad("result.content is set, but this state's artifact is not editable");
+        }
+        if (typeof result["content"] !== "string") return bad("result.content must be a string");
+      }
+      // Anchored notes ride alongside the review-level comment rather than replacing it: one is
+      // about a passage, the other about the whole thing, and a reviewer routinely has both.
+      // `choose_option` is in this branch for its decision only — it shows no artifact, so it has
+      // nothing to anchor to, and a note on it is refused rather than silently carried.
+      if (config.component === "choose_option") {
+        if (result["notes"] !== undefined) return bad("choose_option shows no artifact, so it takes no notes");
+        return { ok: true };
+      }
+      const notes = checkNotes(result["notes"]);
+      return notes.ok ? { ok: true } : bad(notes.errors);
     }
-    case "edit_markdown":
+    case "edit_artifact":
       return typeof result["content"] === "string" ? { ok: true } : bad("result.content must be a string");
     case "confirm_action":
       return typeof result["confirmed"] === "boolean" ? { ok: true } : bad("result.confirmed must be a boolean");

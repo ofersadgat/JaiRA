@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { hashText, initProject, stateHashes } from "@jaira/persistence";
-import { specPlanningFiles, syncRules, USER_APPROVE_CHANGESET, writeWorkflowFiles, type ConformanceFinding } from "@jaira/runtime";
+import { specPlanningFiles, syncRules, REVIEW_ARTIFACTS, writeWorkflowFiles, type ConformanceFinding } from "@jaira/runtime";
 import { WORKFLOW_DESCRIPTION, WORKFLOW_DESCRIPTION_PATH } from "@jaira/shared";
 import { AppService } from "../src/main/service";
 
@@ -342,7 +342,7 @@ describe("runSync towards the states", () => {
       // interaction from MAIN, so it reaches a window that reloaded or navigated away during a
       // run that can take an hour — which is exactly when the blocking channel's result is lost.
       review: true,
-      interactions: { [USER_APPROVE_CHANGESET]: [{ decisions: [{ id: "c1", decision: "merged" }] } as never] },
+      interactions: { [REVIEW_ARTIFACTS]: [{ decisions: [{ id: "c1", decision: "merged" }] } as never] },
       fake: fake({ edits: [edit("feature/plan/gate", '{"label":"Approve the plan"}')] }) as never,
     });
     expect(result.reviewTaskId).toBeDefined();

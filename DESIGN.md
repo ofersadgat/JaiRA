@@ -320,7 +320,7 @@ screenshot, plus 83 tests. What that phase settled:
    process before it can become a workflow output (DESIGN §7.1). The engine's own
    output-schema check remains a second, independent gate.
 2. **Result shapes are chosen to land on declared outputs** — `choose_option` and
-   `review_artifact` return `{ decision, comments? }`, `edit_markdown`
+   `review_artifact` return `{ decision, comments? }`, `edit_artifact`
    `{ content }`, `confirm_action` `{ confirmed }`, and `fill_form` a flat object
    of its fields. So a UI state's outputs are ordinary state outputs, with no
    adapter layer in between.
@@ -1463,7 +1463,7 @@ function names — which is why `waiting_for_user` is a JaiRA-side fact rather t
 an engine one.
 
 MVP component set (§15, Q4): `choose_option`, `review_artifact`,
-`edit_markdown`, `fill_form`, `confirm_action`. Each is a React component with
+`edit_artifact`, `fill_form`, `confirm_action`. Each is a React component with
 a typed props/result contract in `@jaira/shared`. `review_artifact` renders
 markdown artifacts with the decision buttons supplied by the state config;
 `fill_form` renders from a JSON-Schema subset.
@@ -3124,7 +3124,7 @@ remains the fastest debugging surface permanently.
 | 1 | Artifact location | **A configurable destination URI** (§7.6) — `virtual:` or a `file:` path template over a closed variable set (`$DEFAULT`, `$CENTRAL`, `$CENTRAL_FLAT`, `$WORKTREE`, `$TASK_ID`, `$RELPATH`, `$SLOT`, …), so backend and path derivation stay independent. JaiRA owns the agent's write tool, so it controls where bytes land while the agent still sees its own path. Built. |
 | 2 | State file extension | `.json` inside `.jaira/workflows/` (directory already scopes meaning) |
 | 3 | Omit `id`? | Yes — derived from path; if present it must match (validator error otherwise) |
-| 4 | Minimum UI components | The spec's five: choose_option, review_artifact, edit_markdown, fill_form, confirm_action |
+| 4 | Minimum UI components | The spec's five: choose_option, review_artifact, edit_artifact, fill_form, confirm_action |
 | 5 | First agent provider | Claude Agent SDK, then llm_api, then Claude Code CLI, then generic CLI (opencode/codex) |
 | 6 | Partial progress | Normalized `RunnerEvent` stream per adapter (§8) |
 | 7 | Validation timing | Live lint + on save (advisory); enforced at task start (§5.2) |

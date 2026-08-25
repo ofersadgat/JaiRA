@@ -62,7 +62,7 @@ export interface GallerySurface {
   /**
    * The state's other resolved inputs — what the component reads BESIDES its config.
    *
-   * `review_artifact` shows one, `edit_markdown` seeds an editor from one, and the changeset gate
+   * `review_artifact` shows one, `edit_artifact` seeds an editor from one, and the changeset gate
    * finds its changeset among them by shape. A component that reads none declares none.
    */
   inputs?: Record<string, JsonValue>;
@@ -97,6 +97,8 @@ const OPTION: SchemaDoc = {
   properties: {
     value: str("value", "what the state's declared output receives"),
     label: str("label", "what the button says; absent ⇒ the value"),
+    description: str("description", "what choosing it means — a line under the label"),
+    icon: str("icon", "a glyph beside the label, by name; an unknown name draws nothing"),
     tone: {
       type: "string",
       enum: ["default", "danger"],
@@ -165,6 +167,9 @@ const CONFIG_SCHEMAS: Record<ComponentName, { hint: string; document: SchemaDoc;
     document: configSchema("choose_option", "one decision, taken from a named set", {
       options: OPTIONS,
       comments: bool("comments", "offer a free-text note alongside the choice"),
+      multiple: bool("multiple", "several options may be chosen; the answer is then a list"),
+      require_confirm: bool("require_confirm", "picking holds the choice; a Confirm button sends it"),
+      icon: str("icon", "a glyph beside the question; absent ⇒ a message bubble"),
     }),
     expected: ["prompt", "options"],
   },
@@ -175,12 +180,14 @@ const CONFIG_SCHEMAS: Record<ComponentName, { hint: string; document: SchemaDoc;
       options: OPTIONS,
       decisions: { ...OPTIONS, title: "decisions", description: "an alias for options — it reads better in a review state" },
       comments: bool("comments", "offer a free-text note alongside the choice"),
+      icon: str("icon", "a glyph beside the question"),
+      editable: bool("editable", "let the reviewer change the artifact; the edit rides back as content"),
     }),
     expected: ["prompt", "artifact", "options"],
   },
-  edit_markdown: {
-    hint: "hand the text back edited — `edit_markdown`'s args",
-    document: configSchema("edit_markdown", "a person edits a document the run produced", {
+  edit_artifact: {
+    hint: "hand the text back edited — `edit_artifact`'s args",
+    document: configSchema("edit_artifact", "a person edits a document the run produced", {
       source: str("source", "the input whose content seeds the editor; absent ⇒ start empty"),
     }),
     expected: ["prompt"],
@@ -206,9 +213,9 @@ const CONFIG_SCHEMAS: Record<ComponentName, { hint: string; document: SchemaDoc;
     }),
     expected: ["prompt"],
   },
-  "user-approve-changeset": {
-    hint: "the changeset gate — `user-approve-changeset`'s args (CHANGESETS.md §4.1)",
-    document: configSchema("user-approve-changeset", "every change decided, one at a time", {
+  review_artifacts: {
+    hint: "the changeset gate — `review_artifacts`'s args (CHANGESETS.md §4.1)",
+    document: configSchema("review_artifacts", "every change decided, one at a time", {
       tree: {
         type: "string",
         enum: ["base", "proposal"],
@@ -325,7 +332,7 @@ registerSchema({
 
 // --- the fixtures ------------------------------------------------------------
 
-/** The document `review_artifact` shows and `edit_markdown` seeds its editor from. */
+/** The document `review_artifact` shows and `edit_artifact` seeds its editor from. */
 export const GALLERY_DOCUMENT = [
   "# Plan: cache the availability probe",
   "",
@@ -368,6 +375,21 @@ export const GALLERY_CHANGESET: Changeset = {
         "  return cached;",
         "}",
       ].join("\n"),
+      // Real hunks, because the reviewer renders the STORED ones and derives nothing. Without them
+      // the offline preview showed the before-text with no marks at all — a picture of a diff
+      // viewer that cannot show a diff, which is the one thing the gallery exists to catch.
+      hunks: [
+        {
+          id: "h1",
+          start: 58,
+          end: 91,
+          text: [
+            "  if (cached !== null && Date.now() - cached.checkedAt < INTERVAL) return cached;",
+            "  cached = await probeEverything();",
+            "  return cached;",
+          ].join("\n"),
+        },
+      ],
     },
     {
       id: "c2",
@@ -402,11 +424,15 @@ export const GALLERY_SURFACES: readonly GallerySurface[] = [
     component: "choose_option",
     title: "Choose an option",
     blurb:
-      "One decision, taken from a set the state names. The answer lands as `decision`, which is why the state's declared output usually carries the same enum.",
+      "One decision, taken from a set the state names. The answer lands as `decision`, which is why the state's declared output usually carries the same enum. The SAME control draws a running agent's question — the two differ in where the answer goes and in nothing you can see (decision 0002).",
     schemaId: componentConfigSchemaId("choose_option"),
     sample: {
       prompt: "Pick a direction for the plan.",
-      options: ["approve", "request_changes", { value: "block", tone: "danger" }],
+      options: [
+        { value: "approve", description: "the plan goes forward as written", icon: "check" },
+        { value: "request_changes", description: "back to the model with your note", icon: "comment" },
+        { value: "block", description: "nothing downstream is built", tone: "danger", icon: "cross" },
+      ],
       comments: true,
     },
   },
@@ -423,17 +449,18 @@ export const GALLERY_SURFACES: readonly GallerySurface[] = [
       artifact: "plan_doc",
       decisions: ["approve", { value: "reject", tone: "danger" }],
       comments: true,
+      editable: true,
     },
     inputs: { plan_doc: GALLERY_DOCUMENT },
   },
   {
-    id: "edit_markdown",
+    id: "edit_artifact",
     kind: "interaction",
-    component: "edit_markdown",
-    title: "Edit markdown",
+    component: "edit_artifact",
+    title: "Edit an artifact",
     blurb:
       "A person edits what the run produced and hands it back as `content`. `source` seeds the editor from an input; without one the editor starts empty.",
-    schemaId: componentConfigSchemaId("edit_markdown"),
+    schemaId: componentConfigSchemaId("edit_artifact"),
     sample: { prompt: "Tidy up the plan.", source: "plan_doc" },
     inputs: { plan_doc: GALLERY_DOCUMENT },
   },
@@ -466,25 +493,25 @@ export const GALLERY_SURFACES: readonly GallerySurface[] = [
     sample: { prompt: "Merge the plan into main?", confirmLabel: "Merge", cancelLabel: "Not yet" },
   },
   {
-    id: "user-approve-changeset",
+    id: "review_artifacts",
     kind: "interaction",
-    component: "user-approve-changeset",
-    title: "Approve a changeset",
+    component: "review_artifacts",
+    title: "Review a set of artifacts",
     blurb:
-      "Every proposed change, decided one at a time (CHANGESETS.md §4.1). It finds its changeset among the state's inputs BY SHAPE — no config field names it — and returns a decision per change.",
-    schemaId: componentConfigSchemaId("user-approve-changeset"),
+      "N artifacts, each decided — today's case being a changeset (CHANGESETS.md §4.1). It finds its changeset among the state's inputs BY SHAPE — no config field names it — and returns a decision per change.",
+    schemaId: componentConfigSchemaId("review_artifacts"),
     sample: { prompt: "Review the proposed changes.", tree: "proposal" },
     inputs: { changeset: GALLERY_CHANGESET as unknown as JsonValue },
   },
   {
     id: "unknown-function",
     kind: "interaction",
-    component: "summarise_findings",
+    component: "unknown_function",
     title: "A gate JaiRA does not know",
     blurb:
-      "The fallback: a UI state whose function is not a built-in still parks, and still has to be answerable. You get a JSON box, which is the honest offer when nothing declares what the answer should look like — and it is what a typo in `operation.function` looks like from here.",
+      "The fallback, and NOT a real component: `unknown_function` is a name nothing implements. A UI state whose function is not a built-in still parks and still has to be answerable, so you get a JSON box — the honest offer when nothing declares what the answer should look like, and what a typo in `operation.function` looks like from here.",
     schemaId: "gallery-unknown-function",
-    sample: { function: "summarise_findings" },
+    sample: { function: "unknown_function" },
   },
   {
     id: "approval",
