@@ -132,6 +132,19 @@ export interface SessionScope {
   runId?: number;
 }
 
+/**
+ * A session name as it is actually STORED — namespaced by the run that made it.
+ *
+ * Exported because two readers need it and a second copy of the rule is a join that silently returns
+ * nothing: the store keys every row this way, and the replay index has to resolve a journal's
+ * `sessionRef` (which carries the bare authored name) to the same string. A fork carries its lineage
+ * in the name (`main[0:14]/b`), so prefixing is all there is to it either way.
+ */
+export function scopedSessionId(scope: SessionScope, id: string): string {
+  const { taskId, runId } = scope;
+  return taskId === undefined && runId === undefined ? id : `${taskId ?? ""}/${runId ?? ""}/${id}`;
+}
+
 export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore {
   private minted = 0;
 
@@ -707,8 +720,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * run's conversations wants once it has narrowed to that run.
    */
   private k(id: string): string {
-    const { taskId, runId } = this.scope;
-    return taskId === undefined && runId === undefined ? id : `${taskId ?? ""}/${runId ?? ""}/${id}`;
+    return scopedSessionId(this.scope, id);
   }
 
   private branch(id: string, branch: Branch): void {

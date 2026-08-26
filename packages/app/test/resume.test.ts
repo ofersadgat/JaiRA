@@ -242,3 +242,55 @@ describe("what the strip is told", () => {
     await expect(service.resumeTask({ taskId })).rejects.toThrow(/completed and cannot be resumed/);
   }, 30000);
 });
+
+/**
+ * A workflow that talks to a model, which is what the strip is actually looking at in practice.
+ *
+ * Every fixture above is an interactive gate, and a gate is an UNPLACED call — its record is keyed
+ * by the operation's content hash. A prompt or agent call takes a seat in a conversation and its
+ * record is keyed by that seat instead. An index that cannot read the second kind reports every such
+ * operation unreadable, `resumable` answers `none`, and the strip quietly falls back to "Start
+ * again" on the one kind of workflow anybody runs. That is a bug this file could not see, so it
+ * gets a case here.
+ */
+const PROMPTED = "prompted";
+
+function promptFiles(): Record<string, JsonValue> {
+  const leaf = (name: string): JsonValue => ({
+    label: name,
+    outputs: { text: { schema: { type: "string" } } },
+    operation: { kind: "prompt", prompt: `say ${name}`, config: { model: "fake/model" } },
+  });
+  return {
+    [PROMPTED]: {
+      label: "Two calls in one conversation",
+      environment: { session: "main" },
+      outputs: { last: { schema: { type: "string" }, binding: ".children.b.outputs.text" } },
+      children: { a: { state: `${PROMPTED}/a` }, b: { state: `${PROMPTED}/b` } },
+      sequence: ["a", "b"],
+    },
+    [`${PROMPTED}/a`]: leaf("a"),
+    [`${PROMPTED}/b`]: leaf("b"),
+  };
+}
+
+describe("a workflow whose calls take a seat in a conversation", () => {
+  it("offers a real plan, not the fallback, when the second call failed", async () => {
+    writeWorkflowFiles(workflowsDir, promptFiles());
+    const { taskId } = service.createTask({ title: "Prompted", workflow: PROMPTED });
+    await service.startTask({
+      // Rules match first to last: `b` fails, everything else answers.
+      taskId,
+      fake: [{ promptIncludes: "say b", error: "the model refused" }, { output: { text: "hi" } }] as never,
+    });
+    await until(() => pushes.some((p) => p.type === "run:finished"), "the run to end");
+    expect(statusOf(taskId)).toBe("failed");
+
+    const plan = service.resumable(taskId);
+    // `none` here is the symptom to guard against: it is what makes the strip say "Start again" —
+    // a fork's wording — about a task whose first call is sitting in the record, readable.
+    expect(plan.kind).toBe("retry");
+    expect(plan.blocked).toBeUndefined();
+    expect(plan.replayed).toBe(1);
+  }, 30000);
+});

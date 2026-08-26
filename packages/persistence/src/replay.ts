@@ -46,7 +46,7 @@ import type {
 import type { InstanceNode } from "@jaira/shared";
 import { SqliteEventLog } from "./eventLog";
 import { eventsOf, isLive, projectRun } from "./projection";
-import { ON_RECORD } from "./sessionStore";
+import { ON_RECORD, scopedSessionId } from "./sessionStore";
 import { parseSessionRef } from "./views";
 import type { Project } from "./project";
 
@@ -163,7 +163,7 @@ export function buildRunReplay(project: Project, taskId: string, runId: number):
       }
       continue;
     }
-    const row = takeRecord(project, queues, event);
+    const row = takeRecord(project, taskId, runId, queues, event);
     if (event.type !== "operation.completed") continue;
     if (row === undefined) {
       unreadable.push({ address, stateId: event.stateId, reason: "no operation record for this event" });
@@ -314,34 +314,49 @@ function recordQueues(project: Project, taskId: string, runId: number): Map<stri
 /**
  * The record a settled operation event points at — through whichever of the two joins applies.
  *
- * An UNPLACED call (a pure helper, a gate, anything not in a conversation) is keyed by the content
- * hash hw stamps as `operationId`, and is CONSUMED from the queue above: one row per settled event,
- * in order. A PLACED one is keyed by the position it claimed, which is unique by construction — the
- * primary key on `session_positions` IS the claim — so it needs no queue and no consuming.
+ * **The POSITION first, wherever there is one, and the order is the whole correctness of this.** A
+ * settled event carries BOTH ids: `operationId` (the content hash) and `metrics.sessionRef` (the
+ * seat the call took). But a PLACED call's record is keyed by that seat — `withRecord` names it
+ * `<session>:<seq>` — and nothing was ever written under the hash, so reaching for the hash first
+ * finds nothing and reports every prompt and every agent call as unreadable. Which is what it did:
+ * the whole feature fell back to "start over" on any workflow that talks to a model, because the
+ * fixtures were all interactive gates and a gate is unplaced.
  *
- * The known imprecision, stated because it fails safe rather than silently: if a crashed dispatch of
- * some operation left a row and a LATER identical dispatch settled, the pairing hands the later
+ * An UNPLACED call (a pure helper, a gate, an embedded call) has no seat, and its content hash is
+ * NOT unique — a loop dispatching the identical operation writes one row per dispatch, told apart by
+ * `attempt`. So those are CONSUMED from the queue above: one row per settled event, in order.
+ *
+ * The known imprecision on that queue, stated because it fails safe rather than silently: if a
+ * crashed dispatch left a row and a LATER identical dispatch settled, the pairing hands the later
  * event the earlier row. That yields no readable value, so the operation lands in `unreadable` and
- * the caller is told resume would re-dispatch it — which is the conservative answer, not a wrong one.
+ * the caller is told resume would re-dispatch it — the conservative answer, not a wrong one.
  */
 function takeRecord(
   project: Project,
+  taskId: string,
+  runId: number,
   queues: Map<string, RecordRow[]>,
   event: { operationId?: string; metrics?: { sessionRef?: string } },
 ): RecordRow | undefined {
-  if (event.operationId !== undefined) return queues.get(event.operationId)?.shift();
   const ref = event.metrics?.sessionRef;
   const position = ref === undefined ? undefined : parseSessionRef(ref);
-  if (position === undefined) return undefined;
-  return project.db
-    .prepare(
-      `SELECT r.status, r.result_json FROM session_positions p
-         JOIN operation_records r ON ${ON_RECORD}
-        WHERE p.session_id = ? AND p.seq = ?`,
-    )
-    // One position back from where the call ended — `sessionRef`'s documented contract, and the same
-    // arithmetic `stateSessions` does.
-    .get(position.id, position.seq - 1) as RecordRow | undefined;
+  if (position !== undefined) {
+    return (
+      project.db
+        .prepare(
+          `SELECT r.status, r.result_json FROM session_positions p
+             JOIN operation_records r ON ${ON_RECORD}
+            WHERE p.session_id = ? AND p.seq = ?`,
+        )
+        // Two adjustments, both easy to omit and each fatal on its own. The id is SCOPED — a session
+        // name is instance-scoped and instance ids restart every run, so the store namespaces every
+        // row by the run that made it. And the seq is one BACK from where the call ended, which is
+        // `sessionRef`'s documented contract and the same arithmetic `stateSessions` does.
+        .get(scopedSessionId({ taskId, runId }, position.id), position.seq - 1) as RecordRow | undefined
+    );
+  }
+  if (event.operationId !== undefined) return queues.get(event.operationId)?.shift();
+  return undefined;
 }
 
 /**

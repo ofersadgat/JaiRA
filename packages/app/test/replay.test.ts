@@ -60,13 +60,14 @@ function replayFiles(): Record<string, JsonValue> {
 }
 
 let dir: string;
+let workflowsDir: string;
 let service: AppService;
 let pushes: PushMessage[];
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-replay-"));
-  const paths = initProject(dir);
-  writeWorkflowFiles(paths.workflowsDir, replayFiles());
+  workflowsDir = initProject(dir).workflowsDir;
+  writeWorkflowFiles(workflowsDir, replayFiles());
   pushes = [];
   service = new AppService({ publish: (m) => pushes.push(m) });
   await service.open(dir);
@@ -195,5 +196,56 @@ describe("the replay index", () => {
     // is the prefix every other one is built on, and it is the empty string.
     expect(addressKey([])).toBe("");
     expect(replayOf(taskId).frontier.every((f) => f.address.length === 2)).toBe(true);
+  }, 30000);
+});
+
+/**
+ * A conversation's calls — the case the interactive fixtures above cannot reach.
+ *
+ * Every gate in this file is an UNPLACED call: it takes no seat in a conversation, so its record is
+ * keyed by the operation's content hash. A prompt or an agent call is PLACED, and its record is
+ * keyed by the seat instead (`<session>:<seq>`). The settled event carries BOTH ids, so an index
+ * that reaches for the hash first finds nothing for any call that talked to a model — which is
+ * exactly what happened, and it turned the whole feature into "start over" on every real workflow
+ * while the tests above stayed green.
+ */
+const PROMPTED = "prompted";
+
+function promptFiles(): Record<string, JsonValue> {
+  const leaf = (name: string): JsonValue => ({
+    label: name,
+    outputs: { text: { schema: { type: "string" } } },
+    operation: { kind: "prompt", prompt: `say ${name}`, config: { model: "fake/model" } },
+  });
+  return {
+    [PROMPTED]: {
+      label: "Two calls in one conversation",
+      // Declared, so both children take a seat in the SAME transcript — the arrangement any real
+      // workflow uses, and the one where positions rather than hashes are the record's key.
+      environment: { session: "main" },
+      outputs: { last: { schema: { type: "string" }, binding: ".children.b.outputs.text" } },
+      children: { a: { state: `${PROMPTED}/a` }, b: { state: `${PROMPTED}/b` } },
+      sequence: ["a", "b"],
+    },
+    [`${PROMPTED}/a`]: leaf("a"),
+    [`${PROMPTED}/b`]: leaf("b"),
+  };
+}
+
+describe("the replay index over a conversation", () => {
+  it("reads back a call that took a seat, not just one that never did", async () => {
+    writeWorkflowFiles(workflowsDir, promptFiles());
+    const { taskId } = service.createTask({ title: "Prompted", workflow: PROMPTED });
+    await service.startTask({ taskId, fake: [{ output: { text: "hi" } }] as never });
+    await until(() => pushes.some((p) => p.type === "run:finished"), "the run to finish");
+
+    const replay = replayOf(taskId);
+    // Both calls, addressed by position, with their values — and nothing the index could not read.
+    // An `unreadable` entry here is the whole bug: it makes `resumable` answer `none`, which makes
+    // the strip fall back to "Start again" on a task that could perfectly well be resumed.
+    expect(replay.unreadable).toEqual([]);
+    expect(keys(replay).sort()).toEqual(["a#0", "b#0"]);
+    expect(replay.answers.get("a#0")?.value).toMatchObject({ text: "hi" });
+    expect(replay.frontier).toEqual([]);
   }, 30000);
 });
