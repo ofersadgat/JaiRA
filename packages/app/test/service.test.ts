@@ -731,6 +731,17 @@ describe("diagnostics", () => {
     expect(entry?.message).toBe("task:detail: unknown task 't-1'");
   });
 
+  it("logs a refusal where it is decided, and marks it so the boundary will not re-file it", () => {
+    // A refusal from anywhere in the service, not just the one method the resume work touched: the
+    // sweep is what makes the rule true generally, and this is the shape it holds in.
+    expect(() => service.pruneHistory({ olderThanDays: -1 })).toThrow(Refusal);
+
+    const entry = service.listLogs({ source: "project" }).at(-1);
+    // `warn`, because the service checked and declined — the code working, not the code breaking.
+    expect(entry).toMatchObject({ level: "warn", source: "project" });
+    expect(entry?.message).toBe("olderThanDays must be a non-negative number");
+  });
+
   it("leaves a REFUSAL alone — its own site already logged it, and knew what it was", () => {
     // The boundary sees a deliberate refusal and a genuine bug as the same shape, so it must not
     // classify either: `error` means the code is malfunctioning, and "the service declined" is the

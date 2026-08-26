@@ -1277,10 +1277,10 @@ export class AppService {
   private session(ref?: string): ProjectSession {
     const session = this.sessionOf(ref);
     if (session === undefined) {
-      if (ref !== undefined) throw new Error(`project '${ref}' is not open`);
+      if (ref !== undefined) throw this.refusal("project", `project '${ref}' is not open`);
       // Two different faults, and telling them apart is the whole reason there is no focus: one is a
       // window with nothing open, the other is a caller that had to say which and did not.
-      throw new Error(this.hasProject ? "several projects are open, so this call must name one" : "no project is open");
+      throw this.refusal("project", this.hasProject ? "several projects are open, so this call must name one" : "no project is open");
     }
     return session;
   }
@@ -1337,6 +1337,32 @@ export class AppService {
    */
   private log(entry: Omit<LogEntry, "id" | "at">): void {
     this.diagnostics.log(entry);
+  }
+
+  /**
+   * Decline, saying why — the one way this service refuses, and the one place that records it.
+   *
+   * Returns the error rather than throwing it, so the call site keeps `throw`. That is not a style
+   * choice: a helper that threw would still be a plain call as far as the compiler is concerned, and
+   * every `if (row === undefined) …` guard would stop narrowing the moment the throw went inside it.
+   * `throw this.refusal(…)` reads as what it is and costs nothing.
+   *
+   * `warn`, always. The two levels answer different questions — `error` is the code malfunctioning,
+   * `warn` is something going wrong that the code then handled — and a refusal is by construction the
+   * second: the service checked, decided, and said so. The site picks the SOURCE, because only it
+   * knows which part of the app just declined.
+   *
+   * A {@link Refusal} is also what stops the IPC boundary logging this a second time at `error`, and
+   * that pairing is the whole point: the line is written here, where the decision was taken, at the
+   * level the decision deserves.
+   */
+  private refusal(
+    source: string,
+    message: string,
+    context: Omit<LogEntry, "id" | "at" | "level" | "source" | "message"> = {},
+  ): Refusal {
+    this.log({ level: "warn", source, message, ...context });
+    return new Refusal(message);
   }
 
   /**
@@ -2066,9 +2092,9 @@ export class AppService {
     const open = this.session();
     const project = open.project;
     const days = request.olderThanDays ?? 0;
-    if (!Number.isFinite(days) || days < 0) throw new Error("olderThanDays must be a non-negative number");
+    if (!Number.isFinite(days) || days < 0) throw this.refusal("project", "olderThanDays must be a non-negative number");
     const keep = request.keepRunsPerTask ?? 1;
-    if (!Number.isInteger(keep) || keep < 0) throw new Error("keepRunsPerTask must be a non-negative integer");
+    if (!Number.isInteger(keep) || keep < 0) throw this.refusal("project", "keepRunsPerTask must be a non-negative integer");
     const result = pruneHistory(project, {
       before: Date.now() - days * 86_400_000,
       keepRunsPerTask: keep,
@@ -2208,7 +2234,7 @@ export class AppService {
   ): Promise<{ taskId: string; runId: number }> {
     const project = open.project;
     const config = opts.config;
-    if (open.live.has(taskId)) throw new Error(`task '${taskId}' is already running in this process`);
+    if (open.live.has(taskId)) throw this.refusal("run", `task '${taskId}' is already running in this process`);
 
     const scripted = opts.interactions ? new ScriptedFunctions(opts.interactions) : undefined;
     const registry = newRegistry();
@@ -2344,7 +2370,7 @@ export class AppService {
       finishTaskRun(project, taskId, started.runId, "failed", {
         failure: { classification: "permanent", reason: gateIssues[0]!.message },
       });
-      throw new Error(gateIssues.map((i) => `${i.stateId}: ${i.message}`).join("; "));
+      throw this.refusal("run", gateIssues.map((i) => `${i.stateId}: ${i.message}`).join("; "));
     }
     const abort = new AbortController();
     let settle!: () => void;
@@ -2920,7 +2946,7 @@ export class AppService {
   async sendChatMessage(
     request: typeof AppService.chatSend,
   ): Promise<ChatTurnResult & { instanceId: number; iteration: number; steered?: boolean }> {
-    if (request.message.trim() === "") throw new Error("a message cannot be empty");
+    if (request.message.trim() === "") throw this.refusal("run", "a message cannot be empty");
     const open = this.session(request.project);
     // Taken before this send installs its own, so it names the PREDECESSOR rather than itself.
     const settledAhead = open.chatDone.get(request.taskId);
@@ -3332,13 +3358,13 @@ export class AppService {
    */
   renameTask(request: { taskId: string; title: string; project?: string }): TaskSummary {
     const title = request.title.trim();
-    if (title === "") throw new Error("a task needs a title");
+    if (title === "") throw this.refusal("run", "a task needs a title");
     const open = this.session(request.project);
     const project = open.project;
     const meta = project.tasks.read(request.taskId);
     project.tasks.write({ ...meta, title });
     const row = project.runtime.get(request.taskId);
-    if (row === undefined) throw new Error(`unknown task '${request.taskId}'`);
+    if (row === undefined) throw this.refusal("run", `unknown task '${request.taskId}'`);
     this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
     this.publishFor(open, { type: "store:invalidate", scope: "board" });
     return {
@@ -3398,7 +3424,7 @@ export class AppService {
     if (run === undefined) throw new NoConversationHere(`task '${taskId}' has never run`);
     const task = project.runtime.get(taskId);
     const bundle = bundleFor(project, task?.snapshotHash ?? run.snapshotHash, run.snapshotHash);
-    if (bundle === undefined) throw new Error(`the snapshot for run ${run.id} is missing`);
+    if (bundle === undefined) throw this.refusal("run", `the snapshot for run ${run.id} is missing`);
 
     const { events, atMs } = eventsOf(project.events.list(taskId, { runId: run.id }));
     const tree = projectRun(events, undefined, atMs);
@@ -3673,30 +3699,26 @@ export class AppService {
   async resumeTask(request: StartRunRequest): Promise<{ taskId: string; runId: number }> {
     const open = this.session(request.project);
     const taskId = request.taskId;
-    // Every refusal below is the same shape: say what happened, at the level that describes it, then
-    // throw a {@link Refusal} so the IPC boundary does not file it a second time as a malfunction.
-    // `warn` on all of them — the run did not resume, and the reason it did not is that the service
-    // checked and declined, which is the code working rather than the code breaking.
-    const refuse = (message: string, detail?: JsonValue): never => {
-      this.log({ level: "warn", source: "run", message, project: open.key, taskId, ...(detail !== undefined ? { detail } : {}) });
-      throw new Refusal(message);
-    };
-
+    const at = { project: open.key, taskId };
     const row = open.project.runtime.get(taskId);
-    if (row === undefined) refuse(`cannot resume unknown task '${taskId}'`);
-    if (row!.status === "running") refuse(`task '${taskId}' is already running`);
-    if (!isStartableStatus(row!.status)) {
-      refuse(`task '${taskId}' is ${row!.status} and cannot be resumed — run it again instead`);
+    if (row === undefined) throw this.refusal("run", `cannot resume unknown task '${taskId}'`, at);
+    if (row.status === "running") throw this.refusal("run", `task '${taskId}' is already running`, at);
+    if (!isStartableStatus(row.status)) {
+      throw this.refusal("run", `task '${taskId}' is ${row.status} and cannot be resumed — run it again instead`, at);
     }
     const replay = buildTaskReplay(open.project, taskId);
     if (replay.unreadable.length > 0) {
       const first = replay.unreadable[0]!;
-      refuse(
+      throw this.refusal(
+        "run",
         `task '${taskId}' cannot be resumed: ${replay.unreadable.length} operation(s) have no readable record ` +
           `(first: ${first.stateId} — ${first.reason}). Running it again would repeat them.`,
-        // The whole list, because one example names the symptom and the set is what someone would
-        // need to work out whether the history is holed in one place or everywhere.
-        replay.unreadable.map((entry) => ({ stateId: entry.stateId, reason: entry.reason })),
+        {
+          ...at,
+          // The whole list, because one example names the symptom and the set is what someone would
+          // need to work out whether the history is holed in one place or everywhere.
+          detail: replay.unreadable.map((entry) => ({ stateId: entry.stateId, reason: entry.reason })),
+        },
       );
     }
     // What a resume actually IS, written down before it happens: how much is being taken from the
@@ -3752,8 +3774,8 @@ export class AppService {
   async rerunTask(request: StartRunRequest): Promise<{ taskId: string; runId: number }> {
     const open = this.session(request.project);
     const row = open.project.runtime.get(request.taskId);
-    if (row === undefined) throw new Error(`unknown task '${request.taskId}'`);
-    if (row.status === "running") throw new Error(`task '${request.taskId}' is already running`);
+    if (row === undefined) throw this.refusal("run", `unknown task '${request.taskId}'`);
+    if (row.status === "running") throw this.refusal("run", `task '${request.taskId}' is already running`);
     const spokenTo = this.sessionHistory({ taskId: request.taskId, project: request.project }).some((h) =>
       isChatInstance(h.instanceId),
     );
@@ -3788,11 +3810,11 @@ export class AppService {
   async deleteTask(taskId: string, project?: string): Promise<{ taskId: string }> {
     const session = this.session(project);
     if (session.live.has(taskId) || session.project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
-      throw new Error(`task '${taskId}' is running — cancel it before deleting it`);
+      throw this.refusal("run", `task '${taskId}' is running — cancel it before deleting it`);
     }
     if (session.project.runtime.get(taskId)?.worktreePath !== undefined) {
       const result = await removeWorktree(session.project, taskId, { force: true });
-      if (!result.removed) throw new Error(`could not remove the task's worktree: ${result.reason}`);
+      if (!result.removed) throw this.refusal("run", `could not remove the task's worktree: ${result.reason}`);
     }
     deleteTask(session.project, taskId);
     this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
@@ -3871,7 +3893,7 @@ export class AppService {
    */
   private cancelable(session: ProjectSession, taskId: string): boolean {
     const row = session.project.runtime.get(taskId);
-    if (row === undefined) throw new Error(`unknown task '${taskId}'`);
+    if (row === undefined) throw this.refusal("run", `unknown task '${taskId}'`);
     return !isTerminalStatus(row.status);
   }
 
@@ -3894,7 +3916,7 @@ export class AppService {
     // is actually parked waits forever.
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
     if (owner === undefined || !owner.approvals.decide(requestId, decision, scope)) {
-      throw new Error(`no pending approval '${requestId}'`);
+      throw this.refusal("run", `no pending approval '${requestId}'`);
     }
     return { requestId };
   }
@@ -3911,7 +3933,7 @@ export class AppService {
   submitQuestion(requestId: string, answers?: Record<string, string | string[]>): { requestId: string } {
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
     if (owner === undefined || !owner.questions.answer(requestId, answers)) {
-      throw new Error(`no pending question '${requestId}'`);
+      throw this.refusal("run", `no pending question '${requestId}'`);
     }
     return { requestId };
   }
@@ -3966,11 +3988,11 @@ export class AppService {
     const contract = this.configOf(requestId);
     if (contract) {
       const check = validateComponentResult(contract.config, value, contract.inputs);
-      if (!check.ok) throw new Error(`invalid ${contract.config.component} response: ${check.errors}`);
+      if (!check.ok) throw this.refusal("run", `invalid ${contract.config.component} response: ${check.errors}`);
     }
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
     if (owner === undefined || !owner.hub.submit(requestId, value)) {
-      throw new Error(`no pending interaction '${requestId}'`);
+      throw this.refusal("run", `no pending interaction '${requestId}'`);
     }
     return { requestId };
   }
@@ -4048,7 +4070,7 @@ export class AppService {
     // nowhere to go tells the author to fix the wrong thing. The base layer is always writable —
     // it is the machine's, and `initBase` creates it — so only the project layer can fail here.
     if (request.layer !== "base" && this.sessionOf(request.project) === undefined) {
-      throw new Error(
+      throw this.refusal("config", 
         request.project === undefined
           ? "no project was named, so there is no project config to write"
           : `project '${request.project}' is not open`,
@@ -4247,7 +4269,7 @@ export class AppService {
   async probeExecutors(name?: string): Promise<ProbeResult[]> {
     const config = this.effectiveConfig();
     const wanted = listExecutors(config.agents).filter((info) => name === undefined || info.name === name);
-    if (name !== undefined && wanted.length === 0) throw new Error(`unknown executor '${name}'`);
+    if (name !== undefined && wanted.length === 0) throw this.refusal("config", `unknown executor '${name}'`);
     const exec = new NodeExec({ execEnv: config.execEnvironment });
     const secrets = this.secretResolver();
     const results = await Promise.all(
@@ -4284,12 +4306,12 @@ export class AppService {
    */
   setSecret(request: SetSecretRequest): { name: string; target: SecretTargetOf } {
     if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(request.name)) {
-      throw new Error(`'${request.name}' is not a usable secret name`);
+      throw this.refusal("config", `'${request.name}' is not a usable secret name`);
     }
     if (request.target === "keychain") {
       const keychain = this.options.keychain;
       if (keychain?.available() !== true) {
-        throw new Error(this.secretCapabilities().keychainReason ?? "no encrypted store is available here");
+        throw this.refusal("config", this.secretCapabilities().keychainReason ?? "no encrypted store is available here");
       }
       if (request.value.length === 0) keychain.remove(request.name);
       else keychain.set(request.name, request.value);
@@ -4334,7 +4356,7 @@ export class AppService {
     try {
       JSON.parse(request.text);
     } catch (e) {
-      throw new Error(`not valid JSON: ${(e as Error).message}`);
+      throw this.refusal("file", `not valid JSON: ${(e as Error).message}`);
     }
     const file = this.workflowFile(request.stateId, request.layer, request.project);
     mkdirSync(dirname(file), { recursive: true });
@@ -4357,9 +4379,9 @@ export class AppService {
   moveWorkflow(request: MoveWorkflowRequest): WorkflowMutationResult {
     const from = this.workflowFile(request.stateId, request.layer, request.project);
     const to = this.workflowFile(request.to, request.toLayer, request.project);
-    if (!existsSync(from)) throw new Error(`'${request.stateId}' does not exist in the ${request.layer} layer`);
-    if (from === to) throw new Error("the source and destination are the same file");
-    if (existsSync(to)) throw new Error(`'${request.to}' already exists in the ${request.toLayer} layer`);
+    if (!existsSync(from)) throw this.refusal("file", `'${request.stateId}' does not exist in the ${request.layer} layer`);
+    if (from === to) throw this.refusal("file", "the source and destination are the same file");
+    if (existsSync(to)) throw this.refusal("file", `'${request.to}' already exists in the ${request.toLayer} layer`);
 
     const renaming = request.copy !== true && request.to !== request.stateId;
     const referencedBy = renaming ? this.referrersOf(request.stateId, request.project) : [];
@@ -4383,7 +4405,7 @@ export class AppService {
    */
   deleteWorkflow(request: { stateId: string; layer: WorkflowLayer; force?: boolean; project?: string }): WorkflowMutationResult {
     const file = this.workflowFile(request.stateId, request.layer, request.project);
-    if (!existsSync(file)) throw new Error(`'${request.stateId}' does not exist in the ${request.layer} layer`);
+    if (!existsSync(file)) throw this.refusal("file", `'${request.stateId}' does not exist in the ${request.layer} layer`);
     const referencedBy = this.referrersOf(request.stateId, request.project);
     if (referencedBy.length > 0 && request.force !== true) {
       return { stateId: request.stateId, layer: request.layer, applied: false, referencedBy };
@@ -4409,7 +4431,7 @@ export class AppService {
    */
   validateSchema(request: ValidateSchemaRequest): ValidateSchemaResult {
     const entry = schemaById(request.schemaId);
-    if (!entry) throw new Error(`no schema named '${request.schemaId}'`);
+    if (!entry) throw this.refusal("config", `no schema named '${request.schemaId}'`);
 
     let value: unknown;
     try {
@@ -4502,9 +4524,9 @@ export class AppService {
   readFile(request: ReadFileRequest): FileSource {
     const file = this.layerFile(request.path, request.layer, request.project);
     const mime = mimeOfPath(request.path);
-    if (!isTextMime(mime)) throw new Error(`'${request.path}' is ${mime}, which is not text`);
+    if (!isTextMime(mime)) throw this.refusal("file", `'${request.path}' is ${mime}, which is not text`);
     const exists = existsSync(file);
-    if (exists && statSync(file).isDirectory()) throw new Error(`'${request.path}' is a directory`);
+    if (exists && statSync(file).isDirectory()) throw this.refusal("file", `'${request.path}' is a directory`);
     return {
       layer: request.layer,
       // Echoed back, so the document the panel holds knows which project it is in — the tree's
@@ -4649,7 +4671,7 @@ export class AppService {
    */
   listArtifacts(request: { taskId: string; project?: ProjectRef }): ArtifactSummary[] {
     const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
-    if (session === undefined) throw new Error("no project is open");
+    if (session === undefined) throw this.refusal("file", "no project is open");
     return session.project.artifacts.list(request.taskId).map((record) => ({
       path: record.logicalPath,
       // The recorded type, else what the name implies — the same order `serveArtifact` resolves in,
@@ -4674,9 +4696,9 @@ export class AppService {
    */
   async serveArtifact(request: ServeArtifactRequest): Promise<ServedArtifact> {
     const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
-    if (session === undefined) throw new Error("no project is open");
+    if (session === undefined) throw this.refusal("file", "no project is open");
     const record = session.project.artifacts.get(request.taskId, request.path);
-    if (record === undefined) throw new Error(`no artifact at '${request.path}' for task ${request.taskId}`);
+    if (record === undefined) throw this.refusal("file", `no artifact at '${request.path}' for task ${request.taskId}`);
 
     // Inline copy first, then wherever it was placed — the artifact map's own resolution order, and
     // the reason a `virtual:` artifact is servable at all.
@@ -4685,7 +4707,7 @@ export class AppService {
       (record.physicalPath !== undefined && existsSync(record.physicalPath)
         ? readFileSync(record.physicalPath, "utf8")
         : undefined);
-    if (body === undefined) throw new Error(`the bytes for '${request.path}' are no longer where they were placed`);
+    if (body === undefined) throw this.refusal("file", `the bytes for '${request.path}' are no longer where they were placed`);
 
     const mediaType = request.mediaType ?? record.format ?? mimeOfPath(request.path);
     const interactive = record.interactive === true;
@@ -4722,16 +4744,16 @@ export class AppService {
    */
   async readUri(request: ReadUriRequest): Promise<UriContent> {
     const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
-    if (session === undefined) throw new Error("no project is open");
+    if (session === undefined) throw this.refusal("file", "no project is open");
     const project = session.project;
     const uri = request.uri.trim();
 
     const guarded = (root: string, rel: string): UriContent => {
       const file = withinWorkspace(root, rel);
-      if (file === undefined) throw new Error(`'${uri}' escapes its anchor — refused`);
+      if (file === undefined) throw this.refusal("file", `'${uri}' escapes its anchor — refused`);
       const mime = mimeOfPath(rel.replace(/\\/g, "/"));
-      if (!isTextMime(mime)) throw new Error(`'${uri}' is ${mime}, which is not text`);
-      if (!existsSync(file) || statSync(file).isDirectory()) throw new Error(`'${uri}' does not name a readable file`);
+      if (!isTextMime(mime)) throw this.refusal("file", `'${uri}' is ${mime}, which is not text`);
+      if (!existsSync(file) || statSync(file).isDirectory()) throw this.refusal("file", `'${uri}' does not name a readable file`);
       return { uri, mime, text: readFileSync(file, "utf8") };
     };
 
@@ -4741,7 +4763,7 @@ export class AppService {
       if (anchor === "PROJECT") return guarded(project.paths.projectDir, rel!);
       if (anchor === "JAIRA") return guarded(project.paths.jairaDir, rel!);
       const worktree = request.taskId !== undefined ? project.runtime.get(request.taskId)?.worktreePath : undefined;
-      if (worktree === undefined) throw new Error(`'$WORKTREE' needs a task with a worktree — pass taskId`);
+      if (worktree === undefined) throw this.refusal("file", `'$WORKTREE' needs a task with a worktree — pass taskId`);
       return guarded(worktree, rel!);
     }
 
@@ -4760,34 +4782,34 @@ export class AppService {
     if (artifact !== null) {
       const [, taskId, logicalPath] = artifact;
       const record = project.artifacts.get(decodeURIComponent(taskId!), logicalPath!);
-      if (record === undefined) throw new Error(`'${uri}' names no artifact this project produced`);
+      if (record === undefined) throw this.refusal("file", `'${uri}' names no artifact this project produced`);
       const text =
         record.content ??
         (record.physicalPath !== undefined && existsSync(record.physicalPath)
           ? readFileSync(record.physicalPath, "utf8")
           : undefined);
-      if (text === undefined) throw new Error(`the bytes for '${uri}' are no longer where they were placed`);
+      if (text === undefined) throw this.refusal("file", `the bytes for '${uri}' are no longer where they were placed`);
       return { uri, mime: record.format ?? mimeOfPath(logicalPath!), text };
     }
 
     if (uri.startsWith("git:")) {
       const source = parseChangesetSource(uri);
       if (source.scheme !== "git" || source.path === undefined) {
-        throw new Error(`'${uri}' names a commit, not a blob — read git:<sha>:<path>`);
+        throw this.refusal("file", `'${uri}' names a commit, not a blob — read git:<sha>:<path>`);
       }
       // The project's OWN repository — §1.1's longest-match becomes ls-tree for this scheme, but a
       // read of one blob needs no listing at all.
       const git = gitFor(project, project.paths.projectDir);
       const text = await git.show(source.rev, source.path);
-      if (text === undefined) throw new Error(`'${uri}' does not resolve in this project's repository`);
+      if (text === undefined) throw this.refusal("file", `'${uri}' does not resolve in this project's repository`);
       return { uri, mime: mimeOfPath(source.path), text };
     }
 
     if (uri.startsWith("db://")) {
       const source = parseChangesetSource(uri);
-      if (source.scheme !== "db") throw new Error(`'${uri}' is not a db:// address`);
+      if (source.scheme !== "db") throw this.refusal("file", `'${uri}' is not a db:// address`);
       if (source.table !== "operation_records") {
-        throw new Error(`'${uri}' addresses table '${source.table}' — only operation_records is addressable`);
+        throw this.refusal("file", `'${uri}' addresses table '${source.table}' — only operation_records is addressable`);
       }
       const store = sessionStoreFor(project, {
         ...(request.taskId !== undefined ? { taskId: request.taskId } : {}),
@@ -4799,30 +4821,30 @@ export class AppService {
         // or not the call ever claimed a conversation seat. Rooted at {request, result} because
         // §5.3 puts a gate's changeset in the REQUEST.
         const record = store.record(source.recordId);
-        if (record === undefined) throw new Error(`'${uri}' names a record this scope has not written`);
+        if (record === undefined) throw this.refusal("file", `'${uri}' names a record this scope has not written`);
         value = record;
       } else {
         const row = store.at(source.session, source.seq);
-        if (row === undefined) throw new Error(`'${uri}' names a position no record has claimed`);
+        if (row === undefined) throw this.refusal("file", `'${uri}' names a position no record has claimed`);
         value = { result: row.value };
       }
       for (const step of source.pointer) {
         value = value !== null && typeof value === "object" ? (value as Record<string, unknown>)[step] : undefined;
       }
-      if (value === undefined) throw new Error(`'${uri}' resolves a record, but '${source.pointer.join(".")}' is not in it`);
+      if (value === undefined) throw this.refusal("file", `'${uri}' resolves a record, but '${source.pointer.join(".")}' is not in it`);
       return { uri, mime: "application/json", text: JSON.stringify(value, null, 2) };
     }
 
     if (uri.startsWith("file:")) {
       const source = parseChangesetSource(uri);
-      if (source.scheme !== "file") throw new Error(`'${uri}' is not a file: address`);
+      if (source.scheme !== "file") throw this.refusal("file", `'${uri}' is not a file: address`);
       // Absolute, but still confined: the path must land under one of the anchors this project owns.
       const worktree = request.taskId !== undefined ? project.runtime.get(request.taskId)?.worktreePath : undefined;
       const roots = [project.paths.projectDir, project.paths.jairaDir, ...(worktree !== undefined ? [worktree] : [])];
       const inside = roots
         .map((root) => ({ root, rel: relative(root, source.path) }))
         .find(({ rel }) => rel !== "" && !rel.startsWith("..") && !isAbsolute(rel));
-      if (inside === undefined) throw new Error(`'${uri}' is outside every anchor this project owns — refused`);
+      if (inside === undefined) throw this.refusal("file", `'${uri}' is outside every anchor this project owns — refused`);
       const content = guarded(inside.root, inside.rel);
       if (source.sha256 !== undefined) {
         const now = createHash("sha256").update(content.text).digest("hex");
@@ -4831,7 +4853,7 @@ export class AppService {
       return content;
     }
 
-    throw new Error(`unrecognised uri '${uri}' — expected $PROJECT/, $JAIRA/, $WORKTREE/, file:, git: or db:// (refused rather than guessed at)`);
+    throw this.refusal("file", `unrecognised uri '${uri}' — expected $PROJECT/, $JAIRA/, $WORKTREE/, file:, git: or db:// (refused rather than guessed at)`);
   }
 
   /**
@@ -4844,8 +4866,8 @@ export class AppService {
    */
   writeFile(request: WriteFileRequest): FileSource {
     const mime = mimeOfPath(request.path);
-    if (!isTextMime(mime)) throw new Error(`'${request.path}' is ${mime}, which is not text`);
-    if (mime === WORKFLOW_JSON) throw new Error(`'${request.path}' is a state file — write it through workflow:write`);
+    if (!isTextMime(mime)) throw this.refusal("file", `'${request.path}' is ${mime}, which is not text`);
+    if (mime === WORKFLOW_JSON) throw this.refusal("file", `'${request.path}' is a state file — write it through workflow:write`);
     const file = this.layerFile(request.path, request.layer, request.project);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, request.text, "utf8");
@@ -4887,7 +4909,7 @@ export class AppService {
    */
   createFile(request: CreateFileRequest): { file: string } {
     const file = this.layerFile(request.path, request.layer, request.project);
-    if (existsSync(file)) throw new Error(`'${request.path}' already exists`);
+    if (existsSync(file)) throw this.refusal("file", `'${request.path}' already exists`);
     if (request.kind === "directory") {
       mkdirSync(file, { recursive: true });
     } else {
@@ -4912,12 +4934,12 @@ export class AppService {
   renameFile(request: RenameFileRequest): FileMutationResult {
     const from = this.layerFile(request.path, request.layer, request.project);
     const to = this.layerFile(request.to, request.layer, request.project);
-    if (!existsSync(from)) throw new Error(`'${request.path}' does not exist in the ${request.layer} root`);
-    if (from === to) throw new Error("the source and destination are the same path");
-    if (existsSync(to)) throw new Error(`'${request.to}' already exists`);
+    if (!existsSync(from)) throw this.refusal("file", `'${request.path}' does not exist in the ${request.layer} root`);
+    if (from === to) throw this.refusal("file", "the source and destination are the same path");
+    if (existsSync(to)) throw this.refusal("file", `'${request.to}' already exists`);
     // Moving a directory into itself leaves the tree with an unreachable branch, and `renameSync`
     // reports it as a bare EINVAL that says nothing about what was attempted.
-    if (to.startsWith(`${from}${sep}`)) throw new Error(`'${request.to}' is inside '${request.path}'`);
+    if (to.startsWith(`${from}${sep}`)) throw this.refusal("file", `'${request.to}' is inside '${request.path}'`);
 
     const states = this.statesUnder(from, request.layer, request.project);
     const referencedBy = this.brokenBy(states, request.project);
@@ -4940,7 +4962,7 @@ export class AppService {
    */
   deleteFile(request: DeleteFileRequest): FileMutationResult {
     const file = this.layerFile(request.path, request.layer, request.project);
-    if (!existsSync(file)) throw new Error(`'${request.path}' does not exist in the ${request.layer} root`);
+    if (!existsSync(file)) throw this.refusal("file", `'${request.path}' does not exist in the ${request.layer} root`);
 
     const states = this.statesUnder(file, request.layer, request.project);
     const referencedBy = this.brokenBy(states, request.project);
@@ -5109,11 +5131,11 @@ export class AppService {
   async runSync(request: WorkflowSyncRequest): Promise<WorkflowSyncResult> {
     const source = this.syncSource(request.layer, request.project);
     const owner = this.syncHolder(request.layer);
-    if (owner.syncTask !== undefined) throw new Error("a sync is already running");
+    if (owner.syncTask !== undefined) throw this.refusal("sync", "a sync is already running");
 
     const file = this.layerFile(request.path, request.layer, request.project);
     const spec = request.text ?? (existsSync(file) ? readFileSync(file, "utf8") : "");
-    if (spec.trim() === "") throw new Error(`${request.path} is empty; there is nothing to sync`);
+    if (spec.trim() === "") throw this.refusal("sync", `${request.path} is empty; there is nothing to sync`);
 
     // Scoped to what this description OWNS: the root it names, minus every subtree a nearer
     // description covers. The delegated subtrees are still in the digest, as contracts — a parent
@@ -5128,7 +5150,7 @@ export class AppService {
     // evidence is present and labelled rather than absent — and the breakage is in scope for the
     // proposal instead of a precondition for it.
     if (digest.roots.length === 0) {
-      throw new Error(`${request.layer === "base" ? "the shared root" : "this project"} has no workflows to sync against`);
+      throw this.refusal("sync", `${request.layer === "base" ? "the shared root" : "this project"} has no workflows to sync against`);
     }
 
     const bundle = loadBundle(syncWorkflowFiles(), syncRootId(request.direction));
@@ -5155,7 +5177,7 @@ export class AppService {
       // Refused rather than run unrecorded. An unjournaled sync is what this used to be, and its
       // failures were unreadable — running one anyway would quietly restore that, and the person
       // would have no way to tell which kind of sync they had just watched fail.
-      throw new Error(`the shared root could not be opened, so a sync cannot be recorded: ${this.roleError.shared}`);
+      throw this.refusal("sync", `the shared root could not be opened, so a sync cannot be recorded: ${this.roleError.shared}`);
     }
 
     this.log({
@@ -5207,7 +5229,7 @@ export class AppService {
       // the run's own `InMemoryPersistence` was standing in for before it had somewhere to write.
       const causes = runCauses(system.project, task.id, started.runId).map((c: { stateId: string; reason: string }) => `${c.stateId}: ${c.reason}`);
       const failure = run?.failureJson === undefined ? undefined : (JSON.parse(run.failureJson) as { reason?: string });
-      throw new Error(causes.length > 0 ? causes.join("; ") : (failure?.reason ?? "the sync did not finish"));
+      throw this.refusal("sync", causes.length > 0 ? causes.join("; ") : (failure?.reason ?? "the sync did not finish"));
     }
 
     const outcome = syncOutcomeOf(
@@ -5342,11 +5364,11 @@ export class AppService {
    */
   async reviewChanges(request: ReviewChangesRequest): Promise<ReviewChangesResult> {
     const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
-    if (session === undefined) throw new Error("no project is open");
+    if (session === undefined) throw this.refusal("review", "no project is open");
     const row = session.project.runtime.get(request.taskId);
     const worktree = row?.worktreePath;
     if (worktree === undefined) {
-      throw new Error(`task '${request.taskId}' has no worktree — only a branch-bound task's edits can be reviewed`);
+      throw this.refusal("review", `task '${request.taskId}' has no worktree — only a branch-bound task's edits can be reviewed`);
     }
     const git = gitFor(session.project, worktree);
     const changeset = await worktreeChangeset(git, request.base ?? "HEAD", (path) => {
@@ -5355,14 +5377,14 @@ export class AppService {
       return readFileSync(file, "utf8");
     });
     if (changeset.changes.length === 0) {
-      throw new Error(`the worktree matches ${request.base ?? "HEAD"} — there is nothing to review`);
+      throw this.refusal("review", `the worktree matches ${request.base ?? "HEAD"} — there is nothing to review`);
     }
 
     // Recorded in the base root, like a sync — and refused rather than run unrecorded, for the
     // same reason (§5.3: the record is what pins the changeset once the worktree moves on).
     const system = this.sessionOf(SHARED_SESSION);
     if (system === undefined) {
-      throw new Error(`the shared root could not be opened, so a review cannot be recorded: ${this.roleError.shared}`);
+      throw this.refusal("review", `the shared root could not be opened, so a review cannot be recorded: ${this.roleError.shared}`);
     }
     const meta = session.project.tasks.tryRead(request.taskId);
     const rootId = request.loop === true ? CHANGESET_REVIEW_LOOP_ID : CHANGESET_REVIEW_ID;
@@ -5421,12 +5443,12 @@ export class AppService {
    */
   async reviewSyncChangeset(request: ReviewSyncRequest): Promise<ReviewChangesResult> {
     const changeset = changesetOf(request.changeset);
-    if (changeset.changes.length === 0) throw new Error("the proposal has no changes to review");
+    if (changeset.changes.length === 0) throw this.refusal("review", "the proposal has no changes to review");
     const root = request.layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject(request.project).paths.jairaDir;
 
     const system = this.sessionOf(SHARED_SESSION);
     if (system === undefined) {
-      throw new Error(`the shared root could not be opened, so a review cannot be recorded: ${this.roleError.shared}`);
+      throw this.refusal("review", `the shared root could not be opened, so a review cannot be recorded: ${this.roleError.shared}`);
     }
     // The description the proposal exists to satisfy, for the respond rounds. Read from disk: the
     // draft the sync itself read is the renderer's, and by the time a comment comes back the disk
@@ -5916,7 +5938,7 @@ export class AppService {
     const file = resolvePath(root, path);
     const rel = relative(root, file);
     if (rel.startsWith("..") || rel.length === 0 || resolvePath(root, rel) !== file) {
-      throw new Error(`'${path}' is not inside the ${layer} root`);
+      throw this.refusal("file", `'${path}' is not inside the ${layer} root`);
     }
     return file;
   }
@@ -5938,7 +5960,7 @@ export class AppService {
     const file = resolvePath(root, `${stateId}.json`);
     const rel = relative(root, file);
     if (rel.startsWith("..") || rel.length === 0 || resolvePath(root, rel) !== file) {
-      throw new Error(`'${stateId}' does not name a state inside the ${layer} workflows directory`);
+      throw this.refusal("file", `'${stateId}' does not name a state inside the ${layer} workflows directory`);
     }
     return file;
   }
