@@ -68,6 +68,17 @@ export interface InstanceNode {
    * declares no label, and the caller then falls back to listing the inputs.
    */
   label?: string;
+  /**
+   * Which RUN this node was folded out of, for a task-level projection (`foldRuns`).
+   *
+   * A task's view is every run merged by position, so two nodes in one tree can come from different
+   * runs — and `instanceId` is minted per run, so it is unique only WITHIN one. The pair is the
+   * identity: a consumer keying nodes (a React list, a lookup back into the journal) must use
+   * `runId:instanceId`, never `instanceId` alone.
+   *
+   * Absent on a single-run projection, where every node trivially belongs to the run being read.
+   */
+  runId?: number;
   children: InstanceNode[];
 }
 

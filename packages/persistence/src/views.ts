@@ -16,6 +16,7 @@ import { workflowLoadOptions } from "./workflowRefs";
 import {
   breadcrumbOf,
   eventsOf,
+  foldRuns,
   projectBoard,
   projectRun,
   type ProjectedRun,
@@ -381,6 +382,24 @@ export function runCostUsd(project: Project, taskId: string, runId?: number): nu
   return total;
 }
 
+/**
+ * The projected TASK — every run folded by position (`foldRuns`).
+ *
+ * What a person means by "this task": a resume is a new run that re-walks from the root, so no single
+ * run's journal is the task's history once one has happened. This is what the detail view reads, and
+ * it is why a failed resume no longer draws over what an earlier run reached.
+ */
+export function taskRun(project: Project, taskId: string, shape?: WorkflowShape): ProjectedRun {
+  const runs = project.runtime.listRuns(taskId);
+  if (runs.length === 0) return { instances: [], activePath: [], blocked: [] };
+  return foldRuns(
+    runs.map((run) => {
+      const { events, atMs } = eventsOf(project.events.list(taskId, { runId: run.id }));
+      return { runId: run.id, run: projectRun(events, shape, atMs) };
+    }),
+  );
+}
+
 /** The projected latest run of a task (empty when it has never run). */
 export function latestRun(project: Project, taskId: string, shape?: WorkflowShape): ProjectedRun {
   const runs = project.runtime.listRuns(taskId);
@@ -427,7 +446,9 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
   if (!row) throw refusal(log, `unknown task '${taskId}' in ${project.paths.projectDir}`, { taskId });
   const meta = project.tasks.tryRead(taskId);
   const shape = meta ? shapeFor(project, meta.workflow, row.snapshotHash, options)?.shape : undefined;
-  const run = latestRun(project, taskId, shape);
+  // The TASK, not its last run — see `taskRun`. The timeline below is still every event in order,
+  // so the panel shows the folded tree beside the unfolded history that produced it.
+  const run = taskRun(project, taskId, shape);
   const timeline: TimelineEntry[] = project.events
     .list(taskId)
     .slice(-TIMELINE_LIMIT)

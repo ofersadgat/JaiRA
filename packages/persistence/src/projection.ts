@@ -241,6 +241,85 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
  * frontier it re-enters is the live leaves (`replay.ts`). A second definition of "live" is a second
  * chance for the two to disagree about whether a run has anything left to do.
  */
+/**
+ * Every run of a task, merged by POSITION into the one tree the task actually is.
+ *
+ * A resume starts a new run that re-walks from the root, so a run's own journal holds only what that
+ * walk reached. Reading the latest alone is what made a task's history appear to shrink: run 8 got
+ * as far as `confidence`, run 10 replayed five calls and died at `verdict`, and opening the task drew
+ * run 10's six nodes over run 8's twelve. Nothing was lost — it was being asked the wrong question.
+ *
+ * Merged by ADDRESS rather than by instance id, for the reason `replay.ts` gives at length: ids are
+ * minted `nextInstanceId++` as the engine walks, so two runs agree about them only by luck. Position
+ * — the chain of child keys, each with an occurrence — is what is stable across runs of one pinned
+ * definition, and it is what the replay index already keys on.
+ *
+ * LATER WINS wherever a later run actually reached, and earlier runs fill in only what it did not.
+ * That is the rule the fold needs while a replay can still fail behind the frontier: the newest
+ * attempt is the truth about every state it touched, and everything past where it stopped is still
+ * the truth from the run that got there. Once a replay cannot fail short of the frontier, the two
+ * can no longer disagree and this degenerates into "the last run, plus its own tail".
+ *
+ * Every node carries the run it came from ({@link InstanceNode.runId}), because `instanceId` is
+ * unique only within a run and this tree spans several — see that field's note.
+ */
+export function foldRuns(runs: readonly { runId: number; run: ProjectedRun }[]): ProjectedRun {
+  const stamped = runs.map((entry) => ({ runId: entry.runId, run: entry.run }));
+  let merged: InstanceNode[] = [];
+  const blocked: BlockedChild[] = [];
+  for (const { runId, run } of stamped) {
+    merged = mergeNodes(merged, run.instances.map((node) => stampRun(node, runId)));
+    for (const entry of run.blocked) {
+      if (!blocked.some((b) => b.stateId === entry.stateId && b.reason === entry.reason)) blocked.push(entry);
+    }
+  }
+  return { instances: merged, activePath: activePathOf(merged), blocked };
+}
+
+/** The run a node came from, stamped through the whole subtree. */
+function stampRun(node: InstanceNode, runId: number): InstanceNode {
+  return { ...node, runId, children: node.children.map((child) => stampRun(child, runId)) };
+}
+
+/**
+ * One sibling list merged into another, keyed by position.
+ *
+ * The key is the child key plus its occurrence — `addressesOf`' rule, counted over ALL siblings so a
+ * superseded first iteration still makes the second occurrence 1. A root has no child key, so it is
+ * keyed by state id instead; a task has one root and the distinction never bites, but keying it on
+ * `undefined` would merge two unrelated roots if it ever did.
+ *
+ * Order follows the LATER list, with anything only the earlier one has appended after — which for
+ * the case this exists for is exactly right: the earlier run's extra nodes are the ones further along
+ * the sequence than the later run managed to get.
+ */
+function mergeNodes(prev: readonly InstanceNode[], next: readonly InstanceNode[]): InstanceNode[] {
+  const index = (nodes: readonly InstanceNode[]): Map<string, InstanceNode> => {
+    const seen = new Map<string, number>();
+    const out = new Map<string, InstanceNode>();
+    for (const node of nodes) {
+      const base = node.childKey ?? `@${node.stateId}`;
+      const occurrence = seen.get(base) ?? 0;
+      seen.set(base, occurrence + 1);
+      out.set(`${base}#${occurrence}`, node);
+    }
+    return out;
+  };
+  const before = index(prev);
+  const after = index(next);
+  const out: InstanceNode[] = [];
+  for (const [key, node] of after) {
+    const earlier = before.get(key);
+    // The later node wins outright — its status, operation and inputs are what the newest attempt
+    // found — but its CHILDREN are merged, because that is where the earlier run's extra tail lives.
+    out.push(earlier === undefined ? node : { ...node, children: mergeNodes(earlier.children, node.children) });
+  }
+  for (const [key, node] of before) {
+    if (!after.has(key)) out.push(node);
+  }
+  return out;
+}
+
 export function isLive(node: MutableNode | InstanceNode): boolean {
   return !node.superseded && (node.status === "running" || node.status === "waiting_for_user" || node.status === "blocked");
 }

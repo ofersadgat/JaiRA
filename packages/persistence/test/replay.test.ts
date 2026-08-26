@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { buildTaskReplay, initProject, openProject, type Project } from "../src/index";
+import { buildTaskReplay, initProject, openProject, taskRun, type Project } from "../src/index";
 
 let dir: string;
 let project: Project;
@@ -109,5 +109,79 @@ describe("the replay index over a task's whole history", () => {
     const replay = buildTaskReplay(project, "t");
     expect(replay.answers.get("a#0")?.value).toEqual({ ok: true });
     expect(replay.unreadable).toEqual([]);
+  });
+});
+
+/** Journal an instance terminating. Absent for an instance the process died inside. */
+function terminated(runId: number, instanceId: number, stateId: string, outcome: string): void {
+  project.db
+    .prepare(
+      `INSERT INTO state_machine_events (task_id, run_id, instance_id, type, payload_json, created_at)
+       VALUES ('t', ?, ?, 'instance.terminated', ?, 1000)`,
+    )
+    .run(runId, instanceId, JSON.stringify({ type: "instance.terminated", instanceId, stateId, outcome }));
+}
+
+/**
+ * A task that got FAR, then a resume that failed SHORT of where it had got to.
+ *
+ * Run 1 walks `a` → `b` and dies inside `c`, so the task's edge is `c`. Run 2 replays `a`, fails in
+ * `b`, and terminates every instance on the way out — the shape a failed run always has. Reading the
+ * last run alone then says the task has no frontier and nothing past `b`, which is how ten hours of
+ * work stopped being visible the moment a resume failed early.
+ */
+function farThenShort(): void {
+  const first = project.runtime.beginRun("t", "h", 1000);
+  entered(first, 1, "root");
+  entered(first, 2, "root/a", "a", 1);
+  completed(first, 2, "root/a", "op-a");
+  record(first, "op-a", { ok: true });
+  terminated(first, 2, "root/a", "success");
+  entered(first, 3, "root/b", "b", 1);
+  completed(first, 3, "root/b", "op-b");
+  record(first, "op-b", { ok: true });
+  terminated(first, 3, "root/b", "success");
+  entered(first, 4, "root/c", "c", 1); // never terminated — the process died here
+  project.runtime.endRun(first, "interrupted", 2000);
+
+  const second = project.runtime.beginRun("t", "h", 3000);
+  entered(second, 1, "root");
+  entered(second, 2, "root/a", "a", 1);
+  terminated(second, 2, "root/a", "success");
+  entered(second, 3, "root/b", "b", 1);
+  terminated(second, 3, "root/b", "error");
+  terminated(second, 1, "root", "error");
+  project.runtime.endRun(second, "error", 4000);
+}
+
+describe("the task's frontier across runs", () => {
+  it("keeps the edge an earlier run reached when a later one fails short of it", () => {
+    farThenShort();
+    const replay = buildTaskReplay(project, "t");
+    // `c` is where this task stopped, and a resume that died in `b` does not change that.
+    expect(replay.frontier.map((f) => f.stateId)).toEqual(["root/c"]);
+    expect(replay.frontier[0]!.address).toEqual([{ childKey: "c", occurrence: 0 }]);
+  });
+
+  it("folds the runs into one tree instead of drawing the last one over the rest", () => {
+    farThenShort();
+    const run = taskRun(project, "t");
+    const root = run.instances[0]!;
+    // Every child the task ever reached, not just the two the failed resume got to.
+    expect(root.children.map((c) => c.childKey)).toEqual(["a", "b", "c"]);
+    // The newest attempt is the truth where it reached; the tail is still the run that got there.
+    expect(root.children.map((c) => [c.childKey, c.status, c.runId])).toEqual([
+      ["a", "completed", 2],
+      ["b", "failed", 2],
+      ["c", "running", 1],
+    ]);
+  });
+
+  it("reports no frontier for a task whose runs all ended", () => {
+    const only = project.runtime.beginRun("t", "h", 1000);
+    entered(only, 1, "root");
+    terminated(only, 1, "root", "success");
+    project.runtime.endRun(only, "success", 2000);
+    expect(buildTaskReplay(project, "t").frontier).toEqual([]);
   });
 });

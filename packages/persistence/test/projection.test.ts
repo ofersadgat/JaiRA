@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import type { EngineEvent } from "@declarative-ai/hw";
 import {
   activePathOf,
+  foldRuns,
   breadcrumbOf,
   flattenInstances,
   projectBoard,
@@ -384,5 +385,59 @@ describe("breadcrumbOf", () => {
     };
     expect(ids(breadcrumbOf(cyclic, "a", "b"))).toEqual(["a", "b"]);
     expect(ids(breadcrumbOf(cyclic, "a", "zzz"))).toEqual(["zzz"]);
+  });
+});
+
+/**
+ * Folding a task's runs (`foldRuns`) — the merge a resume makes necessary.
+ *
+ * The subtle half is the KEY. A loop re-enters one child key, so position means the key plus its
+ * occurrence; merging on the key alone would collapse three iterations into one, and merging on the
+ * instance id would not match at all, since ids are minted per run.
+ */
+describe("folding a task's runs into one tree", () => {
+  const run = (events: EngineEvent[]) => projectRun(events);
+
+  it("keeps what an earlier run reached past where a later one stopped", () => {
+    const deep = run([
+      entered(1, "root"),
+      entered(2, "root/a", 1, "a"),
+      terminated(2, "root/a", "success"),
+      entered(3, "root/b", 1, "b"),
+    ]);
+    const shallow = run([entered(1, "root"), entered(2, "root/a", 1, "a"), terminated(2, "root/a", "success")]);
+
+    const folded = foldRuns([
+      { runId: 1, run: deep },
+      { runId: 2, run: shallow },
+    ]);
+    const root = folded.instances[0]!;
+    expect(root.children.map((c) => [c.childKey, c.runId])).toEqual([
+      ["a", 2],
+      ["b", 1],
+    ]);
+  });
+
+  it("distinguishes a loop's iterations instead of collapsing them onto one key", () => {
+    // Two entries under one child key: occurrence, not the key, is what tells them apart.
+    const looped = run([
+      entered(1, "root"),
+      entered(2, "root/tick", 1, "tick"),
+      terminated(2, "root/tick", "success"),
+      entered(3, "root/tick", 1, "tick"),
+      terminated(3, "root/tick", "success"),
+    ]);
+    const once = run([entered(1, "root"), entered(2, "root/tick", 1, "tick")]);
+
+    const folded = foldRuns([
+      { runId: 1, run: looped },
+      { runId: 2, run: once },
+    ]);
+    const ticks = folded.instances[0]!.children;
+    // The later run re-answered the FIRST iteration only; the second survives from the earlier run.
+    expect(ticks.map((c) => [c.status, c.runId])).toEqual([
+      ["running", 2],
+      ["completed", 1],
+    ]);
   });
 });

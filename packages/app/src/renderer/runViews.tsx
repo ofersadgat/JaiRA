@@ -156,7 +156,7 @@ export function RunBoard({
             <Column key={child.key} name={child.label ?? child.key} seq={index + 1} count={runs.length} empty="not reached">
               {runs.map((node, i) => (
                 <RunTile
-                  key={node.instanceId}
+                  key={`${node.runId ?? ""}:${node.instanceId}`}
                   node={node}
                   index={i}
                   total={runs.length}

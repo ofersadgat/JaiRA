@@ -45,7 +45,7 @@ import type {
 } from "@declarative-ai/hw";
 import type { InstanceNode } from "@jaira/shared";
 import { SqliteEventLog } from "./eventLog";
-import { eventsOf, isLive, projectRun } from "./projection";
+import { eventsOf, foldRuns, isLive, projectRun, type ProjectedRun } from "./projection";
 import { ON_RECORD, scopedSessionId } from "./sessionStore";
 import { parseSessionRef } from "./views";
 import type { Project } from "./project";
@@ -180,7 +180,7 @@ export function buildRunReplay(project: Project, taskId: string, runId: number):
     answers.set(addressKey(address), { address, stateId: event.stateId, instanceId: event.instanceId, value });
   }
 
-  return { taskId, runId, answers, frontier: frontierOf(instances, addresses), unreadable };
+  return { taskId, runId, answers, frontier: frontierOf(instances), unreadable };
 }
 
 /**
@@ -194,8 +194,17 @@ export function buildRunReplay(project: Project, taskId: string, runId: number):
  * Later wins because a later run is a re-attempt: where run 2 actually dispatched an address that
  * run 1 had also answered, run 2 answered it more recently and is what the task last did.
  *
- * The FRONTIER comes from the last run alone. It is "where did this task stop", and only the run
- * that stopped can say — an earlier run's live leaves are just how it looked when it was superseded.
+ * The FRONTIER comes from the folded tree — every run merged by position (`foldRuns`) — and not from
+ * the last run alone. It used to, on the reasoning that only the run that stopped can say where the
+ * task stopped, and an earlier run's live leaves are how it looked when it was superseded. That holds
+ * only while a later run always gets at least as far as an earlier one. A resume that fails BEHIND
+ * the frontier breaks it: run 10 replayed five calls, died at `verdict`, and terminated every
+ * instance on the way out — so the task's edge at `confidence` vanished and the strip offered a retry
+ * of a task that had a perfectly good frontier two runs back.
+ *
+ * A replay failing short of the frontier is a defect rather than a state to model, and each one gets
+ * fixed where it lives. Until none are left, the fold is what keeps the edge from being forgotten by
+ * an attempt that never reached it.
  *
  * `unreadable` is folded over the SAME runs as `answers`, and then filtered by what the fold
  * produced. Taking it from the last run alone was wrong in a way that defeated the guard it feeds: a
@@ -212,16 +221,18 @@ export function buildTaskReplay(project: Project, taskId: string): RunReplay {
   }
   const answers = new Map<string, ReplayAnswer>();
   const holes: Array<{ address: InstanceAddress; stateId: string; reason: string }> = [];
-  let latest: RunReplay | undefined;
+  const projected: Array<{ runId: number; run: ProjectedRun }> = [];
   for (const run of runs) {
-    latest = buildRunReplay(project, taskId, run.id);
-    for (const [address, answer] of latest.answers) answers.set(address, answer);
-    holes.push(...latest.unreadable);
+    const one = buildRunReplay(project, taskId, run.id);
+    for (const [address, answer] of one.answers) answers.set(address, answer);
+    holes.push(...one.unreadable);
+    const { events } = eventsOf(new SqliteEventLog(project.db).list(taskId, { runId: run.id }));
+    projected.push({ runId: run.id, run: projectRun(events) });
   }
   // A later run that re-dispatched the address and recorded it properly has REPAIRED the hole, so
   // reporting it would refuse a resume that is now perfectly safe. Only a hole nothing filled counts.
   const unreadable = holes.filter((hole) => !answers.has(addressKey(hole.address)));
-  return { taskId, runId: last.id, answers, frontier: latest!.frontier, unreadable };
+  return { taskId, runId: last.id, answers, frontier: frontierOf(foldRuns(projected).instances), unreadable };
 }
 
 /**
@@ -269,27 +280,49 @@ function addressesOf(roots: readonly InstanceNode[]): Map<number, InstanceAddres
 }
 
 /** Live leaves — a live instance with no live child under it. */
-function frontierOf(roots: readonly InstanceNode[], addresses: Map<number, InstanceAddress>): FrontierEntry[] {
+function frontierOf(roots: readonly InstanceNode[]): FrontierEntry[] {
   const out: FrontierEntry[] = [];
-  const walk = (nodes: readonly InstanceNode[]): void => {
+  /** How many frontier entries this subtree contributed — see the descent rule below. */
+  const walk = (nodes: readonly InstanceNode[], prefix: InstanceAddress): number => {
+    let pushed = 0;
+    // Counted over ALL siblings, live or not — the same rule `addressesOf` follows, and it has to be
+    // the same or the two disagree about which occurrence a live instance is. Descending only into
+    // the live ones (as this used to, reading a precomputed map) would renumber a second iteration
+    // back to 0 the moment the first was cleared.
+    const seen = new Map<string, number>();
     for (const node of nodes) {
-      if (!isLive(node)) continue;
-      const live = node.children.filter(isLive);
-      if (live.length > 0) {
-        walk(live);
+      let address = prefix;
+      if (node.childKey !== undefined) {
+        const occurrence = seen.get(node.childKey) ?? 0;
+        seen.set(node.childKey, occurrence + 1);
+        address = [...prefix, { childKey: node.childKey, occurrence }];
+      }
+      // SUPERSEDED is the only subtree never descended into: a sequence reset abandoned it, and a
+      // node left "running" inside one is history rather than somewhere to resume.
+      if (node.superseded) continue;
+      // Descend through a TERMINATED node, which the single-run walk never had to do. In a folded
+      // tree the ancestors come from the newest run and the tail from an older one, so a failed
+      // `feature` can sit above a live `confidence` — and stopping at the first non-live node found
+      // no frontier at all on exactly the task this fold exists for. Depth-first and count what came
+      // back: a node is the frontier only when it is live and nothing deeper is.
+      if (walk(node.children, address) > 0) {
+        pushed += 1;
         continue;
       }
+      if (!isLive(node)) continue;
       out.push({
-        address: addresses.get(node.instanceId) ?? [],
+        address,
         stateId: node.stateId,
         instanceId: node.instanceId,
         // The operation is `running` exactly while it has started and not settled — which for a
         // stopped run means the process died inside it.
         stopped: node.operation?.status === "running" ? "mid-operation" : "between-children",
       });
+      pushed += 1;
     }
+    return pushed;
   };
-  walk(roots);
+  walk(roots, []);
   return out;
 }
 

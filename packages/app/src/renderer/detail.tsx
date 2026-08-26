@@ -13,7 +13,7 @@ function Tree({ nodes }: { nodes: InstanceNode[] }): JSX.Element {
   return (
     <ul className="tree">
       {nodes.map((node) => (
-        <li key={node.instanceId} className={node.superseded ? "superseded" : undefined}>
+        <li key={`${node.runId ?? ""}:${node.instanceId}`} className={node.superseded ? "superseded" : undefined}>
           <span className="tree-row">
             <Badge status={node.status} />
             <span className="tree-label">{node.childKey ?? node.stateId}</span>
