@@ -172,7 +172,7 @@ export function buildRunReplay(project: Project, taskId: string, runId: number):
     // `completed` is the whole filter — see the header. A record settled `failed`, or left `open` by
     // a crash, is the frontier rather than an answer, and the projection has already put it there.
     if (row.status !== "completed") continue;
-    const value = valueOf(row.result_json);
+    const value = valueOf(row.result_json, event.op);
     if (value === undefined) {
       unreadable.push({ address, stateId: event.stateId, reason: "the record holds no readable value" });
       continue;
@@ -372,13 +372,49 @@ function takeRecord(
 }
 
 /**
- * The value out of a record's payload.
+ * The value out of a record's payload — undoing the choice `withRecord` made when it wrote the row.
  *
  * Records are written `{ value }` by `withRecord`, and a row that is not that shape is left alone
  * rather than guessed at — the same rule `foldNativeCapture` follows, and for the same reason: a
  * wrong unwrapping here would feed the engine a value the call never returned.
+ *
+ * One level is NOT always enough, and the extra one is the whole reason a resumed run could fail on
+ * a state that had already succeeded. `withRecord` stores `result.record` when the executor reported
+ * one and `result.value` only when it did not, and for a PROMPT op those are different objects: the
+ * payload is the whole `LlmOutput` — the op's value plus reasoning, tool trace, messages, finish
+ * reason — because a record says what the call PRODUCED, not the one field the op happened to
+ * declare. hw wants the other one: `ReplayedOperation.value` becomes `.operation.output`, which is
+ * what a state's outputs bind through, so handing it the payload makes every
+ * `.operation.output.<name>` binding resolve to nothing and the state fail "required output '<name>'
+ * was not produced" — on a replay of a call that answered perfectly the first time.
+ *
+ * Which of the two is in a given row is NOT a per-call flag to be recovered. `ctx.returnRecord` is
+ * what an executor answers, and `withRecord` sets it UNCONDITIONALLY on every call it records; the
+ * memo normalizes the same way (ask for everything, store everything, serve what was asked) and
+ * `withMetrics` names `record` explicitly so retry/budget/memo rebuilds carry it rather than dropping
+ * it. So the request is invariant, and what actually varies is whether the executor IMPLEMENTS it:
+ * the prompt family does — agent executors included, since they override only `lower` and `invoke`
+ * and inherit the phase that reports it — and the scripted executor does not.
+ *
+ * So a prompt payload is projected the way `projectLlmOutput` projects it live, and detection is the
+ * event's op kind AND `finishReason`, not either alone. The kind alone is wrong because a SCRIPTED
+ * prompt executor reports no payload, so its row already holds the flat value — which is exactly why
+ * the faked tests stayed green while every real workflow failed here. `finishReason` alone is wrong
+ * because nothing stops a function op from returning an object that happens to carry the field. It
+ * is the payload type's one REQUIRED field, so its presence on a prompt row is a contract rather
+ * than a guess — even the stub written for a call that produced nothing is `{ finishReason: "error" }`.
+ *
+ * The one shape the pair cannot separate is a payload with no `value` — indistinguishable from a flat
+ * value that carries a `finishReason` of its own. Both fall through as unreadable, which is the
+ * honest answer for either: `resumeTask` names the operation and declines instead of replaying a
+ * value it had to invent. In practice only a FAILED call records that shape, and a failed record is
+ * already filtered out above as the frontier.
+ *
+ * The blob rule is deliberately NOT reproduced. Live, a blob-kind prompt output projects to
+ * `files[0].bytes`; this module cannot see `op.output.kind`, and bytes do not survive the row's JSON
+ * anyway. Such a payload carries no `value` either, so it lands on the same refusal.
  */
-function valueOf(resultJson: string | null): JsonValue | undefined {
+function valueOf(resultJson: string | null, op?: string): JsonValue | undefined {
   if (resultJson === null) return undefined;
   let parsed: unknown;
   try {
@@ -388,5 +424,20 @@ function valueOf(resultJson: string | null): JsonValue | undefined {
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
   const value = (parsed as { value?: JsonValue }).value;
-  return value === undefined ? undefined : value;
+  if (value === undefined) return undefined;
+  return isLlmPayload(value, op) ? (value as { value?: JsonValue }).value : value;
+}
+
+/** Whether a prompt record's stored payload is an `LlmOutput` rather than the projected value.
+ *  `finishReason` is the payload's one REQUIRED field — even the stub written for a call that
+ *  produced nothing is `{ finishReason: "error" }` — so its presence on a prompt op's row is what
+ *  says the projection still has to be applied. */
+function isLlmPayload(value: JsonValue, op?: string): boolean {
+  return (
+    op === "prompt" &&
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof (value as { finishReason?: unknown }).finishReason === "string"
+  );
 }

@@ -197,6 +197,27 @@ describe("the replay index", () => {
     expect(addressKey([])).toBe("");
     expect(replayOf(taskId).frontier.every((f) => f.address.length === 2)).toBe(true);
   }, 30000);
+
+  /**
+   * A FUNCTION op is never unwrapped, whatever its value happens to contain.
+   *
+   * Only the prompt executor family reports a record payload, so only a prompt row can be holding
+   * one. Detecting on `finishReason` alone would make a function that returned a field by that name
+   * lose its answer — hence the kind is half the test, and this pins it.
+   */
+  it("does not unwrap a function op whose value carries a finishReason of its own", async () => {
+    const taskId = await start();
+    const first = await tick(true);
+    await tick(false, first);
+    await until(() => pushes.some((p) => p.type === "run:finished"), "the run to finish");
+
+    const value = { confirmed: true, finishReason: "stop" };
+    rewriteRecords(taskId, value);
+
+    const replay = replayOf(taskId);
+    expect(replay.unreadable).toEqual([]);
+    expect(replay.answers.get("loop#0/tick#0")?.value).toEqual(value);
+  }, 30000);
 });
 
 /**
@@ -247,5 +268,101 @@ describe("the replay index over a conversation", () => {
     expect(keys(replay).sort()).toEqual(["a#0", "b#0"]);
     expect(replay.answers.get("a#0")?.value).toMatchObject({ text: "hi" });
     expect(replay.frontier).toEqual([]);
+  }, 30000);
+});
+
+/**
+ * The shape a REAL prompt call records — which no faked run in this file produces.
+ *
+ * `withRecord` stores `result.record` when the executor reports one, and the prompt executor reports
+ * the whole `LlmOutput`: the op's value, plus the reasoning and tool trace that the projection drops.
+ * The scripted executor reports no payload at all (it says so in its own comment), so every test
+ * above records the already-projected value and the extra level never appears. That is precisely how
+ * a resume that could not read a single real prompt answer shipped green.
+ *
+ * So the row is rewritten into the payload shape after a faked run, and the index is asked to read
+ * the run back. Nothing else changes: the journal, the addresses and the record pairing are the ones
+ * the run actually produced.
+ */
+function rewriteRecords(taskId: string, payload: JsonValue): void {
+  const project = openProject(dir);
+  try {
+    const rows = project.db
+      .prepare("SELECT id FROM operation_records WHERE task_id = ? ORDER BY id")
+      .all(taskId) as Array<{ id: number }>;
+    for (const row of rows) {
+      project.db.prepare("UPDATE operation_records SET result_json = ? WHERE id = ?").run(JSON.stringify({ value: payload }), row.id);
+    }
+  } finally {
+    project.close();
+  }
+}
+
+/** The payload a real prompt call records around `value` — `finishReason` is its one REQUIRED field. */
+function llmPayload(value: JsonValue): JsonValue {
+  return { value, thinking: [], toolCalls: [], toolResults: [], messages: [], finishReason: "stop" };
+}
+
+describe("the replay index over a real prompt payload", () => {
+  it("projects the recorded LlmOutput, so a bound output still resolves", async () => {
+    writeWorkflowFiles(workflowsDir, promptFiles());
+    const { taskId } = service.createTask({ title: "Payload", workflow: PROMPTED });
+    await service.startTask({ taskId, fake: [{ output: { text: "hi" } }] as never });
+    await until(() => pushes.some((p) => p.type === "run:finished"), "the run to finish");
+
+    // What a real prompt executor would have written for the same two calls.
+    rewriteRecords(taskId, llmPayload({ text: "hi" }));
+
+    const replay = replayOf(taskId);
+    // The op's value, NOT the envelope around it. Handing back the envelope is what made
+    // `.operation.output.text` resolve to nothing and the state fail "required output 'text' was not
+    // produced" — on a call that had already answered.
+    expect(replay.unreadable).toEqual([]);
+    expect(replay.answers.get("a#0")?.value).toEqual({ text: "hi" });
+    expect(replay.answers.get("b#0")?.value).toEqual({ text: "hi" });
+  }, 30000);
+
+  /**
+   * The other half of the discriminator, and the reason it is not the op kind alone.
+   *
+   * A SCRIPTED prompt executor reports no payload — it returns only the projected value, so
+   * `withRecord` stores that — which means "this row came from a prompt op" does not tell you which
+   * shape is in it. Unwrapping on the kind would corrupt every faked run instead of the real ones.
+   */
+  it("leaves a prompt row that already holds the projected value alone", async () => {
+    writeWorkflowFiles(workflowsDir, promptFiles());
+    const { taskId } = service.createTask({ title: "Flat", workflow: PROMPTED });
+    await service.startTask({ taskId, fake: [{ output: { text: "hi" } }] as never });
+    await until(() => pushes.some((p) => p.type === "run:finished"), "the run to finish");
+
+    // Exactly what the scripted executor records today — no envelope to strip.
+    rewriteRecords(taskId, { text: "hi" });
+
+    const replay = replayOf(taskId);
+    expect(replay.unreadable).toEqual([]);
+    expect(replay.answers.get("a#0")?.value).toEqual({ text: "hi" });
+  }, 30000);
+
+  /**
+   * A payload whose call produced no value is UNREADABLE, not silently `undefined`.
+   *
+   * It is also the shape that cannot be told apart from a flat value carrying a `finishReason` field
+   * of its own, so refusing is the only honest answer for both: `resumeTask` names the operation and
+   * declines rather than dispatching one whose effects may already have landed.
+   */
+  it("refuses a payload that carries no value rather than guessing one", async () => {
+    writeWorkflowFiles(workflowsDir, promptFiles());
+    const { taskId } = service.createTask({ title: "Valueless", workflow: PROMPTED });
+    await service.startTask({ taskId, fake: [{ output: { text: "hi" } }] as never });
+    await until(() => pushes.some((p) => p.type === "run:finished"), "the run to finish");
+
+    rewriteRecords(taskId, { thinking: [], messages: [], finishReason: "stop" });
+
+    const replay = replayOf(taskId);
+    expect(replay.answers.size).toBe(0);
+    expect(replay.unreadable.map((u) => u.reason)).toEqual([
+      "the record holds no readable value",
+      "the record holds no readable value",
+    ]);
   }, 30000);
 });
