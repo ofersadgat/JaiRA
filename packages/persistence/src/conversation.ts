@@ -61,7 +61,7 @@ export function conversationView(project: Project, taskId: string, options: Conv
   // Named with the project it was looked for IN. A task id is a rowid in one database and every
   // read about it names that database (see `taskDetailView`) — so when this fires, the useful half
   // of the report is which one was asked, not which id was missing.
-  if (!row) throw refusal(log, `unknown task '${taskId}' in ${project.paths.projectDir}`);
+  if (!row) throw refusal(log, `unknown task '${taskId}' in ${project.paths.projectDir}`, { taskId });
   const meta = project.tasks.tryRead(taskId);
   const runs = project.runtime.listRuns(taskId);
   const runId = options.runId ?? runs[runs.length - 1]?.id;

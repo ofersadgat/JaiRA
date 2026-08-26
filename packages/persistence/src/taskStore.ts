@@ -26,7 +26,7 @@ export class TaskFileStore {
 
   read(taskId: string): TaskMeta {
     const meta = this.tryRead(taskId);
-    if (!meta) throw refusal(log, `no task file for '${taskId}' in ${this.tasksDir}`);
+    if (!meta) throw refusal(log, `no task file for '${taskId}' in ${this.tasksDir}`, { taskId });
     return meta;
   }
 

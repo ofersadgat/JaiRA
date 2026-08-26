@@ -129,7 +129,7 @@ export class RuntimeStore {
     const res = this.db
       .prepare(`UPDATE task_runtime SET status = ?, updated_at = ? WHERE task_id = ?`)
       .run(status, nowMs, taskId);
-    if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`);
+    if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
     this.logTask(taskId);
   }
 
@@ -137,7 +137,7 @@ export class RuntimeStore {
     const res = this.db
       .prepare(`UPDATE task_runtime SET snapshot_hash = ?, updated_at = ? WHERE task_id = ?`)
       .run(snapshotHash, nowMs, taskId);
-    if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`);
+    if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
     this.logTask(taskId);
   }
 
@@ -146,7 +146,7 @@ export class RuntimeStore {
     const res = this.db
       .prepare(`UPDATE task_runtime SET worktree_path = ?, updated_at = ? WHERE task_id = ?`)
       .run(worktreePath, nowMs, taskId);
-    if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`);
+    if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
     this.logTask(taskId);
   }
 
@@ -175,7 +175,7 @@ export class RuntimeStore {
     const res = this.db
       .prepare(`UPDATE runs SET ended_at = ?, outcome = ?, outputs_json = ?, failure_json = ? WHERE id = ?`)
       .run(nowMs, outcome, extra?.outputsJson ?? null, extra?.failureJson ?? null, runId);
-    if (res.changes === 0) throw refusal(log, `no run row with id ${runId}`);
+    if (res.changes === 0) throw refusal(log, `no run row with id ${runId}`, { runId });
     this.logRun(runId);
   }
 
@@ -237,9 +237,9 @@ export class RuntimeStore {
 
   assertCancelable(taskId: string): TaskRuntimeRow {
     const row = this.get(taskId);
-    if (!row) throw refusal(log, `unknown task '${taskId}'`);
+    if (!row) throw refusal(log, `unknown task '${taskId}'`, { taskId });
     if (isTerminalStatus(row.status)) {
-      throw refusal(log, `task '${taskId}' is already ${row.status}`);
+      throw refusal(log, `task '${taskId}' is already ${row.status}`, { taskId });
     }
     return row;
   }

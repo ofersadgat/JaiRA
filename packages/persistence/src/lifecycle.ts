@@ -52,7 +52,7 @@ export function createTask(project: Project, input: CreateTaskInput, nowMs = Dat
     ...(input.branch !== undefined ? { branch: input.branch } : {}),
     ...(input.parentTaskId !== undefined ? { parentTaskId: input.parentTaskId } : {}),
   };
-  if (project.runtime.get(meta.id)) throw refusal(log, `task '${meta.id}' already exists`);
+  if (project.runtime.get(meta.id)) throw refusal(log, `task '${meta.id}' already exists`, { taskId: meta.id });
   project.tasks.write(meta);
   project.runtime.insert(meta.id, nowMs, { branch: meta.branch });
   return meta;
@@ -108,9 +108,9 @@ export interface BeginRunOptions {
 export async function beginTaskRun(project: Project, taskId: string, options: BeginRunOptions = {}): Promise<StartedRun> {
   const nowMs = options.nowMs ?? Date.now();
   const runtime = project.runtime.get(taskId);
-  if (!runtime) throw refusal(log, `unknown task '${taskId}'`);
+  if (!runtime) throw refusal(log, `unknown task '${taskId}'`, { taskId });
   if (!isStartableStatus(runtime.status)) {
-    throw refusal(log, `task '${taskId}' is ${runtime.status}; only queued/interrupted/failed tasks can start`);
+    throw refusal(log, `task '${taskId}' is ${runtime.status}; only queued/interrupted/failed tasks can start`, { taskId });
   }
   const meta = project.tasks.read(taskId);
 
@@ -259,9 +259,9 @@ export function cancelTask(project: Project, taskId: string, nowMs = Date.now())
  */
 export function deleteTask(project: Project, taskId: string): void {
   const row = project.runtime.get(taskId);
-  if (!row) throw refusal(log, `unknown task '${taskId}'`);
+  if (!row) throw refusal(log, `unknown task '${taskId}'`, { taskId });
   if (row.status === "running") {
-    throw refusal(log, `task '${taskId}' is running; cancel it before deleting it`);
+    throw refusal(log, `task '${taskId}' is running; cancel it before deleting it`, { taskId });
   }
   // One transaction, children before parents: events and jobs reference runs, runs reference the
   // runtime row, and foreign keys are ON. Jobs are matched by task OR by run — a process job records

@@ -7,6 +7,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { formatRecord, setLogSink } from "@declarative-ai/log";
 import { loadBundle, validateBundle, moduleHash as moduleHashOf } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/exec";
 import { registerCliChangesetReviewer } from "./changesetReviewer";
@@ -135,7 +136,29 @@ const USAGE = `usage:
             [--json] [--fake <json|@file>] [--repair-turns <n>] [--project <dir>]
 `;
 
+/**
+ * What the libraries say, and where a CLI puts it.
+ *
+ * `@declarative-ai/log`'s default sink writes every record to stderr, which is the right default for
+ * a library with no application around it and the wrong one here: this CLI already prints what went
+ * wrong, once, in its own words. Left alone, every refusal `@jaira/persistence` and `@jaira/runtime`
+ * make arrives twice — once as `[warn] [jaira.persistence.project] …` and again as `error: …` — and
+ * the first copy leaks internal module scopes at somebody running a command.
+ *
+ * So the CLI decides, as an application should. Silent by default; set `JAIRA_LOG` to get the
+ * library stream back on stderr, which is what you want when you are debugging one.
+ */
+function installLogSink(io: CliIo): void {
+  if (process.env["JAIRA_LOG"] !== undefined) {
+    setLogSink((record) => io.stderr(`${formatRecord(record)}
+`));
+    return;
+  }
+  setLogSink(() => {});
+}
+
 export async function runCli(argv: string[], io: CliIo): Promise<number> {
+  installLogSink(io);
   try {
     return await dispatch(argv, io);
   } catch (e) {

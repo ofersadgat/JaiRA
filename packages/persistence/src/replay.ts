@@ -196,6 +196,13 @@ export function buildRunReplay(project: Project, taskId: string, runId: number):
  *
  * The FRONTIER comes from the last run alone. It is "where did this task stop", and only the run
  * that stopped can say — an earlier run's live leaves are just how it looked when it was superseded.
+ *
+ * `unreadable` is folded over the SAME runs as `answers`, and then filtered by what the fold
+ * produced. Taking it from the last run alone was wrong in a way that defeated the guard it feeds: a
+ * hole in run 1's record left that address with no answer, and if run 2 stopped before reaching it,
+ * run 2 reported nothing unreadable and `resumeTask` proceeded — dispatching an operation whose side
+ * effects had already landed. The rule is the one the caller actually needs: an address is a problem
+ * if, after everything is folded, nothing can answer it.
  */
 export function buildTaskReplay(project: Project, taskId: string): RunReplay {
   const runs = project.runtime.listRuns(taskId);
@@ -204,12 +211,17 @@ export function buildTaskReplay(project: Project, taskId: string): RunReplay {
     return { taskId, runId: 0, answers: new Map(), frontier: [], unreadable: [] };
   }
   const answers = new Map<string, ReplayAnswer>();
+  const holes: Array<{ address: InstanceAddress; stateId: string; reason: string }> = [];
   let latest: RunReplay | undefined;
   for (const run of runs) {
     latest = buildRunReplay(project, taskId, run.id);
     for (const [address, answer] of latest.answers) answers.set(address, answer);
+    holes.push(...latest.unreadable);
   }
-  return { taskId, runId: last.id, answers, frontier: latest!.frontier, unreadable: latest!.unreadable };
+  // A later run that re-dispatched the address and recorded it properly has REPAIRED the hole, so
+  // reporting it would refuse a resume that is now perfectly safe. Only a hole nothing filled counts.
+  const unreadable = holes.filter((hole) => !answers.has(addressKey(hole.address)));
+  return { taskId, runId: last.id, answers, frontier: latest!.frontier, unreadable };
 }
 
 /**

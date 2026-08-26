@@ -14,6 +14,7 @@ import { initProject } from "@jaira/persistence";
 import { blockedRules, happyRules, HUMAN_REVIEW_FUNCTION, specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
 import { jairaBasePaths, SHARED_SESSION, type PushMessage } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
+import { createLogger } from "@declarative-ai/log";
 import { AppService, Refusal } from "../src/main/service";
 
 let dir: string;
@@ -754,6 +755,39 @@ describe("diagnostics", () => {
     // with no mapping table in between for the two to drift across.
     expect(entry).toMatchObject({ level: "warn", source: "jaira.persistence.views" });
     expect(entry?.message).toContain("unknown task 't-does-not-exist'");
+  });
+
+  it("carries the task pointer across, so a library's row is actionable", () => {
+    // A message naming a task in prose is not a pointer: `LogEntry.taskId` is what makes the row
+    // click through and what `listLogs` can select on. The sweep is only half done without it.
+    expect(() => service.taskDetail("t-does-not-exist")).toThrow(Refusal);
+    expect(service.listLogs({ source: "jaira.persistence.views" }).at(-1)).toMatchObject({
+      taskId: "t-does-not-exist",
+    });
+  });
+
+  it("refuses to promote a pointer that is not what its type promises", () => {
+    // `LogRecord.fields` is `Record<string, unknown>`, so `{ taskId: 42 }` is a typo nothing stops —
+    // and a `LogEntry.taskId` holding a number crashes whichever renderer treats it as the string
+    // its type declares. A wrong-shaped value stays in `detail`, visible and harmless.
+    createLogger("test.pointers").warn("mistyped", { taskId: 42, runId: 7 });
+
+    const entry = service.listLogs({ source: "test.pointers" }).at(-1);
+    expect(entry?.taskId).toBeUndefined();
+    expect(JSON.stringify(entry?.detail)).toContain("42");
+    // The correctly-typed one beside it still gets through — this rejects values, not the feature.
+    expect(entry?.runId).toBe(7);
+  });
+
+  it("hands the log back when it closes, so a later service is not written over", async () => {
+    // `setLogSink` is process-global. A service that kept the seam after closing would keep
+    // swallowing records that belong to whatever runs next — and in tests, that is the next test.
+    const other = new AppService({ baseDir: join(dir, "other-root") });
+    await other.close();
+    // `other` was constructed second, so it owned the sink; closing it must hand the seam back
+    // rather than leave a closed service holding it.
+    createLogger("test.afterclose").warn("still routed");
+    expect(service.listLogs({ source: "test.afterclose" })).toEqual([]);
   });
 
   it("leaves a REFUSAL alone — its own site already logged it, and knew what it was", () => {

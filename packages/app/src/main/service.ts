@@ -223,7 +223,15 @@ import {
   Refusal,
 } from "@jaira/shared";
 import { Diagnostics } from "./diagnostics";
-import { errorToJson, setLogSink, type LogRecord } from "@declarative-ai/log";
+import { errorToJson, resetLogSink, setLogSink, type LogRecord, type LogSink } from "@declarative-ai/log";
+
+/**
+ * The sink currently installed BY THIS MODULE, if any.
+ *
+ * `@declarative-ai/log` has no way to read back the active sink, and a service must not reset one it
+ * did not install — with two alive in a process (tests do this), the younger one owns the seam.
+ */
+let installed: LogSink | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
 import { ProjectSession, type SyncHolder } from "./session";
 import type {
@@ -642,8 +650,22 @@ function pendingApprovalOf(request: ApprovalRequest, project: string): PendingAp
  */
 export { Refusal } from "@jaira/shared";
 
-/** Fields a library may attach that this app indexes rather than buries in `detail`. */
-const POINTERS = ["taskId", "runId", "instanceId", "jobId", "project"] as const;
+/**
+ * Fields a library may attach that this app indexes rather than buries in `detail`, and the type
+ * each has to BE.
+ *
+ * Checked rather than cast. `LogRecord.fields` is `Record<string, unknown>` filled by whatever call
+ * site wrote it, so `{ taskId: 42 }` is a typo nothing stops — and a `LogEntry.taskId` holding a
+ * number is a crash in whichever renderer treats it as the string its type promises. A value of the
+ * wrong shape stays in `detail`, where it is visible and harmless.
+ */
+const POINTERS = {
+  taskId: "string",
+  runId: "number",
+  instanceId: "number",
+  jobId: "number",
+  project: "string",
+} as const;
 
 /**
  * A library's log record as one of this app's entries.
@@ -658,12 +680,15 @@ const POINTERS = ["taskId", "runId", "instanceId", "jobId", "project"] as const;
  */
 function entryOfRecord(record: LogRecord): Omit<LogEntry, "id" | "at"> {
   const fields = { ...(record.fields ?? {}) };
-  const pointers: Record<string, unknown> = {};
-  for (const key of POINTERS) {
-    if (fields[key] !== undefined) {
-      pointers[key] = fields[key];
-      delete fields[key];
-    }
+  const pointers: Record<string, string | number> = {};
+  for (const [key, want] of Object.entries(POINTERS)) {
+    const value = fields[key];
+    if (value === undefined) continue;
+    // Only when it is what it claims to be. A mistyped pointer is left where it was rather than
+    // promoted into a typed field it does not satisfy.
+    if (typeof value !== want) continue;
+    pointers[key] = value as string | number;
+    delete fields[key];
   }
   const detail = { ...fields, ...(record.err !== undefined ? { err: errorToJson(record.err) } : {}) };
   return {
@@ -711,6 +736,8 @@ export class AppService {
   private readonly schemaValidators = new Map<string, ValidateFunction>();
   /** What the app has said about itself — see {@link Diagnostics}. */
   private readonly diagnostics: Diagnostics;
+  /** This service's sink, held so {@link close} can tell whether it is still the installed one. */
+  private readonly sink: LogSink = (record) => this.diagnostics.log(entryOfRecord(record));
 
   constructor(private readonly options: AppServiceOptions = {}) {
     this.baseDir = jairaBasePaths(options.baseDir ?? settingsBaseDir()).baseDir;
@@ -729,7 +756,8 @@ export class AppService {
     // Installed in the CONSTRUCTOR rather than at `open`, because a failure while opening a project
     // is precisely one of the failures worth having, and a sink installed afterwards would miss it.
     // It is a process-wide seam and this is the process's one service.
-    setLogSink((record) => this.diagnostics.log(entryOfRecord(record)));
+    installed = this.sink;
+    setLogSink(this.sink);
     // The checks that decide what can answer a prompt run BY THEMSELVES, from here on. They used to
     // wait for someone to open Settings and press a button, which meant the app's own idea of what
     // was available was whatever it had assumed — everything — until a run failed to prove otherwise.
@@ -1260,6 +1288,13 @@ export class AppService {
   async close(): Promise<void> {
     // Terminal. Set FIRST, so a read arriving during the drain cannot re-open what is being closed.
     this.closed = true;
+    // Hand the log back, but only if it is still OURS. The sink is process-global, so a second
+    // service constructed after this one has already replaced it — resetting unconditionally would
+    // silence a service that is still running on behalf of the one shutting down.
+    if (installed === this.sink) {
+      resetLogSink();
+      installed = undefined;
+    }
     await this.closeUserSessions();
     for (const session of [...this.sessions.values()]) await this.closeSession(session.key);
   }
