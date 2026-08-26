@@ -12,7 +12,11 @@ import { basename, dirname, join, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
 import { isProject } from "@jaira/persistence";
 import { ARTIFACT_SCHEME, IPC_CHANNELS, PUSH_CHANNEL, type IpcChannel, type PushMessage, type SaveFileRequest } from "@jaira/shared";
-import { AppService, type KeychainPort } from "./service";
+import { AppService, type CrashKind, type KeychainPort } from "./service";
+
+// Source maps are enabled in `entry.cjs`, which loads this bundle — NOT here. The flag registers a
+// map for modules compiled after it runs, and by the time this line executes the bundle it belongs to
+// has already been compiled. See that file for the whole of the reasoning.
 
 /** `dist/` layout produced by the build (see build.mjs / vite.config.ts). */
 const DIST = __dirname;
@@ -76,9 +80,79 @@ function electronKeychain(): KeychainPort {
   };
 }
 
+/**
+ * Report a failure that escaped everything else — to the console AND to the log.
+ *
+ * The console half is not redundant, it is a DEBT this file incurred by existing. Registering
+ * `unhandledRejection` / `uncaughtException` does not add a reporter, it REPLACES Node's: the default
+ * printer runs only while no listener is installed. So handlers that merely recorded would have
+ * bought the Logs panel by taking away the terminal — and the terminal is where the one message that
+ * explained this whole class of bug (`UnhandledPromiseRejectionWarning: Error: NaN is not allowed`)
+ * actually turned up. Trading one silence for a quieter one is not a fix.
+ *
+ * PRINTED FIRST, for two reasons: the logger is a channel that can fail, and a `push` failure means
+ * the Logs panel is precisely the surface that may not be updating.
+ *
+ * Wrapped twice over. The inner call can fail because `service` is still in its own temporal dead
+ * zone — a push raised during `new AppService(...)` reaches this before the binding exists — and
+ * because a reporter is code, and code has bad days. Every caller here is a last resort, so the one
+ * thing this must not do is throw a second exception over the first.
+ */
+function reportCrash(kind: CrashKind, error: unknown): void {
+  const e = error instanceof Error ? error : new Error(String(error));
+  try {
+    // The STACK, not the message: a bare message is what made the original report unactionable, and
+    // `entry.cjs` has source maps on now, so these frames name real files.
+    console.error(`[jaira] ${kind}:`, e.stack ?? e.message);
+  } catch {
+    // A console that cannot be written to is not a reason to lose the record below.
+  }
+  try {
+    service.recordCrash(kind, e);
+  } catch {
+    // Nothing above to catch it and nothing left to report with.
+  }
+}
+
+/**
+ * The two failures that used to leave no trace at all.
+ *
+ * Electron runs Node with `--unhandled-rejections=warn`, so a rejection nobody handled prints one
+ * warning to stdout and the process carries on as if nothing happened. That is how an hour went
+ * missing: a run stalled, the app looked healthy, the Logs panel was empty, and the sentence naming
+ * the cause — `Error: NaN is not allowed` — had been written to a console the app does not own.
+ *
+ * Registered at MODULE LOAD rather than in `whenReady`, because the service is constructed below and
+ * construction is itself something that can throw; a net installed after the fall is not a net.
+ *
+ * Neither handler exits. An uncaught exception in the main process of a desktop app is not
+ * automatically fatal, the run loop already fails the run it belongs to, and killing the window would
+ * destroy the very Logs panel someone needs to read next.
+ */
+process.on("unhandledRejection", (reason: unknown) => reportCrash("unhandledRejection", reason));
+process.on("uncaughtException", (error: unknown) => reportCrash("uncaughtException", error));
+
 const service = new AppService({
   publish: (message: PushMessage) => {
-    if (window && !window.isDestroyed()) window.webContents.send(PUSH_CHANNEL, message);
+    // GUARDED, because this is a send into another process and the service treats it as a statement.
+    //
+    // `webContents.send` structure-clones its argument and throws on anything it cannot represent, and
+    // it throws again for a window torn down between the check and the call. Every caller upstream is
+    // ordinary bookkeeping — "a run started", "the board changed" — written as if telling the window
+    // were free. It is not, and an exception here surfaces wherever that bookkeeping happened to sit,
+    // which for an engine event is inside the run.
+    //
+    // A push is NEWS, and news that cannot be delivered is not the sender's failure to survive: the
+    // renderer refetches on reconnect and on `store:invalidate`, so a dropped frame costs latency and
+    // nothing else.
+    try {
+      if (window && !window.isDestroyed()) window.webContents.send(PUSH_CHANNEL, message);
+    } catch (e) {
+      // Not through `service.log`, which would publish a `log:entry` back through this same failing
+      // channel. `recordCrash` records; whether the window hears about it is a separate question that
+      // this frame is in no position to answer.
+      reportCrash("push", new Error(`'${message.type}' could not be delivered: ${(e as Error).message}`));
+    }
   },
   keychain: electronKeychain(),
   // The app checks what can actually answer a prompt — by itself, at startup, at project open, and
@@ -416,24 +490,30 @@ async function createWindow(): Promise<BrowserWindow> {
    */
   win.webContents.on("context-menu", (_event, params) => {
     if (win.isDestroyed()) return;
-    win.webContents.send(PUSH_CHANNEL, {
-      type: "frame:contextMenu",
-      menu: {
-        x: params.x,
-        y: params.y,
-        selectionText: params.selectionText,
-        linkURL: params.linkURL,
-        srcURL: params.srcURL,
-        mediaType: params.mediaType,
-        isEditable: params.isEditable,
-        editFlags: {
-          canCut: params.editFlags.canCut,
-          canCopy: params.editFlags.canCopy,
-          canPaste: params.editFlags.canPaste,
-          canSelectAll: params.editFlags.canSelectAll,
+    // Guarded for the same reason the push seam is: a send can throw, and a menu that failed to open
+    // must not take down the event handler that would have opened the next one.
+    try {
+      win.webContents.send(PUSH_CHANNEL, {
+        type: "frame:contextMenu",
+        menu: {
+          x: params.x,
+          y: params.y,
+          selectionText: params.selectionText,
+          linkURL: params.linkURL,
+          srcURL: params.srcURL,
+          mediaType: params.mediaType,
+          isEditable: params.isEditable,
+          editFlags: {
+            canCut: params.editFlags.canCut,
+            canCopy: params.editFlags.canCopy,
+            canPaste: params.editFlags.canPaste,
+            canSelectAll: params.editFlags.canSelectAll,
+          },
         },
-      },
-    } satisfies PushMessage);
+      } satisfies PushMessage);
+    } catch (e) {
+      reportCrash("push", new Error(`context menu could not be forwarded: ${(e as Error).message}`));
+    }
   });
 
   await win.loadFile(RENDERER_HTML);

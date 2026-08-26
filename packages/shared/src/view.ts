@@ -960,7 +960,7 @@ export interface LogEntry {
   id: number;
   at: number;
   level: LogLevel;
-  /** Where it came from — `ipc`, `engine`, `process`, `project`, `availability`, `app`. */
+  /** Where it came from — `ipc`, `engine`, `process`, `crash`, `project`, `availability`, `app`. */
   source: string;
   message: string;
   /** The session key of the project it concerns, when it concerns one. */

@@ -731,6 +731,25 @@ describe("diagnostics", () => {
     expect(entry?.message).toBe("task:detail: unknown task 't-1'");
   });
 
+  it("records a crash under its OWN source, with the stack", () => {
+    // `crash` and not `process`: the test below asserts that every `process` row carries a `taskId`,
+    // because that source means "a child process this run started". A crash belongs to no task.
+    service.recordCrash("unhandledRejection", new Error("NaN is not allowed"));
+
+    const entry = service.listLogs({ source: "crash" }).at(-1);
+    expect(entry).toMatchObject({ level: "error", source: "crash" });
+    expect(entry?.message).toBe("unhandledRejection: NaN is not allowed");
+    // The STACK is the point. A bare message is what made the original report unactionable.
+    expect(JSON.stringify(entry?.detail)).toContain("Error: NaN is not allowed");
+  });
+
+  it("never throws out of the crash reporter, whatever it is handed", () => {
+    // Reached from a process-level handler, where there is nothing above to catch a second failure.
+    expect(() => service.recordCrash("uncaughtException", "a bare string")).not.toThrow();
+    expect(() => service.recordCrash("push", undefined)).not.toThrow();
+    expect(service.listLogs({ source: "crash" }).at(-1)?.message).toBe("push: undefined");
+  });
+
   it("records opening a project, which is where a recovery would be reported", async () => {
     const entry = service.listLogs({ source: "project" }).at(-1);
     expect(entry?.message).toContain(dir);

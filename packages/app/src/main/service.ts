@@ -384,6 +384,15 @@ export interface AppServiceOptions {
  * what matters here is that the value never crosses back into the renderer, which is why there is
  * no bulk read.
  */
+/**
+ * What kind of failure reached {@link AppService.recordCrash} — the word that leads the log line.
+ *
+ * `push` is here so a send that failed is not filed as an uncaught exception. It is neither: nothing
+ * escaped, the sender caught it, and calling it what it is keeps the Logs panel honest for the one
+ * failure most likely to be silent.
+ */
+export type CrashKind = "unhandledRejection" | "uncaughtException" | "push";
+
 export interface KeychainPort {
   /** False on a platform (or a build) with no encrypted store — the chain then starts at `.env.local`. */
   available(): boolean;
@@ -1327,6 +1336,36 @@ export class AppService {
       message: `${channel}: ${e.message}`,
       ...(e.stack !== undefined ? { detail: { stack: e.stack } as JsonValue } : {}),
     });
+  }
+
+  /**
+   * A failure that reached the PROCESS — an unhandled rejection, an uncaught exception, or a push
+   * that could not be delivered.
+   *
+   * The last resort, and it exists because it was missing. A `NaN` in a bound argument threw inside
+   * a detached promise, and Node printed `UnhandledPromiseRejectionWarning` to a console the app does
+   * not own and nobody was watching: not in the Logs panel, not in the NDJSON mirror, not in the run's
+   * own record. The run hung, and the one sentence naming the cause was written where it could not be
+   * found. Anything that gets this far is a bug, so it is logged at `error` with its stack.
+   *
+   * NEVER THROWS: it is reached from a process-level handler, where there is nothing above to catch.
+   */
+  recordCrash(kind: CrashKind, error: unknown): void {
+    try {
+      const e = error instanceof Error ? error : new Error(String(error));
+      this.log({
+        level: "error",
+        // NOT `process`, which this app already uses for output from a CHILD process and which every
+        // reader treats as belonging to a task. A crash belongs to nothing — that is what makes it a
+        // crash — so it gets a source of its own rather than arriving as a job with no job.
+        source: "crash",
+        message: `${kind}: ${e.message}`,
+        ...(e.stack !== undefined ? { detail: { stack: e.stack } as JsonValue } : {}),
+      });
+    } catch {
+      // The reporter itself failed. There is no channel left, and taking the process down for a
+      // diagnostic would be worse than the diagnostic being lost.
+    }
   }
 
   /** The tail of what the app has said — what the Logs panel reads on open. */
