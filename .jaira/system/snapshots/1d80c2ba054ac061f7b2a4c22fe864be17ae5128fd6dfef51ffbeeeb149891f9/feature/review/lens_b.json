@@ -1,0 +1,193 @@
+{
+  "label": "Lens B — the person we serve, and the operator at 3am",
+  "description": "The second independent find pass, on a DIFFERENT runtime (feature.md §8 step 3). Two agents that would agree by construction are one agent.",
+  "inputs": {
+    "features": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "id",
+            "story",
+            "importance",
+            "metrics"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "story": {
+              "type": "string",
+              "description": "As a [who], I should be able to [what] so that I can [value]."
+            },
+            "importance": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "metrics": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "requires": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "flows": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "components": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "units": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "changes": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "tests": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "paths": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "findings_b": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "findings_b"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "findings_b"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Review what was built. Your lens is **the person we serve, and the operator at\n3am.**\n\nAnother agent is reviewing the same work through a different lens, on a different\nruntime. You do not share a document with it and you will not see its findings.\nThat independence is the whole mechanism — do not try to guess what it will find\nor avoid overlapping with it.\n\n## What was built\n\nDeliverables: {{.inputs.features}}\n\nFlows: {{.inputs.flows}}\n\nComponents: {{.inputs.components}}\n\nUnits: {{.inputs.units}}\n\nChanges: {{.inputs.changes}}\n\nTests: {{.inputs.tests}}\n\nDocs touched: {{.inputs.paths}}\n\n## Your lens\n\n**The person we serve.** Take the story from each deliverable and walk it. Can\nthat person actually get the value — not \"is the feature present\", but do they\nreach it, understand it, and finish? Where does the path ask them to know\nsomething they have no way to know? Where does an error tell them what happened\ninstead of what to do? Where does the empty state waste the most teachable moment\nin the interface?\n\n**The operator at 3am.** Something has gone wrong in production and they have\nthis system, its logs, and no context. Can they tell *what* broke? Does anything\nfail silently — no crash, no error, just wrong? Is there a failure mode with no\nrecovery, a migration with no rollback, a job that can be half-done with no way\nto see that it is? What would they have to read the source to find out?\n\n## The rule that makes a finding a finding\n\n**Before recording anything, write the strongest argument that it is *not* a\nproblem.** If that argument holds, it was a note — record it as one, or drop it.\n\nAnd: **name the deliverable, flow, component or unit id it violates.** A finding\nthat cannot name one is taste, not a defect. Taste can be a note. It should not\nhold up a ship.\n\n## What to produce\n\n`findings_b` — each with `severity` (`blocker` · `should-fix` · `note`), the\n`claim`, the `evidence` (a `path:line` or a reproduction), and the\n`deliverable_id`. Include the counterargument you tried.\n\nFinding nothing is a legitimate result. Say so plainly rather than padding — but\nknow that a lens that finds nothing twice running is reported as either\nmisconfigured or unnecessary.\n",
+    "config": {
+      "model": "codex-cli/default"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "findings_b": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "findings_b"
+        ]
+      }
+    }
+  }
+}

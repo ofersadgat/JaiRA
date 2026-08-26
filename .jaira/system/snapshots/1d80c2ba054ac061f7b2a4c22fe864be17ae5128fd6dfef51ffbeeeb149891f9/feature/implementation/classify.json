@@ -1,0 +1,211 @@
+{
+  "label": "Implementation wrong, or design wrong?",
+  "description": "Per failure: is the CODE wrong, or is the DESIGN wrong? (feature.md §5). Conflating them is how a design defect becomes a weakened assertion.",
+  "inputs": {
+    "results": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    },
+    "unit_docs": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "unassertable": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "finding_class": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "finding_class"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "finding_class"
+    },
+    "design_findings": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "design_findings"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "design_findings"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Something failed. Decide **which kind of wrong it is**.\n\nConflating these two is how a design defect becomes a weakened assertion, so this\nis a real decision and not a formality.\n\n## What the build and the suite reported\n\n{{.inputs.results}}\n\n## The invariants that were supposed to hold\n\nThey are a section inside the unit docs above. Read them **verbatim from the file** —\nan invariant paraphrased on the way here is an invariant nobody can check the test against.\n\n## The unit docs that declared them\n\n{{.inputs.unit_docs}}\n\n_Paths — open them with `read_file`._\n\n## Invariants the test author could not express\n\n{{.inputs.unassertable}}\n\n## The two classes\n\n| Class | Looks like | Goes to |\n| --- | --- | --- |\n| `implementation` | The code does not do what the unit doc says | back to `implement` |\n| `design` | **The unit doc cannot be satisfied**: an invariant that cannot hold, a failure mode with no recovery, a contract that cannot be met, two invariants that contradict | out of this phase, to `feature/engineering` |\n\n## How to decide\n\nRead the unit doc first, then the failure. Ask: **if the code were rewritten from\nscratch by someone competent, working only from this doc, would it pass?**\n\n- Yes → `implementation`. The doc is satisfiable and the code did not satisfy it.\n- No → `design`. Say precisely which claim in the doc cannot hold, and quote it.\n\n**Anything in `unassertable` is a design finding**, without further argument. The\ninvariant was not phrased so a test could assert it, which the engineering phase's\nchecklist required. Include each one.\n\nWhere nothing failed and `unassertable` is empty, both outputs are empty. That is\nthe common case, and you should say it plainly rather than manufacture a finding.\n\n## What to produce\n\n`finding_class` — `implementation` or `design`. Where both kinds are present,\nreport `design`: it leaves the phase, and the implementation defects will be\nre-derived against a doc that is actually satisfiable.\n\n`design_findings` — one row per design defect: the unit, the claim quoted from\nthe doc, the failing test as evidence, and what about the claim cannot hold.\n",
+    "config": {
+      "model": "anthropic/claude-sonnet-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "finding_class": {
+            "type": "string",
+            "enum": [
+              "implementation",
+              "design"
+            ]
+          },
+          "design_findings": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "finding_class",
+          "design_findings"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file"
+    ]
+  },
+  "slotMeta": {
+    "inputs.results": {
+      "optional": true
+    },
+    "inputs.unit_docs": {
+      "optional": true,
+      "description": "Paths to the unit docs. The invariants are a section inside them — read them there, verbatim."
+    },
+    "inputs.unassertable": {
+      "optional": true
+    }
+  }
+}

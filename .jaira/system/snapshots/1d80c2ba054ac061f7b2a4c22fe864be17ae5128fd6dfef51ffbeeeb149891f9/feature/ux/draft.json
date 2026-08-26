@@ -1,0 +1,238 @@
+{
+  "label": "Draft flows",
+  "description": "One flow per path: steps, states, reversibility, success signal (feature.md §2 step 3).",
+  "inputs": {
+    "features": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "id",
+            "story",
+            "importance",
+            "metrics"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "story": {
+              "type": "string",
+              "description": "As a [who], I should be able to [what] so that I can [value]."
+            },
+            "importance": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "metrics": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "requires": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "path": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    },
+    "working_set": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "flows": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "flows"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "flows"
+    },
+    "flow_docs": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "flow_docs"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "flow_docs"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "For each product deliverable, write the path from intent to value.\n\n## The deliverables\n\n{{.inputs.features}}\n\n## The docs this phase reads\n\n{{.inputs.working_set}}\n\n**These are paths, not contents.** Open each one with `read_file` before you start. Read the\nfile as it is now — an earlier state in this phase may have edited it since the run began.\n\n\n## The path this exploration chose\n\n{{.inputs.path}}\n\nEmpty means an existing pattern already fits and you should instantiate it.\n\n## Answer these, in order\n\n1. **What does this person do today** to get the same value, and what does that\n   cost them — steps, waiting, guessing, giving up? Be honest here: if the\n   current way is not really that bad, phase 1 overstated the value and this is\n   where it shows.\n2. **Where does the feature start?** How do they find out it exists at the\n   moment they need it?\n3. **What is the shortest path from intent to value**, and what on it is not\n   strictly necessary?\n4. **What must they know at each step** to decide the next one — and what are we\n   asking them to remember instead of showing them?\n5. **What happens when it is empty, slow, partial, denied, or broken?** Which of\n   those is the common case?\n6. **What is irreversible?** What can be undone, and for how long? What is lost\n   if they walk away mid-flow?\n7. **How does it behave** on keyboard only, a screen reader, a small window, a\n   slow machine?\n8. **Which existing pattern is this an instance of?** Where it deviates, why is\n   this case different?\n\n## What to produce\n\n`flows` — one per deliverable. Each declares its steps as **`actor does` /\n`system does` / `actor knows`**, and carries one row per state: `first_run`,\n`empty`, `loading`, `partial`, `error`, `denied`, `success`.\n\n`actor knows` is not decoration. It is the evidence that a step is decidable: a\nstep needing knowledge from three steps back is a defect, not a step.\n\nEach flow also names its **success signal** — the observable that says the person\ngot the value. Phase 6 writes a test that asserts exactly this, so it has to be\nobservable from outside. If the deliverable's metric cannot be observed anywhere\nalong the flow, one of the two is wrong, and it is usually the metric — say so.\n\n`flow_docs` — one doc per flow, each with its upward link to the deliverable it\nserves and a **Where this fits** section.\n",
+    "config": {
+      "model": "anthropic/claude-sonnet-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "flows": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "flow_docs": {
+            "type": "string",
+            "contentMediaType": "text/markdown"
+          }
+        },
+        "required": [
+          "flows",
+          "flow_docs"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file"
+    ]
+  },
+  "slotMeta": {
+    "inputs.path": {
+      "optional": true,
+      "description": "The winning path from the exploration."
+    },
+    "inputs.working_set": {
+      "optional": true,
+      "description": "Paths to the docs this phase reads — its standing docs and the catalog entries that bear on the feature. Open them with read_file: the file as it is now, not a copy taken before this phase started editing."
+    }
+  }
+}

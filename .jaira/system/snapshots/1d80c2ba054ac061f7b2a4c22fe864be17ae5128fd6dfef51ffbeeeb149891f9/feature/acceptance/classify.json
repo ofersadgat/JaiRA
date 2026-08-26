@@ -1,0 +1,204 @@
+{
+  "label": "Implementation, design, or spec?",
+  "description": "Per failure: implementation, design, or SPEC — the flow as written cannot deliver the value (feature.md §6 step 6). The class decides which phase the run re-enters.",
+  "inputs": {
+    "results": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    },
+    "claims": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "flows": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "finding_class": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "finding_class"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "finding_class"
+    },
+    "design_findings": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "design_findings"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "design_findings"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "An acceptance test failed. Decide **which kind of wrong it is** — and this phase\nhas three, not two.\n\n## What the suite reported\n\n{{.inputs.results}}\n\n## The claims those tests defend\n\n{{.inputs.claims}}\n\n## The flows they walk\n\n{{.inputs.flows}}\n\n## The three classes\n\n| Class | Means | Goes to |\n| --- | --- | --- |\n| `implementation` | The code does not do what the unit doc says | `feature/implementation` |\n| `design` | The unit doc cannot be satisfied | `feature/engineering` |\n| `spec` | **The flow as written cannot deliver the value.** The steps happen, the system does what phase 2 said, and the person still does not get what the deliverable promised | `feature/ux` |\n\n## Why `spec` exists\n\nA failing acceptance test is not automatically a coding mistake. It can mean the\nflow cannot deliver the success signal it claimed — and that is a UX defect, not\na test failure.\n\nThe alternative — letting this phase \"fix\" it locally by relaxing the assertion —\nis precisely how a design defect becomes a weakened assertion. So route it back\nto the phase that owns the claim, carrying the failing test as evidence.\n\nHow to tell `spec` from the others: **walk the flow by hand as the person.** If\nevery step behaves exactly as phase 2 wrote it and the value still is not\ndelivered, the flow is what is wrong.\n\n## What to produce\n\n`finding_class` — the earliest-owning class present. `spec` outranks `design`,\nwhich outranks `implementation`: an earlier layer being wrong makes the later\nfindings moot.\n\n`design_findings` — one row per defect: the class, the deliverable id, the flow\nstep or the invariant it is about, the failing test as evidence, and what\nspecifically cannot hold.\n\nWhere everything passed, both outputs are empty. Say that plainly.\n",
+    "config": {
+      "model": "anthropic/claude-sonnet-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "finding_class": {
+            "type": "string",
+            "enum": [
+              "implementation",
+              "design",
+              "spec"
+            ]
+          },
+          "design_findings": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "finding_class",
+          "design_findings"
+        ]
+      }
+    }
+  },
+  "slotMeta": {
+    "inputs.results": {
+      "optional": true
+    },
+    "inputs.claims": {
+      "optional": true,
+      "description": "The deliverables this phase must prove — id, story, success signal."
+    }
+  }
+}

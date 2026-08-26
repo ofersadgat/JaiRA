@@ -1,0 +1,10 @@
+{
+  "id": "t-iofzbtjtss",
+  "title": "feature #1",
+  "workflow": "feature",
+  "createdAt": "2026-08-25T17:59:58.556Z",
+  "inputs": {
+    "issue": "Currently, workflow tasks have a conversation view. I want the conversation for a workflow task to also appear in the chat list.\n",
+    "manual_advance": false
+  }
+}

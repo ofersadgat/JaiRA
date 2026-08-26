@@ -1,0 +1,320 @@
+{
+  "label": "Draft deliverables",
+  "description": "Write the product deliverables and their docs (feature.md §1 step 3).",
+  "inputs": {
+    "issue": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "framing": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    },
+    "residue": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    },
+    "working_set": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "features": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "features"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "features"
+    },
+    "feature_docs": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "feature_docs"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "feature_docs"
+    },
+    "standing_amendment": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "standing_amendment"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "standing_amendment"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Turn the issue into product deliverables: who is served, what they can do, and\nhow we would know it worked.\n\n## The issue\n\n{{.inputs.issue}}\n\n## The docs this phase reads\n\n{{.inputs.working_set}}\n\n**These are paths, not contents.** Open each one with `read_file` before you start. Read the\nfile as it is now — an earlier state in this phase may have edited it since the run began.\n\n\n## The framing this exploration chose\n\n{{.inputs.framing}}\n\n{{.inputs.residue}}\n\nIf those are empty, the catalog already answered the framing question and you\nshould work from the issue directly.\n\n## Answer these, in order\n\n1. **Who are we serving?** The user, a developer, support, marketing? Name one\n   per deliverable, and name them the way they would describe themselves.\n2. **What are the goals?** How does this bring value to that person? Can we\n   measure that value — what does success look like, and what does failure look\n   like?\n3. **How does this feature bring that value?** What is necessary, what is\n   sufficient, and what is merely nice to have?\n4. **What other features must exist** for this one to deliver its value?\n5. **Where does this sit among the features that already exist** — what does it\n   overlap with, what does it make redundant, and what would a user expect it to\n   do because of a neighbour?\n6. **Does it conform to the product principles?** If not, this is an *exception*\n   (with the reason, on the doc claiming it) or an *amendment* (the principle is\n   wrong). Silence is neither, and phase 8 finds silent departures.\n\n## What to produce\n\n`features` — one entry per deliverable:\n\n```\n{ \"id\": \"feature-name\",\n  \"story\": \"As a [who], I should be able to [what] so that I can [value]\",\n  \"importance\": 0.0-1.0,\n  \"metrics\": [\"...\"],\n  \"requires\": [\"other-feature-name\"] }\n```\n\nTwo things to get right in the story. The **who** has to be someone who would\nrecognise this as their job. The **so that I can** has to name something the\nperson wanted *before this feature existed* — \"so that I can use the new panel\"\nis the feature wearing a story's clothes.\n\nThe metrics must measure the **value**, not the activity. Opens, clicks and\nruns-started measure that the feature was reached. Ask which metric would move\nif the feature were popular and useless, and do not write that one.\n\n`feature_docs` — one doc per deliverable, on the `docs/_templates/product-feature.md`\ntemplate. Each carries its upward link, a **Where this fits** section (serves /\nneighbors / depends on / history), and — where the exploration rejected a\nreading — a **Framings considered** row.\n\n`standing_amendment` — only when `product/principles.md` is itself wrong. The\ngate approves an amendment separately from the feature, so do not fold one into\na doc.\n",
+    "config": {
+      "model": "anthropic/claude-sonnet-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "story",
+                "importance",
+                "metrics"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "story": {
+                  "type": "string",
+                  "description": "As a [who], I should be able to [what] so that I can [value]."
+                },
+                "importance": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "metrics": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "requires": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "feature_docs": {
+            "type": "string",
+            "contentMediaType": "text/markdown"
+          },
+          "standing_amendment": {
+            "type": "string",
+            "contentMediaType": "text/markdown"
+          }
+        },
+        "required": [
+          "features",
+          "feature_docs"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file"
+    ]
+  },
+  "slotMeta": {
+    "inputs.issue": {
+      "description": "What is being asked for."
+    },
+    "inputs.framing": {
+      "optional": true,
+      "description": "The winning framing from the exploration. Absent when the catalog already answered it."
+    },
+    "inputs.residue": {
+      "optional": true,
+      "description": "What the exploration leaves behind — the Framings considered rows."
+    },
+    "inputs.working_set": {
+      "optional": true,
+      "description": "Paths to the docs this phase reads — its standing docs and the catalog entries that bear on the feature. Open them with read_file: the file as it is now, not a copy taken before this phase started editing."
+    },
+    "outputs.standing_amendment": {
+      "optional": true
+    }
+  }
+}

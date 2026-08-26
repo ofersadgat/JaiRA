@@ -1,0 +1,25 @@
+{
+  "models": {},
+  "memo": {
+    "enabled": false
+  },
+  "artifactDir": "artifacts",
+  "artifacts": {
+    "destination": "$DEFAULT",
+    "dir": "artifacts",
+    "inlineMaxBytes": 65536,
+    "askAboveBytes": 4194304
+  },
+  "storage": {
+    "journal": "db",
+    "conversations": "db",
+    "tasks": "db",
+    "artifacts": "db",
+    "format": "claude"
+  },
+  "execEnvironment": "windows",
+  "policy": {},
+  "agents": {},
+  "executors": {},
+  "workflows": {}
+}

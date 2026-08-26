@@ -1,0 +1,21 @@
+# Two files, and everything else under system/ is meant to be COMMITTED —
+# see DESIGN §4.4. Once a concern's truth is a JSONL that git can merge, there is
+# nothing derived left to hide, and hiding it would defeat the point of choosing files.
+#
+# The database is what survives: it is a rebuildable index of those files now, and an
+# unmergeable binary either way. The logs are this machine talking to itself and would
+# conflict on every line.
+system/jaira.db
+system/jaira.db-wal
+system/jaira.db-shm
+system/logs/
+
+# Machine-local: what this disk has agreed to RUN (SPEC §7.5.5). An approval is a
+# statement about a file on ONE disk, so syncing it would let one machine confer
+# trust on the rest.
+system/approvals.local.json
+
+# Credentials. .env.local is machine-local by convention and is the first project link of the
+# secret chain (DESIGN §8.1). Its sibling .env is deliberately NOT ignored: a project that wants
+# to commit a non-secret default has to be able to.
+.env.local
