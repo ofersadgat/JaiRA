@@ -28,6 +28,7 @@ import {
   createWorkflowExecutor,
   type EngineEvent,
   type Persistence,
+  type ReplaySource,
   type CallCache,
   type WorkflowBundle,
   type WorkflowMetrics,
@@ -248,6 +249,14 @@ export interface WorkflowRunConfig {
    * in-run default, which answers it only within one run: the same call in a later run pays again.
    */
   callCache?: CallCache;
+  /**
+   * What a stopped run already answered — supplying it makes this run a RESUME (hw's `ReplaySource`).
+   *
+   * The run still starts at the root: every operation this source can answer is taken instead of
+   * dispatched, so the engine walks back to where the run stopped without re-executing anything it
+   * already did, and the frontier is simply where the answers run out.
+   */
+  replay?: ReplaySource;
   abortSignal?: AbortSignal;
   /**
    * The filesystem the run acts within — a task's git worktree, or the project
@@ -378,6 +387,7 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     // needs the store: what reaches an executor is the position it resolved to.
     ...(cfg.session !== undefined ? { sessions: cfg.session.sessions } : {}),
     ...(cfg.callCache !== undefined ? { callCache: cfg.callCache } : {}),
+    ...(cfg.replay !== undefined ? { replay: cfg.replay } : {}),
     ...(cfg.persistence !== undefined ? { persistence: cfg.persistence } : {}),
   });
   const ctx: ExecServices = {

@@ -5,8 +5,8 @@
  * state that ran three times showed one card and there was no way to reach the other two passes.
  */
 import { describe, expect, it } from "vitest";
-import type { InstanceNode } from "@jaira/shared/browser";
-import { instanceOf, runsByChild } from "../src/renderer/runViews";
+import type { InstanceNode, ResumePlan } from "@jaira/shared/browser";
+import { instanceOf, runsByChild, stoppedAction } from "../src/renderer/runViews";
 
 const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
   status: "completed",
@@ -86,5 +86,64 @@ describe("runsByChild", () => {
 
   it("is empty for a run that has entered nothing yet", () => {
     expect(runsByChild(undefined).size).toBe(0);
+  });
+});
+
+/**
+ * Which verb the activity strip offers, and why there are two.
+ *
+ * Both do the same thing to the engine; the words report how the run ENDED, which is not a
+ * preference. A button that says "Resume" about a run with nothing live to pick up is the kind of
+ * small lie this table exists to prevent — the same standard the pre-resume verbs were held to.
+ */
+describe("stoppedAction", () => {
+  const plan = (over: Partial<ResumePlan>): ResumePlan => ({
+    taskId: "t",
+    kind: "none",
+    replayed: 0,
+    frontier: [],
+    ...over,
+  });
+
+  it("says Resume where instances were still live", () => {
+    const action = stoppedAction({
+      status: "interrupted",
+      resume: plan({ kind: "continue", replayed: 4, frontier: [{ stateId: "feature/build", stopped: "mid-operation" }] }),
+    })!;
+    expect(action.verb).toBe("Resume");
+    expect(action.resume).toBe(true);
+    // The hint names WHERE and HOW MUCH, because "resumes the run" is a claim anyone would believe
+    // and neither number is one they could work out.
+    expect(action.hint).toContain("build");
+    expect(action.hint).toContain("4 operations");
+  });
+
+  it("says Retry where the run ended and nothing is live", () => {
+    const action = stoppedAction({ status: "failed", resume: plan({ kind: "retry", replayed: 1 }) })!;
+    expect(action.verb).toBe("Retry");
+    expect(action.hint).toContain("state that failed");
+    // Singular reads as singular. A hint that says "1 operations" is a hint nobody wrote.
+    expect(action.hint).toContain("1 operation ");
+  });
+
+  it("falls back to the restart verbs when there is nothing to resume", () => {
+    expect(stoppedAction({ status: "failed" })).toMatchObject({ verb: "Try again", resume: false });
+    expect(stoppedAction({ status: "interrupted" })).toMatchObject({ verb: "Start again", resume: false });
+    // Canceled never resumes: it ended on purpose, and its lifecycle is over either way.
+    expect(stoppedAction({ status: "canceled" })).toMatchObject({ verb: "Run again", resume: false });
+    expect(stoppedAction({ status: "queued" })).toMatchObject({ verb: "Start", resume: false });
+  });
+
+  it("says nothing at all for a run that finished or is still going", () => {
+    expect(stoppedAction({ status: "completed" })).toBeUndefined();
+    expect(stoppedAction({ status: "running" })).toBeUndefined();
+  });
+
+  it("explains a record it cannot read, rather than silently dropping the button", () => {
+    // The person deciding what to do next is owed the reason: a task whose history has a hole in it
+    // can still be started over, and that is a different decision from "resume is just missing".
+    const action = stoppedAction({ status: "failed", resume: plan({ blocked: "no record for design's operation" }) })!;
+    expect(action.verb).toBe("Try again");
+    expect(action.hint).toContain("resuming is unavailable: no record for design's operation");
   });
 });

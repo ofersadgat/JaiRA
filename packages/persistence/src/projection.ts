@@ -234,7 +234,14 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
   return { instances: roots, activePath: activePathOf(roots), blocked };
 }
 
-function isLive(node: MutableNode | InstanceNode): boolean {
+/**
+ * Whether an instance still counts as somewhere the run IS.
+ *
+ * Exported because a resume asks the same question the board does and must get the same answer — the
+ * frontier it re-enters is the live leaves (`replay.ts`). A second definition of "live" is a second
+ * chance for the two to disagree about whether a run has anything left to do.
+ */
+export function isLive(node: MutableNode | InstanceNode): boolean {
   return !node.superseded && (node.status === "running" || node.status === "waiting_for_user" || node.status === "blocked");
 }
 

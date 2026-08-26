@@ -279,6 +279,9 @@ const handlers: Record<IpcChannel, Handler> = {
   "task:cancel": ((request: { taskId: string; project?: string }) =>
     service.cancelTask(request.taskId, request.project)) as Handler,
   "task:rerun": ((request: Parameters<typeof service.rerunTask>[0]) => service.rerunTask(request)) as Handler,
+  "task:resume": ((request: Parameters<typeof service.resumeTask>[0]) => service.resumeTask(request)) as Handler,
+  "task:resumable": ((request: { taskId: string; project?: string }) =>
+    service.resumable(request.taskId, request.project)) as Handler,
   "task:delete": ((request: { taskId: string; project?: string }) =>
     service.deleteTask(request.taskId, request.project)) as Handler,
   "task:rename": ((request: Parameters<typeof service.renameTask>[0]) => service.renameTask(request)) as Handler,

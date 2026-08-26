@@ -2715,6 +2715,23 @@ export function useApp() {
         }
       },
       /**
+       * Pick a stopped task up where it left off.
+       *
+       * Unlike `rerunTask` the task id never changes: resuming is something a task does to itself,
+       * and the copy-a-finished-task rule has no counterpart here — a completed or canceled run is
+       * refused outright rather than duplicated, because there is nothing to continue.
+       */
+      resumeTask: async (taskId: string, project?: string) => {
+        patch({ busy: true, error: null, stream: [] });
+        try {
+          await invoke("task:resume", { taskId, ...(project !== undefined ? { project } : {}) });
+          patch({ busy: false });
+          await Promise.all([refreshTasks(), refreshBoard(), refreshDetail(taskId, project)]);
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /**
        * Delete tasks for good. The confirmation happened in the UI; by here the only job left is
        * to not keep showing what no longer exists — a deleted task that is also the selection would
        * otherwise leave the panel describing a record the next fetch cannot find.

@@ -664,14 +664,23 @@ function TranscriptSpecimen(): JSX.Element {
 /**
  * What stands where a composite's composer used to be.
  *
- * Three conditions in one frame, because the design is as much about the third as the first two: a
+ * Every condition in one frame, because the design is as much about the silent ones as the loud: a
  * run going, a gate waiting on a person, and a settled run — which draws nothing at all. A picture is
  * the only way to check that last one, since "renders null" is what a test would assert and what it
  * LOOKS like is whether the panel below ends cleanly or leaves a hole.
+ *
+ * The two RESUME rows are here for a different reason: they are the same strip, the same tone and
+ * the same button, differing in one word. Seeing "Resume" and "Retry" stacked is the only way to
+ * check that the difference reads as deliberate rather than as an inconsistency — and beneath them,
+ * that a task with nothing to resume still falls back to a verb that means what it does.
  */
 const RUN_AT = Date.now() - 134_000;
 
-const runDetail = (status: TaskDetail["status"], child: "running" | "waiting_for_user"): TaskDetail =>
+const runDetail = (
+  status: TaskDetail["status"],
+  child: "running" | "waiting_for_user",
+  resume?: TaskDetail["resume"],
+): TaskDetail =>
   ({
     taskId: "tsk_8f31c0",
     title: "Lint and review the workflow",
@@ -686,6 +695,7 @@ const runDetail = (status: TaskDetail["status"], child: "running" | "waiting_for
     blocked: [],
     runs: [{ runId: 1, outcome: status === "running" ? "running" : "success", snapshotHash: "4c9ae21b", startedAt: RUN_AT }],
     timeline: [],
+    ...(resume !== undefined ? { resume } : {}),
   }) as unknown as TaskDetail;
 
 function RunActivitySpecimen(): JSX.Element {
@@ -698,6 +708,30 @@ function RunActivitySpecimen(): JSX.Element {
         <RunActivity detail={runDetail("running", "waiting_for_user")} onStop={() => {}} />
       </div>
       {/* Settled: nothing. The frame ends here, which is the whole of the third condition. */}
+      {/* Interrupted with a frontier: somewhere to pick up, so the verb continues. */}
+      <div className="cx-doing">
+        <RunActivity
+          detail={runDetail("interrupted", "running", {
+            taskId: "tsk_8f31c0",
+            kind: "continue",
+            replayed: 6,
+            frontier: [{ stateId: "feature/review", stopped: "mid-operation" }],
+          })}
+          onStop={() => {}}
+          onRerun={() => {}}
+          onResume={() => {}}
+        />
+      </div>
+      {/* Failed: nothing live, so the same machinery is honestly called a retry of the state that broke. */}
+      <div className="cx-doing">
+        <RunActivity
+          detail={runDetail("failed", "running", { taskId: "tsk_8f31c0", kind: "retry", replayed: 3, frontier: [] })}
+          onStop={() => {}}
+          onRerun={() => {}}
+          onResume={() => {}}
+        />
+      </div>
+      {/* Nothing to resume: the fallback verb, which is what this strip said before resume existed. */}
       <div className="cx-doing">
         <RunActivity detail={runDetail("failed", "running")} onStop={() => {}} onRerun={() => {}} />
       </div>
@@ -726,5 +760,5 @@ export const SPECIMENS: readonly Specimen[] = [
   { id: "editor", figure: "— · edit_artifact", width: 1180, height: 820, node: <EditorSpecimen /> },
   { id: "review-one", figure: "— · review_artifact", width: 1180, height: 900, node: <ReviewOneSpecimen /> },
   { id: "transcript", figure: "— · The message rail", width: 900, height: 1140, node: <TranscriptSpecimen /> },
-  { id: "run-activity", figure: "— · What a run is doing", width: 900, height: 330, node: <RunActivitySpecimen /> },
+  { id: "run-activity", figure: "— · What a run is doing", width: 900, height: 460, node: <RunActivitySpecimen /> },
 ];

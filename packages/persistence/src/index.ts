@@ -10,6 +10,7 @@ export * from "./conversationFile";
 export * from "./rowFile";
 export * from "./lifecycle";
 export * from "./projection";
+export * from "./replay";
 export * from "./runLabel";
 export * from "./shape";
 export * from "./views";

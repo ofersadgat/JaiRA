@@ -269,6 +269,15 @@ export interface FileSurfaceContext {
    * dialog has nowhere to navigate to, so it offers no button rather than one that goes nowhere.
    */
   onRerun?: ((taskId: string) => void) | undefined;
+  /**
+   * Pick a stopped task up where it left off, rather than starting it over.
+   *
+   * Separate from {@link onRerun} rather than a flag on it because they are different promises: this
+   * one keeps everything the task already did and never changes the task id, and a surface that
+   * offered it where the channel is not wired would say "Resume" and start over. Absent ⇒ the strip
+   * offers the restart, with the restart's wording.
+   */
+  onResume?: ((taskId: string) => void) | undefined;
   /** Write a configuration layer as a parsed document — validated in main, unlike a raw file write. */
   onSaveConfig: (layer: ConfigLayer, doc: unknown) => void;
   /** Check a draft against a registered schema — what the JSON editor's picker turns on. */

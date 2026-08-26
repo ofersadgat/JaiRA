@@ -210,6 +210,44 @@ export interface TaskDetail {
   runs: RunView[];
   /** Most recent events last. */
   timeline: TimelineEntry[];
+  /**
+   * What resuming would do, for a task that could still start.
+   *
+   * Absent for every other status, which is the same answer as `kind: "none"` and cheaper: the
+   * service only folds a task's journal when there is a button whose wording depends on it.
+   */
+  resume?: ResumePlan;
+}
+
+/**
+ * What resuming a stopped task would do — enough for a button to say it truthfully.
+ *
+ * The distinction the UI turns on is `kind`, and it is a fact about how the run ENDED rather than a
+ * preference:
+ *
+ *  - `continue` — instances were still live when it stopped, which is what a process dying looks
+ *    like. There is somewhere to pick up, and {@link frontier} says where.
+ *  - `retry` — nothing is live. A state failed and the run ended with it, so every instance
+ *    terminated; the frontier is empty by construction. Resuming replays everything that completed
+ *    and re-runs the state that failed, with its history intact.
+ *  - `none` — there is nothing to resume, or the record cannot be read (see {@link blocked}). The
+ *    caller offers a plain re-run instead.
+ */
+export interface ResumePlan {
+  taskId: string;
+  kind: "continue" | "retry" | "none";
+  /** How many operations would be taken from the record rather than run again. */
+  replayed: number;
+  /** Where it would pick up. Empty for `retry`, and for `none`. */
+  frontier: Array<{ stateId: string; stopped: "mid-operation" | "between-children" }>;
+  /**
+   * Why resuming is refused, when it is.
+   *
+   * Present only with `kind: "none"` and only for the unreadable-record case — "there is nothing
+   * here to resume" needs no reason, but "this task's history has a hole in it" is something the
+   * person deciding what to do next should be told rather than left to infer from a missing button.
+   */
+  blocked?: string;
 }
 
 // --- workflow browser (DESIGN §11.1) ----------------------------------------

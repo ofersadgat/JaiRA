@@ -25,7 +25,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, 
 import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
-import { InMemoryPersistence, loadBundle, type LoadedState, type WorkflowBundle } from "@declarative-ai/hw";
+import { InMemoryPersistence, loadBundle, type LoadedState, type ReplaySource, type WorkflowBundle } from "@declarative-ai/hw";
 import type { ExecServices, MemoCache } from "@declarative-ai/exec";
 import type { ExecPolicy } from "@declarative-ai/permissions";
 import type { JsonValue } from "@declarative-ai/json";
@@ -34,6 +34,8 @@ import {
   baseSource,
   baseStateView,
   beginTaskRun,
+  buildTaskReplay,
+  replaySourceOf,
   userModules,
   prepareUserModules,
   gitFor,
@@ -277,6 +279,7 @@ import type {
   SecretCapabilities,
   SetSecretRequest,
   StartTaskRequest,
+  ResumePlan,
   SchemaViolation,
   StateSlots,
   StateView,
@@ -1915,7 +1918,14 @@ export class AppService {
   taskDetail(taskId: string, project?: string): TaskDetail {
     // Scoped, because the Tasks view now shows the root's runs beside the project's and selecting one
     // must read the database it actually lives in.
-    return taskDetailView(this.session(project).project, taskId, this.viewOptions());
+    const detail = taskDetailView(this.session(project).project, taskId, this.viewOptions());
+    // Folded in HERE rather than fetched separately, because the one surface that needs it — the
+    // activity strip's verb — already has the detail and would otherwise draw a button before
+    // knowing what it does. Computed only for a task that could actually start: for anything else
+    // `resumable` answers `none` off the status alone, and folding a completed task's whole journal
+    // on every panel draw would be work with no reader.
+    if (!isStartableStatus(detail.status)) return detail;
+    return { ...detail, resume: this.resumable(taskId, project) };
   }
 
   /**
@@ -2162,6 +2172,15 @@ export class AppService {
       capabilities?: (registry: ReturnType<typeof newRegistry>) => void;
       interactions?: StartRunRequest["interactions"];
       fake?: JsonValue | FakeRule[];
+      /**
+       * What this task's earlier runs already answered — supplied ⇒ this run is a RESUME.
+       *
+       * It changes nothing else about starting: the same snapshot is loaded, the same worktree is
+       * ensured, a new run row is opened. What differs is that the engine takes recorded answers
+       * instead of dispatching, so it walks back to where the task stopped without paying for or
+       * re-doing anything it already did.
+       */
+      replay?: ReplaySource;
     },
   ): Promise<{ taskId: string; runId: number }> {
     const project = open.project;
@@ -2492,6 +2511,7 @@ export class AppService {
           inputs: started.meta.inputs ?? {},
           registry,
           prompt: streaming,
+          ...(opts.replay !== undefined ? { replay: opts.replay } : {}),
           // Tee the journal: persist, then push the same event to the renderer so
           // the detail view streams live without polling the database.
           persistence: {
@@ -3605,6 +3625,80 @@ export class AppService {
    * run's transcript in the Tasks view puts the same turns in the same place, and they deserve the
    * same treatment. A task nobody has talked to has nothing to lose and re-runs in place as before.
    */
+  /**
+   * Pick a stopped task up where it left off, rather than starting it over ("task:resume").
+   *
+   * The difference from {@link rerunTask} is what the run does on the way back, not where it begins:
+   * both start at the root of the same pinned snapshot, but this one carries the task's replay index,
+   * so every operation an earlier run already completed is TAKEN rather than dispatched. The engine
+   * walks to where the task stopped without spending anything and without re-doing a single thing
+   * with side effects, and the first real call is at the frontier.
+   *
+   * Two shapes reach this, and the strip names them differently because what they mean differs:
+   *
+   *  - `interrupted` — the process died with instances still live. There is a frontier, and resuming
+   *    re-enters it. The calls that were in flight are re-made; nothing behind them is.
+   *  - `failed` — a state failed and the run ended, so nothing is live and the frontier is EMPTY.
+   *    The re-walk still replays everything that completed and then re-runs the state that failed,
+   *    which is a retry of that state with all its history intact. Its conversation position was
+   *    claimed by the failed attempt, so the re-entry forks automatically (SESSIONS.md §4).
+   *
+   * Refused when the index could not be read in full: an operation missing an answer is one the
+   * engine would DISPATCH, and for a state that already wrote a file that is a double-apply nobody
+   * asked for. Better to say so and let the caller start over deliberately.
+   */
+  async resumeTask(request: StartRunRequest): Promise<{ taskId: string; runId: number }> {
+    const open = this.session(request.project);
+    const row = open.project.runtime.get(request.taskId);
+    if (row === undefined) throw new Error(`unknown task '${request.taskId}'`);
+    if (row.status === "running") throw new Error(`task '${request.taskId}' is already running`);
+    if (!isStartableStatus(row.status)) {
+      throw new Error(`task '${request.taskId}' is ${row.status} and cannot be resumed — run it again instead`);
+    }
+    const replay = buildTaskReplay(open.project, request.taskId);
+    if (replay.unreadable.length > 0) {
+      const first = replay.unreadable[0]!;
+      throw new Error(
+        `task '${request.taskId}' cannot be resumed: ${replay.unreadable.length} operation(s) have no readable record ` +
+          `(first: ${first.stateId} — ${first.reason}). Running it again would repeat them.`,
+      );
+    }
+    return this.startRun(open, request.taskId, {
+      config: open.project.config,
+      secrets: this.secretResolver(open),
+      replay: replaySourceOf(replay),
+      ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
+      ...(request.fake !== undefined ? { fake: request.fake } : {}),
+    });
+  }
+
+  /**
+   * What resuming this task would do, for a caller that has to say so before doing it ("task:resumable").
+   *
+   * The renderer needs this to choose a verb: a task with a frontier is one to CONTINUE, and one
+   * without is one whose failed state gets another go. Both are the same machinery; the words are
+   * not, and a button that says the wrong one is worse than no button.
+   */
+  resumable(taskId: string, project?: string): ResumePlan {
+    const open = this.session(project);
+    const row = open.project.runtime.get(taskId);
+    if (row === undefined || !isStartableStatus(row.status) || row.snapshotHash === undefined) {
+      return { taskId, kind: "none", replayed: 0, frontier: [] };
+    }
+    const replay = buildTaskReplay(open.project, taskId);
+    if (replay.unreadable.length > 0) {
+      return { taskId, kind: "none", replayed: 0, frontier: [], blocked: replay.unreadable[0]!.reason };
+    }
+    return {
+      taskId,
+      // A frontier means live instances the process died inside; none means the run ended, and what
+      // is left to do is the state that ended it.
+      kind: replay.frontier.length > 0 ? "continue" : "retry",
+      replayed: replay.answers.size,
+      frontier: replay.frontier.map((entry) => ({ stateId: entry.stateId, stopped: entry.stopped })),
+    };
+  }
+
   async rerunTask(request: StartRunRequest): Promise<{ taskId: string; runId: number }> {
     const open = this.session(request.project);
     const row = open.project.runtime.get(request.taskId);

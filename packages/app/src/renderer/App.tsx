@@ -1144,6 +1144,7 @@ export default function App(): JSX.Element {
     // The action, not the channel — re-running a finished task answers with a DIFFERENT task, and
     // this is what moves the selection onto it. See `FileSurfaceContext.onRerun`.
     onRerun: (taskId: string) => void actions.rerunTask(taskId, state.selectedProject ?? undefined),
+    onResume: (taskId: string) => void actions.resumeTask(taskId, state.selectedProject ?? undefined),
     onSaveConfig: actions.saveConfig,
     validateSchema: actions.validateSchema,
     stateSlots: actions.stateSlots,

@@ -37,6 +37,7 @@ import type {
   PruneResult,
   StateSlots,
   StateView,
+  ResumePlan,
   TaskDetail,
   TaskSummary,
   WorkflowBrowser,
@@ -1034,6 +1035,20 @@ export interface IpcContract {
    * actually ran, which is why it can differ from the one asked about.
    */
   "task:rerun": { request: StartTaskRequest; response: { taskId: string; runId: number } };
+  /**
+   * Pick a stopped task up where it left off, instead of starting it over.
+   *
+   * The same task, the same pinned snapshot, and a new run — what differs is that every operation an
+   * earlier run already completed is TAKEN from the record rather than dispatched, so the engine
+   * walks back to where the task stopped without spending anything and without repeating a single
+   * thing that had side effects. The first real call is at the frontier.
+   *
+   * Refused for a task that is not startable, and refused when the record cannot be read in full:
+   * an operation with no answer is one the engine would run again, and saying so beats doing it.
+   */
+  "task:resume": { request: StartTaskRequest; response: { taskId: string; runId: number } };
+  /** What resuming would do — see {@link ResumePlan}. Cheap enough to ask whenever the panel draws. */
+  "task:resumable": { request: { taskId: string; project?: ProjectRef }; response: ResumePlan };
   /**
    * Delete a task outright — its runs, its journal, its worktree, its file. Refused while it is
    * running (here or in another process); everything else may go, and none of it comes back.
