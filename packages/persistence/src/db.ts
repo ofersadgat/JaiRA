@@ -8,9 +8,14 @@
  * `@ai-exec/hw`; the tables here are shaped so they can be added alongside
  * without migration of what exists.
  */
+import { createLogger, errorToJson } from "@declarative-ai/log";
+import { Refusal } from "@jaira/shared";
 import Database from "better-sqlite3";
 import { migrate } from "./migrations";
 import { abiAdvice, sqliteBinding } from "./nativeBinding";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.persistence.db");
 
 export type JairaDb = Database.Database;
 
@@ -198,6 +203,10 @@ function openWithAdvice(file: string, binding: string | undefined): JairaDb {
   } catch (e) {
     const advice = abiAdvice(e);
     if (advice === undefined) throw e;
-    throw new Error(advice, { cause: e });
+    // Not through `refusal`, and the reason is the `cause`: this is the one refusal here that chains
+    // the underlying error, and losing that would leave the advice with no way back to the ABI
+    // mismatch it is advice ABOUT. So the line is written by hand and the marker applied by hand.
+    log.warn(advice, { file, cause: errorToJson(e) });
+    throw new Refusal(advice, { cause: e });
   }
 }

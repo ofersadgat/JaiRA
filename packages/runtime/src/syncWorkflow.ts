@@ -27,7 +27,12 @@
  * {@link syncRespondPrompt} is the respond half of that loop: a comment sends the changeset back to
  * a model that revises it under the same authoring rules the proposal was written under.
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/exec";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.runtime.syncWorkflow");
 // The wire vocabulary, not a copy of it: the app's IPC contract and these workflows must mean the
 // same thing by "document", or a button would run the other direction.
 import type { SyncDirection } from "@jaira/shared";
@@ -484,7 +489,7 @@ export function syncOutcomeOf(value: unknown, direction: SyncDirection): SyncOut
   if (direction === "document") {
     const text = outputs["document"];
     if (typeof text !== "string" || text.trim() === "") {
-      throw new Error("the sync returned no document to put in the editor");
+      throw refusal(log, "the sync returned no document to put in the editor");
     }
     const changes = arrayOf(outputs["changes"]).map((raw) => {
       const row = record(raw);
@@ -500,7 +505,7 @@ export function syncOutcomeOf(value: unknown, direction: SyncDirection): SyncOut
     const row = record(raw);
     const path = typeof row["path"] === "string" ? row["path"] : "";
     const text = typeof row["text"] === "string" ? row["text"] : "";
-    if (path === "" || text === "") throw new Error(`the sync returned an edit with no path or no file (edits[${i}])`);
+    if (path === "" || text === "") throw refusal(log, `the sync returned an edit with no path or no file (edits[${i}])`);
     return {
       path,
       action: row["action"] === "create" ? ("create" as const) : ("update" as const),
@@ -657,7 +662,7 @@ function arrayOf(value: unknown): unknown[] {
 
 function record(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("the sync returned a malformed proposal");
+    throw refusal(log, "the sync returned a malformed proposal");
   }
   return value as Record<string, unknown>;
 }

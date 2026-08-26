@@ -6,6 +6,8 @@
  * — so both the Electron main process and the headless CLI render the same board
  * from the same code. Anything that *runs* a workflow lives above this.
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import { loadBundle, type StateDef, type WorkflowBundle } from "@declarative-ai/hw";
 import type { BoardView, TaskDetail, TaskSummary, TimelineEntry } from "@jaira/shared";
@@ -23,6 +25,9 @@ import {
 import { loadSnapshot, readWorkflowFiles } from "./snapshots";
 import { ON_RECORD } from "./sessionStore";
 import { workflowShape } from "./shape";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.persistence.views");
 
 export interface ViewOptions {
   /**
@@ -419,7 +424,7 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
   const row = project.runtime.get(taskId);
   // With the project, for the reason `conversationView` states: the id is never the surprising
   // half of this failure — the database it was looked for in is.
-  if (!row) throw new Error(`unknown task '${taskId}' in ${project.paths.projectDir}`);
+  if (!row) throw refusal(log, `unknown task '${taskId}' in ${project.paths.projectDir}`);
   const meta = project.tasks.tryRead(taskId);
   const shape = meta ? shapeFor(project, meta.workflow, row.snapshotHash, options)?.shape : undefined;
   const run = latestRun(project, taskId, shape);

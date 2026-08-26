@@ -4,6 +4,8 @@
  * (executors, providers, interaction) is the caller's concern — this module
  * owns only the durable bookkeeping around a run.
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import type { Failure, FunctionCapabilities, JsonValue } from "@declarative-ai/exec";
 import { loadBundle, validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
 import { newTaskId, isStartableStatus, type TaskMeta, type TaskStatus } from "@jaira/shared";
@@ -16,6 +18,9 @@ import { removeTaskJournal } from "./journalFile";
 import { removeTaskConversations } from "./conversationFile";
 import { removeTaskRows } from "./rowFile";
 import { isFileBacked } from "./shadow";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.persistence.lifecycle");
 
 export interface CreateTaskInput {
   title: string;
@@ -34,7 +39,7 @@ export function createTask(project: Project, input: CreateTaskInput, nowMs = Dat
   // inside `ensureWorkspace` at start — a refusal at creation says the same thing where it can still
   // be acted on. The base root is not a checkout, so a task recorded there can never take one.
   if (project.kind !== "project" && input.branch !== undefined) {
-    throw new Error(`a ${project.kind} task cannot be bound to a branch — the shared root is not a checkout`);
+    throw refusal(log, `a ${project.kind} task cannot be bound to a branch — the shared root is not a checkout`);
   }
   const meta: TaskMeta = {
     id: input.id ?? newTaskId(),
@@ -47,7 +52,7 @@ export function createTask(project: Project, input: CreateTaskInput, nowMs = Dat
     ...(input.branch !== undefined ? { branch: input.branch } : {}),
     ...(input.parentTaskId !== undefined ? { parentTaskId: input.parentTaskId } : {}),
   };
-  if (project.runtime.get(meta.id)) throw new Error(`task '${meta.id}' already exists`);
+  if (project.runtime.get(meta.id)) throw refusal(log, `task '${meta.id}' already exists`);
   project.tasks.write(meta);
   project.runtime.insert(meta.id, nowMs, { branch: meta.branch });
   return meta;
@@ -103,9 +108,9 @@ export interface BeginRunOptions {
 export async function beginTaskRun(project: Project, taskId: string, options: BeginRunOptions = {}): Promise<StartedRun> {
   const nowMs = options.nowMs ?? Date.now();
   const runtime = project.runtime.get(taskId);
-  if (!runtime) throw new Error(`unknown task '${taskId}'`);
+  if (!runtime) throw refusal(log, `unknown task '${taskId}'`);
   if (!isStartableStatus(runtime.status)) {
-    throw new Error(`task '${taskId}' is ${runtime.status}; only queued/interrupted/failed tasks can start`);
+    throw refusal(log, `task '${taskId}' is ${runtime.status}; only queued/interrupted/failed tasks can start`);
   }
   const meta = project.tasks.read(taskId);
 
@@ -144,12 +149,12 @@ export async function beginTaskRun(project: Project, taskId: string, options: Be
       bundle = loadBundle(files, meta.workflow, workflowLoadOptions(project.paths, { vfs, path: project.config.workflows.path }));
     } catch (e) {
       const note = unreadable.length > 0 ? `\n  unreadable files:\n  ${unreadable.join("\n  ")}` : "";
-      throw new Error(`${(e as Error).message}${note}`);
+      throw refusal(log, `${(e as Error).message}${note}`);
     }
     const report = validateBundle(bundle, options.functions ? { functions: options.functions } : {});
     if (report.errors.length > 0) {
       const detail = report.errors.map((e) => `${e.stateId} ${e.path}: ${e.message}`).join("\n  ");
-      throw new Error(`workflow validation failed for '${meta.workflow}':\n  ${detail}`);
+      throw refusal(log, `workflow validation failed for '${meta.workflow}':\n  ${detail}`);
     }
     const snap = await snapshotWithModules(project, bundle);
     hash = snap.hash;
@@ -192,7 +197,7 @@ async function snapshotWithModules(
     // The bundle names a module symbol, which means the loader resolved one, which means this
     // process built the pair. Reaching here would be a wiring bug rather than an authoring one, so it
     // says so instead of failing later with something about an unregistered function.
-    throw new Error(
+    throw refusal(log, 
       `workflow '${bundle.rootId}' calls js/ts functions (${entries.join(", ")}) but this process never called prepareUserModules()`,
     );
   }
@@ -254,9 +259,9 @@ export function cancelTask(project: Project, taskId: string, nowMs = Date.now())
  */
 export function deleteTask(project: Project, taskId: string): void {
   const row = project.runtime.get(taskId);
-  if (!row) throw new Error(`unknown task '${taskId}'`);
+  if (!row) throw refusal(log, `unknown task '${taskId}'`);
   if (row.status === "running") {
-    throw new Error(`task '${taskId}' is running; cancel it before deleting it`);
+    throw refusal(log, `task '${taskId}' is running; cancel it before deleting it`);
   }
   // One transaction, children before parents: events and jobs reference runs, runs reference the
   // runtime row, and foreign keys are ON. Jobs are matched by task OR by run — a process job records

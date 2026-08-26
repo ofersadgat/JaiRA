@@ -17,6 +17,8 @@
  * reviewing it. When it does, the answer is ANOTHER changeset — from the stored base to what is
  * actually there now — presented alongside the pending one, never silently rebased under it.
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import { createHash } from "node:crypto";
 import {
   changesetOf,
@@ -30,6 +32,9 @@ import {
   type TreeState,
 } from "@jaira/shared";
 import type { GitRead } from "./git";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.runtime.changesets");
 
 /** How the producer reads the AFTER side (the worktree) or the current tree. Absent file ⇒ undefined. */
 export type FileReader = (path: string) => Promise<string | undefined> | string | undefined;
@@ -60,7 +65,7 @@ function withHunks(change: Change): Change {
  */
 export async function worktreeChangeset(git: GitRead, base: string, read: FileReader): Promise<Changeset> {
   const resolved = await git.revParse(base);
-  if (resolved === undefined) throw new Error(`'${base}' does not resolve in this repository`);
+  if (resolved === undefined) throw refusal(log, `'${base}' does not resolve in this repository`);
   const id = changeIds();
   const changes: Change[] = [];
   // `.jaira/` is JaiRA's own bookkeeping — task files, the run database, its WAL — not the work

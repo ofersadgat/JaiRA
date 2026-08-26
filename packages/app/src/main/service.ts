@@ -220,8 +220,10 @@ import {
   ALWAYS_GRANTED_TOOLS,
   withAlwaysGranted,
   isTerminalStatus,
+  Refusal,
 } from "@jaira/shared";
 import { Diagnostics } from "./diagnostics";
+import { errorToJson, setLogSink, type LogRecord } from "@declarative-ai/log";
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
 import { ProjectSession, type SyncHolder } from "./session";
 import type {
@@ -631,19 +633,47 @@ function pendingApprovalOf(request: ApprovalRequest, project: string): PendingAp
  * typed rules already, so both are accepted here.
  */
 /**
- * An error the service raised ON PURPOSE, and already logged where it decided to.
+ * Re-exported, NOT redefined.
  *
- * The log's two levels mean different things — `error` is the code malfunctioning, `warn` is
- * something going wrong that the code then handled — and only the site that raised a failure knows
- * which one it is. "unknown task 't-1'" is the service working exactly as intended; a `TypeError`
- * out of the same handler is not, and at the IPC boundary the two arrive looking identical. So the
- * boundary stops classifying on anyone's behalf: a site that has decided, and has written its own
- * line at its own level, throws this, and {@link AppService.recordIpcFailure} leaves it alone.
- *
- * The renderer sees no difference — it still gets the rejection and still shows the message. What
- * changes is only which of the two things the log says happened.
+ * A second `class Refusal` here would typecheck, read identically, and quietly break the one thing
+ * the marker is for: `instanceof` is per-class, so a refusal thrown by `@jaira/persistence` would
+ * fail the check below and be re-filed at `error` as a malfunction. There is one class, in
+ * `@jaira/shared`, because every package that refuses has to be measured against the same one.
  */
-export class Refusal extends Error {}
+export { Refusal } from "@jaira/shared";
+
+/** Fields a library may attach that this app indexes rather than buries in `detail`. */
+const POINTERS = ["taskId", "runId", "instanceId", "jobId", "project"] as const;
+
+/**
+ * A library's log record as one of this app's entries.
+ *
+ * The SCOPE becomes the source, because that is what each already is: `jaira.persistence.lifecycle`
+ * and `engine.providers.generate` say where a line came from in exactly the way the panel's `source`
+ * column exists to show, and inventing a mapping table would only let the two drift.
+ *
+ * The pointers are lifted out of `fields` rather than left inside `detail`, because they are what
+ * makes a row ACTIONABLE — `taskId` opens the task, `jobId` opens that process's output. Everything
+ * else stays as detail, unread until somebody expands the row.
+ */
+function entryOfRecord(record: LogRecord): Omit<LogEntry, "id" | "at"> {
+  const fields = { ...(record.fields ?? {}) };
+  const pointers: Record<string, unknown> = {};
+  for (const key of POINTERS) {
+    if (fields[key] !== undefined) {
+      pointers[key] = fields[key];
+      delete fields[key];
+    }
+  }
+  const detail = { ...fields, ...(record.err !== undefined ? { err: errorToJson(record.err) } : {}) };
+  return {
+    level: record.level,
+    source: record.scope,
+    message: record.message,
+    ...(pointers as { taskId?: string; runId?: number; instanceId?: number; jobId?: number; project?: string }),
+    ...(Object.keys(detail).length > 0 ? { detail: detail as JsonValue } : {}),
+  };
+}
 
 export interface StartRunRequest extends Omit<StartTaskRequest, "fake"> {
   fake?: JsonValue | FakeRule[];
@@ -690,6 +720,16 @@ export class AppService {
       dir: jairaBasePaths(this.baseDir).logsDir,
       publish: (entry) => this.publish({ type: "log:entry", entry }),
     });
+    // Every library's records, into the same panel. `@declarative-ai/log` has always had a swappable
+    // sink and its own header said JaiRA installs one — and JaiRA never did, so everything the model
+    // layer, the engine and JaiRA's own persistence and runtime had to say went to stderr and died
+    // there. Which is why the panel could be empty at the exact moment somebody was told a thing had
+    // gone wrong.
+    //
+    // Installed in the CONSTRUCTOR rather than at `open`, because a failure while opening a project
+    // is precisely one of the failures worth having, and a sink installed afterwards would miss it.
+    // It is a process-wide seam and this is the process's one service.
+    setLogSink((record) => this.diagnostics.log(entryOfRecord(record)));
     // The checks that decide what can answer a prompt run BY THEMSELVES, from here on. They used to
     // wait for someone to open Settings and press a button, which meant the app's own idea of what
     // was available was whatever it had assumed — everything — until a run failed to prove otherwise.

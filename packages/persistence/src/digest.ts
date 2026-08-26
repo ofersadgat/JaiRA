@@ -21,6 +21,8 @@
  * Nothing here is truncated silently: a state clipped by `maxStateChars` is named
  * in `truncated`, and the caller says so.
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadBundle, type LoadedState, type WorkflowBundle } from "@declarative-ai/hw";
@@ -28,6 +30,9 @@ import { isUnder } from "./descriptions";
 import type { Project } from "./project";
 import { browseSource, projectSource, readWorkflowsTolerantly, type LayerSource } from "./workflows";
 import { workflowLoadOptions } from "./workflowRefs";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.persistence.digest");
 
 export interface WorkflowDigestOptions {
   /** Only these workflow roots. Absent ⇒ every root the browser derives. */
@@ -149,7 +154,7 @@ export function digestSource(source: LayerSource, options: WorkflowDigestOptions
   const known = new Set(browser.workflows.map((w) => w.rootId));
   for (const root of options.roots ?? []) {
     if (!known.has(root)) {
-      throw new Error(
+      throw refusal(log, 
         `unknown workflow '${root}'` +
           (known.size > 0 ? ` — ${where} has: ${[...known].join(", ")}` : ` — ${where} has no workflows`),
       );

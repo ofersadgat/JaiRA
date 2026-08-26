@@ -2,10 +2,15 @@
  * Task lifecycle rows (`task_runtime` + `runs`). The status column is the
  * engine-facing truth; the JSON task file never carries status (DESIGN §4.1).
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import type { TaskStatus } from "@jaira/shared";
 import { isTerminalStatus } from "@jaira/shared";
 import type { JairaDb } from "./db";
 import type { RowLog } from "./rowFile";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.persistence.runtime");
 
 export interface TaskRuntimeRow {
   taskId: string;
@@ -124,7 +129,7 @@ export class RuntimeStore {
     const res = this.db
       .prepare(`UPDATE task_runtime SET status = ?, updated_at = ? WHERE task_id = ?`)
       .run(status, nowMs, taskId);
-    if (res.changes === 0) throw new Error(`no task_runtime row for task '${taskId}'`);
+    if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`);
     this.logTask(taskId);
   }
 
@@ -132,7 +137,7 @@ export class RuntimeStore {
     const res = this.db
       .prepare(`UPDATE task_runtime SET snapshot_hash = ?, updated_at = ? WHERE task_id = ?`)
       .run(snapshotHash, nowMs, taskId);
-    if (res.changes === 0) throw new Error(`no task_runtime row for task '${taskId}'`);
+    if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`);
     this.logTask(taskId);
   }
 
@@ -141,7 +146,7 @@ export class RuntimeStore {
     const res = this.db
       .prepare(`UPDATE task_runtime SET worktree_path = ?, updated_at = ? WHERE task_id = ?`)
       .run(worktreePath, nowMs, taskId);
-    if (res.changes === 0) throw new Error(`no task_runtime row for task '${taskId}'`);
+    if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`);
     this.logTask(taskId);
   }
 
@@ -170,7 +175,7 @@ export class RuntimeStore {
     const res = this.db
       .prepare(`UPDATE runs SET ended_at = ?, outcome = ?, outputs_json = ?, failure_json = ? WHERE id = ?`)
       .run(nowMs, outcome, extra?.outputsJson ?? null, extra?.failureJson ?? null, runId);
-    if (res.changes === 0) throw new Error(`no run row with id ${runId}`);
+    if (res.changes === 0) throw refusal(log, `no run row with id ${runId}`);
     this.logRun(runId);
   }
 
@@ -232,9 +237,9 @@ export class RuntimeStore {
 
   assertCancelable(taskId: string): TaskRuntimeRow {
     const row = this.get(taskId);
-    if (!row) throw new Error(`unknown task '${taskId}'`);
+    if (!row) throw refusal(log, `unknown task '${taskId}'`);
     if (isTerminalStatus(row.status)) {
-      throw new Error(`task '${taskId}' is already ${row.status}`);
+      throw refusal(log, `task '${taskId}' is already ${row.status}`);
     }
     return row;
   }

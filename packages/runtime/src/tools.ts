@@ -11,6 +11,8 @@
  * Commands run through the same {@link Exec} seam as git (DESIGN §9.1), in the
  * task's workspace, so a WSL project's agent commands execute inside the distro.
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import {
   hostFunction,
   type CapabilityRegistry,
@@ -49,6 +51,9 @@ import { NodeExec, type Exec } from "./exec";
 import { commandWords, isDeniedPath } from "./policy";
 import { parseCommand } from "./command";
 import { dialectFor, interpreterFor, type ExecEnv } from "./paths";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.runtime.tools");
 
 export interface ToolOptions {
   exec?: Exec;
@@ -295,7 +300,7 @@ export function gateTools(options: {
   const out: Record<string, Tool> = {};
   for (const name of options.names) {
     const tool = options.registry.tools.get(name);
-    if (tool === undefined) throw new Error(`tool '${name}' is not registered`);
+    if (tool === undefined) throw refusal(log, `tool '${name}' is not registered`);
     // OWN entries only. These maps are keyed by TOOL NAME, so a tool called `constructor` would
     // otherwise resolve its mode — and its smart rule — to a prototype member.
     const authoredMode =

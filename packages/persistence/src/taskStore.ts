@@ -3,9 +3,14 @@
  * Human-readable and hand-editable while the task is not running; the SQLite
  * side references tasks by id only and never duplicates these fields.
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseTaskMeta, readJsonFile, type TaskMeta } from "@jaira/shared";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.persistence.taskStore");
 
 export class TaskFileStore {
   constructor(private readonly tasksDir: string) {}
@@ -21,7 +26,7 @@ export class TaskFileStore {
 
   read(taskId: string): TaskMeta {
     const meta = this.tryRead(taskId);
-    if (!meta) throw new Error(`no task file for '${taskId}' in ${this.tasksDir}`);
+    if (!meta) throw refusal(log, `no task file for '${taskId}' in ${this.tasksDir}`);
     return meta;
   }
 

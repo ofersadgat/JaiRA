@@ -22,12 +22,13 @@
     "@declarative-ai/exec": "file:../../../declarative-ai/packages/exec",
     "@declarative-ai/hw": "file:../../../declarative-ai/packages/hw",
     "@declarative-ai/json": "file:../../../declarative-ai/packages/json",
+    "@declarative-ai/log": "file:../../../declarative-ai/packages/log",
     "@declarative-ai/ops": "file:../../../declarative-ai/packages/ops",
     "@declarative-ai/permissions": "file:../../../declarative-ai/packages/permissions",
     "@declarative-ai/validate": "file:../../../declarative-ai/packages/validate",
+    "@jaira/runtime": "*",
     "@jaira/shared": "*",
-    "better-sqlite3": "^12.2.0",
-    "@jaira/runtime": "*"
+    "better-sqlite3": "^12.2.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13"

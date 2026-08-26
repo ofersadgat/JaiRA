@@ -13,6 +13,8 @@
  * `{"choose_option": [{"decision": "approve"}]}`. A `"*"` key answers any
  * function that has no queue of its own.
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import {
   failureOf,
   hostFunction,
@@ -24,6 +26,9 @@ import {
   type ResolvedValue,
 } from "@declarative-ai/exec";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.runtime.scriptedFunctions");
 
 /** A human gate: interactive, side-effect-free, and never memoized (the answer
  *  is a fresh human decision, not a cacheable computation). */
@@ -39,12 +44,12 @@ export interface ScriptedCall {
 
 export function parseInteractionScript(raw: unknown): Record<string, JsonValue[]> {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error("interaction script must be a JSON object of functionName → response array");
+    throw refusal(log, "interaction script must be a JSON object of functionName → response array");
   }
   const script: Record<string, JsonValue[]> = {};
   for (const [name, responses] of Object.entries(raw as Record<string, unknown>)) {
     if (!Array.isArray(responses)) {
-      throw new Error(`interaction script for '${name}' must be an array of responses`);
+      throw refusal(log, `interaction script for '${name}' must be an array of responses`);
     }
     script[name] = [...(responses as JsonValue[])];
   }

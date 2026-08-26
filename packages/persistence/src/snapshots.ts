@@ -24,11 +24,16 @@
  * restores it. This is also why a `LoadedState` has to be plain JSON — see hw's
  * `fanOut`, which was a `Set` and serialized to `{}`.
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { isBareStateId, parseReferencedFile, snapshotHash, stateIdFromPath, type LoadedState, type WorkflowBundle } from "@declarative-ai/hw";
 import { readJsonFile } from "@jaira/shared";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.persistence.snapshots");
 
 const META_FILE = ".meta.json";
 
@@ -73,7 +78,7 @@ const MODULES_DIR = "_modules";
 
 function assertSafeStateId(stateId: string): void {
   if (stateId.split("/").some((seg) => seg === "" || seg === "." || seg === "..")) {
-    throw new Error(`state id '${stateId}' is not a safe relative path`);
+    throw refusal(log, `state id '${stateId}' is not a safe relative path`);
   }
 }
 
@@ -248,7 +253,7 @@ export function ensureSnapshot(snapshotsDir: string, bundle: WorkflowBundle, opt
 export function loadSnapshot(snapshotsDir: string, hash: string): WorkflowBundle {
   const dir = join(snapshotsDir, hash);
   const metaFile = join(dir, META_FILE);
-  if (!existsSync(metaFile)) throw new Error(`snapshot '${hash}' not found under ${snapshotsDir}`);
+  if (!existsSync(metaFile)) throw refusal(log, `snapshot '${hash}' not found under ${snapshotsDir}`);
   const meta = readJsonFile(metaFile) as SnapshotMeta;
 
   const states: Record<string, LoadedState> = {};
@@ -283,7 +288,7 @@ export function loadSnapshot(snapshotsDir: string, hash: string): WorkflowBundle
   };
   const actual = snapshotHash(bundle);
   if (actual !== hash) {
-    throw new Error(`snapshot '${hash}' is corrupt: contents hash to ${actual}`);
+    throw refusal(log, `snapshot '${hash}' is corrupt: contents hash to ${actual}`);
   }
   return bundle;
 }

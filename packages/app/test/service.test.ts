@@ -742,6 +742,20 @@ describe("diagnostics", () => {
     expect(entry?.message).toBe("olderThanDays must be a non-negative number");
   });
 
+  it("carries a LIBRARY's refusal into the panel, under the scope it came from", () => {
+    // The chain this whole arrangement exists for: `@jaira/persistence` declines, writes its own
+    // line through `@declarative-ai/log`, and the sink JaiRA installs turns that into an entry in
+    // the same panel the app's own lines land in. Before, persistence had no logger to reach and the
+    // reason went to whoever caught the throw — which, for a person reading the panel, was nowhere.
+    expect(() => service.taskDetail("t-does-not-exist")).toThrow(Refusal);
+
+    const entry = service.listLogs({ source: "jaira.persistence.views" }).at(-1);
+    // The SCOPE becomes the source verbatim: a library says where it is, and the panel shows it,
+    // with no mapping table in between for the two to drift across.
+    expect(entry).toMatchObject({ level: "warn", source: "jaira.persistence.views" });
+    expect(entry?.message).toContain("unknown task 't-does-not-exist'");
+  });
+
   it("leaves a REFUSAL alone — its own site already logged it, and knew what it was", () => {
     // The boundary sees a deliberate refusal and a genuine bug as the same shape, so it must not
     // classify either: `error` means the code is malfunctioning, and "the service declined" is the

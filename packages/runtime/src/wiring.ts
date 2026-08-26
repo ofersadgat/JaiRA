@@ -12,6 +12,8 @@
  *    other kind of work (host code, interactive UI, delegated agents) is a
  *    `FunctionOp` resolved through `registry.functions`.
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import {
   newCapabilityRegistry,
   type CapabilityRegistry,
@@ -61,6 +63,9 @@ import { buildPromptTree, withSecurityFloor } from "./executorTree";
 import { agentPromptRouteNames, agentRouteVendors, usableRouteKeys } from "./modelRoutes";
 import type { StackedExecutor } from "./executorStack";
 import type { SecretResolver } from "./secrets";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.runtime.wiring");
 
 export type WorkflowExecResult = ExecResult<ResolvedValue, WorkflowMetrics>;
 
@@ -543,7 +548,7 @@ export function defaultExecutorTree(
     .map((model) => namedModelAnswer(configured.prompt, model))
     .filter((answer): answer is { answers: false; reason: string } => !answer.answers);
   if (unserved.length > 0) {
-    throw new Error(
+    throw refusal(log, 
       unserved.length === 1
         ? unserved[0]!.reason
         : `these states name models nothing here serves — ${unserved.map((u) => u.reason).join("; also, ")}`,
@@ -559,12 +564,12 @@ export function defaultExecutorTree(
   const answer = unnamedModelAnswer(tree.prompt);
   if (answer.answers) return tree;
   if (answer.pinned !== undefined) {
-    throw new Error(
+    throw refusal(log, 
       `the default executor is pinned to '${answer.pinned}', which names no model, and these states name none ` +
         "either. Give it a model, or unpin it so a route that picks its own can answer.",
     );
   }
-  throw new Error(
+  throw refusal(log, 
     answer.routes.length === 0
       ? "nothing can answer a prompt here: enable an agent executor (claude-cli needs no API key), or " +
         "add a provider key under models.routes — in Settings, or in .jaira/settings.json"

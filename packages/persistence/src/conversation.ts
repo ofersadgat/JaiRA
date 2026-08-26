@@ -18,9 +18,14 @@
  * operation, and separating them loses the one thing the reader wants to know, which is what the
  * agent was doing when it asked.
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import { ENTERED_TURN, type ConversationTurn, type ConversationView } from "@jaira/shared";
 import type { Project } from "./project";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.persistence.conversation");
 
 /** Turns returned by default. A long agent run produces thousands; the tail is what is being read. */
 export const CONVERSATION_LIMIT = 400;
@@ -56,7 +61,7 @@ export function conversationView(project: Project, taskId: string, options: Conv
   // Named with the project it was looked for IN. A task id is a rowid in one database and every
   // read about it names that database (see `taskDetailView`) — so when this fires, the useful half
   // of the report is which one was asked, not which id was missing.
-  if (!row) throw new Error(`unknown task '${taskId}' in ${project.paths.projectDir}`);
+  if (!row) throw refusal(log, `unknown task '${taskId}' in ${project.paths.projectDir}`);
   const meta = project.tasks.tryRead(taskId);
   const runs = project.runtime.listRuns(taskId);
   const runId = options.runId ?? runs[runs.length - 1]?.id;

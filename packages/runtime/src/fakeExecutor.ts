@@ -8,6 +8,8 @@
  * and the rendered prompt tail (conversation-history preamble stripped, so
  * `full_history` re-invocations don't accidentally match on echoed history).
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import type {
   Capabilities,
   ExecHandle,
@@ -21,6 +23,9 @@ import type {
   ResolvedValue,
 } from "@declarative-ai/exec";
 import { emptyWorkflowMetrics, mergeWorkflowMetrics, type WorkflowMetrics } from "@declarative-ai/hw";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.runtime.fakeExecutor");
 
 const CAPS: Capabilities = {
   structuredOutput: true,
@@ -50,14 +55,14 @@ export interface FakeRule {
 }
 
 export function parseFakeRules(raw: unknown): FakeRule[] {
-  if (!Array.isArray(raw)) throw new Error("fake script must be a JSON array of rules");
+  if (!Array.isArray(raw)) throw refusal(log, "fake script must be a JSON array of rules");
   return raw.map((entry, i) => {
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
-      throw new Error(`fake rule ${i} must be an object`);
+      throw refusal(log, `fake rule ${i} must be an object`);
     }
     const rule = entry as FakeRule;
     if ((rule.output === undefined) === (rule.error === undefined)) {
-      throw new Error(`fake rule ${i} must have exactly one of 'output' or 'error'`);
+      throw refusal(log, `fake rule ${i} must have exactly one of 'output' or 'error'`);
     }
     return rule;
   });

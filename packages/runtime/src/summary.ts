@@ -45,6 +45,8 @@
  *    actually responds to; summarizing it away is what makes summary modes feel
  *    lossy.
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import type {
   ExecServices,
   Executor,
@@ -58,6 +60,9 @@ import { MapSessionStore, promptOp } from "@declarative-ai/exec";
 import type { WorkflowBundle, WorkflowMetrics } from "@declarative-ai/hw";
 import { SchemaValidator } from "@declarative-ai/validate";
 import { conversationModesOf, type ConversationModes } from "@jaira/shared";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.runtime.summary");
 
 /**
  * One conversation turn. Structurally the engine's own `Turn` (which it does not
@@ -165,7 +170,7 @@ export class SummarizingSessionStore implements SessionStore<JsonValue> {
     if (this.inner.compact === undefined) {
       // Refused at construction rather than at the first oversized conversation, which
       // would be a silent no-op until a run happened to get long enough to need it.
-      throw new Error("SummarizingSessionStore needs a store that can compact; the given one cannot");
+      throw refusal(log, "SummarizingSessionStore needs a store that can compact; the given one cannot");
     }
     this.budget = options.budgetChars ?? DEFAULT_BUDGET_CHARS;
     this.keepRecent = Math.max(0, options.keepRecentTurns ?? DEFAULT_KEEP_RECENT);
@@ -213,7 +218,7 @@ export class SummarizingSessionStore implements SessionStore<JsonValue> {
   }
 
   resync(ref: string, messages: readonly JsonValue[]): string | Promise<string> {
-    if (this.inner.resync === undefined) throw new Error("the underlying store cannot resync");
+    if (this.inner.resync === undefined) throw refusal(log, "the underlying store cannot resync");
     return this.inner.resync(ref, messages);
   }
 
@@ -375,7 +380,7 @@ export function promptSummarizer(
     const result = await handle.result;
     if ("error" in result && result.error !== undefined) {
       // Surfaced as a rejection so the store's catch keeps the full conversation.
-      throw new Error(`summarization failed: ${result.error.reason}`);
+      throw refusal(log, `summarization failed: ${result.error.reason}`);
     }
     const value = result.value;
     return typeof value === "string" ? value : JSON.stringify(value);

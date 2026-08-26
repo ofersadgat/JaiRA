@@ -18,7 +18,12 @@
  * `workflowDigest`), so it judges what will run rather than what a summary of it
  * would have said.
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/exec";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.runtime.conformanceWorkflow");
 
 export const CONFORMANCE_ID = "workflow/conformance";
 
@@ -349,7 +354,7 @@ function arrayOf(value: unknown): unknown[] {
 
 function record(value: unknown, at: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`the check returned a malformed ${at}`);
+    throw refusal(log, `the check returned a malformed ${at}`);
   }
   return value as Record<string, unknown>;
 }
@@ -360,5 +365,5 @@ function text(value: unknown): string {
 
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], at: string): T {
   if (typeof value === "string" && (allowed as readonly string[]).includes(value)) return value as T;
-  throw new Error(`the check returned '${String(value)}' for ${at}; expected one of ${allowed.join(", ")}`);
+  throw refusal(log, `the check returned '${String(value)}' for ${at}; expected one of ${allowed.join(", ")}`);
 }

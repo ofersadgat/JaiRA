@@ -16,6 +16,12 @@
  *    guessing would be worse than passing it through.
  */
 
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
+
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.runtime.paths");
 /** The execution environment a project's commands run in (DESIGN §9.1). */
 export type ExecEnv = "windows" | { wsl: string };
 
@@ -123,7 +129,7 @@ export function toWindowsPath(wslPath: string, distro?: string): string {
   }
   if (wslPath.startsWith("/")) {
     if (distro === undefined) {
-      throw new Error(`cannot map distro path '${wslPath}' to Windows without a distro name`);
+      throw refusal(log, `cannot map distro path '${wslPath}' to Windows without a distro name`);
     }
     const rest = toBackslash(wslPath.replace(/^\/+/, "").replace(/\/+$/, ""));
     return `\\\\wsl.localhost\\${distro}${rest ? `\\${rest}` : ""}`;

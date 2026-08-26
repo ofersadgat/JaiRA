@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@declarative-ai/json": "file:../../../declarative-ai/packages/json",
+    "@declarative-ai/log": "file:../../../declarative-ai/packages/log",
     "jsonc-parser": "^3.3.1",
     "monaco-editor": "^0.56.0",
     "yaml": "^2.9.0"

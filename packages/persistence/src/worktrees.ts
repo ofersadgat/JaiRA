@@ -12,10 +12,15 @@
  * `git worktree remove` refuses to discard uncommitted work unless forced, and
  * that refusal is a feature, so the caller decides.
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import { existsSync, mkdirSync } from "node:fs";
 import { worktreePathFor, type JairaExecEnvironment } from "@jaira/shared";
 import { Git, NodeExec, type Exec, type ExecEnv } from "@jaira/runtime";
 import type { Project } from "./project";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.persistence.worktrees");
 
 /** The workspace a task's run executes in. */
 export interface TaskWorkspace {
@@ -69,7 +74,7 @@ export async function ensureWorkspace(
   }
 
   if (!(await git.isRepo())) {
-    throw new Error(
+    throw refusal(log, 
       `task '${taskId}' is bound to branch '${meta.branch}' but ${project.paths.projectDir} is not a git repository`,
     );
   }

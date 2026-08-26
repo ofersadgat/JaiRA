@@ -6,6 +6,8 @@
  * Recovery therefore treats every `running` task found at open time as
  * interrupted — there is no live engine that could still be driving it.
  */
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -33,6 +35,9 @@ import { JobStore, type JobRow } from "./jobs";
 import { SqliteEventLog } from "./eventLog";
 import { RuntimeStore } from "./runtime";
 import { TaskFileStore } from "./taskStore";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.persistence.project");
 
 export interface Project {
   /**
@@ -225,7 +230,7 @@ export function openProject(
 ): Project {
   const paths = jairaPaths(projectDir, opts?.baseDir);
   if (!existsSync(paths.jairaDir)) {
-    throw new Error(`${paths.projectDir} is not a JaiRA project (no .jaira/ — run 'jaira init')`);
+    throw refusal(log, `${paths.projectDir} is not a JaiRA project (no .jaira/ — run 'jaira init')`);
   }
   initBase(paths.base.baseDir);
   return openAt(paths, loadLayeredConfig(paths), "project", opts);
