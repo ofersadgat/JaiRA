@@ -2,6 +2,10 @@
 import { pathToFileURL } from "node:url";
 import { runCli } from "./cli";
 
+// Source maps are enabled in `bin/jaira.js`, which loads this bundle — NOT here. The flag only
+// registers maps for modules compiled after it runs, and a bundle finishes compiling before its first
+// statement executes. See `packages/app/entry.cjs` for the measurement behind that.
+
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const abort = new AbortController();
   const onSigint = (): void => abort.abort();

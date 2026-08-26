@@ -9,7 +9,7 @@
     "directory": "packages/app"
   },
   "type": "module",
-  "main": "dist/main.cjs",
+  "main": "entry.cjs",
   "exports": {
     ".": "./src/index.ts"
   },
