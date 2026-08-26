@@ -50,7 +50,7 @@ import { TearBar, ZigDefs } from "./sessionPanels";
 import { CHAT_AGENT, isChatWorkflow, titleOf } from "./chatWorkflow";
 import { ContextMenu, AskDialog, type AskSpec, type MenuAnchor } from "./menu";
 import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from "./transcript";
-import { LiveStatusBar, Paper, sizeOf, Transcript, type ArtifactSurface } from "./transcriptView";
+import { DayChip, LiveStatusBar, Paper, sizeOf, Transcript, type ArtifactSurface } from "./transcriptView";
 import { ValueView } from "./valueView";
 import { Icon, Spinner } from "./icons";
 import { invoke } from "./store";
@@ -942,6 +942,18 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         setEditing({ at: points.get(turn)!, was: text });
         setDraft(text);
       },
+      /**
+       * The same fork, with the box left empty.
+       *
+       * `editing` still carries the words that were there, because the banner above the composer
+       * names the message being replaced and that is as true of a rewind as of an edit. What changes
+       * is only the draft. Rewinding is not "say that again" — it is "everything from here was a
+       * wrong turn", and prefilling the wrong turn is the one thing that makes it hard to leave.
+       */
+      rewind: (turn: number, text: string) => {
+        setEditing({ at: points.get(turn)!, was: text });
+        setDraft("");
+      },
     }),
     [points],
   );
@@ -969,6 +981,11 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         }}
       >
         <ZigDefs />
+        {/* Which day you are reading, floating over the thread — see {@link DayChip}. Inside the
+            scroller and outside the sheet: it is a fact about where you are standing, not a line in
+            the record. The gaps between messages say how long each pause was; this says which day
+            you are looking at, and between them nothing needs a rule drawn across the page. */}
+        <DayChip scroller={scroller} />
         <Paper>
           <Transcript
             session={thread?.session ?? null}
@@ -980,6 +997,10 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
             empty={running ? "Working…" : "This conversation has not said anything yet."}
             artifacts={artifacts}
             onEdit={edit}
+            // The conversation is what a type correction belongs to — see `messageTypes.ts`. The
+            // replaced branch below deliberately gets none: it is off the path, and a preference
+            // keyed to a message nobody can reach again is a preference nobody can clear.
+            scope={taskId}
             {...(status !== null ? { narrated: true } : {})}
           />
         </Paper>

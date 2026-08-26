@@ -31,7 +31,7 @@ import { isTextMime, mimeFallbacks } from "./mime";
  * is how two panels come to disagree about what markdown looks like — the point of this module is
  * that a model's answer renders the same way in the transcript, in the sync report and in a file.
  */
-export type ViewId = "text" | "json" | "markdown" | "html" | "code" | "media" | "changes";
+export type ViewId = "text" | "json" | "form" | "markdown" | "html" | "code" | "media" | "changes";
 
 /** What a caller already knows about the value, when it knows anything. */
 export interface ViewHint {
@@ -164,17 +164,39 @@ const MARKDOWN_MARKS = [
   /^\s*\|.+\|\s*$/m, // a table row
 ];
 
+/** The same marks, counted rather than merely detected — see {@link looksLikeMarkdown}. */
+const MARKDOWN_COUNTERS = MARKDOWN_MARKS.map((mark) => new RegExp(mark.source, `${mark.flags}g`));
+
 /**
  * Whether a string reads as markdown.
  *
  * TWO marks, not one. A single `- ` at the start of a line appears in every stack trace and every
  * bulleted sentence somebody typed into a plain-text field, and offering a markdown view over those
- * is noise; two independent structural marks is a document. Bold and italic are deliberately not on
- * the list — asterisks are punctuation as often as they are emphasis.
+ * is noise; two structural marks is a document. Bold and italic are deliberately not on the list —
+ * asterisks are punctuation as often as they are emphasis.
+ *
+ * ## Two OCCURRENCES, not two different kinds
+ *
+ * It used to want two marks of different kinds, which failed on the single most common thing a
+ * person actually writes: a sentence and a bullet list under it. Three bullets and nothing else is
+ * one kind of mark, and it was read as plain text — while a stack trace with one stray `- ` in it
+ * was too, which is the case the rule was written for and the only one it needs to keep excluding.
+ *
+ * Counting occurrences separates them. One `- ` is still not a document; two lines that both begin
+ * with one is a list, and a list is a document. Getting this wrong in either direction now costs a
+ * click rather than a rendering, because the type is something a reader can simply assert.
  */
 export function looksLikeMarkdown(text: string): boolean {
   if (text.length === 0) return false;
-  return MARKDOWN_MARKS.filter((mark) => mark.test(text)).length >= 2;
+  let marks = 0;
+  for (const counter of MARKDOWN_COUNTERS) {
+    counter.lastIndex = 0;
+    // Capped per kind, so no single repeated mark can carry the verdict alone beyond what it is
+    // worth — two bullets is a list, and two hundred is the same list.
+    marks += Math.min(text.match(counter)?.length ?? 0, 2);
+    if (marks >= 2) return true;
+  }
+  return false;
 }
 
 /** Whether a string reads as an HTML document or fragment. */
@@ -197,6 +219,15 @@ export function looksLikeHtml(text: string): boolean {
  */
 function viewOfMime(mime: string | undefined): ViewId | undefined {
   if (mime === undefined || mime === "") return undefined;
+  // `text/plain` is a STATEMENT, and until this line it was the one declaration the sniffer was
+  // allowed to overrule — a value explicitly declared plain still had markdown offered over it if it
+  // happened to carry two hashes. It matters now that a person can make the declaration themselves:
+  // "no, this really is just text" has to be sayable, and it is only sayable if it sticks.
+  //
+  // The type ITSELF, not its chain, for the same reason `isCodeMime` checks it that way: every text
+  // type ends at `text/plain` in `mimeFallbacks`, so asking the chain would silence sniffing for all
+  // of them rather than for the one that asked.
+  if (mime === "text/plain") return "text";
   for (const candidate of mimeFallbacks(mime)) {
     if (candidate === "markdown" || candidate === "text/markdown" || candidate.endsWith("+markdown")) return "markdown";
     if (candidate === "html" || candidate === "text/html" || candidate.endsWith("+html")) return "html";
@@ -206,7 +237,15 @@ function viewOfMime(mime: string | undefined): ViewId | undefined {
 }
 
 /** A slot schema's `contentMediaType`, which is how a workflow declares "this string is markdown". */
-function mimeOfSchema(schema: unknown): string | undefined {
+/**
+ * The type a slot's schema declares, when it declares one.
+ *
+ * Exported because a surface that draws a control for the type has to be able to SAY which type is
+ * in force, and "whatever `viewsFor` worked out internally" is not something it can put on a chip.
+ * One resolution order, read the same way by the function that picks the views and by the control
+ * that names them — see `typeNames.ts`.
+ */
+export function mimeOfSchema(schema: unknown): string | undefined {
   if (schema === null || typeof schema !== "object" || Array.isArray(schema)) return undefined;
   const media = (schema as Record<string, unknown>)["contentMediaType"];
   return typeof media === "string" ? media : undefined;
@@ -276,10 +315,52 @@ export function viewsFor(value: unknown, hint: ViewHint = {}): ViewId[] {
     views.push("text");
     return views;
   }
-  // The raw form, always last and always present — a set of changes is still a JSON value, and the
-  // rendering of it is a claim you must be able to check.
+  // Highlighted, with the schema's own descriptions ghosted beside the keys where there is one.
+  // It LEADS, which is a decision about where these are read: a value in a transcript is a record
+  // of what a run produced, and the coloured value is the compact honest form of that. A form is
+  // the better reading of a big nested object and the worse one of a three-key result, and three
+  // keys is what most of these are.
   views.push("json");
+  // A value that came with a SCHEMA can also be read as the thing the schema describes — labelled
+  // fields in the order somebody declared them, rather than a brace at every level.
+  if (isObjectSchema(hint.schema)) views.push("form");
+  // …and the raw serialization under it, always last and always present. The rendering above is a
+  // claim you must be able to check — the same argument that keeps `text` under every rendered
+  // string, applied one level up.
+  views.push("text");
   return views;
+}
+
+/** Whether a schema describes an object with named members — what a form can be built from. */
+function isObjectSchema(schema: unknown): boolean {
+  if (schema === null || typeof schema !== "object" || Array.isArray(schema)) return false;
+  const node = schema as Record<string, unknown>;
+  if (node["type"] === "object") return true;
+  const props = node["properties"];
+  return props !== null && typeof props === "object" && !Array.isArray(props);
+}
+
+/**
+ * What this value would be CALLED, once everything that gets a say has said it.
+ *
+ * The other half of {@link viewsFor}, and it exists because a control that lets somebody correct a
+ * type has to be able to name the one currently in force — and "whatever `viewsFor` worked out
+ * internally" is not something that can go on a chip. Same declarations, same predicates, in the
+ * same order, so the name and the list of readings can never disagree about what they are looking at.
+ *
+ * `undefined` means DETECTION DECLINED, which is a different answer from `text/plain` and the reason
+ * this does not simply fall back to it: the caller knows things this does not. An assistant's answer
+ * with no markdown marks in it is still markdown — that is what an answer is — and only the surface
+ * drawing it knows whose words these are.
+ */
+export function detectedMime(value: unknown, hint: ViewHint = {}): string | undefined {
+  const declared = hint.mime ?? mimeOfSchema(hint.schema);
+  if (declared !== undefined) return declared;
+  const text = textOf(value);
+  if (text === undefined) return "application/json";
+  if (looksLikeMarkdown(text)) return "text/markdown";
+  if (looksLikeHtml(text)) return "text/html";
+  return undefined;
 }
 
 // --- artifacts ---------------------------------------------------------------

@@ -28,7 +28,7 @@ import type { ComponentServices } from "./changesetReview";
 import { TaskDetailSections, TaskHead } from "./detail";
 import { entriesOf, journalFor, sidechainEntriesOf, signatureOf } from "./transcript";
 import { instanceOf as instanceOfState, nodeAt, prunedTrail, type TrailStep } from "./trail";
-import { Paper, Transcript, durationOf } from "./transcriptView";
+import { Paper, Pulse, Transcript, durationOf, useElapsed } from "./transcriptView";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, type SessionPiece } from "./sessionBands";
 import { SessionBandsView } from "./sessionPanels";
 import type { FileSurfaceProps } from "./fileTypes";
@@ -277,6 +277,11 @@ export function RunConversation({
         session={view}
         entries={entries}
         live={live}
+        // The SESSION, not the task: a turn number is only unique inside one, so a run's several
+        // conversations would otherwise overwrite each other's type corrections at turn 3. A piece
+        // with no session id yet is one still being written, and gets the control without the
+        // remembering — see `messageTypes.ts`.
+        {...(piece.sessionId !== undefined ? { scope: piece.sessionId } : {})}
         {...(openSidechain !== undefined
           ? { onOpenSidechain: (call: string, name: string) => openSidechain(piece.node, call, name) }
           : {})}
@@ -305,6 +310,8 @@ export function RunConversation({
         instanceId={parent?.instanceId}
         project={context.project}
         running={detail.status === "running"}
+        detail={detail}
+        {...(context.onRerun !== undefined ? { onRerun: context.onRerun } : {})}
       />
     </div>
   );
@@ -380,12 +387,18 @@ function ChatComposer({
   instanceId,
   project,
   running,
+  detail,
+  onRerun,
 }: {
   taskId: string;
   instanceId: number | undefined;
   project?: string | undefined;
   /** The TASK is still going — what makes the button a stop button. See {@link stop}. */
   running?: boolean;
+  /** The run itself, for the case where there is no conversation to compose into — {@link RunActivity}. */
+  detail: TaskDetail;
+  /** Set a stopped run going again. Passed straight through — see {@link RunActivity}. */
+  onRerun?: ((taskId: string) => void) | undefined;
 }): JSX.Element {
   const [overrides, setOverrides] = useState<ChatSettings>({});
   // THREE states, not two. `undefined` is "not asked yet", `null` is "asked, and there is no
@@ -458,17 +471,23 @@ function ChatComposer({
   // answered and said this state has no session of its own, and an enabled box above that answer is
   // an invitation to an error. `undefined` is the wait, and it disables nothing.
   //
-  // A composite is the case: it orchestrates and says nothing, so it holds no session, while its
-  // CHILDREN each hold one. The message says what is true of the node you are on rather than of the
-  // panel, which is showing those children's transcripts — and it says what to do about it, because
-  // "no chat session exists in this state" read as a fault to somebody looking straight at three
-  // transcripts, when it is a fact about the orchestrator above them.
-  const disabled =
-    instanceId === undefined
-      ? "Select a run to continue its conversation."
-      : plan === null
-        ? "This state holds no conversation of its own — reply in one of the runs below."
-        : undefined;
+  // Only ONE case reaches the composer now: nothing selected. The other — a composite, which
+  // orchestrates and says nothing while its children each hold a session — used to produce a greyed
+  // box carrying a sentence explaining itself, and a greyed box is a control that has to be read
+  // before it can be dismissed. See {@link RunActivity} for what stands there instead.
+  const disabled = instanceId === undefined ? "Select a run to continue its conversation." : undefined;
+
+  // The three-state `plan` is what makes this safe, and collapsing it is the way to get it wrong:
+  // `undefined` is "not asked yet" and `null` is "asked, and there is no conversation here". Acting
+  // on both would flash the composer out of existence and back on every first render.
+  if (plan === null && instanceId !== undefined) {
+    return (
+      <div className="cx-doing">
+        {error !== null ? <p className="cx-error">{error}</p> : null}
+        <RunActivity detail={detail} onStop={stop} {...(onRerun !== undefined ? { onRerun } : {})} />
+      </div>
+    );
+  }
 
   return (
     <>
@@ -491,6 +510,139 @@ function ChatComposer({
     </>
   );
 }
+
+/**
+ * What is happening here, and the button that ends it — what stands where the composer would.
+ *
+ * A composite orchestrates and says nothing, so there is no conversation of its own to type into.
+ * The old answer was a disabled composer carrying a sentence about why it was disabled, which is a
+ * control you have to read before you can dismiss it, sitting under every run of every workflow that
+ * has children. It also carried the only Stop button on the page, which is why it could not simply
+ * be deleted: a composite is exactly the node somebody stands on to watch a whole workflow.
+ *
+ * So the box goes and the fact stays. One line, present only while something is ACTUALLY going on,
+ * naming the state that is going and carrying `task:cancel`. When the run settles it is not there
+ * either — a strip that says "idle" is the greyed composer again in a smaller box.
+ *
+ * ## Why this duplicates the header's Cancel
+ *
+ * `TaskHead` has had one all along, wired to the same `task:cancel`, and nothing here changes it.
+ * This one sits where the composer's send button was, which is where the hand already goes, and it
+ * is the only one of the two that says WHAT it would be stopping. The pair is safe for exactly one
+ * reason and it must stay true: both are task-scoped, so pressing either does the same thing to the
+ * same run. The day one of them means "stop this state" they become a trap.
+ */
+export function RunActivity({
+  detail,
+  onStop,
+  onRerun,
+}: {
+  detail: TaskDetail;
+  onStop: () => void;
+  /** Set it going again. Absent ⇒ the strip reports the stop and offers nothing — see the context field. */
+  onRerun?: ((taskId: string) => void) | undefined;
+}): JSX.Element | null {
+  const deepest = detail.activePath[detail.activePath.length - 1];
+  const node = deepest === undefined ? undefined : nodeAt(detail.instances, deepest.instanceId);
+  // A gate is not motion but it is still something happening, and it is happening to YOU — which is
+  // the one status here worth colouring differently, because it is the one you can end by acting.
+  const waiting = node?.status === "waiting_for_user";
+  const going = detail.status === "running" || waiting;
+  const startedAt = detail.runs.find((run) => run.outcome === "running")?.startedAt;
+  // Once a second. The transcript's own counter runs in tenths to prove a thinking model is alive;
+  // nobody watches the tenths of a run that has been going for four minutes.
+  const elapsed = useElapsed(startedAt, going, 1000);
+
+  // The whole path, not just its tail: `review` on its own says nothing on a workflow with three
+  // states called review, and the path is how the panel below is already labelled.
+  const where = detail.activePath.map((step) => step.childKey ?? step.stateId.split("/").pop() ?? step.stateId).join(" → ");
+  const at = where.length > 0 ? <b>{where}</b> : <b>this run</b>;
+
+  if (going) {
+    return (
+      <div className={waiting ? "run-doing waiting" : "run-doing"}>
+        <Pulse />
+        <span className="ellip">
+          {waiting ? "Waiting for you in " : "Running "}
+          {at}
+        </span>
+        {elapsed !== undefined ? (
+          <>
+            <span className="run-doing-cut">·</span>
+            <span className="run-doing-el">{durationOf(elapsed)}</span>
+          </>
+        ) : null}
+        <span className="grow" />
+        <button type="button" className="danger" onClick={onStop}>
+          Stop
+        </button>
+      </div>
+    );
+  }
+
+  /**
+   * A run that STOPPED, which is also something that happened here.
+   *
+   * The strip was only ever drawn while something was moving, on the reasoning that a settled run
+   * has nothing to say. That is right for a run that finished and wrong for every other way of
+   * stopping: failed, canceled and interrupted are all states somebody is looking at the panel
+   * BECAUSE of, and the panel said nothing about any of them — the badge in the header carried the
+   * whole story, and the thing you wanted to do about it was three clicks away.
+   *
+   * `completed` is still nothing. A run that did what it was asked is the one case where silence is
+   * the correct report.
+   */
+  const stopped = STOPPED[detail.status];
+  if (stopped === undefined || onRerun === undefined) return null;
+  return (
+    <div className={`run-doing ${stopped.tone}`}>
+      <span className={`run-doing-mark ${stopped.tone}`} aria-hidden="true" />
+      <span className="ellip">
+        {stopped.said} {detail.activePath.length > 0 ? <>in {at}</> : null}
+      </span>
+      <span className="grow" />
+      <button type="button" className="primary" onClick={() => onRerun(detail.taskId)} title={stopped.hint}>
+        {stopped.verb}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * What each way of stopping is called, and what starting it again actually does.
+ *
+ * The verbs are different because the ACTS are different, and the engine is what decides which:
+ * `isStartableStatus` lets an interrupted or failed task begin again in place, against the snapshot
+ * its first run pinned, while a canceled one has ended its lifecycle and can only be copied into a
+ * fresh task (see `service.rerunTask`). One button either way — `task:rerun` picks — but it must not
+ * claim to resume when what it will do is start over, and it must not claim to be the same task when
+ * what comes back is a new one.
+ *
+ * Nothing here says "Resume". There is no mid-run resume in this engine: every one of these begins a
+ * new run from the top of the workflow. Saying otherwise would be the one word on this strip that
+ * was not true.
+ */
+const STOPPED: Partial<Record<TaskDetail["status"], { said: string; verb: string; hint: string; tone: string }>> = {
+  failed: {
+    said: "Failed",
+    verb: "Try again",
+    hint: "Runs the workflow again from the top, against the snapshot this task pinned",
+    tone: "bad",
+  },
+  interrupted: {
+    said: "Interrupted",
+    verb: "Start again",
+    hint: "Runs the workflow again from the top, against the snapshot this task pinned",
+    tone: "warn",
+  },
+  canceled: {
+    said: "Stopped",
+    verb: "Run again",
+    hint: "A canceled run cannot restart — this starts a fresh copy of the task and opens it",
+    tone: "warn",
+  },
+  queued: { said: "Not started", verb: "Start", hint: "Runs the workflow", tone: "idle" },
+};
 
 /**
  * One run, in the middle column of the Tasks view — the mirror of {@link CompositeView}.

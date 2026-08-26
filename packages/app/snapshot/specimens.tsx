@@ -10,7 +10,7 @@
  * stops at the window frame and everything inside it is imported.
  */
 import { useMemo, useState, type JSX, type ReactNode } from "react";
-import type { BoardCard, BoardView, FileTree } from "@jaira/shared/browser";
+import type { BoardCard, BoardView, FileTree, SessionView, TaskDetail } from "@jaira/shared/browser";
 import { defaultAppearance } from "@jaira/shared/browser";
 import { GALLERY_SURFACES } from "@jaira/shared/browser";
 import { AppearancePane } from "../src/renderer/appearancePane";
@@ -21,6 +21,9 @@ import { Sidebar, type SidebarAct } from "../src/renderer/sidebar";
 import { StateGraphView } from "../src/renderer/stateGraphView";
 import { StatePanel } from "../src/renderer/statePanel";
 import { ValuePanelContext, type PinnedValue } from "../src/renderer/valuePanel";
+import { Paper, Transcript } from "../src/renderer/transcriptView";
+import type { TranscriptEntry } from "../src/renderer/transcript";
+import { RunActivity } from "../src/renderer/runViews";
 
 /**
  * The clock the specimen's ages are measured back from.
@@ -559,6 +562,156 @@ export interface Specimen {
   node: ReactNode;
 }
 
+/**
+ * The transcript, with the message rail on it.
+ *
+ * Photographed because none of it is testable any other way: the rail is a hover state, the gaps are
+ * margins, and the day chip is a sticky element that only exists while something scrolls. A model
+ * test can say the gap between two of these messages is "26 minutes later" and cannot say whether it
+ * reads as a pause or as a rule through the page — which is the only question the design was about.
+ *
+ * The rail is forced open with `ts-shown`, a class that exists for exactly this frame: `:hover` is
+ * not a thing a screenshot has, and a picture of the rail at rest is a picture of nothing.
+ */
+const RAIL_SESSION = {
+  sessionId: "s1",
+  empty: "",
+  turns: [],
+  sidechains: {},
+} as unknown as SessionView;
+
+const day = (iso: string): number => new Date(iso).getTime();
+
+const RAIL_ENTRIES = [
+  {
+    kind: "message",
+    role: "user",
+    turn: 1,
+    at: day("2026-08-24T09:41:08"),
+    text: "The sync workflow keeps looping on reviewSync. Is that the guard, or is the edit not landing?",
+  },
+  {
+    kind: "message",
+    role: "assistant",
+    turn: 2,
+    at: day("2026-08-24T09:41:52"),
+    text:
+      "The edit is not landing. `reviewSync` re-reads the prompts folder each pass, and the guard compares against the folder rather than the edit it just applied — so the condition never goes false.\n\n- a declared `contentMediaType` wins outright\n- detection only *offers*; it never decides",
+  },
+  {
+    kind: "message",
+    role: "user",
+    turn: 3,
+    at: day("2026-08-24T10:07:14"),
+    text: "Try it with the path-based SyncEdit instead.",
+  },
+  {
+    // The case the whole control exists for: markdown that detection will not offer, because
+    // `looksLikeMarkdown` wants two marks and this carries one.
+    kind: "message",
+    role: "assistant",
+    turn: 4,
+    at: day("2026-08-24T10:08:03"),
+    text: "## Change\n- `sync.ts` keys edits by path, not by index",
+  },
+  {
+    // Detection running on the user's side too: this is markdown, and until it did the app's answer
+    // for an instruction was "text" whatever was in it.
+    kind: "message",
+    role: "user",
+    turn: 5,
+    at: day("2026-08-25T14:22:31"),
+    text: "Two things:\n\n- did the reachability check pass?\n- and what did the sync status say?",
+  },
+  {
+    // A structured output with a schema: three readings, and the schema's own descriptions ride
+    // along into the JSON view as ghosted hints.
+    kind: "message",
+    role: "assistant",
+    turn: 6,
+    at: day("2026-08-25T14:23:04"),
+    text: JSON.stringify({ verdict: "clean", states: 79, errors: 0 }, null, 2),
+    output: {
+      name: "report",
+      value: { verdict: "clean", states: 79, errors: 0 },
+      schema: {
+        type: "object",
+        properties: {
+          verdict: { type: "string", description: "clean, or the first thing that was not" },
+          states: { type: "number", description: "how many were checked" },
+          errors: { type: "number", description: "unreachable transitions found" },
+        },
+      },
+    },
+  },
+] as unknown as TranscriptEntry[];
+
+function TranscriptSpecimen(): JSX.Element {
+  return (
+    <div className="ts-page ts-shown" style={{ height: "100%", overflow: "auto" }}>
+      <Paper>
+        <Transcript
+          session={RAIL_SESSION}
+          entries={RAIL_ENTRIES}
+          scope="specimen"
+          onEdit={{ can: () => true, edit: () => {}, rewind: () => {} }}
+        />
+      </Paper>
+    </div>
+  );
+}
+
+/**
+ * What stands where a composite's composer used to be.
+ *
+ * Three conditions in one frame, because the design is as much about the third as the first two: a
+ * run going, a gate waiting on a person, and a settled run — which draws nothing at all. A picture is
+ * the only way to check that last one, since "renders null" is what a test would assert and what it
+ * LOOKS like is whether the panel below ends cleanly or leaves a hole.
+ */
+const RUN_AT = Date.now() - 134_000;
+
+const runDetail = (status: TaskDetail["status"], child: "running" | "waiting_for_user"): TaskDetail =>
+  ({
+    taskId: "tsk_8f31c0",
+    title: "Lint and review the workflow",
+    workflow: "feature",
+    status,
+    createdAt: new Date(RUN_AT).toISOString(),
+    instances: [{ instanceId: 2, stateId: "feature/review", status: child, startedAt: RUN_AT, children: [] }],
+    activePath: [
+      { instanceId: 1, stateId: "feature/lint", childKey: "lint" },
+      { instanceId: 2, stateId: "feature/review", childKey: "review" },
+    ],
+    blocked: [],
+    runs: [{ runId: 1, outcome: status === "running" ? "running" : "success", snapshotHash: "4c9ae21b", startedAt: RUN_AT }],
+    timeline: [],
+  }) as unknown as TaskDetail;
+
+function RunActivitySpecimen(): JSX.Element {
+  return (
+    <div style={{ background: "var(--bg)", height: "100%", display: "grid", alignContent: "start", gap: 4 }}>
+      <div className="cx-doing">
+        <RunActivity detail={runDetail("running", "running")} onStop={() => {}} />
+      </div>
+      <div className="cx-doing">
+        <RunActivity detail={runDetail("running", "waiting_for_user")} onStop={() => {}} />
+      </div>
+      {/* Settled: nothing. The frame ends here, which is the whole of the third condition. */}
+      <div className="cx-doing">
+        <RunActivity detail={runDetail("failed", "running")} onStop={() => {}} onRerun={() => {}} />
+      </div>
+      <div className="cx-doing">
+        <RunActivity detail={runDetail("canceled", "running")} onStop={() => {}} onRerun={() => {}} />
+      </div>
+      {/* Completed: nothing. The frame ends here, which is the whole of the last condition. */}
+      <div className="cx-doing">
+        <RunActivity detail={runDetail("completed", "running")} onStop={() => {}} onRerun={() => {}} />
+      </div>
+    </div>
+  );
+}
+
 export const SPECIMENS: readonly Specimen[] = [
   { id: "board-column", figure: "06 · Column", width: 276, height: 384, node: <BoardSpecimen board={ONE_COLUMN} /> },
   { id: "board-two", figure: "01 · Tasks", width: 560, height: 340, node: <BoardSpecimen board={TWO_COLUMNS} /> },
@@ -572,4 +725,6 @@ export const SPECIMENS: readonly Specimen[] = [
   { id: "reviewer", figure: "— · review_artifacts", width: 1720, height: 900, node: <ReviewerSpecimen /> },
   { id: "editor", figure: "— · edit_artifact", width: 1180, height: 820, node: <EditorSpecimen /> },
   { id: "review-one", figure: "— · review_artifact", width: 1180, height: 900, node: <ReviewOneSpecimen /> },
+  { id: "transcript", figure: "— · The message rail", width: 900, height: 1140, node: <TranscriptSpecimen /> },
+  { id: "run-activity", figure: "— · What a run is doing", width: 900, height: 330, node: <RunActivitySpecimen /> },
 ];

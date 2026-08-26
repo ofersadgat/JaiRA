@@ -1438,6 +1438,28 @@ button.side-twist:hover:not(:disabled) {
 .menu-item.here {
   font-weight: 600;
 }
+/* A caption above the items, for a menu that answers a question rather than offering verbs — the
+   type picker is the one that does, and "This text is" is the question its rows complete. */
+.menu-title {
+  padding: 5px 12px 4px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 9.5 / 12);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+/* The glyph column, for a menu whose items are KINDS rather than actions. Off everywhere else — a
+   menu of verbs gains nothing from a column of pictures. See `menu.tsx`. */
+.menu-item .menu-icon {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--dim);
+}
+.menu-item.here .menu-icon,
+.menu-item:hover:not(:disabled) .menu-icon {
+  color: inherit;
+}
 .menu-item .grow {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -7511,27 +7533,357 @@ fieldset.reading {
   margin-bottom: 0;
 }
 
-/* The clock, on hover. On a message it is provenance rather than content, and a permanent grey line
-   above every paragraph the model wrote is a line nobody reads and everybody sees. Work rows keep
-   theirs on the line — down there the gap between two calls is the thing being read. */
-.ts-meta {
+/* --- the message rail ---
+   What you can DO to a message, what it IS, and when it was said, on one line under it.
+
+   Hidden until the pointer or the keyboard arrives, which is the whole posture of this view: a
+   transcript at rest is the words and nothing else. It replaced a meta line that carried a clock and
+   two text buttons, and it is a rail rather than a line because it now carries two control groups
+   whose separation is load bearing — verbs on the left, and on the right two different claims about
+   the value. The type can be wrong; the reading can only be preferred. */
+.ts-rail {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 2px;
   margin-top: 4px;
-  padding: 0 3px;
-  font-size: calc(var(--size-data) * 11 / 12);
-  font-family: var(--font-data);
-  font-variant-numeric: tabular-nums;
+  padding: 0 1px;
+  min-height: 22px;
+  flex-wrap: wrap;
   color: var(--dim);
   opacity: 0;
   transition: opacity 0.14s ease;
 }
-.ts-msg-user .ts-meta {
+.ts-msg-user .ts-rail {
   justify-content: flex-end;
 }
-.ts-msg:hover .ts-meta,
-.ts-msg:focus-within .ts-meta {
+/* `focus-within` is not a nicety here — it is the entire keyboard story for four buttons that are
+   otherwise reachable and invisible at the same time. */
+.ts-msg:hover .ts-rail,
+.ts-msg:focus-within .ts-rail {
   opacity: 1;
+}
+/* Every rail at once, for the snapshot harness. A hover state is not something a photograph has,
+   and a picture of this rail at rest is a picture of nothing — see `snapshot/specimens.tsx`. */
+.ts-shown .ts-rail {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ts-rail {
+    transition: none;
+  }
+}
+/* A rail that has been opened by a menu stays open while the menu is up: the control you are aiming
+   at cannot fade out from under the pointer that left the message to reach it. */
+.ts-msg:has(.ts-rail [aria-expanded="true"]) .ts-rail {
+  opacity: 1;
+}
+
+/* The verbs. Icon-only, and named by their tooltip and their accessible name — see the note in
+   `icons.tsx` about why these are the one place a glyph stands alone. */
+.ts-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--control-radius-sm);
+  background: transparent;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  line-height: 1;
+  cursor: pointer;
+}
+.ts-act:hover {
+  background: var(--fill-ghost-hover);
+  color: var(--text);
+}
+.ts-act svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+
+/* Verbs on one side, claims about the value on the other. */
+.ts-rail-cut {
+  width: 1px;
+  align-self: stretch;
+  margin: 3px 5px;
+  background: var(--line);
+}
+
+/* Which output slot this was bound to, where it was bound to one. */
+.ts-slot {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10 / 12);
+  color: var(--dim);
+  padding-right: 2px;
+}
+
+/* Control one: what this text IS.
+   Not monospace, because it wears the NAME of the type rather than its media type — `Markdown`, not
+   `text/markdown`. The MIME string is on the tooltip, which is the right amount of room for a fact
+   somebody needs occasionally and never wants to read. Accent once it has been overridden, so a
+   message being shown under a corrected type never hides that it is. */
+.ts-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius-sm);
+  background: var(--panel);
+  color: var(--dim);
+  font-family: inherit;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  line-height: 1.35;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ts-type:hover {
+  color: var(--text);
+}
+.ts-type.on {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+}
+.ts-type svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+  flex: none;
+}
+.ts-car {
+  font-size: 8px;
+  opacity: 0.7;
+}
+
+/* Control two: how the type in force is being READ.
+   A dropdown rather than a segmented strip, because the number of readings is not fixed — a JSON
+   value with a schema has three (a form, the highlighted value, the serialization) and a markdown
+   string has two. A strip that is two buttons wide on one message and four on the next moves
+   everything after it, and a rail is a row of controls whose positions people learn. */
+.ts-read {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 3px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius-sm);
+  background: var(--panel);
+  color: var(--dim);
+  font-family: inherit;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  line-height: 1.35;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ts-read:hover {
+  color: var(--text);
+}
+/* Accent once you have chosen one, on the same rule the type chip follows: a value being shown in a
+   form somebody picked should never be indistinguishable from one shown in the form it leads with. */
+.ts-read.on {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+}
+
+/* A structured value, coloured, with its schema's own descriptions ghosted beside the keys.
+   Borrows the two layers the schema editor paints with — see `JsonView`. */
+.vv-json {
+  color: var(--text);
+}
+.vv-json .code-line {
+  display: inline;
+}
+/* The hint slot takes no width and paints past its own edge, which is right inside the schema
+   editor's scrolling pane and wrong in a message: with nothing containing it the overflow reaches
+   the page, and the whole transcript grows a horizontal scrollbar to accommodate a comment. Its own
+   scroll container puts that back where it belongs — the descriptions stay, and what has to move to
+   read a long one is the value rather than the window. */
+.vv-json {
+  overflow-x: auto;
+}
+/* A read-only form is a reading of a value, so it sits in the flow rather than in a panel of its
+   own — no card, no heading, just the fields the schema declares. */
+.vv-form {
+  padding: 2px 0;
+  /* The form was built for an inspector COLUMN and is being read inside a message, so it gives up
+     the one thing an inspector assumes: that it decides the width. */
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.vv-form .cfg-fields,
+.vv-form .cfg-field,
+.vv-form .cfg-field-say {
+  min-width: 0;
+}
+/* The dotted config path beside a label. It names where a value would be WRITTEN, which is a fact
+   about editing a settings file — there is no layer here, nothing is being saved, and in a message
+   it reads as a stray word at the end of the description. */
+.vv-form .cfg-param {
+  display: none;
+}
+/* A read-only form is a rendering, so its controls stop looking like somewhere to type: no fill, no
+   focus ring, no cursor. What is left is the value, laid out as the fields its schema declares. */
+.vv-form .cfg-control input,
+.vv-form .cfg-control textarea,
+.vv-form .cfg-control select {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text);
+  cursor: default;
+}
+
+/* --- how a run STOPPED ---
+   The same strip, reporting the other half of what can happen here. A run that failed, was stopped
+   or was interrupted is a thing somebody is looking at this panel because of, and the panel used to
+   say nothing about any of them. `completed` is still silence — a run that did what it was asked is
+   the one case where nothing is the correct report. */
+.run-doing.bad {
+  border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
+  background: color-mix(in srgb, var(--bad) 6%, var(--panel));
+}
+.run-doing.warn {
+  border-color: color-mix(in srgb, var(--warn) 40%, var(--line));
+  background: color-mix(in srgb, var(--warn) 6%, var(--panel));
+}
+.run-doing.idle {
+  border-style: dashed;
+}
+/* A still dot where the pulse would be: the strip keeps its shape across every condition, so the
+   eye finds the sentence in the same place whether something is moving or not. */
+.run-doing-mark {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--rule);
+}
+.run-doing-mark.bad {
+  background: var(--bad);
+}
+.run-doing-mark.warn {
+  background: var(--warn);
+}
+.run-doing .primary {
+  font: inherit;
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  font-weight: 500;
+  padding: 3px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--control-radius);
+  background: var(--fill-accent);
+  color: var(--on-accent);
+  cursor: pointer;
+}
+.run-doing .primary:hover {
+  background: var(--fill-accent-hover);
+}
+
+/* The exact second, at the end of the rail. The floating day chip says which day and the gaps say
+   how long each pause was; this is the one that answers "when was THIS one", which is a question
+   asked of one message at a time and so belongs on the control that appears over one message. */
+.ts-clock {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10.5 / 12);
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+/* Inside a message the source view IS the message, so it is set in the transcript's own face rather
+   than as a payload. `.vv-source` is styled for a tool result — monospace, dim, and capped at 340px
+   so a huge value cannot take over a row — and all three of those are wrong for something a person
+   wrote. Scoped rather than parameterised: this is the only surface where a value is also prose. */
+.ts-msg .vv-source {
+  font-family: inherit;
+  font-size: calc(var(--size-app) * 13 / 12.5);
+  line-height: 1.6;
+  color: var(--text);
+  max-height: none;
+  overflow: visible;
+}
+.ts-msg-aside .vv-source {
+  color: var(--dim);
+}
+
+/* --- how long a pause was ---
+   Space sized to the silence, with a small word in it, and no rule anywhere. A ruled separator is a
+   horizontal line through a column of prose: it reads as the end of a document rather than as a gap
+   in a conversation. The space does most of the telling and the label only names what it showed. */
+.ts-gap {
+  align-self: center;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10 / 12);
+  letter-spacing: 0.05em;
+  color: var(--dim);
+  opacity: 0.66;
+  user-select: none;
+}
+.ts-gap-mins {
+  margin: 20px 0 16px;
+}
+.ts-gap-hours {
+  margin: 34px 0 28px;
+}
+/* The widest space in the transcript. A day boundary is the one gap whose label is not a duration —
+   it is the weekday — and the space is what makes the break register even when the chip is not
+   being looked at. */
+.ts-gap-day {
+  margin: 52px 0 44px;
+  opacity: 0.82;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+/* --- which day you are reading ---
+   One pill for a conversation of any length, floating at the top of the scroller and naming the day
+   under it. Time as a property of WHERE YOU ARE rather than of each message, which is what lets the
+   messages themselves carry none of it.
+
+   It fades rather than disappearing when the scrolling stops: a control that comes and goes at the
+   edge of vision is a flicker, and one sitting at a third of its opacity is a thing you can look at
+   when you want the answer and never notice when you do not. */
+.ts-daychip-hold {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  justify-content: center;
+  height: 0;
+  pointer-events: none;
+}
+.ts-daychip {
+  transform: translateY(4px);
+  padding: 3px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(6px);
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10 / 12);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+  color: var(--dim);
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(20, 26, 38, 0.08);
+  opacity: 0.34;
+  transition: opacity 0.25s ease;
+}
+:root[data-theme="dark"] .ts-daychip {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+}
+.ts-daychip.on {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ts-daychip {
+    transition: none;
+  }
 }
 
 /* The answer arriving. The one piece of motion in the transcript, and it means "still going". */
@@ -8307,6 +8659,55 @@ fieldset.reading {
   flex-direction: column;
   min-height: 0;
   flex: 1;
+}
+/* Sits in the composer's own padded band, so removing the box does not move the panel edge. */
+.cx-doing {
+  padding: 10px 16px 14px;
+  background: var(--bg);
+}
+
+/* --- what a run is doing, where its composer would be (`RunActivity` in `runViews.tsx`) ---
+   A composite holds no conversation of its own, so there is nothing to type into and the box that
+   used to stand here was a disabled control carrying a sentence about why it was disabled. This is
+   the fact without the box: one line, only while something is actually going on, naming the state
+   that is going and carrying the button that ends it. Settled, it is not there at all. */
+.run-doing {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 auto;
+  padding: 6px 8px 6px 13px;
+  max-width: 900px;
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  background: var(--panel);
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+}
+/* A gate is not motion — it is a thing waiting on YOU, which is the one status here worth its own
+   colour, because it is the only one you can end by acting rather than by aborting. */
+.run-doing.waiting {
+  border-color: color-mix(in srgb, var(--warn) 42%, var(--line));
+  background: color-mix(in srgb, var(--warn) 7%, var(--panel));
+}
+.run-doing b {
+  font-weight: 600;
+  color: var(--text);
+}
+.run-doing-cut {
+  opacity: 0.5;
+}
+.run-doing-el {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10.5 / 12);
+  font-variant-numeric: tabular-nums;
+}
+/* The pulse borrows the transcript's own "still going" motion. Stilled where nothing is moving:
+   three dots breathing over a gate would be saying the machine is working when it is waiting. */
+.run-doing.waiting .ts-pulse span {
+  animation: none;
+  opacity: 0.75;
+  background: var(--warn);
 }
 .cx {
   padding: 10px 16px 14px;
@@ -9394,12 +9795,6 @@ fieldset.reading {
   background: var(--panel-2);
 }
 
-/* Edit, on a message you sent. Hidden with the rest of the meta line until the message is hovered:
-   it is an action about the record rather than part of it. */
-.ts-edit {
-  padding: 0 4px;
-  font-size: calc(var(--size-app) * 11 / 12.5);
-}
 
 /* The mention list is anchored to the composer's shell, so the shell has to be what it measures
    from. `.cx-chip-wrap` is separately relative, so the chip popovers are unaffected. */

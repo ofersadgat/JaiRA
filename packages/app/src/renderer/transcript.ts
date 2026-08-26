@@ -1145,3 +1145,107 @@ export function signatureOf(node: Pick<InstanceNode, "childKey" | "stateId" | "l
   const inputs = node.inputs ?? {};
   return { name, params: Object.entries(inputs).map(([key, value]) => ({ name: key, preview: previewOf(value) })) };
 }
+
+// --- how long a pause was -----------------------------------------------------
+
+/**
+ * A silence between two messages, when it was long enough to be worth saying.
+ *
+ * The transcript used to answer "when" with a hover clock and nothing else, so two messages an hour
+ * apart looked exactly like two messages a second apart. The fix is not a timestamp on every line —
+ * a permanent grey clock above every paragraph the model wrote is a line nobody reads and everybody
+ * sees. It is to draw the PAUSE, because the pause is the part that carries meaning: you left, you
+ * came back, you picked it up the next morning.
+ *
+ * So the space between two messages is sized to the silence and the label is elapsed time, not a
+ * date — a floating chip carries the day (see `DayChip`), and a label that repeated it would be the
+ * ruled separator this replaced. The one exception is the boundary between two days, which is the
+ * only gap whose label is not a duration: `15 hours later` is arithmetic nobody wants to do, and
+ * the weekday is the one thing neither the chip nor a duration says on its own.
+ */
+export type GapSize = "mins" | "hours" | "day";
+
+export interface Gap {
+  size: GapSize;
+  /** `26 minutes later`, `3 hours later`, `Tuesday`, `Mon 17 Aug`. */
+  label: string;
+}
+
+/** Under this, a pause is just the rhythm of a conversation and annotating it is noise. */
+const GAP_FLOOR_MS = 5 * 60_000;
+/** Past this, a weekday name has stopped locating anything and the label takes the date back. */
+const WEEKDAY_HORIZON_MS = 7 * 24 * 60 * 60_000;
+
+/** Whether two moments fell on different calendar days, in the reader's own zone. */
+function differentDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() !== b.getFullYear() || a.getMonth() !== b.getMonth() || a.getDate() !== b.getDate()
+  );
+}
+
+/**
+ * The gap between two messages, or `undefined` where there is nothing worth drawing.
+ *
+ * `now` is a parameter rather than a call, because "is this within the last week" is the one thing
+ * here that is not a function of its inputs — and a formatter that reads the clock is a formatter
+ * that cannot be tested.
+ */
+export function gapBetween(before: number | undefined, after: number | undefined, now = Date.now()): Gap | undefined {
+  if (before === undefined || after === undefined || before <= 0 || after <= 0) return undefined;
+  const delta = after - before;
+  // Not `< 0`: records arrive out of order often enough (a journal fact stamped by main, a live
+  // fragment stamped by the renderer) that a negative delta means "these two are the same moment as
+  // far as anybody reading is concerned", not "time went backwards".
+  if (delta < GAP_FLOOR_MS) return undefined;
+
+  const start = new Date(before);
+  const end = new Date(after);
+  if (differentDay(start, end)) {
+    const far = now - after >= WEEKDAY_HORIZON_MS;
+    return {
+      size: "day",
+      label: far
+        ? end.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })
+        : end.toLocaleDateString(undefined, { weekday: "long" }),
+    };
+  }
+  const hours = Math.round(delta / 3_600_000);
+  if (delta >= 3_600_000) return { size: "hours", label: `${hours} ${hours === 1 ? "hour" : "hours"} later` };
+  const mins = Math.round(delta / 60_000);
+  return { size: "mins", label: `${mins} minutes later` };
+}
+
+/** The day a moment fell on, as the floating chip says it: `Today`, or `Mon 24 Aug`. */
+export function dayLabelOf(at: number | undefined, now = Date.now()): string | undefined {
+  if (at === undefined || at <= 0) return undefined;
+  const when = new Date(at);
+  if (!differentDay(when, new Date(now))) return "Today";
+  return when.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+}
+
+/**
+ * When a block began and when it ended — what a gap is measured between.
+ *
+ * A work block is a stretch of activity with a first call and a last one, so a pause is the distance
+ * from the END of one block to the START of the next. Measuring message-to-message instead would
+ * count the run itself as a silence: forty tool calls and three minutes of thinking would be drawn
+ * as "3 minutes later", as though nobody had been at the keyboard when in fact nobody was supposed
+ * to be. The gap this app wants to show is the one where NOTHING was happening.
+ */
+export function startOfBlock(block: TranscriptBlock | undefined): number | undefined {
+  if (block === undefined) return undefined;
+  if (block.kind === "work") return block.entries.find((entry) => entry.at !== undefined)?.at;
+  return block.kind === "live" ? undefined : block.at;
+}
+
+export function endOfBlock(block: TranscriptBlock | undefined): number | undefined {
+  if (block === undefined) return undefined;
+  if (block.kind === "work") {
+    for (let i = block.entries.length - 1; i >= 0; i -= 1) {
+      const at = block.entries[i]?.at;
+      if (at !== undefined) return at;
+    }
+    return undefined;
+  }
+  return block.kind === "live" ? undefined : block.at;
+}

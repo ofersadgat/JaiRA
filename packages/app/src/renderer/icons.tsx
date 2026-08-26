@@ -14,6 +14,7 @@
  * then in words for fact, and a glyph on its own is a guess.
  */
 import type { JSX } from "react";
+import type { TypeFamily } from "@jaira/shared/browser";
 import { brandHex, brandMark, brandOf } from "./brands";
 import type { WorkIconName } from "./transcript";
 
@@ -25,7 +26,9 @@ import type { WorkIconName } from "./transcript";
  * compile if it cannot draw one of them. A view is allowed to know about the model. Not the reverse.
  */
 export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send" | "clip" | "model" | "shield" | "anthropic" | "openai" | "lock" | "unlocked" | "star" | "pencil" | "plan" | "columns" | "tabs" | "comment" | "choice" | "files" | "form"
-  | "fileAdd" | "fileDel" | "fileEdit", string[]> = {
+  | "fileAdd" | "fileDel" | "fileEdit"
+  | "copy" | "rewind"
+  | "typeProse" | "typePlain" | "typeCode" | "typeData" | "typeTable" | "typeChanges" | "typeMedia", string[]> = {
   terminal: ["M4 17l6-6-6-6", "M12 19h8"],
   read: ["M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
   write: ["M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7", "M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"],
@@ -86,7 +89,66 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   fileAdd: ["M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9Z", "M13 3v6h6", "M12 12v6", "M9 15h6"],
   fileDel: ["M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9Z", "M13 3v6h6", "M9 15h6"],
   fileEdit: ["M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9Z", "M13 3v6h6", "M9 13h6", "M9 17h4"],
+
+  // The message rail's two verbs, and the module's one exception to "never alone".
+  //
+  // These sit in a row of buttons under a message, and a button is not a transcript row: it names
+  // itself through its accessible name and its tooltip, which is where `Copy` and `Rewind to here`
+  // actually live. Three words under every paragraph would be wider than some of the messages.
+  /** Two sheets, one behind the other. */
+  copy: ["M9 9h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z", "M5 15V5a1 1 0 0 1 1-1h9"],
+  /** An arrow going back into a line that carries on — fork here, not delete from here. */
+  rewind: ["M3 10h11a5 5 0 0 1 0 10H9", "m7 6-4 4 4 4"],
+
+  // The type families (`shared/typeNames.ts`), one glyph each. These DO sit beside their name
+  // everywhere they appear — on the chip and in its menu — which is the rule, not the exception.
+  /** The markdown mark: an M and a downward arrow. The one type whose glyph everybody knows. */
+  typeProse: ["M3 17V7l4 4 4-4v10", "M16 7v7", "m13 11 3 3 3-3"],
+  /** Ruled lines: text with nothing on top of it. */
+  typePlain: ["M5 7h14", "M5 12h14", "M5 17h8"],
+  /** Angle brackets and a slash — anything with a grammar an editor can colour. */
+  typeCode: ["m9 8-4 4 4 4", "m15 8 4 4-4 4", "M13.5 5 10.5 19"],
+  /** Braces: structure, read as a value rather than as writing. */
+  typeData: [
+    "M8 4a3 3 0 0 0-3 3v2a3 3 0 0 1-2 3 3 3 0 0 1 2 3v2a3 3 0 0 0 3 3",
+    "M16 4a3 3 0 0 1 3 3v2a3 3 0 0 0 2 3 3 3 0 0 0-2 3v2a3 3 0 0 1-3 3",
+  ],
+  /** A grid with a header row: rows and columns. */
+  typeTable: ["M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z", "M3 10h18", "M10 10v10"],
+  /** A plus over a minus: what a diff is, before it is anything else. */
+  typeChanges: ["M12 5v7", "M8.5 8.5h7", "M8.5 18h7"],
+  /** A frame with a horizon in it. */
+  typeMedia: [
+    "M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z",
+    "M9 10.5a1.3 1.3 0 1 1-2.6 0 1.3 1.3 0 0 1 2.6 0Z",
+    "m4 18 5-5 3.5 3.5L15 14l6 5",
+  ],
 };
+
+/**
+ * The glyph for a type family — the other half of {@link typeNameOf}.
+ *
+ * A function rather than a map so the compiler checks the families off against the union: a family
+ * added in `shared` and forgotten here is a build error rather than a blank square.
+ */
+export function familyIcon(family: TypeFamily): keyof typeof PATHS {
+  switch (family) {
+    case "prose":
+      return "typeProse";
+    case "code":
+      return "typeCode";
+    case "data":
+      return "typeData";
+    case "table":
+      return "typeTable";
+    case "changes":
+      return "typeChanges";
+    case "media":
+      return "typeMedia";
+    case "plain":
+      return "typePlain";
+  }
+}
 
 /**
  * One glyph.

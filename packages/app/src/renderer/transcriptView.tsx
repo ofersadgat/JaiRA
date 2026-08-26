@@ -36,15 +36,35 @@
  * with its children's cards underneath — and that arrangement is gone, because it grouped by state
  * where the thing being read is grouped by conversation. See `sessionBands.ts`.
  */
-import { useEffect, useState, type JSX, type ReactNode } from "react";
-import { artifactOf, type InstanceNode, type ServedArtifact, type SessionView } from "@jaira/shared/browser";
+import { Fragment, useCallback, useEffect, useRef, useState, type JSX, type ReactNode, type RefObject } from "react";
+import {
+  artifactOf,
+  detectedMime,
+  mimeOfSchema,
+  OFFERED_TYPES,
+  typeNameOf,
+  viewsFor,
+  type InstanceNode,
+  type ServedArtifact,
+  type SessionView,
+  type ViewHint,
+  type ViewId,
+} from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { Markdown, type FenceRenderer } from "./markdown";
 import { ValueView } from "./valueView";
-import { Icon } from "./icons";
+import { familyIcon, Icon } from "./icons";
+import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
+import { typeKeyOf, useMessageTypes } from "./messageTypes";
+import { useValuePanel } from "./valuePanel";
 import {
   blocksOf,
+  dayLabelOf,
+  endOfBlock,
+  gapBetween,
   iconOf,
+  startOfBlock,
+  type Gap,
   type LiveStatus,
   sidechainEntriesOf,
   signatureOf,
@@ -80,11 +100,49 @@ type OpenSidechain = (call: string, name: string) => void;
 export interface EditMessage {
   can: (turn: number) => boolean;
   edit: (turn: number, text: string) => void;
+  /**
+   * Put the conversation back to just before this message, with an empty composer.
+   *
+   * The same fork {@link edit} makes, and deliberately a separate verb rather than a second button
+   * onto the same one. Editing is "I said that badly"; rewinding is "everything from here was a
+   * wrong turn, let me say something else" — the text is what tells them apart, and a rewind that
+   * prefilled the old words would be an edit wearing a different icon.
+   *
+   * Optional: a host may offer replacement without offering this, and the button is absent where it
+   * does. Guarded by {@link can}, like the edit it forks the same way.
+   */
+  rewind?: ((turn: number, text: string) => void) | undefined;
 }
 
 /** `09:14:02`. Seconds included: the gap between two calls is the thing being read. */
 function clockOf(at: number | undefined): string {
   return at === undefined || at === 0 ? "" : new Date(at).toLocaleTimeString();
+}
+
+/**
+ * The whole moment, for the tooltip behind the clock — every field, in the reader's own format.
+ */
+function fullClockOf(at: number | undefined): string | undefined {
+  return at === undefined || at === 0 ? undefined : new Date(at).toLocaleString();
+}
+
+/**
+ * What the rail says about WHEN, which has to be a complete answer on its own.
+ *
+ * A bare clock is complete only for today. Hovering a message from Tuesday and reading `14:22:31`
+ * tells you the minute and leaves the day to be worked out from the floating chip, which is at the
+ * top of the scroller and may not even be on screen — so the two devices between them answered the
+ * question only if you used both. The date joins the clock the moment the message is not from today,
+ * which is exactly when it stops being redundant.
+ */
+function stampOf(at: number | undefined): string {
+  if (at === undefined || at === 0) return "";
+  const when = new Date(at);
+  const now = new Date();
+  const sameDay =
+    when.getFullYear() === now.getFullYear() && when.getMonth() === now.getMonth() && when.getDate() === now.getDate();
+  if (sameDay) return when.toLocaleTimeString();
+  return `${when.toLocaleDateString(undefined, { day: "numeric", month: "short" })}, ${when.toLocaleTimeString()}`;
 }
 
 /** Bytes as a person reads them — what a size looks like beside a name. */
@@ -432,14 +490,20 @@ function Tool({
  */
 const TICK_MS = 100;
 
-function useElapsed(startedAt: number | undefined, live: boolean): number | undefined {
+/**
+ * `tick` is a parameter because the two things that count here are counting different quantities.
+ * A thinking block is a pause you are WAITING OUT, measured in tenths so the digits prove something
+ * is alive. A run has been going for four minutes and nobody is watching the seconds — a tenth there
+ * is forty re-renders a second spent on a number whose last digit nobody reads.
+ */
+export function useElapsed(startedAt: number | undefined, live: boolean, tick = TICK_MS): number | undefined {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!live || startedAt === undefined) return;
     setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), TICK_MS);
+    const timer = setInterval(() => setNow(Date.now()), tick);
     return () => clearInterval(timer);
-  }, [live, startedAt]);
+  }, [live, startedAt, tick]);
   return startedAt === undefined ? undefined : Math.max(0, now - startedAt);
 }
 
@@ -667,85 +731,450 @@ function WorkBlockView({
  * produce. Where main can prove the text IS the value (see `SessionOutput`), the value is drawn
  * instead, through the same {@link ValueView} every other value in the app goes through.
  */
-function Message({ entry, onEdit }: { entry: MessageEntry; onEdit?: EditMessage | undefined }): JSX.Element {
+function Message({
+  entry,
+  onEdit,
+  scope,
+}: {
+  entry: MessageEntry;
+  onEdit?: EditMessage | undefined;
+  scope?: string | undefined;
+}): JSX.Element {
   // Only a message the host can NAME a position for is editable, which is why this asks rather than
   // being told: the host holds the edit points, and a button offered over a message nothing can be
   // sent in place of would be a button that fails when pressed.
   const editable = onEdit !== undefined && entry.turn !== undefined && onEdit.can(entry.turn);
+  const store = useMessageTypes();
+  const panel = useValuePanel();
   /**
-   * Whether this answer is being read as markdown or as what the model actually wrote.
+   * A type asserted during THIS viewing, before any of it reaches the settings file.
    *
-   * An answer is rendered by default because that is what it was written to be, and the toggle
-   * exists because rendering is a CLAIM — a fence that never closed, a heading that ate a paragraph,
-   * a table that did not parse are all invisible in the rendering and obvious in the source. It
-   * lives in the hover meta rather than in a permanent control: this is a check you make
-   * occasionally, and a button over every paragraph the model wrote is chrome that never rests.
-   *
-   * It carries the same weight for a structured output, and it has to. `ValueView` offers a toggle
-   * only where a value has more than one reading, and a plain object has exactly one — so the drawn
-   * value would otherwise be a dead end, and its JSON view is a re-serialization rather than what
-   * the model typed. Nothing is hidden by that (the two are equal by construction, which is the only
-   * reason the message is replaced at all), but "what did it actually write" is still a question
-   * somebody asks, and this is where every other message answers it.
+   * Three values, and the third is the one that needs the type: `undefined` is "nothing said here",
+   * `null` is "said, and what was said is to stop asserting anything" — which is not the same as
+   * never having asked, because a message inheriting the conversation's type has to be able to opt
+   * back out of it. Collapsing them makes "back to what JaiRA detected" a no-op on exactly the
+   * messages somebody would press it on.
    */
-  const [source, setSource] = useState(false);
-  const meta = (
-    // Hidden until hovered. On a message the clock is provenance rather than content: worth having,
-    // never worth a permanent line of grey above every paragraph the model wrote.
-    <div className="ts-meta">
-      <span>{clockOf(entry.at)}</span>
-      {entry.role === "assistant" && entry.text !== undefined && entry.text.length > 0 ? (
-        <button className="ghost ts-view" aria-pressed={source} onClick={() => setSource((v) => !v)}>
-          {source ? "Rendered" : "Source"}
-        </button>
-      ) : null}
+  const [local, setLocal] = useState<string | null | undefined>(undefined);
+  const [picked, setPicked] = useState<ViewId | null>(null);
+  const [menu, setMenu] = useState<MenuAnchor | null>(null);
+  const [reading, setReading] = useState<MenuAnchor | null>(null);
+  const [more, setMore] = useState<MenuAnchor | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  // A message with no turn is a live fragment: there is no stable name to store a preference under,
+  // so it gets the control and not the remembering. Keying it on the conversation would be worse
+  // than forgetting — it would silently assert the type of every message in the thread.
+  const msgKey = scope !== undefined && entry.turn !== undefined ? typeKeyOf(scope, entry.turn) : undefined;
+  const convKey = scope !== undefined ? typeKeyOf(scope) : undefined;
+  const forConversation = convKey === undefined ? undefined : store?.get(convKey);
+  /** What THIS message asserts, before the conversation is consulted — kept apart because clearing
+   *  has to know which of the two layers is the one actually in force. */
+  const own = local === undefined ? (msgKey === undefined ? undefined : store?.get(msgKey)) : (local ?? undefined);
+  const override = own ?? forConversation;
+
+  const said = entry.text !== undefined && entry.text.length > 0;
+  const value = entry.output !== undefined ? entry.output.value : (entry.text ?? "");
+
+  /**
+   * What the app would say this is if nobody had corrected it.
+   *
+   * The declared type first, because a slot saying `contentMediaType` is a statement and everything
+   * under it is a default. Then DETECTION, which now runs on both sides of the conversation — an
+   * instruction is markdown about as often as an answer is, and until this ran on user messages the
+   * app's answer for one was "text" whatever was in it.
+   *
+   * The ROLE is the floor under detection rather than a rule over it. An answer with no structural
+   * marks is still markdown, because that is what an answer is written as; anything else with no
+   * marks is what somebody typed. That is the fact the transcript has relied on since it was written
+   * — one side through a markdown renderer, the other through a `<pre>` — said out loud, so the chip
+   * has something true to report and `viewsFor` cannot quietly re-decide it.
+   */
+  const given =
+    detectedMime(value, entry.output?.schema !== undefined ? { schema: entry.output.schema } : {}) ??
+    (entry.role === "assistant" ? "text/markdown" : "text/plain");
+  const mime = override ?? given;
+  const named = typeNameOf(mime);
+
+  const hint: ViewHint = {
+    mime,
+    ...(entry.output?.schema !== undefined ? { schema: entry.output.schema } : {}),
+  };
+  const views = viewsFor(value, hint);
+  // A reading you chose survives a change of type, and stops surviving the moment the new type has
+  // no such reading — which is what makes "set it to Markdown" land on the rendering rather than on
+  // the source you were trying to get away from.
+  const view = picked !== null && views.includes(picked) ? picked : views[0]!;
+
+  const assert = (next: string, everywhere = false): void => {
+    setMenu(null);
+    if (everywhere) {
+      if (convKey !== undefined) store?.set(convKey, next);
+      // The message's own assertion goes with it. Leaving it would make "use this everywhere" the
+      // one action that cannot be undone from the message you performed it on.
+      if (msgKey !== undefined) store?.set(msgKey, undefined);
+      setLocal(undefined);
+      return;
+    }
+    setLocal(next);
+    if (msgKey !== undefined) store?.set(msgKey, next);
+  };
+
+  /**
+   * Stop asserting — and clear the layer that is ACTUALLY in force.
+   *
+   * Clearing only the message's own key would be a button that does nothing on exactly the messages
+   * somebody presses it on: a message inheriting the conversation's type has no assertion of its own
+   * to remove, so removing it changes nothing and the type comes straight back. The menu says which
+   * of the two it is about, so the row is never a surprise.
+   */
+  const clear = (): void => {
+    setMenu(null);
+    setLocal(null);
+    if (msgKey !== undefined) store?.set(msgKey, undefined);
+    if (own === undefined && convKey !== undefined && forConversation !== undefined) store?.set(convKey, undefined);
+  };
+
+  const copy = (): void => {
+    void navigator.clipboard
+      .writeText(entry.text ?? (typeof value === "string" ? value : JSON.stringify(value, null, 2)))
+      .then(() => setCopied(true))
+      .catch(() => undefined);
+  };
+  // The tick goes back to being a copy icon on its own. A button that stays changed is a button that
+  // has stopped saying what it does.
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1400);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  const openTypes = (at: DOMRect): void => {
+    const rows = OFFERED_TYPES.map((candidate) => {
+      const name = typeNameOf(candidate);
+      // Where the app's own answer came from, said in a word. Only ever on the row it is true of:
+      // a column of provenance beside every option would be a column that is blank most of the way
+      // down, which reads as data missing rather than as a fact about two of the rows.
+      const note =
+        candidate === own
+          ? "yours"
+          : candidate === override
+            ? "this thread"
+            : candidate === given
+              ? (mimeOfSchema(entry.output?.schema) === candidate ? "declared" : "detected")
+              : undefined;
+      return {
+        label: name.label,
+        icon: familyIcon(name.family),
+        ...(note !== undefined ? { note } : {}),
+        checked: candidate === mime,
+        onSelect: () => assert(candidate),
+      };
+    });
+    setMenu({
+      // Under the chip and aligned to its left edge: the menu is about the control, and a list of
+      // types that grew leftwards away from the word it is replacing would be pointing at nothing.
+      x: at.left,
+      y: at.bottom + 3,
+      title: "This text is",
+      items: [
+        ...rows,
+        ...(convKey === undefined
+          ? []
+          : [
+              {
+                label: "Use for every message here",
+                separator: true,
+                note: "until you say otherwise",
+                onSelect: () => assert(mime, true),
+              },
+            ]),
+        ...(override === undefined
+          ? []
+          : [
+              // Named for the layer it clears, because they are different acts: one puts this message
+              // back, the other stops the whole conversation being read that way.
+              own !== undefined
+                ? {
+                    label: "Back to what JaiRA detected",
+                    separator: convKey === undefined,
+                    note: typeNameOf(given).label,
+                    onSelect: clear,
+                  }
+                : {
+                    label: "Stop using it for every message",
+                    separator: false,
+                    note: `back to ${typeNameOf(given).label}`,
+                    onSelect: clear,
+                  },
+            ]),
+      ],
+    });
+  };
+
+  /**
+   * How to READ what the type says this is — the second question, and never the first.
+   *
+   * The list comes from `viewsFor`, so it grows and shrinks with the type: assert JSON on a value
+   * with a schema and a Form appears in here, assert Plain text and this control goes away entirely.
+   * That dependency is the reason the two are separate controls rather than one long menu — a menu
+   * that mixed "what this is" with "how to draw it" would offer combinations that do not exist.
+   */
+  const openReadings = (at: DOMRect): void => {
+    setReading({
+      x: at.left,
+      y: at.bottom + 3,
+      title: "Read it as",
+      items: views.map((id) => ({
+        label: READING[id].label,
+        note: READING[id].hint,
+        checked: id === view,
+        onSelect: () => setPicked(id),
+      })),
+    });
+  };
+
+  const openMore = (at: DOMRect): void => {
+    setMore({
+      x: at.right - MENU_WIDTH,
+      y: at.bottom + 3,
+      items:
+        panel === null
+          ? []
+          : [
+              {
+                label: "Open in context panel",
+                note: "keeps it on screen while you carry on",
+                onSelect: () =>
+                  panel.open({
+                    title: entry.output?.name ?? (entry.role === "user" ? "Message" : "Answer"),
+                    value,
+                    hint,
+                  }),
+              },
+            ],
+    });
+  };
+
+  /**
+   * The rail: what you can DO to this message, what it is, and when it was said.
+   *
+   * Hidden until the pointer or the keyboard arrives, which is the whole posture — a transcript at
+   * rest is the words and nothing else. Two control groups, and the divider between them is load
+   * bearing: on the left are verbs, on the right are two different claims about the value. The TYPE
+   * is what this text is, and it can be wrong. The READING is how that type is being shown, and it
+   * can only be preferred. One control used to do both jobs and did neither, which is how a plan
+   * that was markdown ended up with a `Source` button and no way to say so.
+   */
+  const rail = (
+    <div className="ts-rail">
+      <button type="button" className="ts-act" title="Copy" aria-label="Copy" onClick={copy}>
+        <Icon name={copied ? "check" : "copy"} />
+      </button>
       {editable ? (
-        <button className="ghost ts-edit" onClick={() => onEdit.edit(entry.turn!, entry.text ?? "")}>
-          Edit
+        <button
+          type="button"
+          className="ts-act"
+          title="Edit"
+          aria-label="Edit this message"
+          onClick={() => onEdit.edit(entry.turn!, entry.text ?? "")}
+        >
+          <Icon name="pencil" />
         </button>
       ) : null}
+      {editable && onEdit.rewind !== undefined ? (
+        <button
+          type="button"
+          className="ts-act"
+          title="Rewind to here — everything after it is left behind"
+          aria-label="Rewind to here"
+          onClick={() => onEdit.rewind!(entry.turn!, entry.text ?? "")}
+        >
+          <Icon name="rewind" />
+        </button>
+      ) : null}
+      {said || entry.output !== undefined ? (
+        <>
+          <span className="ts-rail-cut" />
+          {entry.output?.name !== undefined ? <span className="ts-slot">{entry.output.name}</span> : null}
+          <button
+            type="button"
+            className={override !== undefined ? "ts-type on" : "ts-type"}
+            title={`${named.label} — ${mime}${override !== undefined ? `, set by you (JaiRA said ${typeNameOf(given).label})` : ""}`}
+            aria-haspopup="menu"
+            aria-expanded={menu !== null}
+            onClick={(e) => openTypes(e.currentTarget.getBoundingClientRect())}
+          >
+            <Icon name={familyIcon(named.family)} />
+            {named.label}
+            <span className="ts-car">▾</span>
+          </button>
+          {/* Its own dropdown beside the type's, not a segmented strip, because the number of
+              renderings is not fixed: a schema'd JSON value has three (a form, the highlighted
+              value, the serialization) and a markdown string has two. A strip that is two buttons
+              wide here and four there is a control that moves everything after it, and a rail is a
+              row of things whose positions people learn.
+
+              The same rule `ValueView` keeps applies: absent where there is nothing to choose. It
+              is no longer a dead end, because the control beside it changes what a type admits. */}
+          {views.length > 1 ? (
+            <button
+              type="button"
+              className={picked !== null ? "ts-read on" : "ts-read"}
+              title={READING[view].hint}
+              aria-haspopup="menu"
+              aria-expanded={reading !== null}
+              onClick={(e) => openReadings(e.currentTarget.getBoundingClientRect())}
+            >
+              {READING[view].label}
+              <span className="ts-car">▾</span>
+            </button>
+          ) : null}
+        </>
+      ) : null}
+      <span className="grow" />
+      <span className="ts-clock" title={fullClockOf(entry.at)}>
+        {stampOf(entry.at)}
+      </span>
+      {panel !== null ? (
+        <button
+          type="button"
+          className="ts-act"
+          title="What else can be done with this"
+          aria-haspopup="menu"
+          aria-expanded={more !== null}
+          onClick={(e) => openMore(e.currentTarget.getBoundingClientRect())}
+        >
+          …
+        </button>
+      ) : null}
+      {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
+      {reading !== null ? <ContextMenu anchor={reading} onClose={() => setReading(null)} /> : null}
+      {more !== null ? <ContextMenu anchor={more} onClose={() => setMore(null)} /> : null}
     </div>
   );
-  const said = entry.text !== undefined && entry.text.length > 0;
+
+  /**
+   * The words, through the one viewer the rest of the app uses.
+   *
+   * `chrome={false}` because the controls are in the rail, and `fence` because a transcript reads
+   * rather than edits — see `ValueView`'s note on both. What this replaced was three separate
+   * answers to "how is a message drawn": a markdown call, a `<pre>`, and a `ValueView` for the one
+   * case that had a structured output. They disagreed, which is why only one of the three ever had
+   * a way back to the source.
+   */
+  const body = (
+    <ValueView value={value} hint={hint} view={view} chrome={false} fence={drawFence} />
+  );
+
+  const day = dayLabelOf(entry.at);
+  const stamped = day !== undefined ? { "data-day": day } : {};
+
   if (entry.role === "user") {
     return (
-      <div className="ts-msg ts-msg-user">
-        <div className="ts-bubble">{said ? <pre className="ts-text">{entry.text}</pre> : <span className="sub">(empty)</span>}</div>
-        {meta}
+      <div className="ts-msg ts-msg-user" {...stamped}>
+        <div className="ts-bubble">{said ? body : <span className="sub">(empty)</span>}</div>
+        {rail}
       </div>
     );
   }
   if (entry.role === "assistant") {
     return (
-      <div className="ts-msg ts-msg-assistant">
-        {said ? (
-          source ? (
-            <pre className="ts-text">{entry.text}</pre>
-          ) : entry.output !== undefined ? (
-            // The declared schema goes with it, which is what lets a slot that says `text/markdown`
-            // render as a document rather than as a quoted string — see `ViewHint.schema`.
-            <ValueView
-              value={entry.output.value}
-              label={entry.output.name ?? "output"}
-              {...(entry.output.schema !== undefined ? { hint: { schema: entry.output.schema } } : {})}
-            />
-          ) : (
-            <Markdown text={entry.text ?? ""} fence={drawFence} />
-          )
-        ) : (
-          <p className="empty">(no answer was recorded)</p>
-        )}
-        {meta}
+      <div className="ts-msg ts-msg-assistant" {...stamped}>
+        {said || entry.output !== undefined ? body : <p className="empty">(no answer was recorded)</p>}
+        {rail}
       </div>
     );
   }
   return (
-    <div className="ts-msg ts-msg-aside">
+    <div className="ts-msg ts-msg-aside" {...stamped}>
       <span className="ts-tag">{entry.role}</span>
-      {/* Shown as written. This is the input, and reformatting an input is how you stop being able
-          to see what was actually sent. */}
-      {said ? <pre className="ts-text">{entry.text}</pre> : null}
-      {meta}
+      {/* Shown as written, which is what `text/plain` now MEANS rather than merely what happened to
+          happen: this is the input, and reformatting an input is how you stop being able to see what
+          was actually sent. The chip is still there for the day one of them is a pasted diff. */}
+      {said ? body : null}
+      {rail}
+    </div>
+  );
+}
+
+/** What each reading is called in the rail, and what its tooltip says it does. */
+const READING: Record<ViewId, { label: string; hint: string }> = {
+  markdown: { label: "Rendered", hint: "As markdown, rendered" },
+  html: { label: "Rendered", hint: "As HTML, rendered" },
+  media: { label: "Preview", hint: "Play or show it" },
+  changes: { label: "Files", hint: "The files this changes, as a diff" },
+  code: { label: "Code", hint: "Highlighted, in an editor" },
+  text: { label: "Source", hint: "The text exactly as it was written" },
+  json: { label: "JSON", hint: "Highlighted, with what each key means" },
+  form: { label: "Form", hint: "As the fields its schema declares" },
+};
+
+/**
+ * The pause between two messages — space sized to the silence, with a word in it.
+ *
+ * No rule across the page. A ruled separator is a horizontal line through a column of prose, and it
+ * reads as the end of the document rather than as a gap in a conversation; the space itself does
+ * most of the telling, and the label only has to name what the space already showed.
+ */
+function GapMark({ gap }: { gap: Gap }): JSX.Element {
+  return <span className={`ts-gap ts-gap-${gap.size}`}>{gap.label}</span>;
+}
+
+/**
+ * Which day you are looking at, floating over the transcript.
+ *
+ * The other half of the answer the gaps give. A gap says how long a pause was and never says a
+ * date — that is this, and it is a property of WHERE YOU ARE rather than of any one message, which
+ * is why it is one chip for a conversation of any length instead of a stamp on every line.
+ *
+ * It fades rather than disappearing when the scrolling stops. A control that comes and goes at the
+ * edge of vision is a flicker; one that sits at a third of its opacity is a thing you can look at
+ * when you want the answer and never notice when you do not.
+ */
+export function DayChip({ scroller }: { scroller: RefObject<HTMLDivElement | null> }): JSX.Element | null {
+  const [day, setDay] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
+  const idle = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const read = useCallback((): void => {
+    const box = scroller.current;
+    if (box === null) return;
+    const top = box.getBoundingClientRect().top;
+    let found: string | null = null;
+    for (const node of Array.from(box.querySelectorAll<HTMLElement>("[data-day]"))) {
+      // The last message whose top edge has passed under the chip is the one the chip names. Reading
+      // rectangles rather than offsets because the messages are several elements deep inside their
+      // own positioned ancestors, and `offsetTop` would be measured against a different one per row.
+      if (node.getBoundingClientRect().top - top > 30) break;
+      found = node.dataset["day"] ?? found;
+    }
+    setDay((was) => (was === found ? was : (found ?? was)));
+  }, [scroller]);
+
+  useEffect(() => {
+    const box = scroller.current;
+    if (box === null) return;
+    const onScroll = (): void => {
+      setMoving(true);
+      read();
+      if (idle.current !== null) clearTimeout(idle.current);
+      idle.current = setTimeout(() => setMoving(false), 900);
+    };
+    box.addEventListener("scroll", onScroll, { passive: true });
+    read();
+    return () => {
+      box.removeEventListener("scroll", onScroll);
+      if (idle.current !== null) clearTimeout(idle.current);
+    };
+  }, [scroller, read]);
+
+  // Nothing to say until something on screen is stamped — an empty conversation, or one whose
+  // records carry no times at all.
+  if (day === null) return null;
+  return (
+    <div className="ts-daychip-hold" aria-hidden="true">
+      <span className={moving ? "ts-daychip on" : "ts-daychip"}>{day}</span>
     </div>
   );
 }
@@ -770,7 +1199,7 @@ export function Paper({ children }: { children: ReactNode }): JSX.Element {
 }
 
 /** Three dots, breathing. The one piece of motion in the transcript, and it means "still going". */
-function Pulse(): JSX.Element {
+export function Pulse(): JSX.Element {
   return (
     <span className="ts-pulse" aria-hidden>
       <span />
@@ -858,6 +1287,7 @@ export function Transcript({
   onEdit,
   artifacts,
   narrated,
+  scope,
 }: {
   session?: SessionView | null;
   entries: TranscriptEntry[];
@@ -895,6 +1325,15 @@ export function Transcript({
    * present, so the two never overlap once a turn has landed.
    */
   narrated?: boolean | undefined;
+  /**
+   * What to remember a reader's type corrections under — see `messageTypes.ts`.
+   *
+   * A name for THIS conversation, supplied by whatever is drawing it: a task id in the Chat view, a
+   * session id in a run's bands. Absent ⇒ the chip still works and nothing is written down, which is
+   * the right posture for a transcript nobody owns — a subagent's side conversation, a fork's
+   * abandoned branch — where a stored preference would be keyed to something that never comes back.
+   */
+  scope?: string | undefined;
 }): JSX.Element {
   // Dropped rather than never built: `entriesOf` has one reading of the tail and every surface gets
   // the same one, so which rows a surface DRAWS is a rendering decision and belongs here.
@@ -910,21 +1349,40 @@ export function Transcript({
     chains !== undefined || live?.sidechains !== undefined
       ? (call) => sidechainEntriesOf(session ?? null, call, live?.sidechains?.[call])
       : undefined;
+  const blocks = blocksOf(shown);
   return (
     <div className="ts">
-      {blocksOf(shown).map((block, i) => {
+      {blocks.map((block, i) => {
+        // The pause before this block, drawn as space rather than as a rule — see `gapBetween`.
+        // Measured between BLOCKS rather than between messages, because a stretch of forty tool
+        // calls is not a silence: the agent was working, and marking that as "3 hours later" would
+        // be annotating the run as if nobody had been there.
+        const gap = gapBetween(endOfBlock(blocks[i - 1]), startOfBlock(block));
+        const before = gap === undefined ? null : <GapMark key={`gap-${i}`} gap={gap} />;
         if (block.kind === "work")
           return (
-            <WorkBlockView
-              key={i}
-              entries={block.entries}
-              {...(sidechainOf !== undefined ? { sidechainOf } : {})}
-              {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
-              {...(artifacts !== undefined ? { artifacts } : {})}
-              {...(narrated === true ? { narrated } : {})}
-            />
+            <Fragment key={i}>
+              {before}
+              <WorkBlockView
+                entries={block.entries}
+                {...(sidechainOf !== undefined ? { sidechainOf } : {})}
+                {...(onOpenSidechain !== undefined ? { onOpenSidechain } : {})}
+                {...(artifacts !== undefined ? { artifacts } : {})}
+                {...(narrated === true ? { narrated } : {})}
+              />
+            </Fragment>
           );
-        if (block.kind === "message") return <Message key={i} entry={block} {...(onEdit !== undefined ? { onEdit } : {})} />;
+        if (block.kind === "message")
+          return (
+            <Fragment key={i}>
+              {before}
+              <Message
+                entry={block}
+                {...(onEdit !== undefined ? { onEdit } : {})}
+                {...(scope !== undefined ? { scope } : {})}
+              />
+            </Fragment>
+          );
         return (
           <div key={i} className="ts-msg ts-msg-assistant ts-live">
             {/* Plain text, not markdown: a half-arrived answer has half a fenced block in it, and

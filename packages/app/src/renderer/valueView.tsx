@@ -33,7 +33,7 @@
  * takes no decisions, and it is available wherever a value happens to be a set of files: in the
  * transcript beside the call that produced them, in the sync report, in a structured output.
  */
-import { lazy, Suspense, useEffect, useRef, useState, type JSX, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import type { Change, ServedArtifact, ViewHint, ViewId } from "@jaira/shared/browser";
 import {
   artifactOf,
@@ -46,7 +46,15 @@ import {
   totalStats,
   viewsFor,
 } from "@jaira/shared/browser";
-import { Markdown } from "./markdown";
+import { Markdown, type FenceRenderer } from "./markdown";
+import { highlightJson } from "./jsonHighlight";
+/**
+ * Loaded on first sight of a value with a schema, never with the view.
+ *
+ * The form is a tree of widgets and a presentation registry, and a transcript that shows one tool
+ * result should not pay for either — the same rule the markdown editor and Monaco follow here.
+ */
+const SchemaForm = lazy(() => import("./schemaForm/SchemaForm").then((m) => ({ default: m.SchemaForm })));
 /**
  * Loaded on first sight of a markdown value, never with the view.
  *
@@ -81,6 +89,7 @@ const VIEW_META: Record<ViewId, { label: string; hint: string }> = {
   code: { label: "Code", hint: "Highlighted, in an editor" },
   text: { label: "Source", hint: "The text exactly as it was produced" },
   json: { label: "JSON", hint: "The value as JSON" },
+  form: { label: "Form", hint: "As the fields its schema declares" },
 };
 
 /** How a diff is laid out. Two readings of one comparison — see {@link MonacoDiffProps.sideBySide}. */
@@ -288,6 +297,85 @@ function Source({ value }: { value: unknown }): JSX.Element {
 }
 
 /**
+ * A structured value, coloured — and told what its own keys MEAN where a schema says so.
+ *
+ * The `json` view used to be {@link Source} with a different name on it, which is why a value with
+ * a schema and a value without one looked identical and why nothing was ever gained by toggling
+ * between them. This is the reading: the same highlighter the schema editor paints with, plus the
+ * one thing a viewer can offer that an editor mostly cannot — the description of each key, ghosted
+ * at the end of its line, taken from the schema the value was declared against.
+ *
+ * The descriptions are the whole reason the schema is optional rather than required. Without one
+ * this is still the coloured form, which beats a wall of grey; with one it answers "what is
+ * `threshold`" without leaving the value.
+ */
+function JsonView({ value, schema }: { value: unknown; schema?: unknown }): JSX.Element {
+  const text = useMemo(() => (typeof value === "string" ? value : JSON.stringify(value, null, 2)), [value]);
+  /**
+   * What each key means, by the path of the object it sits in.
+   *
+   * Walks the schema itself rather than going through the registry the editor uses: this is handed a
+   * schema, not a document type, so there is nothing to look up. Absent members simply answer
+   * `undefined`, which the highlighter reads as "no hint on this line".
+   */
+  const describe = useMemo(() => {
+    if (schema === null || typeof schema !== "object") return undefined;
+    return (path: readonly string[], key: string): string | undefined => {
+      let node: unknown = schema;
+      for (const step of path) {
+        const props = propertiesOf(node);
+        // An array index is a step in the VALUE's path and not in the schema's — the members of an
+        // array all share one declaration, so walking into `items` is how the two stay in step.
+        node = /^\d+$/.test(step) ? itemsOf(node) : props?.[step];
+        if (node === undefined) return undefined;
+      }
+      const target = propertiesOf(node)?.[key];
+      if (target === null || typeof target !== "object") return undefined;
+      const described = (target as Record<string, unknown>)["description"];
+      return typeof described === "string" ? described : undefined;
+    };
+  }, [schema]);
+
+  const lines = useMemo(() => highlightJson(text, describe), [text, describe]);
+  return (
+    <pre className="vv-source vv-json">
+      {lines.map((line, i) => (
+        <span className="code-line" key={i}>
+          {line.tokens.map((token, j) => (
+            <span key={j} className={`tok tok-${token.kind}`}>
+              {token.text}
+            </span>
+          ))}
+          {line.hint !== undefined ? (
+            // The slot takes no width, so a description can never change where a line breaks — the
+            // same arrangement the schema editor uses, and for the same reason.
+            <span className="line-hint-slot">
+              <span className="line-hint">{line.hint.length > 80 ? `${line.hint.slice(0, 80)}…` : line.hint}</span>
+            </span>
+          ) : null}
+          {"\n"}
+        </span>
+      ))}
+    </pre>
+  );
+}
+
+/** A schema node's declared members, or `undefined` for anything that has none. */
+function propertiesOf(schema: unknown): Record<string, unknown> | undefined {
+  if (schema === null || typeof schema !== "object" || Array.isArray(schema)) return undefined;
+  const props = (schema as Record<string, unknown>)["properties"];
+  return props !== null && typeof props === "object" && !Array.isArray(props)
+    ? (props as Record<string, unknown>)
+    : undefined;
+}
+
+/** What an array's members are declared as. */
+function itemsOf(schema: unknown): unknown {
+  if (schema === null || typeof schema !== "object" || Array.isArray(schema)) return undefined;
+  return (schema as Record<string, unknown>)["items"];
+}
+
+/**
  * HTML a model produced, rendered in a sandbox.
  *
  * An `iframe` with no permissions rather than `dangerouslySetInnerHTML`: this is a privileged
@@ -389,6 +477,9 @@ export function ValueView({
   onPrompt,
   edit,
   diff,
+  view: controlled,
+  chrome,
+  fence,
 }: {
   value: unknown;
   hint?: ViewHint | undefined;
@@ -428,10 +519,39 @@ export function ValueView({
    * keystroke, and the caret went with it. Only the markdown view reads it today.
    */
   diff?: MarkdownDiff | undefined;
+  /**
+   * Which view to show, decided by the caller — for a surface that draws the toggle itself.
+   *
+   * The transcript is the one that does. A message already has a row of controls under it, and a
+   * second toggle inside the value would be the same question asked twice in the same two inches;
+   * so the rail owns the choice and hands the answer down. Ignored where it names a view this value
+   * does not have, which is what keeps a remembered pick from surviving a change of type.
+   */
+  view?: ViewId | undefined;
+  /** `false` ⇒ draw no header at all. For a caller that has somewhere better to put the controls. */
+  chrome?: boolean | undefined;
+  /**
+   * How a fenced code block draws — and, by supplying it, a request for the LIGHT markdown renderer.
+   *
+   * The markdown view is normally the live-preview editor, which is right for a document and wrong
+   * for a transcript: CodeMirror is a few hundred kilobytes and a thread is forty messages, so a
+   * conversation that mounted one per answer would pay for an editor nobody asked for forty times.
+   * A caller passing a fence renderer is one that wants the reading, not the editing — see
+   * `drawFence` in `transcriptView.tsx`, which is the whole reason the hook is shaped this way.
+   */
+  fence?: FenceRenderer | undefined;
 }): JSX.Element {
   const views = viewsFor(value, hint ?? {});
   const [picked, setPicked] = useState<ViewId | null>(null);
-  const view = picked !== null && views.includes(picked) ? picked : views[0]!;
+  // The caller's answer first, then this component's own, then whatever leads. Each step only counts
+  // if the view still applies: a value whose type just changed has a different list, and a pick that
+  // is no longer on it is a pick at something that is not there.
+  const view =
+    controlled !== undefined && views.includes(controlled)
+      ? controlled
+      : picked !== null && views.includes(picked)
+        ? picked
+        : views[0]!;
   /** Where "open in the context panel" sends this, when there is a panel. See `valuePanel.ts`. */
   const panel = useValuePanel();
   const [more, setMore] = useState<MenuAnchor | null>(null);
@@ -493,6 +613,10 @@ export function ValueView({
       return <Source value={showing} />;
     }
     if (view === "markdown") {
+      // The reading, for a surface that only ever reads — see {@link fence}. Nothing is given up by
+      // taking this path: it is the same parser, and the editor it skips could not have been typed
+      // into anyway, because `edit` is what would have made it writable.
+      if (edit === undefined && fence !== undefined) return <Markdown text={String(showing)} fence={fence} />;
       // The live-preview editor IS the markdown renderer, read-only when nothing may change it —
       // one surface with a flag rather than a viewer and an editor that drift apart.
       return (
@@ -517,6 +641,30 @@ export function ValueView({
         </Suspense>
       );
     }
+    if (view === "form") {
+      // Read-only, which the form already knows how to be (`SchemaFormContext.disabled`) — this is
+      // a reading of a value, not an editor for it, and `edit` here is a text callback the form has
+      // no way to honour. One surface with a flag rather than a viewer that drifts from the editor.
+      return (
+        <Suspense fallback={<Source value={showing} />}>
+          <div className="vv-form">
+            <SchemaForm
+              schema={(hint?.schema ?? {}) as never}
+              value={showing}
+              onChange={() => undefined}
+              // `isSet` answers false for everything, which is not a lie by omission — it is the
+              // only true answer here. The tag it drives means "this LAYER states this value", a
+              // fact about editing a config file, and its default (`the key is present`) would put
+              // a "set here" chip beside every field of a value nobody is editing at all.
+              ctx={{ path: "", disabled: true, isSet: () => false }}
+            />
+          </div>
+        </Suspense>
+      );
+    }
+    // The VIEWER, not the serialization — see {@link JsonView}. `text` falls through to `Source`
+    // below, which is what keeps "what was actually written down" one click away from it.
+    if (view === "json") return <JsonView value={showing} {...(hint?.schema !== undefined ? { schema: hint.schema } : {})} />;
     if (edit !== undefined && typeof showing === "string") {
       return (
         <textarea
@@ -589,7 +737,7 @@ export function ValueView({
 
   return (
     <div className="vv">
-      {label !== undefined || views.length > 1 || actions !== undefined ? (
+      {chrome !== false && (label !== undefined || views.length > 1 || actions !== undefined) ? (
         <div className="vv-head">
           {label !== undefined ? <span className="vv-label">{label}</span> : null}
           <span className="grow" />

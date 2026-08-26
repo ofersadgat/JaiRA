@@ -21,9 +21,24 @@ import {
   editorKindOf,} from "../src/valueViews";
 
 describe("which views apply", () => {
-  it("offers only JSON for an ordinary value — nothing to toggle to", () => {
-    expect(viewsFor({ verdict: "gaps", count: 3 })).toEqual(["json"]);
-    expect(viewsFor(42)).toEqual(["json"]);
+  it("reads a structured value two ways: highlighted, and as what was actually serialised", () => {
+    // It used to offer only `json`, on the grounds that an object has one honest rendering. That was
+    // true while `json` WAS the raw text. It is not any more — the JSON view is a viewer, with the
+    // schema's own descriptions ghosted beside the keys — so the serialization underneath it is a
+    // second reading, and the same reversibility argument that keeps `text` under every rendered
+    // string applies to it.
+    expect(viewsFor({ verdict: "gaps", count: 3 })).toEqual(["json", "text"]);
+    expect(viewsFor(42)).toEqual(["json", "text"]);
+  });
+
+  it("offers a form for a value whose schema describes named members", () => {
+    // The most legible reading of a value somebody wrote a shape for is the shape.
+    const schema = { type: "object", properties: { verdict: { type: "string" } } };
+    // Behind the coloured value rather than in front of it — see `viewsFor` on why the record is
+    // the lead reading and the form is the alternative.
+    expect(viewsFor({ verdict: "gaps" }, { schema })).toEqual(["json", "form", "text"]);
+    // …and not for a schema that describes a string, which has no members to lay out.
+    expect(viewsFor("words", { schema: { type: "string" } })).toEqual(["text"]);
   });
 
   it("keeps the source available behind every rendering", () => {
@@ -42,7 +57,7 @@ describe("which views apply", () => {
 
   it("puts the file view first when the value is a set of files, and keeps the JSON behind it", () => {
     const edits = [{ path: "workflows/a.json", action: "create", text: "{}" }];
-    expect(viewsFor(edits)).toEqual(["changes", "json"]);
+    expect(viewsFor(edits)).toEqual(["changes", "json", "text"]);
   });
 
   it("offers a code view for text with a grammar, and not for text without one", () => {
@@ -71,7 +86,7 @@ describe("which views apply", () => {
     // The type alone is not enough — an image slot holding a description is not an image.
     expect(viewsFor("not a picture", { mime: "image/png" })).toEqual(["text"]);
     expect(viewsFor("https://example.test/a.png", { mime: "image/png" })[0]).toBe("media");
-    expect(viewsFor({ uri: "https://example.test/a.mp4" }, { mime: "video/mp4" })).toEqual(["media", "json"]);
+    expect(viewsFor({ uri: "https://example.test/a.mp4" }, { mime: "video/mp4" })).toEqual(["media", "json", "text"]);
   });
 });
 
@@ -256,5 +271,24 @@ describe("editorKindOf", () => {
 
   it("falls through to the plain editor for source, which is its own presentation", () => {
     expect(editorKindOf("text/x-typescript", "const a = 1;")).toBe("text");
+  });
+});
+
+describe("counting markdown marks", () => {
+  it("reads a sentence with a bullet list under it as the document it is", () => {
+    // The case the old rule missed, and the commonest thing anybody actually types. Three bullets
+    // and nothing else is one KIND of mark, so requiring two kinds read it as plain text.
+    expect(looksLikeMarkdown("Two things:\n\n- did the check pass?\n- what did it say?")).toBe(true);
+    expect(looksLikeMarkdown("1. read it\n2. fix it")).toBe(true);
+  });
+
+  it("still refuses a single stray mark, which is what the rule was written for", () => {
+    expect(looksLikeMarkdown("at Object.<anonymous> - /w/p/a.ts:12")).toBe(false);
+    expect(looksLikeMarkdown("- just one bullet")).toBe(false);
+    expect(looksLikeMarkdown("plain words with an * in them")).toBe(false);
+  });
+
+  it("still takes two marks of different kinds", () => {
+    expect(looksLikeMarkdown("# Title\n\n- one")).toBe(true);
   });
 });

@@ -21,6 +21,7 @@ export * from "./slotTypes";
 export * from "./references";
 export * from "./changeset";
 export * from "./diffStrategies";
+export * from "./typeNames";
 export * from "./valueViews";
 export * from "./toolVocabulary";
 export * from "./scopes";

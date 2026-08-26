@@ -58,6 +58,7 @@ import {
 import { PointerMenus } from "./pointerMenu";
 import { projectName } from "./projects";
 import { ValuePanelContext, type PinnedValue } from "./valuePanel";
+import { MessageTypeContext, type MessageTypeStore } from "./messageTypes";
 import { ValueView } from "./valueView";
 import {
   FileAddressBar,
@@ -733,6 +734,28 @@ export default function App(): JSX.Element {
   const valuePanel = useMemo(() => ({ open: (item: PinnedValue) => setPinned(item) }), []);
 
   /**
+   * Where a reader's "no, this message is markdown" is kept — see `messageTypes.ts`.
+   *
+   * `ui.modes` because that is already the map for controls with more than two positions, and a type
+   * is one: it is a position, it belongs to one person on one machine, and it must never travel in
+   * `settings.json` where a pull request could change how somebody reads their own transcripts.
+   *
+   * Clearing writes an empty string rather than deleting the key. `withMode` only ever sets, and a
+   * `withoutMode` beside it would be a second way to spell absence — so absence is spelled once,
+   * here, and every reader gets it from {@link MessageTypeStore.get}.
+   */
+  const messageTypes = useMemo<MessageTypeStore>(
+    () => ({
+      get: (key) => {
+        const held = ui.modes[key];
+        return held === undefined || held === "" ? undefined : held;
+      },
+      set: (key, mime) => actions.setMode(key, mime ?? ""),
+    }),
+    [ui, actions],
+  );
+
+  /**
    * How wide a context panel actually is, given that its ceiling MOVES.
    *
    * A panel holding a document may be dragged out to {@link PANE_WIDE}; the same panel back to
@@ -1118,6 +1141,9 @@ export default function App(): JSX.Element {
     runMode,
     onRunMode: setRunMode,
     onAnswer: waiting ? () => actions.select(waiting.taskId) : undefined,
+    // The action, not the channel — re-running a finished task answers with a DIFFERENT task, and
+    // this is what moves the selection onto it. See `FileSurfaceContext.onRerun`.
+    onRerun: (taskId: string) => void actions.rerunTask(taskId, state.selectedProject ?? undefined),
     onSaveConfig: actions.saveConfig,
     validateSchema: actions.validateSchema,
     stateSlots: actions.stateSlots,
@@ -1374,6 +1400,7 @@ export default function App(): JSX.Element {
     /* Every `ValueView` in the window, however deeply it is drawn, can put its value in the panel —
        see `valuePanel.ts` on why this is a context and not six more props. */
     <ValuePanelContext.Provider value={valuePanel}>
+    <MessageTypeContext.Provider value={messageTypes}>
     <div
       className="app"
       style={{ "--sidebar": `${sidebarShut ? SIDEBAR_RAIL : sidebarWidth}px` } as CSSProperties}
@@ -2060,6 +2087,7 @@ export default function App(): JSX.Element {
         </div>
       ) : null}
     </div>
+    </MessageTypeContext.Provider>
     </ValuePanelContext.Provider>
   );
 }

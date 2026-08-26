@@ -5,11 +5,17 @@
  * the alternative — a form at the bottom of the panel for every verb — turns "rename this" into a
  * hunt. Right-click is where people already look.
  *
- * Deliberately not a general menu framework: one level, no submenus, no icons. Everything the Files
- * view needs is a flat list of verbs, and a nesting mechanism nobody uses is a nesting mechanism
- * nobody maintains.
+ * Deliberately not a general menu framework: one level, no submenus. Everything the Files view needs
+ * is a flat list of verbs, and a nesting mechanism nobody uses is a nesting mechanism nobody
+ * maintains.
+ *
+ * It grew a glyph column and a caption when the transcript's type picker arrived, because that menu
+ * is not a list of verbs — it is a list of KINDS, and the control that opens it wears one of their
+ * icons. Both are optional and both are off everywhere else: a menu of verbs gains nothing from a
+ * column of pictures.
  */
 import { useEffect, useRef, useState, type JSX } from "react";
+import { Icon, type PATHS } from "./icons";
 
 export interface MenuItem {
   label: string;
@@ -29,6 +35,15 @@ export interface MenuItem {
   checked?: boolean;
   /** A second line, dimmer: what distinguishes this entry from the others. */
   note?: string;
+  /**
+   * A glyph before the label, for a menu whose items are KINDS rather than actions.
+   *
+   * The type picker is the case and, so far, the only one: its rows are the same names the control
+   * that opened it wears, and a list where the chip has a picture and the menu does not reads as two
+   * different vocabularies for one choice. Absent everywhere else on purpose — a menu of verbs gains
+   * nothing from a column of pictures, and the module's own rule is that a glyph alone is a guess.
+   */
+  icon?: keyof typeof PATHS;
 }
 
 /**
@@ -46,6 +61,8 @@ export interface MenuAnchor {
   x: number;
   y: number;
   items: MenuItem[];
+  /** A dim caption above the items, for a menu that answers a question rather than offering verbs. */
+  title?: string;
 }
 
 /**
@@ -88,6 +105,7 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAnchor; onClose: 
 
   return (
     <div className="context-menu" role="menu" ref={ref} style={{ left, top, width }}>
+      {anchor.title !== undefined ? <div className="menu-title">{anchor.title}</div> : null}
       {anchor.items.map((item, i) => (
         <button
           key={`${item.label}-${i}`}
@@ -100,6 +118,7 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAnchor; onClose: 
           }}
         >
           {item.checked === true ? <span className="menu-mark">•</span> : null}
+          {item.icon !== undefined ? <Icon name={item.icon} className="menu-icon" /> : null}
           <span className="grow ellip">{item.label}</span>
           {item.note !== undefined ? <span className="menu-note ellip">{item.note}</span> : null}
         </button>

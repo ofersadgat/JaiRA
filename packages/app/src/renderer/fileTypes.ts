@@ -257,6 +257,18 @@ export interface FileSurfaceContext {
   runMode?: "board" | "conversation" | undefined;
   onRunMode?: ((mode: "board" | "conversation") => void) | undefined;
   onAnswer?: (() => void) | undefined;
+  /**
+   * Set this run going again — `task:rerun`, and the shell's own action rather than a raw call.
+   *
+   * It has to be the action because the answer is sometimes a DIFFERENT task: the engine will not
+   * re-enter a finished lifecycle, so re-running a completed or canceled one starts a fresh copy and
+   * names it. A surface calling the channel directly would leave the window describing the task that
+   * did not restart. See `store.ts`'s `rerunTask`, which moves the selection with it.
+   *
+   * Absent where a surface is drawn outside the shell, which is the honest posture: a specimen or a
+   * dialog has nowhere to navigate to, so it offers no button rather than one that goes nowhere.
+   */
+  onRerun?: ((taskId: string) => void) | undefined;
   /** Write a configuration layer as a parsed document — validated in main, unlike a raw file write. */
   onSaveConfig: (layer: ConfigLayer, doc: unknown) => void;
   /** Check a draft against a registered schema — what the JSON editor's picker turns on. */
