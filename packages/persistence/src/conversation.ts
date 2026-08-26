@@ -19,7 +19,7 @@
  * agent was doing when it asked.
  */
 import type { JsonValue } from "@declarative-ai/json";
-import type { ConversationTurn, ConversationView } from "@jaira/shared";
+import { ENTERED_TURN, type ConversationTurn, type ConversationView } from "@jaira/shared";
 import type { Project } from "./project";
 
 /** Turns returned by default. A long agent run produces thousands; the tail is what is being read. */
@@ -41,9 +41,15 @@ function outcomeText(outcome: unknown, failure: unknown): string {
 /**
  * Project one run into turns.
  *
- * Only the events a reader can act on become turns. `instance.entered` is deliberately dropped for
- * every state that also emits `operation.started` — entering and starting are one moment to anyone
- * not debugging the engine, and showing both doubles the length of every conversation.
+ * Only the events a reader can act on become turns.
+ *
+ * `instance.entered` used to be dropped for every state that also emits `operation.started`, on the
+ * grounds that entering and starting are one moment. That was a decision about the TRANSCRIPT, taken
+ * in the projection — and the transcript ignores `operation` turns anyway (`EVENT_TONE`), so it cost
+ * nothing there and hid the fact from the one reader that needs it. The canvas draws the run's PATH,
+ * and a state entering is the step; that a conversation opens underneath it is a second fact, not the
+ * same one. So the journal is projected as it was written, and dropping is left to whoever is
+ * reading.
  */
 export function conversationView(project: Project, taskId: string, options: ConversationOptions = {}): ConversationView {
   const row = project.runtime.get(taskId);
@@ -59,28 +65,63 @@ export function conversationView(project: Project, taskId: string, options: Conv
   }
 
   const events = project.events.list(taskId, { runId });
-  const started = new Set<number>();
-  for (const stored of events) {
-    if (stored.event.type === "operation.started") started.add(stored.event.instanceId);
-  }
+
+  /**
+   * Where each instance sits, as the chain of child KEYS from the root — see `ConversationTurn.path`.
+   *
+   * Built on the way through because that is the only place the answer exists: an event names its
+   * parent instance, and the path is the walk up. The root's own path is the empty string, which is
+   * what makes "the module you are already looking at" distinguishable from a step inside it.
+   */
+  const pathOf = new Map<number, string>();
+  /**
+   * The mount, or `undefined` when the event does not say.
+   *
+   * The two are different answers and the difference matters: `""` is the ROOT — the module a page
+   * is already about — while `undefined` is "this journal does not record where". Older runs are the
+   * second case, because `instance.blocked` carried no parent or key until it was given one. Reading
+   * those as the root would put every historical block on the module itself and, worse, make two
+   * blocks with the same reason indistinguishable.
+   */
+  const under = (parentInstanceId: number | undefined, childKey: string | undefined): string | undefined => {
+    if (parentInstanceId === undefined || childKey === undefined) return undefined;
+    const base = pathOf.get(parentInstanceId) ?? "";
+    return base === "" ? childKey : `${base}/${childKey}`;
+  };
+
+  /** A `path` field, or none at all — an absent mount is not a mount at the root. */
+  const mountedAt = (path: string | undefined): { path?: string } => (path === undefined ? {} : { path });
 
   const turns: ConversationTurn[] = [];
   for (const stored of events) {
     const event = stored.event;
     const at = stored.createdAt;
     const seq = stored.seq;
+    /** This event's own place in the run, for the instances that have one. */
+    const where = (instanceId: number): { path?: string } => mountedAt(pathOf.get(instanceId));
     switch (event.type) {
-      case "instance.entered":
-        // A composite state never starts an operation of its own; without this it would be invisible
-        // in a conversation that is otherwise entirely about its children.
-        if (started.has(event.instanceId)) break;
-        turns.push({ seq, at, kind: "operation", stateId: event.stateId, text: "entered" });
+      case "instance.entered": {
+        // A root has no parent, and its path is the empty string — not "unknown". Every instance is
+        // entered before anything else is said about it, so this is what fills the map.
+        pathOf.set(event.instanceId, under(event.parentInstanceId, event.childKey) ?? "");
+        turns.push({ seq, at, kind: "operation", stateId: event.stateId, ...where(event.instanceId), text: ENTERED_TURN });
         break;
+      }
       case "instance.blocked":
-        turns.push({ seq, at, kind: "failure", stateId: event.stateId, text: event.reason, ok: false });
+        // Never an instance — `instanceId` is -1 — so its place comes from the MOUNT the engine
+        // reported instead of from a path it never got as far as having.
+        turns.push({
+          seq,
+          at,
+          kind: "blocked",
+          stateId: event.stateId,
+          ...mountedAt(under(event.parentInstanceId, event.childKey)),
+          text: event.reason,
+          ok: false,
+        });
         break;
       case "operation.started":
-        turns.push({ seq, at, kind: "operation", stateId: event.stateId, text: event.op });
+        turns.push({ seq, at, kind: "operation", stateId: event.stateId, ...where(event.instanceId), text: event.op });
         break;
       case "operation.completed":
         turns.push({
@@ -88,6 +129,7 @@ export function conversationView(project: Project, taskId: string, options: Conv
           at,
           kind: "output",
           stateId: event.stateId,
+          ...where(event.instanceId),
           ok: true,
           ...(event.metrics !== undefined ? { data: event.metrics as unknown as JsonValue } : {}),
         });
@@ -98,12 +140,13 @@ export function conversationView(project: Project, taskId: string, options: Conv
           at,
           kind: "failure",
           stateId: event.stateId,
+          ...where(event.instanceId),
           ok: false,
           text: event.failure.reason,
         });
         break;
       case "transition.taken":
-        turns.push({ seq, at, kind: "transition", stateId: event.stateId, text: event.to });
+        turns.push({ seq, at, kind: "transition", stateId: event.stateId, ...where(event.instanceId), text: event.to });
         break;
       case "instance.terminated":
         turns.push({
@@ -111,6 +154,7 @@ export function conversationView(project: Project, taskId: string, options: Conv
           at,
           kind: "operation",
           stateId: event.stateId,
+          ...where(event.instanceId),
           ok: event.outcome === "success",
           text: outcomeText(event.outcome, event.failure),
         });

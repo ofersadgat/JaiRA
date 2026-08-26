@@ -8113,11 +8113,25 @@ fieldset.reading {
   align-self: center;
   color: var(--bad);
 }
-/* The state, then what happened to it. Monospaced and dimmed: it is a name, and the sentence beside
-   it is the thing being read. */
+/* What happened, then where, then why. The verb comes FIRST — "could not enter product → explore"
+   reads as the sentence it is, where a bare reason beside a name leaves the reader to work out that
+   the state never ran at all. */
+.sb-note-verb {
+  flex: none;
+  color: var(--dim);
+}
+/* The path. Monospaced and dimmed: it is a name, and the sentence beside it is the thing being
+   read. */
 .sb-note-state {
   flex: none;
   max-width: 30%;
+  color: var(--dim);
+}
+/* A transition is the machine MOVING, not something wrong with it: the ordinary text colour, so a
+   path down the page never reads as a column of errors. Same row, same column, same size — the two
+   are the same kind of fact about a state, and the run is read by their interleaving. */
+.sb-note.step,
+.sb-note.step .sb-note-icon {
   color: var(--dim);
 }
 .sb-note-text {

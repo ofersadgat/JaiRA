@@ -171,12 +171,13 @@ describe("what a conversation draws", () => {
  * no panel to be a line of, and the session id a panel is named by says nothing about what the
  * conversation is — so the background carries the one and the gutter carries the other.
  */
-const note = (patch: Partial<BandNote> & Pick<BandNote, "seq" | "at" | "text">): BandNote => patch;
+/** A note. `kind` defaults to `failure`, which is what most of these are about. */
+const note = (patch: Partial<BandNote> & Pick<BandNote, "seq" | "at" | "text">): BandNote => ({ kind: "failure", path: "", ...patch });
 
 const drawWith = (
   parent: InstanceNode | undefined,
   refs: SessionRef[],
-  extra: { notes?: BandNote[]; onOpenWorkflow?: (piece: SessionPiece) => void },
+  extra: { notes?: BandNote[]; root?: string; onOpenWorkflow?: (piece: SessionPiece) => void },
 ): string =>
   renderToStaticMarkup(
     createElement(SessionBandsView, {
@@ -217,6 +218,68 @@ describe("a failure with no panel to appear in", () => {
 
   it("still says nothing happened when nothing did", () => {
     expect(drawWith(undefined, [], {})).toContain("has not said anything yet");
+  });
+});
+
+/**
+ * The machine's own moves, on the same grey.
+ *
+ * A transition is taken BY a composite, and a composite has no panel — so the path a run took was
+ * the one thing a page about that run could not show. It goes where the failures go, in the same
+ * column and the same order, because reading a run means reading the two interleaved.
+ */
+describe("the path on the background", () => {
+  const step = (patch: Partial<BandNote> & Pick<BandNote, "seq" | "at" | "text">): BandNote => ({
+    ...note(patch),
+    kind: "transition",
+  });
+
+  it("writes the mount path, one arrow per step further in", () => {
+    const html = drawWith(undefined, [], {
+      notes: [step({ seq: 1, at: 5, stateId: "explore", path: "product/explore", text: "explore" })],
+    });
+    // The MOUNT, not the state file. `explore` is one definition mounted under all six phases, and
+    // its id alone does not say which of them is running it.
+    expect(html).toContain("product → explore");
+    expect(html).toContain("entered");
+  });
+
+  it("trims the module already being looked at", () => {
+    const html = drawWith(undefined, [], {
+      notes: [step({ seq: 1, at: 5, path: "product/explore", text: "explore" })],
+      root: "product",
+    });
+    expect(html).toContain("explore");
+    expect(html).not.toContain("product → explore");
+  });
+
+  it("says a block is a state that could NOT be entered, not a bare reason beside a name", () => {
+    const html = drawWith(undefined, [], {
+      notes: [
+        note({ seq: 1, at: 5, kind: "blocked", path: "product/explore", text: "input 'prior_findings': child 'critique' has not run" }),
+      ],
+    });
+    expect(html).toContain("could not enter");
+    expect(html).toContain("product → explore");
+  });
+
+  it("is not drawn as a failure — no alert, and not the failure colour", () => {
+    const moved = drawWith(undefined, [], { notes: [step({ seq: 1, at: 5, path: "draft", text: "draft" })] });
+    const broke = drawWith(undefined, [], { notes: [note({ seq: 1, at: 5, path: "draft", text: "blocked" })] });
+    expect(moved).toContain("sb-note step");
+    expect(broke).toContain('class="sb-note"');
+    expect(broke).not.toContain("sb-note step");
+  });
+
+  it("fills the canvas that used to say a run had not entered a child yet", () => {
+    const html = drawWith(undefined, [], {
+      notes: [
+        note({ seq: 1, at: 5, kind: "entered", path: "product", text: "" }),
+        step({ seq: 2, at: 6, path: "product/context", text: "context" }),
+      ],
+    });
+    expect(html).not.toContain("has not said anything yet");
+    expect(html.indexOf("product")).toBeLessThan(html.indexOf("context"));
   });
 });
 

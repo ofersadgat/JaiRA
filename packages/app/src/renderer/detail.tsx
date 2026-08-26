@@ -192,6 +192,7 @@ const TURN_ROLE: Record<string, string> = {
   policy: "policy",
   interaction: "waiting",
   failure: "failed",
+  blocked: "blocked",
   transition: "→",
 };
 

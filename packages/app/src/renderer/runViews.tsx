@@ -29,7 +29,7 @@ import { TaskDetailSections, TaskHead } from "./detail";
 import { entriesOf, journalFor, sidechainEntriesOf, signatureOf } from "./transcript";
 import { instanceOf as instanceOfState, nodeAt, prunedTrail, type TrailStep } from "./trail";
 import { Paper, Transcript, durationOf } from "./transcriptView";
-import { bandsOf, instancesOf, notesOf, piecesOf, type SessionPiece } from "./sessionBands";
+import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, type SessionPiece } from "./sessionBands";
 import { SessionBandsView } from "./sessionPanels";
 import type { FileSurfaceProps } from "./fileTypes";
 import { Composer } from "./composer";
@@ -231,7 +231,16 @@ export function RunConversation({
    * shown are a cascade anyway, in which the sentence explaining why a child gave up is on the child
    * and the one explaining what that cost is on the parent. Each note names its own state.
    */
-  const notes = useMemo(() => notesOf(conversation?.turns ?? [], bands), [conversation, bands]);
+  const notes = useMemo(() => notesOf(conversation?.turns ?? []), [conversation]);
+  /**
+   * Where the run being READ sits, so a note's path is shown from here rather than from the root of
+   * the workflow. Walking into `product` should leave its notes saying `explore`, not
+   * `product → explore` — the second half is the page you are already on.
+   */
+  const rootPath = useMemo(
+    () => (parent === undefined ? "" : mountPathOf(detail?.instances ?? [], parent.instanceId)),
+    [detail, parent],
+  );
 
   // Every panel is open, so every transcript in them is needed — fetched in one round rather than
   // on expand, which is what the folded card design paid for and this one does not.
@@ -282,6 +291,7 @@ export function RunConversation({
           bands={bands}
           render={render}
           notes={notes}
+          {...(rootPath !== undefined ? { root: rootPath } : {})}
           {...(onOpenWorkflow !== undefined
             ? { onOpenWorkflow: (piece: SessionPiece) => onOpenWorkflow(piece.node.stateId, piece.node.instanceId) }
             : {})}

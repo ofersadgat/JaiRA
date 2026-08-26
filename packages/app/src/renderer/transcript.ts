@@ -460,6 +460,7 @@ const EVENT_TONE: Record<string, EventEntry["tone"] | undefined> = {
   policy: "warn",
   interaction: "warn",
   failure: "bad",
+  blocked: "bad",
   transition: "plain",
   // `operation` and `tool` are the session's own material, told worse. Keeping them would double
   // every model call: once as the turn it actually was, once as a journal line saying it happened.

@@ -43,6 +43,7 @@ import { Fragment, useState, type JSX, type ReactNode } from "react";
 import { Icon } from "./icons";
 import { RunCard } from "./transcriptView";
 import {
+  pathFrom,
   placeNotes,
   startersOf,
   type BandNote,
@@ -357,27 +358,49 @@ function Band({
  * is drawn as an annotation on the background the panels sit on: the same place a note would be
  * written in the margin of a printed transcript, at the point in the stack where it happened.
  */
-function NoteRow({ note }: { note: BandNote }): JSX.Element {
+function NoteRow({ note, root }: { note: BandNote; root: string }): JSX.Element {
+  // Moving is not going wrong: a forking-path glyph and the ordinary text colour, against the alert
+  // and `--bad` a failure gets. Same shape and same column either way, because they are the same KIND
+  // of thing — a fact about a state, written where the state has no page of its own — and reading a
+  // run means reading them interleaved, in the order they happened.
+  const moved = note.kind === "entered" || note.kind === "transition";
+  const where = pathFrom(note.path, root);
   return (
-    <div className="sb-note" role="note">
-      <Icon name="alert" className="sb-note-icon" />
-      {note.stateId !== undefined ? (
-        <span className="sb-note-state mono ellip" title={note.stateId}>
-          {note.stateId.split("/").pop()}
+    <div className={moved ? "sb-note step" : "sb-note"} role="note">
+      <Icon name={moved ? "choice" : "alert"} className="sb-note-icon" />
+      {/* What HAPPENED, then where. A block is the negative of entering and says so in the same
+          words — "could not enter product → explore" — rather than leaving a reason to stand on its
+          own beside a name and leaving the reader to work out that the state never ran. */}
+      {VERB[note.kind] === "" ? null : <span className="sb-note-verb">{VERB[note.kind]}</span>}
+      {/* The ROOT has no path to draw — you are looking at it — so its own row is the sentence
+          alone rather than a sentence with a blank column in front of it. */}
+      {where === "" ? null : (
+        <span className="sb-note-state mono ellip" title={note.stateId ?? where}>
+          {where}
         </span>
-      ) : null}
-      <span className="sb-note-text">{note.text}</span>
+      )}
+      {note.kind === "entered" || note.text.length === 0 ? null : (
+        <span className="sb-note-text">{note.kind === "blocked" ? `: ${note.text}` : note.text}</span>
+      )}
     </div>
   );
 }
 
+/** What each kind of note says it is. The row reads as a sentence, so this is its verb. */
+const VERB: Record<BandNote["kind"], string> = {
+  entered: "entered",
+  transition: "entered",
+  blocked: "could not enter",
+  failure: "",
+};
+
 /** The notes standing at one point in the stack, or nothing at all. */
-function Notes({ notes }: { notes: readonly BandNote[] }): JSX.Element | null {
+function Notes({ notes, root }: { notes: readonly BandNote[]; root: string }): JSX.Element | null {
   if (notes.length === 0) return null;
   return (
     <div className="sb-notes">
       {notes.map((note) => (
-        <NoteRow key={`${note.seq}:${note.stateId ?? ""}`} note={note} />
+        <NoteRow key={`${note.seq}:${note.stateId ?? ""}`} note={note} root={root} />
       ))}
     </div>
   );
@@ -388,13 +411,16 @@ export function SessionBandsView({
   bands,
   render,
   notes = [],
+  root = "",
   onOpenWorkflow,
   empty,
 }: {
   bands: readonly SessionBand[];
   render: (piece: SessionPiece) => ReactNode;
-  /** Failures with no panel to appear in — see {@link BandNote} and {@link NoteRow}. */
+  /** Failures and transitions with no panel to appear in — see {@link BandNote} and {@link NoteRow}. */
   notes?: readonly BandNote[];
+  /** The MOUNT PATH this page is read from — what a note's path is shown relative to. Root is `""`. */
+  root?: string;
   /** Describe the workflow a panel's conversation was opened by — see the gutter in {@link Sheet}. */
   onOpenWorkflow?: ((piece: SessionPiece) => void) | undefined;
   empty?: string;
@@ -411,7 +437,7 @@ export function SessionBandsView({
       <ZigDefs />
       {bands.map((band, i) => (
         <Fragment key={`${band.startedAt}:${i}`}>
-          <Notes notes={placed[i]!} />
+          <Notes notes={placed[i]!} root={root} />
           <Band
             band={band}
             bare={bare}
@@ -421,7 +447,7 @@ export function SessionBandsView({
           />
         </Fragment>
       ))}
-      <Notes notes={placed[bands.length]!} />
+      <Notes notes={placed[bands.length]!} root={root} />
     </div>
   );
 }

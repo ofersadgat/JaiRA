@@ -520,13 +520,34 @@ export interface StateView {
  * transcript: what the operation did, what it called, whether its output validated, and every point
  * a human was asked something.
  */
-export type TurnKind = "operation" | "tool" | "output" | "policy" | "interaction" | "failure" | "transition";
+export type TurnKind = "operation" | "tool" | "output" | "policy" | "interaction" | "failure" | "blocked" | "transition";
+
+/**
+ * The `text` an `operation` turn carries when it is a state being ENTERED rather than a call being
+ * made — see `conversationView`, which projects both onto `operation` because entering and starting
+ * are one moment to anyone not debugging the engine.
+ *
+ * Named here because two readers now depend on telling them apart: the transcript, which drops both,
+ * and the canvas, which draws entering as a step in the run's path. A string literal repeated in
+ * three files is a rename waiting to break one of them silently.
+ */
+export const ENTERED_TURN = "entered";
 
 export interface ConversationTurn {
   seq: number;
   at: number;
   kind: TurnKind;
   stateId?: string;
+  /**
+   * Where this happened, as the chain of CHILD KEYS from the run's root — `product/explore`, not
+   * `explore`. Empty string for the root itself.
+   *
+   * Distinct from `stateId`, and the distinction is the point: one state file is mounted under
+   * several keys in several parents, so `explore` names a definition and says nothing about which of
+   * the six phases was running it. Computed here rather than in a view because the answer is only in
+   * the ORDER of the events — each `instance.entered` names its parent, and the path is the walk.
+   */
+  path?: string;
   /** The message, command, or reason — whatever this kind's one line is. */
   text?: string;
   /** Tool name, for `tool` turns. */

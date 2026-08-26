@@ -12,7 +12,17 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ConversationTurn, InstanceNode, SessionRef } from "@jaira/shared/browser";
-import { bandsOf, instancesOf, notesOf, piecesOf, placeNotes, startersOf } from "../src/renderer/sessionBands";
+import {
+  bandsOf,
+  instancesOf,
+  notesOf,
+  mountPathOf,
+  pathFrom,
+  piecesOf,
+  placeNotes,
+  startersOf,
+  type BandNote,
+} from "../src/renderer/sessionBands";
 
 const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
   status: "completed",
@@ -252,41 +262,141 @@ describe("notesOf", () => {
     bandsOf(piecesOf(tree(kids), refs, 1));
 
   it("keeps the failure of a state that never opened a conversation", () => {
-    const bands = bandsFor([{ id: 2, from: 0, to: 10 }], [ref(2, "A", 0, 10)]);
-    const notes = notesOf(
-      [
-        turn({ seq: 1, kind: "failure", stateId: "plan/draft", text: "plan/draft: input 'framing' is not wired", ok: false }),
-        turn({ seq: 2, kind: "operation", stateId: "plan", text: "child 'draft' terminated with error", ok: false }),
-      ],
-      bands,
-    );
-    expect(notes.map((n) => [n.stateId, n.text])).toEqual([
+    const notes = notesOf([
+      turn({ seq: 1, kind: "blocked", stateId: "plan/draft", path: "draft", text: "plan/draft: input 'framing' is not wired", ok: false }),
+      turn({ seq: 2, kind: "operation", stateId: "plan", path: "", text: "child 'draft' terminated with error", ok: false }),
+    ]);
+    expect(notes.map((n) => [n.kind, n.path, n.text])).toEqual([
       // The state id the engine prefixed the reason with is dropped: the note carries it beside the
       // sentence, and saying it twice is one subject too many.
-      ["plan/draft", "input 'framing' is not wired"],
-      ["plan", "child 'draft' terminated with error"],
+      ["blocked", "draft", "input 'framing' is not wired"],
+      ["failure", "", "child 'draft' terminated with error"],
     ]);
   });
 
-  it("leaves a failure alone when the state that failed has a panel to say it in", () => {
-    const bands = bandsFor([{ id: 2, from: 0, to: 10 }], [ref(2, "A", 0, 10)]);
-    // `s2` is the state the piece ran — its transcript already carries this, and a copy on the
-    // background would be the same sentence twice.
-    const notes = notesOf([turn({ seq: 1, kind: "failure", stateId: "s2", text: "the call failed", ok: false })], bands);
+  it("addresses a row by its MOUNT, not by the state file it runs", () => {
+    // `explore` is one definition mounted under all six phases. The id says which FILE; only the
+    // mount says which of the six could not be entered.
+    const notes = notesOf([
+      turn({ seq: 1, kind: "blocked", stateId: "explore", path: "product/explore", text: "nope", ok: false }),
+    ]);
+    expect(notes.map((n) => [n.stateId, n.path])).toEqual([["explore", "product/explore"]]);
+  });
+
+  it("keeps a failure even when the state HAS a panel — the grey is the run's order, not a fallback", () => {
+    // `s2` ran, and its transcript carries this too. Both are wanted: the panel gives the failure its
+    // context, the grey gives it its place among everything else that happened.
+    const notes = notesOf([turn({ seq: 1, kind: "failure", stateId: "s2", path: "a", text: "the call failed", ok: false })]);
+    expect(notes.map((n) => [n.kind, n.text])).toEqual([["failure", "the call failed"]]);
+  });
+
+  it("draws a state being ENTERED as a step in the path", () => {
+    // The case that makes this worth having: a sequence walking down its spine takes no transitions
+    // at all, so a canvas drawn from `transition.taken` alone would be blank for the run somebody
+    // opens to ask how far it got.
+    const notes = notesOf([turn({ seq: 1, kind: "operation", stateId: "feature/product", path: "product", text: "entered" })]);
+    expect(notes).toEqual([{ seq: 1, at: 10, kind: "entered", stateId: "feature/product", path: "product", text: "" }]);
+  });
+
+  it("does not draw the ROOT entering itself — everything in the run is inside it", () => {
+    const notes = notesOf([
+      turn({ seq: 1, kind: "operation", stateId: "feature", path: "", text: "entered" }),
+      turn({ seq: 2, kind: "operation", stateId: "feature/product", path: "product", text: "entered" }),
+    ]);
+    expect(notes.map((n) => n.path)).toEqual(["product"]);
+  });
+
+  it("does not read a call, or a termination, as a state being entered", () => {
+    // `operation.started` projects onto the same kind with the OP's name, and a termination carries
+    // `ok`. Neither is the run walking into somewhere.
+    const notes = notesOf([
+      turn({ seq: 1, kind: "operation", stateId: "plan/draft", path: "draft", text: "prompt" }),
+      turn({ seq: 2, kind: "operation", stateId: "plan/draft", path: "draft", text: "entered", ok: true }),
+    ]);
     expect(notes).toEqual([]);
   });
 
-  it("ignores everything that is not a failure, and says each one once", () => {
-    const notes = notesOf(
-      [
-        turn({ seq: 1, kind: "transition", stateId: "plan", text: "draft" }),
-        turn({ seq: 2, kind: "operation", stateId: "plan", text: "success", ok: true }),
-        turn({ seq: 3, kind: "failure", stateId: "plan/draft", text: "not wired", ok: false }),
-        turn({ seq: 4, kind: "failure", stateId: "plan/draft", text: "not wired", ok: false }),
-      ],
-      [],
-    );
-    expect(notes.map((n) => n.text)).toEqual(["not wired"]);
+  it("draws a TRANSITION as its own kind of note, carrying the target it went to", () => {
+    // A transition GOES somewhere, so the row is addressed by where it ARRIVES: the taking state's
+    // path with the target as one more step.
+    const notes = notesOf([turn({ seq: 1, kind: "transition", stateId: "feature/product", path: "product", text: "explore" })]);
+    expect(notes).toEqual([
+      { seq: 1, at: 10, kind: "transition", stateId: "feature/product", path: "product/explore", text: "explore" },
+    ]);
+  });
+
+  it("says a repeated FAILURE once, and a repeated TRANSITION every time", () => {
+    // A loop that went back to `draft` three times went back three times — that IS the path. The
+    // same block reported three times is one fact reported three times.
+    const notes = notesOf([
+      turn({ seq: 1, kind: "transition", stateId: "plan", path: "", text: "draft" }),
+      turn({ seq: 2, kind: "operation", stateId: "plan", path: "", text: "success", ok: true }),
+      turn({ seq: 3, kind: "failure", stateId: "plan/draft", path: "draft", text: "not wired", ok: false }),
+      turn({ seq: 4, kind: "failure", stateId: "plan/draft", path: "draft", text: "not wired", ok: false }),
+      turn({ seq: 5, kind: "transition", stateId: "plan", path: "", text: "draft" }),
+    ]);
+    expect(notes.map((n) => [n.kind, n.text])).toEqual([
+      ["transition", "draft"],
+      ["failure", "not wired"],
+      ["transition", "draft"],
+    ]);
+  });
+
+  it("ignores the turns that are neither — a successful termination is not news on the grey", () => {
+    const notes = notesOf([
+      turn({ seq: 1, kind: "operation", stateId: "plan", path: "", text: "success", ok: true }),
+      turn({ seq: 2, kind: "output", stateId: "plan", path: "", ok: true }),
+    ]);
+    expect(notes).toEqual([]);
+  });
+});
+
+describe("pathFrom", () => {
+  it("draws a mount path as the run going one step further in", () => {
+    expect(pathFrom("product/explore", "")).toBe("product → explore");
+  });
+
+  it("trims the module already being looked at", () => {
+    // Walked into `product`: the page already says `product`, so a row repeating it wastes the
+    // column that the part which varies needs.
+    expect(pathFrom("product/explore", "product")).toBe("explore");
+  });
+
+  it("has nothing to draw for the module itself", () => {
+    expect(pathFrom("product", "product")).toBe("");
+    expect(pathFrom("", "")).toBe("");
+  });
+
+  it("leaves a path that is not inside the module alone", () => {
+    expect(pathFrom("other/thing", "product")).toBe("other → thing");
+  });
+});
+
+describe("mountPathOf", () => {
+  const node = (instanceId: number, childKey: string | undefined, children: InstanceNode[] = []): InstanceNode =>
+    ({
+      instanceId,
+      stateId: `s${instanceId}`,
+      status: "completed",
+      iteration: 0,
+      superseded: false,
+      startedAt: 0,
+      children,
+      ...(childKey !== undefined ? { childKey } : {}),
+    }) as InstanceNode;
+
+  const forest = [node(1, undefined, [node(2, "product", [node(3, "context"), node(4, "explore")])])];
+
+  it("is the chain of CHILD KEYS from the root", () => {
+    expect(mountPathOf(forest, 4)).toBe("product/explore");
+  });
+
+  it("is empty for the root — which is how the view spells you are looking at it", () => {
+    expect(mountPathOf(forest, 1)).toBe("");
+  });
+
+  it("is empty for an instance the tree does not have", () => {
+    expect(mountPathOf(forest, 99)).toBe("");
   });
 });
 
@@ -296,10 +406,10 @@ describe("placeNotes", () => {
       { id: 2, from: 10, to: 20 },
       { id: 3, from: 30, to: 40 },
     ]), [ref(2, "A", 10, 20), ref(3, "B", 30, 40)], 1));
-    const notes = [
-      { seq: 1, at: 5, text: "before anything ran" },
-      { seq: 2, at: 25, text: "between the two" },
-      { seq: 3, at: 99, text: "how it ended" },
+    const notes: BandNote[] = [
+      { seq: 1, at: 5, kind: "failure", path: "", text: "before anything ran" },
+      { seq: 2, at: 25, kind: "failure", path: "", text: "between the two" },
+      { seq: 3, at: 99, kind: "failure", path: "", text: "how it ended" },
     ];
     expect(placeNotes(notes, bands).map((bucket) => bucket.map((n) => n.text))).toEqual([
       ["before anything ran"],
@@ -308,8 +418,23 @@ describe("placeNotes", () => {
     ]);
   });
 
+  it("puts a note ABOVE a band that starts at the very same instant", () => {
+    // The tie is the ordinary case, not an edge: a band starts at the `operation.started` of its
+    // first call, and the state ENTERING is the journal event immediately before it — the one that
+    // opened the conversation. They land in the same millisecond routinely, and on `<=` the step
+    // drew underneath the panel it had just opened.
+    const bands = bandsOf(piecesOf(tree([{ id: 2, from: 1_787_686_049_384, to: 1_787_686_062_189 }]), [ref(2, "A", 1_787_686_049_384, 1_787_686_062_189)], 1));
+    const step: BandNote = { seq: 43, at: 1_787_686_049_384, kind: "entered", path: "product/context", text: "" };
+    const later: BandNote = { seq: 47, at: 1_787_686_062_191, kind: "blocked", path: "product/explore", text: "not wired" };
+    expect(placeNotes([step, later], bands).map((bucket) => bucket.map((n) => n.path))).toEqual([
+      ["product/context"],
+      ["product/explore"],
+    ]);
+  });
+
   it("gives every note the last bucket when there are no bands at all", () => {
-    expect(placeNotes([{ seq: 1, at: 5, text: "blocked" }], [])).toEqual([[{ seq: 1, at: 5, text: "blocked" }]]);
+    const only: BandNote = { seq: 1, at: 5, kind: "failure", path: "", text: "blocked" };
+    expect(placeNotes([only], [])).toEqual([[only]]);
   });
 });
 
