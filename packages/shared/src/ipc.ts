@@ -1199,6 +1199,16 @@ export interface IpcContract {
    */
   "task:rename": { request: { taskId: string; title: string; project?: ProjectRef }; response: TaskSummary };
   /** The tail of what the app has said about itself. */
+  /**
+   * What the UI just showed a person, so the log holds it too.
+   *
+   * `warn` and not `error`, decided in MAIN rather than passed in: an error the interface put in
+   * front of somebody is by definition one the app noticed and responded to, which is the whole of
+   * what a warning is. A renderer choosing its own level would be a renderer deciding whether its
+   * own code is malfunctioning, which is the one judgement it is least placed to make — a genuine
+   * malfunction reaches the log at `error` from wherever it actually threw.
+   */
+  "log:record": { request: { message: string; detail?: JsonValue }; response: { recorded: boolean } };
   "log:list": {
     request: { afterId?: number; level?: LogLevel; source?: string; project?: string; limit?: number } | void;
     response: LogEntry[];
@@ -1382,7 +1392,21 @@ export type IpcChannel = keyof IpcContract;
 export type IpcRequest<C extends IpcChannel> = IpcContract[C]["request"];
 export type IpcResponse<C extends IpcChannel> = IpcContract[C]["response"];
 
-export const IPC_CHANNELS: readonly IpcChannel[] = [
+/**
+ * Every channel the bridge will carry, as a runtime list.
+ *
+ * A second statement of the contract, and it has to be: the preload whitelist and the handler
+ * registration both need VALUES, and a type is not one. What it must never be is a second statement
+ * that can disagree — `readonly IpcChannel[]` accepted any subset, so adding a channel to the
+ * contract and forgetting it here compiled cleanly and failed in front of a person, twice over: the
+ * handler was never registered in main, and the preload refused the call as "not part of the IPC
+ * contract". Which it was.
+ *
+ * So the list is checked BOTH WAYS. `satisfies` refuses a name the contract does not declare, and
+ * the assertion under it refuses a declared name this list omits — by failing to compile with the
+ * missing channel written into the error.
+ */
+export const IPC_CHANNELS = [
   "project:open",
   "project:init",
   "project:choose",
@@ -1395,6 +1419,8 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "task:start",
   "task:cancel",
   "task:rerun",
+  "task:resume",
+  "task:resumable",
   "task:delete",
   "task:rename",
   "board:view",
@@ -1415,6 +1441,7 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "chat:cancel",
   "chat:thread",
   "log:list",
+  "log:record",
   "job:list",
   "job:output",
   "interaction:pending",
@@ -1465,7 +1492,18 @@ export const IPC_CHANNELS: readonly IpcChannel[] = [
   "availability:refresh",
   "secret:capabilities",
   "secret:set",
-];
+] as const satisfies readonly IpcChannel[];
+
+/**
+ * The other direction: a channel in the contract that nobody listed.
+ *
+ * Resolves to `never` when the list is complete, and to the missing channel's own literal type when
+ * it is not — so the compiler reports `Type 'true' is not assignable to type '"task:resume"'`, which
+ * names the omission rather than merely announcing one.
+ */
+type UnlistedChannel = Exclude<IpcChannel, (typeof IPC_CHANNELS)[number]>;
+const _everyChannelIsListed: UnlistedChannel extends never ? true : UnlistedChannel = true;
+void _everyChannelIsListed;
 
 /**
  * The live turn main is holding for a task — the same accumulation a from-the-start watcher builds

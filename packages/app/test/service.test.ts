@@ -731,6 +731,21 @@ describe("diagnostics", () => {
     expect(entry?.message).toBe("task:detail: unknown task 't-1'");
   });
 
+  it("records what the interface showed a person, as a warning", () => {
+    // The log had a hole the shape of the renderer: main records what MAIN does, so a failure that
+    // never reached main — the bridge refusing a channel, a fetch the panel gave up on — was put in
+    // front of somebody and written down nowhere.
+    service.recordUiError("channel 'task:resume' is not part of the IPC contract", { stack: "at invoke" });
+
+    const entry = service.listLogs({ source: "ui" }).at(-1);
+    // `warn`, not `error`. An error the app DISPLAYED is one it noticed and responded to, which is
+    // what a warning means here; `error` is reserved for the code actually malfunctioning, and is
+    // logged from wherever that happened rather than from the panel that reported it.
+    expect(entry).toMatchObject({ level: "warn", source: "ui" });
+    expect(entry?.message).toBe("channel 'task:resume' is not part of the IPC contract");
+    expect(JSON.stringify(entry?.detail)).toContain("at invoke");
+  });
+
   it("records a crash under its OWN source, with the stack", () => {
     // `crash` and not `process`: the test below asserts that every `process` row carries a `taskId`,
     // because that source means "a child process this run started". A crash belongs to no task.

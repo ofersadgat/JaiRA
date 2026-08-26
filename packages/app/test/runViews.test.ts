@@ -5,7 +5,7 @@
  * state that ran three times showed one card and there was no way to reach the other two passes.
  */
 import { describe, expect, it } from "vitest";
-import type { InstanceNode, ResumePlan } from "@jaira/shared/browser";
+import { IPC_CHANNELS, type InstanceNode, type ResumePlan } from "@jaira/shared/browser";
 import { instanceOf, runsByChild, stoppedAction } from "../src/renderer/runViews";
 
 const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
@@ -145,5 +145,26 @@ describe("stoppedAction", () => {
     const action = stoppedAction({ status: "failed", resume: plan({ blocked: "no record for design's operation" }) })!;
     expect(action.verb).toBe("Try again");
     expect(action.hint).toContain("resuming is unavailable: no record for design's operation");
+  });
+});
+
+/**
+ * The bridge carries every channel the contract declares.
+ *
+ * `IPC_CHANNELS` is a second statement of `IpcContract` — the preload whitelist and the handler
+ * registration both need values, and a type is not one — so the two can disagree, and did:
+ * `task:resume` shipped in the contract and not in the list, which meant no handler was registered
+ * and the preload refused the call as "not part of the IPC contract". The compiler catches that
+ * now; this catches it in the form a reader recognises, and names the channels that were missed.
+ */
+describe("the IPC channel list", () => {
+  it("carries the resume channels, and the one the UI reports through", () => {
+    for (const channel of ["task:resume", "task:resumable", "log:record"] as const) {
+      expect(IPC_CHANNELS).toContain(channel);
+    }
+  });
+
+  it("has no duplicates, since it becomes a Set the bridge trusts", () => {
+    expect(new Set(IPC_CHANNELS).size).toBe(IPC_CHANNELS.length);
   });
 });

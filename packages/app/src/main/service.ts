@@ -1331,6 +1331,28 @@ export class AppService {
    * highest-value diagnostic in the app: every failed channel call becomes one legible line, where
    * before it was a rejection that died in a renderer catch and was recorded nowhere.
    */
+  /**
+   * An error the interface put in front of a person ("log:record").
+   *
+   * The log had a hole exactly the shape of the renderer: main records what IT does, so a failure
+   * that never reached main — the bridge refusing a channel, a fetch the renderer gave up on —
+   * was shown to somebody and written down nowhere. Someone reading the Logs panel after being told
+   * something went wrong found no trace of the thing they had just been told.
+   *
+   * `warn`, always, and fixed here rather than taken from the caller: an error the UI displayed is
+   * one the app noticed and handled by saying so, which is what a warning IS. Anything actually
+   * malfunctioning logs at `error` from the place it malfunctioned.
+   */
+  recordUiError(message: string, detail?: JsonValue): { recorded: boolean } {
+    this.log({
+      level: "warn",
+      source: "ui",
+      message,
+      ...(detail !== undefined ? { detail } : {}),
+    });
+    return { recorded: true };
+  }
+
   recordIpcFailure(channel: string, error: unknown): void {
     const e = error instanceof Error ? error : new Error(String(error));
     this.log({
