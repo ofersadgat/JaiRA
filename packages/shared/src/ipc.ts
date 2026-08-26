@@ -1199,16 +1199,6 @@ export interface IpcContract {
    */
   "task:rename": { request: { taskId: string; title: string; project?: ProjectRef }; response: TaskSummary };
   /** The tail of what the app has said about itself. */
-  /**
-   * What the UI just showed a person, so the log holds it too.
-   *
-   * `warn` and not `error`, decided in MAIN rather than passed in: an error the interface put in
-   * front of somebody is by definition one the app noticed and responded to, which is the whole of
-   * what a warning is. A renderer choosing its own level would be a renderer deciding whether its
-   * own code is malfunctioning, which is the one judgement it is least placed to make — a genuine
-   * malfunction reaches the log at `error` from wherever it actually threw.
-   */
-  "log:record": { request: { message: string; detail?: JsonValue }; response: { recorded: boolean } };
   "log:list": {
     request: { afterId?: number; level?: LogLevel; source?: string; project?: string; limit?: number } | void;
     response: LogEntry[];
@@ -1441,7 +1431,6 @@ export const IPC_CHANNELS = [
   "chat:cancel",
   "chat:thread",
   "log:list",
-  "log:record",
   "job:list",
   "job:output",
   "interaction:pending",

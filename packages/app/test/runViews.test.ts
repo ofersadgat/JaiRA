@@ -158,8 +158,8 @@ describe("stoppedAction", () => {
  * now; this catches it in the form a reader recognises, and names the channels that were missed.
  */
 describe("the IPC channel list", () => {
-  it("carries the resume channels, and the one the UI reports through", () => {
-    for (const channel of ["task:resume", "task:resumable", "log:record"] as const) {
+  it("carries the resume channels", () => {
+    for (const channel of ["task:resume", "task:resumable"] as const) {
       expect(IPC_CHANNELS).toContain(channel);
     }
   });

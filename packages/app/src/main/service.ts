@@ -630,6 +630,21 @@ function pendingApprovalOf(request: ApprovalRequest, project: string): PendingAp
  * JSON (it is parsed with `parseFakeRules`); in-process callers usually have
  * typed rules already, so both are accepted here.
  */
+/**
+ * An error the service raised ON PURPOSE, and already logged where it decided to.
+ *
+ * The log's two levels mean different things — `error` is the code malfunctioning, `warn` is
+ * something going wrong that the code then handled — and only the site that raised a failure knows
+ * which one it is. "unknown task 't-1'" is the service working exactly as intended; a `TypeError`
+ * out of the same handler is not, and at the IPC boundary the two arrive looking identical. So the
+ * boundary stops classifying on anyone's behalf: a site that has decided, and has written its own
+ * line at its own level, throws this, and {@link AppService.recordIpcFailure} leaves it alone.
+ *
+ * The renderer sees no difference — it still gets the rejection and still shows the message. What
+ * changes is only which of the two things the log says happened.
+ */
+export class Refusal extends Error {}
+
 export interface StartRunRequest extends Omit<StartTaskRequest, "fake"> {
   fake?: JsonValue | FakeRule[];
 }
@@ -1330,30 +1345,16 @@ export class AppService {
    * Public because the boundary that catches it is in `index.ts`, and because it is the single
    * highest-value diagnostic in the app: every failed channel call becomes one legible line, where
    * before it was a rejection that died in a renderer catch and was recorded nowhere.
-   */
-  /**
-   * An error the interface put in front of a person ("log:record").
    *
-   * The log had a hole exactly the shape of the renderer: main records what IT does, so a failure
-   * that never reached main — the bridge refusing a channel, a fetch the renderer gave up on —
-   * was shown to somebody and written down nowhere. Someone reading the Logs panel after being told
-   * something went wrong found no trace of the thing they had just been told.
-   *
-   * `warn`, always, and fixed here rather than taken from the caller: an error the UI displayed is
-   * one the app noticed and handled by saying so, which is what a warning IS. Anything actually
-   * malfunctioning logs at `error` from the place it malfunctioned.
+   * `error` is the right level for what is LEFT here — an exception nobody expected, which is the one
+   * kind a boundary can classify without knowing anything about what it was doing. A {@link Refusal}
+   * is not that, and is skipped: see the class.
    */
-  recordUiError(message: string, detail?: JsonValue): { recorded: boolean } {
-    this.log({
-      level: "warn",
-      source: "ui",
-      message,
-      ...(detail !== undefined ? { detail } : {}),
-    });
-    return { recorded: true };
-  }
-
   recordIpcFailure(channel: string, error: unknown): void {
+    // Already logged where it was DECIDED, at the level only that site could choose. Logging it a
+    // second time here would file the service working correctly under "the code is malfunctioning",
+    // which is the distinction the two levels exist to make.
+    if (error instanceof Refusal) return;
     const e = error instanceof Error ? error : new Error(String(error));
     this.log({
       level: "error",
@@ -3671,21 +3672,48 @@ export class AppService {
    */
   async resumeTask(request: StartRunRequest): Promise<{ taskId: string; runId: number }> {
     const open = this.session(request.project);
-    const row = open.project.runtime.get(request.taskId);
-    if (row === undefined) throw new Error(`unknown task '${request.taskId}'`);
-    if (row.status === "running") throw new Error(`task '${request.taskId}' is already running`);
-    if (!isStartableStatus(row.status)) {
-      throw new Error(`task '${request.taskId}' is ${row.status} and cannot be resumed — run it again instead`);
+    const taskId = request.taskId;
+    // Every refusal below is the same shape: say what happened, at the level that describes it, then
+    // throw a {@link Refusal} so the IPC boundary does not file it a second time as a malfunction.
+    // `warn` on all of them — the run did not resume, and the reason it did not is that the service
+    // checked and declined, which is the code working rather than the code breaking.
+    const refuse = (message: string, detail?: JsonValue): never => {
+      this.log({ level: "warn", source: "run", message, project: open.key, taskId, ...(detail !== undefined ? { detail } : {}) });
+      throw new Refusal(message);
+    };
+
+    const row = open.project.runtime.get(taskId);
+    if (row === undefined) refuse(`cannot resume unknown task '${taskId}'`);
+    if (row!.status === "running") refuse(`task '${taskId}' is already running`);
+    if (!isStartableStatus(row!.status)) {
+      refuse(`task '${taskId}' is ${row!.status} and cannot be resumed — run it again instead`);
     }
-    const replay = buildTaskReplay(open.project, request.taskId);
+    const replay = buildTaskReplay(open.project, taskId);
     if (replay.unreadable.length > 0) {
       const first = replay.unreadable[0]!;
-      throw new Error(
-        `task '${request.taskId}' cannot be resumed: ${replay.unreadable.length} operation(s) have no readable record ` +
+      refuse(
+        `task '${taskId}' cannot be resumed: ${replay.unreadable.length} operation(s) have no readable record ` +
           `(first: ${first.stateId} — ${first.reason}). Running it again would repeat them.`,
+        // The whole list, because one example names the symptom and the set is what someone would
+        // need to work out whether the history is holed in one place or everywhere.
+        replay.unreadable.map((entry) => ({ stateId: entry.stateId, reason: entry.reason })),
       );
     }
-    return this.startRun(open, request.taskId, {
+    // What a resume actually IS, written down before it happens: how much is being taken from the
+    // record and where the spending starts again. Without this a resumed run is indistinguishable in
+    // the log from an ordinary one, and the interesting number — what it did NOT re-run — is the one
+    // nothing else reports.
+    const frontier = replay.frontier.map((entry) => entry.stateId);
+    this.log({
+      level: "info",
+      source: "run",
+      message: `resuming ${taskId}: ${replay.answers.size} operation(s) replayed, ${
+        frontier.length > 0 ? `re-entering ${frontier.join(", ")}` : "re-running the state that failed"
+      }`,
+      project: open.key,
+      taskId,
+    });
+    return this.startRun(open, taskId, {
       config: open.project.config,
       secrets: this.secretResolver(open),
       replay: replaySourceOf(replay),

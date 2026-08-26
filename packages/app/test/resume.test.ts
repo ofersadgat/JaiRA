@@ -233,13 +233,35 @@ describe("what the strip is told", () => {
     expect(service.resumable(taskId)).toMatchObject({ kind: "none", replayed: 0, frontier: [] });
   });
 
-  it("refuses to resume a completed task", async () => {
+  it("refuses to resume a completed task, and says so in the log as a WARNING", async () => {
     const taskId = await start();
     await answer();
     await answer();
     await answer();
     await until(() => pushes.some((p) => p.type === "run:finished"), "the run to finish");
     await expect(service.resumeTask({ taskId })).rejects.toThrow(/completed and cannot be resumed/);
+
+    // Logged where the decision was MADE, not generically at the boundary — which is the only place
+    // that knows this is the service declining rather than the service breaking. `warn`, therefore:
+    // something did not happen, and the reason is that the code checked and said no.
+    const entry = service.listLogs({ source: "run" }).filter((e) => e.taskId === taskId).at(-1);
+    expect(entry).toMatchObject({ level: "warn", source: "run" });
+    expect(entry?.message).toContain("cannot be resumed");
+  }, 30000);
+
+  it("writes down what a resume is about to skip", async () => {
+    const taskId = await start();
+    await answer();
+    await parked();
+    await crashAndReopen(taskId);
+    await service.resumeTask({ taskId });
+
+    // The number that matters is the one nothing else reports: how much was taken from the record
+    // rather than run again. Without it a resumed run reads in the log exactly like an ordinary one.
+    const line = service.listLogs({ source: "run" }).find((e) => e.taskId === taskId && e.message.startsWith("resuming"));
+    expect(line).toMatchObject({ level: "info", source: "run" });
+    expect(line?.message).toContain("1 operation(s) replayed");
+    expect(line?.message).toContain(`re-entering ${ROOT}/b`);
   }, 30000);
 });
 

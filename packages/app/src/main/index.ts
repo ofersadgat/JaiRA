@@ -12,7 +12,6 @@ import { basename, dirname, join, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
 import { isProject } from "@jaira/persistence";
 import { ARTIFACT_SCHEME, IPC_CHANNELS, PUSH_CHANNEL, type IpcChannel, type PushMessage, type SaveFileRequest } from "@jaira/shared";
-import type { JsonValue } from "@declarative-ai/json";
 import { AppService, type CrashKind, type KeychainPort } from "./service";
 
 // Source maps are enabled in `entry.cjs`, which loads this bundle — NOT here. The flag registers a
@@ -281,8 +280,6 @@ const handlers: Record<IpcChannel, Handler> = {
     service.cancelTask(request.taskId, request.project)) as Handler,
   "task:rerun": ((request: Parameters<typeof service.rerunTask>[0]) => service.rerunTask(request)) as Handler,
   "task:resume": ((request: Parameters<typeof service.resumeTask>[0]) => service.resumeTask(request)) as Handler,
-  "log:record": ((request: { message: string; detail?: JsonValue }) =>
-    service.recordUiError(request.message, request.detail)) as Handler,
   "task:resumable": ((request: { taskId: string; project?: string }) =>
     service.resumable(request.taskId, request.project)) as Handler,
   "task:delete": ((request: { taskId: string; project?: string }) =>

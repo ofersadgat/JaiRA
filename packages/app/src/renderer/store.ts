@@ -901,30 +901,7 @@ export function useApp() {
   // The backstop: after a render the ref is the state, whatever the incremental writes above did.
   ref.current = state;
 
-  /**
-   * Show a failure, and write it down.
-   *
-   * Every user-facing error in this store passes through here, which is what makes it the one place
-   * worth reporting from. Main records what MAIN does; a failure the bridge refused, or one a
-   * handler rejected and the panel then displayed, was shown to a person and left no trace anybody
-   * reading the Logs panel could find. `log:record` closes that, at `warn` — main fixes the level,
-   * because "the app told someone" is not the renderer's judgement to make.
-   *
-   * Reported and forgotten: the report is `void`-ed rather than awaited, so a slow write cannot
-   * delay the message appearing, and its failure is swallowed rather than routed back here — a
-   * reporting call that called `fail` on failing would loop on the one channel already broken.
-   */
-  const fail = useCallback(
-    (e: unknown) => {
-      const error = e instanceof Error ? e : new Error(String(e));
-      patch({ error: error.message, busy: false });
-      void invoke("log:record", {
-        message: error.message,
-        ...(error.stack !== undefined ? { detail: { stack: error.stack } } : {}),
-      }).catch(() => undefined);
-    },
-    [patch],
-  );
+  const fail = useCallback((e: unknown) => patch({ error: (e as Error).message, busy: false }), [patch]);
 
   /**
    * The pending write of the remembered layout, and whether one has been read yet.

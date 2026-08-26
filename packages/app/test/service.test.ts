@@ -14,7 +14,7 @@ import { initProject } from "@jaira/persistence";
 import { blockedRules, happyRules, HUMAN_REVIEW_FUNCTION, specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
 import { jairaBasePaths, SHARED_SESSION, type PushMessage } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
-import { AppService } from "../src/main/service";
+import { AppService, Refusal } from "../src/main/service";
 
 let dir: string;
 let service: AppService;
@@ -731,19 +731,17 @@ describe("diagnostics", () => {
     expect(entry?.message).toBe("task:detail: unknown task 't-1'");
   });
 
-  it("records what the interface showed a person, as a warning", () => {
-    // The log had a hole the shape of the renderer: main records what MAIN does, so a failure that
-    // never reached main — the bridge refusing a channel, a fetch the panel gave up on — was put in
-    // front of somebody and written down nowhere.
-    service.recordUiError("channel 'task:resume' is not part of the IPC contract", { stack: "at invoke" });
+  it("leaves a REFUSAL alone — its own site already logged it, and knew what it was", () => {
+    // The boundary sees a deliberate refusal and a genuine bug as the same shape, so it must not
+    // classify either: `error` means the code is malfunctioning, and "the service declined" is the
+    // code working. A site that has decided says so with `Refusal`, having written its own line.
+    const before = service.listLogs({ source: "ipc" }).length;
+    service.recordIpcFailure("task:resume", new Refusal("task 't-1' is completed and cannot be resumed"));
+    expect(service.listLogs({ source: "ipc" }).length).toBe(before);
 
-    const entry = service.listLogs({ source: "ui" }).at(-1);
-    // `warn`, not `error`. An error the app DISPLAYED is one it noticed and responded to, which is
-    // what a warning means here; `error` is reserved for the code actually malfunctioning, and is
-    // logged from wherever that happened rather than from the panel that reported it.
-    expect(entry).toMatchObject({ level: "warn", source: "ui" });
-    expect(entry?.message).toBe("channel 'task:resume' is not part of the IPC contract");
-    expect(JSON.stringify(entry?.detail)).toContain("at invoke");
+    // Anything else is exactly what a boundary CAN classify: an exception nobody expected.
+    service.recordIpcFailure("task:resume", new TypeError("x is not a function"));
+    expect(service.listLogs({ source: "ipc" }).at(-1)).toMatchObject({ level: "error", source: "ipc" });
   });
 
   it("records a crash under its OWN source, with the stack", () => {
