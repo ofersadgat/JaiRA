@@ -1,0 +1,477 @@
+{
+  "label": "Critique the units",
+  "description": "Do the units cover the behaviour, and do the invariants say anything? (feature.md §4).",
+  "inputs": {
+    "units": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "unit_docs": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "contract_docs": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "decisions": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "components": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "flows": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "severity_threshold": {
+      "kind": "text",
+      "schema": {
+        "type": "string",
+        "enum": [
+          "blocker",
+          "significant",
+          "minor",
+          "note"
+        ]
+      }
+    },
+    "prior_findings": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "severity",
+            "claim"
+          ],
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "blocker",
+                "significant",
+                "minor",
+                "note"
+              ]
+            },
+            "claim": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string",
+              "description": "A path:line, a quotation, or a reproduction."
+            },
+            "target_id": {
+              "type": "string",
+              "description": "The deliverable, flow, component or unit id this is about."
+            }
+          }
+        }
+      }
+    },
+    "working_set": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "findings": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "findings"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "findings"
+    },
+    "max_severity": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "max_severity"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "max_severity"
+    },
+    "max_severity_rank": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "max_severity_rank"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "max_severity_rank"
+    },
+    "target": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "target"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "target"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Judge this design. Two questions: **do the units cover the behaviour, and do the\ninvariants say anything?**\n\nStructure is already machine-checked. Spend your attention on substance.\n\n## The units and their docs\n\n{{.inputs.units}}\n\n{{.inputs.unit_docs}}\n\n_Paths — open them with `read_file`._\n\n## The contracts\n\n{{.inputs.contract_docs}}\n\n## The decision records\n\n{{.inputs.decisions}}\n\n## What they have to serve\n\n{{.inputs.components}}\n\n{{.inputs.flows}}\n\n## The docs this phase reads\n\n{{.inputs.working_set}}\n\n**These are paths, not contents.** Open each one with `read_file` before you start. Read the\nfile as it is now — an earlier state in this phase may have edited it since the run began.\n\n## Findings from the previous pass\n\n{{.inputs.prior_findings}}\n\n## What to check\n\n- **Components and flows with no unit behind them** — and units that serve\n  nothing.\n- **Invariants that cannot be false.** \"The store returns valid data\" is\n  decoration. One worth writing names a state the system could actually reach and\n  is forbidden from, and phase 5 has to be able to assert it. Take each invariant\n  and try to write the failing test in your head; where you cannot, say so.\n- **Failure modes that are only the easy ones.** Which has it *not* answered: two\n  writers at once, a process killed mid-write, a partial read, a retry that\n  duplicates, a clock that moved? Naming \"network error\" and stopping is the\n  usual shape of an incomplete list.\n- **Every failure mode maps to a UX state.** If one has none, that is `blocked`:\n  either phase 2 missed a state or the failure cannot occur, and a person\n  decides which.\n- **One owner per fact.** Where two stores hold the same thing, is the source of\n  truth named and the other one derived?\n- **Units that are one responsibility split across a file boundary**, or one file\n  holding two responsibilities.\n- **Is the compatibility answer honest about existing data** — not just the\n  schema, but rows written by the version running right now?\n- **Budgets that are adjectives.** If nothing is at risk, say so and drop the\n  section.\n- An architecture change lives in `architecture.md`, not only in the unit doc.\n\n## What to produce\n\n`findings` (severity · claim · evidence · target_id), `max_severity`,\n`max_severity_rank`, and `target` — `draft`, `explore`, or `upstream` where the\ncomponent or the flow is what is wrong.\n",
+    "config": {
+      "model": "claude-opus-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "severity",
+                "claim"
+              ],
+              "properties": {
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "blocker",
+                    "significant",
+                    "minor",
+                    "note"
+                  ]
+                },
+                "claim": {
+                  "type": "string"
+                },
+                "evidence": {
+                  "type": "string",
+                  "description": "A path:line, a quotation, or a reproduction."
+                },
+                "target_id": {
+                  "type": "string",
+                  "description": "The deliverable, flow, component or unit id this is about."
+                }
+              }
+            }
+          },
+          "max_severity": {
+            "type": "string",
+            "enum": [
+              "blocker",
+              "significant",
+              "minor",
+              "note"
+            ]
+          },
+          "max_severity_rank": {
+            "type": "integer"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "explore",
+              "upstream"
+            ]
+          }
+        },
+        "required": [
+          "findings",
+          "max_severity",
+          "max_severity_rank",
+          "target"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file"
+    ]
+  },
+  "slotMeta": {
+    "inputs.units": {
+      "optional": true
+    },
+    "inputs.unit_docs": {
+      "optional": true,
+      "description": "Path to unit_docs. Read it with read_file — the file as it is now, not a copy taken at state entry."
+    },
+    "inputs.contract_docs": {
+      "optional": true
+    },
+    "inputs.decisions": {
+      "optional": true
+    },
+    "inputs.severity_threshold": {
+      "description": "Substantial means at or above this."
+    },
+    "inputs.prior_findings": {
+      "optional": true,
+      "description": "The previous pass's findings, so the loop converges instead of rediscovering the same weakness."
+    },
+    "inputs.working_set": {
+      "optional": true,
+      "description": "Paths to the docs this phase reads — its standing docs and the catalog entries that bear on the feature. Open them with read_file: the file as it is now, not a copy taken before this phase started editing."
+    }
+  }
+}

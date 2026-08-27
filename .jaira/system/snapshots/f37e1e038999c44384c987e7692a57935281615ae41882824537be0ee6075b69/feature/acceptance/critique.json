@@ -1,0 +1,451 @@
+{
+  "label": "Critique the acceptance suite",
+  "description": "Would these tests still pass if the feature delivered nothing useful? (feature.md §6).",
+  "inputs": {
+    "acceptance_tests": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "results": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    },
+    "diagnosability": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    },
+    "claims": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "covered": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "severity_threshold": {
+      "kind": "text",
+      "schema": {
+        "type": "string",
+        "enum": [
+          "blocker",
+          "significant",
+          "minor",
+          "note"
+        ]
+      }
+    },
+    "prior_findings": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "severity",
+            "claim"
+          ],
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "blocker",
+                "significant",
+                "minor",
+                "note"
+              ]
+            },
+            "claim": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string",
+              "description": "A path:line, a quotation, or a reproduction."
+            },
+            "target_id": {
+              "type": "string",
+              "description": "The deliverable, flow, component or unit id this is about."
+            }
+          }
+        }
+      }
+    }
+  },
+  "outputs": {
+    "findings": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "findings"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "findings"
+    },
+    "max_severity": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "max_severity"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "max_severity"
+    },
+    "max_severity_rank": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "max_severity_rank"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "max_severity_rank"
+    },
+    "target": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "target"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "target"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Judge this acceptance suite. One question above all the others: **would these\ntests still pass if the feature delivered nothing useful?**\n\n## The tests\n\n{{.inputs.acceptance_tests}}\n\n## What they reported\n\n{{.inputs.results}}\n\n## The mutation check\n\n{{.inputs.diagnosability}}\n\n## The claims they were supposed to defend\n\n{{.inputs.claims}}\n\n## What phase 5 already covers\n\n{{.inputs.covered}}\n\n## Findings from the previous pass\n\n{{.inputs.prior_findings}}\n\n## What to check\n\n- **The central question, per test:** imagine the feature technically working and\n  worthless — the data loads but is wrong, the run starts but never finishes.\n  Does this test still pass? Then it asserts an intermediate, not the success\n  signal. Go through them one at a time; this is the finding worth the whole\n  phase.\n- **Deliverables with no test**, especially the ones that break *silently*: no\n  crash, no error, just wrong. Those need the most coverage and usually have the\n  least.\n- **Tests that take a shortcut the person cannot take** — through the API when\n  the deliverable is reached through the UI. They pass while the real path is\n  broken.\n- **Acceptance tests that re-assert a unit invariant** already covered in phase\n  5: duplicated cost, and a false reading of coverage.\n- **Failure modes invisible from outside.** Every phase-4 mode should be reachable\n  and observable the way the person experiences it, or recorded as unverified.\n- **Diagnosability.** The mutations must make the suite fail *and name the cause*.\n  A suite that goes red without saying why gets ignored in six months. Read the\n  mutation results as evidence, not as a formality.\n- Every `done_when` from phase 5 has a test that would notice it regressing;\n  invalidated tests were deleted or rewritten, not skipped.\n\n## What to produce\n\n`findings` (severity · claim · evidence · target_id), `max_severity`,\n`max_severity_rank` (blocker=3, significant=2, minor=1, note=0), and `target` —\n`draft` to go back to writing tests, `explore` to re-open how the value is\ndriven, `upstream` where the flow or the deliverable is what is wrong.\n",
+    "config": {
+      "model": "claude-opus-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "severity",
+                "claim"
+              ],
+              "properties": {
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "blocker",
+                    "significant",
+                    "minor",
+                    "note"
+                  ]
+                },
+                "claim": {
+                  "type": "string"
+                },
+                "evidence": {
+                  "type": "string",
+                  "description": "A path:line, a quotation, or a reproduction."
+                },
+                "target_id": {
+                  "type": "string",
+                  "description": "The deliverable, flow, component or unit id this is about."
+                }
+              }
+            }
+          },
+          "max_severity": {
+            "type": "string",
+            "enum": [
+              "blocker",
+              "significant",
+              "minor",
+              "note"
+            ]
+          },
+          "max_severity_rank": {
+            "type": "integer"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "explore",
+              "upstream"
+            ]
+          }
+        },
+        "required": [
+          "findings",
+          "max_severity",
+          "max_severity_rank",
+          "target"
+        ]
+      }
+    }
+  },
+  "slotMeta": {
+    "inputs.acceptance_tests": {
+      "optional": true
+    },
+    "inputs.results": {
+      "optional": true
+    },
+    "inputs.diagnosability": {
+      "optional": true
+    },
+    "inputs.claims": {
+      "optional": true,
+      "description": "The deliverables this phase must prove — id, story, success signal."
+    },
+    "inputs.covered": {
+      "optional": true,
+      "description": "What phase 5's unit tests already assert. Do not re-assert an invariant here."
+    },
+    "inputs.severity_threshold": {
+      "description": "Substantial means at or above this."
+    },
+    "inputs.prior_findings": {
+      "optional": true,
+      "description": "The previous pass's findings, so the loop converges instead of rediscovering the same weakness."
+    }
+  }
+}

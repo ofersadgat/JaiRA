@@ -1,0 +1,145 @@
+{
+  "label": "Write acceptance tests",
+  "description": "One test per deliverable, walking the flow's steps, asserting the SUCCESS SIGNAL — not mocking the thing under test (feature.md §6 step 3). A coding agent.",
+  "inputs": {
+    "claims": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "flows": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "covered": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "map": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    }
+  },
+  "outputs": {
+    "acceptance_tests": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "acceptance_tests"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "acceptance_tests"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Write one acceptance test per deliverable. These prove the **product\ndeliverables**, not the units.\n\nPhase 5 already defended every phase-4 invariant with a unit test beside the code.\nNothing here repeats that. This phase asks the only question those tests cannot:\n**can the person from the story actually get the value?**\n\n## The claims to defend\n\n{{.inputs.claims}}\n\n## The flows that reach them\n\n{{.inputs.flows}}\n\n## What phase 5 already covers\n\n{{.inputs.covered}}\n\nDo not re-assert anything in that list. An acceptance test that re-asserts a unit\ninvariant is duplicated cost and a false reading of coverage.\n\n## How to drive it\n\n{{.inputs.map}}\n\n## How to write them\n\n**Walk the flow's steps** and assert the **success signal** — the observable the\nflow declared as \"the person got the value\".\n\nThe test that matters is the one that fails when the person stops getting the\nvalue. So before you write each one, do this: **imagine the feature technically\nworking and worthless** — the data loads but is wrong, the run starts but never\nfinishes, the list renders but is empty when it should not be. Does your test\nstill pass? Then it asserts an intermediate, and you have not written the test\nyet.\n\nRules:\n\n- **Do not mock the thing under test.** What has to be real for this test to mean\n  anything — the store, the agent runtime, the file system? Make those real.\n  What may still be faked, fake.\n- **Do not take a shortcut the person cannot take.** Reaching through the API\n  when the deliverable is reached through the UI produces a test that passes while\n  the real path is broken.\n- **Weight coverage toward what breaks silently** — no crash, no error, just\n  wrong. Those need the most coverage and usually have the least.\n- **Every phase-4 failure mode** should be reachable and observable the way the\n  person experiences it. Where one is not, leave it uncovered and say so rather\n  than asserting it from the inside.\n- **Delete or rewrite tests this feature invalidates.** Do not skip them.\n\n## What to produce\n\n`acceptance_tests` — one row per test: the deliverable it defends, the success\nsignal it asserts, how it drives the system, what is real and what is faked, and\nwhere the test lives.\n",
+    "config": {
+      "model": "claude-cli/default"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "acceptance_tests": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "acceptance_tests"
+        ]
+      }
+    }
+  },
+  "slotMeta": {
+    "inputs.claims": {
+      "optional": true,
+      "description": "The deliverables this phase must prove — id, story, success signal."
+    },
+    "inputs.covered": {
+      "optional": true,
+      "description": "What phase 5's unit tests already assert. Do not re-assert an invariant here."
+    },
+    "inputs.map": {
+      "optional": true,
+      "description": "How to drive it: through the UI, the CLI, the contract seam, or a real store."
+    }
+  }
+}

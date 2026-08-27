@@ -1,0 +1,139 @@
+{
+  "label": "Draft contracts",
+  "description": "A doc per API, schema, event, format or CLI surface, with its compatibility answer (feature.md §4 step 4).",
+  "inputs": {
+    "units": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "unit_docs": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "existing": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "contract_docs": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "contract_docs"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "contract_docs"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Write a doc per contract this design owns.\n\n## The units\n\n{{.inputs.units}}\n\n## Their docs\n\n{{.inputs.unit_docs}}\n\n_Paths — open them with `read_file`._\n\n## The contracts that already exist\n\n{{.inputs.existing}}\n\n## What counts as a contract\n\nAny **API, schema, event, file format, or CLI surface** a unit owns. If something\noutside this feature can depend on its shape, it is a contract, whether or not\nanyone has depended on it yet.\n\n## Per contract\n\n- **Which unit owns it.** Exactly one.\n- **Is it already public?** Who depends on it today? Check the existing catalog\n  rather than guessing.\n- **The compatibility answer.** Not just \"is the new schema compatible with the\n  old schema\" — **is it compatible with the rows written by the version running\n  right now?** That is the question that actually breaks in production, and the\n  one a schema diff does not answer.\n- **What migrates**, and whether it can be rolled back after it has run. A\n  one-way door is named as one here, so the implementation phase's confirm gate\n  can be entered before it opens rather than after.\n\n## What to produce\n\n`contract_docs` — one entry per contract: `id`, the owning unit, the surface, the\nshape, whether it is public, its dependents, and the compatibility answer with\nthe rollback story.\n",
+    "config": {
+      "model": "claude-opus-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "contract_docs": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "contract_docs"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file"
+    ]
+  },
+  "slotMeta": {
+    "inputs.units": {
+      "optional": true
+    },
+    "inputs.unit_docs": {
+      "optional": true,
+      "description": "Path to unit_docs. Read it with read_file — the file as it is now, not a copy taken at state entry."
+    },
+    "inputs.existing": {
+      "description": "Paths to existing. Read them with read_file — the files as they are now, not copies taken at state entry."
+    }
+  }
+}

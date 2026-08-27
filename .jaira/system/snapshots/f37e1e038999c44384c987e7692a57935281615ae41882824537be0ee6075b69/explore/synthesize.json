@@ -1,0 +1,443 @@
+{
+  "label": "Synthesize",
+  "inputs": {
+    "criteria": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "candidates": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "scores": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "candidate_kind": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "mandatory_candidate": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    }
+  },
+  "outputs": {
+    "composite": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "composite"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "composite"
+    },
+    "composite_score": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "composite_score"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "composite_score"
+    },
+    "residue": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "residue"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "residue"
+    },
+    "exploration_doc": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "exploration_doc"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "exploration_doc"
+    },
+    "mandatory_id": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "mandatory_id"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "mandatory_id"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Build the composite, and say honestly what it dropped.\n\n## The criteria\n\n{{.inputs.criteria}}\n\n## The candidates\n\n{{.inputs.candidates}}\n\n## The scores\n\n{{.inputs.scores}}\n\n## What to produce\n\n`composite` — a candidate built from the best of the others, in the same shape\nas they are. Take each candidate's `unique` seriously: the composite exists to\nkeep what would otherwise be lost. **Say what it dropped and why** — a composite\nthat claims to keep everything has kept nothing that conflicted, which means it\nhas not chosen.\n\n`composite_score` — the composite scored against the same criteria, by the same\nmethod. Do not flatter it. A composite that grafts three stances together\nusually loses on coherence, and that is exactly what the arithmetic in `verdict`\nis for.\n\n`residue` — **one or two lines**, in the form the phase's doc actually carries.\nThis is the only part of the exploration that survives into `docs/`; the\ncandidates and the scoring table stay on the task.\n\n| Kind | Where the residue lands |\n| --- | --- |\n| `product` | **Framings considered** — the rejected reading, and why not |\n| `ux` | The flow's **Where this fits**, or a new pattern if the shape recurs |\n| `ui` | **Instead consider** on the component |\n| `engineering` | A numbered **decision record** — the one place a losing option keeps its full argument |\n| anything else | One line on the doc this phase produced |\n\nThis exploration is kind `{{.inputs.candidate_kind}}`.\n\nThe test for the residue: a month from now nobody reads the scoring table, and\nsomebody will re-propose the losing option. Write the line that answers them.\nIf a losing candidate is worth more than a row, it was a decision, and it gets a\ndecision record.\n\n`exploration_doc` — the brief, the criteria, the candidates and the scores, as\none markdown document. This is a run artifact on the task, not a file in\n`docs/`.\n",
+    "config": {
+      "model": "claude-opus-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "composite": {
+            "type": "object",
+            "required": [
+              "id",
+              "stance",
+              "content"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "stance": {
+                "type": "string"
+              },
+              "is_mandatory": {
+                "type": "boolean"
+              },
+              "content": {
+                "type": "string"
+              },
+              "holds_earlier_fixed": {
+                "type": "boolean"
+              },
+              "has_irreversible": {
+                "type": "boolean"
+              }
+            }
+          },
+          "composite_score": {
+            "type": "object",
+            "required": [
+              "total"
+            ],
+            "properties": {
+              "total": {
+                "type": "number"
+              },
+              "candidate_id": {
+                "type": "string"
+              }
+            }
+          },
+          "residue": {
+            "type": "object",
+            "description": "One or two lines to land on the phase's doc: product='Framings considered'; ux='Where this fits' or new pattern; ui='Instead consider' + winning mockups; engineering=numbered decision record; 5-7=one line on the phase's doc."
+          },
+          "exploration_doc": {
+            "type": "string",
+            "contentMediaType": "text/markdown"
+          },
+          "mandatory_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "composite",
+          "composite_score",
+          "residue",
+          "exploration_doc",
+          "mandatory_id"
+        ]
+      }
+    }
+  }
+}

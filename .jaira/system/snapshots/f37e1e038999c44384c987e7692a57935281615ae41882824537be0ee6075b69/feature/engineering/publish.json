@@ -1,0 +1,175 @@
+{
+  "label": "Publish engineering docs",
+  "description": "Write this phase's docs to their paths and add the index rows (feature.md §0.2). An AGENT with write_file, not a host function: the tool already routes through artifacts.destination and the scope table, so \"the agent never learns where its file went\" is a property of the tool registration rather than a reason to keep writing out of an agent's hands. The structural refusals §0.2 lists are a repo lint now — they belong in CI, where a hand-edited doc is caught too.",
+  "inputs": {
+    "phase": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "area": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "docs": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "entries": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "residue": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    },
+    "amendment": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "gate_decision": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    }
+  },
+  "outputs": {
+    "paths": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "paths"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "paths"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Write this phase's documents into the doc tree, and leave the tree consistent.\n\nYou are publishing for the **{{.inputs.phase}}** phase, into `docs/{{.inputs.area}}/`.\n\n## The documents\n\n{{.inputs.docs}}\n\n## The structured entries they describe\n\n{{.inputs.entries}}\n\n## What the exploration left behind\n\n{{.inputs.residue}}\n\n## An amendment to a standing doc, where one was approved\n\n{{.inputs.amendment}}\n\n## The gate's decision\n\n{{.inputs.gate_decision}}\n\nPublish only on `approve`. On anything else, write nothing and report what you would\nhave written — a doc that lands after the gate declined is worse than one that never\nlanded, because nothing downstream knows it is there.\n\n## What to do\n\n**Write each document to its path.** A doc's id is its path under `docs/`, without the\nsuffix: `ui/components/session-list` is `docs/ui/components/session-list.md`. Use\n`write_file`; do not try to work out where the bytes actually go, because that is the\nproject's `artifacts.destination` and not yours to know.\n\n**Add the index row, in the same sitting.** Every area has an `index.md` whose table is\nthe only entry point anyone has. A doc with no row is invisible — the next author\nrebuilds it — so this is not a follow-up, it is half of writing the doc.\n\n**Land the residue.** One or two lines, on the doc the exploration produced:\n**Framings considered** on a product doc, **Where this fits** on a flow, **Instead\nconsider** on a component, a numbered decision record in engineering.\n\n**Apply the amendment** to the standing doc it names, but only if the gate approved it.\nAn amendment is decided separately from the phase's own work; if you cannot tell whether\nit was approved, do not apply it.\n\n**Update the dependency graph** where the area has one, so a `requires` edge added here\nshows up in the mermaid block rather than only in frontmatter.\n\n## What not to do\n\nDo not invent content. Everything you write comes from the documents above; where one is\nincomplete, publish it as it is and say so. Do not fix prose, do not reorder sections,\ndo not \"improve\" a doc on the way past — a publish step that edits is a publish step\nnobody can review.\n\n## What to produce\n\n`paths` — every path you wrote or edited, including the index files.\n",
+    "config": {
+      "model": "claude-cli/default"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "paths"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file",
+      "write_file"
+    ]
+  },
+  "slotMeta": {
+    "inputs.phase": {
+      "default": "engineering"
+    },
+    "inputs.area": {
+      "default": "engineering"
+    },
+    "inputs.docs": {
+      "optional": true
+    },
+    "inputs.entries": {
+      "optional": true,
+      "description": "The structured rows the docs describe, for the index table."
+    },
+    "inputs.residue": {
+      "optional": true
+    },
+    "inputs.amendment": {
+      "optional": true
+    },
+    "inputs.gate_decision": {
+      "optional": true
+    }
+  }
+}
