@@ -147,6 +147,15 @@ export const FOLD_DEFAULTS: Record<string, boolean> = {
  */
 export const SHUT = {
   folders: "files.folders",
+  /**
+   * Folded STATES in a run's conversation — see `Sheet` in `sessionPanels.tsx`.
+   *
+   * One bucket for every run in every project rather than one per session, and the keys are what
+   * makes that safe: a state is remembered as `run:instance:seq`, which is already the identity the
+   * panels join on because an instance id names a different state in every run. A bucket per session
+   * would key on an id the engine chose (`default` on most runs) and collide across tasks.
+   */
+  runStates: "run.states",
 } as const;
 
 /**
@@ -282,6 +291,23 @@ export function toggleShut(ui: JairaUiState, id: string, key: string): JairaUiSt
   const current = ui.shut[id] ?? [];
   const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
   return { ...ui, shut: { ...ui.shut, [id]: next } };
+}
+
+
+/**
+ * Fold or unfold SEVERAL rows of one tree at once — what a "collapse all" spends.
+ *
+ * Beside {@link toggleShut} rather than a loop over it, because a loop would write the settings
+ * document once per row: `setUi` defers the disk write but the STATE update is per call, so folding
+ * a nine-state session would re-render the conversation nine times while it collapsed.
+ */
+export function withShut(ui: JairaUiState, id: string, keys: readonly string[], shut: boolean): JairaUiState {
+  const current = new Set(ui.shut[id] ?? []);
+  for (const key of keys) {
+    if (shut) current.add(key);
+    else current.delete(key);
+  }
+  return { ...ui, shut: { ...ui.shut, [id]: [...current] } };
 }
 
 /**

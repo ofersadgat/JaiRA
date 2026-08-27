@@ -10,9 +10,14 @@
  *
  * A fifty-message conversation is ONE instance at `iteration: 50`, and that is load-bearing rather
  * than tidy. `projection.ts` marks a previous instance under the same child key as superseded the
- * moment that key is re-entered, and the conversation view filters superseded nodes out — so a
- * message-per-instance design would make every message but the last silently vanish from the panel
- * that exists to show them.
+ * moment that key is re-entered, and a message-per-instance design would therefore leave
+ * forty-nine of them superseded — every reader of the tree drawing them as work the engine has
+ * disowned, which is not what a message that was sent and answered is.
+ *
+ * (The sharper version of this used to be that the run's transcript DROPPED superseded nodes, so
+ * the other design would have made every message but the last vanish outright. It no longer does —
+ * a loop's earlier passes are history and are shown — but nothing above depends on that, and the
+ * shape here is the right one either way.)
  *
  * So the first message enters the instance and every message after it takes a transition. The
  * projection reads `iteration` straight off `transition.taken`, and re-terminating an id it has

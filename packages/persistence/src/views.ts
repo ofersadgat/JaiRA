@@ -149,14 +149,21 @@ export interface StateSession {
   seq: number;
   at: number;
   /**
-   * How the call ENDED — and `interrupted` is the one that cannot come from the journal at all.
+   * How the call ENDED — and the last two cannot come from the journal at all.
    *
    * A completed call and a failed one each wrote a terminal event; a call the process died inside
    * wrote neither, and is recovered from its own record row instead (see
    * {@link interruptedSessions}). Absent means the journal predates the distinction, which reads as
    * the success it always did.
+   *
+   * `running` is that same recovery pass looking at a call that has not ended at ALL. A live call
+   * and a crashed one leave the journal in exactly the same shape — a start with no terminal event —
+   * so for as long as this said only `interrupted`, every state a person watched while it was
+   * speaking was labelled with its own death notice, and the panel beside it said the process had
+   * ended. The record row is what tells them apart: `open` means a live process is streaming into
+   * it, which is the whole reason that status exists.
    */
-  outcome?: "success" | "error" | "interrupted";
+  outcome?: "success" | "error" | "interrupted" | "running";
 }
 
 /**
@@ -227,8 +234,13 @@ export function stateSessions(project: Project, taskId: string, runId?: number):
 }
 
 /**
- * The calls a CRASH left with no terminal event — recovered by pairing the journal against the
- * record store, because neither half can answer alone.
+ * The calls with no terminal event — recovered by pairing the journal against the record store,
+ * because neither half can answer alone.
+ *
+ * A crash is the case this was written for and not the only one it finds: a call that is STILL
+ * RUNNING leaves the journal in the identical shape, since the terminal event is written when it
+ * ends. Both arrive here and the record's own status separates them — see {@link
+ * StateSession.outcome}.
  *
  * A process that dies mid-call writes no `operation.completed` and no `operation.failed`, so the
  * journal join every other row here uses does not exist. What survives is an `operation.started`
@@ -285,14 +297,14 @@ function interruptedSessions(project: Project, taskId: string, runId?: number): 
   // this the only projection in the file that cannot run against a bare database handle.
   const runs = project.db
     .prepare(
-      `SELECT id FROM runs
+      `SELECT id, ended_at FROM runs
         WHERE task_id = ?
           AND (outcome IN ('interrupted', 'error', 'canceled')
                OR EXISTS (SELECT 1 FROM operation_records r
                            WHERE r.task_id = runs.task_id AND r.run_id = runs.id AND r.status = 'open'))
           ${runId === undefined ? "" : "AND id = ?"} ORDER BY id`,
     )
-    .all(...(runId === undefined ? [taskId] : [taskId, runId])) as Array<{ id: number }>;
+    .all(...(runId === undefined ? [taskId] : [taskId, runId])) as Array<{ id: number; ended_at: number | null }>;
   const out: StateSession[] = [];
   for (const run of runs) {
     // Which instances started an operation that never settled — the calls that were in flight.
@@ -352,10 +364,20 @@ function interruptedSessions(project: Project, taskId: string, runId?: number): 
         at: where.at,
         // Read off the record rather than assumed. `completed` is the one status that means the call
         // RETURNED and lost only its event afterwards — reporting that answer as interrupted would
-        // be as wrong as not listing it. Everything else is interrupted, `failed` included: a call
-        // that really failed wrote a terminal event and would not be in this list at all, so a failed
-        // row with none is what `recoverInterrupted` wrote over a row the crash left open.
-        outcome: record.status === "completed" ? "success" : "interrupted",
+        // be as wrong as not listing it. `open` is the opposite end: a live process is streaming
+        // into that row right now, and calling it interrupted is a death notice on a call still
+        // talking — which is what a person watching a run saw on every state as it ran. The run
+        // still has to be going for that reading to hold: an `open` row left behind by a run that
+        // ENDED is a crash nothing has recovered yet, and that one really is interrupted.
+        // Everything else is interrupted, `failed` included: a call that really failed wrote a
+        // terminal event and would not be in this list at all, so a failed row with none is what
+        // `recoverInterrupted` wrote over a row the crash left open.
+        outcome:
+          record.status === "completed"
+            ? "success"
+            : record.status === "open" && run.ended_at === null
+              ? "running"
+              : "interrupted",
       });
     }
   }

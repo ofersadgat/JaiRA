@@ -25,12 +25,13 @@
  * ## The chrome rule
  *
  * Chrome marks a boundary between one OPERATION and the next, and nothing else. A single run's words
- * are {@link Transcript}, bare. Where several runs are shown together — which is what the session
- * panels in `sessionPanels.tsx` do — each gets a {@link RunCard} around it.
+ * are {@link Transcript}, bare. Where several runs share a sheet — which is what the session panels
+ * in `sessionPanels.tsx` do — each is headed by a LETTERHEAD (`stateSurface.tsx`): a line of type
+ * inside the sheet's top margin with a rule under it.
  *
- * A run is the unit, so a state that ran three times is three sibling cards rather than one card
- * that has to explain itself. Each is headed by its call signature, which is the same line the board
- * card carries, because they are the same fact: a run, and what it was called with.
+ * That replaced a card per run, and the indent went with it. A card wrapped every state in a fold, a
+ * dot and a signature and then hung its body behind a left rule — three levels of which spent about
+ * a fifth of the width restating a boundary the rule already draws.
  *
  * What decides which cards sit together is NOT this file. It used to be — a composite's own words
  * with its children's cards underneath — and that arrangement is gone, because it grouped by state
@@ -115,7 +116,7 @@ export interface EditMessage {
 }
 
 /** `09:14:02`. Seconds included: the gap between two calls is the thing being read. */
-function clockOf(at: number | undefined): string {
+export function clockOf(at: number | undefined): string {
   return at === undefined || at === 0 ? "" : new Date(at).toLocaleTimeString();
 }
 
@@ -1427,49 +1428,4 @@ function Dot({ status }: { status: InstanceNode["status"] }): JSX.Element {
   return <span className={`ts-dot ts-dot-${status}`} />;
 }
 
-/**
- * One run of one child, as a card.
- *
- * Folded by default and opened on demand, which is what makes a five-state run five lines until you
- * ask. `onOpen` exists because the conversation behind a card is fetched, not held: loading every
- * child's transcript to render a list of headers would be one round trip per state on every
- * selection.
- *
- * The card is a rule down the left of its contents rather than a box around them. A box inside a box
- * inside a box is what three levels of nesting used to look like, and by the third the transcript
- * had lost a fifth of its width to borders that said nothing the indent did not.
- */
-export function RunCard({
-  node,
-  open,
-  running,
-  children,
-  onToggle,
-}: {
-  node: InstanceNode;
-  open: boolean;
-  /** True while this run is the live one — the card it is worth opening by default. */
-  running?: boolean;
-  children?: ReactNode;
-  onToggle: () => void;
-}): JSX.Element {
-  const sig = signatureOf(node);
-  const took = node.endedAt !== undefined ? durationOf(node.endedAt - node.startedAt) : undefined;
-  return (
-    <section className={`ts-card${open ? " open" : ""}${running === true ? " live" : ""}`}>
-      <button type="button" className="ts-card-head" aria-expanded={open} onClick={onToggle}>
-        <span className="ts-chev">
-          <Icon name="chevron" />
-        </span>
-        <Dot status={node.status} />
-        <Signature {...sig} />
-        <span className="ts-card-meta">
-          {clockOf(node.startedAt)}
-          {took !== undefined ? ` · ${took}` : ""}
-        </span>
-      </button>
-      {open ? <div className="ts-card-body">{children}</div> : null}
-    </section>
-  );
-}
 

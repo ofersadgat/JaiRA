@@ -7,6 +7,7 @@
  * `to_state` the loader filled in from the rule, and the two ways a wait ends — the gesture, and
  * nobody being there to make it.
  */
+import { getEventListeners } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { loadBundle } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/exec";
@@ -130,6 +131,81 @@ describe("a guard that waits on a gesture", () => {
   it("answers false for an id nobody is holding", () => {
     const { hub } = harness();
     expect(hub.deliver("event-nope")).toBe(false);
+  });
+});
+
+/**
+ * The signal a wait listens on belongs to the RUN, so what a wait registers on it, a wait has to
+ * take back off it.
+ *
+ * A loop that parks once per iteration parked hundreds of times on one signal, and every listener
+ * outlived the wait that added it — Node says so once, at eleven
+ * (`MaxListenersExceededWarning: 11 abort listeners added to [AbortSignal]`), and never again, which
+ * is what let it run for an hour unnoticed. Counted rather than asserted on the warning, because the
+ * warning fires once per signal and a test that watched for it would pass for the wrong reason.
+ */
+describe("what a wait registers on the run's signal, it takes back off", () => {
+  /** The registered `on_user_event`, called the way the engine calls it. */
+  const parkOn = (hub: UserEventHub, signal: AbortSignal) => {
+    const registry = newRegistry();
+    hub.register(registry, "task-7");
+    const entry = registry.functions.get(ON_USER_EVENT) as { impl: (i: unknown, c: unknown) => Promise<unknown> };
+    return entry.impl({ event: TASK_DRAG }, { abortSignal: signal });
+  };
+  /** Node's own count — the number the warning is about. */
+  const listeners = (signal: AbortSignal): number => getEventListeners(signal, "abort").length;
+
+  it("leaves nothing behind when the wait is answered", () => {
+    const requests: UserEventRequest[] = [];
+    const hub = new UserEventHub({ onRequest: (r) => requests.push(r), nextId: () => `event-${requests.length + 1}` });
+    const controller = new AbortController();
+    for (let i = 0; i < 20; i += 1) {
+      void parkOn(hub, controller.signal);
+      expect(hub.deliver(requests[i]!.requestId)).toBe(true);
+    }
+    expect(requests).toHaveLength(20);
+    expect(listeners(controller.signal)).toBe(0);
+  });
+
+  it("leaves nothing behind when the wait is declined", () => {
+    const requests: UserEventRequest[] = [];
+    const hub = new UserEventHub({ onRequest: (r) => requests.push(r), nextId: () => `event-${requests.length + 1}` });
+    const controller = new AbortController();
+    for (let i = 0; i < 20; i += 1) {
+      void parkOn(hub, controller.signal);
+      expect(hub.decline(requests[i]!.requestId)).toBe(true);
+    }
+    expect(listeners(controller.signal)).toBe(0);
+  });
+
+  /**
+   * …and the case the listener is FOR still works: an outstanding wait is withdrawn when the run is
+   * cancelled, and its listener goes with it because `once` consumed it.
+   */
+  it("still withdraws an outstanding wait when the run is cancelled", () => {
+    const resolved: string[] = [];
+    const requests: UserEventRequest[] = [];
+    const hub = new UserEventHub({ onRequest: (r) => requests.push(r), onResolved: (id) => resolved.push(id) });
+    const controller = new AbortController();
+    void parkOn(hub, controller.signal);
+    expect(hub.list()).toHaveLength(1);
+    controller.abort();
+    expect(hub.list()).toHaveLength(0);
+    expect(resolved).toEqual([requests[0]!.requestId]);
+    expect(listeners(controller.signal)).toBe(0);
+  });
+
+  /**
+   * An ALREADY-cancelled signal fires no event, so a wait registered on one used to sit in `pending`
+   * for the life of the window — offered on the board for a run that was already over.
+   */
+  it("does not offer a wait on a signal that has already been cancelled", () => {
+    const requests: UserEventRequest[] = [];
+    const hub = new UserEventHub({ onRequest: (r) => requests.push(r) });
+    const controller = new AbortController();
+    controller.abort();
+    void parkOn(hub, controller.signal);
+    expect(hub.list()).toHaveLength(0);
   });
 });
 

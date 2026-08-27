@@ -47,6 +47,7 @@ import { SHARED_SESSION } from "@jaira/shared/browser";
 import { Composer } from "./composer";
 import { projectName } from "./projects";
 import { ForkMark, ZigDefs } from "./sessionPanels";
+import { useStickToBottom } from "./stickToBottom";
 import { CHAT_AGENT, isChatWorkflow, titleOf } from "./chatWorkflow";
 import { ContextMenu, AskDialog, type AskSpec, type MenuAnchor } from "./menu";
 import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from "./transcript";
@@ -577,52 +578,20 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   /** Which message is being replaced, when one is — see `chat:send`'s `branchAt`. */
   const [editing, setEditing] = useState<{ at: string; was: string } | null>(null);
   const mentions = useMentions(surface.hasProject, project);
-  const scroller = useRef<HTMLDivElement | null>(null);
   /**
-   * Whether the reader is still standing at the live edge.
+   * Follow the live edge while the reader is standing on it — see {@link useStickToBottom}, which
+   * is where this behaviour used to live in full and where the run and leaf transcripts now get it
+   * from too.
    *
-   * The pin is what makes "follow the answer" and "read what was said an hour ago" the same view.
-   * A transcript that scrolls itself to the bottom whenever a fragment lands is unreadable while a
-   * run is going: you scroll up to a tool call, the next delta arrives, and the page yanks you back
-   * — every 100 ms, for as long as the model is talking.
-   *
-   * A REF rather than state on purpose. Nothing on screen changes when it flips, so re-rendering the
-   * thread to record it would be work for no picture; and the scroll effect must read the value as
-   * of the moment it runs, which a ref gives it and a state closure would not.
-   *
-   * Starts pinned: a conversation you have just opened is one you are reading from the end.
+   * `thread` and the live tail are what "the content grew" means here; the task is what "a
+   * different conversation" means.
    */
-  const pinned = useRef(true);
-  /**
-   * The pin, as something the screen can show.
-   *
-   * The ref is what the scroll effect reads; this is what the bar renders. Two spellings of one fact
-   * because they are wanted at different moments — the effect needs it synchronously, mid-scroll,
-   * and a re-render per scroll event is exactly what the ref exists to avoid; the bar needs it as
-   * state, and only when it CHANGES, which is rare. Set through a comparison so a scroll that does
-   * not cross the line costs nothing.
-   */
-  const [away, setAway] = useState(false);
+  const { ref: scroller, onScroll, away, jump } = useStickToBottom<HTMLDivElement>(
+    [thread, surface.live],
+    [taskId, project],
+  );
   /** The agent title a rename has already been asked for — see the effect that adopts it. */
   const asked = useRef<string | null>(null);
-
-  /**
-   * How close to the bottom still counts as being AT it.
-   *
-   * Not zero: a fractional scroll height, a sub-pixel device ratio and a row that grows by a line
-   * while the deltas land all put the reader a few pixels off the floor without them having moved,
-   * and an exact test reads that as "they scrolled away" and stops following. One line of the
-   * transcript is the smallest slack that survives all three.
-   */
-  const nearBottom = (el: HTMLElement): boolean => el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
-
-  /** Back to the live edge, and pinned again — the bar's other job. */
-  const jump = (): void => {
-    pinned.current = true;
-    setAway(false);
-    const el = scroller.current;
-    if (el !== null) el.scrollTop = el.scrollHeight;
-  };
 
   /**
    * The tail that was streaming, held until the record that supersedes it has arrived.
@@ -671,28 +640,6 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
     };
   }, [taskId, project, overrides, thread]);
 
-  // Pinned to the bottom, the way every chat client is: what was just said is what you are reading —
-  // but only while the reader has not gone looking somewhere else. See {@link pinned}.
-  useEffect(() => {
-    const el = scroller.current;
-    if (el === null || !pinned.current) return;
-    el.scrollTop = el.scrollHeight;
-  }, [thread, surface.live]);
-
-  /**
-   * Back to the live edge whenever a conversation is opened.
-   *
-   * The pin is a fact about where a reader is standing in ONE conversation, so it does not travel
-   * with them to the next: switching threads scrolls to the bottom of the new one regardless of how
-   * far up the old one they had climbed.
-   */
-  useEffect(() => {
-    pinned.current = true;
-    setAway(false);
-    const el = scroller.current;
-    if (el !== null) el.scrollTop = el.scrollHeight;
-  }, [taskId, project]);
-
   /**
    * Take the agent's own name for this conversation, once it has one.
    *
@@ -733,8 +680,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
     setEditing(null);
     // Sending re-pins. Typing into the box is the clearest possible statement that the live edge is
     // where you are, whatever you had scrolled up to read while composing.
-    pinned.current = true;
-    setAway(false);
+    jump();
     void invoke("chat:send", {
       taskId,
       instanceId,
@@ -941,13 +887,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
       <div
         className="chat-scroll scroll"
         ref={scroller}
-        // Re-decided on every scroll, whoever caused it — including the pinned effect's own write,
-        // which lands at the bottom and so re-affirms the pin rather than fighting it.
-        onScroll={(e) => {
-          const at = nearBottom(e.currentTarget);
-          pinned.current = at;
-          setAway((was) => (was === !at ? was : !at));
-        }}
+        onScroll={onScroll}
       >
         <ZigDefs />
         {/* Which day you are reading, floating over the thread — see {@link DayChip}. Inside the

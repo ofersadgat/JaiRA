@@ -39,7 +39,6 @@
  * bands are in, drawn on the background between them. See {@link notesOf}.
  */
 import {
-  ENTERED_TURN,
   type ConversationTurn,
   type InstanceAddress,
   type InstanceNode,
@@ -64,7 +63,7 @@ export interface SessionPiece {
   /** Absent ⇒ still running, which overlaps everything that starts after it. */
   endedAt?: number;
   /** How the call ended, when it settled — what names a side of a fork. See {@link forksOf}. */
-  status?: "success" | "error" | "interrupted";
+  status?: "success" | "error" | "interrupted" | "running";
   /** Where this conversation left another — `SessionRef.branch`, carried through unchanged. */
   branch?: { parent: string; at: number };
 }
@@ -159,25 +158,27 @@ export function piecesOf(
     if (refs.length === 0 && node.children.length === 0) {
       out.push({ node, startedAt: node.startedAt, ...(node.endedAt !== undefined ? { endedAt: node.endedAt } : {}) });
     }
-    // Superseded by a sequence reset: history kept, but the engine has disowned it, and drawing its
-    // conversation would show words from a branch that no longer happened.
-    for (const child of node.children) {
-      if (child.superseded) disown(child);
-      else visit(child);
-    }
-  };
-  /**
-   * Everything under a disowned subtree, remembered so the orphan pass below cannot resurrect it.
-   *
-   * The walk simply does not descend into a superseded node, which is enough while the tree is the
-   * only source of pieces. It stops being enough the moment a ref with no node also counts: a
-   * superseded instance has refs, they are not "dropped by the fold", and adding them back would put
-   * a disowned branch's conversation on the page under the pretence of recovering lost work.
-   */
-  const disowned = new Set<string>();
-  const disown = (node: InstanceNode): void => {
-    disowned.add(at(node.runId, node.instanceId));
-    for (const child of node.children) disown(child);
+    /**
+     * EVERY child, superseded ones included.
+     *
+     * A superseded instance used to be skipped, on the reading that the engine had disowned it and
+     * its conversation was "words from a branch that no longer happened". That reading is wrong,
+     * and the loop is where it shows: `explore` running a second time supersedes the first pass the
+     * moment its key is re-entered (`projection.ts`), so looping back to it deleted the whole
+     * previous iteration from the transcript — panels that had been read, and answers a later state
+     * was still working from. The branch DID happen. It ran, it cost money, and it is what the next
+     * pass is a response to.
+     *
+     * `superseded` is a fact about EXPRESSION RESOLUTION, not about history: a superseded instance
+     * no longer answers `children.<key>`, and the projection says in as many words that its history
+     * is kept. Every other reader already treats it that way — the run board draws a card per
+     * execution, the notes between the panels name every pass — and the transcript was the one
+     * surface that took it as a reason to forget.
+     *
+     * Nothing is claimed about which pass is CURRENT. The panels are laid out in time order, so an
+     * earlier iteration is above the one that replaced it, which is what it is.
+     */
+    for (const child of node.children) visit(child);
   };
   visit(root);
 
@@ -196,7 +197,6 @@ export function piecesOf(
   const drawn = new Set(out.map((piece) => `${piece.node.runId ?? runId ?? ""}:${piece.node.instanceId}:${piece.seq ?? ""}`));
   for (const ref of history) {
     if (drawn.has(`${ref.runId}:${ref.instanceId}:${ref.seq}`)) continue;
-    if (disowned.has(at(ref.runId, ref.instanceId))) continue;
     out.push({
       node: {
         instanceId: ref.instanceId,
@@ -489,6 +489,15 @@ export interface BandNote {
   /** The state DEFINITION the note is about, when the journal named one — what the title shows. */
   stateId?: string;
   /**
+   * The instance the note is about, when it became one.
+   *
+   * The rail's lane identity — see `rail.ts`. It has to be the instance and not the state, because
+   * `explore` running twice is two lanes with one colour, and a rail keyed on the name would draw the
+   * second pass as a continuation of the first. Absent on a `blocked` note by construction: a child
+   * that could not be entered never became an instance, which is what blocked means.
+   */
+  instanceId?: number;
+  /**
    * Where it happened, as the chain of child keys from the run's root — `product/explore`.
    *
    * This and not `stateId` is what a row is addressed by. `explore` is one state file mounted under
@@ -500,12 +509,48 @@ export interface BandNote {
   text: string;
 }
 
-/** A journal turn that reads as something going wrong — see `conversationView` for the two spellings. */
-function isFailure(turn: ConversationTurn): boolean {
-  // `failure` is a blocked child or a failed operation. An `operation` turn with `ok: false` is an
-  // instance TERMINATING badly, which is projected as an operation because that is what it ends —
-  // and is the only turn carrying the reason a composite gave up.
-  return turn.kind === "failure" || (turn.kind === "operation" && turn.ok === false);
+/**
+ * Whether the instance a turn names ran an OPERATION — the one fact the error routing turns on.
+ *
+ * ## The rule
+ *
+ * **A failure is drawn in a panel if and only if its instance has an operation. Everything else goes
+ * on the grey.** Both halves read this, and neither reads anything else.
+ *
+ * It is not a new rule. It is the one this module already gives for why the grey exists — "a panel
+ * is a session, and a session is something a state OPENED, so a state that never got that far has no
+ * panel" — stated for blocked children and then never applied to failures, which is how a failed
+ * call came to be written in both places at once.
+ *
+ * ## Why it is a lookup and not a test
+ *
+ * The three questions this replaces could not be answered from a turn at all. *Is this a composite?*
+ * — a turn has no children. *Was this termination already reported by its operation?* — that is a
+ * backwards scan through a list merged from two streams and sorted by clock. *Is this turn a state
+ * being entered?* — that was `text === "entered"`, a discriminated union spelled as a magic string.
+ *
+ * Against the tree, all three collapse into this: `projection.ts` sets `node.operation` on
+ * `operation.started` and on `operation.failed`, and on nothing else. So an instance that dispatched
+ * always has one and an instance that did not never does, and the routing is a fact rather than an
+ * inference.
+ *
+ * A turn with NO instance is a `blocked` child — it never became one, which is what blocked means —
+ * and answers `false`, correctly: there is no panel and there never will be.
+ */
+function ranAnOperation(turn: ConversationTurn, byInstance: Map<number, InstanceNode>): boolean {
+  if (turn.instanceId === undefined) return false;
+  return byInstance.get(turn.instanceId)?.operation !== undefined;
+}
+
+/** Every instance in a run, by id — the index the rule above is a lookup into. */
+function instancesById(root: InstanceNode | undefined): Map<number, InstanceNode> {
+  const out = new Map<number, InstanceNode>();
+  const visit = (node: InstanceNode): void => {
+    out.set(node.instanceId, node);
+    for (const child of node.children) visit(child);
+  };
+  if (root !== undefined) visit(root);
+  return out;
 }
 
 /**
@@ -551,39 +596,67 @@ export function mountPathOf(instances: readonly InstanceNode[], instanceId: numb
  * The module itself is the empty string. Nothing to draw — you are looking at it.
  */
 export function pathFrom(path: string, root: string): string {
-  const inner = root === "" ? path : path === root ? "" : path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
-  return inner === "" ? "" : inner.split("/").join(" → ");
+  return segmentsFrom(path, root).join(" → ");
 }
 
 /**
- * What the panels cannot carry, oldest first: the failures, and the machine's own moves.
+ * The same trim, as the segments themselves — what the rail counts depth in.
+ *
+ * A path that is not underneath `root` is left whole rather than being made relative to something it
+ * is not under. That is the honest reading of a note whose mount the projection did not record: it
+ * says where it says it is, and the rail draws it at that depth.
+ */
+export function segmentsFrom(path: string, root: string): string[] {
+  const inner = root === "" ? path : path === root ? "" : path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
+  return inner === "" ? [] : inner.split("/");
+}
+
+/**
+ * What the panels cannot carry, oldest first: the MACHINE's failures, and its own moves.
  *
  * Both are journal facts about STATES, and a panel is a SESSION — so a composite that never opened a
  * conversation has nowhere to say either, however much of the run it decided.
  *
- * Nothing is filtered by whether the state has a panel any more. A state that spoke AND failed now
- * says so in both places: the panel gives the failure its context, the grey gives it its place in the
- * run, and the person who opened a failed run wants the second one.
+ * ## What is no longer here
+ *
+ * An operation's own failure. It used to be, and a state that spoke and then failed said so twice —
+ * once as a grey note and once, now, as a red panel. That is one event written in two places, and
+ * the note is the worse of the two: it has the reason and none of the context, no retry, and no
+ * relation to the call that produced it.
+ *
+ * So the split is by {@link ranAnOperation}: a turn whose instance dispatched belongs to that
+ * instance's sheet and is dropped here. What is left is exactly what has no sheet — a child that was
+ * blocked before it could run, and a composite that gave up because one of its children did.
+ *
+ * `root` is the instance tree the notes are being read against. ABSENT means no tree was available
+ * — a projection that has not landed yet — and then nothing is dropped, because the alternative is
+ * silently hiding a run's only error while the panel that would have shown it does not exist either.
  *
  * Failures are de-duplicated on state and text — a run that is retried re-blocks the same child for
  * the same reason, and a column of identical sentences says no more than one does. TRANSITIONS are
  * NOT: a loop that took `critique → draft` three times took it three times, and collapsing those
  * would hide the one thing a path is drawn to show.
  */
-export function notesOf(turns: readonly ConversationTurn[]): BandNote[] {
+export function notesOf(turns: readonly ConversationTurn[], root?: InstanceNode): BandNote[] {
+  const byInstance = instancesById(root);
+  /** With no tree to ask, nothing is claimed by a panel — see the note above. */
+  const hasPanel = (turn: ConversationTurn): boolean => byInstance.size > 0 && ranAnOperation(turn, byInstance);
   const seen = new Set<string>();
   const out: BandNote[] = [];
   for (const turn of turns) {
-    const named = turn.stateId !== undefined ? { stateId: turn.stateId } : {};
+    const named = {
+      ...(turn.stateId !== undefined ? { stateId: turn.stateId } : {}),
+      ...(turn.instanceId !== undefined ? { instanceId: turn.instanceId } : {}),
+    };
     // An absent mount falls back to the state id. Journals written before `instance.blocked` carried
     // its parent and key have no mount to show — and reading that absence as the ROOT would both
     // print every historical block against the module itself and, because the de-duplication key is
     // the path, silently collapse two blocks that happened to fail for the same reason into one.
     const path = turn.path ?? turn.stateId ?? "";
-    // A state being entered. `conversationView` projects it onto `operation` — entering and starting
-    // are one moment — and emits it ONLY for a state that never starts an operation of its own, i.e.
-    // exactly the composites that have no panel. So there is nothing here to duplicate.
-    if (turn.kind === "operation" && turn.ok === undefined && turn.text === ENTERED_TURN) {
+    // A state being walked into — its own kind since the projection stopped folding three events
+    // onto one. Drawn for every state, whether or not it has a panel: the grey is where the run's
+    // PATH is read, and a path with the states that spoke missing from it is not a path.
+    if (turn.kind === "entered") {
       // The ROOT entering itself is not a step. Everything in the run is inside it, so "entered
       // feature" on a page about `feature` says only that the page is about `feature`.
       if (path === "") continue;
@@ -601,7 +674,10 @@ export function notesOf(turns: readonly ConversationTurn[]): BandNote[] {
       continue;
     }
     const blocked = turn.kind === "blocked";
-    if (!blocked && !isFailure(turn)) continue;
+    // `failure` is an operation erroring; a `terminated` turn with `ok: false` is an instance ending
+    // badly. Both are failures; only the ones whose instance has no sheet are drawn here.
+    if (!blocked && turn.kind !== "failure" && !(turn.kind === "terminated" && turn.ok === false)) continue;
+    if (!blocked && hasPanel(turn)) continue;
     const text = reasonOf(turn);
     if (text.length === 0) continue;
     const key = `${path} ${text}`;

@@ -29,6 +29,7 @@ import type {
   ConfigView,
   ConversationView,
   InstanceNode,
+  PendingUserEvent,
   SessionRef,
   SessionView,
   ExecutorInfo,
@@ -193,6 +194,40 @@ export interface FileSurfaceContext {
   } | null;
   onShowSession: (instanceId: number | null) => void;
   waiting?: { component: string } | undefined;
+  /**
+   * Transitions parked on a gesture, across every project — `on_user_event` (WORKFLOWS.md §7.4).
+   *
+   * The whole list rather than this task's, because that is what the hub publishes and filtering is
+   * the reader's job: the board wants all of them to light its columns, and a conversation wants the
+   * ones belonging to the task it is drawing.
+   *
+   * A wait is NOT an instance, which is why it arrives here instead of on the instance tree. It sits
+   * between states — the guard of a transition evaluated `on_user_event(...)` and stopped — so there
+   * is no node to hang it off and no operation to read a status from. `projection.ts` does set
+   * `waiting_for_user` on the instance, but it sets the same value for an interactive OPERATION, so
+   * the two are indistinguishable once projected; the request is what tells them apart.
+   */
+  /**
+   * Which states in a run's conversation are folded, and how to fold one.
+   *
+   * Remembered rather than held per panel, because a fold is a statement about what you are done
+   * reading and navigating away is not a retraction of it. `JairaUiState.shut` already stores this
+   * shape — a list of keys per tree id — so this is a place that exists rather than a new one.
+   */
+  shutStates: ReadonlySet<string>;
+  onToggleShutState: (key: string) => void;
+  /** Fold or unfold SEVERAL at once — what the gutter's collapse-all spends. */
+  onSetShutStates: (keys: readonly string[], shut: boolean) => void;
+  userEvents: PendingUserEvent[];
+  /**
+   * Satisfy one, without the gesture it was waiting for.
+   *
+   * The drag on the board is the gesture the workflow author had in mind, and it stays. This is the
+   * same delivery from the surface where the run is being READ — the person is already looking at
+   * the state that stopped, and sending them to another view to move a card is asking them to
+   * remember which column it wanted.
+   */
+  onDeliverUserEvent: (requestId: string) => void;
   onSelectTask: (taskId: string) => void;
   onDrill: (stateId: string) => void;
   /**

@@ -18,6 +18,7 @@ import type {
   ChatSettings,
   InstanceNode,
   PendingInteraction,
+  PendingUserEvent,
   StateChild,
   StateView,
   TaskDetail,
@@ -26,9 +27,13 @@ import { Board, Column, Tile } from "./board";
 import { ChangesetGate } from "./components";
 import type { ComponentServices } from "./changesetReview";
 import { TaskDetailSections, TaskHead } from "./detail";
-import { entriesOf, journalFor, sidechainEntriesOf, signatureOf } from "./transcript";
+import { entriesOf, journalFor, previewOf, sidechainEntriesOf, signatureOf } from "./transcript";
+import { useStickToBottom } from "./stickToBottom";
+import { sessionKey } from "./sessionCache";
 import { instanceOf as instanceOfState, nodeAt, prunedTrail, type TrailStep } from "./trail";
-import { Paper, Pulse, Transcript, durationOf, useElapsed } from "./transcriptView";
+import { Paper, Pulse, Transcript, clockOf, durationOf, useElapsed } from "./transcriptView";
+import { advanceTargetOf, surfaceKindOf } from "./stateSurface";
+import { Icon } from "./icons";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, runForksOf, type SessionPiece } from "./sessionBands";
 import { SessionBandsView } from "./sessionPanels";
 import type { FileSurfaceProps } from "./fileTypes";
@@ -173,17 +178,130 @@ export function RunBoard({
   );
 }
 
+// The key convention now lives in `sessionCache.ts`, with the invalidation that has to agree with
+// it. Re-exported because this is where the panels have always found it.
+export { sessionKey };
+
 /**
- * What one panel's transcript is cached and fetched UNDER.
+ * A transition parked on a gesture, drawn where the run stopped.
  *
- * Run and instance, never the instance alone. Ids are minted `nextInstanceId++` per walk, so `#i2`
- * names a different state in every run — a cache keyed on it hands a resumed task's panel whichever
- * run last wrote that id, and the failure is silent: someone else's conversation, correctly drawn,
- * under the wrong heading. A single-run projection stamps no run, and then the id alone is the whole
- * key because there is only one run to confuse it with.
+ * The case that was rendered NOWHERE. `on_user_event('task_drag')` is declared on seven of the
+ * feature workflow's phase transitions, and until now a run that reached one simply stopped: the
+ * last panel was whatever spoke before it, with nothing on the page saying why nothing followed. The
+ * board lit a column, which is the right place to make the gesture and the wrong place to learn that
+ * one is wanted.
+ *
+ * ## Why it is not an instance
+ *
+ * A wait sits BETWEEN states — a transition's guard evaluated `on_user_event(...)` and stopped — so
+ * there is no node to hang it off and no operation to read a status from. `projection.ts` does set
+ * `waiting_for_user` on the instance, but it sets the same value for an interactive OPERATION, so
+ * asking the node cannot tell a parked transition from a state holding a question out to you. The
+ * hub's request is what tells them apart, and it is also the only thing that knows WHERE the wait
+ * wants the task to go.
+ *
+ * ## Where the destination comes from
+ *
+ * `options.to_state`, filled in by the hub from the rule's own `to` when the author left it out (see
+ * `optionsOf` in `userEvents.ts`). Never re-derived from the workflow file here: a second reader of
+ * the same expression language is how two parts of one app come to disagree about which column a
+ * card belongs in. Absent means the rule goes to a `terminate.*` pseudo-state, which no gesture can
+ * satisfy — the wait is real and the button would be a lie, so it is not offered.
  */
-export function sessionKey(at: { runId?: number; instanceId: number }): string {
-  return at.runId === undefined ? String(at.instanceId) : `${at.runId}:${at.instanceId}`;
+function WaitingOn({ request, onDeliver }: { request: PendingUserEvent; onDeliver: () => void }): JSX.Element {
+  const to = advanceTargetOf(request);
+  // LIVE: a wait is the one thing on this page that is still happening, and how long it has been
+  // going is most of what a reader wants from it. The counter stops the moment the hub resolves the
+  // request, because the panel stops being rendered at all.
+  const waited = useElapsed(request.at, true) ?? 0;
+  return (
+    <div className="sb-panel">
+      <section className="sb-sheet ss-waiting">
+        <div className="sb-body">
+          <div className="lh tb amber" aria-hidden>
+            <Icon name="clock" className="lh-ico" />
+            <span className="lh-kind">waiting on you</span>
+            <span className="lh-name mono">{to !== undefined ? `→ ${to}` : request.event}</span>
+            <span className="lh-meta">{durationOf(waited)}</span>
+          </div>
+          <p className="prose">
+            {to !== undefined ? (
+              <>
+                Move this task to <span className="mono">{to}</span> to carry on. Nothing downstream runs until you do.
+              </>
+            ) : (
+              <>
+                This run is waiting for <span className="mono">{request.event}</span>.
+              </>
+            )}
+          </p>
+          {to !== undefined ? (
+            <div className="ss-wait-do">
+              <button type="button" className="primary" onClick={onDeliver}>
+                Advance to {to}
+              </button>
+              {/* The gesture the workflow author had in mind, said rather than replaced. The button
+                  is the same delivery from the surface the run is being read on; the drag is still
+                  what the board is for. */}
+              <span className="ss-wait-or">— or drag the card there on the board</span>
+            </div>
+          ) : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+/**
+ * What a state with no conversation has to SAY — the body under its letterhead.
+ *
+ * The header is not here. Every state in a run wears one now (see `stateSurface.tsx`), and the sheet
+ * is what draws it — so this is only the contents, which is the difference between a surface and a
+ * conversation rather than between a surface and a card.
+ *
+ * Two things, in the order somebody reads them.
+ *
+ * A FAILED call says what went wrong, from `node.operation.reason`. That is the whole of the error
+ * routing on this side: `projection.ts` writes the reason onto the operation, so the panel has it
+ * without touching the journal — and `notesOf` correspondingly stops drawing it on the grey, because
+ * a failure written in two places is one of them lying about being the account of it.
+ *
+ * Otherwise, the state's INPUTS. The one thing about these states the projection already carries and
+ * the one thing nothing showed: `signatureOf` lists them on a header only when the state declares no
+ * label, and every state that ends up here declares one. So a gate handed a score, three reasons,
+ * two must-asks and twenty kilobytes of deliverables rendered as its own name and nothing else.
+ *
+ * PREVIEWS, not values, and that is a stopping point rather than laziness. `previewOf` bounds every
+ * slot to a line, where rendering `docs` in full would put a 20 KB document in the middle of a run
+ * somebody is scrolling. What belongs here eventually is the derivation — the call, its named
+ * arguments, the value it produced — and that needs the binding tree and the operation records
+ * joined, which is a projection change rather than a rendering one.
+ */
+function SilentState({ node }: { node: InstanceNode }): JSX.Element {
+  const failure = node.operation?.status === "failed" ? node.operation.reason : undefined;
+  if (failure !== undefined) {
+    return (
+      <p className="ss-fail">
+        <span className="ss-fail-msg">{failure}</span>
+      </p>
+    );
+  }
+  const slots = Object.entries(node.inputs ?? {});
+  if (slots.length === 0) {
+    // A real answer and a rare one: a state can be entered with nothing bound to it. Not the old
+    // sentence in new chrome — the letterhead above has already said what this state is.
+    return <p className="ss-none">Nothing was bound to this run.</p>;
+  }
+  return (
+    <div className="ss-slots">
+      {slots.map(([name, value]) => (
+        <div className="ss-slot" key={name}>
+          <span className="ss-slot-name">{name}</span>
+          <span className="ss-slot-value ellip">{previewOf(value)}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /**
@@ -222,7 +340,7 @@ export function RunConversation({
    */
   onOpenSidechain?: ((node: InstanceNode, call: string, name: string) => void) | undefined;
 }): JSX.Element {
-  const { conversation, liveTurn, sessions, sessionHistory, onLoadSessions, onOpenWorkflow } = context;
+  const { conversation, liveTurn, sessions, sessionHistory, onLoadSessions, onOpenWorkflow, userEvents, onDeliverUserEvent, shutStates, onToggleShutState, onSetShutStates } = context;
   const openSidechain = onOpenSidechain ?? context.onWalkIntoSidechain;
   /**
    * The TASK's conversation, not the newest run's.
@@ -245,6 +363,14 @@ export function RunConversation({
   );
   const needed = useMemo(() => instancesOf(bands), [bands]);
   /**
+   * Follow the live edge — the behaviour this panel is watched in and did not have.
+   *
+   * Everything that makes the transcript taller is in the follow list: the bands (a state entered),
+   * the fetched transcripts (a record landed), the tail (a word arrived). The task is the reset — a
+   * different run is a different conversation, and the pin does not travel between them.
+   */
+  const follow = useStickToBottom<HTMLDivElement>([bands, sessions, liveTurn, conversation], [detail?.taskId]);
+  /**
    * What went wrong in the states that never opened a conversation.
    *
    * The journal is the only record of them, and until this it was filtered per PANEL — a turn reached
@@ -258,12 +384,29 @@ export function RunConversation({
    * shown are a cascade anyway, in which the sentence explaining why a child gave up is on the child
    * and the one explaining what that cost is on the parent. Each note names its own state.
    */
-  const notes = useMemo(() => notesOf(conversation?.turns ?? []), [conversation]);
+  // The TREE as well as the turns: a failure belongs on the grey only when the instance it names
+  // ran no operation, and the tree is where that is written. See `notesOf` and `ranAnOperation`.
+  const notes = useMemo(() => notesOf(conversation?.turns ?? [], parent), [conversation, parent]);
   /**
    * Where the run being READ sits, so a note's path is shown from here rather than from the root of
    * the workflow. Walking into `product` should leave its notes saying `explore`, not
    * `product → explore` — the second half is the page you are already on.
    */
+  /**
+   * The waits belonging to THIS task, oldest first.
+   *
+   * Filtered here rather than published filtered, because the hub's list is what the board reads
+   * whole. A wait carries the task it parked in (`UserEventHub.register` stamps it), so this is a
+   * comparison rather than a guess — and a run with none is the ordinary case, which costs an empty
+   * array and draws nothing.
+   */
+  const waits = useMemo(
+    () =>
+      detail === null
+        ? []
+        : [...userEvents].filter((one) => one.taskId === detail.taskId).sort((a, b) => a.at - b.at),
+    [userEvents, detail],
+  );
   const rootPath = useMemo(
     () => (parent === undefined ? "" : mountPathOf(detail?.instances ?? [], parent.instanceId)),
     [detail, parent],
@@ -287,6 +430,23 @@ export function RunConversation({
    * flight offers, and is why an answer appears while it is being written rather than after.
    */
   const render = (piece: SessionPiece): ReactNode => {
+    /**
+     * A state with nothing to read — because it was never going to have any, or because its call
+     * failed before it wrote a word. See `stateSurface.tsx` for the kinds.
+     *
+     * Answered BEFORE the session is fetched, and that is the point rather than an optimisation:
+     * `session:view` has nothing to say about these and says so in one sentence, which is the bug.
+     * Everything the body needs is on the projection already.
+     *
+     * ⚠️ The session check is not redundant with the kind. `piecesOf` SYNTHESISES a node for an
+     * operation the folded tree has no node for — an earlier run's work a later run overwrote — and
+     * a synthesised node carries no `operation`, because a `SessionRef` does not record one. Asking
+     * the node alone would call every one of those computed and draw a worksheet over a conversation
+     * sitting right there in the record. A piece that wrote a session position said something,
+     * whatever the tree remembers about it.
+     */
+    const silent = piece.sessionId === undefined && surfaceKindOf(piece.node) !== "conversation";
+    if (silent || piece.node.operation?.status === "failed") return <SilentState node={piece.node} />;
     const view = sessions[sessionKey(piece.node)];
     if (view === undefined) return <p className="empty">Loading…</p>;
     const matches =
@@ -318,7 +478,7 @@ export function RunConversation({
 
   return (
     <div className="run-convo-wrap">
-      <div className="run-convo scroll">
+      <div className="run-convo scroll" ref={follow.ref} onScroll={follow.onScroll}>
         <SessionBandsView
           bands={bands}
           render={render}
@@ -328,8 +488,19 @@ export function RunConversation({
           {...(onOpenWorkflow !== undefined
             ? { onOpenWorkflow: (piece: SessionPiece) => onOpenWorkflow(piece.node.stateId, piece.node.instanceId) }
             : {})}
+          shut={shutStates}
+          onToggle={onToggleShutState}
+          onSetShut={onSetShutStates}
+          scope={detail.taskId}
           empty="This run has not entered a child yet."
         />
+        {/* AFTER the bands, always. A wait is the present tense of a run — it is where the thing
+            stopped — so it belongs at the bottom of what has happened rather than sorted into it by
+            the clock it parked at. It is also outside `SessionBandsView` because it is not a band:
+            no session, no piece, and nothing that could overlap another conversation. */}
+        {waits.map((request) => (
+          <WaitingOn key={request.requestId} request={request} onDeliver={() => onDeliverUserEvent(request.requestId)} />
+        ))}
       </div>
       {/* Pinned below the scroller, not inside it: what you are about to say does not scroll away
           with what was already said. */}
@@ -384,12 +555,15 @@ export function SidechainConversation({
 
   const liveItems = liveTurn?.sidechains[call];
   const entries = useMemo(() => sidechainEntriesOf(view, call, liveItems), [view, call, liveItems]);
+  // Same rule as the thread that spawned it: a subagent streaming its work is a live edge to stand
+  // on. The call is the reset — walking into a different chain starts at the end of that one.
+  const follow = useStickToBottom<HTMLDivElement>([entries], [call]);
 
   if (step.sidechain === undefined) return <p className="empty">This step is not a subagent conversation.</p>;
   if (view === null && liveItems === undefined) return <p className="empty">Loading…</p>;
   return (
     <div className="run-convo-wrap">
-      <div className="run-convo scroll">
+      <div className="run-convo scroll" ref={follow.ref} onScroll={follow.onScroll}>
         <Paper>
           <Transcript
             session={view}

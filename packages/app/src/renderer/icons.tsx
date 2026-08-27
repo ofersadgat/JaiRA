@@ -26,6 +26,7 @@ import type { WorkIconName } from "./transcript";
  * compile if it cannot draw one of them. A view is allowed to know about the model. Not the reverse.
  */
 export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send" | "clip" | "model" | "shield" | "anthropic" | "openai" | "lock" | "unlocked" | "star" | "pencil" | "plan" | "columns" | "tabs" | "comment" | "choice" | "files" | "form"
+  | "sigma" | "clock" | "fold" | "unfold"
   | "fileAdd" | "fileDel" | "fileEdit"
   | "copy" | "rewind"
   | "typeProse" | "typePlain" | "typeCode" | "typeData" | "typeTable" | "typeChanges" | "typeMedia", string[]> = {
@@ -74,6 +75,19 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   cross: ["M18 6 6 18", "M6 6l12 12"],
   // A speech bubble with a tail — the review note (decision 0002).
   comment: ["M20 4H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3v4l5-4h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1Z"],
+
+  // The kinds a state can be when it is not a conversation — see `stateSurface.tsx`. Three answers
+  // to "what is this", and each only ever appears beside its own word, for the reason the module
+  // note gives about a glyph standing alone.
+  /** A summation sign: a value that was worked out rather than said. */
+  sigma: ["M18 5H6l6 7-6 7h12"],
+  /** A clock: the run is parked, on a person or on time. */
+  clock: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 7v5l3 2"],
+
+  // Fold every state in a session, and undo it. Two chevrons closing onto a rule, or opening off
+  // one — the rule is the sheet, and the arrows are what happens to what is on it.
+  fold: ["m8 4 4 4 4-4", "M4 12h16", "m8 20 4-4 4 4"],
+  unfold: ["m8 8 4-4 4 4", "M4 12h16", "m8 16 4 4 4-4"],
 
   // The gate components (decision 0002), one glyph each. Every one of them sits beside the
   // component's NAME — see the module note on why a glyph alone is a guess.

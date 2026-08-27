@@ -21,7 +21,7 @@
 import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
-import { ENTERED_TURN, type ConversationTurn, type ConversationView } from "@jaira/shared";
+import { type ConversationTurn, type ConversationView } from "@jaira/shared";
 import type { Project } from "./project";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
@@ -102,19 +102,29 @@ export function conversationView(project: Project, taskId: string, options: Conv
     const event = stored.event;
     const at = stored.createdAt;
     const seq = stored.seq;
-    /** This event's own place in the run, for the instances that have one. */
-    const where = (instanceId: number): { path?: string } => mountedAt(pathOf.get(instanceId));
+    /**
+     * This event's own place in the run AND the instance it happened to.
+     *
+     * The two travel together because every reader that wants one wants the other: the path says
+     * which mount of a state file this is, and the instance says which RUN of that mount — a loop
+     * makes the first ambiguous on its own. See `ConversationTurn.instanceId`.
+     */
+    const at_ = (instanceId: number): { path?: string; instanceId: number } => ({
+      ...mountedAt(pathOf.get(instanceId)),
+      instanceId,
+    });
     switch (event.type) {
       case "instance.entered": {
         // A root has no parent, and its path is the empty string — not "unknown". Every instance is
         // entered before anything else is said about it, so this is what fills the map.
         pathOf.set(event.instanceId, under(event.parentInstanceId, event.childKey) ?? "");
-        turns.push({ seq, at, kind: "operation", stateId: event.stateId, ...where(event.instanceId), text: ENTERED_TURN });
+        turns.push({ seq, at, kind: "entered", stateId: event.stateId, ...at_(event.instanceId) });
         break;
       }
       case "instance.blocked":
-        // Never an instance — `instanceId` is -1 — so its place comes from the MOUNT the engine
-        // reported instead of from a path it never got as far as having.
+        // Never an instance — the engine's `instanceId` is -1 — so no id is carried at all, and its
+        // place comes from the MOUNT the engine reported rather than from a path it never got as far
+        // as having. The absence is what tells a reader there is no panel to look for.
         turns.push({
           seq,
           at,
@@ -126,7 +136,7 @@ export function conversationView(project: Project, taskId: string, options: Conv
         });
         break;
       case "operation.started":
-        turns.push({ seq, at, kind: "operation", stateId: event.stateId, ...where(event.instanceId), text: event.op });
+        turns.push({ seq, at, kind: "started", stateId: event.stateId, ...at_(event.instanceId), text: event.op });
         break;
       case "operation.completed":
         turns.push({
@@ -134,7 +144,7 @@ export function conversationView(project: Project, taskId: string, options: Conv
           at,
           kind: "output",
           stateId: event.stateId,
-          ...where(event.instanceId),
+          ...at_(event.instanceId),
           ok: true,
           ...(event.metrics !== undefined ? { data: event.metrics as unknown as JsonValue } : {}),
         });
@@ -145,21 +155,21 @@ export function conversationView(project: Project, taskId: string, options: Conv
           at,
           kind: "failure",
           stateId: event.stateId,
-          ...where(event.instanceId),
+          ...at_(event.instanceId),
           ok: false,
           text: event.failure.reason,
         });
         break;
       case "transition.taken":
-        turns.push({ seq, at, kind: "transition", stateId: event.stateId, ...where(event.instanceId), text: event.to });
+        turns.push({ seq, at, kind: "transition", stateId: event.stateId, ...at_(event.instanceId), text: event.to });
         break;
       case "instance.terminated":
         turns.push({
           seq,
           at,
-          kind: "operation",
+          kind: "terminated",
           stateId: event.stateId,
-          ...where(event.instanceId),
+          ...at_(event.instanceId),
           ok: event.outcome === "success",
           text: outcomeText(event.outcome, event.failure),
         });

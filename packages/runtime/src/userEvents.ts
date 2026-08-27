@@ -228,9 +228,27 @@ export class UserEventHub {
     return new Promise<FunctionResult<ResolvedValue, WorkflowMetrics>>((resolve) => {
       const timeout = typeof options.timeout === "number" && options.timeout > 0 ? options.timeout : undefined;
       let timer: ReturnType<typeof setTimeout> | undefined;
+      /**
+       * The ENGINE cancelling the call — the state terminated, or a sequence reset superseded it.
+       * The offer is withdrawn from the UI and the promise is left to the executor's own
+       * cancellation, which has already settled the call by the time this fires.
+       *
+       * Named, `once`, and REMOVED when the wait ends any other way. It used to be an anonymous
+       * listener that was neither, on a signal that lives as long as the RUN — so every wait that
+       * was delivered, declined or timed out left its listener behind, and a workflow that parks
+       * once per loop iteration accumulated one per pass. Node says so at eleven
+       * (`MaxListenersExceededWarning: 11 abort listeners added to [AbortSignal]`) and then stops
+       * mentioning it, which is the part that makes this worth fixing rather than silencing.
+       */
+      const onAbort = (): void => {
+        if (!this.pending.delete(requestId)) return;
+        if (timer !== undefined) clearTimeout(timer);
+        this.options.onResolved?.(requestId);
+      };
       const settle = (happened: boolean): boolean => {
         if (!this.pending.delete(requestId)) return false;
         if (timer !== undefined) clearTimeout(timer);
+        abortSignal?.removeEventListener("abort", onAbort);
         resolve({ value: happened as ResolvedValue });
         this.options.onResolved?.(requestId);
         return true;
@@ -241,17 +259,14 @@ export class UserEventHub {
         // be able to exit with an unfired wait still on the clock.
         timer.unref?.();
       }
-      // The ENGINE cancelling the call — the state terminated, or a sequence reset superseded it. The
-      // offer is withdrawn from the UI and the promise is left to the executor's own cancellation,
-      // which has already settled the call by the time this fires.
-      abortSignal?.addEventListener("abort", () => {
-        if (this.pending.delete(requestId)) {
-          if (timer !== undefined) clearTimeout(timer);
-          this.options.onResolved?.(requestId);
-        }
-      });
       this.pending.set(requestId, { request, settle });
       this.options.onRequest?.(request);
+      abortSignal?.addEventListener("abort", onAbort, { once: true });
+      // An ALREADY-cancelled signal fires no event — `addEventListener` on an aborted signal is
+      // silent, which is why `exec.ts` asks the same question. Without this the wait would be
+      // offered on a run that is already over and would sit in `pending` until the window closed.
+      // After the registration above so the two orders behave identically.
+      if (abortSignal?.aborted === true) onAbort();
     });
   }
 

@@ -252,6 +252,7 @@ import type {
   SessionOutput,
   SessionRef,
   SessionTurn,
+  OperationRecordView,
   SessionView,
   CreateFileRequest,
   CreateTaskRequest,
@@ -405,8 +406,13 @@ export interface AppServiceOptions {
  * `push` is here so a send that failed is not filed as an uncaught exception. It is neither: nothing
  * escaped, the sender caught it, and calling it what it is keeps the Logs panel honest for the one
  * failure most likely to be silent.
+ *
+ * `renderer` is the window failing rather than this process — it crashed, it hung, it would not
+ * load, or it printed an error. Recorded HERE because the Logs panel is drawn by the renderer, so
+ * the surface that would have reported the failure is the one that just stopped: main is the only
+ * side of the wire that survives a white window, and until it listened, nothing did.
  */
-export type CrashKind = "unhandledRejection" | "uncaughtException" | "push";
+export type CrashKind = "unhandledRejection" | "uncaughtException" | "push" | "renderer";
 
 export interface KeychainPort {
   /** False on a platform (or a build) with no encrypted store — the chain then starts at `.env.local`. */
@@ -1944,7 +1950,8 @@ export class AppService {
       // event, so `costs` holds nothing for it, and a failed one is now distinguished at the source
       // rather than inferred — see `StateSession.outcome`.
       const settled = costs.get(key);
-      const status = s.outcome === "interrupted" ? "interrupted" : s.outcome === "error" ? "error" : settled?.status;
+      const status =
+        s.outcome === "interrupted" || s.outcome === "running" || s.outcome === "error" ? s.outcome : settled?.status;
       const branch = branchOf(s.runId, s.sessionId);
       return {
         runId: s.runId,
@@ -1979,6 +1986,20 @@ export class AppService {
    * appended on the `SessionOutcome` channel — rather than by softening the wording here, because the
    * wording was right and the data was wrong.
    */
+  /**
+   * Every call one run made — what a derivation resolves its impure bindings against.
+   *
+   * Scoped to the RUN and not to an instance, because the store does not attribute a record to one
+   * and does not need to: a resolved binding finds its own record by CONTENT id (`hashCanonical` of
+   * the request is the `record_id`). So a reader takes the run's records once and looks them up by
+   * hash — one round trip for a whole conversation rather than one per state, and no attribution by
+   * time, which is the thing that would be ambiguous when two instances run at once.
+   */
+  runRecords(request: { taskId: string; runId: number; project?: string }): OperationRecordView[] {
+    const session = this.session(request.project);
+    return sessionStoreFor(session.project, { taskId: request.taskId, runId: request.runId }).records();
+  }
+
   sessionView(request: { taskId: string; runId?: number; instanceId?: number; project?: string }): SessionView {
     const session = this.session(request.project);
     const history = this.sessionHistory(request);

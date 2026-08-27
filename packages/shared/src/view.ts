@@ -620,6 +620,33 @@ export interface StateView {
   fileOnly?: boolean;
 }
 
+/**
+ * One call a run made, as the renderer reads it.
+ *
+ * The complete account of a call, and the reason a state with no model call is explicable at all:
+ * `request` carries the callee AND its arguments with their RESOLVED values (an operation's
+ * `input.<slot>.binding.json` is the value the engine settled on), and `result` carries what came
+ * back. Neither needs the workflow file open beside it.
+ *
+ * ⚠️ `result` is the stored ENVELOPE — `{ value }`, or `{ error, value? }` — rather than the callee's
+ * own value. It is passed through unopened because two readers want different halves: a derivation
+ * wants the value, and a failure display wants to know an envelope carried an error even where the
+ * status column says `completed`. Unwrapping here would make the second impossible.
+ *
+ * `recordId` is the CONTENT id: `hashCanonical` of the request. That is what lets a resolved binding
+ * find its record without being attributed by time or by state — the address is the request itself,
+ * so two instances running at once cannot be confused for one another.
+ */
+export interface OperationRecordView {
+  recordId: string;
+  status: string;
+  request?: JsonValue;
+  result?: JsonValue;
+  error?: JsonValue;
+  startedAt?: number;
+  endedAt?: number;
+}
+
 // --- the conversation inside one task ----------------------------------------
 
 /**
@@ -629,24 +656,58 @@ export interface StateView {
  * transcript: what the operation did, what it called, whether its output validated, and every point
  * a human was asked something.
  */
-export type TurnKind = "operation" | "tool" | "output" | "policy" | "interaction" | "failure" | "blocked" | "transition";
-
 /**
- * The `text` an `operation` turn carries when it is a state being ENTERED rather than a call being
- * made — see `conversationView`, which projects both onto `operation` because entering and starting
- * are one moment to anyone not debugging the engine.
+ * ONE KIND PER JOURNAL EVENT. Three of these used to be `operation`.
  *
- * Named here because two readers now depend on telling them apart: the transcript, which drops both,
- * and the canvas, which draws entering as a step in the run's path. A string literal repeated in
- * three files is a rename waiting to break one of them silently.
+ * `instance.entered`, `operation.started` and `instance.terminated` all projected onto a single
+ * `operation` kind, and every reader that needed them apart matched on the free-text `text` field
+ * against the literal `"entered"` — with `ok === undefined` standing in for "has not finished". That
+ * is a discriminated union spelled as a magic string, and it made three different questions
+ * ("did the machine move here", "did a call start", "how did this end") indistinguishable to the
+ * type system while looking answerable in the editor.
+ *
+ * So they are three kinds. The cost is one wider union; what it buys is that a reader asking the
+ * wrong question no longer compiles, which is the only reason the error routing below can be
+ * checked rather than reviewed.
  */
-export const ENTERED_TURN = "entered";
+export type TurnKind =
+  /** A state was walked into. The machine moving, which is not the same as a call beginning. */
+  | "entered"
+  /** An operation was dispatched. `text` is its kind — `prompt` or `function`. */
+  | "started"
+  /** An instance ended. `ok` says whether it ended well; `text` is the outcome or the reason. */
+  | "terminated"
+  | "tool"
+  | "output"
+  | "policy"
+  | "interaction"
+  /** An OPERATION failed — the call ran and errored. Distinct from the machine failing. */
+  | "failure"
+  /** A child could not be entered at all. Carries no instance, because there never was one. */
+  | "blocked"
+  | "transition";
 
 export interface ConversationTurn {
   seq: number;
   at: number;
   kind: TurnKind;
   stateId?: string;
+  /**
+   * WHICH instance this turn is about.
+   *
+   * The join every reader downstream needs and none of them had. `stateId` names a state DEFINITION,
+   * so a loop that ran `draft` four times produced four indistinguishable sets of turns — which is
+   * why the transcript's own note says "a state that ran twice shows both passes' events on both
+   * cards". The instance is the thing that actually happened.
+   *
+   * It is also what makes the error routing structural: a failure belongs in a panel exactly when
+   * the instance it names has an operation, and without this there is nothing to look up.
+   *
+   * ABSENT is meaningful and is not a `-1`. A `blocked` turn never became an instance — that is what
+   * blocked means — so it has no id to carry, and the absence is the fact rather than a sentinel
+   * every reader would have to remember to test for.
+   */
+  instanceId?: number;
   /**
    * Where this happened, as the chain of CHILD KEYS from the run's root — `product/explore`, not
    * `explore`. Empty string for the root itself.
@@ -829,11 +890,12 @@ export interface SessionRef {
    */
   startedAt?: number;
   /**
-   * How the call ended. Present once it settled — and  is the case that never did: the
+   * How the call ended — or that it has not. `interrupted` is the case that never settled: the
    * process died inside it, so no terminal event was ever written and the verdict comes from its
-   * own record row instead.
+   * own record row instead. `running` comes from the same place and means the opposite: the record
+   * is still open, so the call is speaking right now.
    */
-  status?: "success" | "error" | "interrupted";
+  status?: "success" | "error" | "interrupted" | "running";
   costUsd?: number;
   /** What the call consumed and what that number is worth — see {@link RunMetrics}. */
   metrics?: RunMetrics;
@@ -921,7 +983,8 @@ export interface SessionView {
   seq: number;
   /** The agent's own session handle, when it had one — what lets its native transcript be found. */
   providerSessionId?: string;
-  status?: "success" | "error" | "interrupted";
+  /** See {@link SessionRef.status} — `running` means the call has not finished, not that it died. */
+  status?: "success" | "error" | "interrupted" | "running";
   costUsd?: number;
   turns: SessionTurn[];
   /**

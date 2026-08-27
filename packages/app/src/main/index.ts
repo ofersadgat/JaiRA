@@ -299,6 +299,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "project:list": (() => service.listProjects()) as Handler,
   "task:all": ((request: { workflows?: string[] } | undefined) => service.listAllTasks(request ?? {})) as Handler,
   "session:history": ((request: Parameters<typeof service.sessionHistory>[0]) => service.sessionHistory(request)) as Handler,
+  "run:records": ((request: Parameters<typeof service.runRecords>[0]) => service.runRecords(request)) as Handler,
   "session:view": ((request: Parameters<typeof service.sessionView>[0]) => service.sessionView(request)) as Handler,
   "session:live": ((request: Parameters<typeof service.sessionLive>[0]) => service.sessionLive(request)) as Handler,
   "chat:plan": ((request: Parameters<typeof service.chatPlan>[0]) => service.chatPlan(request)) as Handler,
@@ -397,6 +398,12 @@ function registerIpc(): void {
  * is why both say so.
  */
 const WINDOW_BACKGROUND = { light: "#f5f6f8", dark: "#0f1115" } as const;
+/**
+ * How many DISTINCT renderer console errors are mirrored into the log before the window stops being
+ * quoted. Enough to hold the failure and the handful of warnings that led to it; small enough that a
+ * component erroring on every frame cannot fill the panel with one sentence.
+ */
+const RENDERER_CONSOLE_LIMIT = 50;
 
 /**
  * How tall the strip along the top of the window is, in px.
@@ -517,6 +524,48 @@ async function createWindow(): Promise<BrowserWindow> {
     } catch (e) {
       reportCrash("push", new Error(`context menu could not be forwarded: ${(e as Error).message}`));
     }
+  });
+
+  /**
+   * What the RENDERER did, when what it did was die.
+   *
+   * The window going white is a renderer that crashed or a React tree that threw, and until this
+   * neither left a single trace anywhere main could see: the Logs panel is drawn BY the renderer, so
+   * the one surface that would have reported it is the surface that just stopped existing, and main
+   * — which owns the log and survives — was not listening. A report of "the app turned totally
+   * white" was therefore the whole of the evidence, and there was nowhere else to look.
+   *
+   * All four go through {@link reportCrash}, so they print to the terminal AND land in the log the
+   * next window will show. `console-message` is deliberately included and deliberately narrowed to
+   * errors: it is what carries the renderer's own thrown exceptions across, which is what makes the
+   * error boundary's `console.error` reach a place that outlives the crash.
+   */
+  win.webContents.on("render-process-gone", (_event, details) => {
+    reportCrash("renderer", new Error(`the window's renderer process ended: ${details.reason} (exit ${details.exitCode})`));
+  });
+  win.webContents.on("unresponsive", () => {
+    reportCrash("renderer", new Error("the window stopped responding — the renderer is blocked or thrashing"));
+  });
+  win.webContents.on("did-fail-load", (_event, code, description, url) => {
+    reportCrash("renderer", new Error(`the window would not load: ${description} (${code}) at ${url}`));
+  });
+  /**
+   * …and what it PRINTED, deduplicated, because a console is not a log.
+   *
+   * Level 3 is `error` in Chromium's levels; below it is the app talking to itself. Even at that
+   * level the stream is not all crashes — React reports "each child in a list should have a unique
+   * key" through `console.error` too, once per render — so an unfiltered mirror would file a
+   * thousand copies of one warning under `crash` and bury the entry somebody opened the panel to
+   * find. Distinct messages only, and a hard ceiling: past it the interesting one has already been
+   * recorded, and what follows is the same failure repeating.
+   */
+  const printed = new Set<string>();
+  win.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    if (level < 3 || printed.size >= RENDERER_CONSOLE_LIMIT) return;
+    const at = `${message} (${sourceId}:${line})`;
+    if (printed.has(at)) return;
+    printed.add(at);
+    reportCrash("renderer", new Error(at));
   });
 
   await win.loadFile(RENDERER_HTML);

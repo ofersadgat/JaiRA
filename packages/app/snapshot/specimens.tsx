@@ -10,7 +10,16 @@
  * stops at the window frame and everything inside it is imported.
  */
 import { useMemo, useState, type JSX, type ReactNode } from "react";
-import type { BoardCard, BoardView, FileTree, InstanceNode, SessionView, TaskDetail } from "@jaira/shared/browser";
+import type {
+  BoardCard,
+  BoardView,
+  FileTree,
+  InstanceAddress,
+  InstanceNode,
+  SessionRef,
+  SessionView,
+  TaskDetail,
+} from "@jaira/shared/browser";
 import { defaultAppearance } from "@jaira/shared/browser";
 import { GALLERY_SURFACES } from "@jaira/shared/browser";
 import { AppearancePane } from "../src/renderer/appearancePane";
@@ -25,7 +34,7 @@ import { Paper, Transcript } from "../src/renderer/transcriptView";
 import type { TranscriptEntry } from "../src/renderer/transcript";
 import { RunActivity } from "../src/renderer/runViews";
 import { ForkMark, SessionBandsView, ZigDefs } from "../src/renderer/sessionPanels";
-import { bandsOf, piecesOf, runForksOf } from "../src/renderer/sessionBands";
+import { bandsOf, piecesOf, runForksOf, type BandNote } from "../src/renderer/sessionBands";
 
 /**
  * The clock the specimen's ages are measured back from.
@@ -910,6 +919,124 @@ function RunForkSpecimen(): JSX.Element {
   );
 }
 
+/**
+ * A run's own SHAPE, drawn beside what it said — the rail.
+ *
+ * Trimmed from run 11's `product` phase to the four things the drawing has to get right: nesting
+ * (`explore` has children of its own), a LOOP (`explore` twice — two lanes, one colour, which is the
+ * whole reason a lane is keyed on the instance and coloured by the state), a sibling handing over to
+ * the next (one row with a join and a fork in it), and states that ran no model call at all.
+ *
+ * Built from a shape rather than from eighty literal objects, because the specimen's subject is the
+ * shape: a fixture that spelled out every node would be a worse statement of the same thing and
+ * would have to be re-read to be changed.
+ */
+interface RailSpec {
+  key: string;
+  state: string;
+  kids?: RailSpec[];
+  /** Ran no model call — a computed state. It gets a piece and no session, as the real ones do. */
+  silent?: boolean;
+  ms?: number;
+}
+
+const RAIL_SHAPE: RailSpec = {
+  key: "product",
+  state: "product",
+  kids: [
+    { key: "context", state: "context", ms: 28_800 },
+    {
+      key: "explore",
+      state: "explore",
+      kids: [
+        { key: "brief", state: "brief", ms: 123_000 },
+        { key: "verdict", state: "verdict", silent: true, ms: 2 },
+      ],
+    },
+    { key: "draft", state: "draft", ms: 405_000 },
+    { key: "critique", state: "critique", ms: 226_000 },
+    {
+      key: "explore",
+      state: "explore",
+      kids: [
+        { key: "brief", state: "brief", ms: 90_000 },
+        { key: "verdict", state: "verdict", silent: true, ms: 1 },
+      ],
+    },
+    { key: "confidence", state: "confidence", silent: true, ms: 5 },
+  ],
+};
+
+/** The tree, the session rows and the journal notes, all walked out of one shape at once. */
+const RAIL_RUN = ((): { root: InstanceNode; notes: BandNote[]; refs: SessionRef[] } => {
+  const notes: BandNote[] = [];
+  const refs: SessionRef[] = [];
+  let instanceId = 0;
+  let seq = 0;
+  let clock = 0;
+  const visit = (spec: RailSpec, path: readonly string[], parent: InstanceAddress, occurrence: number): InstanceNode => {
+    const id = ++instanceId;
+    const at = [...path, spec.key];
+    const address: InstanceAddress = [...parent, { childKey: spec.key, occurrence }];
+    const startedAt = clock;
+    notes.push({ seq: ++seq, at: clock, kind: "entered", stateId: spec.state, instanceId: id, path: at.join("/"), text: "" });
+    let children: InstanceNode[] = [];
+    if (spec.kids === undefined) {
+      clock += spec.ms ?? 1000;
+      // A silent state gets no session row, which is what makes `piecesOf` hand it a piece with no
+      // conversation — the case the rail has to keep in the run rather than dropping.
+      if (spec.silent !== true) {
+        refs.push({ runId: 1, instanceId: id, stateId: spec.state, sessionId: `s${id}`, seq: 0, startedAt, at: clock } as SessionRef);
+      }
+    } else {
+      const seen = new Map<string, number>();
+      children = spec.kids.map((kid) => {
+        const n = seen.get(kid.key) ?? 0;
+        seen.set(kid.key, n + 1);
+        return visit(kid, at, address, n);
+      });
+    }
+    return {
+      instanceId: id,
+      stateId: spec.state,
+      childKey: spec.key,
+      status: "completed",
+      iteration: 0,
+      superseded: false,
+      startedAt,
+      endedAt: clock,
+      runId: 1,
+      address,
+      children,
+    };
+  };
+  const root = visit(RAIL_SHAPE, [], [], 0);
+  return { root, notes, refs };
+})();
+
+const RAIL_BANDS = bandsOf(piecesOf(RAIL_RUN.root, RAIL_RUN.refs, 1));
+
+function RailSpecimen(): JSX.Element {
+  return (
+    <div className="ts-page" style={{ minHeight: 0 }}>
+      <ZigDefs />
+      <SessionBandsView
+        bands={RAIL_BANDS}
+        notes={RAIL_RUN.notes}
+        // Deliberately one line per panel. The subject is the RAIL, and a specimen carrying real
+        // transcripts would be four screens tall with the thing being photographed off the bottom.
+        render={(piece) => (
+          <p style={{ margin: 0, padding: "10px 14px", fontSize: 12.5 }}>
+            {piece.sessionId === undefined
+              ? "Ran no model call — this state was computed."
+              : `What ${piece.node.stateId} said.`}
+          </p>
+        )}
+      />
+    </div>
+  );
+}
+
 export const SPECIMENS: readonly Specimen[] = [
   { id: "board-column", figure: "06 · Column", width: 276, height: 384, node: <BoardSpecimen board={ONE_COLUMN} /> },
   { id: "board-two", figure: "01 · Tasks", width: 560, height: 340, node: <BoardSpecimen board={TWO_COLUMNS} /> },
@@ -927,4 +1054,5 @@ export const SPECIMENS: readonly Specimen[] = [
   { id: "run-activity", figure: "— · What a run is doing", width: 900, height: 460, node: <RunActivitySpecimen /> },
   { id: "fork", figure: "— · The fork mark", width: 900, height: 700, node: <ForkSpecimen /> },
   { id: "fork-runs", figure: "— · The fork mark, at run scale", width: 900, height: 460, node: <RunForkSpecimen /> },
+  { id: "rail", figure: "— · The state rail", width: 1000, height: 1960, node: <RailSpecimen /> },
 ];

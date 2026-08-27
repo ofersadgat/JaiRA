@@ -31,6 +31,7 @@ import type {
   ProjectSummary,
   ProjectTask,
   SessionRef,
+  OperationRecordView,
   SessionView,
   FileTree,
   HistorySize,
@@ -1106,6 +1107,18 @@ export interface IpcContract {
   "project:list": { request: void; response: ProjectSummary[] };
   /** Every state a task went through, with the conversation each ran in (§11.3). */
   "session:history": { request: { taskId: string; runId?: number; project?: string }; response: SessionRef[] };
+  /**
+   * Every call a run made — see {@link OperationRecordView}.
+   *
+   * Scoped to one run rather than one instance, because a record is not attributed to an instance in
+   * the store and does not need to be: a resolved binding finds its own by CONTENT id. So the reader
+   * takes the run's records once and looks them up by hash, which is one round trip for a whole
+   * conversation instead of one per state.
+   */
+  "run:records": {
+    request: { taskId: string; runId: number; project?: string };
+    response: OperationRecordView[];
+  };
   /** One state instance's conversation, whole — see {@link SessionView}. */
   "session:view": {
     request: { taskId: string; runId?: number; instanceId?: number; project?: string };
@@ -1423,6 +1436,7 @@ export const IPC_CHANNELS = [
   "task:system",
   "project:list",
   "session:history",
+  "run:records",
   "session:view",
   "session:live",
   "chat:plan",

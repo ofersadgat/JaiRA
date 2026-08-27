@@ -593,6 +593,8 @@ export default function App(): JSX.Element {
    * asking it per row would build one per row on the screen to answer one question about each.
    */
   const foldedFolders = useMemo(() => shutOf(ui, SHUT.folders), [ui]);
+  /** The folded states of every run — see `SHUT.runStates` for why one bucket is enough. */
+  const foldedStates = useMemo(() => shutOf(ui, SHUT.runStates), [ui]);
 
   /**
    * Which board group the Tasks column is scrolled to, while it is showing all of them.
@@ -1115,6 +1117,11 @@ export default function App(): JSX.Element {
     sessions: state.sessions,
     onLoadSession: actions.loadSession,
     onLoadSessions: actions.loadSessions,
+    shutStates: foldedStates,
+    onToggleShutState: (key: string) => actions.toggleShut(SHUT.runStates, key),
+    onSetShutStates: (keys: readonly string[], shut: boolean) => actions.setShut(SHUT.runStates, keys, shut),
+    userEvents: state.userEvents,
+    onDeliverUserEvent: actions.deliverUserEvent,
     sessionHistory: state.sessionHistory,
     session: state.session,
     sessionInstance: state.sessionInstance,

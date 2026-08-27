@@ -29,12 +29,27 @@ const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "
 const ref = (instanceId: number, sessionId: string, startedAt: number, at: number): SessionRef =>
   ({ runId: 1, instanceId, stateId: `s${instanceId}`, sessionId, seq: 0, startedAt, at }) as SessionRef;
 
+/**
+ * A composite over leaves that each ran a PROMPT.
+ *
+ * The operation is on the fixture rather than left off, because it is what makes these children
+ * conversations: a leaf with no operation is a state that computed its outputs and never spoke, and
+ * `Sheet` gives that one a surface instead of a panel (see `stateSurface.tsx`). Every test in this
+ * file is about the panel, so every child in it has to be something that could have one.
+ */
 const parentOf = (kids: Array<{ id: number; from: number; to: number }>): InstanceNode =>
   node({
     instanceId: 1,
     stateId: "plan",
     children: kids.map((kid) =>
-      node({ instanceId: kid.id, stateId: `s${kid.id}`, childKey: `k${kid.id}`, startedAt: kid.from, endedAt: kid.to }),
+      node({
+        instanceId: kid.id,
+        stateId: `s${kid.id}`,
+        childKey: `k${kid.id}`,
+        startedAt: kid.from,
+        endedAt: kid.to,
+        operation: { kind: "prompt", status: "completed" },
+      }),
     ),
   });
 
@@ -111,7 +126,7 @@ describe("what a conversation draws", () => {
       { id: 2, from: 0, to: 10 },
       { id: 3, from: 11, to: 20 },
     ]), [ref(2, "planning", 0, 10), ref(3, "planning", 11, 20)]);
-    expect(two.match(/ts-card-head/g)).toHaveLength(2);
+    expect(two.match(/class="lh"/g)).toHaveLength(2);
   });
 
   it("offers no layout control over a band with one conversation in it", () => {
@@ -147,11 +162,88 @@ describe("what a conversation draws", () => {
     expect(html).not.toContain("sb-gutter");
   });
 
-  it("says so rather than going blank when a state ran in no conversation", () => {
+  it("says so rather than going blank when a call has not written its position yet", () => {
+    // A prompt that is in flight, or one whose position never landed. It IS a conversation — it just
+    // has no id yet — so it keeps the panel and the gutter says what is missing.
     const html = draw(parentOf([{ id: 2, from: 0, to: 10 }]), []);
     expect(html).toContain("no conversation");
+    expect(html).toContain("sb-sheet");
     expect(html).toContain("said by #2");
     expect(html).not.toContain("sb-tear");
+  });
+
+  /**
+   * A state that was never going to speak keeps its letterhead and loses its gutter.
+   *
+   * The two halves of one rule. "One state means no letterhead" holds because the gutter above it is
+   * already saying the same three things; a surface has no session to be named or timed by, so the
+   * gutter would be saying nothing — and the letterhead is the only header it can have.
+   */
+  it("gives a surface a letterhead and no gutter", () => {
+    const parent = node({
+      instanceId: 1,
+      stateId: "plan",
+      children: [node({ instanceId: 2, stateId: "confidence", childKey: "confidence", startedAt: 0, endedAt: 5 })],
+    });
+    const html = draw(parent, []);
+    expect(html).toContain("said by #2");
+    expect(html).toContain('class="lh-kind">computed<');
+    expect(html).not.toContain("sb-gutter");
+    // Least obvious and most important: the old sentence is gone rather than relocated. The kind word
+    // says what the state IS, and "no conversation" beside it would answer a question nobody asked of
+    // a state that never had one — and then repeat its timing as if it were a session's.
+    expect(html).not.toContain("no conversation");
+  });
+
+  it("drops the letterhead when a conversation is alone in its sheet", () => {
+    // The gutter names the session, names the state that opened it, and times it. A letterhead under
+    // that is the same three facts a second time.
+    const html = draw(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)]);
+    expect(html).toContain("said by #2");
+    expect(html).toContain("sb-gutter solo");
+    expect(html).not.toContain('class="lh"');
+  });
+
+  it("keeps a letterhead per state once a session holds more than one", () => {
+    const html = draw(parentOf([{ id: 2, from: 0, to: 10 }, { id: 3, from: 11, to: 20 }]), [
+      ref(2, "planning", 0, 10),
+      ref(3, "planning", 11, 20),
+    ]);
+    expect(html.match(/class="lh"/g)).toHaveLength(2);
+    expect(html).not.toContain("sb-gutter solo");
+  });
+
+  it("times the SESSION in the gutter — the envelope of its states, not the sum of them", () => {
+    // A conversation interrupted and resumed spent the gap doing nothing. Summing the two calls
+    // would report 2 ms of talking across a span of twenty.
+    const html = draw(parentOf([{ id: 2, from: 0, to: 1 }, { id: 3, from: 19, to: 20 }]), [
+      ref(2, "planning", 0, 1),
+      ref(3, "planning", 19, 20),
+    ]);
+    expect(html).toContain('class="sb-span">');
+    expect(html).toContain("20 ms");
+  });
+
+  it("offers collapse-all only where there are letterheads to fold", () => {
+    // On a solo panel the gutter's own chevron is already the control, and on a surface there is no
+    // gutter at all — so a button in either place would be a second way to do one thing.
+    const many = draw(parentOf([{ id: 2, from: 0, to: 10 }, { id: 3, from: 11, to: 20 }]), [
+      ref(2, "planning", 0, 10),
+      ref(3, "planning", 11, 20),
+    ]);
+    expect(many).toContain("sb-foldall");
+    const one = draw(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)]);
+    expect(one).not.toContain("sb-foldall");
+  });
+
+  it("keeps the sheet when a session-less piece shares its panel with a conversation", () => {
+    // The guard `Sheet` makes: a surface replaces a panel only when it IS the panel. A segment with
+    // two pieces in it is a shared conversation, and it keeps its sheet whatever the first piece is.
+    const parent = parentOf([{ id: 2, from: 0, to: 10 }, { id: 3, from: 11, to: 20 }]);
+    const html = draw(parent, [ref(2, "planning", 0, 10), ref(3, "planning", 11, 20)]);
+    expect(html).toContain("sb-sheet");
+    expect(html).toContain("said by #2");
+    expect(html).toContain("said by #3");
   });
 
   it("shows a composite that only orchestrates its children, and nothing of its own", () => {
@@ -362,5 +454,59 @@ describe("the zigzag tile", () => {
     // unresolved variable, which is to say none: no torn edge in the app had ever drawn its teeth,
     // in the whole time the vocabulary has been the one two views use to mean "cut here".
     expect(renderToStaticMarkup(createElement(ZigDefs))).not.toContain("var(--");
+  });
+});
+
+/**
+ * Folding — remembered, not held by the panel.
+ *
+ * A fold is a statement about what you are done reading, and navigating away is not a retraction of
+ * it. So the set arrives as a prop (`JairaUiState.shut`, under `SHUT.runStates`) and the sheet only
+ * decides what to do with it — which is also what makes it testable without a DOM.
+ */
+describe("what a fold does", () => {
+  const twoStates = (shut: ReadonlySet<string>): string =>
+    renderToStaticMarkup(
+      createElement(SessionBandsView, {
+        bands: bandsOf(
+          piecesOf(parentOf([{ id: 2, from: 0, to: 10 }, { id: 3, from: 11, to: 20 }]), [
+            ref(2, "planning", 0, 10),
+            ref(3, "planning", 11, 20),
+          ], 1),
+        ),
+        shut,
+        scope: "t-1",
+        render: (piece) => createElement("p", null, `said by #${piece.node.instanceId}`),
+      }),
+    );
+
+  it("opens everything when nothing is remembered", () => {
+    const html = twoStates(new Set());
+    expect(html).toContain("said by #2");
+    expect(html).toContain("said by #3");
+    expect(html).not.toContain("lh shut");
+  });
+
+  it("hides the body of a folded state and keeps its letterhead", () => {
+    // The letterhead has to stay: it is the only thing left to click, and folded it carries the
+    // summary of what is behind it. A fold that removed the row would be a delete.
+    const html = twoStates(new Set(["t-1::2:0"]));
+    expect(html).not.toContain("said by #2");
+    expect(html).toContain("said by #3");
+    expect(html).toContain("lh shut");
+  });
+
+  it("keys a fold by TASK, run and instance, so nothing folds another task's states", () => {
+    // Instance ids are minted per run, so `#i2` names a different state in every one of them — and a
+    // single-run projection stamps no run at all, which is why the task has to be in the key too.
+    expect(twoStates(new Set(["t-2::2:0"]))).toContain("said by #2");
+    expect(twoStates(new Set(["t-1:9:2:0"]))).toContain("said by #2");
+  });
+
+  it("says `expand all` once every state in the sheet is folded", () => {
+    // The control has one meaning — fold what is in this session — so its label is a statement about
+    // what pressing it will do rather than about what it is called.
+    expect(twoStates(new Set())).toContain('aria-label="Collapse all"');
+    expect(twoStates(new Set(["t-1::2:0", "t-1::3:0"]))).toContain('aria-label="Expand all"');
   });
 });

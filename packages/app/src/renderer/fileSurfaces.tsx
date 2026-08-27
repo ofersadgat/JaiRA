@@ -23,6 +23,7 @@ import {
 import { Badge } from "./board";
 import { CompositeView, SidechainConversation } from "./runViews";
 import { entriesOf, journalFor } from "./transcript";
+import { useStickToBottom } from "./stickToBottom";
 import { nodeAt } from "./trail";
 import { Paper, Transcript } from "./transcriptView";
 import { docKey, useDraftBox } from "./drafts";
@@ -242,6 +243,9 @@ function LeafPanel({ context }: FileSurfaceProps): JSX.Element {
     () => entriesOf(session, journalFor(conversation?.turns ?? [], state?.stateId), liveTurn),
     [session, conversation, state?.stateId, liveTurn],
   );
+  // Follow the live edge while the reader is standing on it. The selected run is the reset: another
+  // task's conversation is another conversation, and is read from its end.
+  const follow = useStickToBottom<HTMLDivElement>([entries], [selected]);
   // The host of any doorway in THIS transcript is the instance whose session is on screen — what a
   // sidechain step has to name for the walk to keep resolving. See `TrailStep.sidechain`.
   const host = context.sessionInstance !== null ? nodeAt(context.detail?.instances ?? [], context.sessionInstance) : undefined;
@@ -292,7 +296,7 @@ function LeafPanel({ context }: FileSurfaceProps): JSX.Element {
           </>
         ) : null}
       </div>
-      <div className="leaf-convo scroll">
+      <div className="leaf-convo scroll" ref={follow.ref} onScroll={follow.onScroll}>
         <Paper>
           <Transcript
             session={session}

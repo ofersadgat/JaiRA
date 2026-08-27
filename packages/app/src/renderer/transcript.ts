@@ -26,6 +26,7 @@ import {
   type SessionOutput,
   type SessionTurn,
   type SessionView,
+  type TurnKind,
   type WritingTool,
 } from "@jaira/shared/browser";
 
@@ -455,16 +456,28 @@ function isErrorish(result: unknown): boolean {
 
 // --- building the list --------------------------------------------------------
 
-/** How a journal turn reads once it is not a message. `operation` and `output` are dropped — see below. */
-const EVENT_TONE: Record<string, EventEntry["tone"] | undefined> = {
+/**
+ * How a journal turn reads once it is not a message.
+ *
+ * ⚠️ Typed on `TurnKind` rather than `string`, so a kind added upstream fails to compile here rather
+ * than silently rendering as nothing. That is not hypothetical: `operation` was three journal events
+ * wearing one name, and splitting it into `entered` · `started` · `terminated` would have passed a
+ * `Record<string, …>` without a word while quietly dropping two of the three.
+ *
+ * `started`, `tool` and `output` are the session's own material, told worse — keeping them would
+ * double every model call, once as the turn it was and once as a line saying it happened. `entered`
+ * and `terminated` are the machine moving, which the GREY between the panels draws (see `notesOf`);
+ * inside a transcript they would annotate a conversation with the fact that it began.
+ */
+const EVENT_TONE: Record<TurnKind, EventEntry["tone"] | undefined> = {
   policy: "warn",
   interaction: "warn",
   failure: "bad",
   blocked: "bad",
   transition: "plain",
-  // `operation` and `tool` are the session's own material, told worse. Keeping them would double
-  // every model call: once as the turn it actually was, once as a journal line saying it happened.
-  operation: undefined,
+  entered: undefined,
+  started: undefined,
+  terminated: undefined,
   tool: undefined,
   output: undefined,
 };
@@ -758,7 +771,24 @@ export function liveItemEntries(item: JsonValue, within?: string): Array<Transcr
     // The content is the provider's whole message object — {role, content} with provider-shaped
     // parts — the very shape a stored turn holds, so it is read the same way.
     const message = (rec["content"] ?? {}) as { content?: unknown };
-    if (typeof message.content === "string") return messageOf({ role, text: message.content });
+    /**
+     * The stamps the stream measured, which live OUTSIDE the provider's message.
+     *
+     * `LiveTurnLog.apply` puts `at`, `startedAt` and `thoughtMs` on the ITEM — beside `content`,
+     * never inside it, because `content` is the provider's own object and a replay sends it back
+     * verbatim. This read them off nothing, so "thought for 12 s" was a number the live row carried
+     * while the tail was still growing and lost the instant the turn finished: the tail row went
+     * away and the settled turn that replaced it had never been told how long it took. The stored
+     * record has always kept them (`messageTimes`), which is why re-opening the run showed the
+     * duration a watcher had just seen disappear.
+     */
+    const num = (key: string): number | undefined => (typeof rec[key] === "number" ? (rec[key] as number) : undefined);
+    const times = {
+      ...(num("at") !== undefined ? { at: num("at")! } : {}),
+      ...(num("startedAt") !== undefined ? { startedAt: num("startedAt")! } : {}),
+      ...(num("thoughtMs") !== undefined ? { thoughtMs: num("thoughtMs")! } : {}),
+    };
+    if (typeof message.content === "string") return messageOf({ role, text: message.content, ...times });
     const parts = Array.isArray(message.content) ? message.content : [];
     const text = parts
       .filter((p): p is { type: string; text: string } => (p as { type?: unknown })?.type === "text" && typeof (p as { text?: unknown }).text === "string")
@@ -768,6 +798,7 @@ export function liveItemEntries(item: JsonValue, within?: string): Array<Transcr
       role,
       ...(text.length > 0 ? { text } : {}),
       ...(parts.length > 0 ? { parts: parts as JsonValue } : {}),
+      ...times,
     });
   }
   if (rec["kind"] === "event") return eventEntry(rec["event"] as JsonValue);
@@ -1019,6 +1050,11 @@ export function entriesOf(
   // after everything above it. A transcript that simply stops is indistinguishable from one that
   // was cut off, and the difference is exactly what a reader of a crashed run is trying to
   // establish: whether what they are looking at is all there was.
+  //
+  // A call that has not ended gets nothing, and that is not the same as saying nothing: `running`
+  // is a status of its own now, and the live edge below already says the call is speaking. It used
+  // to arrive here as `interrupted`, so watching a run meant reading its own death notice under
+  // every state that was still talking.
   if (session?.status === "interrupted") {
     entries.push({
       kind: "event",

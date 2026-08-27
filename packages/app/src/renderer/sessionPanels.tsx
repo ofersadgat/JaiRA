@@ -39,10 +39,13 @@
  * a context and nothing about what any of them is; the state that started it is the other half, and
  * it is a place you can go.
  */
-import { Fragment, useCallback, useRef, useState, type JSX, type ReactNode } from "react";
+import { Fragment, useCallback, useRef, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
 import { Icon } from "./icons";
 import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
-import { RunCard } from "./transcriptView";
+import { clockOf, durationOf } from "./transcriptView";
+import { signatureOf } from "./transcript";
+import type { InstanceNode } from "@jaira/shared/browser";
+import { StateBlock, StateHeader, headerToneOf, surfaceKindOf } from "./stateSurface";
 import {
   forksOf,
   pathFrom,
@@ -50,6 +53,7 @@ import {
   placeOf,
   placeRunForks,
   runForkAt,
+  segmentsFrom,
   startersOf,
   type BandNote,
   type RunFork,
@@ -57,6 +61,12 @@ import {
   type SessionPiece,
   type SessionSegment,
 } from "./sessionBands";
+import { RailedRows } from "./railView";
+import type { RailStep } from "./rail";
+
+/** Nothing folded — the default for a host that does not remember folds. Frozen, so it cannot be
+ *  mutated into one host's state by another. */
+const EMPTY_SHUT: ReadonlySet<string> = new Set();
 
 /** How a band with more than one session is arranged. */
 export type BandLayout = "columns" | "tabs";
@@ -245,7 +255,12 @@ export function ForkMark({
  * same convention `StateSession.outcome` documents for a journal that predates the distinction.
  */
 function sideName(piece: SessionPiece): string {
-  return piece.status === "error" ? "failed" : piece.status === "interrupted" ? "stopped" : "finished";
+  if (piece.status === "error") return "failed";
+  if (piece.status === "interrupted") return "stopped";
+  // The one that is not a verdict at all: this side has not ended, so naming it after any of the
+  // ways a call can finish would be a claim about something that has not happened yet.
+  if (piece.status === "running") return "running";
+  return "finished";
 }
 
 /**
@@ -268,24 +283,112 @@ function sideOf(
 }
 
 /**
- * One state's operation inside a session's panel.
+ * What a piece is remembered as when it is folded.
  *
- * The same card a child run has always been drawn as, opened rather than folded: a panel of collapsed
- * headers is an index, and this is meant to read as a conversation. The fold is still there for a
- * forty-turn agent loop somebody wants out of the way.
+ * Three parts, and each one is load-bearing. The RUN, because an instance id is minted per run and
+ * so `#i2` names a different state in every one of them. The SEQUENCE, because a state that called
+ * twice is two pieces. And the SCOPE — the task — because the other two are not enough: a folded
+ * tree stamps `runId` on every node, but a single-run projection leaves it absent, and two tasks
+ * would then both remember a state as `:2:0` and fold each other's.
+ *
+ * The alternative was a bucket per task, which is what `SHUT` ids are for. It loses to this by one
+ * property: a task pruned from the database leaves its keys behind either way, and a single bucket
+ * is one entry to forget rather than one per task nobody can enumerate.
  */
-function Piece({ piece, render }: { piece: SessionPiece; render: (piece: SessionPiece) => ReactNode }): JSX.Element {
-  const [open, setOpen] = useState(true);
+function keyOfPiece(piece: SessionPiece, scope: string): string {
+  return `${scope}:${piece.node.runId ?? ""}:${piece.node.instanceId}:${piece.seq ?? ""}`;
+}
+
+/**
+ * The SESSION's span — when it started, and how long the whole of it took.
+ *
+ * The envelope of its pieces rather than the sum of them: a session interrupted and resumed spent
+ * the gap doing nothing, and reporting the sum would say a conversation took four minutes when it
+ * was open for twenty. Which is also why this belongs to the gutter and not to any letterhead — it
+ * is a fact about the thread, and no single state in it knows it.
+ *
+ * A session still open has no duration yet and says only when it began.
+ */
+function spanOf(segment: SessionSegment): string {
+  const from = Math.min(...segment.pieces.map((piece) => piece.startedAt));
+  if (!Number.isFinite(from)) return "";
+  const ends = segment.pieces.map((piece) => piece.endedAt);
+  const to = ends.some((end) => end === undefined) ? undefined : Math.max(...(ends as number[]));
+  const took = to !== undefined && to >= from ? durationOf(to - from) : undefined;
+  return [clockOf(from), took].filter((part) => part !== undefined && part.length > 0).join(" · ");
+}
+
+/**
+ * One state inside a session's panel — its letterhead, and its transcript under it.
+ *
+ * Opened rather than folded, always, and that is deliberate: a sheet of collapsed headers is an
+ * index, and the first thing somebody opening a run wants is what it said. The fold is a thing you
+ * DO — to a forty-turn agent loop you are scrolling past, or to a whole session at once from the
+ * gutter above.
+ */
+function Piece({
+  piece,
+  open,
+  onToggle,
+  render,
+}: {
+  piece: SessionPiece;
+  open: boolean;
+  onToggle: () => void;
+  render: (piece: SessionPiece) => ReactNode;
+}): JSX.Element {
+  const node = piece.node;
+  const kind = surfaceKindOf(node);
+  const sig = signatureOf(node);
+  const tone = headerToneOf(node, kind);
   return (
-    <RunCard
-      node={piece.node}
+    <StateBlock
       open={open}
-      running={piece.node.status === "running"}
-      onToggle={() => setOpen((v) => !v)}
+      header={
+        <StateHeader
+          open={open}
+          {...(kind !== undefined ? { kind } : {})}
+          {...(tone !== undefined ? { tone } : {})}
+          name={sig.name}
+          {...(sig.label !== undefined ? { label: sig.label } : {})}
+          {...(summaryOf(piece) !== undefined ? { summary: summaryOf(piece)! } : {})}
+          {...(metaOf(node) !== "" ? { meta: metaOf(node) } : {})}
+          {...(kind === "conversation" ? { status: node.status } : {})}
+          onToggle={onToggle}
+        />
+      }
     >
       {render(piece)}
-    </RunCard>
+    </StateBlock>
   );
+}
+
+/**
+ * The clock a header carries, and how long it took.
+ *
+ * Formatted here rather than in the header because it is arithmetic over a node, and a header should
+ * be handed words. A run still going has no duration to state, and says nothing rather than zero.
+ */
+function metaOf(node: InstanceNode): string {
+  const took = node.endedAt !== undefined ? durationOf(node.endedAt - node.startedAt) : undefined;
+  return [clockOf(node.startedAt), took].filter((part) => part !== undefined && part.length > 0).join(" · ");
+}
+
+/**
+ * What a FOLDED state's line says instead of its label — see {@link StateHeader}.
+ *
+ * The one thing available without reading the record: how it ended, and what it cost. A richer
+ * summary (the docs it wrote, the severity it exited at) is the operation's OUTPUT, which the
+ * projection does not carry per instance yet — so this says the two things it can rather than
+ * guessing at the one it cannot.
+ */
+function summaryOf(piece: SessionPiece): string | undefined {
+  const op = piece.node.operation;
+  const parts: string[] = [];
+  if (op?.status === "failed") parts.push(op.reason ?? "failed");
+  else if (piece.node.status === "canceled") parts.push("canceled");
+  if (op?.costUsd !== undefined) parts.push(`$${op.costUsd.toFixed(2)}`);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 
 /**
@@ -325,9 +428,20 @@ function Sheet({
   onGoTo,
   onGoToRun,
   onOpenWorkflow,
+  shut,
+  onToggle,
+  onSetShut,
+  scope,
   render,
 }: {
   segment: SessionSegment;
+  /** What folds are remembered UNDER — see {@link keyOfPiece}. */
+  scope: string;
+  /** Folded states, by the key {@link keyOfPiece} gives them. */
+  shut: ReadonlySet<string>;
+  onToggle: (key: string) => void;
+  /** Fold or unfold several at once — one write, not one per state. */
+  onSetShut: (keys: readonly string[], shut: boolean) => void;
   /** False when something else already names this session — see the tab row in {@link Band}. */
   named?: boolean;
   /** True when this piece is the whole view and needs no card around it — see {@link isSolo}. */
@@ -349,14 +463,77 @@ function Sheet({
   // At most one piece of a panel is a side of a fork: the sides of one division differ by session,
   // and a panel is one session. So the panel can be stamped with it and found from anywhere.
   const side = sideOf(segment, forks);
+
+  /**
+   * Which states in this sheet are folded — REMEMBERED, not held here.
+   *
+   * A fold is a statement about what you are done reading, and navigating away is not a retraction
+   * of it. `JairaUiState.shut` already stores exactly this shape (see `SHUT.runStates`), so the set
+   * arrives as a prop and the sheet only decides what to do with it. Empty is the opening position:
+   * everything expanded, always — the first thing somebody opening a run wants is what it said, and
+   * folding is a thing you do.
+   */
+  const keys = segment.pieces.map((piece) => keyOfPiece(piece, scope));
+  const allShut = keys.length > 0 && keys.every((key) => shut.has(key));
+  // One control, one meaning: fold what is in this session. On a solo sheet there are no letterheads
+  // to fold, so the same gesture folds the sheet itself and leaves the gutter line standing alone.
+  const toggleAll = (): void => onSetShut(keys, !allShut);
+  const onGutterKey = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    toggleAll();
+  };
+
+  /**
+   * ONE STATE MEANS NO LETTERHEAD — and the gutter takes over its job entirely.
+   *
+   * The gutter above already names the session and the state that opened it, and it now carries the
+   * session's own span as well; with one state inside, that span IS that state's timing. So a
+   * letterhead under it would be the same three facts a second time, and dropping it is two lines
+   * collapsing into one rather than anything going missing.
+   *
+   * This is `isSolo`'s rule moved from the VIEW down to the SHEET. It used to ask "is this whole
+   * view one piece", which made it a special case for walking into a leaf; asked per sheet it is
+   * simply what a one-state session looks like, everywhere.
+   *
+   * The EXCEPTION is a surface. A computation, a question and a wait each sit alone on a
+   * session-less sheet by construction, so read literally this would strip the heading off exactly
+   * the states the heading exists for. The principle underneath is not "one state", it is "the
+   * gutter is already saying this" — and a surface has no session to be named or timed by.
+   */
+  const only = segment.pieces.length === 1 ? segment.pieces[0] : undefined;
+  const solo = only !== undefined && surfaceKindOf(only.node) === "conversation";
+  /**
+   * A SURFACE has no gutter at all — it is the other half of the rule above.
+   *
+   * The gutter's three facts are all about a conversation: which session this is, which state opened
+   * it, and how long the whole of it took. A computation, a question and a wait have none of them,
+   * and drawn anyway the row said "no conversation" directly above a letterhead already reading
+   * `computed`, then repeated the state's own timing as if it were a session's. So the letterhead is
+   * the only header, which is what makes it the exception to "one state means no letterhead": there
+   * is nothing above it saying the same thing.
+   */
+  const surface = only !== undefined && segment.sessionId === undefined && surfaceKindOf(only.node) !== "conversation";
+
   return (
     <div
       className="sb-panel"
       {...(side !== undefined ? { "data-fork-place": side.place } : {})}
       {...(segment.pieces[0]?.node.runId !== undefined ? { "data-run": segment.pieces[0].node.runId } : {})}
     >
-      {named ? (
-        <div className="sb-gutter">
+      {named && !surface ? (
+        <div
+          className={`sb-gutter${solo ? " solo" : ""}`}
+          {...(solo ? { role: "button", tabIndex: 0, onClick: toggleAll, onKeyDown: onGutterKey } : {})}
+        >
+          {/* A solo sheet's gutter IS its letterhead, so it opens with the same chevron. With more
+              than one state the fold lives on each letterhead, and the gutter's control folds the
+              lot — see the button at the end of the row. */}
+          {solo ? (
+            <span className={`sb-gut-chev${allShut ? "" : " open"}`}>
+              <Icon name="chevron" />
+            </span>
+          ) : null}
           {segment.sessionId !== undefined ? (
             <span className="sb-session mono ellip" title={segment.sessionId}>
               {segment.sessionId}
@@ -397,6 +574,23 @@ function Sheet({
               note="the position was already taken, so every attempt after the first branched"
             />
           ) : null}
+          {/* The session's own span, not any one state's. With several states it is their envelope;
+              with one it is that state's timing, which is what lets the letterhead go. */}
+          {spanOf(segment) !== "" ? <span className="sb-span">{spanOf(segment)}</span> : null}
+          {/* An icon that grows its word on hover rather than carrying one permanently or waiting on
+              a tooltip. Absent on a solo sheet: there are no letterheads to fold, and the gutter's
+              own chevron is already the control. */}
+          {solo ? null : (
+            <button
+              type="button"
+              className="sb-foldall"
+              aria-label={allShut ? "Expand all" : "Collapse all"}
+              onClick={toggleAll}
+            >
+              <Icon name={allShut ? "unfold" : "fold"} />
+              <span className="sb-foldall-label">{allShut ? "expand all" : "collapse all"}</span>
+            </button>
+          )}
         </div>
       ) : null}
       <section className={`sb-sheet${segment.resumed ? " resumed" : ""}${segment.paused ? " paused" : ""}`}>
@@ -418,7 +612,16 @@ function Sheet({
                 {divides !== undefined && onGoToRun !== undefined ? (
                   <RunForkMark fork={divides} onGoToRun={onGoToRun} inSheet />
                 ) : null}
-                {bare ? <div className="sb-bare">{render(piece)}</div> : <Piece piece={piece} render={render} />}
+                {solo ? (
+                  allShut ? null : <div className="sb-bare">{render(piece)}</div>
+                ) : (
+                  <Piece
+                    piece={piece}
+                    open={!shut.has(keyOfPiece(piece, scope))}
+                    onToggle={() => onToggle(keyOfPiece(piece, scope))}
+                    render={render}
+                  />
+                )}
               </Fragment>
             );
           })}
@@ -454,9 +657,17 @@ function Band({
   onGoTo,
   onGoToRun,
   onOpenWorkflow,
+  shut,
+  onToggle,
+  onSetShut,
+  scope,
   render,
 }: {
   band: SessionBand;
+  scope: string;
+  shut: ReadonlySet<string>;
+  onToggle: (key: string) => void;
+  onSetShut: (keys: readonly string[], shut: boolean) => void;
   /** Passed through to the sheet — see {@link isSolo}. Only ever true for a one-segment band. */
   bare?: boolean;
   /** Who opened each session in the run, by segment key — see {@link startersOf}. */
@@ -487,6 +698,10 @@ function Band({
           onGoTo={onGoTo}
           onGoToRun={onGoToRun}
           {...(onOpenWorkflow !== undefined ? { onOpenWorkflow } : {})}
+          shut={shut}
+          onToggle={onToggle}
+          onSetShut={onSetShut}
+          scope={scope}
           render={render}
         />
       </div>
@@ -542,6 +757,10 @@ function Band({
             runForks={runForks}
             onGoTo={onGoTo}
             onGoToRun={onGoToRun}
+            shut={shut}
+            onToggle={onToggle}
+            onSetShut={onSetShut}
+            scope={scope}
             render={render}
           />
         </>
@@ -557,6 +776,10 @@ function Band({
               onGoTo={onGoTo}
               onGoToRun={onGoToRun}
               {...(onOpenWorkflow !== undefined ? { onOpenWorkflow } : {})}
+              shut={shut}
+              onToggle={onToggle}
+              onSetShut={onSetShut}
+              scope={scope}
               render={render}
             />
           ))}
@@ -610,16 +833,27 @@ const VERB: Record<BandNote["kind"], string> = {
   failure: "",
 };
 
-/** The notes standing at one point in the stack, or nothing at all. */
-function Notes({ notes, root }: { notes: readonly BandNote[]; root: string }): JSX.Element | null {
-  if (notes.length === 0) return null;
-  return (
-    <div className="sb-notes">
-      {notes.map((note) => (
-        <NoteRow key={`${note.seq}:${note.stateId ?? ""}`} note={note} root={root} />
-      ))}
-    </div>
-  );
+/**
+ * Where one note sits on the rail, and whether it OPENS a lane.
+ *
+ * Only entering does. The other three all happen inside a state that is already open, and two of them
+ * are addressed by a path that is not their own: a transition's path is where it ARRIVES, and the row
+ * belongs to the state that took it; a blocked child's path is the child, which never became a state
+ * at all — which is the whole content of the note. Both are drawn against their parent.
+ */
+export function stepOfNote(note: BandNote, root: string): RailStep {
+  const at = segmentsFrom(note.path, root);
+  const opens = note.kind === "entered";
+  const inside = opens || note.kind === "failure" ? at : at.slice(0, -1);
+  return {
+    // The instance where there is one: `explore` running twice is two lanes, and a key on the state
+    // would fold the second pass into the first. A note that never became an instance cannot collide
+    // with anything — nothing else in the run is at its seq.
+    key: opens && note.instanceId !== undefined ? `i${note.instanceId}` : `n${note.seq}`,
+    stateId: note.stateId ?? at[at.length - 1] ?? "",
+    at: inside,
+    opens,
+  };
 }
 
 /**
@@ -679,10 +913,27 @@ export function SessionBandsView({
   root = "",
   onOpenWorkflow,
   runForks = [],
+  shut = EMPTY_SHUT,
+  onToggle = () => undefined,
+  onSetShut = () => undefined,
+  scope = "",
   empty,
 }: {
   bands: readonly SessionBand[];
   render: (piece: SessionPiece) => ReactNode;
+  /**
+   * Folded states, and the two ways to change that — see `SHUT.runStates`.
+   *
+   * Defaulted, so a host that does not remember folds still renders: every state opens, and folding
+   * one does nothing rather than throwing. That is the honest degradation for a surface with no
+   * settings behind it, and it is what the tests render against.
+   */
+  shut?: ReadonlySet<string>;
+  onToggle?: (key: string) => void;
+  onSetShut?: (keys: readonly string[], shut: boolean) => void;
+  /** The task these folds belong to — see {@link keyOfPiece}. Empty is fine for a host with no
+   *  memory: nothing is remembered, so nothing can collide. */
+  scope?: string;
   /** Failures and transitions with no panel to appear in — see {@link BandNote} and {@link NoteRow}. */
   notes?: readonly BandNote[];
   /** The MOUNT PATH this page is read from — what a note's path is shown relative to. Root is `""`. */
@@ -734,29 +985,75 @@ export function SessionBandsView({
   const placedForks = placeRunForks(runForks, bands);
   /** The rest of them: a fork that divides a panel rather than opening one. */
   const byPiece = runForkAt(runForks);
+
+  /**
+   * The page as one flat sequence of rows, so the rail can draw the hierarchy beside it.
+   *
+   * The two lists are built together and stay index-aligned: `steps` is what the rail reasons about
+   * (a path, and whether the row enters it) and `nodes` is what the row says. They are separate
+   * because a rail row is about a STATE and a page row is about anything at all — a panel, a note, a
+   * mark — and the rail also inserts rows of its own where a state is left.
+   */
+  const steps: RailStep[] = [];
+  const nodes: ReactNode[] = [];
+  const add = (step: RailStep, node: ReactNode): void => {
+    steps.push(step);
+    nodes.push(node);
+  };
+  /** Where a panel's state sits. The address is stamped from the run's root, the same basis a note's
+   *  path has, so both are trimmed to the module being read the same way. */
+  const atPiece = (piece: SessionPiece): string[] =>
+    segmentsFrom((piece.node.address ?? []).map((step) => step.childKey).join("/"), root);
+  const addNotes = (list: readonly BandNote[]): void => {
+    for (const note of list) add(stepOfNote(note, root), <NoteRow note={note} root={root} />);
+  };
+
+  for (const [i, band] of bands.entries()) {
+    for (const fork of placedForks[i]!) {
+      const opened = fork.sides[0]!.piece;
+      add(
+        { key: `f${i}:${JSON.stringify(fork.at)}`, stateId: opened.node.stateId, at: atPiece(opened), opens: false },
+        <RunForkMark fork={fork} onGoToRun={goToRun} />,
+      );
+    }
+    addNotes(placed[i]!);
+    // A band can hold several conversations at once, and they are laid out ACROSS. Its place on the
+    // rail is its first piece's: the row is one row however many panels are in it.
+    const lead = band.segments[0]?.pieces[0];
+    add(
+      {
+        key: `b${i}`,
+        stateId: lead?.node.stateId ?? "",
+        at: lead === undefined ? [] : atPiece(lead),
+        opens: false,
+      },
+      <Band
+        band={band}
+        bare={bare}
+        starters={starters}
+        forks={forks}
+        runForks={byPiece}
+        onGoTo={goTo}
+        onGoToRun={goToRun}
+        {...(onOpenWorkflow !== undefined ? { onOpenWorkflow } : {})}
+        shut={shut}
+        onToggle={onToggle}
+        onSetShut={onSetShut}
+        scope={scope}
+        render={render}
+      />,
+    );
+  }
+  addNotes(placed[bands.length]!);
+
   return (
     <div className="sb" ref={sheets}>
       <ZigDefs />
-      {bands.map((band, i) => (
-        <Fragment key={`${band.startedAt}:${i}`}>
-          {placedForks[i]!.map((fork) => (
-            <RunForkMark key={JSON.stringify(fork.at)} fork={fork} onGoToRun={goToRun} />
-          ))}
-          <Notes notes={placed[i]!} root={root} />
-          <Band
-            band={band}
-            bare={bare}
-            starters={starters}
-            forks={forks}
-            runForks={byPiece}
-            onGoTo={goTo}
-            onGoToRun={goToRun}
-            {...(onOpenWorkflow !== undefined ? { onOpenWorkflow } : {})}
-            render={render}
-          />
-        </Fragment>
-      ))}
-      <Notes notes={placed[bands.length]!} root={root} />
+      <RailedRows
+        steps={steps}
+        renderStep={(i) => nodes[i]}
+        {...(bands.some((band) => band.segments.length > 1) ? { className: "rail-wide" } : {})}
+      />
     </div>
   );
 }

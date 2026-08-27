@@ -124,7 +124,12 @@ describe("piecesOf", () => {
     expect(pieces.find((p) => p.sessionId === "OLD")?.node.runId).toBe(0);
   });
 
-  it("drops a pass a sequence reset disowned", () => {
+  it("keeps a pass a sequence reset superseded — the branch still happened", () => {
+    // These used to be dropped, and the loop is where that hurt: re-entering a child key supersedes
+    // the previous instance under it, so looping back to `explore` deleted the entire previous
+    // iteration from the transcript — panels that had been read, and the answers the next pass is a
+    // response to. `superseded` governs expression resolution, not history; the projection keeps the
+    // history in as many words, and every other reader already shows it.
     const parent = node({
       instanceId: 1,
       stateId: "plan",
@@ -133,7 +138,31 @@ describe("piecesOf", () => {
         node({ instanceId: 3, stateId: "s3", startedAt: 11, endedAt: 20 }),
       ],
     });
-    expect(piecesOf(parent, [ref(2, "A", 0, 10), ref(3, "A", 11, 20)], 1).map((p) => p.node.instanceId)).toEqual([3]);
+    const pieces = piecesOf(parent, [ref(2, "A", 0, 10), ref(3, "A", 11, 20)], 1);
+    // In time order, so the superseded pass reads as the earlier one it is.
+    expect(pieces.map((p) => p.node.instanceId)).toEqual([2, 3]);
+  });
+
+  it("keeps the whole subtree under a superseded pass, not only its root", () => {
+    // The walk used to stop descending, so a superseded COMPOSITE took every conversation beneath it
+    // off the page — which is exactly the shape a loop over a module produces.
+    const parent = node({
+      instanceId: 1,
+      stateId: "plan",
+      children: [
+        node({
+          instanceId: 2,
+          stateId: "explore",
+          startedAt: 0,
+          endedAt: 10,
+          superseded: true,
+          children: [node({ instanceId: 4, stateId: "explore/brief", startedAt: 1, endedAt: 9 })],
+        }),
+        node({ instanceId: 3, stateId: "explore", startedAt: 11, endedAt: 20 }),
+      ],
+    });
+    const pieces = piecesOf(parent, [ref(4, "A", 1, 9), ref(3, "B", 11, 20)], 1);
+    expect(pieces.map((p) => p.node.instanceId)).toEqual([4, 3]);
   });
 
   it("prefers the operation's start over the instance's — they differ by a whole subtree", () => {
@@ -295,7 +324,7 @@ describe("notesOf", () => {
   it("keeps the failure of a state that never opened a conversation", () => {
     const notes = notesOf([
       turn({ seq: 1, kind: "blocked", stateId: "plan/draft", path: "draft", text: "plan/draft: input 'framing' is not wired", ok: false }),
-      turn({ seq: 2, kind: "operation", stateId: "plan", path: "", text: "child 'draft' terminated with error", ok: false }),
+      turn({ seq: 2, kind: "terminated", instanceId: 1, stateId: "plan", path: "", text: "child 'draft' terminated with error", ok: false }),
     ]);
     expect(notes.map((n) => [n.kind, n.path, n.text])).toEqual([
       // The state id the engine prefixed the reason with is dropped: the note carries it beside the
@@ -314,35 +343,82 @@ describe("notesOf", () => {
     expect(notes.map((n) => [n.stateId, n.path])).toEqual([["explore", "product/explore"]]);
   });
 
-  it("keeps a failure even when the state HAS a panel — the grey is the run's order, not a fallback", () => {
-    // `s2` ran, and its transcript carries this too. Both are wanted: the panel gives the failure its
-    // context, the grey gives it its place among everything else that happened.
-    const notes = notesOf([turn({ seq: 1, kind: "failure", stateId: "s2", path: "a", text: "the call failed", ok: false })]);
-    expect(notes.map((n) => [n.kind, n.text])).toEqual([["failure", "the call failed"]]);
+  /**
+   * The rule, from both sides: a failure is drawn here if and only if its instance ran NO operation.
+   *
+   * This used to go the other way — a failed call was written twice, once as a grey note and once in
+   * its own panel — and the note was the worse of the two homes: the reason with none of its context,
+   * no retry, and no relation to the call that produced it.
+   */
+  it("drops a failure whose instance ran an operation — that panel is already saying it", () => {
+    const ran = node({
+      instanceId: 2,
+      stateId: "s2",
+      operation: { kind: "prompt", status: "failed", reason: "the call failed" },
+    });
+    const notes = notesOf(
+      [turn({ seq: 1, kind: "failure", instanceId: 2, stateId: "s2", path: "a", text: "the call failed", ok: false })],
+      node({ instanceId: 1, stateId: "plan", children: [ran] }),
+    );
+    expect(notes).toEqual([]);
+  });
+
+  it("keeps a failure whose instance ran nothing — there is no panel and there never will be", () => {
+    // A composite giving up because a child did. It has children and no operation of its own, so the
+    // grey is the only account of it there can be.
+    const notes = notesOf(
+      [turn({ seq: 1, kind: "terminated", instanceId: 1, stateId: "plan", path: "", text: "child 'draft' failed", ok: false })],
+      node({ instanceId: 1, stateId: "plan", children: [node({ instanceId: 2, stateId: "s2" })] }),
+    );
+    expect(notes.map((n) => [n.kind, n.text])).toEqual([["failure", "child 'draft' failed"]]);
+  });
+
+  it("keeps a BLOCKED child whatever the tree says, because it names no instance at all", () => {
+    // The absence of an instance id is the fact rather than a sentinel: blocked means it never
+    // became one, so there is nothing to look up and nothing that could claim it.
+    const notes = notesOf(
+      [turn({ seq: 1, kind: "blocked", stateId: "plan/draft", path: "draft", text: "not wired", ok: false })],
+      node({ instanceId: 1, stateId: "plan", operation: { kind: "prompt", status: "completed" } }),
+    );
+    expect(notes.map((n) => [n.kind, n.text])).toEqual([["blocked", "not wired"]]);
+  });
+
+  it("claims nothing when there is no tree to ask", () => {
+    // A projection that has not landed yet. Hiding a run's only error while the panel that would
+    // have shown it does not exist either is the one failure mode worth refusing.
+    const notes = notesOf([turn({ seq: 1, kind: "failure", instanceId: 2, stateId: "s2", path: "a", text: "boom", ok: false })]);
+    expect(notes.map((n) => n.text)).toEqual(["boom"]);
   });
 
   it("draws a state being ENTERED as a step in the path", () => {
     // The case that makes this worth having: a sequence walking down its spine takes no transitions
     // at all, so a canvas drawn from `transition.taken` alone would be blank for the run somebody
     // opens to ask how far it got.
-    const notes = notesOf([turn({ seq: 1, kind: "operation", stateId: "feature/product", path: "product", text: "entered" })]);
-    expect(notes).toEqual([{ seq: 1, at: 10, kind: "entered", stateId: "feature/product", path: "product", text: "" }]);
+    const notes = notesOf([turn({ seq: 1, kind: "entered", instanceId: 2, stateId: "feature/product", path: "product" })]);
+    // The INSTANCE travels with it, which is what the rail keys a lane on: `explore` running twice is
+    // two lanes with one colour, and a lane keyed on the state would draw the second pass as a
+    // continuation of the first.
+    expect(notes).toEqual([
+      { seq: 1, at: 10, kind: "entered", stateId: "feature/product", instanceId: 2, path: "product", text: "" },
+    ]);
   });
 
   it("does not draw the ROOT entering itself — everything in the run is inside it", () => {
     const notes = notesOf([
-      turn({ seq: 1, kind: "operation", stateId: "feature", path: "", text: "entered" }),
-      turn({ seq: 2, kind: "operation", stateId: "feature/product", path: "product", text: "entered" }),
+      turn({ seq: 1, kind: "entered", instanceId: 1, stateId: "feature", path: "" }),
+      turn({ seq: 2, kind: "entered", instanceId: 2, stateId: "feature/product", path: "product" }),
     ]);
     expect(notes.map((n) => n.path)).toEqual(["product"]);
   });
 
   it("does not read a call, or a termination, as a state being entered", () => {
-    // `operation.started` projects onto the same kind with the OP's name, and a termination carries
-    // `ok`. Neither is the run walking into somewhere.
+    // These three were ONE kind, told apart by matching `text` against the literal "entered" and by
+    // whether `ok` was present. They are three kinds now, so the question is answered by the type
+    // rather than by a string — and a state whose label happens to be "entered" can no longer be
+    // mistaken for the machine walking into it.
     const notes = notesOf([
-      turn({ seq: 1, kind: "operation", stateId: "plan/draft", path: "draft", text: "prompt" }),
-      turn({ seq: 2, kind: "operation", stateId: "plan/draft", path: "draft", text: "entered", ok: true }),
+      turn({ seq: 1, kind: "started", instanceId: 2, stateId: "plan/draft", path: "draft", text: "prompt" }),
+      turn({ seq: 2, kind: "terminated", instanceId: 2, stateId: "plan/draft", path: "draft", text: "entered", ok: true }),
     ]);
     expect(notes).toEqual([]);
   });
@@ -361,7 +437,7 @@ describe("notesOf", () => {
     // same block reported three times is one fact reported three times.
     const notes = notesOf([
       turn({ seq: 1, kind: "transition", stateId: "plan", path: "", text: "draft" }),
-      turn({ seq: 2, kind: "operation", stateId: "plan", path: "", text: "success", ok: true }),
+      turn({ seq: 2, kind: "terminated", instanceId: 1, stateId: "plan", path: "", text: "success", ok: true }),
       turn({ seq: 3, kind: "failure", stateId: "plan/draft", path: "draft", text: "not wired", ok: false }),
       turn({ seq: 4, kind: "failure", stateId: "plan/draft", path: "draft", text: "not wired", ok: false }),
       turn({ seq: 5, kind: "transition", stateId: "plan", path: "", text: "draft" }),
@@ -375,8 +451,8 @@ describe("notesOf", () => {
 
   it("ignores the turns that are neither — a successful termination is not news on the grey", () => {
     const notes = notesOf([
-      turn({ seq: 1, kind: "operation", stateId: "plan", path: "", text: "success", ok: true }),
-      turn({ seq: 2, kind: "output", stateId: "plan", path: "", ok: true }),
+      turn({ seq: 1, kind: "terminated", instanceId: 1, stateId: "plan", path: "", text: "success", ok: true }),
+      turn({ seq: 2, kind: "output", instanceId: 1, stateId: "plan", path: "", ok: true }),
     ]);
     expect(notes).toEqual([]);
   });

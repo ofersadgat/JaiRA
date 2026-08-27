@@ -216,6 +216,53 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
     expect(durable.lineageOf("base")).toBeUndefined();
   });
 
+  /**
+   * Reading a run's calls back — what a derivation resolves its impure bindings against.
+   *
+   * The pair of claims worth pinning: a list is one row per record (the LATEST attempt, so a retried
+   * call is one call), and the read is scoped to the run that wrote it.
+   */
+  it("lists a run's calls once each, latest attempt, oldest first", () => {
+    const at = (recordId: string, attempt: number, started: number, status: string, result: unknown): void => {
+      db.prepare(
+        `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, request_json, result_json, started_at)
+         VALUES (?, 'tr', 9, ?, ?, ?, ?, ?)`,
+      ).run(recordId, attempt, status, JSON.stringify({ functionRef: recordId }), JSON.stringify(result), started);
+    };
+    at("a", 1, 10, "failed", { error: { reason: "first try" } });
+    // A retry writes a SECOND row with the same content id — the call is the same call, so a list
+    // that returned both would show one call twice with different answers, which reads as two.
+    at("a", 2, 30, "completed", { value: "second try" });
+    at("b", 1, 20, "completed", { value: 1 });
+
+    const store = new SqliteSessionStore(db, { taskId: "tr", runId: 9 });
+    const calls = store.records();
+    expect(calls.map((c) => c.recordId)).toEqual(["b", "a"]);
+    expect(calls.find((c) => c.recordId === "a")).toMatchObject({ status: "completed", result: { value: "second try" } });
+  });
+
+  it("keeps a run's calls out of another run's list", () => {
+    db.prepare(
+      `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, started_at)
+       VALUES ('x', 'tr2', 1, 1, 'completed', 1)`,
+    ).run();
+    expect(new SqliteSessionStore(db, { taskId: "tr2", runId: 1 }).records().map((c) => c.recordId)).toEqual(["x"]);
+    expect(new SqliteSessionStore(db, { taskId: "tr2", runId: 2 }).records()).toEqual([]);
+  });
+
+  it("hands back status separately from the error, because a killed call has neither", () => {
+    // A run killed mid-flight leaves `failed` with no payload. A reader that inferred failure from a
+    // missing result would report a call still in flight as one that went wrong.
+    db.prepare(
+      `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, started_at)
+       VALUES ('k', 'tr3', 1, 1, 'failed', 5)`,
+    ).run();
+    const [call] = new SqliteSessionStore(db, { taskId: "tr3", runId: 1 }).records();
+    expect(call).toMatchObject({ status: "failed" });
+    expect(call?.error).toBeUndefined();
+    expect(call?.result).toBeUndefined();
+  });
+
   it("scopes records to the run that wrote them, so a transcript is findable from a task", async () => {
     const store = new SqliteSessionStore(db, { taskId: "t9", runId: 2 }) as unknown as Store;
     await store.open({ id: "s1", source: undefined as never, session: { id: "scoped", seq: 0 }, startMs: 0 });
@@ -523,6 +570,45 @@ describe("stateSessions — a run the process died inside", () => {
     record(runId, "chat:3");
     expect(stateSessions({ db } as never, "t3")).toEqual([
       { runId, instanceId: 7, stateId: "wf/thinking", sessionId: "chat", seq: 3, at: 20, outcome: "interrupted" },
+    ]);
+  });
+
+  /**
+   * The case that is not a crash, a failure or a stop: the call is STILL TALKING.
+   *
+   * It leaves the journal in exactly the shape a crash does — a start with no terminal event, since
+   * the terminal event is what ending writes — so it arrives in this pass beside the dead ones, and
+   * for a while it was labelled with their verdict. Every state a person watched while a run was
+   * going therefore read `interrupted`: the panel beside it said "stopped" and the transcript ended
+   * with "the process ended before this call finished", under an answer that was still growing.
+   *
+   * The record row is what tells them apart, and it always could: `open` means a live process is
+   * streaming into it, which is the whole reason that status exists.
+   */
+  it("calls a live run's in-flight conversation running rather than interrupted", () => {
+    db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t3','running',1,1)`).run();
+    db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at) VALUES ('t3','h',1)`).run();
+    const runId = (db.prepare(`SELECT id FROM runs WHERE task_id = 't3'`).get() as { id: number }).id;
+    started(runId, 4, "wf/critique", 20);
+    record(runId, "#i4:0", "open");
+
+    expect(stateSessions({ db } as never, "t3")).toEqual([
+      { runId, instanceId: 4, stateId: "wf/critique", sessionId: "#i4", seq: 0, at: 20, outcome: "running" },
+    ]);
+  });
+
+  /**
+   * …but only while the run is still going. An `open` row under a run that ENDED is a crash nothing
+   * has recovered yet — `recoverInterrupted` settles those to `failed` at project open, and until it
+   * runs the honest reading of a row nobody is writing to is the interruption it is.
+   */
+  it("still calls an open record interrupted once the run it belongs to has ended", () => {
+    const runId = crashedRun();
+    started(runId, 4, "wf/critique", 20);
+    record(runId, "#i4:0", "open");
+
+    expect(stateSessions({ db } as never, "t3")).toEqual([
+      { runId, instanceId: 4, stateId: "wf/critique", sessionId: "#i4", seq: 0, at: 20, outcome: "interrupted" },
     ]);
   });
 

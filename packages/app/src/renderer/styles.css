@@ -52,6 +52,11 @@
      --line, which separates two things that are side by side and may be almost invisible without
      anybody minding; this one is the only thing saying what is inside what. */
   --rule: #c2cbd9;
+  /* A lane's colour is its state's HUE and the theme's saturation and lightness — see `rail.ts`.
+     Split that way so the same state is recognisably the same colour in both themes while staying
+     legible against each background, which one fixed hex cannot do. */
+  --rail-s: 55%;
+  --rail-l: 44%;
   --text: #1b2130;
   --dim: #5c6779;
   --accent: #2563c7;
@@ -95,6 +100,8 @@
   --panel-2: #1c2029;
   --line: #262b36;
   --rule: #3b4356;
+  --rail-s: 62%;
+  --rail-l: 68%;
   --text: #e6e9ef;
   --dim: #8b93a7;
   --accent: #6ea8fe;
@@ -4109,6 +4116,37 @@ ol.children li::marker {
   align-items: center;
 }
 
+/* A choice between two named treatments, not a switch — see the note at the call site. Its own row
+   shape rather than `.ap-toggle`'s, because there is no control to sit where the switch sits and a
+   label starting at the pane's edge under two that start after one reads as a different section. */
+.ap-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ap-choice-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+/* The note belongs to whichever chip is ON, so it moves when the choice does. Pushed right so the
+   two chips stay adjacent — they are one control, and a sentence between them would read as a
+   caption on the first. */
+.ap-choice-note {
+  margin-left: auto;
+}
+/* Two of them, stacked, at the width the pane has. One surface cannot show the difference between
+   the treatments: what changes is how a RUN of them reads. */
+.ap-preview-surfaces {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+
 /* A stack is an ordered list, and this is the box it lives in: chips left to right in the order they
    are tried, and the way to add one at the end of them. Not a column of rows — three full-width rows
    read as three settings, when they are three attempts at one. */
@@ -6676,6 +6714,15 @@ textarea.cfg-input {
 }
 .session-row .dot.success, .session-head .dot.success { background: var(--ok, #3fa34d); }
 .session-row .dot.error, .session-head .dot.error { background: var(--bad, #c0392b); }
+/* Not a verdict: this call has not ended. It breathes rather than sitting still, because the one
+   thing the dot has to say here is that the state is going to change on its own. */
+.session-row .dot.running, .session-head .dot.running {
+  background: var(--accent, #4a7fd0);
+  animation: ts-pulse 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-row .dot.running, .session-head .dot.running { animation: none; opacity: 0.7; }
+}
 
 .session-body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .session-head {
@@ -8372,24 +8419,19 @@ fieldset.reading {
 .sb {
   display: flex;
   flex-direction: column;
-  gap: 14px;
   min-height: 100%;
   padding: 14px 16px 22px;
   background: var(--bg);
 }
+/* The MEASURE is the rail's, not the band's — see `.rail`. It was `max-width: 900px; margin: 0 auto`
+   here, which centred every band inside its own row: once the rows indent, that slides a panel right
+   by half of whatever the gutter grew by, so a state going one deeper moved its panel twice. */
 .sb-band {
   position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 900px;
-  margin: 0 auto;
   min-width: 0;
-}
-/* Concurrency needs the room. A band holding two conversations at the measure of one would set both
-   at half of it, which is narrower than either deserves and narrower than prose reads at. */
-.sb-band.concurrent {
-  max-width: 1320px;
 }
 .sb-columns {
   display: grid;
@@ -8410,10 +8452,81 @@ fieldset.reading {
 }
 .sb-gutter {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   padding: 0 4px 4px;
   min-width: 0;
+}
+/* A SOLO panel's gutter is its letterhead. With one state inside, the gutter already names the
+   session, names the state that opened it, and times it — so the letterhead has nothing left to add
+   and the whole line becomes the control instead. See `Sheet`. */
+.sb-gutter.solo {
+  cursor: pointer;
+}
+.sb-gutter.solo:hover {
+  color: var(--text);
+}
+.sb-gut-chev {
+  flex: none;
+  display: flex;
+  align-items: center;
+  color: var(--dim);
+  transition: transform 120ms ease-out;
+}
+.sb-gut-chev.open {
+  transform: rotate(90deg);
+}
+/* The SESSION's own span — the envelope of its states, not the sum of them. A conversation
+   interrupted and resumed spent the gap doing nothing, and the sum would report twenty minutes of
+   talking where there were four. */
+.sb-span {
+  flex: none;
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+/* An icon that grows its own word on hover — no permanent label to read past on every panel, and no
+   tooltip to wait for. Folds every state in the sheet; absent on a solo panel, where the gutter's
+   own chevron already is the control. */
+.sb-foldall {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 5px;
+  border: 1px solid transparent;
+  border-radius: var(--control-radius-sm);
+  background: none;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  cursor: pointer;
+}
+.sb-foldall:hover,
+.sb-foldall:focus-visible {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--text);
+}
+.sb-foldall-label {
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0;
+  transition: max-width 150ms ease-out, opacity 110ms ease-out, margin-left 150ms ease-out;
+}
+.sb-foldall:hover .sb-foldall-label,
+.sb-foldall:focus-visible .sb-foldall-label {
+  max-width: 110px;
+  opacity: 1;
+  margin-left: 6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lh-chev,
+  .sb-gut-chev,
+  .sb-foldall-label {
+    transition: none;
+  }
 }
 .sb-session {
   font-size: calc(var(--size-app) * 11 / 12.5);
@@ -8447,8 +8560,6 @@ fieldset.reading {
   flex-direction: column;
   gap: 4px;
   width: 100%;
-  max-width: 900px;
-  margin: 0 auto;
   min-width: 0;
 }
 .sb-note {
@@ -8585,7 +8696,12 @@ fieldset.reading {
   border-bottom-right-radius: 2px;
 }
 .sb-body {
-  padding: 10px 10px 14px;
+  /* A COLUMN FLEX BOX, and that is load-bearing rather than a layout preference: it is what sizes a
+     title block across the sheet's full width. See `.lh`. */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 13px 15px 15px;
   min-width: 0;
 }
 /* The card inside a sheet has already been given its column by the sheet — see `.ts-card-body`,
@@ -8642,6 +8758,233 @@ fieldset.reading {
 .sb-tear-label .mono {
   font-family: var(--font-data);
   color: var(--text);
+}
+
+/* --- ONE HEADER for every state in a run ---
+   See `stateSurface.tsx`. The letterhead: a line of type inside the sheet's own top margin with a
+   rule under it, replacing both the run card's head and the surface heading that briefly stood
+   beside it. The card's indented, left-ruled body goes with it — the rule already says where one
+   state ends, and the indent was a fifth of the width spent saying it again.
+
+   WARNING: THE CONTAINER DOES THE SIZING, and there is no `width` here on purpose. A `<button>` is a
+   form control: `width: auto` sizes it to fit-content, so a title block with the negative margins
+   that bleed it to the sheet's edges shrank to its text — and `width: 100%` is resolved against the
+   CONTENT box, which drew it a padding short on the right and a padding over on the left. Both are
+   wrong, and neither is obviously wrong in a screenshot. `.sb-body` is a column flex box, so
+   `align-items: stretch` sizes the header across the cross axis and HONOURS the negative margins
+   rather than fighting them — one rule that serves the inset letterhead and the bled title block. */
+.lh {
+  display: flex;
+  align-items: baseline;
+  align-self: stretch;
+  gap: 9px;
+  min-width: 0;
+  margin: 0 0 11px;
+  padding: 0 0 7px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  text-align: left;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
+  color: var(--dim);
+  cursor: pointer;
+}
+.lh:hover {
+  color: var(--text);
+}
+/* Every state after the first gets air above it, so the rule reads as the top of what follows rather
+   than the bottom of what came before. Tighter after a FOLDED one, where the rules are a list and the
+   space between them is the only thing that would make it read as anything else. */
+/* A COLUMN FLEX BOX, for the same load-bearing reason `.sb-body` is one — and it is the one that was
+   missing. `.lh` asks for `align-self: stretch`, which is a request made OF ITS PARENT, and its parent
+   is this rather than `.sb-body`: a block container has no such axis, so the header fell back to what
+   a `<button>` does on its own and sized to its text. The rule under a title block then stopped in the
+   middle of the sheet, which reads as an underline rather than as the head of a page. */
+.st-block {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+}
+.st-block + .st-block > .lh {
+  margin-top: 20px;
+}
+.st-block.is-shut + .st-block > .lh {
+  margin-top: 12px;
+}
+/* Nothing under the rule, so the rule is what separates this row from the next — which is exactly the
+   contents-page reading a folded sheet wants. */
+.lh.shut {
+  margin-bottom: 0;
+  padding-bottom: 8px;
+}
+.lh-chev {
+  flex: none;
+  align-self: center;
+  color: var(--dim);
+  transition: transform 120ms ease-out;
+}
+.lh-chev.open {
+  transform: rotate(90deg);
+}
+.lh-ico {
+  flex: none;
+  align-self: center;
+}
+.lh-kind {
+  flex: none;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-size: calc(var(--size-data) * 10 / 12);
+}
+.lh-name {
+  flex: none;
+  color: var(--text);
+  font-weight: 600;
+  font-size: calc(var(--size-data) * 12 / 12);
+}
+/* The run's own name, in the APP voice — it is a sentence somebody wrote ("Approve deliverables"),
+   not an identifier, and setting it in the data voice beside the state id made the two read as one
+   compound name. */
+.lh-label,
+.lh-sum {
+  min-width: 0;
+  font-family: var(--font-app);
+  font-size: calc(var(--size-app) * 12 / 12.5);
+}
+.lh-sum {
+  color: var(--dim);
+}
+.lh-meta {
+  flex: none;
+  margin-left: auto;
+  padding-left: 10px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+.lh-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  align-self: center;
+  background: var(--dim);
+}
+
+/* --- the letterhead, alarmed ---
+   The title block: the same line, filled and taken to the sheet's own edges. It is a STATE and never
+   a preference — running, asked, waiting or broken, and back to a letterhead the moment the state
+   settles — so the loud form always means NOW rather than "this kind of thing". Tint only: no pulse
+   and no motion, because the liveness of a running state is carried by the words under it, which is
+   a thing that stops. */
+.lh.tb {
+  margin: -13px -15px 13px;
+  padding: 9px 15px;
+  background: var(--panel-2);
+}
+.st-block + .st-block > .lh.tb {
+  margin-top: 16px;
+}
+.lh.tb.accent {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  border-bottom-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+  color: var(--accent);
+}
+.lh.tb.accent .lh-name,
+.lh.tb.accent .lh-chev {
+  color: var(--accent);
+}
+.lh.tb.amber {
+  background: color-mix(in srgb, var(--warn) 14%, var(--panel));
+  border-bottom: 1px dashed color-mix(in srgb, var(--warn) 30%, var(--line));
+  color: var(--warn);
+}
+.lh.tb.amber .lh-name,
+.lh.tb.amber .lh-chev {
+  color: var(--warn);
+}
+.lh.tb.red {
+  background: color-mix(in srgb, var(--bad) 11%, var(--panel));
+  border-bottom-color: color-mix(in srgb, var(--bad) 26%, var(--line));
+  color: var(--bad);
+}
+.lh.tb.red .lh-name,
+.lh.tb.red .lh-chev {
+  color: var(--bad);
+}
+
+/* --- a transition parked on a gesture ---
+   See `WaitingOn` in `runViews.tsx`. The one surface in the view you can see the grey THROUGH: a
+   dashed edge and no fill, because nothing is written here yet. Every other sheet is a page with
+   something on it; this is the shape of one that is waiting to be. */
+.sb-sheet.ss-waiting {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--warn) 34%, var(--line));
+  background: none;
+  box-shadow: none;
+}
+.ss-wait-do {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 11px;
+}
+/* The gesture the workflow author had in mind, said rather than replaced — the button delivers the
+   event from the surface the run is being read on, and the drag on the board still works. */
+.ss-wait-or {
+  font-size: calc(var(--size-app) * 12 / 12.5);
+  color: var(--dim);
+}
+
+/* --- what a state with no conversation holds ---
+   One row per slot, the name in the data voice and a bounded preview under it. This is `inputs` —
+   what the state was CALLED WITH — which the projection already carries and which `signatureOf`
+   drops entirely whenever a state declares a label, i.e. on exactly the states that end up here. */
+.ss-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.ss-slot {
+  min-width: 0;
+}
+.ss-slot-name {
+  display: block;
+  margin-bottom: 2px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
+  color: var(--dim);
+}
+/* One line, always. `previewOf` bounds a slot before it gets here, and this is the second guard: a
+   preview of a single-line 20 kB document is still one very long line. */
+.ss-slot-value {
+  display: block;
+  min-width: 0;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 12 / 12);
+  color: var(--text);
+}
+/* An operation's own failure, in the sheet it belongs to — see `notesOf` for why it is no longer
+   also on the grey. */
+.ss-fail {
+  margin: 0;
+  max-width: 62ch;
+}
+.ss-fail-msg {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 12 / 12);
+  color: var(--bad);
+  overflow-wrap: anywhere;
+}
+.ss-none {
+  color: var(--dim);
+  margin: 0;
 }
 
 /* --- the fork mark ---
@@ -10178,4 +10521,209 @@ fieldset.reading {
 .cx-mode-custom {
   color: var(--tok-hint);
   border-style: dashed;
+}
+
+/* --- when the interface itself fails (see crashScreen.tsx) ------------------------------------ */
+/* Its own palette-driven surface rather than a bare white page: the window going blank is exactly
+   the failure this replaces, and a report drawn in the app's own colours says the app is still
+   there. Fixed and full-bleed because there is no layout left to sit inside. */
+.crash {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: var(--bg);
+  color: var(--text);
+  overflow: auto;
+}
+.crash-card {
+  width: min(860px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.crash-card h1 { font-size: 1.25rem; margin: 0; }
+.crash-stack {
+  margin: 0;
+  max-height: 46vh;
+  overflow: auto;
+  padding: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: var(--font-data);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.crash-actions { display: flex; gap: 8px; }
+
+/* Over the app, not instead of it — the tree still renders. */
+.crash-banner {
+  position: fixed;
+  z-index: 9000;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  max-width: min(720px, calc(100vw - 32px));
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--bad) 45%, var(--line));
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.18);
+}
+
+/* ── the state rail ─────────────────────────────────────────────────────────
+   The hierarchy drawn down the left of the conversation. One lane per state the run is inside; a
+   fork where it enters one, a join where it leaves. See `rail.ts` for the geometry and `railView.tsx`
+   for why the pointer is handled imperatively. */
+.rail {
+  --rail-cap: 34px;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  /* The measure plus the gutter. The gutter is bounded by construction under 152px however deep the
+     run goes — see `rail.ts` — so the content column never narrows past what prose reads at. */
+  max-width: 1052px;
+}
+/* Concurrency needs the room. A band holding two conversations at the measure of one would set both
+   at half of it, which is narrower than either deserves and narrower than prose reads at. The whole
+   column widens rather than the one band, because the rail has to be a single column: a row that set
+   its own width would move the gutter, and a gutter that moved would not be a rail. */
+.rail.rail-wide {
+  max-width: 1472px;
+  margin: 0 auto;
+  min-width: 0;
+}
+.rail-row {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+/* A row with a curve in it is exactly one cap tall, because the curves are drawn in a viewBox that
+   tall and stretching it would bend them. Every other row is as tall as it needs to be — which is
+   what lets a blocked child's reason wrap onto three lines without warping the rail beside it. */
+.rail-row.rail-turn {
+  height: var(--rail-cap);
+}
+.rail-gut {
+  position: relative;
+  flex: none;
+  /* The lines run to the row's own edges with no gap of their own: the vertical rhythm is padding
+     INSIDE the content cell, so that the rail stays continuous down the page. */
+  align-self: stretch;
+}
+.rail-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  cursor: pointer;
+}
+/* A hit area wider than the line. A 2px target is not one. */
+.rail-seg::after {
+  content: "";
+  position: absolute;
+  left: -6px;
+  right: -6px;
+  top: 0;
+  bottom: 0;
+}
+/* Several lanes sharing one column, striped in their own colours — see `stackPaint`. */
+.rail-seg.rail-stack {
+  width: 4px;
+}
+.rail-cap {
+  position: absolute;
+  inset: 0;
+  /* The curves overshoot the box by a hair at the joins; clipping them would nick the strokes. */
+  overflow: visible;
+}
+.rail-cap path {
+  fill: none;
+  stroke-width: 2;
+  /* The viewBox is stretched horizontally to the gutter's own width, so without this the strokes
+     would be scaled with it and every curve would be a different thickness from every straight. */
+  vector-effect: non-scaling-stroke;
+}
+.rail-cap .rail-knot,
+.rail-cap .rail-hit {
+  cursor: pointer;
+}
+.rail-cap .rail-hit {
+  fill: transparent;
+}
+/* The lane under the pointer, lit in every row it crosses. */
+.rail-seg.rail-lit,
+.rail-cap path.rail-lit,
+.rail-cap circle.rail-lit {
+  filter: brightness(1.4) saturate(1.4);
+}
+.rail-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 7px 0 7px 10px;
+}
+.rail-row.rail-turn .rail-content {
+  padding-top: 0;
+  padding-bottom: 0;
+  justify-content: center;
+}
+/* What a rolled-up lane says in place of everything it is holding. */
+.rail-rolled {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  font-size: calc(var(--size-app) * 11.5 / 12.5);
+  color: var(--dim);
+}
+.rail-rolled-name {
+  flex: none;
+  font-weight: 600;
+  color: var(--text);
+}
+.rail-rolled-tag {
+  flex: none;
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 3px;
+  background: var(--panel-2);
+}
+/* The lane's name, following the pointer. Fixed rather than absolute so it is not clipped by the
+   scroller the conversation lives in. */
+.rail-tip {
+  position: fixed;
+  z-index: 9;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -150%);
+  transition: opacity 90ms;
+  background: var(--text);
+  color: var(--bg);
+  font-family: var(--font-data, monospace);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 5px 8px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.rail-tip.on {
+  opacity: 1;
 }

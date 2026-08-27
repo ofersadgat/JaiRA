@@ -145,6 +145,51 @@ export function scopedSessionId(scope: SessionScope, id: string): string {
   return taskId === undefined && runId === undefined ? id : `${taskId ?? ""}/${runId ?? ""}/${id}`;
 }
 
+/**
+ * One call a run made, as everything outside the store reads it.
+ *
+ * The whole of what was asked and what came back: `request` carries the callee AND its arguments
+ * with their RESOLVED values (an operation's `input.<slot>.binding.json` is the value the engine
+ * settled on), and `result` carries what it returned. Between them they are a complete account of
+ * one call without needing the workflow file open beside them.
+ *
+ * `status` is separate from `error` on purpose. A call can be `failed` with no error payload — a run
+ * killed mid-flight leaves exactly that — and a reader that inferred failure from a missing result
+ * would report a call still in flight as one that went wrong.
+ */
+export interface RecordedCall {
+  recordId: string;
+  status: string;
+  request?: JsonValue;
+  result?: JsonValue;
+  error?: JsonValue;
+  startedAt?: number;
+  endedAt?: number;
+}
+
+interface CallRow {
+  record_id: string;
+  status: string;
+  request_json: string | null;
+  result_json: string | null;
+  error_json: string | null;
+  started_at: number | null;
+  ended_at: number | null;
+}
+
+/** One row, as a {@link RecordedCall}. Absent columns stay absent rather than becoming `null`. */
+function recordedCallOf(row: CallRow): RecordedCall {
+  return {
+    recordId: row.record_id,
+    status: row.status,
+    ...(row.request_json !== null ? { request: JSON.parse(row.request_json) as JsonValue } : {}),
+    ...(row.result_json !== null ? { result: JSON.parse(row.result_json) as JsonValue } : {}),
+    ...(row.error_json !== null ? { error: JSON.parse(row.error_json) as JsonValue } : {}),
+    ...(row.started_at !== null ? { startedAt: row.started_at } : {}),
+    ...(row.ended_at !== null ? { endedAt: row.ended_at } : {}),
+  };
+}
+
 export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore {
   private minted = 0;
 
@@ -509,21 +554,43 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * conversation. Returns the request too: §5.3 puts a gate's changeset in `request_json`, and
    * addressing the record without it would hide the half that design points at.
    */
-  record(recordId: string): { request?: JsonValue; result?: JsonValue } | undefined {
+  record(recordId: string): RecordedCall | undefined {
     const row = this.db
       .prepare(
-        `SELECT request_json, result_json FROM operation_records
+        `SELECT record_id, status, request_json, result_json, error_json, started_at, ended_at
+           FROM operation_records
           WHERE record_id = ? AND task_id IS ? AND run_id IS ?
           ORDER BY attempt DESC, id DESC LIMIT 1`,
       )
-      .get(recordId, this.scope.taskId ?? null, this.scope.runId ?? null) as
-      | { request_json: string | null; result_json: string | null }
-      | undefined;
-    if (row === undefined) return undefined;
-    return {
-      ...(row.request_json !== null ? { request: JSON.parse(row.request_json) as JsonValue } : {}),
-      ...(row.result_json !== null ? { result: JSON.parse(row.result_json) as JsonValue } : {}),
-    };
+      .get(recordId, this.scope.taskId ?? null, this.scope.runId ?? null) as CallRow | undefined;
+    return row === undefined ? undefined : recordedCallOf(row);
+  }
+
+  /**
+   * Every call this run made, oldest first — what a derivation reads and what a gate's own request
+   * is recovered from.
+   *
+   * Scoped by the store's own `(taskId, runId)`, which is the index `operation_records_scope`
+   * already covers, so this is a range scan rather than a table walk.
+   *
+   * ⚠️ ONE ROW PER RECORD, the latest attempt. A retried call writes a second row with the same
+   * `record_id` and a higher `attempt` (see the note on {@link record}), and a list that returned
+   * both would show the same call twice with different answers — which is precisely the shape a
+   * reader would mistake for two calls. The earlier attempts are still in the table for anyone who
+   * wants the history; this is the answer to "what happened", which is the last one.
+   */
+  records(): RecordedCall[] {
+    const rows = this.db
+      .prepare(
+        `SELECT record_id, status, request_json, result_json, error_json, started_at, ended_at
+           FROM operation_records r
+          WHERE task_id IS ? AND run_id IS ?
+            AND attempt = (SELECT MAX(attempt) FROM operation_records a
+                            WHERE a.record_id = r.record_id AND a.task_id IS r.task_id AND a.run_id IS r.run_id)
+          ORDER BY started_at, id`,
+      )
+      .all(this.scope.taskId ?? null, this.scope.runId ?? null) as CallRow[];
+    return rows.map(recordedCallOf);
   }
 
   /**

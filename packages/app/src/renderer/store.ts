@@ -106,11 +106,13 @@ import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestFiles, selfTestScript } from 
 import { CHAT_AGENT, CHAT_STATES, chatWorkflowFiles, titleOf } from "./chatWorkflow";
 import { applyAppearance } from "./appearance";
 import { unseenTasks } from "./pill";
+import { sessionKey, withoutSession } from "./sessionCache";
 import {
   emptyUiState,
   forgetSeen,
   SHUT,
   toggleShut,
+  withShut,
   withMode,
   withOpen,
   withPane,
@@ -830,6 +832,26 @@ const SYNC_PROGRESS_LIMIT = 60;
  * round trips to learn nothing. These four are the entries where that stops being true.
  */
 const STRUCTURAL_EVENTS = new Set(["instance.entered", "instance.terminated", "operation.completed", "operation.failed"]);
+/**
+ * The journal entries that write a LINE into the run's own narration — everything `conversationView`
+ * projects into a turn.
+ *
+ * A SUPERSET of {@link STRUCTURAL_EVENTS}, and it has to be its own set rather than a reuse: a
+ * transition fired and a child that could not be entered move no instance and open no conversation,
+ * so neither changes the tree or the session history — and both are a sentence in the story of the
+ * run. `entered product → explore` is one of them.
+ *
+ * Until this existed the journal projection was refetched only on a `task` invalidate, which a run
+ * publishes exactly once, when it ENDS. So the notes drawn between the panels — every state entered,
+ * every transition taken, every child blocked — were frozen at whatever had happened by the moment
+ * the task was opened, and the rest of the run's path appeared only after it was over.
+ */
+const NARRATED_EVENTS = new Set([
+  ...STRUCTURAL_EVENTS,
+  "operation.started",
+  "transition.taken",
+  "instance.blocked",
+]);
 /**
  * How long the layout has to stop changing before it is written to `user-settings.json`, in ms.
  *
@@ -1708,8 +1730,7 @@ export function useApp() {
       // Asked for BY RUN as well as by instance. An unscoped read resolves the id against the whole
       // history and takes the last match, so a resumed task's panel came back holding whichever run
       // wrote that id most recently — the right conversation under the wrong heading, silently.
-      const key = (one: { runId?: number; instanceId: number }): string =>
-        one.runId === undefined ? String(one.instanceId) : `${one.runId}:${one.instanceId}`;
+      const key = sessionKey;
       const wanted = at.filter((one) => ref.current.sessions[key(one)] === undefined);
       if (wanted.length === 0) return;
       const loaded = await Promise.all(
@@ -1729,8 +1750,27 @@ export function useApp() {
       );
       if (ref.current.selected !== taskId) return;
       const next = { ...ref.current.sessions };
-      for (const entry of loaded) if (entry !== null) next[entry[0]] = entry[1];
-      patch({ sessions: next });
+      let landed = false;
+      for (const entry of loaded) {
+        if (entry === null) continue;
+        next[entry[0]] = entry[1];
+        landed = true;
+      }
+      /**
+       * Only when something ACTUALLY arrived — otherwise this is a spin.
+       *
+       * The panel asks for whatever it is missing whenever `sessions` changes identity, and `patch`
+       * makes a new object every time it is called. So a round in which every fetch failed used to
+       * publish an identical map under a new identity, the panel would see the same entries still
+       * missing, ask again, fail again — as fast as the round trips resolve, for as long as the
+       * failure lasts. Dropping a failure so it can be re-asked is right; re-asking it in a loop
+       * with nothing in between is what turns one broken transcript into an unusable window.
+       *
+       * The retry is not lost. Anything that legitimately moves the panel — a record landing, a
+       * state entered, the selection changing — re-runs the fetch, which is the cadence a transient
+       * failure wants anyway.
+       */
+      if (landed) patch({ sessions: next });
     },
     [patch],
   );
@@ -2081,8 +2121,20 @@ export function useApp() {
           // this, a transcript watched from the start stayed empty after the run finished.
           const ev = message.event as { type?: string; instanceId?: number };
           if ((ev.type === "operation.completed" || ev.type === "operation.failed") && typeof ev.instanceId === "number") {
-            const { [ev.instanceId]: closed, ...rest } = ref.current.sessions;
-            if (closed !== undefined) patch({ sessions: rest, liveTurn: null });
+            /**
+             * Through {@link withoutSession}, which knows BOTH keys the cache can be holding it
+             * under — this used to spell one of them itself, and spelled the wrong one.
+             *
+             * A single-run projection files a transcript under the bare instance id; the folded
+             * task-level one — which is what the transcript panel actually reads — files it under
+             * `runId:instanceId`. Dropping only the bare key dropped nothing on the view that
+             * matters, so every panel a person had open while a run was going stayed frozen on
+             * whatever the record held mid-call, and the settled answer never arrived. The live tail
+             * was cleared in the same breath, so what was left on screen was a half transcript with
+             * an interrupted marker under it, describing a state that had finished.
+             */
+            const rest = withoutSession(ref.current.sessions, { runId: message.runId, instanceId: ev.instanceId });
+            if (rest !== ref.current.sessions) patch({ sessions: rest, liveTurn: null });
             else patch({ liveTurn: null });
           }
           /**
@@ -2103,6 +2155,11 @@ export function useApp() {
             void refreshDetail(ref.current.selected);
             void refreshSession(ref.current.selected, ref.current.sessionInstance);
           }
+          // The run's NARRATION, on the wider set — see {@link NARRATED_EVENTS}. The instance tree
+          // says what exists; this says what happened, and the transcript draws the second between
+          // its panels. Refetched here rather than left to the end-of-run invalidate, which is when
+          // a path somebody is watching being walked is of no further use to them.
+          if (NARRATED_EVENTS.has(ev.type ?? "")) void refreshConversation(ref.current.selected);
           setState((s) => ({ ...s, stream: [...s.stream, line].slice(-STREAM_LIMIT) }));
           break;
         }
@@ -3121,6 +3178,9 @@ export function useApp() {
        * no longer matches anything is harmless.
        */
       toggleShut: (id: string, key: string) => setUi(toggleShut(ref.current.settings.ui, id, key)),
+      /** Several at once — see `withShut` for why this is not a loop over the one above. */
+      setShut: (id: string, keys: readonly string[], shut: boolean) =>
+        setUi(withShut(ref.current.settings.ui, id, keys, shut)),
 
       /**
        * Remember that a conversation has been read as far as a given moment.

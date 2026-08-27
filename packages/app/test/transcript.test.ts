@@ -134,12 +134,12 @@ describe("building the entry list", () => {
 
   it("folds in the journal facts nobody said, and drops the ones the session already tells", () => {
     const journal: ConversationTurn[] = [
-      { seq: 1, at: 10, kind: "operation", stateId: "plan/goals", text: "ran" },
+      { seq: 1, at: 10, kind: "started", stateId: "plan/goals", text: "prompt" },
       { seq: 2, at: 20, kind: "policy", stateId: "plan/goals", text: "escalated bash" },
       { seq: 3, at: 30, kind: "failure", stateId: "plan/goals", text: "did not validate" },
     ];
     const entries = entriesOf(session([{ role: "user", text: "go" }] as never), journal);
-    // `operation` is the model call, told worse — the message above already is that call.
+    // `started` is the model call, told worse — the message above already IS that call.
     expect(entries.filter((e) => e.kind === "event").map((e) => (e as { text: string }).text)).toEqual([
       "escalated bash",
       "did not validate",
@@ -211,6 +211,42 @@ describe("building the entry list", () => {
     const view = { ...session([{ role: "assistant", text: "as far as it got" }] as never), status: "interrupted" as const };
     const entries = entriesOf(view);
     expect(entries.at(-1)).toMatchObject({ kind: "event", tone: "warn", text: expect.stringMatching(/process ended before/) });
+  });
+
+  it("says nothing of the kind about a call that is still going", () => {
+    // The one that made watching a run unreadable: a live call has no terminal event, which for a
+    // while was projected as `interrupted` — so every state a person watched while it was SPEAKING
+    // carried its own death notice, under a transcript that was still growing.
+    const view = { ...session([{ role: "assistant", text: "as far as it has got" }] as never), status: "running" as const };
+    expect(entriesOf(view).some((e) => e.kind === "event")).toBe(false);
+  });
+
+  it("keeps the thinking duration when the live turn it was measured on settles", () => {
+    // `LiveTurnLog.apply` stamps the finished item with `thoughtMs`, BESIDE the provider's message
+    // rather than inside it. Reading only the message lost the number the instant the turn landed:
+    // the tail's own thought row went away and what replaced it had never been told how long it
+    // took, so "thought for 12 s" appeared while the model reasoned and vanished when it stopped.
+    const entries = entriesOf(session([] as never), [], {
+      text: "",
+      items: [
+        {
+          kind: "message",
+          role: "assistant",
+          at: 4000,
+          startedAt: 1000,
+          thoughtMs: 2500,
+          content: {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "weighing it up" },
+              { type: "text", text: "here is the plan" },
+            ],
+          },
+        },
+      ],
+    });
+    expect(entries[0]).toMatchObject({ kind: "thought", durationMs: 2500, at: 4000 });
+    expect(entries[1]).toMatchObject({ kind: "message", at: 4000 });
   });
 
   it("keeps an untimed entry in the place it was produced rather than sorting it to the front", () => {
