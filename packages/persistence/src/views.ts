@@ -10,7 +10,7 @@ import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import { loadBundle, type StateDef, type WorkflowBundle } from "@declarative-ai/hw";
-import type { BoardView, TaskDetail, TaskSummary, TimelineEntry } from "@jaira/shared";
+import type { BoardView, InstanceAddress, InstanceNode, TaskDetail, TaskSummary, TimelineEntry } from "@jaira/shared";
 import type { Project } from "./project";
 import { workflowLoadOptions } from "./workflowRefs";
 import {
@@ -400,6 +400,32 @@ export function taskRun(project: Project, taskId: string, shape?: WorkflowShape)
   );
 }
 
+/**
+ * Every operation's ADDRESS, by the run and instance that ran it.
+ *
+ * The join `SessionRef` needs to be self-describing. A ref carries the run and the instance, and
+ * instance ids are minted per walk — so two runs' calls at one place in the workflow have nothing in
+ * common to group them by, which is precisely what a run-scale fork has to do. The address is that
+ * thing, and every run's own projection already stamps it.
+ *
+ * Per RUN and not folded: a fold keeps one node per position and drops the losers, and the losers
+ * are exactly the earlier attempts a fork mark exists to offer.
+ */
+export function addressesByRun(project: Project, taskId: string): Map<string, InstanceAddress> {
+  const out = new Map<string, InstanceAddress>();
+  for (const run of project.runtime.listRuns(taskId)) {
+    const { events, atMs } = eventsOf(project.events.list(taskId, { runId: run.id }));
+    const walk = (nodes: readonly InstanceNode[]): void => {
+      for (const node of nodes) {
+        if (node.address !== undefined) out.set(`${run.id}:${node.instanceId}`, node.address);
+        walk(node.children);
+      }
+    };
+    walk(projectRun(events, undefined, atMs).instances);
+  }
+  return out;
+}
+
 /** The projected latest run of a task (empty when it has never run). */
 export function latestRun(project: Project, taskId: string, shape?: WorkflowShape): ProjectedRun {
   const runs = project.runtime.listRuns(taskId);
@@ -484,6 +510,7 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
       ...(r.endedAt !== undefined ? { endedAt: r.endedAt } : {}),
       ...(r.outputsJson !== undefined ? { outputs: JSON.parse(r.outputsJson) as JsonValue } : {}),
       ...(r.failureJson !== undefined ? { failure: JSON.parse(r.failureJson) as JsonValue } : {}),
+      ...(r.forkedAt !== undefined ? { forkedAt: r.forkedAt } : {}),
     })),
     timeline,
   };

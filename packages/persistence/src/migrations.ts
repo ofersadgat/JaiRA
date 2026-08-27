@@ -252,6 +252,31 @@ export const MIGRATIONS: Migration[] = [
     // run that has already been narrowed, and it writes nothing.
     run: (db) => keyPositionsByRecord(db),
   },
+  {
+    version: 9,
+    note: "recorded where a run's own work begins, so a resume's shared prefix is stated rather than guessed",
+    // A resumed run replays what an earlier one answered and dispatches from there. Which panels are
+    // SHARED and which are this run's own is the whole content of a run-scale fork mark, and until
+    // now nothing wrote it down: a reader would have to infer replay from its absences, and the tell
+    // it would have to use — a completion carrying no session ref — is also what a FUNCTION op looks
+    // like, because that runs no model call either. Two different facts, one appearance.
+    //
+    // The value is an `InstanceAddress` as JSON, never `addressKey`. That key is a MAP key — its own
+    // doc says so — and it joins with `/` and `#`, neither of which is reserved in a child key: a
+    // workflow naming a child `a/b` would write a row no parser could read back. `parseSessionRef`
+    // already splits on the LAST `@` for exactly this reason. Structure crossing the boundary leaves
+    // no delimiter to be wrong about, and hw's own step shape stays the contract.
+    //
+    // NULL is the ROOT — this run shares nothing. That is what a re-run from the top does, and what
+    // every row already on disk gets. It is also the safe direction: it never claims a prefix was
+    // carried over when it was not, and claiming that falsely is the failure the mark exists to end.
+    // Guarded rather than plain SQL, because SQLite has no `ADD COLUMN IF NOT EXISTS` and this file's
+    // own rule is to be idempotent wherever it lets you. Two callers need that: the runner already
+    // reasons about two processes racing to migrate one project, and a database whose `user_version`
+    // was rewound over a schema that was not — which is how the migration tests build their fixtures
+    // — re-runs the step against a table that already has the column.
+    run: (db) => addColumn(db, "runs", "forked_at", "TEXT"),
+  },
 ];
 
 /**
@@ -315,6 +340,22 @@ function keyPositionsByRecord(db: JairaDb): void {
 
     DROP TABLE session_positions_by_rowid;
   `);
+}
+
+/**
+ * `ALTER TABLE ... ADD COLUMN`, but only when it is missing.
+ *
+ * SQLite has no `IF NOT EXISTS` for a column, and `duplicate column name` is thrown out of
+ * `openProject` — so a step that cannot be re-run is a step that turns a rewound version, or a lost
+ * race between two processes, into a project that will not open.
+ *
+ * The name is interpolated and must therefore never come from input; every caller is a literal in
+ * this file, which is the same rule the `user_version` write below follows.
+ */
+function addColumn(db: JairaDb, table: string, column: string, type: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (columns.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type};`);
 }
 
 /**

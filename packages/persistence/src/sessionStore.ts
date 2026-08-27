@@ -469,6 +469,24 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     return out;
   }
 
+  /**
+   * Where a conversation CAME FROM — the other direction from {@link forks}, and the one a run asks.
+   *
+   * `forks` answers "walking down to here, what did the path not take", which is the question a chat
+   * thread has: it holds one materialized conversation and wants to know where it divided. A run
+   * holds the branches themselves — a retried state's second attempt is its own session, drawn as
+   * its own panel — and its question is the reverse: given this conversation, whose continuation is
+   * it, and from which position.
+   *
+   * The row has held the answer since the store was written (`parent`, `cursor`); nothing until now
+   * could read it without being inside this class. Absent means a root — most sessions, and nothing
+   * is paid for until one branches.
+   */
+  lineageOf(id: string): { parent: string; at: number } | undefined {
+    const branch = this.branchOf(id);
+    return branch?.parent === undefined ? undefined : { parent: branch.parent, at: branch.cursor };
+  }
+
   /** Every branch that left one conversation at one position — see {@link forks}. */
   private branchesFrom(parent: string, cursor: number): string[] {
     const prefix = this.k("");

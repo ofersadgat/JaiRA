@@ -30,6 +30,33 @@ export interface OperationView {
   costUsd?: number;
 }
 
+/**
+ * One step of an instance ADDRESS: a child key, and which time through it this is.
+ *
+ * The only name in the system that means the same thing in two runs. Instance ids are minted
+ * `nextInstanceId++` as the engine walks, so two runs agree about them by luck; a content hash
+ * repeats whenever a loop dispatches the same operation twice. The address is a position in the
+ * workflow, and it survives — which is why `replay.ts` keys every recorded answer on it.
+ *
+ * READONLY, as hw's is — an address is a position, and nothing has any business editing one.
+ *
+ * Restated here rather than imported because this package is what the RENDERER reads and hw is the
+ * engine. `replay.ts` asserts the two shapes stay assignable, so a field added upstream fails a
+ * build rather than quietly splitting into two vocabularies.
+ *
+ * ⚠️ Compared STRUCTURALLY, step by step. `addressKey` exists and is the right thing for a `Map`
+ * inside one process; it is not an identity. It joins with `/` and `#`, neither of which is reserved
+ * in a child key, so a key containing either produces a string nothing can read back — the same trap
+ * `parseSessionRef` documents for `@`. Encode it for a lookup, never to store or to send.
+ */
+export interface AddressStep {
+  childKey: string;
+  occurrence: number;
+}
+
+/** Where an instance sits in the workflow — the root is the empty address. See {@link AddressStep}. */
+export type InstanceAddress = readonly AddressStep[];
+
 /** One state instance in a task's tree. */
 export interface InstanceNode {
   instanceId: number;
@@ -79,6 +106,18 @@ export interface InstanceNode {
    * Absent on a single-run projection, where every node trivially belongs to the run being read.
    */
   runId?: number;
+  /**
+   * Where this instance sits, as the address the replay index keys on — see {@link AddressStep}.
+   *
+   * Stamped by the projection, because that is where the walk already happens and because the view
+   * has to compare a panel against a run's recorded fork point ({@link RunView.forkedAt}). Doing it
+   * there rather than in the renderer keeps the replay index and the drawing speaking one language:
+   * a second walk counting occurrences even slightly differently would disagree about which
+   * iteration of a loop a panel belongs to, and nothing would say so.
+   *
+   * Absent on a projection built before this existed.
+   */
+  address?: InstanceAddress;
   children: InstanceNode[];
 }
 
@@ -198,6 +237,21 @@ export interface RunView {
   endedAt?: number;
   outputs?: JsonValue;
   failure?: JsonValue;
+  /**
+   * Where this run's OWN work begins — the first operation it dispatched rather than replayed.
+   *
+   * Everything before it in walk order this run took from the record, which is to say it is shared
+   * with whichever earlier runs answered it. That is the whole content of a run-scale fork: the mark
+   * goes here, what is above it is drawn once, and what is below belongs to the side you pick.
+   *
+   * ABSENT IS THE ROOT — this run shares nothing. That is what a re-run from the top does, and what
+   * every run recorded before this field existed gets. Absent never claims a prefix was carried over
+   * when it was not, which is the direction that stays honest when the record cannot say.
+   *
+   * Also absent for a run whose own work is empty: one that replayed and then stopped without
+   * dispatching anything has no place where its work begins. See `forkPointOf`.
+   */
+  forkedAt?: InstanceAddress;
 }
 
 /** The task detail panel (DESIGN §11.1). */
@@ -214,7 +268,13 @@ export interface TaskDetail {
   worktreePath?: string;
   createdAt: string;
   inputs?: Record<string, JsonValue>;
-  /** Instance forest for the latest run (roots first). */
+  /**
+   * Instance forest for the TASK — every run folded by position (`foldRuns`), roots first.
+   *
+   * Not the latest run, which is what this said and stopped being true when the fold landed: a
+   * resume is a new run that re-walks from the root, so no single run's journal is the task's
+   * history once one has happened. Every node carries the run it was folded out of.
+   */
   instances: InstanceNode[];
   activePath: PathStep[];
   blocked: BlockedChild[];
@@ -745,6 +805,21 @@ export interface SessionRef {
   seq: number;
   at: number;
   /**
+   * Where this conversation LEFT another one, when it is a branch of one.
+   *
+   * A retried state re-enters a position the failed attempt already claimed, so it forks rather than
+   * stacking a second answer on top of the first (SESSIONS.md §4) — and until this field the two
+   * arrived on screen as unrelated panels with unfamiliar ids, one of them silently carrying the
+   * other's first six turns. The record always knew: `sessions.parent` and `sessions.cursor` have
+   * held it since the store was written, and `SqliteSessionStore.lineageOf` is what reads it.
+   *
+   * `parent` is the conversation this one left; `at` is the position they share — which is also the
+   * position the parent's own record occupies, so the two sides of a fork are found by matching this
+   * pair against `{ sessionId, seq }`. Absent for a root, which is nearly every session: nothing is
+   * paid for until a conversation actually divides.
+   */
+  branch?: { parent: string; at: number };
+  /**
    * When the CALL began — `operation.started`, not the instance's entry.
    *
    * The two differ by the whole of a subtree for a composite that both delegates and speaks, and the
@@ -762,6 +837,18 @@ export interface SessionRef {
   costUsd?: number;
   /** What the call consumed and what that number is worth — see {@link RunMetrics}. */
   metrics?: RunMetrics;
+  /**
+   * Where the operation sits in the workflow — see {@link AddressStep}.
+   *
+   * The one name that means the same thing in two runs, and therefore the only way to say that this
+   * call and one from another run are the same piece of work done twice. `instanceId` cannot: it is
+   * minted per walk. Without it a call the folded tree dropped — an earlier run's work a later run
+   * overwrote — is on the page with nothing to group it by, and a run-scale fork loses the very
+   * sides it exists to offer.
+   *
+   * Absent for a run journaled before addresses were projected.
+   */
+  address?: InstanceAddress;
 }
 
 /**

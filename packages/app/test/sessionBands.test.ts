@@ -11,17 +11,22 @@
  * that appears in two bands was interrupted, and its halves carry the pause and resume marks.
  */
 import { describe, expect, it } from "vitest";
-import type { ConversationTurn, InstanceNode, SessionRef } from "@jaira/shared/browser";
+import type { ConversationTurn, InstanceNode, RunView, SessionRef } from "@jaira/shared/browser";
 import {
   bandsOf,
+  forksOf,
   instancesOf,
   notesOf,
   mountPathOf,
   pathFrom,
   piecesOf,
   placeNotes,
+  placeRunForks,
+  runForkAt,
+  runForksOf,
   startersOf,
   type BandNote,
+  type SessionPiece,
 } from "../src/renderer/sessionBands";
 
 const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
@@ -97,11 +102,26 @@ describe("piecesOf", () => {
     expect(piece?.sessionId).toBeUndefined();
   });
 
-  it("scopes the join to one run — instance ids restart, so #2 names one per run", () => {
+  it("joins on the RUN and the instance, never the instance alone", () => {
+    // Instance ids restart every run, so `#2` names a different state in each. Joining on it alone
+    // hung an older run's conversation off this run's node — a panel drawn with someone else's words
+    // in it, and nothing on screen to say so.
+    const parent = tree([{ id: 2, from: 0, to: 10 }]);
+    const older = { ...ref(2, "OLD", 0, 10), runId: 0 } as SessionRef;
+    const mine = piecesOf(parent, [older, ref(2, "A", 0, 10)], 1).filter((p) => p.node.runId === undefined);
+    expect(mine.map((p) => p.sessionId)).toEqual(["A"]);
+  });
+
+  it("draws the older run's call as its OWN piece rather than hiding it", () => {
+    // The conversation is the TASK's. A run scoped away was the reason a resumed task's replayed
+    // states came out as panels reading "this state ran no model call" — and it is why a run-scale
+    // fork used to have sides with nothing under them.
     const parent = tree([{ id: 2, from: 0, to: 10 }]);
     const older = { ...ref(2, "OLD", 0, 10), runId: 0 } as SessionRef;
     const pieces = piecesOf(parent, [older, ref(2, "A", 0, 10)], 1);
-    expect(pieces.map((p) => p.sessionId)).toEqual(["A"]);
+    expect(pieces.map((p) => p.sessionId).sort()).toEqual(["A", "OLD"]);
+    // …and it is the older RUN's, not a second reading of this one's node.
+    expect(pieces.find((p) => p.sessionId === "OLD")?.node.runId).toBe(0);
   });
 
   it("drops a pass a sequence reset disowned", () => {
@@ -239,7 +259,18 @@ describe("instancesOf", () => {
       { id: 3, from: 11, to: 20 },
     ]);
     const bands = bandsOf(piecesOf(parent, [ref(2, "A", 0, 10), ref(3, "A", 11, 20)], 1));
-    expect(instancesOf(bands).sort()).toEqual([2, 3]);
+    // By RUN and instance, because that is what a transcript is fetched under: an id minted per walk
+    // names a different state in every run, and asking for it alone brings back whichever run wrote
+    // it last. A single-run tree stamps no run, and then the id alone is the whole key.
+    expect(instancesOf(bands).map((one) => one.instanceId).sort()).toEqual([2, 3]);
+    expect(instancesOf(bands).every((one) => one.runId === undefined)).toBe(true);
+  });
+
+  it("counts a folded task's runs apart, so two runs of one instance are two transcripts", () => {
+    const parent = tree([{ id: 2, from: 0, to: 10 }]);
+    const older = { ...ref(2, "OLD", 0, 10), runId: 0 } as SessionRef;
+    const needed = instancesOf(bandsOf(piecesOf(parent, [older, ref(2, "A", 0, 10)], 1)));
+    expect(needed).toHaveLength(2);
   });
 });
 
@@ -449,5 +480,175 @@ describe("startersOf", () => {
     const bands = bandsOf(piecesOf(parent, [ref(2, "A", 0, 10), ref(3, "B", 11, 20), ref(4, "A", 21, 30)], 1));
     expect(startersOf(bands).get("A")?.node.instanceId).toBe(2);
     expect(startersOf(bands).get("B")?.node.instanceId).toBe(3);
+  });
+});
+
+describe("forksOf", () => {
+  /** A retried state: the attempt that claimed the position, and the branch that had to leave it. */
+  const retried = (): SessionRef[] => [
+    { runId: 1, instanceId: 2, stateId: "implement", sessionId: "default", seq: 6, startedAt: 10, at: 20, status: "error" },
+    {
+      runId: 1,
+      instanceId: 3,
+      stateId: "implement",
+      sessionId: "b7c1e4",
+      seq: 6,
+      startedAt: 30,
+      at: 40,
+      status: "success",
+      branch: { parent: "default", at: 6 },
+    },
+  ];
+
+  it("pairs a branch back up with the record it left, and reports both sides to both", () => {
+    // The two arrive as ordinary pieces with unrelated session ids — which is exactly how a retry
+    // used to read on screen. The lineage is what says they are one division seen twice.
+    const forks = forksOf(
+      piecesOf(
+        tree([
+          { id: 2, from: 10, to: 20 },
+          { id: 3, from: 30, to: 40 },
+        ]),
+        retried(),
+        1,
+      ),
+    );
+    expect([...forks.keys()].sort()).toEqual(["b7c1e4@6", "default@6"]);
+    // One array, shared: `indexOf` is how a panel answers "which of these am I".
+    expect(forks.get("default@6")).toBe(forks.get("b7c1e4@6"));
+  });
+
+  it("puts the sides in the order they ran, which is what makes '2 of 2' true", () => {
+    const forks = forksOf(
+      piecesOf(
+        tree([
+          { id: 2, from: 10, to: 20 },
+          { id: 3, from: 30, to: 40 },
+        ]),
+        retried(),
+        1,
+      ),
+    );
+    // The attempt that failed is attempt one however the pieces happened to be walked.
+    expect(forks.get("default@6")?.map((side) => side.sessionId)).toEqual(["default", "b7c1e4"]);
+  });
+
+  it("reports nothing where only one side is on the page", () => {
+    // A branch whose parent's record is not drawn cannot offer the side it came from, and a mark
+    // reading "1 of 1" would claim a division over something that never divided.
+    const [, branch] = retried();
+    expect(forksOf(piecesOf(tree([{ id: 3, from: 30, to: 40 }]), [branch!], 1)).size).toBe(0);
+  });
+
+  it("says nothing about a run that never forked, which is nearly all of them", () => {
+    const bands = bandsOf(piecesOf(tree([{ id: 2, from: 0, to: 10 }]), [ref(2, "A", 0, 10)], 1));
+    expect(forksOf(bands.flatMap((band) => band.segments.flatMap((segment) => segment.pieces))).size).toBe(0);
+  });
+});
+
+describe("runForksOf", () => {
+  /** One state, run by two runs — a retry, which is what every restart of a failed task is. */
+  const twice = (): SessionPiece[] => {
+    const at = [{ childKey: "implement", occurrence: 0 }];
+    const make = (runId: number, startedAt: number): SessionPiece => ({
+      node: {
+        instanceId: 3,
+        stateId: "implement",
+        childKey: "implement",
+        status: "completed",
+        iteration: 0,
+        superseded: false,
+        startedAt,
+        runId,
+        address: at,
+        children: [],
+      },
+      sessionId: `s${runId}`,
+      seq: 0,
+      startedAt,
+    });
+    return [make(1, 0), make(2, 10)];
+  };
+
+  it("makes a mark of the runs that did their own work at one address", () => {
+    // Not of runs that share a fork POINT: run 1 started at the root and run 2 resumed into
+    // `implement`, and they are still the two sides of one division — the one at `implement`.
+    const forks = runForksOf(twice());
+    expect(forks).toHaveLength(1);
+    expect(forks[0]!.at).toEqual([{ childKey: "implement", occurrence: 0 }]);
+    expect(forks[0]!.sides.map((s) => s.runId)).toEqual([1, 2]);
+  });
+
+  it("says nothing about an address only one run ran", () => {
+    // Which is nearly every address in nearly every task. A mark over one side would be furniture
+    // claiming a choice nobody has.
+    expect(runForksOf(twice().slice(0, 1))).toEqual([]);
+  });
+
+  it("leaves a run that REPLAYED an address out of its sides", () => {
+    // A replayed operation dispatches nothing and so has no piece — correctly, because a side of a
+    // mark has to be a side you can read, and that run produced nothing here to choose.
+    const forks = runForksOf(twice());
+    expect(forks[0]!.sides.some((s) => s.runId === 3)).toBe(false);
+  });
+
+  it("orders the sides by when they ran, so the count reads as the attempt number", () => {
+    const forks = runForksOf([...twice()].reverse());
+    expect(forks[0]!.sides.map((s) => s.runId)).toEqual([1, 2]);
+  });
+});
+
+describe("where a run-scale mark goes", () => {
+  /** Two states on ONE conversation — `environment.session` — one of them run twice. */
+  const shared = (): SessionPiece[] => {
+    const make = (stateId: string, runId: number, startedAt: number, seq: number): SessionPiece => ({
+      node: {
+        instanceId: seq + 2,
+        stateId,
+        childKey: stateId,
+        status: "completed",
+        iteration: 0,
+        superseded: false,
+        startedAt,
+        runId,
+        address: [{ childKey: stateId, occurrence: 0 }],
+        children: [],
+      },
+      sessionId: "thread",
+      seq,
+      startedAt,
+      endedAt: startedAt + 1,
+    });
+    return [make("plan", 1, 0, 0), make("implement", 1, 2, 1), make("implement", 2, 4, 1)];
+  };
+
+  it("keeps a fork that DIVIDES a panel out of the gap above it", () => {
+    // The gap above the sheet would put `plan` below the line — and `plan` is work both runs share.
+    // The one thing the mark claims is that everything above it is common to both sides.
+    const bands = bandsOf(shared());
+    const forks = runForksOf(bands.flatMap((b) => b.segments.flatMap((s) => s.pieces)));
+    expect(forks).toHaveLength(1);
+    expect(placeRunForks(forks, bands).every((bucket) => bucket.length === 0)).toBe(true);
+  });
+
+  it("hands it to the panel instead, keyed on the card it opens", () => {
+    const bands = bandsOf(shared());
+    const pieces = bands.flatMap((b) => b.segments.flatMap((s) => s.pieces));
+    const forks = runForksOf(pieces);
+    const at = runForkAt(forks);
+    // The FIRST attempt's card is where the division starts — not `plan`, which is above it.
+    expect(at.get(pieces.find((p) => p.node.stateId === "implement")!)).toBe(forks[0]);
+    expect(at.get(pieces.find((p) => p.node.stateId === "plan")!)).toBeUndefined();
+  });
+
+  it("still uses the gap when the divided work opens a panel of its own", () => {
+    // The ordinary case: states get their own conversation, so the divergence starts a new sheet and
+    // the mark belongs on the grey in front of it.
+    const own = shared().map((piece) =>
+      piece.node.stateId === "plan" ? piece : { ...piece, sessionId: "second", seq: 0 },
+    );
+    const bands = bandsOf(own);
+    const forks = runForksOf(bands.flatMap((b) => b.segments.flatMap((s) => s.pieces)));
+    expect(placeRunForks(forks, bands).flat()).toHaveLength(1);
   });
 });

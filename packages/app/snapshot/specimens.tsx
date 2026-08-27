@@ -10,7 +10,7 @@
  * stops at the window frame and everything inside it is imported.
  */
 import { useMemo, useState, type JSX, type ReactNode } from "react";
-import type { BoardCard, BoardView, FileTree, SessionView, TaskDetail } from "@jaira/shared/browser";
+import type { BoardCard, BoardView, FileTree, InstanceNode, SessionView, TaskDetail } from "@jaira/shared/browser";
 import { defaultAppearance } from "@jaira/shared/browser";
 import { GALLERY_SURFACES } from "@jaira/shared/browser";
 import { AppearancePane } from "../src/renderer/appearancePane";
@@ -24,6 +24,8 @@ import { ValuePanelContext, type PinnedValue } from "../src/renderer/valuePanel"
 import { Paper, Transcript } from "../src/renderer/transcriptView";
 import type { TranscriptEntry } from "../src/renderer/transcript";
 import { RunActivity } from "../src/renderer/runViews";
+import { ForkMark, SessionBandsView, ZigDefs } from "../src/renderer/sessionPanels";
+import { bandsOf, piecesOf, runForksOf } from "../src/renderer/sessionBands";
 
 /**
  * The clock the specimen's ages are measured back from.
@@ -746,6 +748,168 @@ function RunActivitySpecimen(): JSX.Element {
   );
 }
 
+
+/**
+ * The fork mark, at both of the places it lands.
+ *
+ * A picture is the only way to check the thing the whole design turns on: that the mark is QUIET —
+ * teeth and a chip, no wash and no rules — and still unmissable. A test can assert that `fork:` is
+ * on the page; whether a run with two of these on screen reads as a conversation or as a diagram is
+ * a question only a photograph answers.
+ *
+ * Both placements, in one frame and at their real sizes, because the second claim is that they are
+ * the SAME mark: between panels the chip sits in the gutter with nothing torn, and between turns it
+ * sits in the middle of the teeth. If those read as two different vocabularies, this is where it
+ * shows.
+ */
+const FORK_REFS = [
+  { runId: 1, instanceId: 2, stateId: "implement", sessionId: "default", seq: 6, startedAt: 0, at: 10, status: "error" as const },
+  {
+    runId: 1,
+    instanceId: 3,
+    stateId: "implement",
+    sessionId: "b7c1e4",
+    seq: 6,
+    startedAt: 11,
+    at: 20,
+    status: "success" as const,
+    branch: { parent: "default", at: 6 },
+  },
+];
+
+const forkNode = (instanceId: number, startedAt: number, endedAt: number): InstanceNode => ({
+  instanceId,
+  stateId: "implement",
+  childKey: `k${instanceId}`,
+  status: "completed",
+  iteration: 0,
+  superseded: false,
+  startedAt,
+  endedAt,
+  children: [],
+});
+
+/** Two runs of one task: run 1 failed at `implement`, run 2 replayed `plan` and re-ran it. */
+const RUN_PARENT: InstanceNode = {
+  instanceId: 1,
+  stateId: "feature",
+  status: "completed",
+  iteration: 0,
+  superseded: false,
+  startedAt: 0,
+  runId: 2,
+  address: [],
+  children: [
+    { ...forkNode(2, 0, 10), stateId: "plan", childKey: "plan", runId: 1, address: [{ childKey: "plan", occurrence: 0 }] },
+    { ...forkNode(3, 11, 20), stateId: "implement", childKey: "implement", runId: 2, address: [{ childKey: "implement", occurrence: 0 }] },
+  ],
+};
+
+const RUN_REFS = [
+  { runId: 1, instanceId: 2, stateId: "plan", sessionId: "thread", seq: 0, startedAt: 0, at: 10, status: "success" as const },
+  {
+    runId: 1,
+    instanceId: 9,
+    stateId: "implement",
+    sessionId: "thread",
+    seq: 1,
+    startedAt: 11,
+    at: 14,
+    status: "error" as const,
+    address: [{ childKey: "implement", occurrence: 0 }],
+  },
+  { runId: 2, instanceId: 3, stateId: "implement", sessionId: "thread", seq: 1, startedAt: 15, at: 20, status: "success" as const },
+];
+
+const RUN_BANDS = bandsOf(piecesOf(RUN_PARENT, RUN_REFS));
+const RUN_FORKS = runForksOf(RUN_BANDS.flatMap((band) => band.segments.flatMap((segment) => segment.pieces)));
+
+function ForkSpecimen(): JSX.Element {
+  const parent: InstanceNode = {
+    instanceId: 1,
+    stateId: "feature",
+    status: "completed",
+    iteration: 0,
+    superseded: false,
+    startedAt: 0,
+    children: [forkNode(2, 0, 10), forkNode(3, 11, 20)],
+  };
+  const said = (piece: { node: InstanceNode }): ReactNode =>
+    piece.node.instanceId === 2 ? (
+      <div className="ts">
+        <div className="ts-msg ts-msg-assistant">Applying the mark to SessionSegment.</div>
+      </div>
+    ) : (
+      <div className="ts">
+        <div className="ts-msg ts-msg-assistant">Re-reading the file first — it changed under the last attempt.</div>
+      </div>
+    );
+  return (
+    <div className="ts-page" style={{ minHeight: 0 }}>
+      <ZigDefs />
+      {/* The IN-THREAD placement: one conversation divided partway down, so the mark is torn and
+          sits between the two halves at the page's own measure — the chat view's use. */}
+      <div className="ts-paper">
+        <div className="ts">
+          <div className="ts-msg ts-msg-user">
+            <div className="ts-bubble">Carry the branch mark through to the panels.</div>
+          </div>
+          <div className="ts-msg ts-msg-assistant">Reading sessionBands.ts to find where a segment is built.</div>
+        </div>
+      </div>
+      <div className="chat-fork">
+        <ForkMark
+          sides={[
+            { key: "was", label: "what it said first" },
+            { key: "is", label: "the retry" },
+          ]}
+          shown="is"
+          onShow={() => {}}
+          note="a message was replaced here"
+        />
+      </div>
+      <div className="ts-paper">
+        <div className="ts">
+          <div className="ts-msg ts-msg-assistant">Done — SessionSegment now carries the branch mark.</div>
+        </div>
+      </div>
+      {/* …and the OUT-OF-SESSION placement below it: two attempts are two panels, so nothing was
+          cut and the same chip sits in the gutter with no teeth. */}
+      <SessionBandsView bands={bandsOf(piecesOf(parent, FORK_REFS, 1))} render={said} />
+    </div>
+  );
+}
+
+/**
+ * The RUN scale: a task whose second run replayed `plan` and re-ran `implement`.
+ *
+ * Its own frame, because `.sb` is `min-height: 100%` and two conversations in one scroller put the
+ * second a screen down.
+ *
+ * The states here SHARE one conversation (`environment.session`), which is the case that decides
+ * where a run-scale mark can go: the shared work and the divided work are cards in one sheet, so the
+ * gap above the sheet would put `plan` — which both runs replayed — below the line. The mark goes
+ * between the cards instead, and the claim it makes stays true.
+ */
+function RunForkSpecimen(): JSX.Element {
+  return (
+    <div className="ts-page" style={{ minHeight: 0 }}>
+      <ZigDefs />
+      <SessionBandsView
+        bands={RUN_BANDS}
+        runForks={RUN_FORKS}
+        render={(piece) => (
+          <div className="ts">
+            <div className="ts-msg ts-msg-assistant">
+              {piece.node.stateId === "plan" ? "Two fields and a line in the gutter." : "Re-reading the file first."}
+            </div>
+          </div>
+        )}
+      />
+    </div>
+  );
+}
+
 export const SPECIMENS: readonly Specimen[] = [
   { id: "board-column", figure: "06 · Column", width: 276, height: 384, node: <BoardSpecimen board={ONE_COLUMN} /> },
   { id: "board-two", figure: "01 · Tasks", width: 560, height: 340, node: <BoardSpecimen board={TWO_COLUMNS} /> },
@@ -761,4 +925,6 @@ export const SPECIMENS: readonly Specimen[] = [
   { id: "review-one", figure: "— · review_artifact", width: 1180, height: 900, node: <ReviewOneSpecimen /> },
   { id: "transcript", figure: "— · The message rail", width: 900, height: 1140, node: <TranscriptSpecimen /> },
   { id: "run-activity", figure: "— · What a run is doing", width: 900, height: 460, node: <RunActivitySpecimen /> },
+  { id: "fork", figure: "— · The fork mark", width: 900, height: 700, node: <ForkSpecimen /> },
+  { id: "fork-runs", figure: "— · The fork mark, at run scale", width: 900, height: 460, node: <RunForkSpecimen /> },
 ];

@@ -15,7 +15,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { InstanceNode, SessionRef } from "@jaira/shared/browser";
 import { bandsOf, piecesOf, type BandNote, type SessionPiece } from "../src/renderer/sessionBands";
-import { SessionBandsView } from "../src/renderer/sessionPanels";
+import { SessionBandsView, ZigDefs } from "../src/renderer/sessionPanels";
 
 const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
   status: "completed",
@@ -296,5 +296,71 @@ describe("the workflow behind a conversation", () => {
   it("offers no link where the host has no panel to describe one in", () => {
     const html = drawWith(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)], {});
     expect(html).not.toContain("sb-workflow");
+  });
+});
+
+describe("a panel that is one side of a fork", () => {
+  /** A retried state: the attempt that took the position, and the branch that had to leave it. */
+  const RETRY: SessionRef[] = [
+    { runId: 1, instanceId: 2, stateId: "implement", sessionId: "default", seq: 6, startedAt: 0, at: 10, status: "error" },
+    {
+      runId: 1,
+      instanceId: 3,
+      stateId: "implement",
+      sessionId: "b7c1e4",
+      seq: 6,
+      startedAt: 11,
+      at: 20,
+      status: "success",
+      branch: { parent: "default", at: 6 },
+    },
+  ];
+  const html = (): string =>
+    draw(
+      parentOf([
+        { id: 2, from: 0, to: 10 },
+        { id: 3, from: 11, to: 20 },
+      ]),
+      RETRY,
+    );
+
+  it("says so in the gutter, beside the id the fork changed", () => {
+    // The third fact of the same kind as the two already there. The id says which conversation this
+    // is, the state says what opened it, and until this there was nothing saying where it came from
+    // — two panels with unrelated names, one silently carrying the other's whole prefix.
+    expect(html()).toContain("fork-chip");
+    expect(html()).toContain("fork:");
+  });
+
+  it("marks BOTH sides, and counts each as the one it is", () => {
+    // A fork is a fact about the division, not about the branch: the attempt that was left behind is
+    // as much a side of it as the one that replaced it, and it is the side a reader is most likely
+    // to arrive at first.
+    expect(html()).toContain("1 of 2");
+    expect(html()).toContain("2 of 2");
+  });
+
+  it("tears nothing, because nothing here was cut in two", () => {
+    // Two attempts are two conversations, not one conversation divided — so the panel carries the
+    // chip alone. A torn edge would claim a continuity between the sheets that does not exist.
+    const marks = html().match(/fork-mark/g) ?? [];
+    expect(marks).toHaveLength(2);
+    expect(html()).not.toContain("fork-torn");
+  });
+
+  it("leaves an ordinary run unmarked", () => {
+    // Nothing is paid for until a conversation actually divides, on screen as in the record.
+    expect(draw(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)])).not.toContain("fork-chip");
+  });
+});
+
+describe("the zigzag tile", () => {
+  it("takes its colour from the stylesheet, not from whoever references it", () => {
+    // The bug this guards: the stroke was `var(--zig)`, a property set on `.sb-tear` — and a paint
+    // server resolves custom properties against its OWN place in the tree, not the referencing
+    // element's. This `<defs>` sits outside every element that set it, so the stroke was an
+    // unresolved variable, which is to say none: no torn edge in the app had ever drawn its teeth,
+    // in the whole time the vocabulary has been the one two views use to mean "cut here".
+    expect(renderToStaticMarkup(createElement(ZigDefs))).not.toContain("var(--");
   });
 });

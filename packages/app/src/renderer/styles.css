@@ -8604,7 +8604,6 @@ fieldset.reading {
    The zigzag is a tiling SVG rather than typed characters so that it fills any width exactly and
    announces itself to a screen reader as the sentence rather than as punctuation. */
 .sb-tear {
-  --zig: color-mix(in srgb, var(--accent) 45%, var(--line));
   display: flex;
   align-items: center;
   gap: 8px;
@@ -8617,6 +8616,15 @@ fieldset.reading {
 }
 .sb-tear-paused {
   border-top: 1px solid var(--rule);
+}
+/* The tooth's colour, set where the tooth IS.
+   It used to be a custom property on whatever referenced the pattern (`--zig` on `.sb-tear`), and a
+   paint server does not read those: it resolves against its own place in the tree, and `ZigDefs`
+   sits outside every element that set it. The stroke was an unresolved variable — which is to say
+   none — so no torn edge in this app had ever actually drawn its teeth. Id-coupled to `ZIG` in
+   `sessionPanels.tsx`, which is the pair to keep in step. */
+#jaira-zig path {
+  stroke: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 .sb-zig {
   flex: 1 1 auto;
@@ -8634,6 +8642,77 @@ fieldset.reading {
 .sb-tear-label .mono {
   font-family: var(--font-data);
   color: var(--text);
+}
+
+/* --- the fork mark ---
+   See `ForkMark`. The same drawing wherever a conversation or a task divides: the torn edge above
+   (`.sb-zig`, so there is one tile and one definition of it) and a chip in the middle of it. No
+   wash, no rules, one tooth size. What the old seam did with five carriers — a wash, a rule above,
+   a rule below, teeth, and a sentence — this does with two, and the sentence moves into the menu.
+
+   The chip is QUIET AT REST and takes its box on hover, focus and open. Same posture as `.ts-rail`:
+   a transcript at rest is the words, and a mark that must appear on every branched panel cannot
+   also be permanent furniture. */
+.fork-mark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+/* Between turns it needs its own space; in a gutter the row it sits on already has some. */
+.fork-torn {
+  margin: 14px 0 12px;
+}
+.fork-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  padding: 2px 9px;
+  font: inherit;
+  /* The type the app already uses for words inside a torn edge — see `.sb-tear-label`. */
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+  color: var(--dim);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fork-chip:hover,
+.fork-chip[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  background: var(--panel-2);
+  color: var(--text);
+}
+.fork-chip svg {
+  display: block;
+  width: 11px;
+  height: 11px;
+  flex: none;
+}
+/* `fork:` and the glyph are the one part that is identical on every mark, so they carry the weight
+   and the rest of the label hangs off them. */
+.fork-chip > svg:first-child,
+.fork-kind {
+  color: color-mix(in srgb, var(--accent) 70%, var(--dim));
+}
+.fork-kind {
+  flex: none;
+  font-weight: 600;
+}
+.fork-side {
+  min-width: 0;
+}
+/* Where a jump landed. The sides of a fork are the same state saying nearly the same thing, so
+   arriving at one silently is indistinguishable from not having moved. Fades on its own. */
+.sb-panel-lit > .sb-sheet {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+  transition: box-shadow 0.4s ease-out, border-color 0.4s ease-out;
 }
 
 /* A run board is the SAME board — see `Tile` and `Column` in `board.tsx`. All that is left here is
@@ -9417,50 +9496,13 @@ fieldset.reading {
    said.
 
    Held to the same width as the pages it joins, or the seam would be wider than the paper it tears. */
+/* The mark sits between the two pages, at their measure — see `ForkMark`. Nothing else marks the
+   division: the sheets keep their corners, because a squared edge would be a second carrier of the
+   one fact the teeth already state, and the seam this replaced was loud precisely for spending five. */
 .chat-fork {
   width: 100%;
   max-width: 900px;
   margin: 0 auto;
-}
-.chat-fork .sb-tear-paused {
-  border-top: 0;
-}
-/* Squared where it was torn — see `.sb-sheet.resumed`, which states the same rule for a panel. */
-.chat-scroll .ts-paper:has(+ .chat-fork) {
-  border-bottom-left-radius: 2px;
-  border-bottom-right-radius: 2px;
-}
-.chat-fork + .ts-paper {
-  border-top-left-radius: 2px;
-  border-top-right-radius: 2px;
-}
-/* The one control between the two edges: how many sides there are, and which you are reading. It
-   sits IN the tear rather than above it, because it is about the split and not about either half. */
-.chat-fork-tabs {
-  display: flex;
-  gap: 2px;
-  padding: 4px 10px;
-  min-width: 0;
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
-  border-left: 1px solid var(--line);
-  border-right: 1px solid var(--line);
-}
-.chat-fork-tabs button {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 320px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--bg);
-  padding: 3px 12px;
-  font-size: calc(var(--size-app) * 11.5 / 12.5);
-  color: var(--dim);
-  cursor: pointer;
-}
-.chat-fork-tabs button.on {
-  background: var(--panel);
-  color: var(--text);
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 
 /* What the conversation produced — a disclosure above the thread, closed until asked for. It sits

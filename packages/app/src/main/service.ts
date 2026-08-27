@@ -54,6 +54,7 @@ import {
   RunOwner,
   runCauses,
   runCostUsd,
+  addressesByRun,
   stateSessions,
   cancelTask,
   createTask,
@@ -313,6 +314,7 @@ import type {
   WriteConfigRequest,
   WriteFileRequest,
   WriteWorkflowRequest,
+  InstanceAddress,
   InstanceNode,
   ChatBranch,
   ChatEditPoint,
@@ -1910,6 +1912,29 @@ export class AppService {
     // `stateSessions` returns settled calls in journal order, so the n-th row of an instance is the
     // n-th call it made — which is what pairs it with the n-th start.
     const taken = new Map<string, number>();
+    /**
+     * Lineage, per distinct CONVERSATION rather than per row.
+     *
+     * Several operations share one session on purpose — that is what `environment.session` is for —
+     * and where a conversation came from is a fact about the conversation, not about each call in
+     * it. Memoised for the same reason the costs above are folded in one pass: a run of forty states
+     * through four sessions should open four lineage reads, not forty.
+     *
+     * Scoped to the run that WROTE the session, because a session id is instance-scoped and instance
+     * ids restart on every run — the same reason `sessionView` opens its store per row.
+     */
+    // Every operation's place in the workflow, per run — the one name two runs share. Without it a
+    // call the folded tree dropped is on the page with nothing to group it by, and a run-scale fork
+    // loses the sides it exists to offer.
+    const addresses = addressesByRun(session.project, request.taskId);
+    const lineage = new Map<string, { parent: string; at: number } | undefined>();
+    const branchOf = (runId: number, sessionId: string): { parent: string; at: number } | undefined => {
+      const key = `${runId}:${sessionId}`;
+      if (!lineage.has(key)) {
+        lineage.set(key, sessionStoreFor(session.project, { taskId: request.taskId, runId }).lineageOf(sessionId));
+      }
+      return lineage.get(key);
+    };
     return stateSessions(session.project, request.taskId, request.runId).map((s) => {
       const key = `${s.runId}:${s.instanceId}`;
       const nth = taken.get(key) ?? 0;
@@ -1920,6 +1945,7 @@ export class AppService {
       // rather than inferred — see `StateSession.outcome`.
       const settled = costs.get(key);
       const status = s.outcome === "interrupted" ? "interrupted" : s.outcome === "error" ? "error" : settled?.status;
+      const branch = branchOf(s.runId, s.sessionId);
       return {
         runId: s.runId,
         instanceId: s.instanceId,
@@ -1930,6 +1956,10 @@ export class AppService {
         ...(startedAt !== undefined ? { startedAt } : {}),
         ...(settled ?? {}),
         ...(status !== undefined ? { status } : {}),
+        ...(branch !== undefined ? { branch } : {}),
+        ...(addresses.get(`${s.runId}:${s.instanceId}`) !== undefined
+          ? { address: addresses.get(`${s.runId}:${s.instanceId}`)! }
+          : {}),
       };
     });
   }
@@ -2305,6 +2335,8 @@ export class AppService {
        * re-doing anything it already did.
        */
       replay?: ReplaySource;
+      /** Where this run's own work begins, recorded on its row — see `RunRow.forkedAt`. */
+      forkedAt?: InstanceAddress;
     },
   ): Promise<{ taskId: string; runId: number }> {
     const project = open.project;
@@ -2402,6 +2434,7 @@ export class AppService {
     const started = await beginTaskRun(project, taskId, {
       functions: registry.functions,
       ...(opts.bundle !== undefined ? { bundle: opts.bundle } : {}),
+      ...(opts.forkedAt !== undefined ? { forkedAt: opts.forkedAt } : {}),
     });
 
     // Artifact placement (DESIGN §7.6): one wiring shared by the file tools and the
@@ -3814,6 +3847,11 @@ export class AppService {
       config: open.project.config,
       secrets: this.secretResolver(open),
       replay: replaySourceOf(replay),
+      // Where this run's own work begins, written on its row before it starts. Known now and not
+      // afterwards: a replayed operation leaves no record, and the one trace it does leave — a
+      // completion carrying no session ref — is indistinguishable from a function op, which runs no
+      // model call either. See `forkPointOf`.
+      ...(replay.forkPoint !== undefined ? { forkedAt: replay.forkPoint } : {}),
       ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
       ...(request.fake !== undefined ? { fake: request.fake } : {}),
     });

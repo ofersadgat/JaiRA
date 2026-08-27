@@ -197,6 +197,25 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
     expect(JSON.stringify(messages)).toContain("read_file");
   });
 
+  it("says where a branch came from, which is the other direction from `forks`", async () => {
+    const durable = new SqliteSessionStore(db, { taskId: "t7", runId: 1 });
+    const store = durable as unknown as Store;
+    await append(store, "base", "b1", "shared");
+    await append(store, "base", "b2", "on the trunk");
+    const forkedRef = await store.fork("base@1");
+    const branch = forkedRef.slice(0, forkedRef.lastIndexOf("@"));
+
+    // `forks` answers "walking down to here, what did the path not take" — a thread's question. A
+    // RUN holds the branches themselves, each drawn as its own panel, and asks the reverse: whose
+    // continuation is this one, and from where.
+    expect(durable.lineageOf(branch)).toEqual({ parent: "base", at: 1 });
+    // The position is the one both sides SHARE, which is what pairs a branch back up with the record
+    // it left behind: `base`'s own row at seq 1 is the other side of this fork.
+    expect(durable.at("base", 1)).toBeDefined();
+    // A root is most sessions, and says so by saying nothing.
+    expect(durable.lineageOf("base")).toBeUndefined();
+  });
+
   it("scopes records to the run that wrote them, so a transcript is findable from a task", async () => {
     const store = new SqliteSessionStore(db, { taskId: "t9", runId: 2 }) as unknown as Store;
     await store.open({ id: "s1", source: undefined as never, session: { id: "scoped", seq: 0 }, startMs: 0 });

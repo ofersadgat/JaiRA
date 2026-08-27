@@ -24,6 +24,7 @@ import type {
   BoardColumn,
   BoardCrumb,
   BoardView,
+  InstanceAddress,
   InstanceNode,
   InstanceStatus,
   OperationView,
@@ -231,7 +232,7 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
     }
   });
 
-  return { instances: roots, activePath: activePathOf(roots), blocked };
+  return { instances: stampAddresses(roots), activePath: activePathOf(roots), blocked };
 }
 
 /**
@@ -274,6 +275,31 @@ export function foldRuns(runs: readonly { runId: number; run: ProjectedRun }[]):
     }
   }
   return { instances: merged, activePath: activePathOf(merged), blocked };
+}
+
+/**
+ * Every node's ADDRESS, stamped as the tree is handed out — see `InstanceNode.address`.
+ *
+ * Here rather than in the renderer because the walk is already happening and because the address has
+ * to be the SAME one `replay.ts` keys its answers on: a run's recorded fork point is compared
+ * against these, and two walks that counted occurrences even slightly differently would disagree
+ * about which iteration of a loop a panel belongs to, silently.
+ *
+ * The counting rule is `addressesOf`': occurrence counts entries under one key in this parent, over
+ * ALL siblings including superseded ones, because a loop's second iteration is occurrence 1 whether
+ * or not the first was cleared.
+ */
+function stampAddresses(roots: readonly InstanceNode[], prefix: InstanceAddress = []): InstanceNode[] {
+  const seen = new Map<string, number>();
+  return roots.map((node) => {
+    let address = prefix;
+    if (node.childKey !== undefined) {
+      const occurrence = seen.get(node.childKey) ?? 0;
+      seen.set(node.childKey, occurrence + 1);
+      address = [...prefix, { childKey: node.childKey, occurrence }];
+    }
+    return { ...node, address, children: stampAddresses(node.children, address) };
+  });
 }
 
 /** The run a node came from, stamped through the whole subtree. */

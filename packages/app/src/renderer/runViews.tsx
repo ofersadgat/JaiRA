@@ -29,7 +29,7 @@ import { TaskDetailSections, TaskHead } from "./detail";
 import { entriesOf, journalFor, sidechainEntriesOf, signatureOf } from "./transcript";
 import { instanceOf as instanceOfState, nodeAt, prunedTrail, type TrailStep } from "./trail";
 import { Paper, Pulse, Transcript, durationOf, useElapsed } from "./transcriptView";
-import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, type SessionPiece } from "./sessionBands";
+import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, runForksOf, type SessionPiece } from "./sessionBands";
 import { SessionBandsView } from "./sessionPanels";
 import type { FileSurfaceProps } from "./fileTypes";
 import { Composer } from "./composer";
@@ -174,6 +174,19 @@ export function RunBoard({
 }
 
 /**
+ * What one panel's transcript is cached and fetched UNDER.
+ *
+ * Run and instance, never the instance alone. Ids are minted `nextInstanceId++` per walk, so `#i2`
+ * names a different state in every run — a cache keyed on it hands a resumed task's panel whichever
+ * run last wrote that id, and the failure is silent: someone else's conversation, correctly drawn,
+ * under the wrong heading. A single-run projection stamps no run, and then the id alone is the whole
+ * key because there is only one run to confuse it with.
+ */
+export function sessionKey(at: { runId?: number; instanceId: number }): string {
+  return at.runId === undefined ? String(at.instanceId) : `${at.runId}:${at.instanceId}`;
+}
+
+/**
  * One run's conversation, as a panel per SESSION — see `sessionBands.ts` and `sessionPanels.tsx`.
  *
  * What this replaced was organised by state: the run's own words at the top, then a card per child
@@ -211,11 +224,25 @@ export function RunConversation({
 }): JSX.Element {
   const { conversation, liveTurn, sessions, sessionHistory, onLoadSessions, onOpenWorkflow } = context;
   const openSidechain = onOpenSidechain ?? context.onWalkIntoSidechain;
-  // The history spans every run of the task and instance ids restart on each, so an unscoped join
-  // would match this run's `#i2` against three older runs' as well. The instance tree is the latest
-  // run's, and this is the id that goes with it.
-  const runId = detail?.runs[detail.runs.length - 1]?.runId;
-  const bands = useMemo(() => bandsOf(piecesOf(parent, sessionHistory, runId)), [parent, sessionHistory, runId]);
+  /**
+   * The TASK's conversation, not the newest run's.
+   *
+   * It was the newest run's, and that was wrong twice over on a task anybody had resumed. A resumed
+   * run dispatches only what it did not replay, so its own journal holds a conversation with holes
+   * where the replayed states are — and each hole was drawn as a panel reading "this state ran no
+   * model call", about a state that had one. And a run-scale fork cannot be drawn at all when only
+   * one of its sides is on the page.
+   *
+   * Nothing is unscoped by this: `piecesOf` joins on the run AND the instance, taking the run from
+   * the folded tree's own stamp, which is the pairing that was missing when the filter was the only
+   * thing standing between `#i2` and three older runs' `#i2`.
+   */
+  const bands = useMemo(() => bandsOf(piecesOf(parent, sessionHistory)), [parent, sessionHistory]);
+  /** Every place the task divided — an address more than one run did its own work at. */
+  const runForks = useMemo(
+    () => runForksOf(bands.flatMap((band) => band.segments.flatMap((segment) => segment.pieces))),
+    [bands],
+  );
   const needed = useMemo(() => instancesOf(bands), [bands]);
   /**
    * What went wrong in the states that never opened a conversation.
@@ -245,7 +272,7 @@ export function RunConversation({
   // Every panel is open, so every transcript in them is needed — fetched in one round rather than
   // on expand, which is what the folded card design paid for and this one does not.
   useEffect(() => {
-    const missing = needed.filter((instanceId) => sessions[instanceId] === undefined);
+    const missing = needed.filter((one) => sessions[sessionKey(one)] === undefined);
     if (missing.length > 0) onLoadSessions(missing);
   }, [needed, sessions, onLoadSessions]);
 
@@ -260,7 +287,7 @@ export function RunConversation({
    * flight offers, and is why an answer appears while it is being written rather than after.
    */
   const render = (piece: SessionPiece): ReactNode => {
-    const view = sessions[piece.node.instanceId];
+    const view = sessions[sessionKey(piece.node)];
     if (view === undefined) return <p className="empty">Loading…</p>;
     const matches =
       liveTurn !== null &&
@@ -296,6 +323,7 @@ export function RunConversation({
           bands={bands}
           render={render}
           notes={notes}
+          runForks={runForks}
           {...(rootPath !== undefined ? { root: rootPath } : {})}
           {...(onOpenWorkflow !== undefined
             ? { onOpenWorkflow: (piece: SessionPiece) => onOpenWorkflow(piece.node.stateId, piece.node.instanceId) }
@@ -349,8 +377,10 @@ export function SidechainConversation({
   const open = onOpen ?? context.onWalkIntoSidechain;
 
   useEffect(() => {
-    if (sessions[step.instanceId] === undefined) onLoadSessions([step.instanceId]);
-  }, [sessions, step.instanceId, onLoadSessions]);
+    // A sidechain's host is a node of the folded tree, so it carries the run it came from.
+    const at = { instanceId: step.instanceId, ...(host?.runId !== undefined ? { runId: host.runId } : {}) };
+    if (sessions[sessionKey(at)] === undefined) onLoadSessions([at]);
+  }, [sessions, step.instanceId, host, onLoadSessions]);
 
   const liveItems = liveTurn?.sidechains[call];
   const entries = useMemo(() => sidechainEntriesOf(view, call, liveItems), [view, call, liveItems]);

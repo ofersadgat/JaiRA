@@ -4,7 +4,7 @@
  */
 import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
-import type { TaskStatus } from "@jaira/shared";
+import type { InstanceAddress, TaskStatus } from "@jaira/shared";
 import { isTerminalStatus } from "@jaira/shared";
 import type { JairaDb } from "./db";
 import type { RowLog } from "./rowFile";
@@ -32,6 +32,17 @@ export interface RunRow {
   outcome?: "success" | "error" | "canceled" | "interrupted";
   outputsJson?: string;
   failureJson?: string;
+  /**
+   * Where this run's own work began — see `RunView.forkedAt`, which this becomes.
+   *
+   * Stored as JSON, and read back as structure. Never `addressKey`: that is a map key, it joins with
+   * characters a child key may legally contain, and a stored string nothing can parse back is worse
+   * than no column at all.
+   *
+   * Absent is the ROOT — this run shares nothing. Which is what a re-run from the top does, and what
+   * every row written before the column existed says.
+   */
+  forkedAt?: InstanceAddress;
 }
 
 interface RawRuntime {
@@ -54,6 +65,7 @@ interface RawRun {
   outcome: string | null;
   outputs_json: string | null;
   failure_json: string | null;
+  forked_at: string | null;
 }
 
 function toRuntime(row: RawRuntime): TaskRuntimeRow {
@@ -69,6 +81,31 @@ function toRuntime(row: RawRuntime): TaskRuntimeRow {
   };
 }
 
+/**
+ * The stored fork point, read back as structure — or nothing, which is the root.
+ *
+ * Tolerant on purpose. A column read back as something other than an array of steps is a row this
+ * process did not write, and the honest answer to that is "this run shares nothing" — the same thing
+ * NULL means. Throwing would take down a task list over a field that only decides where a mark goes.
+ */
+function forkedAtOf(raw: string | null): { forkedAt: InstanceAddress } | undefined {
+  if (raw === null) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return undefined;
+    const steps = parsed.filter(
+      (step): step is InstanceAddress[number] =>
+        typeof step === "object" &&
+        step !== null &&
+        typeof (step as { childKey?: unknown }).childKey === "string" &&
+        typeof (step as { occurrence?: unknown }).occurrence === "number",
+    );
+    return steps.length === parsed.length ? { forkedAt: steps } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function toRun(row: RawRun): RunRow {
   return {
     id: row.id,
@@ -79,6 +116,7 @@ function toRun(row: RawRun): RunRow {
     outcome: (row.outcome as RunRow["outcome"]) ?? undefined,
     outputsJson: row.outputs_json ?? undefined,
     failureJson: row.failure_json ?? undefined,
+    ...(forkedAtOf(row.forked_at) ?? {}),
   };
 }
 
@@ -157,10 +195,14 @@ export class RuntimeStore {
     this.logTask(taskId);
   }
 
-  beginRun(taskId: string, snapshotHash: string, nowMs: number): number {
+  /**
+   * `forkedAt` is where this run's own work will begin — absent for a run that shares nothing, which
+   * is every run started from the top. See `RunRow.forkedAt`.
+   */
+  beginRun(taskId: string, snapshotHash: string, nowMs: number, forkedAt?: InstanceAddress): number {
     const res = this.db
-      .prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at) VALUES (?, ?, ?)`)
-      .run(taskId, snapshotHash, nowMs);
+      .prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at, forked_at) VALUES (?, ?, ?, ?)`)
+      .run(taskId, snapshotHash, nowMs, forkedAt === undefined ? null : JSON.stringify(forkedAt));
     // The id is written down because it is REFERENCED — see the note in `rowFile.ts`.
     this.logRun(Number(res.lastInsertRowid));
     return Number(res.lastInsertRowid);

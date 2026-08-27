@@ -185,3 +185,62 @@ describe("the task's frontier across runs", () => {
     expect(buildTaskReplay(project, "t").frontier).toEqual([]);
   });
 });
+
+describe("where a resumed run's own work begins", () => {
+  /**
+   * Two leaves under a root. `a` completed and recorded; `b` did not.
+   *
+   * Which is both kinds of resume at once, and the point of the single rule: whether `b` FAILED or
+   * the process died inside it, its operation never completed, so it has no answer — and the same
+   * walk lands on it either way.
+   */
+  const halfDone = (): number => {
+    const run = project.runtime.beginRun("t", "h", 1000);
+    entered(run, 1, "root");
+    entered(run, 2, "root/a", "a", 1);
+    completed(run, 2, "root/a", "op-a");
+    record(run, "op-a", { ok: true });
+    entered(run, 3, "root/b", "b", 1);
+    project.runtime.endRun(run, "error", 2000);
+    return run;
+  };
+
+  it("is the first address the record cannot answer", () => {
+    halfDone();
+    // `a` will be served from the record; `b` is where spending starts again. That boundary is the
+    // whole content of a run-scale fork: above it is shared, below it belongs to the new run.
+    expect(buildTaskReplay(project, "t").forkPoint).toEqual([{ childKey: "b", occurrence: 0 }]);
+  });
+
+  it("says nothing when the record answers everything it can see", () => {
+    // A run that resumes past the end of what was recorded diverges from nothing anybody can see, so
+    // there is no place to draw. Distinct from the EMPTY address, which is the root and means the
+    // opposite: a run that shares nothing at all.
+    const run = project.runtime.beginRun("t", "h", 1000);
+    entered(run, 1, "root");
+    entered(run, 2, "root/a", "a", 1);
+    completed(run, 2, "root/a", "op-a");
+    record(run, "op-a", { ok: true });
+    project.runtime.endRun(run, "success", 2000);
+    expect(buildTaskReplay(project, "t").forkPoint).toBeUndefined();
+  });
+
+  it("survives the round trip to the run row, as structure rather than a string", () => {
+    // `addressKey` is a map key, and it joins with characters a child key may legally contain. What
+    // is stored is the steps, so a key holding a `/` or a `#` reads back as what it was.
+    halfDone();
+    const point = buildTaskReplay(project, "t").forkPoint;
+    const resumed = project.runtime.beginRun("t", "h", 3000, point);
+    expect(project.runtime.listRuns("t").find((r) => r.id === resumed)?.forkedAt).toEqual([
+      { childKey: "b", occurrence: 0 },
+    ]);
+  });
+
+  it("reads a run started from the top as sharing nothing", () => {
+    // No fork point recorded is the ROOT, and that is the reading every run already on disk gets.
+    // It under-claims on purpose: it can never say a prefix was carried over when it was not.
+    halfDone();
+    const fresh = project.runtime.beginRun("t", "h", 3000);
+    expect(project.runtime.listRuns("t").find((r) => r.id === fresh)?.forkedAt).toBeUndefined();
+  });
+});

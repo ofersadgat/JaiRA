@@ -8,7 +8,7 @@ import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
 import type { Failure, FunctionCapabilities, JsonValue } from "@declarative-ai/exec";
 import { loadBundle, validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
-import { newTaskId, isStartableStatus, type TaskMeta, type TaskStatus } from "@jaira/shared";
+import { newTaskId, isStartableStatus, type InstanceAddress, type TaskMeta, type TaskStatus } from "@jaira/shared";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "./snapshots";
 import { freezeForRun, moduleEntriesOf, userModules } from "./userModules";
 import { nodeVfs } from "./vfs";
@@ -89,6 +89,16 @@ export interface BeginRunOptions {
    * "re-run after interruption" branch below, and a reader would never find it there.
    */
   bundle?: WorkflowBundle;
+  /**
+   * Where this run's own work will begin — `forkPointOf` over the replay index it is resuming from.
+   *
+   * Written on the run row rather than derived later, because it is knowable NOW and stops being so
+   * afterwards: replay leaves no record of its own, and the trace it does leave (a completion with
+   * no session ref) is what a function op looks like too. See `RunRow.forkedAt`.
+   *
+   * Omitted for a run that shares nothing — every run started from the top.
+   */
+  forkedAt?: InstanceAddress;
   nowMs?: number;
 }
 
@@ -165,7 +175,7 @@ export async function beginTaskRun(project: Project, taskId: string, options: Be
   const runId = project.db.transaction(() => {
     project.runtime.setSnapshot(taskId, hash, nowMs);
     project.runtime.setStatus(taskId, "running", nowMs);
-    return project.runtime.beginRun(taskId, hash, nowMs);
+    return project.runtime.beginRun(taskId, hash, nowMs, options.forkedAt);
   })();
 
   return { meta, runId, bundle, snapshotHash: hash, snapshotDir: dir, pinned };

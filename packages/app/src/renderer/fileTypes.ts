@@ -159,8 +159,8 @@ export interface FileSurfaceContext {
    * on every pass through a loop, and only the instance tells them apart.
    */
   detail: TaskDetail | null;
-  /** Transcripts by instance id, and how to fetch one. See `AppState.sessions`. */
-  sessions: Record<number, SessionView>;
+  /** Transcripts by `runId:instanceId`, and how to fetch one — see `sessionKey`. */
+  sessions: Record<string, SessionView>;
   onLoadSession: (instanceId: number) => void;
   /**
    * Fetch SEVERAL, in one round.
@@ -170,7 +170,7 @@ export interface FileSurfaceContext {
    * draws and so wants every transcript in the subtree at once — as one patch, because eight separate
    * ones re-render the whole conversation eight times while it is still assembling itself.
    */
-  onLoadSessions: (instanceIds: readonly number[]) => void;
+  onLoadSessions: (at: ReadonlyArray<{ runId?: number; instanceId: number }>) => void;
   /** Every state that task went through, and the transcript of the one being looked at. */
   sessionHistory: SessionRef[];
   session: SessionView | null;

@@ -43,7 +43,7 @@ import type {
   ReplayedOperation,
   ReplaySource,
 } from "@declarative-ai/hw";
-import type { InstanceNode } from "@jaira/shared";
+import type { AddressStep as ViewAddressStep, InstanceNode } from "@jaira/shared";
 import { SqliteEventLog } from "./eventLog";
 import { eventsOf, foldRuns, isLive, projectRun, type ProjectedRun } from "./projection";
 import { ON_RECORD, scopedSessionId } from "./sessionStore";
@@ -60,6 +60,19 @@ import type { Project } from "./project";
  */
 export type AddressStep = InstanceAddressStep;
 export type InstanceAddress = HwAddress;
+
+/**
+ * hw's address shape and the one the RENDERER reads are the same shape, checked here.
+ *
+ * `@jaira/shared` cannot import the engine — it is what the browser gets — so it restates the step
+ * (`AddressStep` there) and this is what stops the two from drifting. A field added upstream, or a
+ * name changed on either side, fails this build instead of quietly becoming a second vocabulary in
+ * which every address comparison silently stops matching.
+ */
+const _addressShapesAgree: ViewAddressStep = undefined as unknown as InstanceAddressStep;
+const _addressShapesAgreeBack: InstanceAddressStep = undefined as unknown as ViewAddressStep;
+void _addressShapesAgree;
+void _addressShapesAgreeBack;
 
 /**
  * The canonical string form, and the map key.
@@ -125,6 +138,18 @@ export interface RunReplay {
    * run and the caller should say so rather than proceeding quietly.
    */
   unreadable: readonly { address: InstanceAddress; stateId: string; reason: string }[];
+  /**
+   * Where the run about to start will begin doing its OWN work — see {@link forkPointOf}.
+   *
+   * The first address, in walk order, that {@link answers} cannot answer: everything before it will
+   * be replayed, and this is the first thing dispatched. That is the boundary a run-scale fork mark
+   * is drawn at, and recording it is the whole reason it is computed here rather than guessed later
+   * from the shape of what the run left behind.
+   *
+   * Absent when every recorded address is answered — the run picks up past the end of what the tree
+   * holds, so it diverges from nothing that was drawn.
+   */
+  forkPoint?: InstanceAddress;
 }
 
 /** The record row a settled operation event points at. */
@@ -232,7 +257,71 @@ export function buildTaskReplay(project: Project, taskId: string): RunReplay {
   // A later run that re-dispatched the address and recorded it properly has REPAIRED the hole, so
   // reporting it would refuse a resume that is now perfectly safe. Only a hole nothing filled counts.
   const unreadable = holes.filter((hole) => !answers.has(addressKey(hole.address)));
-  return { taskId, runId: last.id, answers, frontier: frontierOf(foldRuns(projected).instances), unreadable };
+  const folded = foldRuns(projected).instances;
+  const forkPoint = forkPointOf(folded, answers);
+  return {
+    taskId,
+    runId: last.id,
+    answers,
+    frontier: frontierOf(folded),
+    unreadable,
+    ...(forkPoint !== undefined ? { forkPoint } : {}),
+  };
+}
+
+/**
+ * The first address a resumed run will DISPATCH rather than replay — where its own work begins.
+ *
+ * Everything before it in walk order has a recorded answer and will be served from it, so it is
+ * shared with whichever earlier runs produced it. Everything from here is the new run's. That single
+ * boundary is the whole content of a run-scale fork, and it is knowable now — before the walk — for
+ * both kinds of resume, which is why it is written down rather than reconstructed afterwards from
+ * what the finished run happens to have left behind.
+ *
+ * ONE rule covers both kinds, and that is the argument for stating it this way:
+ *
+ *  - **continue** — the process died inside an operation, so that operation never completed and has
+ *    no answer. It is the first unanswered address, and it is the frontier.
+ *  - **retry** — a state FAILED. `buildRunReplay` records answers for completed operations only, so
+ *    a failed one has none either, and the same walk lands on it.
+ *
+ * Walk order is the tree's own order, which is entry order: `projectRun` appends each child as it is
+ * entered, so a depth-first walk visits addresses in the order the engine reached them.
+ *
+ * `undefined` when every address in the tree is answered — the run resumes past the end of what was
+ * recorded and diverges from nothing anybody can see. Distinct from an EMPTY address, which is the
+ * root and means the run shares nothing at all.
+ */
+export function forkPointOf(
+  roots: readonly InstanceNode[],
+  answers: ReadonlyMap<string, ReplayAnswer>,
+): InstanceAddress | undefined {
+  let found: InstanceAddress | undefined;
+  const walk = (nodes: readonly InstanceNode[], prefix: InstanceAddress): void => {
+    const seen = new Map<string, number>();
+    for (const node of nodes) {
+      if (found !== undefined) return;
+      let address = prefix;
+      if (node.childKey !== undefined) {
+        const occurrence = seen.get(node.childKey) ?? 0;
+        seen.set(node.childKey, occurrence + 1);
+        address = [...prefix, { childKey: node.childKey, occurrence }];
+      }
+      // Superseded is not somewhere a resume goes — a sequence reset disowned it — and counting it
+      // as unanswered would put the boundary inside history the engine has already abandoned. The
+      // occurrence still counted above, for the reason `addressesOf` gives.
+      if (node.superseded) continue;
+      // A COMPOSITE answers nothing itself; its children are the operations. Only a leaf can be the
+      // place where dispatching resumes, so only a leaf can be the boundary.
+      if (node.children.length === 0 && !answers.has(addressKey(address))) {
+        found = address;
+        return;
+      }
+      walk(node.children, address);
+    }
+  };
+  walk(roots, []);
+  return found;
 }
 
 /**

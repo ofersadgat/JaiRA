@@ -46,7 +46,7 @@ import type {
 import { SHARED_SESSION } from "@jaira/shared/browser";
 import { Composer } from "./composer";
 import { projectName } from "./projects";
-import { TearBar, ZigDefs } from "./sessionPanels";
+import { ForkMark, ZigDefs } from "./sessionPanels";
 import { CHAT_AGENT, isChatWorkflow, titleOf } from "./chatWorkflow";
 import { ContextMenu, AskDialog, type AskSpec, type MenuAnchor } from "./menu";
 import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from "./transcript";
@@ -510,54 +510,12 @@ function ChatStart({ surface }: { surface: ChatSurface }): JSX.Element {
 }
 
 /**
- * A conversation that divided in two, drawn as the division it is.
+ * The key of the side the thread is ON — the branch the record chain actually walks.
  *
- * Replacing a message does not delete what followed it — the store branches, and the turns that
- * followed are intact on the other side. Nothing said so. The thread simply came back shorter, which
- * is indistinguishable on screen from having lost them, and there was no way to read what the
- * conversation had said instead.
- *
- * So the thread TEARS here, in the vocabulary the Tasks view already uses for a session cut in two
- * (`sessionPanels.tsx`): a torn edge closes what both sides share, a torn edge opens what is below,
- * and between them is the one control that says how many sides there are and which you are reading.
- *
- * Everything above the tear is common ground and is drawn once. Everything below belongs to the side
- * that is selected — including the rest of the conversation, which is what "this one" means: pick the
- * other and you are reading the conversation that would have been.
+ * Empty because it is not a session of its own: the kept side IS this conversation, and every other
+ * side is named by the id it was left behind in. See {@link ChatPane}'s `split`.
  */
-export function ForkSeam({
-  branches,
-  shown,
-  onShow,
-}: {
-  /** Every side of the split, the kept one first — see {@link labelForBranch}. */
-  branches: readonly { key: string; label: string }[];
-  shown: string;
-  onShow: (key: string) => void;
-}): JSX.Element {
-  return (
-    <div className="chat-fork">
-      <TearBar kind="paused">
-        {branches.length === 2 ? "the conversation splits here" : `the conversation splits ${branches.length} ways here`}
-      </TearBar>
-      <div className="chat-fork-tabs" role="tablist">
-        {branches.map((branch) => (
-          <button
-            key={branch.key}
-            type="button"
-            role="tab"
-            aria-selected={branch.key === shown}
-            className={branch.key === shown ? "on" : undefined}
-            onClick={() => onShow(branch.key)}
-          >
-            <span className="ellip">{branch.label}</span>
-          </button>
-        ))}
-      </div>
-      <TearBar kind="resumed">{branches.find((b) => b.key === shown)?.label ?? "this conversation"}</TearBar>
-    </div>
-  );
-}
+const KEPT = "";
 
 /** What a side of a split is CALLED: the message that opens it, which is what was said differently. */
 function labelForBranch(turns: readonly SessionTurn[], fallback: string): string {
@@ -918,8 +876,15 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
     const kept = entries.slice(cut);
     return {
       shared: entries.slice(0, cut),
+      /**
+       * OLDEST FIRST, which is what makes "2 of 2" a true sentence.
+       *
+       * `forks` reports the sides left behind in the order they were created — the parent's own tail
+       * first, then any sibling that branched from the same position — and the side the path is on
+       * is the newest of them, because it is the edit that was just made. So the kept one goes last,
+       * and the mark's count reads as the attempt number it is.
+       */
       branches: [
-        { key: "", label: labelForBranch(thread.session.turns.slice(fork.turn), "this conversation"), entries: kept },
         ...fork.left.map((branch) => ({
           key: branch.sessionId,
           label: labelForBranch(branch.turns, "what was replaced"),
@@ -928,12 +893,16 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
           // answer to what a conversation looks like.
           entries: entriesOf({ ...thread.session, turns: [...branch.turns] }, [], null),
         })),
+        { key: KEPT, label: labelForBranch(thread.session.turns.slice(fork.turn), "this conversation"), entries: kept },
       ],
     };
   }, [entries, thread]);
   /** Which side of the newest split is being read. The kept one until somebody says otherwise. */
-  const [branch, setBranch] = useState("");
-  const shown = split?.branches.find((b) => b.key === branch) ?? split?.branches[0];
+  const [branch, setBranch] = useState(KEPT);
+  // The fallback is the KEPT side by name rather than the first entry: the sides are in the order
+  // they happened now, so `branches[0]` is the oldest thing the conversation said and landing there
+  // by accident would mean opening a chat on a branch nobody is having.
+  const shown = split?.branches.find((b) => b.key === branch) ?? split?.branches.find((b) => b.key === KEPT);
   /** Replacing a message: the same offer on either transcript, so it is stated once. */
   const edit = useMemo(
     () => ({
@@ -993,7 +962,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
             // The live tail belongs to the END of the conversation, so it rides with whatever is
             // showing there — and a reader looking at the side that was replaced is not looking at
             // where a turn is arriving.
-            {...(split === null || shown?.key === "" ? { live: surface.live ?? afterglow } : {})}
+            {...(split === null || shown?.key === KEPT ? { live: surface.live ?? afterglow } : {})}
             empty={running ? "Working…" : "This conversation has not said anything yet."}
             artifacts={artifacts}
             onEdit={edit}
@@ -1006,18 +975,25 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         </Paper>
         {split !== null && shown !== undefined ? (
           <>
-            <ForkSeam branches={split.branches} shown={shown.key} onShow={setBranch} />
+            <div className="chat-fork">
+              <ForkMark
+                sides={split.branches}
+                shown={shown.key}
+                onShow={setBranch}
+                note="a message was replaced here"
+              />
+            </div>
             <Paper>
               <Transcript
                 session={thread?.session ?? null}
                 entries={shown.entries}
-                {...(shown.key === "" ? { live: surface.live ?? afterglow } : {})}
+                {...(shown.key === KEPT ? { live: surface.live ?? afterglow } : {})}
                 artifacts={artifacts}
                 // Only on the side that is still being had. A message on the other side cannot be
                 // replaced from here: it is not where this conversation ends, and "edit" means fork
                 // from a position, which that side no longer holds.
-                {...(shown.key === "" ? { onEdit: edit } : {})}
-                {...(status !== null && shown.key === "" ? { narrated: true } : {})}
+                {...(shown.key === KEPT ? { onEdit: edit } : {})}
+                {...(status !== null && shown.key === KEPT ? { narrated: true } : {})}
               />
             </Paper>
           </>

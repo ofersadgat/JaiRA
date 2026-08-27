@@ -486,10 +486,11 @@ export interface AppState {
    * children produced. Fetched on expand rather than up front, because rendering a list of eight
    * folded headers would otherwise cost eight round trips before anyone had asked to read one.
    *
-   * Cleared whenever the selected task changes — an instance id is only unique within a run, so a
-   * stale entry would show the previous task's words under this one's card.
+   * Keyed by RUN and instance (`sessionKey`), because an instance id is minted per walk: `#i2` names
+   * a different state in every run of a task, and a cache keyed on it alone hands a resumed task's
+   * panel whichever run last wrote that id. Still cleared whenever the selected task changes.
    */
-  sessions: Record<number, SessionView>;
+  sessions: Record<string, SessionView>;
   /**
    * What the app has said about itself, newest last, and the process output a row opened.
    *
@@ -1700,21 +1701,27 @@ export function useApp() {
    * selection would file one task's words under another's instance ids.
    */
   const loadSessions = useCallback(
-    async (instanceIds: readonly number[]) => {
+    async (at: ReadonlyArray<{ runId?: number; instanceId: number }>) => {
       const taskId = ref.current.selected;
       if (taskId === null) return;
       const scope = ref.current.selectedProject ?? undefined;
-      const wanted = instanceIds.filter((id) => ref.current.sessions[id] === undefined);
+      // Asked for BY RUN as well as by instance. An unscoped read resolves the id against the whole
+      // history and takes the last match, so a resumed task's panel came back holding whichever run
+      // wrote that id most recently — the right conversation under the wrong heading, silently.
+      const key = (one: { runId?: number; instanceId: number }): string =>
+        one.runId === undefined ? String(one.instanceId) : `${one.runId}:${one.instanceId}`;
+      const wanted = at.filter((one) => ref.current.sessions[key(one)] === undefined);
       if (wanted.length === 0) return;
       const loaded = await Promise.all(
-        wanted.map(async (instanceId) => {
+        wanted.map(async (one) => {
           try {
             const view = await invoke("session:view", {
               taskId,
-              instanceId,
+              instanceId: one.instanceId,
+              ...(one.runId !== undefined ? { runId: one.runId } : {}),
               ...(scope !== undefined ? { project: scope } : {}),
             });
-            return [instanceId, view] as const;
+            return [key(one), view] as const;
           } catch {
             return null;
           }
@@ -2518,7 +2525,7 @@ export function useApp() {
       loadSession: (instanceId: number) => void loadSession(instanceId),
 
       /** Fetch every transcript a session-panelled conversation is about to draw. */
-      loadSessions: (instanceIds: readonly number[]) => void loadSessions(instanceIds),
+      loadSessions: (at: ReadonlyArray<{ runId?: number; instanceId: number }>) => void loadSessions(at),
 
       /** Look at another state's conversation — clicking a row of the task's history. */
       showSession: (instanceId: number | null) => {
