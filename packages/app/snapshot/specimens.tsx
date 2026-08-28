@@ -642,7 +642,12 @@ const RAIL_ENTRIES = [
     turn: 6,
     at: day("2026-08-25T14:23:04"),
     text: JSON.stringify({ verdict: "clean", states: 79, errors: 0 }, null, 2),
-    output: { report: { value: { verdict: "clean", states: 79, errors: 0 } },
+    // `{ name, value, schema }` — the entry's own shape, NOT the record's `{ <binding>: { value } }`.
+    // Written the other way round this read `entry.output.value === undefined`, which is a value the
+    // JSON view cannot serialize, and the whole specimen page went down with it.
+    output: {
+      name: "report",
+      value: { verdict: "clean", states: 79, errors: 0 },
       schema: {
         type: "object",
         properties: {

@@ -286,13 +286,37 @@ async function main() {
   });
   win.showInactive();
 
+  // The page's own console, in the harness's log.
+  //
+  // A specimen that throws during render reports itself to a console nobody was reading, and the
+  // only other evidence was a directory with no PNGs in it — which is indistinguishable from a
+  // selector that stopped matching. Forwarded, the first line of a broken run names the file.
+  win.webContents.on("console-message", (_event, level, message, line, source) => {
+    if (level >= 2) say(`  [page] ${message}${source ? ` (${source}:${line})` : ""}`);
+  });
+
+  /** Set once anything went wrong, so a broken run exits non-zero instead of saying "done". */
+  let broken = false;
+
   for (const theme of ["light", "dark"]) {
     say(`app · ${theme}`);
     await win.loadFile(join(here, "..", "dist", "snapshot", "index.html"), { search: `theme=${theme}` });
     await ready(win, `document.documentElement.dataset.ready === "1"`);
+    // What the page says about itself before a single picture is taken. A specimen that threw is
+    // still photographable — its boundary drew the message into the frame — but the run has to end
+    // badly, because a red panel where a control should be is not a snapshot anybody wants to trust.
+    const failures = await win.webContents.executeJavaScript(`globalThis.__specimenFailures ?? []`);
+    for (const failure of failures) {
+      broken = true;
+      say(`  ! specimen threw — ${failure.split("\n")[0]}`);
+    }
     const ids = await win.webContents.executeJavaScript(
       `[...document.querySelectorAll("[data-shot]")].map((e) => e.dataset.shot)`,
     );
+    if (ids.length === 0) {
+      broken = true;
+      say("  ! no [data-shot] elements — the page rendered nothing");
+    }
     await shoot(
       win,
       ids.map((id, i) => ({ name: `${id}.${theme}`, selector: "[data-shot]", index: i })),
@@ -343,8 +367,11 @@ async function main() {
     );
   }
 
-  say("done");
+  say(broken ? "done, WITH FAILURES — see above" : "done");
   win.destroy();
+  // Non-zero on a broken page, so `npm run snapshot` fails rather than finishing quietly on a run
+  // that photographed nothing.
+  if (broken) app.exit(1);
   app.quit();
 }
 

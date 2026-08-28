@@ -292,8 +292,24 @@ function Media({ src, kind }: { src: string; kind: "image" | "video" | "audio" }
 
 /** The raw form: text as written, or JSON pretty-printed. Never rendered, never reflowed. */
 function Source({ value }: { value: unknown }): JSX.Element {
-  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  return <pre className="vv-source">{text}</pre>;
+  return <pre className="vv-source">{jsonTextOf(value)}</pre>;
+}
+
+/**
+ * The value as text, and NEVER `undefined`.
+ *
+ * `JSON.stringify` answers `undefined` rather than a string for everything JSON cannot express —
+ * `undefined` itself, a function, a symbol — while TypeScript types the overload as returning
+ * `string`, so the hole is invisible until something downstream reads `.length` off it. That is not
+ * a hypothetical: `viewsFor` offers the JSON reading for a value that is absent and puts it FIRST,
+ * so an empty slot lands here on the app's normal path.
+ *
+ * The word `undefined` rather than an empty string, because a blank panel reads as "the value is an
+ * empty document" and this reads as what is actually the case — there is no value.
+ */
+function jsonTextOf(value: unknown): string {
+  if (typeof value === "string") return value;
+  return JSON.stringify(value, null, 2) ?? "undefined";
 }
 
 /**
@@ -310,7 +326,7 @@ function Source({ value }: { value: unknown }): JSX.Element {
  * `threshold`" without leaving the value.
  */
 function JsonView({ value, schema }: { value: unknown; schema?: unknown }): JSX.Element {
-  const text = useMemo(() => (typeof value === "string" ? value : JSON.stringify(value, null, 2)), [value]);
+  const text = useMemo(() => jsonTextOf(value), [value]);
   /**
    * What each key means, by the path of the object it sits in.
    *
@@ -709,8 +725,9 @@ export function ValueView({
           // transcript, and base64-encoding every payload on screen on the chance that one of them
           // gets saved is a cost paid continuously for something that happens rarely.
           onSelect: () => {
-            const text = typeof showing === "string" ? showing : JSON.stringify(showing, null, 2);
-            void invoke("shell:saveFile", { name: downloadName, data: base64Of(text) }).catch(() => undefined);
+            void invoke("shell:saveFile", { name: downloadName, data: base64Of(jsonTextOf(showing)) }).catch(
+              () => undefined,
+            );
           },
         },
         ...(panel === null
