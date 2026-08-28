@@ -17,7 +17,7 @@ import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MapSessionStore, PositionTaken, type RecordStore, type SessionStore } from "@declarative-ai/exec";
 import { openDb, type JairaDb } from "../src/db";
-import { repairInterruptedRecords, SqliteSessionStore } from "../src/sessionStore";
+import { SqliteSessionStore } from "../src/sessionStore";
 import { parseSessionRef, stateSessions } from "../src/views";
 
 let dir: string;
@@ -37,6 +37,15 @@ type Store = SessionStore<never> & RecordStore;
 
 /** One turn, in the shape `defaultMessagesOf` reads: a record's `result.value.messages`. */
 const turn = (text: string) => ({ role: "assistant", content: text });
+/** One ENTRY — the only shape a record's conversation has. `turn` above is what a reader derives
+ *  from it: the wire history, a projection rather than a second copy stored beside it. */
+const said = (text: string, role = "assistant", extra: Record<string, unknown> = {}) => ({
+  kind: "message",
+  role,
+  content: text,
+  provider: "unknown",
+  ...extra,
+});
 
 /** Claim a position and settle it — what one model call does through `withRecord`. */
 async function write(store: Store, at: { id: string; seq: number }, id: string, text: string): Promise<void> {
@@ -334,7 +343,7 @@ describe("the migration runner", () => {
       CREATE TABLE call_memo (key TEXT PRIMARY KEY, outcome TEXT NOT NULL, created_at INTEGER NOT NULL);
       INSERT INTO sessions (id, parent, cursor, created_at) VALUES ('t1/3/old', NULL, 0, 1);
       INSERT INTO operation_records (session_id, seq, record_id, task_id, run_id, result_json, external_id, started_at, ended_at)
-        VALUES ('t1/3/old', 0, 'r0', 't1', 3, '${JSON.stringify({ value: { messages: [{ role: "assistant", content: "kept" }] } }).replace(/'/g, "''")}', 'prov-9', 1, 2);
+        VALUES ('t1/3/old', 0, 'r0', 't1', 3, '${JSON.stringify({ value: { entries: [said("kept")] } }).replace(/'/g, "''")}', 'prov-9', 1, 2);
     `);
     legacy.close();
 
@@ -365,7 +374,7 @@ it("moves a position onto the record's own key, and renumbers attempts so that k
     // attempt, which is exactly what `derive` used to write.
     const file = join(dir, "positions.db");
     const before = openDb(file);
-    const said = (text: string): string => JSON.stringify({ value: { messages: [turn(text)] } }).replace(/'/g, "''");
+    const row = (text: string): string => JSON.stringify({ value: { entries: [said(text)] } }).replace(/'/g, "''");
     before.exec(`
       DROP INDEX IF EXISTS operation_records_natural;
       DROP TABLE session_positions;
@@ -375,9 +384,9 @@ it("moves a position onto the record's own key, and renumbers attempts so that k
         PRIMARY KEY (session_id, seq));
       INSERT INTO sessions (id, parent, cursor, created_at) VALUES ('t1/1/conv', NULL, 0, 1);
       INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, result_json, started_at)
-        VALUES ('conv:0', 't1', 1, 1, 'completed', '${said("first")}', 1);
+        VALUES ('conv:0', 't1', 1, 1, 'completed', '${row("first")}', 1);
       INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, result_json, started_at)
-        VALUES ('conv:0', 't1', 1, 1, 'completed', '${said("second")}', 2);
+        VALUES ('conv:0', 't1', 1, 1, 'completed', '${row("second")}', 2);
       INSERT INTO session_positions (session_id, seq, operation_record_id)
         SELECT 't1/1/conv', 0, MIN(id) FROM operation_records;
       PRAGMA user_version = 7;
@@ -421,37 +430,6 @@ it("moves a position onto the record's own key, and renumbers attempts so that k
     insert(2); // a genuine retry is not a duplicate
   });
 
-  it("gives every interrupted record already on disk the message it was called with", async () => {
-    // Built with the store, then rewound to what the old writer left — the streamed turns alone, on a
-    // database that has not seen migration 7. Rewinding beats hand-writing a version-6 schema: the row
-    // is exactly the shape the real writer produced, minus the one thing the migration is about.
-    const file = join(dir, "repair.db");
-    const fresh = openDb(file);
-    const store = new SqliteSessionStore(fresh, { taskId: "t1", runId: 1 }) as unknown as Store & SqliteSessionStore;
-    const at = await store.resolve({ ref: "conv" });
-    await store.open({ id: "r1", source: { kind: "prompt", user: "why is it slow?" } as never, session: at.at, startMs: 1 });
-    fresh
-      .prepare(`UPDATE operation_records SET result_json = ? WHERE record_id = 'r1'`)
-      .run(JSON.stringify({ error: { classification: "canceled", reason: "stopped" }, value: { messages: [turn("looking")], messageTimes: [{ at: 5 }] } }));
-    fresh.prepare(`UPDATE operation_records SET status = 'failed', ended_at = 9 WHERE record_id = 'r1'`).run();
-    fresh.pragma("user_version = 6");
-    fresh.close();
-
-    const migrated = openDb(file);
-    try {
-      const reader = new SqliteSessionStore(migrated, { taskId: "t1", runId: 1 }) as unknown as Store & SqliteSessionStore;
-      // Replay and the screen both, through the ordinary reads — the migration is correct exactly
-      // when an old record becomes indistinguishable from one written today.
-      expect(await reader.messages("conv")).toEqual([{ role: "user", content: "why is it slow?" }, turn("looking")]);
-      expect(reader.transcript("conv")[0]!.value).toMatchObject({
-        value: { messageTimes: [{}, { at: 5 }] },
-      });
-      // Idempotent: a re-run finds the question already in front and leaves the row alone.
-      expect(repairInterruptedRecords(migrated)).toBe(0);
-    } finally {
-      migrated.close();
-    }
-  });
 });
 
 /**
@@ -722,7 +700,7 @@ describe("stateSessions — a run the process died inside", () => {
  */
 describe("streamed partials on open records", () => {
   const store = () => new SqliteSessionStore(db) as unknown as Store & SqliteSessionStore;
-  const partial = (texts: string[]) => ({ value: { messages: texts.map(turn) } }) as never;
+  const partial = (texts: string[]) => ({ value: { entries: texts.map((t) => said(t)) } }) as never;
 
   it("streams into the open row, visible with its status — and out of materialized history", async () => {
     const s = store();
@@ -738,7 +716,7 @@ describe("streamed partials on open records", () => {
     // The knowing readers see it, labelled: the viewer's channel.
     const rows = s.transcript("chat");
     expect(rows).toHaveLength(2);
-    expect(rows[1]).toMatchObject({ status: "open", value: { value: { messages: [turn("half"), turn("written")] } } });
+    expect(rows[1]).toMatchObject({ status: "open", value: { value: { entries: [said("half"), said("written")] } } });
     // History must not: a half-written turn replayed into a provider is a conversation that never
     // happened. Value presence would say yes here; the state field says no.
     expect(await s.messages("chat")).toEqual([turn("settled")]);
@@ -768,7 +746,7 @@ describe("streamed partials on open records", () => {
 
     // The turns really were exchanged; a failed record keeping them is how errored calls already
     // represent turns that "may exist remotely". They now count as history too — settled, not open.
-    expect(s.transcript("err")[0]).toMatchObject({ status: "failed", value: { value: { messages: [turn("what got said")] } } });
+    expect(s.transcript("err")[0]).toMatchObject({ status: "failed", value: { value: { entries: [said("what got said")] } } });
     expect(await s.messages("err")).toEqual([turn("what got said")]);
   });
 
@@ -807,6 +785,8 @@ describe("streamed partials on open records", () => {
   describe("the message the call was made with", () => {
     const asked = { kind: "prompt", user: "what is in this repository?" } as never;
     const question = { role: "user", content: "what is in this repository?" };
+    /** The same turn as the entry the record actually carries — what `withOpening` splices in. */
+    const askedEntry = said("what is in this repository?", "user");
 
     it("is on the record from birth, before anything has streamed", async () => {
       const s = store();
@@ -814,7 +794,7 @@ describe("streamed partials on open records", () => {
       await s.open({ id: "r1", source: asked, session: at.at, startMs: 1 });
       // The case that made this the record's birth rather than its first flush: a process killed
       // here reaches no later write, and the row is all anybody will ever have.
-      expect(s.transcript("ask")[0]).toMatchObject({ status: "open", value: { value: { messages: [question] } } });
+      expect(s.transcript("ask")[0]).toMatchObject({ status: "open", value: { value: { entries: [askedEntry] } } });
     });
 
     it("stays in front of the turns a flush writes over it", async () => {
@@ -822,7 +802,7 @@ describe("streamed partials on open records", () => {
       const at = await s.resolve({ ref: "ask" });
       await s.open({ id: "r1", source: asked, session: at.at, startMs: 1 });
       s.streamPartial("ask", 0, partial(["it has two tables"]));
-      expect(s.transcript("ask")[0]!.value).toMatchObject({ value: { messages: [question, turn("it has two tables")] } });
+      expect(s.transcript("ask")[0]!.value).toMatchObject({ value: { entries: [askedEntry, said("it has two tables")] } });
     });
 
     it("survives the settle of a call that was stopped, and reaches REPLAY as well as the screen", async () => {
@@ -844,7 +824,7 @@ describe("streamed partials on open records", () => {
       s.streamPartial("ask", 0, partial(["half an answer"]));
       // A call that finished: the provider's delta is authoritative and already opens with the
       // question, so the splice must stand down rather than print it twice.
-      await s.close("r1", { result: { value: { messages: [question, turn("the whole answer")] } } as never });
+      await s.close("r1", { result: { value: { entries: [askedEntry, said("the whole answer")] } } as never });
       expect(await s.messages("ask")).toEqual([question, turn("the whole answer")]);
     });
 
@@ -853,10 +833,16 @@ describe("streamed partials on open records", () => {
       const at = await s.resolve({ ref: "ask" });
       await s.open({ id: "r1", source: asked, session: at.at, startMs: 1 });
       s.streamPartial("ask", 0, timed(["thought about it", "answered"], [{ at: 200, thoughtMs: 90 }, { at: 300 }]));
-      // Three messages now, so three stamps — the spliced question wears a blank rather than the
-      // first answer's clock.
+      // The clocks are ON the turns they measure, so the spliced question simply has none —
+      // there is no parallel array left to shift onto the wrong turn.
       expect(s.transcript("ask")[0]!.value).toMatchObject({
-        value: { messages: [question, turn("thought about it"), turn("answered")], messageTimes: [{}, { at: 200, thoughtMs: 90 }, { at: 300 }] },
+        value: {
+          entries: [
+            askedEntry,
+            said("thought about it", "assistant", { timing: { at: 200, thoughtMs: 90 } }),
+            said("answered", "assistant", { timing: { at: 300 } }),
+          ],
+        },
       });
     });
 
@@ -878,7 +864,7 @@ describe("streamed partials on open records", () => {
    * which is why a finished run's thinking rows had no "thought for 12 s" and a live one did.
    */
   const timed = (texts: string[], times: Array<Record<string, number>>) =>
-    ({ value: { messages: texts.map(turn), messageTimes: times } }) as never;
+    ({ value: { entries: texts.map((t, i) => said(t, "assistant", { timing: times[i] })) } }) as never;
 
   it("carries the streamed per-turn times onto a successful settle, aligned as a suffix", async () => {
     const s = store();
@@ -888,12 +874,14 @@ describe("streamed partials on open records", () => {
     // The settle holds the message the call was made WITH as well, so the stamps line up with the
     // TAIL of its list — padded at the front, never shifted onto the wrong turn.
     await s.close("r1", {
-      result: { value: { messages: [{ role: "user", content: "go" }, turn("thought about it"), turn("answered")] } } as never,
+      result: { value: { entries: [said("go", "user"), said("thought about it"), said("answered")] } } as never,
     });
 
-    const row = s.transcript("timed")[0] as { value?: { value?: { messageTimes?: unknown; messages?: unknown[] } } };
-    expect(row.value?.value?.messages).toHaveLength(3);
-    expect(row.value?.value?.messageTimes).toEqual([{}, { at: 200, thoughtMs: 90 }, { at: 300 }]);
+    const row = s.transcript("timed")[0] as { value?: { value?: { entries?: Array<{ timing?: unknown }> } } };
+    const entries = row.value?.value?.entries;
+    expect(entries).toHaveLength(3);
+    // Merged onto the turns they measure — the question the call was made with keeps none.
+    expect(entries?.map((e) => e.timing)).toEqual([undefined, { at: 200, thoughtMs: 90 }, { at: 300 }]);
   });
 
   it("drops the times rather than mislabel a turn when the roles do not line up", async () => {
@@ -902,10 +890,10 @@ describe("streamed partials on open records", () => {
     await s.open({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
     s.streamPartial("askew", 0, timed(["one", "two"], [{ at: 1 }, { at: 2 }]));
     await s.close("r1", {
-      result: { value: { messages: [turn("one"), { role: "user", content: "not two" }] } } as never,
+      result: { value: { entries: [said("one"), said("not two", "user")] } } as never,
     });
-    const row = s.transcript("askew")[0] as { value?: { value?: { messageTimes?: unknown } } };
-    expect(row.value?.value?.messageTimes).toBeUndefined();
+    const row = s.transcript("askew")[0] as { value?: { value?: { entries?: Array<{ timing?: unknown }> } } };
+    expect(row.value?.value?.entries?.map((e) => e.timing)).toEqual([undefined, undefined]);
   });
 });
 

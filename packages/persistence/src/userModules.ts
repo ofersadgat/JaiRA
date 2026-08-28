@@ -52,7 +52,7 @@ import {
   type Vfs,
   type WorkflowBundle,
 } from "@declarative-ai/hw";
-import { workflowSearchPath, type JairaPaths } from "@jaira/shared";
+import { workflowSearchPath, type ModuleApproval, type JairaPaths } from "@jaira/shared";
 
 import { nodeVfs } from "./vfs";
 
@@ -125,6 +125,14 @@ export function approvalsFor(file: string): Approvals {
 
 export interface UserModules {
   symbols: SymbolIndex;
+  /**
+   * The same index with NO approval gate — for diagnosis, never for resolution.
+   *
+   * Building it executes nothing (§7.5.4): it parses declarations to learn which file WOULD supply a
+   * symbol. That is the one question the gated index structurally cannot answer, and without it an
+   * unapproved module is indistinguishable from a typo — see {@link watchingForUnapproved}.
+   */
+  openSymbols: SymbolIndex;
   userFunctions: UserFunctions;
   approvals: Approvals;
   /** The require path modules resolve each other along — the search path plus its `node_modules`. */
@@ -150,6 +158,10 @@ export async function prepareUserModules(paths: JairaPaths, options: PrepareUser
   const approvals = approvalsFor(paths.base.approvalsFile);
   const searchPath = (options.searchPath ?? workflowSearchPath(paths.roots)).map(canonicalModulePath);
   const requirePath = requirePathFor(searchPath);
+  // ONE parse cache behind both indexes. Named off the option rather than off a `SymbolTable` import
+  // because hw does not re-export that type — and a cache is exactly the thing that must not be two
+  // maps, since the gated and ungated indexes read the very same files.
+  const cache: NonNullable<Parameters<typeof createSymbolIndex>[0]["cache"]> = new Map();
   const symbols = await createSymbolIndex({
     vfs,
     // The gate, at the only place it can be applied without lying about resolution: an unapproved
@@ -164,10 +176,14 @@ export async function prepareUserModules(paths: JairaPaths, options: PrepareUser
       const actual = currentHashOf(vfs, file);
       return actual !== undefined && actual === stored;
     },
-    cache: new Map(),
+    cache,
   });
+  // Shares `cache` with the gated index above, keyed by content hash, so the second index re-reads
+  // directory listings but never re-parses a module. Building it is not a hole in the gate: an index
+  // records what a file DECLARES, and resolution still asks `symbols`, which refuses.
+  const openSymbols = await createSymbolIndex({ vfs, cache });
   const userFunctions = await createUserFunctions({ vfs, requirePath });
-  current = { symbols, userFunctions, approvals, requirePath, vfs };
+  current = { symbols, openSymbols, userFunctions, approvals, requirePath, vfs };
   return current;
 }
 
@@ -198,6 +214,73 @@ export function resetUserModules(): void {
 function currentHashOf(vfs: Vfs, file: string): string | undefined {
   const source = vfs.read(file);
   return source === undefined ? undefined : moduleHash(source);
+}
+
+// --- Telling an unapproved module apart from a typo ---------------------------
+
+/** A symbol a load ASKED FOR and the gate withheld, with the file that would have answered it. */
+export interface WithheldSymbol {
+  /** The dotted name as the expression wrote it — `confidence.score`. */
+  symbol: string;
+  /** The file that declares it, which is the file awaiting a decision. */
+  file: string;
+}
+
+/** Watches one load, and answers what the approval gate cost it. */
+export interface UnapprovedWatch {
+  /** The index to hand the loader in place of the gated one. */
+  symbols: SymbolIndex;
+  /** What was withheld and never resolved anywhere else. Read after the load, however it ended. */
+  withheld(): WithheldSymbol[];
+}
+
+/**
+ * Wrap the gated index so one load records what the gate cost it.
+ *
+ * The problem this solves is the one that makes the feature necessary at all. An unapproved module
+ * contributes no symbol, so `confidence.score` resolves to nothing, so the expression fails to lower
+ * and the whole bundle fails to LOAD — which means there is no bundle to walk and
+ * {@link moduleEntriesOf} has nothing to report. The load has to say what it wanted while it is
+ * failing, because afterwards nobody can reconstruct it.
+ *
+ * ## Two ways to be wrong, and what rules them out
+ *
+ * **A typo must not become an approval prompt.** A name missing from BOTH indexes is left alone to
+ * fail as one; only a name the ungated index can place is recorded. `confidence.nope` stays "not a
+ * known operation"; `confidence.score` becomes a file to approve.
+ *
+ * **A miss is not a failure.** Resolution walks the search path directory by directory, so missing
+ * in the first is the ORDINARY way of finding something in the second — and an unapproved
+ * `$PROJECT/functions/text.ts` shadowed by an approved `$BASE/functions/text.ts` would otherwise be
+ * reported as blocking a load it did not block. So hits are tracked alongside misses and subtracted
+ * at the end: a symbol that resolved anywhere resolved.
+ *
+ * The gated answer is returned UNCHANGED in every case. This observes resolution, it does not
+ * participate in it — nothing here can make an unapproved symbol resolve.
+ */
+export function watchingForUnapproved(modules: UserModules): UnapprovedWatch {
+  const missed = new Map<string, string>();
+  const resolved = new Set<string>();
+  return {
+    symbols: (dir, symbol) => {
+      const name = symbol.join(".");
+      const gated = modules.symbols(dir, symbol);
+      if (gated.found) {
+        resolved.add(name);
+        return gated;
+      }
+      if (!missed.has(name)) {
+        const open = modules.openSymbols(dir, symbol);
+        if (open.found) missed.set(name, canonicalModulePath(open.file));
+      }
+      return gated;
+    },
+    withheld: () =>
+      [...missed]
+        .filter(([name]) => !resolved.has(name))
+        .map(([symbol, file]) => ({ symbol, file }))
+        .sort((a, b) => (a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0)),
+  };
 }
 
 // --- Which modules a bundle actually reaches ----------------------------------
@@ -255,6 +338,86 @@ export async function approvalsPending(modules: UserModules, entries: readonly s
     requirePath: modules.requirePath,
     approvals: modules.approvals,
   });
+}
+
+/**
+ * The withheld symbols alone, as approvals — no closure walk, and therefore SYNCHRONOUS.
+ *
+ * For the lint surface, which is sync all the way down to an IPC handler and would have to become
+ * async to reach {@link moduleApprovalsFor}. What it gives up is a module's own imports: a file
+ * reached only by `import` of a withheld file is not listed here. That is the honest boundary for
+ * lint — it reports the files this workflow NAMES — and the run gate, which is async anyway, walks
+ * the rest before anybody is asked to answer.
+ */
+export function withheldApprovalsOf(modules: UserModules, withheld: readonly WithheldSymbol[]): ModuleApproval[] {
+  const byFile = new Map<string, Set<string>>();
+  for (const { file, symbol } of withheld) {
+    const canonical = canonicalModulePath(file);
+    const known = byFile.get(canonical) ?? new Set<string>();
+    known.add(symbol);
+    byFile.set(canonical, known);
+  }
+  const out: ModuleApproval[] = [];
+  for (const [file, symbols] of [...byFile].sort()) {
+    const source = modules.vfs.read(file);
+    // A file the index placed but the vfs cannot re-read has been deleted mid-lint. Dropping it is
+    // right: there is nothing left to approve, and the load error it caused is now the true answer.
+    if (source === undefined) continue;
+    const previousHash = modules.approvals.approved(file);
+    out.push({
+      file,
+      hash: moduleHash(source),
+      source,
+      ...(previousHash !== undefined ? { previousHash } : {}),
+      symbols: [...symbols].sort(),
+    });
+  }
+  return out;
+}
+
+/**
+ * Everything a person would have to agree to before this workflow could run, as a prompt sees it.
+ *
+ * Takes both halves because the two ways a workflow reaches an unapproved module produce different
+ * evidence and neither covers the other:
+ *
+ *  - `entries` are the files a LOADED bundle names, from {@link moduleEntriesOf}. Available only
+ *    when the bundle loaded, which it does when the module is approved and one of its imports is not.
+ *  - `withheld` is what {@link watchingForUnapproved} caught during a load that FAILED. Available
+ *    only when it failed, which is the ordinary case of a module nobody has approved yet.
+ *
+ * Either way the closure walk runs over the union, so an import two files deep is on the list before
+ * anybody is asked rather than after they answer the first prompt.
+ */
+export async function moduleApprovalsFor(
+  modules: UserModules,
+  entries: readonly string[],
+  withheld: readonly WithheldSymbol[] = [],
+): Promise<ModuleApproval[]> {
+  const calls = new Map<string, Set<string>>();
+  for (const { file, symbol } of withheld) {
+    const canonical = canonicalModulePath(file);
+    const known = calls.get(canonical) ?? new Set<string>();
+    known.add(symbol);
+    calls.set(canonical, known);
+  }
+  const roots = [...new Set([...entries.map(canonicalModulePath), ...calls.keys()])];
+  if (roots.length === 0) return [];
+  const pending = await approvalsPending(modules, roots);
+  return pending
+    .map((entry): ModuleApproval => {
+      const symbols = [...(calls.get(canonicalModulePath(entry.file)) ?? [])].sort();
+      return {
+        file: canonicalModulePath(entry.file),
+        hash: entry.hash,
+        source: entry.source,
+        ...(entry.previousHash !== undefined ? { previousHash: entry.previousHash } : {}),
+        // Omitted rather than empty where nothing named it: a file reached only as an import has no
+        // call site, and an empty array reads as "called with no symbols", which is not the same.
+        ...(symbols.length > 0 ? { symbols } : {}),
+      };
+    })
+    .sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
 }
 
 /**

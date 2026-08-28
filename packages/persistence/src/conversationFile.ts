@@ -55,6 +55,8 @@
  * Turns are emitted at the SETTLE only, not on every partial flush — a call that streams ten times
  * would otherwise spray ten copies of a growing transcript into the file.
  */
+import type { JsonValue } from "@declarative-ai/json";
+import { messagesOfRecord } from "./recordMessages";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { JairaSessionFormat } from "@jaira/shared";
@@ -126,9 +128,7 @@ interface Dialect {
 function messagesOf(row: RecordRow): Array<{ role?: string; content?: unknown }> {
   if (row.status === "open" || row.result_json === null) return [];
   try {
-    const parsed = JSON.parse(row.result_json) as { value?: { messages?: unknown } };
-    const messages = parsed.value?.messages;
-    return Array.isArray(messages) ? (messages as Array<{ role?: string; content?: unknown }>) : [];
+    return messagesOfRecord(JSON.parse(row.result_json) as JsonValue) as Array<{ role?: string; content?: unknown }>;
   } catch {
     return [];
   }

@@ -75,6 +75,49 @@ describe("ApprovalHub", () => {
     await expect(unattended.approver()(request("git push"))).resolves.toEqual({ decision: "deny", scope: "once" });
   });
 
+  it("holds the gate SHUT for a stopping task, so the next ask is refused too", async () => {
+    // Rung 1 of a stop, and the cheapest boundary one has: an agent asks before every tool it is not
+    // pre-approved for, so a shut gate lets it finish the tool it is inside and then wind down. What
+    // this pins is the "too": denying only the parked request unblocked the loop, and the agent came
+    // straight back with the next call — which is what made a stop take as long as the agent liked.
+    let asked = 0;
+    let ids = 0;
+    // Ids are minted BEFORE the request is reported, so they are counted on their own.
+    const hub = new ApprovalHub({ onRequest: () => (asked += 1), nextId: () => `a${++ids}` });
+    const approve = hub.approver({ taskId: "t-1" });
+
+    const parked = approve(request("git push"));
+    expect(asked).toBe(1);
+
+    hub.stop("t-1");
+    await expect(parked).resolves.toMatchObject({ decision: "deny", scope: "once" });
+
+    // The one that matters: the call the agent makes NEXT. Nobody is asked about it — putting a
+    // question on screen about a run that is stopping has only one honest answer.
+    await expect(approve(request("rm -rf build"))).resolves.toMatchObject({ decision: "deny", scope: "once" });
+    expect(asked).toBe(1);
+    expect(hub.stopped("t-1")).toBe(true);
+
+    // Another task's run is untouched — a stop is one task's, not the process's.
+    const other = hub.approver({ taskId: "t-2" })(request("ls"));
+    expect(asked).toBe(2);
+    expect(hub.decide("a2", "allow")).toBe(true);
+    await expect(other).resolves.toMatchObject({ decision: "allow" });
+  });
+
+  it("opens the gate again for a new run, so a resumed task can use tools", async () => {
+    // A stop that outlived the run it stopped would refuse the first tool of the next one, and fail
+    // it for a reason nothing on screen could explain.
+    const hub = new ApprovalHub({ onRequest: () => undefined, nextId: () => "a1" });
+    hub.stop("t-1");
+    expect(hub.stopped("t-1")).toBe(true);
+    hub.allow("t-1");
+    expect(hub.stopped("t-1")).toBe(false);
+    const pending = hub.approver({ taskId: "t-1" })(request("ls"));
+    expect(hub.decide("a1", "allow")).toBe(true);
+    await expect(pending).resolves.toMatchObject({ decision: "allow" });
+  });
+
   it("denies every parked approval on denyAll", async () => {
     const hub = new ApprovalHub({ onRequest: () => undefined, nextId: () => "a1" });
     const pending = hub.approver()(request("git push"));

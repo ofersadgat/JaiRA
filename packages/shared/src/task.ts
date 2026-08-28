@@ -8,6 +8,17 @@ import type { JsonValue } from "@declarative-ai/json";
 export type TaskStatus =
   | "queued"
   | "running"
+  /**
+   * A stop has been ASKED FOR and the run has not settled yet.
+   *
+   * The interval between the decision and the end of the stream is a real state, and it used to be
+   * invisible: a task jumped to `canceled` the instant somebody pressed stop, while output was
+   * visibly still arriving — the panel said the run had ended and the transcript kept growing.
+   *
+   * It is not terminal (nothing has settled) and not startable (something still is), which is why it
+   * is neither set below. What ends it is the run settling, at which point it becomes `canceled`.
+   */
+  | "stopping"
   | "completed"
   | "failed"
   | "canceled"
@@ -36,10 +47,21 @@ export function isTerminalStatus(status: TaskStatus): boolean {
   return TERMINAL.has(status);
 }
 
-/** Statuses from which a (re-)run may begin. `interrupted` re-runs from the
- *  workflow start against the pinned snapshot (DESIGN §1a item 1 / §4.3). */
+/**
+ * Statuses from which a (re-)run may begin.
+ *
+ * `canceled` is in the set, and that is the whole of what makes a stopped run resumable. A stop is
+ * an INTERRUPTION — the difference between it and a crash is who caused it, which is not a fact about
+ * whether there is anything left to pick up. Excluding it meant `resumable()` returned "no plan"
+ * before it had looked, so a task whose record held eleven finished operations was offered a fresh
+ * copy of itself.
+ *
+ * Pause and cancel differ in what they RELEASE — a paused run keeps its process and its worktree, a
+ * canceled one gives them up — and not in whether they can be continued. Neither is the end of a
+ * task's life; deleting is.
+ */
 export function isStartableStatus(status: TaskStatus): boolean {
-  return status === "queued" || status === "interrupted" || status === "failed";
+  return status === "queued" || status === "interrupted" || status === "failed" || status === "canceled";
 }
 
 const ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";

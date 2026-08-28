@@ -74,10 +74,15 @@ describe("withNativeCapture", () => {
       sessionOutcome: { providerSessionId: SID, messages },
     });
     const value = (closes[0]!.settled.result as { value: Record<string, unknown> }).value;
-    // The store prefers the session report over a non-conversation payload; the lines ride the
-    // shape that is actually kept.
-    expect(value["messages"]).toEqual(messages);
-    expect(Array.isArray(value["nativeLines"])).toBe(true);
+    // The reported turns become ENTRIES and the captured lines fold into the same array — this path
+    // used to write `{ messages, nativeLines }`, a second encoding only it produced, which a reader
+    // that speaks entries would have found empty.
+    const entries = value["entries"] as Array<Record<string, unknown>>;
+    expect(Array.isArray(entries)).toBe(true);
+    expect(entries).toContainEqual(expect.objectContaining({ kind: "message", role: "assistant", content: "report" }));
+    // Folded IN, not stored beside: nothing is left on a channel of its own.
+    expect(value["nativeLines"]).toBeUndefined();
+    expect(entries.length).toBeGreaterThan(1);
   });
 
   it("cuts the file at the record's own start — a resumed session's earlier lines belong to earlier records", async () => {

@@ -52,6 +52,11 @@ function project(conversations: "file" | "db", format: "claude" | "codex" = "cla
 }
 
 const turn = (text: string) => ({ role: "assistant", content: text });
+/** A settled payload: one conversation array, which is the only shape a record carries. `turn` above
+ *  is what a reader DERIVES from it — the wire history, never a second copy stored beside it. */
+const said = (text: string) => ({
+  value: { entries: [{ kind: "message", role: "assistant", content: text, provider: "unknown", timestamp: "1970-01-01T00:00:00.000Z" }] },
+});
 
 /** Every line of the one run's file, parsed — the tests below ask what SHAPE was written. */
 const fileLines = (): Array<Record<string, unknown>> =>
@@ -65,7 +70,7 @@ async function call(p: Project, text: string, seq?: number): Promise<void> {
   const store = sessionStoreFor(p, { taskId: "t-1", runId: 1 }) as unknown as Store;
   const at = await store.resolve(seq === undefined ? { ref: "conv" } : { ref: `conv@${seq}` });
   await store.open({ id: `conv:${at.at.seq}`, source: { kind: "prompt", user: text } as never, session: at.at, startMs: 1 });
-  await store.close(`conv:${at.at.seq}`, { result: { value: { messages: [turn(text)] } } as never });
+  await store.close(`conv:${at.at.seq}`, { result: said(text) as never });
 }
 
 describe("the round trip — the file is the truth", () => {
@@ -215,11 +220,11 @@ describe("native turn lines — for the other tool's reader, never for replay", 
     const at = await store.resolve({ ref: "conv" });
     await store.open({ id: "conv:0", source: { kind: "prompt", user: "hi" } as never, session: at.at, startMs: 1 });
     (store as unknown as { streamPartial: (s: string, q: number, v: unknown) => void }).streamPartial("conv", 0, {
-      value: { messages: [turn("partial one")] },
+      value: said("partial one").value,
     });
 
     expect(fileLines().some((l) => l["type"] === "assistant")).toBe(false);
-    await store.close("conv:0", { result: { value: { messages: [turn("final")] } } as never });
+    await store.close("conv:0", { result: said("final") as never });
     expect(fileLines().some((l) => l["type"] === "assistant")).toBe(true);
   });
 });

@@ -15,12 +15,12 @@ import type { JsonValue } from "@declarative-ai/json";
 const at = (id: string, seq: number) => ({ session: { id, seq } });
 
 describe("LiveTurnLog", () => {
-  it("accumulates text, thinking and items for one position", () => {
+  it("accumulates text, thinking and entries for one position", () => {
     const log = new LiveTurnLog();
     log.apply("t1", { ...at("s", 1), stateId: "plan", thinking: "hm " });
     log.apply("t1", { ...at("s", 1), text: "Hel" });
     log.apply("t1", { ...at("s", 1), text: "lo" });
-    log.apply("t1", { ...at("s", 1), item: { kind: "event", event: { type: "x" } } });
+    log.apply("t1", { ...at("s", 1), entry: { kind: "event", event: { type: "x" } } });
     expect(log.snapshot("t1")).toMatchObject({
       sessionId: "s",
       seq: 1,
@@ -28,7 +28,7 @@ describe("LiveTurnLog", () => {
       n: 4,
       text: "Hello",
       thinking: "hm ",
-      items: [{ kind: "event", event: { type: "x" } }],
+      entries: [{ kind: "event", event: { type: "x" } }],
     });
   });
 
@@ -47,13 +47,13 @@ describe("LiveTurnLog", () => {
     expect(log.apply("t1", { ...at("s", 3), text: "c" })).toMatchObject({ n: 3 });
   });
 
-  it("stamps items with times: completion on every item, start + thought duration on a finished turn", () => {
+  it("stamps entries with times: completion on every entry, start + thought duration on a finished turn", () => {
     const log = new LiveTurnLog();
     log.apply("t1", { ...at("s", 1), at: 100, thinking: "hm" });
     log.apply("t1", { ...at("s", 1), at: 250, text: "Hel" });
-    const { item } = log.apply("t1", { ...at("s", 1), at: 400, item: { kind: "message", role: "assistant", content: {} } });
+    const { entry } = log.apply("t1", { ...at("s", 1), at: 400, entry: { kind: "message", role: "assistant", content: {} } });
     // startedAt = first delta of the turn (the thinking), thoughtMs = thinking start → answer start.
-    expect(item).toMatchObject({ at: 400, startedAt: 100, thoughtMs: 150 });
+    expect(entry).toMatchObject({ at: 400, startedAt: 100, thoughtMs: 150 });
     // The tails and their clocks restart with the finished turn.
     expect(log.snapshot("t1")).toMatchObject({ text: "", thinking: "" });
     expect(log.snapshot("t1")!.thinkingStartedAt).toBeUndefined();
@@ -75,7 +75,7 @@ describe("LiveTurnLog", () => {
       kind: "event",
       event: { type: "provider_event", payload: { type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "", signature: "" } } } },
     };
-    log.apply("t1", { ...at("s", 1), at: 100, item: blockStart });
+    log.apply("t1", { ...at("s", 1), at: 100, entry: blockStart });
     expect(log.snapshot("t1")).toMatchObject({ thinking: "", thinkingStartedAt: 100 });
   });
 
@@ -85,7 +85,7 @@ describe("LiveTurnLog", () => {
       kind: "event",
       event: { type: "provider_event", payload: { type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "abc" } } } },
     };
-    log.apply("t1", { ...at("s", 1), at: 250, item: sig });
+    log.apply("t1", { ...at("s", 1), at: 250, entry: sig });
     expect(log.snapshot("t1")!.thinkingStartedAt).toBe(250);
   });
 
@@ -95,11 +95,11 @@ describe("LiveTurnLog", () => {
       kind: "event",
       event: { type: "provider_event", payload: { type: "stream_event", event: { type: "content_block_start", content_block: { type: "thinking" } } } },
     };
-    log.apply("t1", { ...at("s", 1), at: 1000, item: blockStart });
+    log.apply("t1", { ...at("s", 1), at: 1000, entry: blockStart });
     log.apply("t1", { ...at("s", 1), at: 4000, text: "Here" });
-    const { item } = log.apply("t1", { ...at("s", 1), at: 4200, item: { kind: "message", role: "assistant", content: {} } });
+    const { entry } = log.apply("t1", { ...at("s", 1), at: 4200, entry: { kind: "message", role: "assistant", content: {} } });
     // The number the settled row will state — the wait a person actually sat through.
-    expect(item).toMatchObject({ startedAt: 1000, thoughtMs: 3000 });
+    expect(entry).toMatchObject({ startedAt: 1000, thoughtMs: 3000 });
   });
 
   it("ignores stream bookkeeping that is not a thinking block, and does not restart a running clock", () => {
@@ -108,14 +108,14 @@ describe("LiveTurnLog", () => {
       kind: "event",
       event: { type: "provider_event", payload: { type: "stream_event", event: { type: "content_block_start", content_block: { type: "text" } } } },
     };
-    log.apply("t1", { ...at("s", 1), at: 100, item: textBlock });
+    log.apply("t1", { ...at("s", 1), at: 100, entry: textBlock });
     expect(log.snapshot("t1")!.thinkingStartedAt).toBeUndefined();
     const thinkBlock = {
       kind: "event",
       event: { type: "provider_event", payload: { type: "stream_event", event: { type: "content_block_start", content_block: { type: "thinking" } } } },
     };
-    log.apply("t1", { ...at("s", 1), at: 200, item: thinkBlock });
-    log.apply("t1", { ...at("s", 1), at: 300, item: thinkBlock });
+    log.apply("t1", { ...at("s", 1), at: 200, entry: thinkBlock });
+    log.apply("t1", { ...at("s", 1), at: 300, entry: thinkBlock });
     // The FIRST notice is when thinking began; a later one is the same block still going.
     expect(log.snapshot("t1")!.thinkingStartedAt).toBe(200);
   });
@@ -125,29 +125,33 @@ describe("LiveTurnLog", () => {
     log.apply("t1", {
       ...at("s", 1),
       at: 700,
-      item: { kind: "event", event: { type: "provider_event", payload: { type: "stream_event", event: { type: "content_block_start", content_block: { type: "thinking" } } } } },
+      entry: { kind: "event", event: { type: "provider_event", payload: { type: "stream_event", event: { type: "content_block_start", content_block: { type: "thinking" } } } } },
     });
-    const value = partialRecordValue(log.snapshot("t1")!) as { value: { partial?: { thinkingStartedAt?: number } } };
-    expect(value.value.partial).toMatchObject({ thinkingStartedAt: 700 });
+    // "Still thinking, nothing said yet" is an ENTRY with no content and a start — not a field
+    // beside the conversation saying the same thing in a second shape.
+    const value = partialRecordValue(log.snapshot("t1")!) as { value: { entries: Array<Record<string, unknown>> } };
+    expect(value.value.entries).toEqual([
+      { kind: "message", role: "assistant", content: [], partial: true, provider: "unknown", timing: { startedAt: 700 } },
+    ]);
   });
 
   it("holds the call being written, and drops the bookkeeping it read it from", () => {
     // The gap this closes: a model producing a large argument leaves nothing else on the stream, and
-    // hundreds of these fragments would push the conversation itself out of a bounded item list.
+    // hundreds of these fragments would push the conversation itself out of a bounded entry list.
     const log = new LiveTurnLog();
     const stream = (event: JsonValue): JsonValue => ({ kind: "event", event: { type: "provider_event", payload: { type: "stream_event", event } } });
-    log.apply("t1", { ...at("s", 1), at: 100, item: stream({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_1", name: "show_artifact" } }) });
-    log.apply("t1", { ...at("s", 1), at: 200, item: stream({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"path": "mocks/07.html", "content": "<!DOC' } }) });
+    log.apply("t1", { ...at("s", 1), at: 100, entry: stream({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_1", name: "show_artifact" } }) });
+    log.apply("t1", { ...at("s", 1), at: 200, entry: stream({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"path": "mocks/07.html", "content": "<!DOC' } }) });
     const snapshot = log.snapshot("t1")!;
     expect(snapshot.writing).toMatchObject({ name: "show_artifact", chars: 43 });
-    expect(snapshot.items).toEqual([]);
+    expect(snapshot.entries).toEqual([]);
   });
 
   it("lets go of the half-written call once the turn carrying it lands", () => {
     const log = new LiveTurnLog();
     const stream = (event: JsonValue): JsonValue => ({ kind: "event", event: { type: "provider_event", payload: { type: "stream_event", event } } });
-    log.apply("t1", { ...at("s", 1), at: 100, item: stream({ type: "content_block_start", index: 0, content_block: { type: "tool_use", name: "show_artifact" } }) });
-    log.apply("t1", { ...at("s", 1), at: 300, item: { kind: "message", role: "assistant", content: {} } });
+    log.apply("t1", { ...at("s", 1), at: 100, entry: stream({ type: "content_block_start", index: 0, content_block: { type: "tool_use", name: "show_artifact" } }) });
+    log.apply("t1", { ...at("s", 1), at: 300, entry: { kind: "message", role: "assistant", content: {} } });
     // The call is on that turn now, assembled, with a row of its own — two rows for one call is
     // exactly what the drop prevents.
     expect(log.snapshot("t1")!.writing).toBeUndefined();
@@ -157,19 +161,19 @@ describe("LiveTurnLog", () => {
     const log = new LiveTurnLog();
     log.apply("t1", {
       ...at("s", 1),
-      item: { kind: "event", event: { type: "provider_event", payload: { type: "system", subtype: "init", session_id: "prov-7" } } },
+      entry: { kind: "event", event: { type: "provider_event", payload: { type: "system", subtype: "init", session_id: "prov-7" } } },
     });
     expect(log.snapshot("t1")).toMatchObject({ providerSessionId: "prov-7" });
   });
 
-  it("routes a subagent's items to its chain and restarts the tails on a finished assistant turn", () => {
+  it("routes a subagent's entries to its chain and restarts the tails on a finished assistant turn", () => {
     const log = new LiveTurnLog();
     log.apply("t1", { ...at("s", 1), text: "partial" });
-    log.apply("t1", { ...at("s", 1), item: { kind: "message", role: "assistant", content: {}, parentToolUseId: "call1" } });
-    log.apply("t1", { ...at("s", 1), item: { kind: "message", role: "assistant", content: {} } });
+    log.apply("t1", { ...at("s", 1), entry: { kind: "message", role: "assistant", content: {}, parentToolUseId: "call1" } });
+    log.apply("t1", { ...at("s", 1), entry: { kind: "message", role: "assistant", content: {} } });
     const snap = log.snapshot("t1")!;
     expect(snap.sidechains["call1"]).toHaveLength(1);
-    expect(snap.items).toHaveLength(1);
+    expect(snap.entries).toHaveLength(1);
     // The finished turn carries what the deltas streamed — the tail restarts.
     expect(snap.text).toBe("");
   });
@@ -184,10 +188,10 @@ describe("LiveTurnLog", () => {
 
   it("hands out copies — a mutating log must not reach into a snapshot already served", () => {
     const log = new LiveTurnLog();
-    log.apply("t1", { ...at("s", 1), item: { kind: "event", event: { type: "x" } } });
+    log.apply("t1", { ...at("s", 1), entry: { kind: "event", event: { type: "x" } } });
     const snap = log.snapshot("t1")!;
-    log.apply("t1", { ...at("s", 1), item: { kind: "event", event: { type: "y" } } });
-    expect(snap.items).toHaveLength(1);
+    log.apply("t1", { ...at("s", 1), entry: { kind: "event", event: { type: "y" } } });
+    expect(snap.entries).toHaveLength(1);
   });
 });
 
@@ -199,39 +203,68 @@ describe("partialRecordValue — the snapshot as a record's partial value", () =
     ...(parent !== undefined ? { parentToolUseId: parent } : {}),
   });
 
-  it("projects finished turns into the record shape — times in a PARALLEL array, sidechains apart", () => {
-    // Timestamps ride beside the messages, never inside them: `messages` is the provider's log
-    // verbatim, and a replay must send back exactly the bytes the provider produced.
+  it("projects finished turns into ONE array, clocks on the turns and subagents in place", () => {
+    // One encoding, not three. The clocks ride ON each entry rather than in an index-aligned array
+    // beside it, and a subagent's turn sits where it arrived carrying the call that spawned it —
+    // the two key spaces the entry format exists to remove.
     const log = new LiveTurnLog();
-    log.apply("t1", { ...at("s", 1), at: 100, item: message("main") });
-    log.apply("t1", { ...at("s", 1), at: 150, item: message("sub", "call1") });
+    log.apply("t1", { ...at("s", 1), at: 100, entry: message("main") });
+    log.apply("t1", { ...at("s", 1), at: 150, entry: message("sub", "call1") });
     expect(partialRecordValue(log.snapshot("t1")!)).toEqual({
       value: {
-        messages: [{ role: "assistant", content: "main" }],
-        messageTimes: [{ at: 100 }],
-        sidechains: { call1: [{ role: "assistant", content: "sub" }] },
+        entries: [
+          {
+            kind: "message",
+            role: "assistant",
+            content: "main",
+            timestamp: new Date(100).toISOString(),
+            provider: "unknown",
+            timing: { at: 100 },
+          },
+          {
+            kind: "message",
+            role: "assistant",
+            content: "sub",
+            timestamp: new Date(150).toISOString(),
+            provider: "unknown",
+            timing: { at: 150 },
+            sidechain: { id: "call1", parentToolUseId: "call1" },
+          },
+        ],
       },
     });
   });
 
-  it("carries the tails in their own labeled field — a fragment is not a message", () => {
+  it("carries the turn in flight as an entry marked partial — a fragment is not a finished turn", () => {
     const log = new LiveTurnLog();
     log.apply("t1", { ...at("s", 1), at: 100, thinking: "was thinking" });
     log.apply("t1", { ...at("s", 1), at: 200, text: "half a sent" });
-    log.apply("t1", { ...at("s", 1), at: 250, item: { kind: "event", event: { type: "x" } } });
-    // The event item is not a turn; the tails persist under `partial`, clocks included — this is
-    // exactly what a crash was holding, "still thinking/writing" state and all.
+    log.apply("t1", { ...at("s", 1), at: 250, entry: { kind: "event", event: { type: "x" } } });
+    // The event entry is not a turn. The tails are one entry in the same array, flagged so a reader
+    // can tell it from something the model finished saying — `startedAt` and `thoughtMs` recover
+    // both stamps the old `partial` object spelled out (thinking at 100, answer at 100 + 100).
     expect(partialRecordValue(log.snapshot("t1")!)).toEqual({
       value: {
-        messages: [],
-        partial: { text: "half a sent", thinking: "was thinking", textStartedAt: 200, thinkingStartedAt: 100 },
+        entries: [
+          {
+            kind: "message",
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "was thinking" },
+              { type: "text", text: "half a sent" },
+            ],
+            partial: true,
+            provider: "unknown",
+            timing: { startedAt: 100, thoughtMs: 100 },
+          },
+        ],
       },
     });
   });
 
   it("stays null with nothing recordable at all", () => {
     const log = new LiveTurnLog();
-    log.apply("t1", { ...at("s", 1), at: 100, item: { kind: "event", event: { type: "x" } } });
+    log.apply("t1", { ...at("s", 1), at: 100, entry: { kind: "event", event: { type: "x" } } });
     expect(partialRecordValue(log.snapshot("t1")!)).toBeNull();
   });
 });

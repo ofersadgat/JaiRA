@@ -157,6 +157,16 @@ describe("1b. what a stopped turn had already SAID", () => {
    *
    * Returns the instance the turn ran as, so a test can ask the other panel about it too.
    */
+  /** A finished turn, as an entry. */
+  const entry = (role: string, content: unknown) => ({ kind: "message", role, content, provider: "unknown" });
+  /** The turn that was still being written — the same array, flagged rather than filed elsewhere. */
+  const writing = (text: string) => ({
+    kind: "message",
+    role: "assistant",
+    content: [{ type: "text", text }],
+    partial: true,
+    provider: "unknown",
+  });
   function stoppedTurn(taskId: string, asked: string, streamed: Record<string, unknown>): number {
     const thread = service.chatThread({ taskId })!;
     const project = projectOf();
@@ -189,21 +199,21 @@ describe("1b. what a stopped turn had already SAID", () => {
 
   /** An agent's stream: it answered, called a tool, read the result, and was stopped mid-sentence. */
   const TOOL_TRAFFIC = {
-    messages: [
-      { role: "assistant", content: [{ type: "text", text: "Looking at it now" }] },
-      { role: "assistant", content: [{ type: "tool_use", id: "tu1", name: "read_file", input: {} }] },
-      { role: "user", content: [{ type: "tool_result", tool_use_id: "tu1", content: "two tables" }] },
+    entries: [
+      entry("assistant", [{ type: "text", text: "Looking at it now" }]),
+      entry("assistant", [{ type: "tool_use", id: "tu1", name: "read_file", input: {} }]),
+      entry("user", [{ type: "tool_result", tool_use_id: "tu1", content: "two tables" }]),
+      writing("It keeps records, and each one"),
     ],
-    partial: { text: "It keeps records, and each one" },
   };
 
   it("stays on screen — the half-written answer is part of the conversation", async () => {
     // The other half of "nothing disappears". The message survives (above), and so must the words
     // that had already arrived: they are what the person was reading when they pressed stop. The
-    // record keeps them in its own field, `preservePartial` folds them into the errored settle, and
-    // the panel beside a run has always drawn them — this reader simply did not look.
+    // record keeps them as an entry like any other, flagged `partial` so nothing replays them, and
+    // `preservePartial` carries that array through the errored settle.
     const taskId = await started("one");
-    stoppedTurn(taskId, "explain the store", { messages: [], partial: { text: "It keeps records, and each one" } });
+    stoppedTurn(taskId, "explain the store", { entries: [writing("It keeps records, and each one")] });
 
     expect(said(taskId)).toEqual([
       "user: one",

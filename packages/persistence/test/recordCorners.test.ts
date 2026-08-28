@@ -123,6 +123,25 @@ describe("the wire history a record answers with", () => {
     ]);
   });
 
+  it("skips the PARTIAL entry — a turn nobody finished must not go back on the wire", () => {
+    // The conversation is one array that grows as fragments arrive, so the turn in flight is an
+    // entry like any other. What separates it is a flag ON it, and this read is where that flag
+    // earns its keep: these messages are what a resume sends back to the provider, and half an
+    // assistant turn is not an exchange that happened. The viewer still shows it — `turnsOf` reads
+    // the same array and keeps it.
+    const value = {
+      entries: [
+        message("user", [{ type: "text", text: "the question" }]),
+        message("assistant", [{ type: "text", text: "a finished answer" }]),
+        { ...message("assistant", [{ type: "text", text: "half a sen" }]), partial: true },
+      ],
+    };
+    expect(messagesOfRecord(roundTrip(value).read)).toEqual([
+      { role: "user", content: [{ type: "text", text: "the question" }] },
+      { role: "assistant", content: [{ type: "text", text: "a finished answer" }] },
+    ]);
+  });
+
   it("answers with NOTHING for a payload that is not a conversation", () => {
     // A scripted value or a bare function result has no turns, and inventing some would be worse
     // than saying so.

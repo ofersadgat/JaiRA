@@ -443,14 +443,14 @@ describe("withTurnStream", () => {
       }),
     } as unknown as StackedExecutor;
 
-    const seen: Array<{ text?: string; thinking?: string; item?: unknown }> = [];
+    const seen: Array<{ text?: string; thinking?: string; entry?: unknown }> = [];
     const wrapped = withTurnStream((d) => seen.push(d), chatty as never);
     await wrapped.start(promptOp() as never, {} as never).result;
     await new Promise((r) => setTimeout(r, 5));
 
     expect(seen).toHaveLength(4);
-    expect(seen[0]?.item).toMatchObject({ kind: "message", role: "assistant" });
-    expect(seen[1]?.item).toMatchObject({ kind: "event", event: { type: "provider_event" } });
+    expect(seen[0]?.entry).toMatchObject({ kind: "message", role: "assistant" });
+    expect(seen[1]?.entry).toMatchObject({ kind: "event", event: { type: "provider_event" } });
     // Reasoning travels on its own field, never as answer text.
     expect(seen[2]).toMatchObject({ thinking: "hmm, " });
     expect(seen[2]?.text).toBeUndefined();

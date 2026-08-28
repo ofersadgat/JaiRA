@@ -19,6 +19,7 @@ import type { AvailabilitySnapshot, ExecutorInfo, ProbeResult, SecretTarget } fr
 import type { JairaSettings } from "./settings";
 import type { SchemaViolation } from "./schemas";
 import type { UserEventRequest } from "./userEvents";
+import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type {
   BoardView,
@@ -1232,6 +1233,22 @@ export interface IpcContract {
   };
   "interaction:pending": { request: void; response: PendingInteraction[] };
   "interaction:submit": { request: SubmitInteractionRequest; response: { requestId: string } };
+  /**
+   * The js/ts module files a task's start refused over, from the last attempt (SPEC §7.5.5).
+   *
+   * A separate READ rather than data on the rejection, because an Electron IPC rejection carries a
+   * message and nothing else — every own property of the error is dropped in serialization. So
+   * `task:start` fails with the human-readable message it always did, the service keeps the list,
+   * and a renderer that wants to ASK comes back for it.
+   */
+  "functions:pending": { request: { taskId: string; project?: string }; response: ModuleApproval[] };
+  /**
+   * Approve module files by path, then rebuild the process's symbol index.
+   *
+   * The rebuild is not optional and not the caller's to remember: the index was built gated on an
+   * approval that did not exist, so without it the retried start fails exactly as the first did.
+   */
+  "functions:approve": { request: { files: string[]; project?: string }; response: { approved: number } };
   "approval:pending": { request: void; response: PendingApproval[] };
   "approval:submit": { request: SubmitApprovalRequest; response: { requestId: string } };
   "question:pending": { request: void; response: PendingQuestion[] };
@@ -1449,6 +1466,8 @@ export const IPC_CHANNELS = [
   "job:output",
   "interaction:pending",
   "interaction:submit",
+  "functions:pending",
+  "functions:approve",
   "approval:pending",
   "approval:submit",
   "question:pending",
@@ -1531,8 +1550,9 @@ export interface LiveTurnSnapshot {
   text: string;
   /** The reasoning tail. */
   thinking: string;
-  /** Whole stream items so far, in order — the same shapes `session:turn.item` carries. */
-  items: JsonValue[];
+  /** Every entry so far, in order — the same shapes `session:turn.entry` carries, and the same
+   *  shapes the record's `entries` will hold. One word for one thing, stream to store. */
+  entries: JsonValue[];
   /** Subagent turns streaming by, keyed by the spawning call id. */
   sidechains: Record<string, JsonValue[]>;
   /** The tool call whose ARGUMENTS are still being written, when one is — see {@link WritingTool}. */
@@ -1544,7 +1564,7 @@ export interface LiveTurnSnapshot {
  * "the call exists".
  *
  * That gap is normally imperceptible and occasionally enormous. A tool call reaches the stream as a
- * whole `message` item, assembled; until it does, the only trace is `input_json_delta` bookkeeping,
+ * whole `message` entry, assembled; until it does, the only trace is `input_json_delta` bookkeeping,
  * which every layer discarded. For `bash({command: "ls"})` there is nothing to miss. For
  * `show_artifact` writing a fifteen-kilobyte page there is close to a minute in which the model is
  * producing the entire point of the turn and the transcript has no row for it, no text tail, and
@@ -1569,14 +1589,14 @@ export interface WritingTool {
 export const WRITING_HEAD_MAX = 512;
 
 /**
- * The provider's own stream line inside an item, when the item is one.
+ * The provider's own stream line inside an entry, when the entry is one.
  *
  * Both spellings, for the same reason {@link startsThinking} takes both: a live passthrough nests
  * the line under `provider_event`, a pinned event IS the line.
  */
-function streamEventOf(item: JsonValue): Record<string, unknown> | undefined {
-  if (item === null || typeof item !== "object" || Array.isArray(item)) return undefined;
-  const rec = item as { kind?: unknown; event?: unknown };
+function streamEventOf(entry: JsonValue): Record<string, unknown> | undefined {
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return undefined;
+  const rec = entry as { kind?: unknown; event?: unknown };
   if (rec.kind !== "event" || rec.event === null || typeof rec.event !== "object") return undefined;
   const envelope = rec.event as { type?: unknown; payload?: unknown };
   const line = (envelope.type === "provider_event" ? envelope.payload : envelope) as { type?: unknown; event?: unknown };
@@ -1586,22 +1606,22 @@ function streamEventOf(item: JsonValue): Record<string, unknown> | undefined {
 }
 
 /**
- * Is this item pure delta bookkeeping — a fragment whose content arrives again, assembled, on the
+ * Is this entry pure delta bookkeeping — a fragment whose content arrives again, assembled, on the
  * finished turn?
  *
- * Asked so it can be kept OUT of the live item list. Nothing renders it (`eventEntry` drops every
+ * Asked so it can be kept OUT of the live entry list. Nothing renders it (`eventEntry` drops every
  * `stream_event`) and nothing persists it (`partialRecordValue` keeps only messages), but the list
  * is capped, and a tool call streaming a large argument produces hundreds of these — enough to push
  * the conversation itself out of a bounded buffer while it is still being read. The one thing these
  * events actually say is folded first, by {@link startsThinking} and {@link foldWriting}; after that
  * they are noise with a quota.
  */
-export function isStreamBookkeeping(item: JsonValue): boolean {
-  return streamEventOf(item) !== undefined;
+export function isStreamBookkeeping(entry: JsonValue): boolean {
+  return streamEventOf(entry) !== undefined;
 }
 
 /**
- * Fold one stream item into "which call is being written right now", or leave it alone.
+ * Fold one stream entry into "which call is being written right now", or leave it alone.
  *
  * Lives here, beside {@link startsThinking}, for the identical reason: BOTH accumulations ask it —
  * main's `LiveTurnLog` and the renderer's `session:turn` reducer — and either can be the one holding
@@ -1612,8 +1632,8 @@ export function isStreamBookkeeping(item: JsonValue): boolean {
  * An event with no index is still folded rather than dropped — a transport that omits it is reporting
  * a stream with one block in it, and refusing the fragment there would show nothing at all.
  */
-export function foldWriting(writing: WritingTool | undefined, item: JsonValue): WritingTool | undefined {
-  const event = streamEventOf(item);
+export function foldWriting(writing: WritingTool | undefined, entry: JsonValue): WritingTool | undefined {
+  const event = streamEventOf(entry);
   if (event === undefined) return writing;
   const index = typeof event["index"] === "number" ? (event["index"] as number) : undefined;
   const mine = writing !== undefined && (index === undefined || writing.index === undefined || index === writing.index);
@@ -1666,7 +1686,7 @@ export function writingPath(head: string): string | undefined {
 }
 
 /**
- * Does this stream item say the model STARTED REASONING?
+ * Does this stream entry say the model STARTED REASONING?
  *
  * Asked because a thinking block does not always carry text. When the provider withholds the
  * reasoning it streams the block anyway: `content_block_start` for a `thinking` block, then deltas
@@ -1681,9 +1701,9 @@ export function writingPath(head: string): string | undefined {
  * than about either end: BOTH folds ask it — main's `LiveTurnLog` and the renderer's `session:turn`
  * reducer — and either can be the one holding the tail on screen, so they must agree.
  */
-export function startsThinking(item: JsonValue): boolean {
-  if (item === null || typeof item !== "object" || Array.isArray(item)) return false;
-  const rec = item as { kind?: unknown; event?: unknown };
+export function startsThinking(entry: JsonValue): boolean {
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return false;
+  const rec = entry as { kind?: unknown; event?: unknown };
   if (rec.kind !== "event" || rec.event === null || typeof rec.event !== "object") return false;
   // A passthrough nests the provider's line under `provider_event`; a pinned event IS the line.
   const envelope = rec.event as { type?: unknown; payload?: unknown };
@@ -1768,18 +1788,18 @@ export type PushMessage =
       sessionId?: string;
       seq?: number;
       stateId?: string;
-      /** A fragment of the answer's text. Exactly one of `text` / `thinking` / `item` is present. */
+      /** A fragment of the answer's text. Exactly one of `text` / `thinking` / `entry` is present. */
       text?: string;
       /** A fragment of the model's reasoning as it thinks — shown live, never part of the answer. */
       thinking?: string;
       /**
-       * A whole stream item that is not answer text, in stream order with the fragments:
+       * A whole conversation ENTRY that is not answer text, in stream order with the fragments:
        * `{kind:"message", role, content}` for a finished turn (tool calls and results ride on the
        * content), `{kind:"event", event}` for anything else the executor emitted, verbatim. The
        * viewer renders every one, understood or not — the stream IS the conversation while the
        * record is still open.
        */
-      item?: JsonValue;
+      entry?: JsonValue;
       /**
        * This delta's position in main's live-turn log — {@link LiveTurnSnapshot.n} is the count
        * already folded into a snapshot, so a viewer that just seeded from one skips every push with

@@ -18,6 +18,7 @@ import { createClaudeCodeFunction, type AgentQuery, type ClaudeCodeFunctionOptio
 import { createCliAgentFunction, createCodexAgentFunction, CODEX_CAPS, type CodexSandbox, type SpawnProcess } from "@declarative-ai/agents-cli";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { resolveInvocation, type ExecObserver } from "./exec";
+import { detachedForTree, killTree } from "./killTree";
 import type { ExecEnv } from "./paths";
 import { claudeReplacements } from "./tools";
 
@@ -72,8 +73,14 @@ export function agentSpawn(options: { execEnv?: ExecEnv; observer?: ExecObserver
     });
     const child = spawn(command, args, {
       ...(cwd !== undefined ? { cwd } : {}),
-      stdio: [opts.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+      // stdin is PIPED whenever the adapter may speak again, not only when it has a prompt to hand
+      // over. That is what makes steering possible at all: a closed channel is why the only mid-run
+      // signal this transport used to have was `kill()`.
+      stdio: [opts.stdin === undefined && opts.keepInputOpen !== true ? "ignore" : "pipe", "pipe", "pipe"],
       windowsHide: true,
+      // Its own process group on POSIX, so `kill` below can reach the tools the agent spawns and not
+      // just the agent. See `detachedForTree` for the trade this makes with terminal signals.
+      ...detachedForTree,
     });
     const lines = createInterface({ input: child.stdout!, crlfDelay: Infinity });
     const observer = options.observer;
@@ -119,14 +126,27 @@ export function agentSpawn(options: { execEnv?: ExecEnv; observer?: ExecObserver
       lines.close();
     });
 
+    child.stdin?.on("error", () => {});
     if (opts.stdin !== undefined) {
-      child.stdin?.on("error", () => {});
-      child.stdin?.end(opts.stdin);
+      // Written either way; only the CLOSE depends on whether the caller means to say more. Closing it
+      // is what ENDS a stream-json session, so an adapter that wants to interrupt must keep it open
+      // and close it itself.
+      if (opts.keepInputOpen === true) child.stdin?.write(opts.stdin);
+      else child.stdin?.end(opts.stdin);
     }
 
     return {
       lines,
-      kill: () => void child.kill(),
+      ...(child.stdin !== null
+        ? {
+            write: (line: string): void => void child.stdin?.write(line),
+            endInput: (): void => void child.stdin?.end(),
+          }
+        : {}),
+      // The WHOLE tree, not the child. `child.kill()` here killed the Chocolatey shim and left the
+      // real `claude` running against the pipe it had inherited — the run was recorded as stopped
+      // while the agent went on working and billing. See `killTree`.
+      kill: () => killTree(child),
       exit: new Promise<number>((resolve) => {
         child.on("error", () => {
           observeExit(-1);

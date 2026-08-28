@@ -1338,6 +1338,30 @@ unapproved file*, because a NEW file earlier on the search path changes which mo
 resolves to without touching anything that already existed. Editing an approved file puts
 it back in that state until it is approved again.
 
+#### You are asked, not just told
+
+The gate holds, but it is a **question** wherever somebody can answer it. Starting a task
+whose workflow reaches an unapproved module stops **before** the bundle is validated,
+snapshotted or frozen — so nothing has happened, and answering yes starts the run for the
+first time rather than resuming a half-started one.
+
+| Where | What happens |
+| --- | --- |
+| The app | A dialog naming each file, its call sites, and its **full source**. Approve and it starts. |
+| `jaira` on a terminal | The same, on stdout, then `[y/N]`. Anything but `y`/`yes` is no. |
+| A pipe, CI, `--non-interactive` | Refuses, and prints the `jaira functions approve` line that answers it. |
+| `--approve-functions` | Approves everything the workflow reaches, as part of starting it. |
+
+`--non-interactive` and `--approve-functions` are both on `jaira run` and `jaira task start`.
+
+This is possible because an unapproved module can be *named* even though it resolves to
+nothing. Resolution consults a gated symbol index and gets a miss; the diagnosis consults an
+ungated one — which parses declarations and runs no code — and learns which file would have
+answered. A name missing from **both** is a typo and is left to fail as one, so
+`confidence.nope` still reports `is not a known operation` while `confidence.score` becomes
+a file to approve. `jaira workflow lint` and the app's workflow browser report it the same
+way.
+
 Approvals are **machine-local and never synced** (`$BASE/system/approvals.local.json`,
 gitignored): an approval is a statement about a file on one disk, and propagating it would
 let one compromised machine confer trust on the rest. Files under `node_modules/` are
@@ -2103,9 +2127,12 @@ Every one of these fails **silently or misleadingly**:
 20. A column a person drags a card INTO cannot be wired from the column before
     it: a hand-moved state has no proven predecessor, so the reachability check
     rejects it (§12.2).
-21. A `.ts` function contributes NOTHING until it is approved (§9.1), and the
-    failure reads as a typo: `'confidence.score' is not a known operation`. Run
-    `jaira functions approve <file>`. Editing an approved file un-approves it.
+21. A `.ts` function contributes NOTHING until it is approved (§9.1). Editing an
+    approved file un-approves it. You are ASKED before a run rather than left to
+    read the parse error it would otherwise cause — but only where somebody can
+    answer: the app shows the file and its source, `jaira` prompts on a terminal,
+    and everywhere else (a pipe, CI, `--non-interactive`) it refuses with the
+    `jaira functions approve <file>` line that answers it.
 22. A `.js` function module types nothing. Every parameter is an untyped slot that
     accepts anything, so a wrong argument reaches the code instead of the linter.
 23. A module contributes its EXPORTS, not its filename — an exported OBJECT

@@ -322,6 +322,8 @@ const handlers: Record<IpcChannel, Handler> = {
   "question:submit": ((request: { requestId: string; answers?: Record<string, string | string[]> }) =>
     service.submitQuestion(request.requestId, request.answers)) as Handler,
   "workflow:browse": ((request: { project?: string } | undefined) => service.browseWorkflows(request?.project)) as Handler,
+  "functions:pending": ((request: { taskId: string; project?: string }) => service.functionsPending(request)) as Handler,
+  "functions:approve": ((request: { files: string[]; project?: string }) => service.functionsApprove(request)) as Handler,
   "workflow:read": ((request: Parameters<typeof service.readWorkflow>[0]) => service.readWorkflow(request)) as Handler,
   "workflow:write": ((request: Parameters<typeof service.writeWorkflow>[0]) => service.writeWorkflow(request)) as Handler,
   "workflow:move": ((request: Parameters<typeof service.moveWorkflow>[0]) => service.moveWorkflow(request)) as Handler,

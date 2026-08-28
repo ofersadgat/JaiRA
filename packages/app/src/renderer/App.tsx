@@ -41,7 +41,7 @@ import { Board, lanesOf } from "./board";
 import { dragOffersOf } from "./taskDrag";
 import { ChatListPanel, ChatView, chatProjectOf, conversationsOf, type ChatSurface } from "./chatPane";
 import { isChatWorkflow } from "./chatWorkflow";
-import { ApprovalDialog, InteractionDialog, QuestionDialog } from "./components";
+import { ApprovalDialog, InteractionDialog, ModuleApprovalDialog, QuestionDialog } from "./components";
 import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem } from "./menu";
 import { AppearancePane } from "./appearancePane";
 import {
@@ -2032,7 +2032,16 @@ export default function App(): JSX.Element {
         />
       </div>
 
-      {state.questions.length > 0 ? (
+      {state.moduleApproval !== null ? (
+        // FIRST in the chain, and it is not a priority call so much as a fact about time: this one is
+        // asked before a run exists, so nothing else in this list can be waiting yet.
+        <ModuleApprovalDialog
+          files={state.moduleApproval.files}
+          error={state.error}
+          onApprove={actions.approveModulesAndStart}
+          onCancel={actions.dismissModuleApproval}
+        />
+      ) : state.questions.length > 0 ? (
         // The agent ASKED — that outranks everything else waiting, because it is the one item the
         // person was explicitly addressed by.
         <QuestionDialog

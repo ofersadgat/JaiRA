@@ -146,12 +146,12 @@ describe("building the entry list", () => {
     ]);
   });
 
-  it("renders live stream items in order — whole turns, tools included, before the text tail", () => {
+  it("renders live stream entries in order — whole turns, tools included, before the text tail", () => {
     // What arrives over `session:turn` while the record is still open (the record persists only at
     // close). A finished turn reads exactly as a stored one would; the text tail comes last.
     const entries = entriesOf(session([{ role: "user", text: "go" }] as never), [], {
       text: "and now…",
-      items: [
+      entries: [
         {
           kind: "message",
           role: "assistant",
@@ -222,13 +222,13 @@ describe("building the entry list", () => {
   });
 
   it("keeps the thinking duration when the live turn it was measured on settles", () => {
-    // `LiveTurnLog.apply` stamps the finished item with `thoughtMs`, BESIDE the provider's message
+    // `LiveTurnLog.apply` stamps the finished entry with `thoughtMs`, BESIDE the provider's message
     // rather than inside it. Reading only the message lost the number the instant the turn landed:
     // the tail's own thought row went away and what replaced it had never been told how long it
     // took, so "thought for 12 s" appeared while the model reasoned and vanished when it stopped.
     const entries = entriesOf(session([] as never), [], {
       text: "",
-      items: [
+      entries: [
         {
           kind: "message",
           role: "assistant",
@@ -291,7 +291,7 @@ describe("building the entry list", () => {
     // finished turn, and the text/thinking deltas already travel as the tails.
     const entries = entriesOf(session([] as never), [], {
       text: "",
-      items: [
+      entries: [
         { kind: "event", event: { type: "provider_event", payload: { type: "stream_event", event: { type: "content_block_delta", delta: { type: "input_json_delta", partial_json: '{"pa' } } } } },
       ],
     });
@@ -301,7 +301,7 @@ describe("building the entry list", () => {
   it("withholds a subagent's live turn from the main flow rather than misattributing it", () => {
     const entries = entriesOf(session([] as never), [], {
       text: "",
-      items: [
+      entries: [
         { kind: "message", role: "assistant", parentToolUseId: "toolu_task", content: { role: "assistant", content: [{ type: "text", text: "subagent says" }] } },
       ],
     });
@@ -311,7 +311,7 @@ describe("building the entry list", () => {
   it("shows a stream event it does not understand rather than dropping it", () => {
     const entries = entriesOf(session([] as never), [], {
       text: "",
-      items: [
+      entries: [
         { kind: "event", event: { type: "provider_event", payload: { type: "system", subtype: "compact_boundary" } } },
         { kind: "event", event: { type: "progress", message: "warming up" } },
       ],
@@ -397,11 +397,11 @@ describe("subagent conversations", () => {
   });
 
   it("marks a LIVE spawning call as the doorway before any record of the chain exists", () => {
-    // While the run is going, the Task call is itself a live item and its chain has only the live
+    // While the run is going, the Task call is itself a live entry and its chain has only the live
     // tail's turns — the doorway must open the moment the subagent first speaks.
     const entries = entriesOf(session([] as never), [], {
       text: "",
-      items: [
+      entries: [
         {
           kind: "message",
           role: "assistant",
@@ -698,8 +698,8 @@ describe("the call being written, before it is a call", () => {
     stream({ type: "content_block_start", index, content_block: { type: "tool_use", id: "toolu_1", name, input: {} } });
 
   /** The renderer's own fold, run over a stream — the same one main runs. */
-  const foldAll = (items: JsonValue[]): WritingTool | undefined =>
-    items.reduce<WritingTool | undefined>((state, item) => foldWriting(state, item), undefined);
+  const foldAll = (entries: JsonValue[]): WritingTool | undefined =>
+    entries.reduce<WritingTool | undefined>((state, entry) => foldWriting(state, entry), undefined);
 
   it("names the tool and counts what has arrived, while the arguments are still coming", () => {
     const writing = foldAll([blockStart("show_artifact"), inputDelta('{"path": "mocks/07.html", "content": "<!DOC'), inputDelta("TYPE html>…")]);
@@ -730,7 +730,7 @@ describe("the call being written, before it is a call", () => {
     expect(entries).toEqual([{ kind: "writing", name: "show_artifact", path: "dating-mocks/06-wiki.html", chars: 15805 }]);
   });
 
-  it("is bookkeeping, and so is kept out of the item list it would otherwise fill", () => {
+  it("is bookkeeping, and so is kept out of the entry list it would otherwise fill", () => {
     expect(isStreamBookkeeping(inputDelta("{"))).toBe(true);
     expect(isStreamBookkeeping({ kind: "message", role: "assistant", content: {} })).toBe(false);
   });

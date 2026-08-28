@@ -28,10 +28,12 @@ import { join, relative, resolve, sep } from "node:path";
 import type { FunctionCapabilities } from "@declarative-ai/exec";
 import { loadBundle, parseReferencedFile, resolveStateRef, snapshotHash, stateIdFromPath, validateBundle } from "@declarative-ai/hw";
 import { baseAsProjectPaths, componentConfigIssues, conversationModesOf, parseJsonText, type JairaPaths } from "@jaira/shared";
+import { approvalRefusalMessage, approveCommandFor } from "@jaira/shared";
 import type { LintIssue, WorkflowBrowser, WorkflowEntry, WorkflowFileEntry } from "@jaira/shared";
 import type { Project } from "./project";
 import { checkLabel } from "./runLabel";
 import { isStateFile } from "./snapshots";
+import { userModules, watchingForUnapproved, withheldApprovalsOf } from "./userModules";
 import { workflowLoadOptions } from "./workflowRefs";
 
 // The view models live in `@jaira/shared` so the renderer can name them without
@@ -327,12 +329,28 @@ function browseLayers(
       layer: source?.layer ?? "project",
     };
     let bundle;
+    // Per ROOT, not per browse: two roots must not pool their withheld symbols, or a workflow that
+    // calls nothing would be reported as needing the approval its neighbour needs.
+    const modules = userModules();
+    const watch = modules !== undefined ? watchingForUnapproved(modules) : undefined;
     try {
-      bundle = loadBundle(effective, rootId, refOptions);
+      bundle = loadBundle(effective, rootId, watch !== undefined ? { ...refOptions, symbols: watch.symbols } : refOptions);
     } catch (e) {
       // An unresolvable child reference or a malformed state: the closure is
       // unknown, so the only honest answer is the load error itself.
-      return { ...base, states: [rootId], loadError: (e as Error).message };
+      //
+      // Unless the gate is the reason. An unapproved module contributes no symbol, so its call site
+      // fails to resolve and the load error says `'confidence.score' is not a known operation` —
+      // which is what a typo says too. Read only on the FAILING path: missing in one directory is
+      // the ordinary way of being found in the next, so a miss is only evidence once the load is
+      // over and lost.
+      const needsApproval = modules !== undefined && watch !== undefined ? withheldApprovalsOf(modules, watch.withheld()) : [];
+      return {
+        ...base,
+        states: [rootId],
+        loadError: (e as Error).message,
+        ...(needsApproval.length > 0 ? { needsApproval } : {}),
+      };
     }
     const states = Object.keys(bundle.states).sort();
     for (const id of states) covered.add(id);
@@ -440,7 +458,16 @@ function browseLayers(
 export function lintErrors(browser: WorkflowBrowser): Array<{ rootId: string; issue: LintIssue | { message: string } }> {
   const out: Array<{ rootId: string; issue: LintIssue | { message: string } }> = [];
   for (const workflow of browser.workflows) {
-    if (workflow.loadError !== undefined) out.push({ rootId: workflow.rootId, issue: { message: workflow.loadError } });
+    // The approval refusal REPLACES the load error rather than joining it. They are one fault seen
+    // twice, and the load error is the misleading half — it names a symbol and implies a typo.
+    if (workflow.needsApproval !== undefined && workflow.needsApproval.length > 0) {
+      out.push({
+        rootId: workflow.rootId,
+        issue: { message: `${approvalRefusalMessage(workflow.needsApproval)}\n${approveCommandFor(workflow.needsApproval)}` },
+      });
+    } else if (workflow.loadError !== undefined) {
+      out.push({ rootId: workflow.rootId, issue: { message: workflow.loadError } });
+    }
     for (const issue of workflow.issues) {
       if (issue.severity === "error") out.push({ rootId: workflow.rootId, issue });
     }

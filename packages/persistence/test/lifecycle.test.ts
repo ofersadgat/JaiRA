@@ -150,15 +150,23 @@ describe("task lifecycle", () => {
     expect(p.runtime.listRuns(meta.id)).toHaveLength(2);
   });
 
-  it("cancel is terminal and closes dangling runs", async () => {
+  it("cancel settles the run and closes dangling ones — and leaves the task resumable", async () => {
     const p = open();
     const meta = createTask(p, { title: "T", workflow: "wf" });
     await beginTaskRun(p, meta.id);
     cancelTask(p, meta.id);
     expect(p.runtime.get(meta.id)?.status).toBe("canceled");
     expect(p.runtime.listRuns(meta.id)[0]?.outcome).toBe("canceled");
+    // Cancelling twice is still someone stating something untrue about a task they named.
     expect(() => cancelTask(p, meta.id)).toThrow(/already canceled/);
-    await expect(() => beginTaskRun(p, meta.id)).rejects.toThrow(/canceled/);
+    // But the RUN ending is not the TASK's life ending. A stop is an interruption — the difference
+    // between it and a crash is who caused it, which says nothing about whether there is work left
+    // to pick up — so the task begins again against the snapshot its first run pinned. It used to
+    // refuse here, which is what made a stopped task offer a fresh copy of itself instead of a
+    // resume, discarding every operation it had already finished.
+    const again = await beginTaskRun(p, meta.id);
+    expect(again.pinned).toBe(true);
+    expect(p.runtime.get(meta.id)?.status).toBe("running");
   });
 
   it("deletes a finished task: rows, journal, jobs, artifacts, and the JSON file", async () => {

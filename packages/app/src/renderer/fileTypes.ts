@@ -186,7 +186,7 @@ export interface FileSurfaceContext {
     /** When each tail began — what the live "thought for 12 s" counter measures from. */
     textStartedAt?: number;
     thinkingStartedAt?: number;
-    items: JsonValue[];
+    entries: JsonValue[];
     /** Subagent turns streaming by, keyed by the spawning call — see `AppState.liveTurn`. */
     sidechains: Record<string, JsonValue[]>;
     /** The tool call whose arguments are still streaming — see `WritingTool`. */

@@ -22,7 +22,7 @@ import { stateFilePath } from "@declarative-ai/hw";
 import { parseJsonText, workflowSearchPath, type JairaPaths } from "@jaira/shared";
 import { hostCalleeSignatures } from "@jaira/runtime";
 
-import { userModules } from "./userModules";
+import { userModules, type UnapprovedWatch } from "./userModules";
 import { nodeVfs } from "./vfs";
 
 /**
@@ -64,6 +64,14 @@ export interface WorkflowRefOptions {
   onWarn?: (message: string) => void;
   /** Each file a document reference pulled in, for the snapshot closure. */
   onReferencedFile?: (file: string) => void;
+  /**
+   * Watch what the APPROVAL GATE withholds from this load (SPEC §7.5.5).
+   *
+   * Supplied by a caller that will have to explain a failure — the pre-run gate and the lint
+   * surface. Without it an unapproved module is reported as `'confidence.score' is not a known
+   * operation`, which is indistinguishable from a typo and sends the reader looking for one.
+   */
+  watch?: UnapprovedWatch;
 }
 
 /**
@@ -103,7 +111,7 @@ export function workflowLoadOptions(paths: JairaPaths, options: WorkflowRefOptio
     // it would report "not an operation document" about a file that is perfectly good, so the two
     // travel together or not at all. Absent ⇒ no module contributes anything, which is exactly the
     // behavior that predates the feature.
-    ...userModuleOptions(),
+    ...userModuleOptions(options.watch),
     ...(options.onWarn !== undefined ? { onWarn: options.onWarn } : {}),
     ...(options.onReferencedFile !== undefined ? { onReferencedFile: options.onReferencedFile } : {}),
   };
@@ -116,9 +124,13 @@ export function workflowLoadOptions(paths: JairaPaths, options: WorkflowRefOptio
  * has an opinion: whether modules resolve is a property of the PROCESS having built a compiler, not
  * of which project is being loaded.
  */
-function userModuleOptions(): Pick<LoadBundleOptions, "symbols" | "userFunctions"> {
+function userModuleOptions(watch?: UnapprovedWatch): Pick<LoadBundleOptions, "symbols" | "userFunctions"> {
   const modules = userModules();
-  return modules === undefined ? {} : { symbols: modules.symbols, userFunctions: modules.userFunctions };
+  if (modules === undefined) return {};
+  // The watch is per-LOAD, not per-process, which is why it is threaded rather than stashed beside
+  // the pair: two loads running against one set of modules must not pool their withheld symbols, and
+  // a surface that never asks pays nothing — the wrapper is not built at all.
+  return { symbols: watch?.symbols ?? modules.symbols, userFunctions: modules.userFunctions };
 }
 
 /**

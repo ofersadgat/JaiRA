@@ -6,6 +6,7 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import type { TaskStatus } from "./task";
+import type { ModuleApproval } from "./refusal";
 
 /**
  * Per-instance status, derived from the event journal (SPEC §10.1). `blocked` is
@@ -378,6 +379,14 @@ export interface WorkflowEntry {
   issues: LintIssue[];
   /** Set when the bundle could not be loaded at all, so `issues` is empty. */
   loadError?: string;
+  /**
+   * The js/ts module files this root reaches that nobody has approved (SPEC §7.5.5).
+   *
+   * Set only alongside a `loadError`, and when it is set the load error is a CONSEQUENCE: an
+   * unapproved module contributes no symbol, so the call site fails to resolve and reads as a typo.
+   * A surface showing both should lead with this one — it is the fault, and it is answerable.
+   */
+  needsApproval?: ModuleApproval[];
   taskIds: string[];
   /** Tasks pinned to a snapshot other than what is on disk now. */
   driftedTasks: string[];
@@ -957,9 +966,9 @@ export interface SessionTurn {
   /** Tool calls and their results, kept structured so a viewer can pair and collapse them. */
   parts?: JsonValue;
   /**
-   * When the turn ARRIVED, host clock. Recorded beside the messages rather than inside them
-   * (`messageTimes`), because a message is the provider's own object and a replay sends it back
-   * verbatim. Absent for a record written before turns were timed.
+   * When the turn ARRIVED, host clock — kept on the entry in `timing`, apart from the provider's own
+   * `timestamp`. The two are different facts and only one of them goes back on the wire. Absent for
+   * a turn nothing streamed.
    */
   at?: number;
   /** When the turn STARTED — its first streamed fragment, thinking included. */

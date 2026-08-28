@@ -57,8 +57,11 @@ import {
   type SessionStore,
   type StoredRecord,
 } from "@declarative-ai/exec";
+import { entriesOfMessages } from "@declarative-ai/llm";
 import type { JairaDb } from "./db";
 import { dehydrate, hydrate, release } from "./blobStore";
+import { messagesOfRecord } from "./recordMessages";
+export { messagesOfRecord } from "./recordMessages";
 import type { ConversationLog, PositionRow, RecordRow, SessionRow } from "./conversationFile";
 
 /** `<id>@<position>` — the ref spelling upstream uses, restated because both halves must agree. */
@@ -381,7 +384,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     const result =
       error !== undefined
         ? preservePartial(settled.result as JsonValue, settled.sessionOutcome, row.result_json, row.request_json)
-        : carryMessageTimes(settled.result as JsonValue, row.result_json);
+        : carryTurnTiming(settled.result as JsonValue, row.result_json);
     this.db
       .prepare(
         `UPDATE operation_records
@@ -668,6 +671,9 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     const attempt = this.attemptFor(stub.id);
     const request = stub.source === undefined ? null : JSON.stringify(stub.source);
     const opening = openingMessage(request, []);
+    // Through `withOpening`, so the splice is spelled out in ONE place and a record is born in the
+    // same shape it will settle in — one conversation array, whatever writes it next.
+    const born = opening.length === 0 ? null : JSON.stringify(withOpening({} as JsonValue, request));
     const info = this.db
       .prepare(
         `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, request_json, result_json, started_at)
@@ -679,7 +685,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
         this.scope.runId ?? null,
         attempt,
         request,
-        opening.length === 0 ? null : JSON.stringify({ value: { messages: opening } }),
+        born,
         stub.startMs ?? Date.now(),
       );
     // The KEY, not the rowid. A caller that needs to point at this record — a position claim — must
@@ -786,7 +792,12 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
             this.scope.taskId ?? null,
             this.scope.runId ?? null,
             attempt,
-            JSON.stringify({ value: { messages } }),
+            // A compaction or a resync is a record like any other, so it holds its turns the one way
+            // a record holds turns: as entries. The caller hands over messages because that is what a
+            // summary IS at the point it is written; the shape it is stored in is not the caller's.
+            JSON.stringify({
+              value: { entries: entriesOfMessages(messages as never, { provider: "unknown", at: new Date(0).toISOString() }) },
+            }),
             Date.now(),
             Date.now(),
           );
@@ -892,35 +903,20 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
  * scripted fake.
  */
 function projectValue(result: JsonValue | undefined, sessionOutcome: JsonValue | undefined): JsonValue | undefined {
-  const payload = result as { value?: { entries?: unknown; messages?: unknown } } | undefined;
-  if (payload?.value?.entries !== undefined || payload?.value?.messages !== undefined) return result;
+  const payload = result as { value?: { entries?: unknown } } | undefined;
+  if (payload?.value?.entries !== undefined) return result;
   const reported = (sessionOutcome as { messages?: JsonValue[] } | undefined)?.messages;
-  if (reported !== undefined) return { value: { messages: reported } };
+  // Turned into entries HERE rather than stored as a second conversation shape: an executor whose
+  // payload is not a conversation still reports one, and `entries` is the only encoding this store
+  // hands out. `provider: "unknown"` because the outcome does not say, and the timestamp is the
+  // projection's, not a fact about when anything was said.
+  if (reported !== undefined) {
+    const entries = entriesOfMessages(reported as never, { provider: "unknown", at: new Date(0).toISOString() });
+    return { value: { entries: entries as unknown as JsonValue } } as JsonValue;
+  }
   return result;
 }
 
-/**
- * A record's messages: upstream's `defaultMessagesOf`, over a stored record rather than a live one.
- *
- * DERIVED from the record's entries — one array holds the conversation and the wire history is a
- * projection of it, never a second copy stored beside it (RECORDS.md). A subagent's turns are left
- * out for the same reason they always were: they are not the main thread's history.
- */
-export function messagesOfRecord(value: JsonValue | undefined): JsonValue[] {
-  const payload = (value as { value?: { entries?: JsonValue[]; messages?: JsonValue[] } } | undefined)?.value;
-  if (Array.isArray(payload?.entries)) {
-    return payload.entries
-      .filter((e) => {
-        const entry = e as { kind?: unknown; sidechain?: unknown } | null;
-        return entry !== null && typeof entry === "object" && entry.kind === "message" && entry.sidechain === undefined;
-      })
-      .map((e) => {
-        const entry = e as { role?: JsonValue; content?: JsonValue };
-        return { role: entry.role, content: entry.content } as JsonValue;
-      });
-  }
-  return Array.isArray(payload?.messages) ? payload.messages : [];
-}
 
 /**
  * An ERRORED settle's result, with the streamed partial folded in when the settle brought nothing
@@ -932,55 +928,67 @@ export function messagesOfRecord(value: JsonValue | undefined): JsonValue[] {
  * thing. Only when neither has the turns does the partial's early copy become the record's, which is
  * exactly the interrupted/crashed case it was streamed for.
  */
-/** A message's role, for the alignment check below. `undefined` for anything that is not one. */
-function roleOf(message: JsonValue | undefined): string | undefined {
-  const m = message as { role?: unknown } | undefined;
-  return m !== null && typeof m === "object" && typeof m.role === "string" ? m.role : undefined;
+/** Main-chain, finished message entries with their positions — what the two sides align on. */
+function mainMessageEntries(entries: readonly JsonValue[]): Array<{ index: number; entry: Record<string, JsonValue> }> {
+  const out: Array<{ index: number; entry: Record<string, JsonValue> }> = [];
+  for (const [index, raw] of entries.entries()) {
+    const entry = raw as Record<string, JsonValue> | null;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+    if (entry["kind"] !== "message" || entry["sidechain"] !== undefined || entry["partial"] === true) continue;
+    out.push({ index, entry });
+  }
+  return out;
 }
 
 /**
- * The settled result, wearing the per-turn clocks the stream measured — see the call site in `close()`.
+ * The settled result, wearing the clocks the stream measured — see the call site in `close()`.
  *
- * `messageTimes` is a parallel array over the record's messages (`at`, `startedAt`, `thoughtMs`),
- * stamped by the live-turn log as deltas arrived and written into the open row by every partial
- * flush. The settle overwrites that row with the provider's own result, which has no clocks in it at
- * all — so on a successful call the numbers were measured, persisted, and then thrown away one
- * statement later. "Thought for 12 s" worked while you watched and vanished when you came back.
+ * A turn's clocks are the numbers only a streaming consumer can take: when its first fragment
+ * appeared, and how long the model spent thinking before it began answering. The settle overwrites
+ * the row with the provider's own result, which has none of them — so they were measured, persisted,
+ * and thrown away one statement later. "Thought for 12 s" worked while you watched and vanished when
+ * you came back.
  *
- * The alignment is a SUFFIX, not an index-for-index match: the stream only sees the turns the call
- * produced, while the settled record also holds the messages it was called WITH. So the partial's
- * `p` stamps line up with the last `p` of the settled `s`, and the array is padded at the front with
- * blanks — which `turnsOf` reads as "this turn was not timed", the same as an old record.
- *
- * Checked by ROLE before it is believed. A transport that streams something other than a suffix of
- * what it settles would otherwise label one turn with another's duration, which is worse than no
- * label; a mismatch drops the whole carry rather than guessing at an offset.
+ * They ride ON each entry (`timing`), so this MERGES rather than padding a parallel array. What
+ * still needs aligning is which turn is which: the stream sees only the turns the call produced,
+ * while the settle also holds the messages it was called with, so the streamed run matches a SUFFIX
+ * of the settled one. Checked by role before it is believed — a transport that streams something
+ * other than a suffix of what it settles would label one turn with another's duration, which is
+ * worse than no label, so a mismatch drops the whole carry rather than guessing at an offset.
  */
-function carryMessageTimes(settledResult: JsonValue | undefined, existingJson: string | null): JsonValue | undefined {
+function carryTurnTiming(settledResult: JsonValue | undefined, existingJson: string | null): JsonValue | undefined {
   if (existingJson === null || settledResult === undefined) return settledResult;
-  const settled = settledResult as { value?: { messages?: unknown; messageTimes?: unknown } };
-  // A result that already carries its own is authoritative — nothing to add.
-  if (settled?.value?.messageTimes !== undefined) return settledResult;
-  const messages = settled?.value?.messages;
-  if (!Array.isArray(messages) || messages.length === 0) return settledResult;
-  let partial: { value?: { messages?: unknown; messageTimes?: unknown } } | null;
+  const settled = settledResult as { value?: { entries?: JsonValue[] } };
+  if (!Array.isArray(settled.value?.entries)) return settledResult;
+  let streamed: { value?: { entries?: JsonValue[] } } | null;
   try {
-    partial = JSON.parse(existingJson) as typeof partial;
+    streamed = JSON.parse(existingJson) as typeof streamed;
   } catch {
     return settledResult;
   }
-  const times = partial?.value?.messageTimes;
-  const streamed = partial?.value?.messages;
-  if (!Array.isArray(times) || !Array.isArray(streamed) || times.length !== streamed.length) return settledResult;
-  const offset = messages.length - streamed.length;
+  const partialEntries = streamed?.value?.entries;
+  if (!Array.isArray(partialEntries)) return settledResult;
+  const settledMain = mainMessageEntries(settled.value.entries);
+  const streamedMain = mainMessageEntries(partialEntries);
+  if (streamedMain.length === 0) return settledResult;
+  const offset = settledMain.length - streamedMain.length;
   if (offset < 0) return settledResult;
-  for (const [i, message] of streamed.entries()) {
-    if (roleOf(message as JsonValue) !== roleOf(messages[i + offset] as JsonValue)) return settledResult;
+  for (const [i, streamedEntry] of streamedMain.entries()) {
+    if (streamedEntry.entry["role"] !== settledMain[i + offset]!.entry["role"]) return settledResult;
   }
-  return {
-    ...(settledResult as object),
-    value: { ...(settled.value as object), messageTimes: [...Array.from({ length: offset }, () => ({})), ...times] },
-  } as JsonValue;
+  const merged = [...settled.value.entries];
+  let carried = false;
+  for (const [i, streamedEntry] of streamedMain.entries()) {
+    const timing = streamedEntry.entry["timing"];
+    if (timing === undefined) continue;
+    const target = settledMain[i + offset]!;
+    // Never over an existing one: a transport that measured its own turns is authoritative.
+    if (target.entry["timing"] !== undefined) continue;
+    merged[target.index] = { ...target.entry, timing } as JsonValue;
+    carried = true;
+  }
+  if (!carried) return settledResult;
+  return { ...(settledResult as object), value: { ...(settled.value as object), entries: merged } } as JsonValue;
 }
 
 function preservePartial(
@@ -989,27 +997,19 @@ function preservePartial(
   existingJson: string | null,
   requestJson: string | null,
 ): JsonValue | undefined {
-  const settled = settledResult as { value?: { messages?: unknown } } | undefined;
-  if (settled?.value?.messages !== undefined) return settledResult;
+  const settled = settledResult as { value?: { entries?: unknown } } | undefined;
+  if (settled?.value?.entries !== undefined) return settledResult;
   if (sessionOutcome?.messages !== undefined) return settledResult;
   // Through `withOpening` even though `insertRecord` normally put the question there already: a row
   // opened before that existed, or one whose only flush raced ahead of it, still settles correctly.
-  const partial = withOpening(parsed<JsonValue>(existingJson) ?? {}, requestJson) as {
-    value?: { messages?: JsonValue[]; messageTimes?: JsonValue; sidechains?: JsonValue; partial?: JsonValue };
-  };
-  const messages = Array.isArray(partial.value?.messages) ? partial.value.messages : [];
-  // Worth keeping when there is ANY evidence of what happened — the question, the finished turns, or
-  // the tails of the one being written when it died.
-  if (messages.length === 0 && partial.value?.partial === undefined) return settledResult;
+  const partial = withOpening(parsed<JsonValue>(existingJson) ?? {}, requestJson) as { value?: { entries?: JsonValue[] } };
+  // One array holds everything worth keeping — the question, the finished turns, and the one that
+  // was being written when the call died — so there is nothing to fold in from a second channel.
+  const entries = Array.isArray(partial.value?.entries) ? partial.value.entries : [];
+  if (entries.length === 0) return settledResult;
   return {
     ...((settledResult ?? {}) as object),
-    value: {
-      ...((settled?.value ?? {}) as object),
-      messages,
-      ...(partial.value?.messageTimes !== undefined ? { messageTimes: partial.value.messageTimes } : {}),
-      ...(partial.value?.sidechains !== undefined ? { sidechains: partial.value.sidechains } : {}),
-      ...(partial.value?.partial !== undefined ? { partial: partial.value.partial } : {}),
-    },
+    value: { ...((settled?.value ?? {}) as object), entries },
   } as JsonValue;
 }
 
@@ -1021,20 +1021,17 @@ function preservePartial(
  * record carries the same shape at every instant of its life rather than acquiring it at one of them.
  */
 function withOpening(value: JsonValue, requestJson: string | null): JsonValue {
-  const held = value as { value?: { messages?: JsonValue[]; messageTimes?: JsonValue } } | null;
-  const messages = Array.isArray(held?.value?.messages) ? held.value.messages : [];
-  const opening = openingMessage(requestJson, messages);
+  const held = value as { value?: { entries?: JsonValue[] } } | null;
+  const entries = Array.isArray(held?.value?.entries) ? held.value.entries : [];
+  const opening = openingMessage(requestJson, messagesOfRecord(value));
   if (opening.length === 0) return value;
-  const times = held?.value?.messageTimes;
+  const asked = opening[0] as { role: string; content: JsonValue };
+  // `provider: "unknown"` because nobody produced it: this turn is the host stating what it asked,
+  // which is exactly what a settled record's own spliced opening says about itself.
+  const entry = { kind: "message", role: asked.role, content: asked.content, provider: "unknown" } as JsonValue;
   return {
     ...((value ?? {}) as object),
-    value: {
-      ...((held?.value ?? {}) as object),
-      messages: [...opening, ...messages],
-      // Padded by however many messages went in front, because `messageTimes` is a parallel array
-      // over `messages` and a shift of one labels every turn with its neighbour's duration.
-      ...(Array.isArray(times) ? { messageTimes: [...opening.map(() => ({})), ...times] } : {}),
-    },
+    value: { ...((held?.value ?? {}) as object), entries: [entry, ...entries] },
   } as JsonValue;
 }
 
@@ -1067,48 +1064,6 @@ function openingMessage(requestJson: string | null, streamed: readonly JsonValue
   return [{ role: "user", content: asked }];
 }
 
-/**
- * Splice the question into every interrupted record written before {@link openingMessage} existed —
- * the one-shot half of that fix, for rows already on disk (migration 7).
- *
- * Narrowed to records that FAILED and hold their messages on the result: a settled call's delta
- * already opens with the question, and a record whose messages live on the session-outcome channel
- * would be SHADOWED rather than repaired, because `projectValue` prefers the result when it has
- * messages. Naturally idempotent — a second pass finds the question already in front and does
- * nothing — so a half-finished upgrade is re-runnable.
- */
-export function repairInterruptedRecords(db: JairaDb): number {
-  const rows = db
-    .prepare(
-      `SELECT id, result_json, request_json, session_outcome_json FROM operation_records
-        WHERE status = 'failed' AND request_json IS NOT NULL`,
-    )
-    .all() as Array<{ id: number; result_json: string | null; request_json: string; session_outcome_json: string | null }>;
-  const update = db.prepare(`UPDATE operation_records SET result_json = ? WHERE id = ?`);
-  let repaired = 0;
-  for (const row of rows) {
-    if (parsed<{ messages?: unknown }>(row.session_outcome_json)?.messages !== undefined) continue;
-    const result = parsed<{ value?: { messages?: JsonValue[]; messageTimes?: JsonValue[] } }>(row.result_json);
-    if (row.result_json !== null && result === undefined) continue; // unreadable: leave it exactly as it is
-    const messages = Array.isArray(result?.value?.messages) ? result.value.messages : [];
-    const opening = openingMessage(row.request_json, messages);
-    if (opening.length === 0) continue;
-    const times = result?.value?.messageTimes;
-    update.run(
-      JSON.stringify({
-        ...(result ?? {}),
-        value: {
-          ...(result?.value ?? {}),
-          messages: [...opening, ...messages],
-          ...(Array.isArray(times) ? { messageTimes: [...opening.map(() => ({})), ...times] } : {}),
-        },
-      }),
-      row.id,
-    );
-    repaired += 1;
-  }
-  return repaired;
-}
 
 /** JSON from a column, or `undefined` — a malformed blob is a row to leave alone, not a throw. */
 function parsed<T>(json: string | null): T | undefined {

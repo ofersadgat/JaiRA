@@ -610,7 +610,7 @@ function pairResults(entries: Array<TranscriptEntry | ResultPart>): TranscriptEn
   return out;
 }
 
-/** The answer being written right now: the text tail, the thinking tail, and every whole stream item so far. */
+/** The answer being written right now: the text tail, the thinking tail, and every whole entry so far. */
 export interface LiveTail {
   text: string;
   /** The reasoning being written, before its block lands on the finished turn. */
@@ -624,10 +624,10 @@ export interface LiveTail {
   /** When the answer tail began — the moment thinking stopped being the live state. */
   textStartedAt?: number;
   /** `{kind:"message", role, content}` turns and `{kind:"event", event}` passthroughs, in order. */
-  items?: readonly JsonValue[];
+  entries?: readonly JsonValue[];
   /**
    * SUBAGENT turns streaming by, keyed by the spawning call — the live counterpart of
-   * `SessionView.sidechains`, which does not exist until the record closes. Kept out of `items`
+   * `SessionView.sidechains`, which does not exist until the record closes. Kept out of `entries`
    * because they are not this thread's; the doorway row and the sidechain panel are where they
    * render, while the run is still going.
    */
@@ -734,9 +734,9 @@ export function agentTitleOf(session: SessionView | null | undefined): string | 
 }
 
 /**
- * One live stream item as entries — the same reading a stored turn gets, before the record exists.
+ * One live entry as transcript rows — the same reading a stored turn gets, before the record exists.
  *
- * A `message` item is a finished turn and goes through {@link messageOf} exactly as a stored one
+ * A `message` entry is a finished turn and goes through {@link messageOf} exactly as a stored one
  * would, tool calls and all. Everything else is shown rather than dropped, named as well as it can
  * be, with the raw payload behind the row: the contract with the person watching is that the whole
  * stream reaches the screen in order, understood or not.
@@ -746,11 +746,11 @@ export function agentTitleOf(session: SessionView | null | undefined): string | 
  * reason a subagent's words can stream live without ever being misattributed to the thread that
  * spawned it.
  */
-export function liveItemEntries(item: JsonValue, within?: string): Array<TranscriptEntry | ResultPart> {
-  if (item === null || typeof item !== "object" || Array.isArray(item)) {
-    return [{ kind: "tool", name: "stream", summary: "", args: item }];
+export function liveEntriesOf(entry: JsonValue, within?: string): Array<TranscriptEntry | ResultPart> {
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+    return [{ kind: "tool", name: "stream", summary: "", args: entry }];
   }
-  const rec = item as Record<string, unknown>;
+  const rec = entry as Record<string, unknown>;
   if (rec["kind"] === "message") {
     // A turn belongs to exactly one flow: the chain its tag names, or the main thread if untagged.
     // Anywhere else it is withheld rather than misattributed.
@@ -767,7 +767,7 @@ export function liveItemEntries(item: JsonValue, within?: string): Array<Transcr
      * verbatim. This read them off nothing, so "thought for 12 s" was a number the live row carried
      * while the tail was still growing and lost the instant the turn finished: the tail row went
      * away and the settled turn that replaced it had never been told how long it took. The stored
-     * record has always kept them (`messageTimes`), which is why re-opening the run showed the
+     * record keeps them on the entry (`entry.timing`), which is why re-opening the run showed the
      * duration a watcher had just seen disappear.
      */
     const num = (key: string): number | undefined => (typeof rec[key] === "number" ? (rec[key] as number) : undefined);
@@ -790,7 +790,7 @@ export function liveItemEntries(item: JsonValue, within?: string): Array<Transcr
     });
   }
   if (rec["kind"] === "event") return eventEntry(rec["event"] as JsonValue);
-  return [{ kind: "tool", name: "stream", summary: "", args: item }];
+  return [{ kind: "tool", name: "stream", summary: "", args: entry }];
 }
 
 /**
@@ -950,7 +950,7 @@ export function entriesOf(
    *
    * An untimed entry inherits the last stamp seen before it, so it keeps the position it was
    * produced in rather than sorting to the front. Treating absent as zero was harmless only while
-   * nothing in a session's own turns carried a clock; now that they do (`messageTimes`), a run's
+   * nothing in a session's own turns carried a clock; now that they do (`entry.timing`), a run's
    * tool rows, its native lines and its thought blocks would all have sorted above the conversation
    * they belong to — the exact inversion this comment used to warn about, arriving from the other
    * side. The sort is stable, so equal keys keep insertion order and a burst inside one millisecond
@@ -973,7 +973,7 @@ export function entriesOf(
   const tail: LiveTail | null = typeof live === "string" ? { text: live } : (live ?? null);
   if (tail !== null) {
     const streamed: Array<TranscriptEntry | ResultPart> = [];
-    for (const item of tail.items ?? []) streamed.push(...liveItemEntries(item));
+    for (const entry of tail.entries ?? []) streamed.push(...liveEntriesOf(entry));
     // Paired within the stream: a live tool_result answers a live tool_use, and the record's own
     // entries are already settled above.
     entries.push(...pairResults(streamed));
@@ -1070,7 +1070,7 @@ export function sidechainEntriesOf(
 ): TranscriptEntry[] {
   const said: Array<TranscriptEntry | ResultPart> = [];
   for (const turn of session?.sidechains?.[call] ?? []) said.push(...messageOf(turn));
-  for (const item of live ?? []) said.push(...liveItemEntries(item, call));
+  for (const entry of live ?? []) said.push(...liveEntriesOf(entry, call));
   const entries = pairResults(said);
   const chains = session?.sidechains ?? {};
   for (const entry of entries) {

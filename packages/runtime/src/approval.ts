@@ -56,6 +56,19 @@ export class ApprovalHub {
   private counter = 0;
   /** Reasons captured from the policy audit, keyed by the command they concern. */
   private readonly reasons = new Map<string, string>();
+  /**
+   * Tasks whose runs are STOPPING — the gate, held shut.
+   *
+   * The cheapest boundary a stop has. An agent asks before every tool it is not pre-approved for, so
+   * refusing from here means it finishes the tool it is inside, asks for the next one, is told no,
+   * and winds down on its own: nothing side-effecting is ever cut in half. It costs at most one more
+   * tool call, and it needs no protocol the transport does not already have — which is why it works
+   * for every adapter, including the ones that cannot be interrupted at all.
+   *
+   * A set rather than a flag on the parked requests, because the requests that matter have not been
+   * made yet. Denying the parked ones alone unblocked the loop and then let it ask again.
+   */
+  private readonly stopping = new Set<string>();
 
   constructor(private readonly options: ApprovalHubOptions = {}) {}
 
@@ -73,12 +86,41 @@ export class ApprovalHub {
     }
   };
 
+  /**
+   * Shut the gate for a task, and refuse whatever is already waiting at it.
+   *
+   * Idempotent, and deliberately not cleared here: a stop stays stopped until a new run opens the
+   * gate again ({@link allow}), so an approval arriving late — from a tool call already in flight
+   * when the stop was requested — meets the same answer as one arriving early.
+   */
+  stop(taskId: string): void {
+    this.stopping.add(taskId);
+    for (const [requestId, entry] of [...this.pending]) {
+      if (entry.request.taskId === taskId) this.decide(requestId, "deny", "once");
+    }
+  }
+
+  /** Open it again — a new run for this task may ask for tools. */
+  allow(taskId: string): void {
+    this.stopping.delete(taskId);
+  }
+
+  /** Is this task's gate shut? */
+  stopped(taskId: string): boolean {
+    return this.stopping.has(taskId);
+  }
+
   /** The `Approver` to place on `ctx.approve`. */
   approver(context: { taskId?: string } = {}): Approver {
     return (req: PermissionRequest) => this.park(req, context.taskId);
   }
 
   private park(req: PermissionRequest, taskId?: string): Promise<PermissionDecision> {
+    // The gate is shut: answer without asking anybody. Parking here would put a question on screen
+    // about a run that is stopping, and the only honest answer to it is the one given here.
+    if (taskId !== undefined && this.stopping.has(taskId)) {
+      return Promise.resolve({ decision: "deny", scope: "once" });
+    }
     const requestId = this.options.nextId?.() ?? `approval-${++this.counter}`;
     const input = req.input as Record<string, unknown>;
     const command = typeof input["command"] === "string" ? (input["command"] as string) : undefined;

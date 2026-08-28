@@ -17,6 +17,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { delimiter } from "node:path";
 import { resolveProgram, type ProgramDeps } from "@declarative-ai/agents-cli";
 import { isWslEnv, toWslPath, type ExecEnv } from "./paths";
+import { killTree } from "./killTree";
 
 export interface ExecOptions {
   cwd?: string;
@@ -211,8 +212,14 @@ export class NodeExec implements Exec {
       let aborted = false;
       let settled = false;
 
+      // A timeout or an abort ends the COMMAND, which on Windows is routinely a launcher with the
+      // real program underneath it. The guard stays: `killTree` spawns a `taskkill` there, and asking
+      // twice for the same tree costs a process for nothing.
+      //
+      // The children here are not spawned detached (short-lived commands should still die with the
+      // shell that started them), so on POSIX this is the single-process kill it always was.
       const kill = (): void => {
-        if (!child.killed) child.kill();
+        if (!child.killed) killTree(child);
       };
       const timer =
         merged.timeoutMs !== undefined && merged.timeoutMs > 0

@@ -764,6 +764,9 @@ export function RunActivity({
   // the one status here worth colouring differently, because it is the one you can end by acting.
   const waiting = node?.status === "waiting_for_user";
   const going = detail.status === "running" || waiting;
+  // A stop has been asked for and the run has not settled. Neither going nor stopped: the agent is
+  // finishing the tool it is inside, and what it says on the way out is still arriving.
+  const stopping = detail.status === "stopping";
   const startedAt = detail.runs.find((run) => run.outcome === "running")?.startedAt;
   // Once a second. The transcript's own counter runs in tenths to prove a thinking model is alive;
   // nobody watches the tenths of a run that has been going for four minutes.
@@ -773,6 +776,23 @@ export function RunActivity({
   // states called review, and the path is how the panel below is already labelled.
   const where = detail.activePath.map((step) => step.childKey ?? step.stateId.split("/").pop() ?? step.stateId).join(" → ");
   const at = where.length > 0 ? <b>{where}</b> : <b>this run</b>;
+
+  if (stopping) {
+    return (
+      <div className="run-doing warn">
+        <Pulse />
+        <span className="ellip">
+          Stopping {at} — waiting for the agent to finish what it is doing
+        </span>
+        <span className="grow" />
+        {/* Rung 4, OFFERED rather than taken. The gate is shut and the turn is ending; this is for
+            the person who does not want to wait for either. */}
+        <button type="button" className="danger" onClick={onStop}>
+          Force stop
+        </button>
+      </div>
+    );
+  }
 
   if (going) {
     return (
@@ -839,11 +859,14 @@ export function RunActivity({
  * What each way of stopping is called, and what starting it again actually does.
  *
  * The verbs are different because the ACTS are different, and the engine is what decides which:
- * `isStartableStatus` lets an interrupted or failed task begin again in place, against the snapshot
- * its first run pinned, while a canceled one has ended its lifecycle and can only be copied into a
- * fresh task (see `service.rerunTask`). One button either way, but it must not claim to resume when
- * what it will do is start over, and it must not claim to be the same task when what comes back is
- * a new one.
+ * `isStartableStatus` lets an interrupted, failed or STOPPED task begin again in place, against the
+ * snapshot its first run pinned; a task that finished, or one that has been spoken to, is copied into
+ * a fresh one instead (see `service.rerunTask`). One button either way, but it must not claim to
+ * resume when what it will do is start over, and it must not claim to be the same task when what
+ * comes back is a new one.
+ *
+ * "Run again" is therefore reserved for the case it is TRUE of: a task with no usable record, which
+ * genuinely starts from the top. A stop leaves a record, so it gets Resume or Retry below.
  *
  * These are the FALLBACK verbs — what a stop is called when resuming is not on offer. A task whose
  * record can still be replayed gets {@link RESUMABLE} instead, which is the whole reason this table
@@ -864,8 +887,8 @@ const STOPPED: Partial<Record<TaskDetail["status"], { said: string; verb: string
   },
   canceled: {
     said: "Stopped",
-    verb: "Run again",
-    hint: "A canceled run cannot restart — this starts a fresh copy of the task and opens it",
+    verb: "Start again",
+    hint: "Runs the workflow again from the top, against the snapshot this task pinned",
     tone: "warn",
   },
   queued: { said: "Not started", verb: "Start", hint: "Runs the workflow", tone: "idle" },

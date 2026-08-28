@@ -579,7 +579,7 @@ export function defaultExecutorTree(
   );
 }
 
-/** One live stream item — a fragment of the answer, or a whole event that is not answer text. */
+/** One live delta — a fragment of the answer, or a whole entry that is not answer text. */
 export interface TurnDelta {
   /** The conversation position the call is claiming, when it runs in one. */
   session?: { id: string; seq: number };
@@ -589,12 +589,16 @@ export interface TurnDelta {
    *  finest time granularity the system has — what "started thinking at" and "answered at" are
    *  measured from. */
   at?: number;
-  /** A fragment of the answer being written. Exactly one of `text` / `thinking` / `item` is present. */
+  /** A fragment of the answer being written. Exactly one of `text` / `thinking` / `entry` is present. */
   text?: string;
   /** A fragment of the model's reasoning, while it is still thinking — never part of the answer. */
   thinking?: string;
   /**
-   * A whole stream item that is not answer text, in stream order with the fragments.
+   * A whole conversation ENTRY that is not answer text, in stream order with the fragments.
+   *
+   * The same word the record uses, because it is the same thing at an earlier moment: what arrives
+   * here is what `entries` will hold. It used to be called an "item" on the way in and an "entry"
+   * once stored, which made a translation out of what should be an append (RECORDS.md).
    *
    * `{ kind: "message", role, content }` is a finished turn — content carries the provider's own
    * parts, tool calls and results included. Anything else is forwarded as
@@ -602,7 +606,7 @@ export interface TurnDelta {
    * EVERYTHING on the stream reaches it in order, understood or not — an event dropped here is a
    * stretch of an hour-long run the person watching cannot account for.
    */
-  item?: JsonValue;
+  entry?: JsonValue;
 }
 
 /**
@@ -661,7 +665,7 @@ export function withTurnStream(
             // progress, command decisions, provider events, drop notices — goes opaquely, because
             // the viewer's job is to show what happened and "we had no name for it" is not a
             // reason a person watching an hour-long run should see a gap.
-            const delta: Omit<TurnDelta, "text" | "item"> = {
+            const delta: Omit<TurnDelta, "text" | "entry"> = {
               ...(at !== undefined ? { session: { id: at.id, seq: at.seq } } : {}),
               ...(stateId !== undefined ? { stateId } : {}),
               at: Date.now(),
@@ -676,7 +680,7 @@ export function withTurnStream(
             } else if (event.type === "message") {
               payload = {
                 ...delta,
-                item: {
+                entry: {
                   kind: "message",
                   role: event.role,
                   content: event.content,
@@ -686,7 +690,7 @@ export function withTurnStream(
                 } as JsonValue,
               };
             } else {
-              payload = { ...delta, item: { kind: "event", event: event as unknown as JsonValue } as JsonValue };
+              payload = { ...delta, entry: { kind: "event", event: event as unknown as JsonValue } as JsonValue };
             }
             try {
               sink(payload);

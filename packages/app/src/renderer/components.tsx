@@ -26,6 +26,7 @@ import {
   type FormField,
   type ApprovalScope,
   type PendingApproval,
+  type ModuleApproval,
   type PendingInteraction,
   type PendingQuestion,
   type Change,
@@ -875,6 +876,69 @@ export function ApprovalDialog({
         <div className="options">
           <button className="danger" onClick={() => onDecide("deny", "once")}>
             Deny
+          </button>
+        </div>
+        {error ? <p className="reason">{error}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The js/ts modules a workflow calls, before it is allowed to call them (SPEC §7.5.5).
+ *
+ * Not the {@link ApprovalDialog}, and the difference is worth keeping visible. That one authorizes
+ * ONE command a model just proposed, mid-run, and its answer expires with the run. This one is asked
+ * before anything has started, about source sitting on disk, and its answer is durable — approving
+ * writes a machine-local record that outlives the task. So there is no "allow once" here: the
+ * question is whether this code may run on this machine, and "yes, but only this time" is not an
+ * answer that record can hold.
+ *
+ * The source is shown in full rather than summarized. A prompt that asks whether to run code without
+ * showing it is a rubber stamp, and `previousHash` is what tells the reader which question they are
+ * being asked: an unapproved file is "should this run at all", a changed one is "here is what moved
+ * since you last said yes".
+ */
+export function ModuleApprovalDialog({
+  files,
+  error,
+  onApprove,
+  onCancel,
+}: {
+  files: readonly ModuleApproval[];
+  error?: string | null;
+  onApprove: () => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const changed = files.filter((f) => f.previousHash !== undefined).length;
+  return (
+    <div className="modal-backdrop">
+      <div className="modal modal-wide" data-testid="module-approval">
+        <h3>
+          <Icon name="shield" className="gate-icon" /> Run this workflow&apos;s TypeScript?
+        </h3>
+        <div className="sub">
+          {files.length === 1 ? "1 file" : `${files.length} files`}
+          {changed > 0 ? ` · ${changed} changed since you approved it` : ""} · nothing has run yet
+        </div>
+
+        {files.map((file) => (
+          <div key={file.file}>
+            <div className="sub">
+              {file.file} —{" "}
+              {file.previousHash !== undefined ? "changed since you approved it" : "never approved"}
+              {/* What the workflow actually CALLS out of this file. Absent for a file reached only as
+                  an import of another, where there is no call site to name. */}
+              {file.symbols !== undefined && file.symbols.length > 0 ? ` · calls ${file.symbols.join(", ")}` : ""}
+            </div>
+            <pre className="artifact">{file.source}</pre>
+          </div>
+        ))}
+
+        <div className="options">
+          <button onClick={onApprove}>Approve and run</button>
+          <button className="danger" onClick={onCancel}>
+            Cancel
           </button>
         </div>
         {error ? <p className="reason">{error}</p> : null}

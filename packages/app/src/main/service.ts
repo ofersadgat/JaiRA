@@ -25,7 +25,14 @@ import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, 
 import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
-import { InMemoryPersistence, loadBundle, type LoadedState, type ReplaySource, type WorkflowBundle } from "@declarative-ai/hw";
+import {
+  InMemoryPersistence,
+  loadBundle,
+  moduleHash as moduleHashOf,
+  type LoadedState,
+  type ReplaySource,
+  type WorkflowBundle,
+} from "@declarative-ai/hw";
 import type { ExecServices, MemoCache } from "@declarative-ai/exec";
 import type { ExecPolicy } from "@declarative-ai/permissions";
 import type { JsonValue } from "@declarative-ai/json";
@@ -37,6 +44,7 @@ import {
   buildTaskReplay,
   replaySourceOf,
   userModules,
+  canonicalModulePath,
   prepareUserModules,
   gitFor,
   boardForState,
@@ -222,7 +230,9 @@ import {
   ALWAYS_GRANTED_TOOLS,
   withAlwaysGranted,
   isTerminalStatus,
+  ApprovalRequired,
   Refusal,
+  type ModuleApproval,
 } from "@jaira/shared";
 import { Diagnostics } from "./diagnostics";
 import { errorToJson, resetLogSink, setLogSink, type LogRecord, type LogSink } from "@declarative-ai/log";
@@ -2275,19 +2285,72 @@ export class AppService {
    * are journaled. Interactive states are answered by the renderer through
    * {@link submitInteraction} unless `request.interactions` scripts them.
    */
+  /**
+   * What a task's last start attempt refused over, per task id.
+   *
+   * Kept because the rejection cannot carry it: Electron serializes an IPC error's MESSAGE and drops
+   * every own property, so `ApprovalRequired.pending` does not survive the trip. Written on the way
+   * out of {@link startTask} and read back by `functions:pending` — one entry per task, replaced by
+   * the next attempt, and deleted the moment a start succeeds so a stale list cannot be shown
+   * against a run that is already going.
+   */
+  private readonly moduleApprovals = new Map<string, ModuleApproval[]>();
+
+  /** {@link moduleApprovals} for one task, or empty where the last start did not stop on the gate. */
+  functionsPending(request: { taskId: string; project?: string }): ModuleApproval[] {
+    return this.moduleApprovals.get(request.taskId) ?? [];
+  }
+
+  /**
+   * Approve module files, then REBUILD so the next load can see them.
+   *
+   * Approving without rebuilding is the failure this method exists to make impossible: the symbol
+   * index this process built at startup was gated on the approvals as they stood then, and it
+   * answers from that reading until something replaces it.
+   */
+  async functionsApprove(request: { files: string[]; project?: string }): Promise<{ approved: number }> {
+    const open = this.session(request.project);
+    const modules = userModules();
+    if (modules === undefined) throw this.refusal("functions", "this process has no js/ts function support to approve into");
+    let approved = 0;
+    for (const file of request.files) {
+      const source = modules.vfs.read(canonicalModulePath(file));
+      // Hashed HERE rather than trusting a hash the renderer sent back: an approval records what the
+      // file says now, and the only reading of "now" that can be trusted is the one taken beside the
+      // write. A file that changed between the prompt and the answer must not be approved as what
+      // was shown.
+      if (source === undefined) throw this.refusal("functions", `cannot approve '${file}': it could not be read`);
+      modules.approvals.approve(canonicalModulePath(file), moduleHashOf(source));
+      approved += 1;
+    }
+    await prepareUserModules(open.project.paths, { searchPath: open.project.config.workflows.path, rebuild: true });
+    return { approved };
+  }
+
   async startTask(request: StartRunRequest): Promise<{ taskId: string; runId: number }> {
     // The session that HOLDS the task, which is also whose config and secrets govern it — see the
     // rule on {@link startRun}. For a system task those are the shared root's, which is the pairing
     // a workflow that lives in the shared root wants.
     const open = this.session(request.project);
     const bundle = this.overriddenBundle(open, request.taskId, request.overrides);
-    return this.startRun(open, request.taskId, {
-      config: open.project.config,
-      secrets: this.secretResolver(open),
-      ...(bundle !== undefined ? { bundle } : {}),
-      ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
-      ...(request.fake !== undefined ? { fake: request.fake } : {}),
-    });
+    try {
+      const started = await this.startRun(open, request.taskId, {
+        config: open.project.config,
+        secrets: this.secretResolver(open),
+        ...(bundle !== undefined ? { bundle } : {}),
+        ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
+        ...(request.fake !== undefined ? { fake: request.fake } : {}),
+      });
+      // A start that got through settles the question, whatever it was last time.
+      this.moduleApprovals.delete(request.taskId);
+      return started;
+    } catch (e) {
+      // Stashed, then RETHROWN unchanged. The renderer's contract does not move — it still gets the
+      // rejection and can still just show the message — but a renderer that would rather ask now has
+      // somewhere to read the list from.
+      if (e instanceof ApprovalRequired) this.moduleApprovals.set(request.taskId, [...e.pending]);
+      throw e;
+    }
   }
 
   /**
@@ -2561,6 +2624,11 @@ export class AppService {
       ...this.promptWiring(config, {
         fake: fakeRules !== undefined,
         secrets: opts.secrets,
+        // The same observer the agent FUNCTION adapters get, a few lines up. A prompt op reaches an
+        // agent through a model prefix rather than a `functionRef`, and that difference had come to
+        // mean "and is not recorded as a job" — which is invisible until a run is stopped and the
+        // process it left behind cannot be found.
+        observer,
         // The durable store a definition's `memoize` step writes to. The RECORDING project's, because
         // that is where this run's database is — a memo is part of the run record, not of the config
         // that decided which model to call.
@@ -2592,10 +2660,10 @@ export class AppService {
     const streaming = withTurnStream((delta) => {
       // Folded into main's live-turn log FIRST, so the number the push carries is the count a
       // `session:live` snapshot taken now would report — the merge protocol that lets a viewer seed
-      // from the snapshot and skip the pushes already folded into it. The published item is the
+      // from the snapshot and skip the pushes already folded into it. The published entry is the
       // log's ENRICHED copy (timestamps, thought duration), so viewer, snapshot and persisted
       // partial all hold the same stamps.
-      const { n, item } = open.liveTurns.apply(taskId, delta);
+      const { n, entry } = open.liveTurns.apply(taskId, delta);
       liveFlush.note();
       this.publish({
         type: "session:turn",
@@ -2606,7 +2674,7 @@ export class AppService {
         ...(delta.stateId !== undefined ? { stateId: delta.stateId } : {}),
         ...(delta.text !== undefined ? { text: delta.text } : {}),
         ...(delta.thinking !== undefined ? { thinking: delta.thinking } : {}),
-        ...(item !== undefined ? { item } : {}),
+        ...(entry !== undefined ? { entry } : {}),
       });
     }, prompt, open.liveCalls);
 
@@ -2663,6 +2731,10 @@ export class AppService {
       // artifact configuration; turning it into an escalation is the policy's job.
       askAboveBytes: config.artifacts.askAboveBytes,
     });
+    // OPEN THE GATE. A previous run of this task may have shut it on the way out (`stop`), and a
+    // stop that outlived the run it stopped would refuse the first tool of the next one — a resumed
+    // task that can never touch a file, failing for a reason nothing on screen would explain.
+    open.approvals.allow(taskId);
     const approve = open.approvals.approver({ taskId });
 
     const recorder = project.events.recorder(taskId, started.runId);
@@ -3173,6 +3245,11 @@ export class AppService {
     // it under the session layers, which is the only difference between the two uses.
     const prompt = buildPromptExecutor({
       ...(fakeRules !== undefined ? { fakeRules } : {}),
+      // No observer: a chat turn is not a run, so it holds no job claim for a child to hang off (see
+      // `cancelChatTurn`). Stated rather than left out, because an observer omitted by accident is
+      // exactly how the run path came to spawn unrecorded agents. An agent started from a
+      // conversation is therefore still unfindable as an orphan — worth closing, and it needs a claim
+      // to close it, not another argument here.
       ...this.promptWiring(config, { fake, secrets, memoCache: new SqliteMemoCache(project.db) }),
       tree: this.defaultTree(config, context.bundle, fake, secrets).prompt,
     });
@@ -3223,7 +3300,7 @@ export class AppService {
     // What "stop" writes down before it stops anything — see `ProjectSession.liveFlush`.
     open.liveFlush.set(request.taskId, () => liveFlush.flush());
     const streaming = withTurnStream((delta) => {
-      const { n, item } = open.liveTurns.apply(request.taskId, delta);
+      const { n, entry } = open.liveTurns.apply(request.taskId, delta);
       liveFlush.note();
       this.publish({
         type: "session:turn",
@@ -3234,7 +3311,7 @@ export class AppService {
         ...(delta.stateId !== undefined ? { stateId: delta.stateId } : {}),
         ...(delta.text !== undefined ? { text: delta.text } : {}),
         ...(delta.thinking !== undefined ? { thinking: delta.thinking } : {}),
-        ...(item !== undefined ? { item } : {}),
+        ...(entry !== undefined ? { entry } : {}),
       });
     }, prompt, open.liveCalls);
     const executor = withSessionLayers(stores, streaming);
@@ -3991,12 +4068,24 @@ export class AppService {
       for (const [requestId, owner] of session.requestTask) {
         if (owner === taskId) session.hub.reject(requestId, "the task was canceled");
       }
-      // A parked approval blocks the agent's tool loop just as hard as a gate.
-      for (const [requestId, run] of session.approvalRun) {
-        if (run.taskId === taskId) session.approvals.decide(requestId, "deny", "once");
-      }
+      // SHUT THE GATE, rather than only answering what happens to be waiting at it.
+      //
+      // A parked approval blocks the agent's tool loop just as hard as a gate does, and denying it
+      // was enough to unblock the loop — after which the agent asked for the next tool and the
+      // question came straight back. Held shut, the agent finishes the tool it is inside, asks for
+      // the next, is refused, and winds down on its own: the cheapest boundary a stop has, and the
+      // only one that works for a transport with no interrupt at all.
+      session.approvals.stop(taskId);
       // And so does a parked question — dismissed, not errored: nobody is going to answer it.
       session.questions.dismissFor(taskId);
+      // SAY SO, for the interval between the decision and the end of the stream.
+      //
+      // The task used to jump to `canceled` here, while output was visibly still arriving — the panel
+      // reported a run that had ended and the transcript beside it kept growing. `stopping` is that
+      // interval, and the run settling is what ends it: the ordinary finish path writes `canceled`
+      // when the stream actually stops, so nothing else has to know this state exists.
+      session.project.runtime.setStatus(taskId, "stopping", Date.now());
+      this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
       // What it had said by now, written down while its record is still open to take it.
       session.liveFlush.get(taskId)?.();
       run.abort.abort();
@@ -6115,7 +6204,7 @@ export class AppService {
    */
   private promptWiring(
     config: JairaConfigOf,
-    opts: { fake?: boolean; memoCache?: MemoCache; secrets?: SecretResolver } = {},
+    opts: { fake?: boolean; memoCache?: MemoCache; secrets?: SecretResolver; observer?: ExecObserver } = {},
   ): {
     router?: ReturnType<typeof modelRouterOptions>;
     routes?: ReturnType<typeof agentPromptRoutes>;
@@ -6127,7 +6216,17 @@ export class AppService {
     const presets = config.models.presets;
     return {
       router: modelRouterOptions(config.models, opts.secrets ?? this.secretResolver()),
-      routes: agentPromptRoutes(config.agents, { execEnv: config.execEnvironment }),
+      routes: agentPromptRoutes(config.agents, {
+        execEnv: config.execEnvironment,
+        // The job observer, so an agent a PROMPT op starts is recorded exactly like one an agent
+        // FUNCTION op starts. Without it `agentPromptRoutes` builds its own unobserved spawn and
+        // every agent reached through a model prefix spawns unrecorded: no `kind='process'` row, no
+        // heartbeat, and — the part that bites — nothing for `JobStore.orphans()` to find, which is
+        // the one query written to catch a `claude` still running and still billing after its run
+        // stopped. The CLI has always passed this (`cli.ts`); the app never did, so the two drivers
+        // disagreed about what a run leaves behind — and the app is the one with a Stop button.
+        ...(opts.observer !== undefined ? { observer: opts.observer } : {}),
+      }),
       ...(presets !== undefined ? { configs: { get: (id: string) => presets[id] } } : {}),
       // The named stacks. Each becomes a route keyed by its name, so a state naming `review/…` gets
       // the executor this project built rather than whatever the prefix would otherwise have meant.
@@ -6271,35 +6370,44 @@ function turnOf(raw: JsonValue): SessionTurn {
 }
 
 /**
- * A record's messages as turns, wearing the per-message times (`messageTimes`) the stream measured.
+ * A record's conversation as turns, each wearing the clocks the stream measured for it.
  *
- * Every message a record holds is a message that record CONTRIBUTED — `LlmOutput.messages` is "the
- * messages this call appended to the conversation", a session's messages are its records concatenated
+ * Every message a record holds is a message that record CONTRIBUTED — its entries are the turns this
+ * call added, a session's messages are its records concatenated
  * (`materialize`), and a fork inherits its prefix by lineage rather than by copying. So there is
  * nothing to subtract here, and this used to try: it dropped a leading run of messages whenever a
  * record happened to begin with the previous record's list in full, which is a shape nothing writes
  * and which cost a repeated exchange its second copy (ask the same question twice, get the same
  * answer twice, and the second pair vanished).
  *
- * `messageTimes` is a parallel array over `messages`, so the alignment is a plain index. A record
+ * The clocks ride ON each turn (`entry.timing`), so there is no alignment to get right. A record
  * with no times — written before turns were timed, or by a transport that never streamed — yields
  * turns without them rather than zeros.
- */
+ *
+ * The PARTIAL entry is included, deliberately. It is the turn that was being written when a run was
+ * stopped, and a conversation that showed the question and then nothing is what the record used to
+ * give a person who pressed stop. It is excluded from `messagesOfRecord` instead, which is the read
+ * that goes back on the wire — the one place a half-written turn must never appear.
+ * */
 function turnsOf(value: JsonValue | undefined): SessionTurn[] {
-  const messages = messagesOfRecord(value);
-  const raw = (value as { value?: { messageTimes?: unknown } } | undefined)?.value?.messageTimes;
-  const times = Array.isArray(raw) ? (raw as Array<{ at?: number; startedAt?: number; thoughtMs?: number }>) : [];
-  return messages.map((message, i) => {
-    const turn = turnOf(message);
-    const time = times[i];
-    if (time === undefined) return turn;
-    return {
+  const entries = (value as { value?: { entries?: JsonValue[] } } | undefined)?.value?.entries;
+  if (!Array.isArray(entries)) return [];
+  const turns: SessionTurn[] = [];
+  for (const raw of entries) {
+    const entry = raw as { kind?: unknown; role?: unknown; content?: JsonValue; sidechain?: unknown; timing?: unknown } | null;
+    if (entry === null || typeof entry !== "object") continue;
+    // Events are not turns, and a subagent's turns belong to the call that spawned it.
+    if (entry.kind !== "message" || entry.sidechain !== undefined) continue;
+    const turn = turnOf({ role: entry.role, content: entry.content } as JsonValue);
+    const timing = (entry.timing ?? {}) as { at?: unknown; startedAt?: unknown; thoughtMs?: unknown };
+    turns.push({
       ...turn,
-      ...(typeof time.at === "number" ? { at: time.at } : {}),
-      ...(typeof time.startedAt === "number" ? { startedAt: time.startedAt } : {}),
-      ...(typeof time.thoughtMs === "number" ? { thoughtMs: time.thoughtMs } : {}),
-    };
-  });
+      ...(typeof timing.at === "number" ? { at: timing.at } : {}),
+      ...(typeof timing.startedAt === "number" ? { startedAt: timing.startedAt } : {}),
+      ...(typeof timing.thoughtMs === "number" ? { thoughtMs: timing.thoughtMs } : {}),
+    });
+  }
+  return turns;
 }
 
 /**
@@ -6312,42 +6420,13 @@ function turnsOf(value: JsonValue | undefined): SessionTurn[] {
  * thing as what it sits beside.
  */
 function turnsSaidBy(row: { value?: JsonValue; status: "open" | "completed" | "failed" }): SessionTurn[] {
-  const said = turnsOf(row.value);
-  /**
-   * …and the half of the ANSWER that was written before the turn was cut off.
-   *
-   * The record keeps it — `preservePartial` folds the streamed tail into an errored settle for
-   * exactly this reason — and the panel beside a run has always rendered it (`sessionView`). This
-   * reader did not, so a conversation showed the question, then nothing, and the words the person
-   * had been watching arrive vanished the moment they pressed stop. One trailing assistant turn,
-   * through the ordinary machinery so a `thinking` tail becomes a thought row — and never folded
-   * into `messages`, where a fragment nobody finished would be indistinguishable from a turn
-   * somebody did.
-   */
-  const tails = partialOf(row.value);
-  if (tails !== undefined) {
-    said.push({
-      role: "assistant",
-      ...(tails.text !== undefined ? { text: tails.text } : {}),
-      ...(tails.thinking !== undefined ? { parts: [{ type: "thinking", thinking: tails.thinking }] as never } : {}),
-    });
-  }
-  return said;
+  // Everything this record said, INCLUDING the turn that was still being written when it stopped —
+  // that is an entry of its own, marked `partial`, sitting where it happened. It used to live in a
+  // field beside the conversation and be appended back on at display time, which is why a stopped
+  // run once showed the question and then nothing.
+  return turnsOf(row.value);
 }
 
-/**
- * The TAILS a cut-off call was writing — the fragment of a turn nobody finished.
- *
- * Kept in its own field by `partialRecordValue` and folded into an errored settle by
- * `preservePartial`, precisely so it stays distinguishable from a finished turn. `undefined` when
- * there is nothing to show, which is every settled record and any interruption that arrived before
- * the model had said a word.
- */
-function partialOf(value: JsonValue | undefined): { text?: string; thinking?: string } | undefined {
-  const partial = (value as { value?: { partial?: { text?: string; thinking?: string } } } | undefined)?.value?.partial;
-  if (partial === undefined || (partial.text === undefined && partial.thinking === undefined)) return undefined;
-  return partial;
-}
 
 /**
  * Where a record's structured output actually IS — see {@link SessionOutput}.
@@ -6420,35 +6499,49 @@ export function structuredOutputOf(
   return undefined;
 }
 
-/** The record's subagent conversations, as turns — `LlmOutput.sidechains`, read the way `turns` is. */
+/**
+ * The record's subagent conversations, as turns — DERIVED from the entries that carry the call that
+ * spawned them, the way every other reading of a record is derived from the same one array.
+ *
+ * It used to read `LlmOutput.sidechains`, a second key space holding the same conversation. Upstream
+ * folds them into `entries` with a `sidechain` marker, so the grouping happens here, on read.
+ */
 function sidechainsOf(value: JsonValue | undefined): Record<string, SessionTurn[]> | undefined {
-  const raw = (value as { value?: { sidechains?: unknown } } | undefined)?.value?.sidechains;
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const entries = (value as { value?: { entries?: JsonValue[] } } | undefined)?.value?.entries;
+  if (!Array.isArray(entries)) return undefined;
   const out: Record<string, SessionTurn[]> = {};
-  for (const [call, messages] of Object.entries(raw as Record<string, unknown>)) {
-    if (Array.isArray(messages)) out[call] = (messages as JsonValue[]).map(turnOf);
+  for (const raw of entries) {
+    const entry = raw as { kind?: unknown; role?: unknown; content?: JsonValue; sidechain?: { id?: unknown } } | null;
+    if (entry === null || typeof entry !== "object" || entry.kind !== "message") continue;
+    const call = entry.sidechain?.id;
+    if (typeof call !== "string") continue;
+    (out[call] ??= []).push(turnOf({ role: entry.role, content: entry.content } as JsonValue));
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /**
- * The record's provider events, each pinned to how many of the record's messages preceded it.
+ * The record's provider events, each pinned to how many of the record's turns preceded it.
  *
- * Counted against the record's OWN messages, which is what upstream stamps them with and what the
- * turns rendered from it are. This used to subtract an "inherited prefix" from every index — a
- * companion to the subtraction in `turnsOf`, and wrong for the same reason, except that this one had
- * teeth on real data: the count it subtracted was the PREVIOUS record's length, so in an ordinary
- * chat every event after the first collapsed onto index 0 (`Math.max(0, 1 - 2)`) and rendered above
- * the turn it happened after.
+ * The pin is COMPUTED now rather than stored. Upstream used to keep the events in an array of their
+ * own carrying an `index`, which every reader had to splice back — and this one got it wrong on real
+ * data, subtracting an "inherited prefix" that was the previous record's length, so in an ordinary
+ * chat every event after the first collapsed onto index 0 and rendered above the turn it followed.
+ * The events are entries now, sitting where they happened, so the index is just how many message
+ * entries came before — which is arithmetic that cannot drift from the thing it describes.
  */
 function recordEventsOf(value: JsonValue | undefined): Array<{ index: number; event: JsonValue }> | undefined {
-  const raw = (value as { value?: { providerEvents?: unknown } } | undefined)?.value?.providerEvents;
-  if (!Array.isArray(raw)) return undefined;
+  const entries = (value as { value?: { entries?: JsonValue[] } } | undefined)?.value?.entries;
+  if (!Array.isArray(entries)) return undefined;
   const out: Array<{ index: number; event: JsonValue }> = [];
-  for (const row of raw) {
-    const e = row as { index?: unknown; event?: unknown };
-    if (typeof e?.index !== "number" || e.event === undefined) continue;
-    out.push({ index: Math.max(0, e.index), event: e.event as JsonValue });
+  let turns = 0;
+  for (const raw of entries) {
+    const entry = raw as { kind?: unknown; sidechain?: unknown; event?: { data?: JsonValue } } | null;
+    if (entry === null || typeof entry !== "object") continue;
+    // A subagent's rows belong to its own chain, not to the main thread's count.
+    if (entry.sidechain !== undefined) continue;
+    if (entry.kind === "message") turns += 1;
+    else if (entry.kind === "event" && entry.event?.data !== undefined) out.push({ index: turns, event: entry.event.data });
   }
   return out.length > 0 ? out : undefined;
 }

@@ -40,6 +40,8 @@ import type {
   Appearance,
   JairaTheme,
   PendingApproval,
+  ModuleApproval,
+  StartTaskRequest,
   PendingQuestion,
   PendingUserEvent,
   PendingInteraction,
@@ -195,6 +197,15 @@ export interface AppState {
   pending: PendingInteraction[];
   /** Per-command approvals awaiting a decision (DESIGN §10.2). */
   approvals: PendingApproval[];
+  /**
+   * A start that stopped on the js/ts module gate, and the files it is waiting on (SPEC §7.5.5).
+   *
+   * Deliberately NOT folded into {@link approvals}: that inbox is per-COMMAND and mid-run, raised by
+   * a tool call a model made. This is answered before anything runs at all, it is about source on
+   * disk rather than a command line, and its answer is durable — approving here writes a machine-local
+   * record that outlives the task. One inbox for both would have to explain that difference anyway.
+   */
+  moduleApproval: { request: StartTaskRequest; files: ModuleApproval[] } | null;
   /** Mid-run questions a running agent asked (`AskUserQuestion`) — answered, never approved. */
   questions: PendingQuestion[];
   /**
@@ -549,14 +560,14 @@ export interface AppState {
    *
    * A record persists once, at the end of its operation — so without this a long agent run shows an
    * empty conversation for as long as it is thinking. `text` is the fragment tail of the answer;
-   * `items` is everything else the stream carried in order — finished turns (tool calls and results
+   * `entries` is everything else the stream carried in order — finished turns (tool calls and results
    * ride on them) and events we may not even recognise, all rendered, because an hour-long agent
    * run whose tools are invisible reads as an agent doing nothing. Cleared when the record lands,
    * because the stored turn is the same content and better.
    *
    * `sidechains` is the same accumulation for SUBAGENT turns, keyed by the tool call that spawned
-   * each — items tagged `parentToolUseId` land here and nowhere else. Kept apart from `items`
-   * because a subagent's words are not the main thread's (see `liveItemEntries`); the doorway row
+   * each — entries tagged `parentToolUseId` land here and nowhere else. Kept apart from `entries`
+   * because a subagent's words are not the main thread's (see `liveEntriesOf`); the doorway row
    * and the sidechain panel are what render them, while the run is still going.
    */
   liveTurn: {
@@ -574,7 +585,7 @@ export interface AppState {
     /** When the tails began — what makes "still thinking, for 12 s" a number rather than a pulse. */
     textStartedAt?: number;
     thinkingStartedAt?: number;
-    items: JsonValue[];
+    entries: JsonValue[];
     sidechains: Record<string, JsonValue[]>;
     /**
      * The tool call whose ARGUMENTS are still being written, when one is.
@@ -753,6 +764,7 @@ const EMPTY: AppState = {
   detail: null,
   pending: [],
   approvals: [],
+  moduleApproval: null,
   questions: [],
   userEvents: [],
   stream: [],
@@ -818,8 +830,8 @@ const EMPTY: AppState = {
 
 /** Keep the live log bounded — a long run would otherwise grow without limit. */
 const STREAM_LIMIT = 300;
-/** Live stream items kept per position. An agent loop emits one per turn; the tail is what is read. */
-const LIVE_ITEM_LIMIT = 500;
+/** Live entries kept per position. An agent loop emits one per turn; the tail is what is read. */
+const LIVE_ENTRY_LIMIT = 500;
 /** How many diagnostics the renderer keeps. The main process holds more; this is the visible tail. */
 const LOG_LIMIT = 2000;
 /** How many lines of a sync's own narration the panel keeps. Enough for a three-state run. */
@@ -1493,7 +1505,7 @@ export function useApp() {
                         thinking: live.thinking,
                         ...(live.textStartedAt !== undefined ? { textStartedAt: live.textStartedAt } : {}),
                         ...(live.thinkingStartedAt !== undefined ? { thinkingStartedAt: live.thinkingStartedAt } : {}),
-                        items: live.items,
+                        entries: live.entries,
                         sidechains: live.sidechains,
                         ...(live.writing !== undefined ? { writing: live.writing } : {}),
                       },
@@ -2221,7 +2233,7 @@ export function useApp() {
           // Already folded in — the tail was seeded from a `session:live` snapshot that had seen
           // this delta. Applying it again would show the fragment twice.
           if (same && message.n !== undefined && live.n !== undefined && message.n <= live.n) break;
-          const items = same ? [...live.items] : [];
+          const entries = same ? [...live.entries] : [];
           const sidechains = same ? { ...live.sidechains } : {};
           let text = same ? live.text : "";
           let thinking = same ? live.thinking : "";
@@ -2231,24 +2243,24 @@ export function useApp() {
           let textStartedAt = same ? live.textStartedAt : undefined;
           let thinkingStartedAt = same ? live.thinkingStartedAt : undefined;
           let writing = same ? live.writing : undefined;
-          if (message.item !== undefined) {
+          if (message.entry !== undefined) {
             // A SUBAGENT's turn accumulates under the call that spawned it and nowhere else — the
-            // doorway row renders it there, and folding it into `items` is the misattribution the
+            // doorway row renders it there, and folding it into `entries` is the misattribution the
             // tag exists to prevent.
-            const item = message.item as { kind?: string; role?: string; parentToolUseId?: string };
-            if (typeof item.parentToolUseId === "string") {
-              const chain = [...(sidechains[item.parentToolUseId] ?? []), message.item];
-              sidechains[item.parentToolUseId] = chain.length > LIVE_ITEM_LIMIT ? chain.slice(-LIVE_ITEM_LIMIT) : chain;
+            const entry = message.entry as { kind?: string; role?: string; parentToolUseId?: string };
+            if (typeof entry.parentToolUseId === "string") {
+              const chain = [...(sidechains[entry.parentToolUseId] ?? []), message.entry];
+              sidechains[entry.parentToolUseId] = chain.length > LIVE_ENTRY_LIMIT ? chain.slice(-LIVE_ENTRY_LIMIT) : chain;
             } else {
-              // The identical fold main runs (`LiveTurnLog`), on the identical item: what the
+              // The identical fold main runs (`LiveTurnLog`), on the identical entry: what the
               // bookkeeping SAYS is kept, the event itself is dropped rather than queued behind the
               // cap. Either side can be the one holding the tail on screen, so both must agree.
-              writing = foldWriting(writing, message.item);
-              if (!isStreamBookkeeping(message.item)) items.push(message.item);
+              writing = foldWriting(writing, message.entry);
+              if (!isStreamBookkeeping(message.entry)) entries.push(message.entry);
               // A finished assistant turn carries the same text and thinking its deltas streamed — the
               // tails restart so nothing is shown twice, once in the turn and once as the live edge.
               // The half-written call ends with them: it is on that turn now, with a row of its own.
-              if (item.kind === "message" && item.role === "assistant") {
+              if (entry.kind === "message" && entry.role === "assistant") {
                 text = "";
                 thinking = "";
                 textStartedAt = undefined;
@@ -2257,9 +2269,9 @@ export function useApp() {
               }
             }
           }
-          // Stamped from the item's own `at` where it has one (main enriches every item), falling
+          // Stamped from the entry's own `at` where it has one (main enriches every entry), falling
           // back to the arrival clock — a delta with neither is a fragment we can still time.
-          const stampedAt = (message.item as { at?: number } | undefined)?.at ?? Date.now();
+          const stampedAt = (message.entry as { at?: number } | undefined)?.at ?? Date.now();
           if (message.text !== undefined) {
             if (text.length === 0 && message.text.length > 0) textStartedAt = stampedAt;
             text += message.text;
@@ -2271,7 +2283,7 @@ export function useApp() {
           // A withheld think streams no text at all, so its start arrives as bookkeeping instead of
           // as a fragment. The identical rule main folds in `LiveTurnLog`; both must agree, because
           // either can be the one holding the tail on screen.
-          if (thinkingStartedAt === undefined && text.length === 0 && message.item !== undefined && startsThinking(message.item)) {
+          if (thinkingStartedAt === undefined && text.length === 0 && message.entry !== undefined && startsThinking(message.entry)) {
             thinkingStartedAt = stampedAt;
           }
           patch({
@@ -2284,7 +2296,7 @@ export function useApp() {
               thinking,
               ...(textStartedAt !== undefined ? { textStartedAt } : {}),
               ...(thinkingStartedAt !== undefined ? { thinkingStartedAt } : {}),
-              items: items.length > LIVE_ITEM_LIMIT ? items.slice(-LIVE_ITEM_LIMIT) : items,
+              entries: entries.length > LIVE_ENTRY_LIMIT ? entries.slice(-LIVE_ENTRY_LIMIT) : entries,
               sidechains,
               ...(writing !== undefined ? { writing } : {}),
             },
@@ -2746,7 +2758,7 @@ export function useApp() {
       startTask: async (taskId: string, fake?: unknown, project?: string) => {
         patch({ busy: true, error: null, stream: [] });
         try {
-          await invoke("task:start", {
+          await actionsRef.current.startTaskAsking({
             taskId,
             ...(fake !== undefined ? { fake: fake as never } : {}),
             ...(project !== undefined ? { project } : {}),
@@ -2945,7 +2957,7 @@ export function useApp() {
           // The composer's picks ride the START, because for a conversation the first message IS the
           // run — see `StartTaskRequest.overrides`. Every later message carries them on `chat:send`
           // instead, which is the same settings reaching the same call by the route that call takes.
-          await invoke("task:start", {
+          await actionsRef.current.startTaskAsking({
             taskId: summary.taskId,
             ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
             project,
@@ -3954,7 +3966,7 @@ export function useApp() {
             refreshConversation(taskId, SHARED_SESSION),
           ]);
 
-          await invoke("task:start", {
+          await actionsRef.current.startTaskAsking({
             taskId,
             project: SHARED_SESSION,
             ...(options.scripted === true ? { fake: selfTestScript() } : {}),
@@ -4112,7 +4124,60 @@ export function useApp() {
             refreshDetail(summary.taskId, at),
             refreshConversation(summary.taskId, at),
           ]);
-          await invoke("task:start", { taskId: summary.taskId, ...(project !== undefined ? { project } : {}) });
+          await actionsRef.current.startTaskAsking({ taskId: summary.taskId, ...(project !== undefined ? { project } : {}) });
+        } catch (e) {
+          fail(e);
+        }
+      },
+
+      /**
+       * Start a task, and ASK rather than only reporting when the js/ts module gate stops it.
+       *
+       * Every `task:start` in this store goes through here. The gate refuses before the workflow is
+       * validated, snapshotted or frozen, so nothing has happened when the question is raised and a
+       * second attempt after the answer is an ordinary first start rather than a resume.
+       *
+       * The pending list is FETCHED rather than read off the rejection: an Electron IPC error carries
+       * its message and nothing else, so the service keeps the list and `functions:pending` hands it
+       * back. When it comes back empty the failure was something else, and the error stands as it is.
+       */
+      startTaskAsking: async (request: StartTaskRequest): Promise<void> => {
+        try {
+          await invoke("task:start", request);
+        } catch (e) {
+          // The WHOLE request is kept, not just the task id: a retry that dropped `fake` or
+          // `overrides` would start a different run than the one the person asked for.
+          const files = await invoke("functions:pending", {
+            taskId: request.taskId,
+            ...(request.project !== undefined ? { project: request.project } : {}),
+          }).catch(() => [] as ModuleApproval[]);
+          if (files.length === 0) throw e;
+          patch({ moduleApproval: { request, files }, busy: false });
+        }
+      },
+
+      /** Dismiss the module-approval prompt without approving. Nothing has run, so there is nothing to undo. */
+      dismissModuleApproval: () => patch({ moduleApproval: null }),
+
+      /**
+       * Approve the files this task stopped on, then start it again.
+       *
+       * The approval is written by the MAIN process, which re-reads and re-hashes each file beside
+       * the write — a file that changed between the prompt and this click must not be approved as
+       * what was shown. The retry then goes back through {@link startTaskAsking}, so a second
+       * unapproved file behind the first raises a second prompt rather than a bare failure.
+       */
+      approveModulesAndStart: async () => {
+        const stopped = ref.current.moduleApproval;
+        if (stopped === null) return;
+        patch({ moduleApproval: null, busy: true });
+        try {
+          await invoke("functions:approve", {
+            files: stopped.files.map((f) => f.file),
+            ...(stopped.request.project !== undefined ? { project: stopped.request.project } : {}),
+          });
+          await actionsRef.current.startTaskAsking(stopped.request);
+          patch({ busy: false });
         } catch (e) {
           fail(e);
         }

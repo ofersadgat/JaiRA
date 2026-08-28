@@ -12,9 +12,9 @@
  *
  * Hence a {@link RecordStore} DECORATOR rather than executor work: the store's `close` is where a
  * settled call and its `providerSessionId` meet, on the prompt path (whole `LlmOutput` payload) and
- * the agent-function path (`SessionOutcome` only) alike. The captured lines land on the stored
- * payload as `nativeLines` — `LlmOutput`'s declared pinned-index shape — beside the messages they
- * annotate, so the transcript reader finds them where it already looks.
+ * the agent-function path (`SessionOutcome` only) alike. The captured lines are MERGED INTO the
+ * payload's `entries` — annotating the turns they belong to, never stored beside them as a second
+ * encoding of the same conversation, which is what `nativeLines` on the record used to be.
  *
  * Best-effort BY DESIGN: a capture failure logs and stores the record exactly as before. The record
  * is the run's memory and the capture is an enrichment of it; refusing to close a record because a
@@ -29,7 +29,7 @@ import {
   type NativeSidechainFile,
 } from "@declarative-ai/agents-api";
 import type { JsonValue, RecordStore } from "@declarative-ai/exec";
-import { renderToolResult } from "@declarative-ai/llm";
+import { entriesOfMessages, renderToolResult } from "@declarative-ai/llm";
 
 type Settled = Parameters<RecordStore["close"]>[1];
 
@@ -64,8 +64,8 @@ function recordShaped(value: unknown): value is Record<string, unknown> {
  * Three payload shapes reach a close and each gets the same answer a reader expects:
  *  - a prompt-op record is `{ value: LlmOutput }` — the lines join the output object;
  *  - a delegated function op settles with a text value and reports its conversation on
- *    `sessionOutcome` — the store prefers the report (`{ value: { messages } }`), so the lines are
- *    folded into THAT shape, which is what actually gets stored;
+ *    `sessionOutcome` — those turns become entries here, so the lines fold into the same one array
+ *    every other record carries rather than into a second shape only this path would write;
  *  - anything else has nowhere honest to put them, and is stored untouched rather than wrapped in a
  *    shape nothing reads.
  */
@@ -85,7 +85,17 @@ function enriched(settled: Settled, captured: Captured): Settled {
   }
   const messages = settled.sessionOutcome?.messages;
   if (messages !== undefined) {
-    return { ...settled, result: { ...(result ?? {}), value: { messages, ...captured } } as unknown as Settled["result"] };
+    // Converted BEFORE the fold, so this branch and the one above produce the same thing: a record
+    // whose conversation is `entries`. Storing `{ messages }` here made this the one path that
+    // wrote a second encoding, and a reader that stopped speaking it would find the record empty.
+    const entries = entriesOfMessages(messages as never, { provider: "unknown", at: new Date(0).toISOString() });
+    return {
+      ...settled,
+      result: {
+        ...(result ?? {}),
+        value: foldIntoEntries({ entries: entries as unknown as JsonValue }, captured),
+      } as unknown as Settled["result"],
+    };
   }
   return settled;
 }

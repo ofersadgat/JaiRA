@@ -19,7 +19,6 @@
  *    SQLite rejects the latter outright, because it would have to rewrite every existing row.
  */
 import type { JairaDb } from "./db";
-import { repairInterruptedRecords } from "./sessionStore";
 
 export interface Migration {
   /** The `user_version` this step brings the database TO. Sequential from 1. */
@@ -221,9 +220,11 @@ export const MIGRATIONS: Migration[] = [
     // nowhere in it. Readers compensated at display time and replay did not compensate at all: a
     // resumed conversation was handed an answer with no question in front of it.
     //
-    // `openingMessage` now splices it at the write, and this brings the rows already on disk up to
-    // the same shape, so nothing downstream has to know which era a record was written in.
-    run: (db) => void repairInterruptedRecords(db),
+    // `openingMessage` splices it at the write. This step brought the rows already on disk up to
+    // the same shape — in the `messages` encoding, which no longer exists: a record's conversation
+    // is one `entries` array and nothing reads the old shape any more. The version STAYS, because
+    // every database that ran it recorded that it did; the work is what is gone.
+    run: () => undefined,
   },
   {
     version: 8,

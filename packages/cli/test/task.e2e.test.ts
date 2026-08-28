@@ -177,13 +177,15 @@ describe("jaira task lifecycle (e2e, temp project)", () => {
     expect((retry.json() as Record<string, unknown>)["status"]).toBe("completed");
   });
 
-  it("cancel is terminal", async () => {
+  it("cancel settles the run, and the task can be started again", async () => {
     const taskId = await createPlanningTask();
     const canceled = await cli(["task", "cancel", taskId]);
     expect(canceled.code).toBe(0);
     expect((canceled.json() as Record<string, unknown>)["status"]).toBe("canceled");
-    const start = await cli(["task", "start", taskId, "--fake", "[]"]);
-    expect(start.code).toBe(1);
-    expect(start.err).toMatch(/canceled/);
+    // A stop ends the RUN, not the task. It used to refuse here, which is what made a stopped task
+    // offer a fresh copy of itself rather than picking up what it had already finished.
+    const start = await cli(["task", "start", taskId, "--fake", JSON.stringify(happyRules())]);
+    expect(start.code).toBe(0);
+    expect((start.json() as Record<string, unknown>)["status"]).toBe("completed");
   });
 });

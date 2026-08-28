@@ -5,12 +5,12 @@
  * owns only the durable bookkeeping around a run.
  */
 import { createLogger } from "@declarative-ai/log";
-import { refusal } from "@jaira/shared";
+import { ApprovalRequired, approvalRefusalMessage, refusal } from "@jaira/shared";
 import type { Failure, FunctionCapabilities, JsonValue } from "@declarative-ai/exec";
 import { loadBundle, validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
 import { newTaskId, isStartableStatus, type InstanceAddress, type TaskMeta, type TaskStatus } from "@jaira/shared";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "./snapshots";
-import { freezeForRun, moduleEntriesOf, userModules } from "./userModules";
+import { freezeForRun, moduleApprovalsFor, moduleEntriesOf, userModules, watchingForUnapproved, type WithheldSymbol } from "./userModules";
 import { nodeVfs } from "./vfs";
 import { workflowLoadOptions } from "./workflowRefs";
 import type { Project } from "./project";
@@ -155,9 +155,26 @@ export async function beginTaskRun(project: Project, taskId: string, options: Be
     // the states: the snapshot stores the resolved definition, which has it spliced in already
     // (EXPRESSIONS.md §11).
     const vfs = nodeVfs();
+    // What the approval gate withholds while this load runs. Watched unconditionally because the
+    // load is where the evidence exists: a withheld symbol makes the bundle fail to load, and a
+    // failed load leaves nothing behind to ask the question of afterwards.
+    const modules = userModules();
+    const watch = modules !== undefined ? watchingForUnapproved(modules) : undefined;
     try {
-      bundle = loadBundle(files, meta.workflow, workflowLoadOptions(project.paths, { vfs, path: project.config.workflows.path }));
+      bundle = loadBundle(
+        files,
+        meta.workflow,
+        workflowLoadOptions(project.paths, {
+          vfs,
+          path: project.config.workflows.path,
+          ...(watch !== undefined ? { watch } : {}),
+        }),
+      );
     } catch (e) {
+      // An unapproved module is raised FIRST, because it explains the load failure rather than
+      // accompanying it: the parse error the loader raised is downstream of the symbol the gate
+      // withheld, so reporting it would send the reader hunting a typo that is not there.
+      await refuseIfUnapproved(watch?.withheld() ?? []);
       const note = unreadable.length > 0 ? `\n  unreadable files:\n  ${unreadable.join("\n  ")}` : "";
       throw refusal(log, `${(e as Error).message}${note}`);
     }
@@ -211,10 +228,35 @@ async function snapshotWithModules(
       `workflow '${bundle.rootId}' calls js/ts functions (${entries.join(", ")}) but this process never called prepareUserModules()`,
     );
   }
+  // The freeze refuses with a message; this refuses with a QUESTION, and it has to come first or the
+  // question never gets asked. Both cases reach here — a module approved but since edited, and an
+  // import of an approved module that was never approved itself — and neither shows up as a withheld
+  // symbol, because a bundle that names an approved module loads perfectly well.
+  await refuseIfUnapproved([], entries);
   const frozen = await freezeForRun(modules, entries);
   const withDigest: WorkflowBundle = { ...bundle, moduleDigest: frozen.digest };
   const snap = ensureSnapshot(project.paths.snapshotsDir, withDigest, { modules: frozen.emitted });
   return { hash: snap.hash, dir: snap.dir, bundle: withDigest };
+}
+
+/**
+ * Raise the answerable refusal, if there is anything to answer.
+ *
+ * A no-op in the ordinary case — nothing withheld, nothing pending — which is what lets both call
+ * sites run it unconditionally rather than guarding it. When there IS something, the error carries
+ * the whole list: a person about to approve wants to see what they are approving, not to be asked
+ * again after each answer.
+ *
+ * It stays a `Refusal`, so a host with nobody attached prints the message and stops exactly as
+ * before. A host with a human narrows to {@link ApprovalRequired} and asks.
+ */
+async function refuseIfUnapproved(withheld: readonly WithheldSymbol[], entries: readonly string[] = []): Promise<void> {
+  if (withheld.length === 0 && entries.length === 0) return;
+  const modules = userModules();
+  if (modules === undefined) return;
+  const pending = await moduleApprovalsFor(modules, entries, withheld);
+  if (pending.length === 0) return;
+  throw new ApprovalRequired(approvalRefusalMessage(pending), pending);
 }
 
 export type RunEndStatus = Extract<TaskStatus, "completed" | "failed" | "canceled">;

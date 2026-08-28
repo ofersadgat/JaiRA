@@ -228,6 +228,24 @@ describe("what the strip is told", () => {
     expect(plan.replayed).toBe(1);
   }, 30000);
 
+  it("gives a STOPPED task a plan, keeping what it finished before someone pressed stop", async () => {
+    // The case this whole thing is about. A stop used to end the task's lifecycle, so `resumable`
+    // returned "none" before it had looked at the record — and the strip offered a fresh copy of a
+    // task whose history was intact. A stop is an interruption; the only difference from a crash is
+    // who caused it, which says nothing about what is left to pick up.
+    const taskId = await start();
+    await answer(); // a
+    await answer(); // b
+    await parked(); // c — offered, and stopped while it waits
+    service.cancelTask(taskId);
+    await until(() => statusOf(taskId) === "canceled", "the task to settle as stopped");
+
+    const plan = service.resumable(taskId);
+    expect(plan.kind).not.toBe("none");
+    // The two answered gates are kept. Re-running from the top would put them again.
+    expect(plan.replayed).toBe(2);
+  }, 30000);
+
   it("says there is nothing to resume for a task that never ran", async () => {
     const { taskId } = service.createTask({ title: "Fresh", workflow: ROOT });
     expect(service.resumable(taskId)).toMatchObject({ kind: "none", replayed: 0, frontier: [] });

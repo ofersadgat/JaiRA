@@ -41,10 +41,14 @@ import {
   jairaBasePaths,
   jairaPaths,
   parseJsonText,
+  ApprovalRequired,
+  approvalRefusalMessage,
+  approveCommandFor,
   WORKFLOW_DESCRIPTION_PATH,
   type BoardCard,
   type BoardView,
   type JairaConfig,
+  type ModuleApproval,
 } from "@jaira/shared";
 import {
   buildPromptExecutor,
@@ -106,6 +110,43 @@ export interface CliIo {
   stderr: (text: string) => void;
   /** External cancellation (SIGINT in main.ts). */
   abortSignal?: AbortSignal;
+  /**
+   * Ask a yes/no question, when there is somebody to ask.
+   *
+   * Present only where a terminal is attached on BOTH ends (`main.ts` decides), absent in a pipe, a
+   * CI job, a test harness and every non-tty caller. Its absence is the signal, which is what keeps
+   * the CLI headless by default rather than by flag: a command that needs an answer and finds no
+   * `confirm` refuses with instructions instead of blocking on a stdin nobody is typing into.
+   */
+  confirm?: (question: string) => Promise<boolean>;
+}
+
+/**
+ * How a command may answer a question the run gate raises (SPEC §7.5.5).
+ *
+ * Three states rather than two because "do not ask" and "the answer is yes" are different
+ * instructions and a single flag would conflate them: `--non-interactive` says answer nothing and
+ * refuse, `--approve-functions` says the answer is yes without asking, and the default is to ask if
+ * anybody is there.
+ */
+interface ApprovalGate {
+  /** `--non-interactive`: never prompt, even on a terminal. */
+  nonInteractive: boolean;
+  /** `--approve-functions`: approve whatever this workflow reaches, as part of starting it. */
+  approveFunctions: boolean;
+}
+
+/** The two flags every run-starting command carries, for `parseArgs`. */
+const APPROVAL_OPTIONS = {
+  "non-interactive": { type: "boolean" },
+  "approve-functions": { type: "boolean" },
+} as const;
+
+function approvalGateOf(values: { "non-interactive"?: boolean; "approve-functions"?: boolean }): ApprovalGate {
+  return {
+    nonInteractive: values["non-interactive"] === true,
+    approveFunctions: values["approve-functions"] === true,
+  };
 }
 
 class UsageError extends Error {}
@@ -114,10 +155,11 @@ const USAGE = `usage:
   jaira init [--project <dir>]
   jaira run --root <stateId> [--project <dir>] [--workflows <dir>] [--inputs <json|@file>]
             [--interactions <json|@file>] [--fake <json|@file>] [--repair-turns <n>]
+            [--non-interactive] [--approve-functions]
   jaira task create --title <t> --workflow <rootStateId> [--description <s>] [--label <l>]...
             [--inputs <json|@file>] [--branch <b>] [--project <dir>]
   jaira task start <taskId> [--interactions <json|@file>] [--fake <json|@file>]
-            [--repair-turns <n>] [--project <dir>]
+            [--repair-turns <n>] [--project <dir>] [--non-interactive] [--approve-functions]
   jaira task list [--project <dir>]
   jaira task status <taskId> [--events <n>] [--project <dir>]
   jaira task cancel <taskId> [--project <dir>]
@@ -527,6 +569,7 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
       interactions: { type: "string" },
       fake: { type: "string" },
       "repair-turns": { type: "string" },
+      ...APPROVAL_OPTIONS,
     },
   });
   if (values.root === undefined) throw new UsageError("run requires --root <stateId>");
@@ -588,7 +631,7 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
       ...(Object.keys(inputs).length > 0 ? { inputs } : {}),
       labels: ["adhoc"],
     });
-    return await runTaskNow(project, task.id, wiring, io);
+    return await runTaskNow(project, task.id, wiring, io, approvalGateOf(values));
   } finally {
     project.close();
   }
@@ -730,6 +773,7 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
       fake: { type: "string" },
       "repair-turns": { type: "string" },
       project: { type: "string" },
+      ...APPROVAL_OPTIONS,
     },
   });
   const taskId = positionals[0];
@@ -737,10 +781,80 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
   const wiring = runWiringOf(values, io.cwd);
   const project = await openWithRecoveryNote(projectDirOf(values, io), io);
   try {
-    return await runTaskNow(project, taskId, wiring, io);
+    return await runTaskNow(project, taskId, wiring, io, approvalGateOf(values));
   } finally {
     project.close();
   }
+}
+
+/**
+ * Start a run, asking about unapproved js/ts modules rather than only refusing over them.
+ *
+ * `beginTaskRun` raises {@link ApprovalRequired} BEFORE it validates, snapshots or freezes anything,
+ * so the answer arrives while nothing has happened yet and a second attempt is an ordinary first
+ * start rather than a resume. That is the whole reason the gate can be a question here at all.
+ *
+ * The three answers, in the order they are checked:
+ *
+ *  - `--approve-functions`: approve the list and go, saying which files were approved. Loud rather
+ *    than silent, because "I approved these five files" is a fact the person wants in their scrollback.
+ *  - `--non-interactive`, or no terminal attached: refuse, with the `jaira functions approve` line
+ *    that answers it. Nothing is approved and nothing has run.
+ *  - otherwise: show each file and ask. A no is a refusal, not a partial start.
+ *
+ * Approving REBUILDS the module pair before retrying. Without that the retry consults the index this
+ * process built at startup, which was gated on the approval that did not exist yet, and the second
+ * attempt fails exactly as the first did.
+ */
+async function beginTaskRunAsking(
+  project: Project,
+  taskId: string,
+  options: Parameters<typeof beginTaskRun>[2],
+  gate: ApprovalGate,
+  io: CliIo,
+): Promise<Awaited<ReturnType<typeof beginTaskRun>>> {
+  try {
+    return await beginTaskRun(project, taskId, options);
+  } catch (e) {
+    if (!(e instanceof ApprovalRequired)) throw e;
+    const modules = userModules();
+    if (modules === undefined) throw e;
+    if (!(await answerApproval(e.pending, gate, io))) {
+      // Re-raised with the command APPENDED rather than printed alongside, so the next step reads
+      // under the refusal instead of above it: `answerApproval` writes to stderr as it goes, and the
+      // top-level printer has not written `error:` yet.
+      throw new ApprovalRequired(`${e.message}\n${approveCommandFor(e.pending)}`, e.pending);
+    }
+    for (const entry of e.pending) modules.approvals.approve(entry.file, entry.hash);
+    io.stderr(`approved ${e.pending.length} function file(s): ${e.pending.map((p) => p.file).join(", ")}\n`);
+    await prepareUserModules(project.paths, { searchPath: project.config.workflows.path, rebuild: true });
+    return await beginTaskRun(project, taskId, options);
+  }
+}
+
+/** Whether these files may run: the flag, or the person, or neither. */
+async function answerApproval(pending: readonly ModuleApproval[], gate: ApprovalGate, io: CliIo): Promise<boolean> {
+  if (gate.approveFunctions) return true;
+  // Neither flag set, and nobody to ask. The refusal itself carries the command that answers it, so
+  // there is nothing to print here — see `beginTaskRunAsking`.
+  if (gate.nonInteractive || io.confirm === undefined) return false;
+  for (const entry of pending) {
+    const why = entry.previousHash !== undefined ? "CHANGED since you approved it" : "never approved";
+    const called = entry.symbols !== undefined && entry.symbols.length > 0 ? `, called as ${entry.symbols.join(", ")}` : "";
+    io.stderr(`\n  ${entry.file} — ${why}${called}\n`);
+    // The source, always. A prompt that asks whether to run code without showing it is a rubber
+    // stamp, and `previousHash` is what tells the reader whether they are judging a whole file or a
+    // change to one they already judged.
+    io.stderr(`\n${indent(entry.source)}\n`);
+  }
+  return io.confirm(`run ${pending.length === 1 ? "this file" : `these ${pending.length} files`}?`);
+}
+
+function indent(source: string): string {
+  return source
+    .split("\n")
+    .map((line) => `    ${line}`)
+    .join("\n");
 }
 
 /**
@@ -749,7 +863,13 @@ async function cmdTaskStart(argv: string[], io: CliIo): Promise<number> {
  * does: a run row, the journal, scoped conversations, the job claim, artifacts). The caller owns
  * the project's lifecycle.
  */
-async function runTaskNow(project: Project, taskId: string, wiring: RunWiring, io: CliIo): Promise<number> {
+async function runTaskNow(
+  project: Project,
+  taskId: string,
+  wiring: RunWiring,
+  io: CliIo,
+  gate: ApprovalGate = { nonInteractive: false, approveFunctions: false },
+): Promise<number> {
   // Declared out here so `finally` can release the claim however the run ends.
   let owner: RunOwner | undefined;
   try {
@@ -767,7 +887,7 @@ async function runTaskNow(project: Project, taskId: string, wiring: RunWiring, i
     if (project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
       throw new Error(`task '${taskId}' is already running in another process`);
     }
-    const started = await beginTaskRun(project, taskId, { functions: probe.functions });
+    const started = await beginTaskRunAsking(project, taskId, { functions: probe.functions }, gate, io);
     // Artifact placement (DESIGN §7.6), assembled once and shared by the file tools
     // and the post-run sink so both put files in the same place.
     const artifacts = artifactWiring({
@@ -1040,7 +1160,15 @@ function renderWorkflows(browser: WorkflowBrowser): string {
     if (workflow.driftedTasks.length > 0) {
       lines.push(`  drift   ${workflow.driftedTasks.join(", ")} pinned to an older snapshot`);
     }
-    if (workflow.loadError !== undefined) lines.push(`  error   ${workflow.loadError}`);
+    // The approval refusal INSTEAD of the load error, not beside it: the load error is what the gate
+    // caused, and printing both invites the reader to debug the symbol rather than answer the
+    // question. `needsApproval` is only ever set alongside a load error, so nothing is lost.
+    if (workflow.needsApproval !== undefined && workflow.needsApproval.length > 0) {
+      for (const line of approvalRefusalMessage(workflow.needsApproval).split("\n")) lines.push(`  ${line}`);
+      lines.push(`  ${approveCommandFor(workflow.needsApproval)}`);
+    } else if (workflow.loadError !== undefined) {
+      lines.push(`  error   ${workflow.loadError}`);
+    }
     for (const issue of workflow.issues) {
       lines.push(`  ${issue.severity === "error" ? "✗" : "⚠"} ${issue.stateId} ${issue.path}: ${issue.message}`);
     }

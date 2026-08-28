@@ -129,8 +129,9 @@ describe("stoppedAction", () => {
   it("falls back to the restart verbs when there is nothing to resume", () => {
     expect(stoppedAction({ status: "failed" })).toMatchObject({ verb: "Try again", resume: false });
     expect(stoppedAction({ status: "interrupted" })).toMatchObject({ verb: "Start again", resume: false });
-    // Canceled never resumes: it ended on purpose, and its lifecycle is over either way.
-    expect(stoppedAction({ status: "canceled" })).toMatchObject({ verb: "Run again", resume: false });
+    // A stopped task falls back like any other: this is the no-record case, not a statement that a
+    // stop cannot be resumed. Given a plan it says Resume or Retry, same as the rest.
+    expect(stoppedAction({ status: "canceled" })).toMatchObject({ verb: "Start again", resume: false });
     expect(stoppedAction({ status: "queued" })).toMatchObject({ verb: "Start", resume: false });
   });
 

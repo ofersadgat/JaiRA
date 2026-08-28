@@ -10,6 +10,12 @@ The transcript's role-and-order weave is deleted with them: §1's join no longer
 every read, because the capture merges into the entries once, at close. What reaches the reader is
 events, spliced by the index they were always stamped with.
 
+One word, stream to store. What the live turn accumulates and what the record holds are the same
+things at two moments, so both are `entries` — `TurnDelta.entry`, `session:turn.entry`,
+`LiveTurnSnapshot.entries`, `value.entries`. They were "items" on the way in and "entries" once
+stored, which made a translation out of what should be an append, and made two people describing the
+same field to each other take four rounds to notice they agreed.
+
 The measurements below are from that run (17 agent operations, the `feature` workflow), read out of
 `.jaira/system/jaira.db`.
 
