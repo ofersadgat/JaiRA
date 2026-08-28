@@ -38,6 +38,8 @@ import {
 } from "@jaira/persistence";
 import {
   defaultConfig,
+  BASE_DIR_ENV,
+  takeHomeFlag,
   jairaBasePaths,
   jairaPaths,
   parseJsonText,
@@ -152,6 +154,8 @@ function approvalGateOf(values: { "non-interactive"?: boolean; "approve-function
 class UsageError extends Error {}
 
 const USAGE = `usage:
+  jaira [--home <dir>] <command> …    the shared root to use (default: $JAIRA_HOME, then ~/.jaira)
+
   jaira init [--project <dir>]
   jaira run --root <stateId> [--project <dir>] [--workflows <dir>] [--inputs <json|@file>]
             [--interactions <json|@file>] [--fake <json|@file>] [--repair-turns <n>]
@@ -201,8 +205,24 @@ function installLogSink(io: CliIo): void {
 
 export async function runCli(argv: string[], io: CliIo): Promise<number> {
   installLogSink(io);
+  let restore: (() => void) | undefined;
   try {
-    return await dispatch(argv, io);
+    // `--home` is sugar over the environment variable rather than a second mechanism: the base root
+    // is resolved lazily, from `process.env`, at each of the many points that need it, and threading
+    // a parameter to all of them would be the refactor this flag exists to avoid. Set for the
+    // dispatch and put back afterwards, so a caller running two commands in one process — the tests
+    // do — is not left standing in the previous one's home.
+    const { home, rest, malformed } = takeHomeFlag(argv);
+    if (malformed === true) throw new UsageError("--home needs a directory");
+    if (home !== undefined) {
+      const previous = process.env[BASE_DIR_ENV];
+      process.env[BASE_DIR_ENV] = home;
+      restore = () => {
+        if (previous === undefined) delete process.env[BASE_DIR_ENV];
+        else process.env[BASE_DIR_ENV] = previous;
+      };
+    }
+    return await dispatch(rest, io);
   } catch (e) {
     if (e instanceof UsageError) {
       io.stderr(`error: ${e.message}\n\n${USAGE}`);
@@ -210,6 +230,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     }
     io.stderr(`error: ${(e as Error).message}\n`);
     return 1;
+  } finally {
+    restore?.();
   }
 }
 

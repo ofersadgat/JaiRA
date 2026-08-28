@@ -8,6 +8,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Git, NodeExec } from "@jaira/runtime";
+import { testHome } from "@jaira/testing";
 import { runCli, type CliIo } from "../src/cli";
 import { makePlanningProject } from "./fixtures";
 
@@ -41,8 +42,7 @@ describe("jaira changeset review", () => {
     writeFileSync(join(dir, "src", "new.md"), "brand new\n", "utf8");
 
     const cli = io();
-    const code = await runCli(
-      [
+    const code = await runCli(["--home", testHome(),
         "changeset",
         "review",
         "--interactions",
@@ -68,7 +68,7 @@ describe("jaira changeset review", () => {
 
   it("says plainly when there is nothing to review", async () => {
     const cli = io();
-    expect(await runCli(["changeset", "review"], cli)).toBe(0);
+    expect(await runCli(["--home", testHome(), "changeset", "review"], cli)).toBe(0);
     expect(cli.out()).toContain("nothing to review");
   });
 
@@ -76,7 +76,7 @@ describe("jaira changeset review", () => {
     writeFileSync(join(dir, "notes.md"), "changed\n", "utf8");
     const cli = io();
     // vitest runs with no TTY, so the terminal reviewer is not registered and nothing was scripted.
-    expect(await runCli(["changeset", "review"], cli)).toBe(1);
+    expect(await runCli(["--home", testHome(), "changeset", "review"], cli)).toBe(1);
     expect(cli.err()).toContain("nothing can answer the gate");
     // Refused before touching anything: the edit survives.
     expect(readFileSync(join(dir, "notes.md"), "utf8")).toBe("changed\n");

@@ -14,14 +14,15 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PermissionRequest } from "@declarative-ai/permissions";
 import { initProject, openProject, type Project } from "@jaira/persistence";
 import { ApprovalHub, compilePolicy, type ApprovalRequest, type PolicyAuditEntry } from "@jaira/runtime";
+import { testHome } from "@jaira/testing";
 
 let dir: string;
 let project: Project;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-approve-"));
-  initProject(dir);
-  project = openProject(dir);
+  initProject(dir, testHome());
+  project = openProject(dir, { baseDir: testHome() });
 });
 
 afterEach(() => {

@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
+import { testHome } from "@jaira/testing";
 import { initProject, openProject, type Project } from "../src/project";
 import { browseWorkflows, lintErrors } from "../src/workflows";
 
@@ -18,9 +19,9 @@ let project: Project;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-wfbrowse-"));
-  const paths = initProject(dir);
+  const paths = initProject(dir, testHome());
   writeWorkflowFiles(paths.workflowsDir, specPlanningFiles());
-  project = openProject(dir);
+  project = openProject(dir, { baseDir: testHome() });
 });
 
 afterEach(() => {

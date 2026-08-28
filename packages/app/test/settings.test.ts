@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { defaultAppearance, type PushMessage } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { AppService, type KeychainPort } from "../src/main/service";
 
 let dir: string;
@@ -45,7 +46,7 @@ beforeEach(() => {
   baseDir = mkdtempSync(join(tmpdir(), "jaira-app-base-"));
   stored = {};
   pushes = [];
-  initProject(dir);
+  initProject(dir, testHome());
   service = new AppService({
     baseDir,
     watchWorkflows: false,
@@ -258,7 +259,7 @@ describe("remembering the projects that were open", () => {
   it("records a project as it opens, in the order they were opened", async () => {
     const second = mkdtempSync(join(tmpdir(), "jaira-app-second-"));
     try {
-      initProject(second);
+      initProject(second, testHome());
       await service.open(dir);
       await service.open(second);
 
@@ -280,7 +281,7 @@ describe("remembering the projects that were open", () => {
   it("re-opens them on the next start, in the order they were opened", async () => {
     const second = mkdtempSync(join(tmpdir(), "jaira-app-restore-"));
     try {
-      initProject(second);
+      initProject(second, testHome());
       await service.open(second);
       await service.open(dir);
       await service.close();
@@ -302,7 +303,7 @@ describe("remembering the projects that were open", () => {
 
   it("forgets a remembered directory that is no longer a project", async () => {
     const gone = mkdtempSync(join(tmpdir(), "jaira-app-gone-"));
-    initProject(gone);
+    initProject(gone, testHome());
     await service.open(gone);
     await service.open(dir);
     await service.close();

@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { jairaPaths } from "@jaira/shared";
 import { resetUserModules } from "@jaira/persistence";
+import { testHome } from "@jaira/testing";
 import { runCli, type CliIo } from "../src/cli";
 import { makePlanningProject } from "./fixtures";
 
@@ -31,7 +32,7 @@ beforeEach(() => {
   base = mkdtempSync(join(tmpdir(), "jaira-base-"));
   process.env.JAIRA_HOME = base;
   dir = makePlanningProject();
-  const paths = jairaPaths(dir);
+  const paths = jairaPaths(dir, testHome());
   writeFileSync(
     join(paths.workflowsDir, "caller.json"),
     JSON.stringify({
@@ -63,7 +64,7 @@ async function cli(args: string[], confirm?: (q: string) => Promise<boolean>): P
     stderr: (t) => (err += t),
     ...(confirm !== undefined ? { confirm } : {}),
   };
-  return { code: await runCli(args, io), out, err };
+  return { code: await runCli(["--home", testHome(), ...args], io), out, err };
 }
 
 /** Creates the task and hands back the id the CLI minted for it. */

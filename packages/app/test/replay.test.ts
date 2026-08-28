@@ -19,6 +19,7 @@ import { addressKey, buildRunReplay, initProject, openProject, type RunReplay } 
 import { writeWorkflowFiles } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
 import type { PushMessage } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
 const ROOT = "replay";
@@ -66,10 +67,10 @@ let pushes: PushMessage[];
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-replay-"));
-  workflowsDir = initProject(dir).workflowsDir;
+  workflowsDir = initProject(dir, testHome()).workflowsDir;
   writeWorkflowFiles(workflowsDir, replayFiles());
   pushes = [];
-  service = new AppService({ publish: (m) => pushes.push(m) });
+  service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   await service.open(dir);
 });
 
@@ -112,7 +113,7 @@ async function parked(after?: string): Promise<void> {
 
 /** The index for this task's only run, read the way a resume would. */
 function replayOf(taskId: string): RunReplay {
-  const project = openProject(dir);
+  const project = openProject(dir, { baseDir: testHome() });
   try {
     const runId = project.runtime.listRuns(taskId)[0]!.id;
     return buildRunReplay(project, taskId, runId);
@@ -285,7 +286,7 @@ describe("the replay index over a conversation", () => {
  * the run actually produced.
  */
 function rewriteRecords(taskId: string, payload: JsonValue): void {
-  const project = openProject(dir);
+  const project = openProject(dir, { baseDir: testHome() });
   try {
     const rows = project.db
       .prepare("SELECT id FROM operation_records WHERE task_id = ? ORDER BY id")

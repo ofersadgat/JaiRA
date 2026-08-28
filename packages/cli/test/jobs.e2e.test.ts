@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openProject, newOwnerToken } from "@jaira/persistence";
+import { testHome } from "@jaira/testing";
 import { runCli, type CliIo } from "../src/cli";
 import { blockedRules, happyRules, HUMAN_REVIEW_FUNCTION, makePlanningProject } from "./fixtures";
 
@@ -28,7 +29,7 @@ async function cli(args: string[]): Promise<{ code: number; out: string; err: st
   let out = "";
   let err = "";
   const io: CliIo = { cwd: dir, stdout: (t) => (out += t), stderr: (t) => (err += t) };
-  const code = await runCli(args, io);
+  const code = await runCli(["--home", testHome(), ...args], io);
   return { code, out, err };
 }
 
@@ -44,7 +45,7 @@ describe("a run claims itself", () => {
     const taskId = await createTask();
     await cli(["task", "start", taskId, "--fake", JSON.stringify(happyRules()), "--interactions", gate]);
 
-    const project = openProject(dir);
+    const project = openProject(dir, { baseDir: testHome() });
     try {
       const jobs = project.jobs.list(taskId);
       const runJob = jobs.find((j) => j.kind === "run")!;
@@ -63,7 +64,7 @@ describe("a run claims itself", () => {
     const taskId = await createTask();
     await cli(["task", "start", taskId, "--fake", JSON.stringify(happyRules()), "--interactions", gate]);
 
-    const project = openProject(dir);
+    const project = openProject(dir, { baseDir: testHome() });
     try {
       expect(project.orphans).toEqual([]);
     } finally {
@@ -77,7 +78,7 @@ describe("a run claims itself", () => {
     const res = await cli(["task", "start", taskId, "--fake", JSON.stringify(blockedRules())]);
     expect(res.code).toBe(1);
 
-    const project = openProject(dir);
+    const project = openProject(dir, { baseDir: testHome() });
     try {
       expect(project.jobs.liveRunJob(taskId, Date.now())).toBeUndefined();
     } finally {
@@ -90,7 +91,7 @@ describe("a second process", () => {
   it("is refused rather than taking the task over", async () => {
     const taskId = await createTask();
     // Simulate a live owner elsewhere.
-    const project = openProject(dir);
+    const project = openProject(dir, { baseDir: testHome() });
     project.runtime.beginRun(taskId, "hash", Date.now());
     project.jobs.claimRun({ taskId, runId: 1, ownerToken: newOwnerToken(), pid: 999, nowMs: Date.now() });
     project.close();
@@ -103,7 +104,7 @@ describe("a second process", () => {
 
   it("requests a cancel instead of writing a terminal status", async () => {
     const taskId = await createTask();
-    const project = openProject(dir);
+    const project = openProject(dir, { baseDir: testHome() });
     project.runtime.beginRun(taskId, "hash", Date.now());
     project.runtime.setStatus(taskId, "running", Date.now());
     project.jobs.claimRun({ taskId, runId: 1, ownerToken: newOwnerToken(), nowMs: Date.now() });
@@ -112,7 +113,7 @@ describe("a second process", () => {
     const res = await cli(["task", "cancel", taskId]);
 
     expect(JSON.parse(res.out)).toMatchObject({ status: "cancel_requested" });
-    const after = openProject(dir);
+    const after = openProject(dir, { baseDir: testHome() });
     try {
       // The owning process records the terminal status itself; this one must not
       // reach in and do it.
@@ -126,7 +127,7 @@ describe("a second process", () => {
 
 describe("orphan reporting", () => {
   it("warns about a process a dead session left running", async () => {
-    const project = openProject(dir);
+    const project = openProject(dir, { baseDir: testHome() });
     const stale = Date.now() - 10 * 60_000;
     const token = newOwnerToken();
     project.jobs.claimRun({ taskId: "t-old", runId: 1, ownerToken: token, nowMs: stale });

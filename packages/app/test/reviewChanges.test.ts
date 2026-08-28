@@ -13,6 +13,7 @@ import { initProject } from "@jaira/persistence";
 import { NodeExec, Git, REVIEW_ARTIFACTS } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
 import type { PushMessage } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
 let dir: string;
@@ -29,7 +30,7 @@ async function until(predicate: () => boolean, label: string, budgetMs = 8000): 
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-review-"));
-  initProject(dir);
+  initProject(dir, testHome());
   const git = new Git({ exec: new NodeExec(), repoDir: dir });
   await git.run(["init", "--initial-branch=main"]);
   await git.run(["config", "user.email", "t@example.com"]);
@@ -39,7 +40,7 @@ beforeEach(async () => {
   await git.run(["commit", "-m", "base"]);
 
   pushes = [];
-  service = new AppService({ publish: (m) => pushes.push(m) });
+  service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   await service.open(dir);
 });
 

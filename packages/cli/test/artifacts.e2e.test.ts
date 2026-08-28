@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject, openProject } from "@jaira/persistence";
 import { jairaPaths } from "@jaira/shared";
 import { writeWorkflowFiles } from "@jaira/runtime";
+import { testHome } from "@jaira/testing";
 import { runCli, type CliIo } from "../src/cli";
 
 let dir: string;
@@ -36,7 +37,7 @@ const FAKE = [{ promptIncludes: "Summarize", output: "# Widgets\n\nA plan." }];
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-artifacts-"));
-  const paths = initProject(dir);
+  const paths = initProject(dir, testHome());
   writeWorkflowFiles(paths.workflowsDir, WORKFLOW);
 });
 
@@ -48,12 +49,12 @@ async function cli(args: string[]): Promise<{ code: number; out: string; err: st
   let out = "";
   let err = "";
   const io: CliIo = { cwd: dir, stdout: (t) => (out += t), stderr: (t) => (err += t) };
-  const code = await runCli(args, io);
+  const code = await runCli(["--home", testHome(), ...args], io);
   return { code, out, err };
 }
 
 function configure(artifacts: Record<string, unknown>): void {
-  writeFileSync(jairaPaths(dir).settingsFile, JSON.stringify({ artifacts }, null, 2), "utf8");
+  writeFileSync(jairaPaths(dir, testHome()).settingsFile, JSON.stringify({ artifacts }, null, 2), "utf8");
 }
 
 /** Create and run a task, returning its id and the run report. */
@@ -74,7 +75,7 @@ describe("a returned artifact reaches the filesystem", () => {
     expect(report.artifacts).toMatchObject([{ path: "summary.md", bytes: 18 }]);
 
     // …and it is recorded, so a later state or run can resolve the path.
-    const project = openProject(dir);
+    const project = openProject(dir, { baseDir: testHome() });
     try {
       const record = project.artifacts.get(taskId, "summary.md")!;
       expect(record.format).toBe("text/markdown");
@@ -111,7 +112,7 @@ describe("a returned artifact reaches the filesystem", () => {
     expect(existsSync(join(dir, "summary.md"))).toBe(false);
     expect(report.artifacts).toMatchObject([{ path: "summary.md" }]);
 
-    const project = openProject(dir);
+    const project = openProject(dir, { baseDir: testHome() });
     try {
       const record = project.artifacts.get(taskId, "summary.md")!;
       expect(record.physicalPath).toBeUndefined();

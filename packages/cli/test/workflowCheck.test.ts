@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { jairaPaths } from "@jaira/shared";
 import { conformanceRules, type ConformanceFinding, type ConformanceRequirement } from "@jaira/runtime";
+import { testHome } from "@jaira/testing";
 import { runCli, type CliIo } from "../src/cli";
 import { makePlanningProject } from "./fixtures";
 
@@ -34,7 +35,7 @@ async function cli(args: string[]): Promise<{ code: number; out: string; err: st
   let out = "";
   let err = "";
   const io: CliIo = { cwd: dir, stdout: (t) => (out += t), stderr: (t) => (err += t) };
-  const code = await runCli(args, io);
+  const code = await runCli(["--home", testHome(), ...args], io);
   return { code, out, err };
 }
 
@@ -147,7 +148,7 @@ describe("jaira workflow check", () => {
     // of health. The digest no longer goes partial silently — an unloadable root is rendered from
     // its files and labelled — so the check runs, and the warning is what keeps the answer from
     // being mistaken for a clean one.
-    writeFileSync(join(jairaPaths(dir).workflowsDir, "scratch.json"), "{ half-written", "utf8");
+    writeFileSync(join(jairaPaths(dir, testHome()).workflowsDir, "scratch.json"), "{ half-written", "utf8");
     const res = await cli(["workflow", "check", "--fake", fake([satisfied("R1", ["x"])], "conforms")]);
     expect(res.code).toBe(0);
     expect(res.err).toContain("workflows that do not load");

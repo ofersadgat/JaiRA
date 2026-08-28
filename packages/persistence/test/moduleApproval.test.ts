@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ApprovalRequired } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { moduleHash } from "@declarative-ai/hw";
 import {
   beginTaskRun,
@@ -50,7 +51,7 @@ let project: Project | undefined;
 let moduleFile: string;
 
 async function open(): Promise<Project> {
-  project = openProject(dir);
+  project = openProject(dir, { baseDir: testHome() });
   // The pair a real host builds at process start. Rebuilt per test so one test's approvals — and one
   // test's directory listing — cannot leak into the next.
   await prepareUserModules(project.paths, { rebuild: true });
@@ -62,7 +63,7 @@ beforeEach(() => {
   base = mkdtempSync(join(tmpdir(), "jaira-base-"));
   process.env.JAIRA_HOME = base;
   dir = mkdtempSync(join(tmpdir(), "jaira-approve-"));
-  const paths = initProject(dir);
+  const paths = initProject(dir, testHome());
   writeFileSync(join(paths.workflowsDir, "caller.json"), JSON.stringify(CALLER), "utf8");
   mkdirSync(join(dir, ".jaira", "functions"), { recursive: true });
   moduleFile = join(dir, ".jaira", "functions", "confidence.ts");

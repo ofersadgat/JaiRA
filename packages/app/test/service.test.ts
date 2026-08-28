@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { blockedRules, happyRules, HUMAN_REVIEW_FUNCTION, specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
 import { jairaBasePaths, SHARED_SESSION, type PushMessage } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import type { JsonValue } from "@declarative-ai/json";
 import { createLogger } from "@declarative-ai/log";
 import { AppService, Refusal } from "../src/main/service";
@@ -23,11 +24,11 @@ let pushes: PushMessage[];
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-app-"));
-  const paths = initProject(dir);
+  const paths = initProject(dir, testHome());
   writeWorkflowFiles(paths.workflowsDir, specPlanningFiles());
   pushes = [];
   let n = 0;
-  service = new AppService({ publish: (m) => pushes.push(m), nextInteractionId: () => `ui-${++n}` });
+  service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m), nextInteractionId: () => `ui-${++n}` });
   await service.open(dir);
 });
 
@@ -78,7 +79,7 @@ describe("AppService reads", () => {
 
   it("throws for an unknown task and when no project is open", () => {
     expect(() => service.taskDetail("nope")).toThrow(/unknown task/);
-    const closed = new AppService();
+    const closed = new AppService({ baseDir: testHome() });
     expect(() => closed.listTasks()).toThrow(/no project is open/);
   });
 });
@@ -315,7 +316,7 @@ describe("AppService.cancelTask (not running here)", () => {
 describe("sessions — one process, several projects", () => {
   it("opens another project ALONGSIDE the first, and refuses to guess between them", async () => {
     const other = mkdtempSync(join(tmpdir(), "jaira-app-b-"));
-    const paths = initProject(other);
+    const paths = initProject(other, testHome());
     writeWorkflowFiles(paths.workflowsDir, specPlanningFiles());
     try {
       const taskId = newTask();
@@ -344,7 +345,7 @@ describe("sessions — one process, several projects", () => {
 
   it("puts both projects in the files tree, with the shared root listed once beside them", async () => {
     const other = mkdtempSync(join(tmpdir(), "jaira-app-c-"));
-    initProject(other);
+    initProject(other, testHome());
     try {
       await service.open(other);
       const tree = service.filesTree();
@@ -363,7 +364,7 @@ describe("sessions — one process, several projects", () => {
 
   it("lists every project's tasks as one recency-ordered list, each stamped with its project", async () => {
     const other = mkdtempSync(join(tmpdir(), "jaira-app-d-"));
-    const paths = initProject(other);
+    const paths = initProject(other, testHome());
     writeWorkflowFiles(paths.workflowsDir, specPlanningFiles());
     try {
       const here = newTask("here");
@@ -462,7 +463,7 @@ describe("the base root as a project", () => {
 
   it("survives switching the open project, because it is machine-global", async () => {
     const other = mkdtempSync(join(tmpdir(), "jaira-app-c-"));
-    initProject(other);
+    initProject(other, testHome());
     try {
       // A base-layer status read materializes it; switching checkouts must not then discard it.
       service.syncStatus({ layer: "base", path: "workflows/workflow.md" });

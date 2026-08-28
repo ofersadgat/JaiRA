@@ -16,6 +16,7 @@ import { initProject } from "@jaira/persistence";
 import { REVIEW_ARTIFACTS } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
 import type { Changeset, PushMessage } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
 let dir: string;
@@ -32,9 +33,9 @@ async function until(predicate: () => boolean, label: string, budgetMs = 8000): 
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-reviewsync-"));
-  initProject(dir);
+  initProject(dir, testHome());
   pushes = [];
-  service = new AppService({ publish: (m) => pushes.push(m) });
+  service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   await service.open(dir);
   service.createFile({ layer: "project", path: "workflows/workflow.md", kind: "file", text: "# The flow\n" });
 });

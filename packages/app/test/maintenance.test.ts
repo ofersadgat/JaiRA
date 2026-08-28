@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { happyRules, HUMAN_REVIEW_FUNCTION, specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
 import type { PushMessage } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
 let dir: string;
@@ -17,10 +18,10 @@ let pushes: PushMessage[];
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-maint-"));
-  const paths = initProject(dir);
+  const paths = initProject(dir, testHome());
   writeWorkflowFiles(paths.workflowsDir, specPlanningFiles());
   pushes = [];
-  service = new AppService({ publish: (m) => pushes.push(m), watchDebounceMs: 10 });
+  service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m), watchDebounceMs: 10 });
   await service.open(dir);
 });
 

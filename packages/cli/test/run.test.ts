@@ -8,6 +8,7 @@ import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { testHome } from "@jaira/testing";
 import { runCli, type CliIo } from "../src/cli";
 import { blockedRules, happyRules, HUMAN_REVIEW_FUNCTION, makePlanningProject } from "./fixtures";
 
@@ -43,7 +44,10 @@ describe("jaira run (headless planning workflow)", () => {
     const bin = fileURLToPath(new URL("../bin/jaira.js", import.meta.url));
     const stdout = execFileSync(
       process.execPath,
-      [bin, "run", "--root", "feature/plan", "--inputs", '{"issue":"the issue"}', "--fake", "@fake.json"],
+      // `--home` on the CHILD's command line, not inherited from this process's environment. A
+      // subprocess is the one caller that would otherwise carry the runner's own home into a real
+      // `jaira` invocation, and the point of this test is the binary as somebody runs it.
+      [bin, "--home", testHome(), "run", "--root", "feature/plan", "--inputs", '{"issue":"the issue"}', "--fake", "@fake.json"],
       { cwd: dir, encoding: "utf8" },
     );
     const report = JSON.parse(stdout) as Record<string, unknown>;
@@ -57,8 +61,7 @@ describe("jaira run (headless planning workflow)", () => {
 
   it("routes a blocked critique through a scripted interactive function", async () => {
     const cli = io();
-    const code = await runCli(
-      [
+    const code = await runCli(["--home", testHome(),
         "run",
         "--root",
         "feature/plan",
@@ -86,8 +89,7 @@ describe("jaira run (headless planning workflow)", () => {
 
   it("fails the state when an interactive function is reached unregistered", async () => {
     const cli = io();
-    const code = await runCli(
-      ["run", "--root", "feature/plan", "--inputs", '{"issue":"i"}', "--fake", JSON.stringify(blockedRules())],
+    const code = await runCli(["--home", testHome(), "run", "--root", "feature/plan", "--inputs", '{"issue":"i"}', "--fake", JSON.stringify(blockedRules())],
       cli,
     );
     expect(code).toBe(1);
@@ -104,7 +106,7 @@ describe("jaira run (headless planning workflow)", () => {
       "utf8",
     );
     const cli = io();
-    const code = await runCli(["run", "--root", "feature/plan", "--fake", "[]"], cli);
+    const code = await runCli(["--home", testHome(), "run", "--root", "feature/plan", "--fake", "[]"], cli);
     expect(code).toBe(1);
     expect(cli.err()).toMatch(/validation failed/);
     expect(cli.err()).toMatch(/nowhere/);
@@ -112,8 +114,8 @@ describe("jaira run (headless planning workflow)", () => {
 
   it("reports usage errors distinctly", async () => {
     const cli = io();
-    expect(await runCli(["run"], cli)).toBe(2);
+    expect(await runCli(["--home", testHome(), "run"], cli)).toBe(2);
     expect(cli.err()).toMatch(/--root/);
-    expect(await runCli(["bogus"], io())).toBe(2);
+    expect(await runCli(["--home", testHome(), "bogus"], io())).toBe(2);
   });
 });

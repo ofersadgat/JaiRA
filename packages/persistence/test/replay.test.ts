@@ -15,6 +15,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { testHome } from "@jaira/testing";
 import { buildTaskReplay, initProject, openProject, taskRun, type Project } from "../src/index";
 
 let dir: string;
@@ -22,8 +23,8 @@ let project: Project;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-replayfold-"));
-  initProject(dir);
-  project = openProject(dir);
+  initProject(dir, testHome());
+  project = openProject(dir, { baseDir: testHome() });
   project.runtime.insert("t", 1000);
 });
 

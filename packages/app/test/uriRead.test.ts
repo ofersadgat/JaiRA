@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject, openProject } from "@jaira/persistence";
 import { SqliteSessionStore } from "@jaira/persistence";
 import { NodeExec, Git } from "@jaira/runtime";
+import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
 let dir: string;
@@ -19,8 +20,8 @@ let service: AppService;
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-uriread-"));
-  initProject(dir);
-  service = new AppService({ watchWorkflows: false });
+  initProject(dir, testHome());
+  service = new AppService({ baseDir: testHome(), watchWorkflows: false });
   await service.open(dir);
 });
 
@@ -91,7 +92,7 @@ describe("git: blob reads", () => {
 describe("db:// record reads", () => {
   it("resolves a recorded value through session_positions, pointer and all", async () => {
     // Write a record the way a run would: through the store, at a claimed position.
-    const project = openProject(dir);
+    const project = openProject(dir, { baseDir: testHome() });
     try {
       const store = new SqliteSessionStore(project.db, { taskId: "t1", runId: 1 });
       const at = store.resolve({ ref: "review" }).at;

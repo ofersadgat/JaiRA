@@ -24,6 +24,7 @@ import { initProject, openProject } from "@jaira/persistence";
 import { componentsWorkflowFiles, COMPONENTS_ID, writeWorkflowFiles } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
 import type { PushMessage } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
 let dir: string;
@@ -32,10 +33,10 @@ let pushes: PushMessage[];
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-runrecord-"));
-  const paths = initProject(dir);
+  const paths = initProject(dir, testHome());
   writeWorkflowFiles(paths.workflowsDir, componentsWorkflowFiles());
   pushes = [];
-  service = new AppService({ publish: (m) => pushes.push(m) });
+  service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   await service.open(dir);
 });
 
@@ -84,7 +85,7 @@ interface EventRow {
 describe("what a stopped run can be read back from", () => {
   it("joins each instance to what its operation returned", async () => {
     const taskId = await runToCompletion();
-    const project = openProject(dir);
+    const project = openProject(dir, { baseDir: testHome() });
     try {
       const events = project.db
         .prepare(
@@ -124,7 +125,7 @@ describe("what a stopped run can be read back from", () => {
     // the way in, and this workflow threads each gate's answer into the next one's inputs. So a
     // value that reached a downstream state is recoverable even without the join above.
     const taskId = await runToCompletion();
-    const project = openProject(dir);
+    const project = openProject(dir, { baseDir: testHome() });
     try {
       const entered = (
         project.db
@@ -156,7 +157,7 @@ describe("what a stopped run can be read back from", () => {
     // about where a stopped one got to; it is here to mark the boundary between what is stored and
     // what is reconstructed.
     const taskId = await runToCompletion();
-    const project = openProject(dir);
+    const project = openProject(dir, { baseDir: testHome() });
     try {
       const run = project.db.prepare(`SELECT outcome, outputs_json FROM runs WHERE task_id = ?`).get(taskId) as {
         outcome: string;

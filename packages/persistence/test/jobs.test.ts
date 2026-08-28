@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { testHome } from "@jaira/testing";
 import { initProject, openProject, type Project } from "../src/project";
 import { DEFAULT_STALE_MS, JobStore, newOwnerToken } from "../src/jobs";
 import { RunOwner } from "../src/jobOwner";
@@ -21,8 +22,8 @@ const NOW = 1_800_000_000_000;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-jobs-"));
-  initProject(dir);
-  project = openProject(dir);
+  initProject(dir, testHome());
+  project = openProject(dir, { baseDir: testHome() });
 });
 
 afterEach(() => {
@@ -81,7 +82,7 @@ describe("recovery", () => {
     project.jobs.claimRun({ taskId: "t-1", runId: 1, ownerToken: newOwnerToken(), nowMs: Date.now() });
     project.close();
 
-    project = openProject(dir);
+    project = openProject(dir, { baseDir: testHome() });
 
     expect(project.recovered).toEqual([]);
     expect(project.runtime.get("t-1")?.status).toBe("running");
@@ -93,7 +94,7 @@ describe("recovery", () => {
     project.jobs.claimRun({ taskId: "t-1", runId: 1, ownerToken: newOwnerToken(), nowMs: Date.now() - 10 * 60_000 });
     project.close();
 
-    project = openProject(dir);
+    project = openProject(dir, { baseDir: testHome() });
 
     expect(project.recovered).toEqual(["t-1"]);
     expect(project.runtime.get("t-1")?.status).toBe("interrupted");
@@ -103,7 +104,7 @@ describe("recovery", () => {
     runningTask();
     project.close();
 
-    project = openProject(dir);
+    project = openProject(dir, { baseDir: testHome() });
 
     expect(project.recovered).toEqual(["t-1"]);
   });
@@ -134,7 +135,7 @@ describe("child processes", () => {
     project.jobs.spawned({ ownerToken: token, taskId: "t-1", command: "claude -p", pid: 999, nowMs: stale });
     project.close();
 
-    project = openProject(dir);
+    project = openProject(dir, { baseDir: testHome() });
 
     expect(project.orphans).toHaveLength(1);
     expect(project.orphans[0]).toMatchObject({ command: "claude -p", pid: 999 });

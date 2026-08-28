@@ -21,6 +21,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { testHome } from "@jaira/testing";
 import { openSharedProject, type Project } from "../src/project";
 import { createTask } from "../src/lifecycle";
 
@@ -47,7 +48,7 @@ describe("openSharedProject — the selected root, as a project", () => {
     const shared = track(openSharedProject({ baseDir }));
 
     // Directly under the base, not under a `.jaira/` inside it: the base IS the layer, rather than a
-    // checkout's override of one. `jairaPaths(baseDir)` would have looked for `~/.jaira/.jaira/…`.
+    // checkout's override of one. `jairaPaths(baseDir, testHome())` would have looked for `~/.jaira/.jaira/…`.
     expect(shared.paths.projectDir).toBe(shared.paths.jairaDir);
     // The line. What a person authors is at the top; what JaiRA writes is one directory down, so a
     // root is a place someone can look at and recognize as theirs.

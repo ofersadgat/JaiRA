@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { testHome } from "@jaira/testing";
 import type { EngineEvent } from "@declarative-ai/hw";
 import { initProject, openProject, type Project } from "../src/project";
 import { conversationView } from "../src/conversation";
@@ -20,8 +21,8 @@ const now = 1_800_000_000_000;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-convo-"));
-  initProject(dir);
-  project = openProject(dir);
+  initProject(dir, testHome());
+  project = openProject(dir, { baseDir: testHome() });
 });
 
 afterEach(() => {

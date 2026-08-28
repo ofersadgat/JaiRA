@@ -13,6 +13,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { testHome } from "@jaira/testing";
 import type { EngineEvent } from "@declarative-ai/hw";
 import { initProject, openProject, type Project } from "../src/project";
 import { journalFileFor, readJournalFile } from "../src/journalFile";
@@ -31,7 +32,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-journal-"));
   baseDir = join(dir, "base");
   mkdirSync(join(dir, "repo"), { recursive: true });
-  initProject(join(dir, "repo"));
+  initProject(join(dir, "repo"), testHome());
 });
 
 afterEach(() => {

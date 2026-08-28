@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
+import { testHome } from "@jaira/testing";
 import {
   COMPONENT_NAMES,
   GALLERY_CHANGESET,
@@ -32,8 +33,8 @@ let service: AppService;
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-gallery-"));
-  initProject(dir);
-  service = new AppService({ watchWorkflows: false });
+  initProject(dir, testHome());
+  service = new AppService({ baseDir: testHome(), watchWorkflows: false });
   await service.open(dir);
 });
 

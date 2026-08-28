@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { testHome } from "@jaira/testing";
 import { loadBundle, snapshotHash } from "@declarative-ai/hw";
 import { initProject, openProject, type Project } from "../src/project";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "../src/snapshots";
@@ -32,8 +33,8 @@ function write(root: string, relPath: string, body: unknown): void {
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-wfrefs-"));
-  initProject(dir);
-  project = openProject(dir);
+  initProject(dir, testHome());
+  project = openProject(dir, { baseDir: testHome() });
 });
 
 afterEach(() => {

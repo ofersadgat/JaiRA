@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Git, NodeExec, writeWorkflowFiles, specPlanningFiles } from "@jaira/runtime";
 import { worktreePathFor } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { createTask } from "../src/lifecycle";
 import { initProject, openProject, type Project } from "../src/project";
 import { ensureWorkspace, removeWorktree } from "../src/worktrees";
@@ -22,7 +23,7 @@ beforeEach(async () => {
   // A parent directory, because worktrees live OUTSIDE the project (DESIGN §3).
   root = mkdtempSync(join(tmpdir(), "jaira-wt-"));
   projectDir = join(root, "myproject");
-  const paths = initProject(projectDir);
+  const paths = initProject(projectDir, testHome());
   writeWorkflowFiles(paths.workflowsDir, specPlanningFiles());
 
   const git = new Git({ exec, repoDir: projectDir });
@@ -33,7 +34,7 @@ beforeEach(async () => {
   await git.run(["add", "."]);
   await git.run(["commit", "-m", "initial"]);
 
-  project = openProject(projectDir);
+  project = openProject(projectDir, { baseDir: testHome() });
 });
 
 afterEach(() => {
@@ -120,8 +121,8 @@ describe("ensureWorkspace", () => {
 
   it("refuses a bound task when the project is not a git repository", async () => {
     const plainDir = join(root, "plain");
-    initProject(plainDir);
-    const plain = openProject(plainDir);
+    initProject(plainDir, testHome());
+    const plain = openProject(plainDir, { baseDir: testHome() });
     try {
       const taskId = createTask(plain, { title: "T", workflow: "feature/plan", branch: "x" }).id;
       await expect(ensureWorkspace(plain, taskId)).rejects.toThrow(/not a git repository/);

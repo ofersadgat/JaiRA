@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { testHome } from "@jaira/testing";
 import type { RecordStore, SessionStore } from "@declarative-ai/exec";
 import { initProject, openProject, sessionStoreFor, type Project } from "../src/project";
 import { conversationFileFor, readConversationFile } from "../src/conversationFile";
@@ -30,7 +31,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-conv-"));
   baseDir = join(dir, "base");
   mkdirSync(join(dir, "repo"), { recursive: true });
-  initProject(join(dir, "repo"));
+  initProject(join(dir, "repo"), testHome());
 });
 
 afterEach(() => {

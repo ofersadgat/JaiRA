@@ -1264,7 +1264,10 @@ export class AppService {
    * that is already a project is an open, not an overwrite.
    */
   async init(dir: string): Promise<{ dir: string; recovered: string[] }> {
-    initProject(dir);
+    // THIS service's base root, not the ambient one. `open` below uses it, and a create that
+    // resolved a different shared root than the open that follows it would lay the project out
+    // against one library and then read it against another.
+    initProject(dir, this.baseDir);
     return this.open(dir);
   }
 

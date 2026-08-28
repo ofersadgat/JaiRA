@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject, openProject, SqliteSessionStore, type Project } from "@jaira/persistence";
 import type { PushMessage } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
 let dir: string;
@@ -27,7 +28,7 @@ let pushes: PushMessage[];
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-crash-"));
-  initProject(dir);
+  initProject(dir, testHome());
   pushes = [];
 });
 
@@ -39,7 +40,7 @@ afterEach(async () => {
 
 /** A task caught mid-call: still `running`, its record still `open`, with a partial and a handle. */
 function crashedRun(over: { handle?: string | null } = {}): void {
-  const project: Project = openProject(dir);
+  const project: Project = openProject(dir, { baseDir: testHome() });
   try {
     project.runtime.insert("t-crash", 1000);
     project.runtime.setStatus("t-crash", "running", 1000);
@@ -61,7 +62,7 @@ function crashedRun(over: { handle?: string | null } = {}): void {
 
 /** What the record holds now, read the way a viewer would. */
 function recordValue(): { messages?: unknown[]; entries?: unknown[]; capturedAt?: string } {
-  const project = openProject(dir);
+  const project = openProject(dir, { baseDir: testHome() });
   try {
     const row = project.db.prepare(`SELECT result_json FROM operation_records WHERE task_id = 't-crash'`).get() as {
       result_json: string;
@@ -84,6 +85,7 @@ describe("a crashed run's conversation is recovered at the next open", () => {
     crashedRun();
     const asked: Array<{ id: string; cwd: string; sinceMs?: number }> = [];
     service = new AppService({
+      baseDir: testHome(),
       publish: (m) => pushes.push(m),
       watchWorkflows: false,
       captureNative: async (providerSessionId, opts) => {
@@ -105,7 +107,7 @@ describe("a crashed run's conversation is recovered at the next open", () => {
     expect(value.entries).toMatchObject([{ kind: "event", event: { type: "attachment" } }]);
     expect(value.capturedAt).toEqual(expect.any(String));
     // …and the row is settled: 'open' must mean "a live process is streaming into this".
-    const project = openProject(dir);
+    const project = openProject(dir, { baseDir: testHome() });
     try {
       expect(project.db.prepare(`SELECT status FROM operation_records WHERE task_id = 't-crash'`).get()).toEqual({
         status: "failed",
@@ -120,6 +122,7 @@ describe("a crashed run's conversation is recovered at the next open", () => {
     // record. What the flush saved is still the answer.
     crashedRun();
     service = new AppService({
+      baseDir: testHome(),
       publish: (m) => pushes.push(m),
       watchWorkflows: false,
       captureNative: async () => {
@@ -135,6 +138,7 @@ describe("a crashed run's conversation is recovered at the next open", () => {
     crashedRun({ handle: null });
     let asked = 0;
     service = new AppService({
+      baseDir: testHome(),
       publish: (m) => pushes.push(m),
       watchWorkflows: false,
       captureNative: async () => {
@@ -154,19 +158,19 @@ describe("a crashed run's conversation is recovered at the next open", () => {
       return { nativeLines: [{ index: 0, line: { type: "attachment" } as never }] };
     };
     let calls = 0;
-    service = new AppService({ publish: (m) => pushes.push(m), watchWorkflows: false, captureNative: capture });
+    service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m), watchWorkflows: false, captureNative: capture });
     await service.open(dir);
     await settled();
     expect(calls).toBe(1);
 
     await service.close();
-    service = new AppService({ publish: (m) => pushes.push(m), watchWorkflows: false, captureNative: capture });
+    service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m), watchWorkflows: false, captureNative: capture });
     await service.open(dir);
     await new Promise((resolve) => setTimeout(resolve, 50));
     // The task is `interrupted` rather than `running` now, so recovery reports nothing — and even
     // where it did, the row already carries `nativeLines` and is no longer offered.
     expect(calls).toBe(1);
-    const project = openProject(dir);
+    const project = openProject(dir, { baseDir: testHome() });
     try {
       expect(new SqliteSessionStore(project.db).recoverable("t-crash")).toEqual([]);
     } finally {

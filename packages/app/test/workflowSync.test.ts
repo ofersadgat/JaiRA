@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { hashText, initProject, stateHashes } from "@jaira/persistence";
 import { specPlanningFiles, syncRules, REVIEW_ARTIFACTS, writeWorkflowFiles, type ConformanceFinding } from "@jaira/runtime";
 import { WORKFLOW_DESCRIPTION, WORKFLOW_DESCRIPTION_PATH } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
 let dir: string;
@@ -30,10 +31,10 @@ const DESCRIPTION = "# Planning\n\nTurn the issue into goals, then write a plan,
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-sync-"));
-  const paths = initProject(dir);
+  const paths = initProject(dir, testHome());
   writeWorkflowFiles(paths.workflowsDir, specPlanningFiles());
   writeFileSync(join(paths.workflowsDir, "workflow.md"), DESCRIPTION, "utf8");
-  service = new AppService({ watchWorkflows: false });
+  service = new AppService({ baseDir: testHome(), watchWorkflows: false });
   await service.open(dir);
 });
 
@@ -600,10 +601,10 @@ describe("runSync refusals", () => {
 
   it("refuses a project with no workflows at all", async () => {
     const empty = mkdtempSync(join(tmpdir(), "jaira-sync-empty-"));
-    const paths = initProject(empty);
+    const paths = initProject(empty, testHome());
     mkdirSync(paths.workflowsDir, { recursive: true });
     writeFileSync(join(paths.workflowsDir, "workflow.md"), DESCRIPTION, "utf8");
-    const other = new AppService({ watchWorkflows: false });
+    const other = new AppService({ baseDir: testHome(), watchWorkflows: false });
     await other.open(empty);
     try {
       expect(other.syncStatus({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH }).blocked).toMatch(/no workflows/);

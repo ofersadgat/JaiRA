@@ -7,6 +7,7 @@ import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { beginTaskRun, openProject } from "@jaira/persistence";
+import { testHome } from "@jaira/testing";
 import { runCli, type CliIo } from "../src/cli";
 import { blockedRules, happyRules, HUMAN_REVIEW_FUNCTION, makePlanningProject } from "./fixtures";
 
@@ -33,7 +34,7 @@ function io(): Capture {
 
 async function cli(args: string[]): Promise<{ code: number; out: string; err: string; json: () => unknown }> {
   const capture = io();
-  const code = await runCli(args, capture);
+  const code = await runCli(["--home", testHome(), ...args], capture);
   return { code, out: capture.out(), err: capture.err(), json: () => JSON.parse(capture.out()) as unknown };
 }
 
@@ -64,7 +65,7 @@ describe("jaira task lifecycle (e2e, temp project)", () => {
     expect((report["outputs"] as Record<string, unknown>)["outcome"]).toBe("complete");
 
     // Durable record: runtime row, pinned snapshot on disk, journal in SQLite.
-    const project = openProject(dir);
+    const project = openProject(dir, { baseDir: testHome() });
     try {
       const runtime = project.runtime.get(taskId);
       expect(runtime?.status).toBe("completed");
@@ -120,7 +121,7 @@ describe("jaira task lifecycle (e2e, temp project)", () => {
 
     // Simulate a crash: begin a run (status=running, open run row) and never finish it.
     {
-      const project = openProject(dir);
+      const project = openProject(dir, { baseDir: testHome() });
       await beginTaskRun(project, taskId);
       project.close();
     }

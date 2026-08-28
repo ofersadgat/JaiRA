@@ -8,13 +8,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initProject } from "@jaira/persistence";
 import { specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
+import { testHome } from "@jaira/testing";
 
 export { blockedRules, happyRules, HUMAN_REVIEW_FUNCTION, PLAN_ID, specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
 
 /** A fresh temp project with `.jaira/` initialized and the planning workflow installed. */
 export function makePlanningProject(): string {
   const dir = mkdtempSync(join(tmpdir(), "jaira-test-"));
-  const paths = initProject(dir);
+  const paths = initProject(dir, testHome());
   writeWorkflowFiles(paths.workflowsDir, specPlanningFiles());
   return dir;
 }

@@ -6,6 +6,7 @@
 import { rmSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BoardView } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { runCli, type CliIo } from "../src/cli";
 import { blockedRules, happyRules, HUMAN_REVIEW_FUNCTION, makePlanningProject } from "./fixtures";
 
@@ -23,7 +24,7 @@ async function cli(args: string[]): Promise<{ code: number; out: string; err: st
   let out = "";
   let err = "";
   const io: CliIo = { cwd: dir, stdout: (t) => (out += t), stderr: (t) => (err += t) };
-  const code = await runCli(args, io);
+  const code = await runCli(["--home", testHome(), ...args], io);
   return { code, out, err };
 }
 

@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { testHome } from "@jaira/testing";
 import { initProject, openProject, type Project } from "../src/project";
 import { fingerprintOf, rowFileFor, rowFiles } from "../src/rowFile";
 import { createTask } from "../src/lifecycle";
@@ -31,7 +32,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-rows-"));
   baseDir = join(dir, "base");
   mkdirSync(join(dir, "repo"), { recursive: true });
-  initProject(join(dir, "repo"));
+  initProject(join(dir, "repo"), testHome());
 });
 
 afterEach(() => {

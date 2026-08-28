@@ -18,6 +18,7 @@ import { initProject, openProject } from "@jaira/persistence";
 import { writeWorkflowFiles } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
 import type { PushMessage } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
 const ROOT = "resume";
@@ -64,13 +65,13 @@ const seen = new Set<string>();
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-resume-"));
-  workflowsDir = initProject(dir).workflowsDir;
+  workflowsDir = initProject(dir, testHome()).workflowsDir;
   writeWorkflowFiles(workflowsDir, files());
   pushes = [];
   offered = 0;
   abandoned = [];
   seen.clear();
-  service = new AppService({ publish: (m) => pushes.push(m) });
+  service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   await service.open(dir);
 });
 
@@ -121,13 +122,13 @@ async function parked(): Promise<void> {
  */
 async function crashAndReopen(taskId: string): Promise<void> {
   abandoned.push(service);
-  const project = openProject(dir);
+  const project = openProject(dir, { baseDir: testHome() });
   try {
     project.db.prepare(`UPDATE jobs SET heartbeat_at = 0 WHERE task_id = ? AND ended_at IS NULL`).run(taskId);
   } finally {
     project.close();
   }
-  service = new AppService({ publish: (m) => pushes.push(m) });
+  service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   const { recovered } = await service.open(dir);
   expect(recovered).toEqual([taskId]);
   // Request ids are a per-hub counter (`ui-1`, `ui-2`, …), so a fresh service starts the id space
@@ -143,7 +144,7 @@ async function start(): Promise<string> {
 }
 
 function statusOf(taskId: string): string {
-  const project = openProject(dir);
+  const project = openProject(dir, { baseDir: testHome() });
   try {
     return project.runtime.get(taskId)!.status;
   } finally {
@@ -191,7 +192,7 @@ describe("resuming an interrupted task", () => {
     await answer();
     await until(() => pushes.some((p) => p.type === "run:finished"), "the resumed run to finish");
 
-    const project = openProject(dir);
+    const project = openProject(dir, { baseDir: testHome() });
     try {
       const runs = project.runtime.listRuns(taskId);
       expect(runs.length).toBe(2);

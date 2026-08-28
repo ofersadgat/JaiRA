@@ -2,6 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, sep } from "node:path";
 import { describe, expect, it } from "vitest";
+import { testHome } from "@jaira/testing";
 import {
   defaultConfig,
   parseJsonText,
@@ -102,7 +103,7 @@ describe("json", () => {
 
 describe("paths", () => {
   it("derives the .jaira layout from the project dir", () => {
-    const paths = jairaPaths("/some/project");
+    const paths = jairaPaths("/some/project", testHome());
     expect(paths.jairaDir.endsWith(".jaira")).toBe(true);
     expect(paths.workflowsDir).toContain(".jaira");
     expect(paths.dbFile.endsWith("jaira.db")).toBe(true);

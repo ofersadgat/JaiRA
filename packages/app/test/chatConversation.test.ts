@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import type { PushMessage } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 import { CHAT_AGENT, CHAT_ASSISTANT, chatWorkflowFiles, titleOf } from "../src/renderer/chatWorkflow";
 
@@ -27,7 +28,7 @@ let pushes: PushMessage[];
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-convo-"));
-  const paths = initProject(dir);
+  const paths = initProject(dir, testHome());
   // The states the Chat view installs, written into the PROJECT rather than into the machine's
   // shared root: a test must not write to `~/.jaira`, and the loader searches the project first — so
   // this exercises the same ids through the same resolution the view's install lands in.
@@ -37,7 +38,7 @@ beforeEach(async () => {
     writeFileSync(file, JSON.stringify(state, null, 2), "utf8");
   }
   pushes = [];
-  service = new AppService({ publish: (m) => pushes.push(m) });
+  service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   await service.open(dir);
 });
 
@@ -174,7 +175,7 @@ describe("the settings of a conversation that has not started yet", () => {
     expect(plan.settings.model).toBe("fake/model");
     // And the authored file is untouched — a pick for one conversation is not an edit of what a
     // conversation IS.
-    const state = JSON.parse(readFileSync(join(initProject(dir).workflowsDir, `${CHAT_AGENT}.json`), "utf8")) as {
+    const state = JSON.parse(readFileSync(join(initProject(dir, testHome()).workflowsDir, `${CHAT_AGENT}.json`), "utf8")) as {
       environment: { tools: string[] };
     };
     expect(state.environment.tools).toEqual(["bash", "read_file", "write_file"]);

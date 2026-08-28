@@ -186,10 +186,64 @@ export const SYSTEM_DIR_NAME = "system";
  */
 export const BASE_DIR_ENV = "JAIRA_HOME";
 
-/** Where the shared root lives when nothing overrides it. */
+/**
+ * `--home <dir>`, lifted out of a command line.
+ *
+ * Here rather than in either entry point because both of them take it and it has to mean the same
+ * thing in each: the CLI strips it before dispatching a subcommand, the app reads it while building
+ * its service, and a flag that selected a different root depending on which binary you typed would
+ * be worse than no flag.
+ *
+ * The flag is GLOBAL, and that is a claim about what it selects — the root every other path is read
+ * against: the workflows a state resolves through, the settings a provider is configured in, the
+ * approvals a module is checked against, the database a task is recorded in. Per-subcommand it would
+ * be the same value written fourteen times, and the once it was left off would be a command quietly
+ * reading a different library than the one before it.
+ *
+ * `malformed` rather than a throw: the two callers report a bad command line differently — one
+ * prints usage and exits 2, the other has a window to open — and a parse is in no position to pick.
+ */
+export function takeHomeFlag(argv: readonly string[]): { home?: string; rest: string[]; malformed?: true } {
+  const at = argv.indexOf("--home");
+  if (at < 0) return { rest: [...argv] };
+  const value = argv[at + 1];
+  // A malformed flag consumes only ITSELF. `--home --json` means the directory was forgotten, not
+  // that `--json` was it, and swallowing the next token would turn one mistake into two — a missing
+  // home reported, and a flag the person did write silently dropped.
+  if (value === undefined || value.startsWith("--")) {
+    return { rest: [...argv.slice(0, at), ...argv.slice(at + 1)], malformed: true };
+  }
+  return { home: resolve(value), rest: [...argv.slice(0, at), ...argv.slice(at + 2)] };
+}
+
+/**
+ * Where the shared root lives when nothing overrides it.
+ *
+ * Under a test runner the home directory is never the answer, and the failure is LOUD rather than
+ * silent. `test/setup.ts` points {@link BASE_DIR_ENV} at a scratch directory, but it is wired to the
+ * repository root's vitest config — so running the suite scoped to one package
+ * (`vitest --root packages/app`) picks up no config, runs no setup, and every test then resolves the
+ * base layer to the developer's real `~/.jaira`.
+ *
+ * That went unnoticed once, and it cost twice. The suite read whatever workflows happened to be
+ * authored there, which turned into twenty failures that named nothing recognisable — and, worse, a
+ * run that got far enough to open the base as a project WROTE to it: a couple of hundred task rows
+ * and a pile of snapshots, in a directory a person keeps their own work in. An exception naming the
+ * cause is the only version of this that costs one minute instead of an afternoon.
+ */
 export function defaultBaseDir(env: NodeJS.ProcessEnv = process.env): string {
   const configured = env[BASE_DIR_ENV];
-  return configured && configured.length > 0 ? resolve(configured) : join(homedir(), JAIRA_DIR_NAME);
+  if (configured !== undefined && configured.length > 0) return resolve(configured);
+  if (env["VITEST"] !== undefined) {
+    throw new Error(
+      `${BASE_DIR_ENV} is unset under a test run, so the shared base root would resolve to the real ` +
+        `${join(homedir(), JAIRA_DIR_NAME)} — which a suite must never read or write. ` +
+        `test/setup.ts sets it, and it is wired to the repository root's vitest config: run the tests ` +
+        `from the repository root (\`npm test\`, or \`npx vitest run packages/app/test/x.test.ts\`) ` +
+        `rather than with \`--root packages/<name>\`.`,
+    );
+  }
+  return join(homedir(), JAIRA_DIR_NAME);
 }
 
 export function jairaBasePaths(baseDir: string = defaultBaseDir()): JairaBasePaths {

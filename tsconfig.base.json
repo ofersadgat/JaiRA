@@ -24,7 +24,8 @@
       "@jaira/shared/browser": ["./packages/shared/src/browser.ts"],
       "@jaira/shared": ["./packages/shared/src/index.ts"],
       "@jaira/runtime": ["./packages/runtime/src/index.ts"],
-      "@jaira/persistence": ["./packages/persistence/src/index.ts"]
+      "@jaira/persistence": ["./packages/persistence/src/index.ts"],
+      "@jaira/testing": ["./test/testing.ts"]
     }
   }
 }

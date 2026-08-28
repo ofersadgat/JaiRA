@@ -7,6 +7,7 @@ import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { jairaPaths } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { runCli, type CliIo } from "../src/cli";
 import { makePlanningProject } from "./fixtures";
 
@@ -24,12 +25,12 @@ async function cli(args: string[]): Promise<{ code: number; out: string; err: st
   let out = "";
   let err = "";
   const io: CliIo = { cwd: dir, stdout: (t) => (out += t), stderr: (t) => (err += t) };
-  const code = await runCli(args, io);
+  const code = await runCli(["--home", testHome(), ...args], io);
   return { code, out, err };
 }
 
 function writeWorkflow(relPath: string, content: string): void {
-  writeFileSync(join(jairaPaths(dir).workflowsDir, relPath), content, "utf8");
+  writeFileSync(join(jairaPaths(dir, testHome()).workflowsDir, relPath), content, "utf8");
 }
 
 describe("jaira workflow", () => {

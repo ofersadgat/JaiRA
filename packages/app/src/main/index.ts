@@ -11,7 +11,15 @@ import { writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
 import { isProject } from "@jaira/persistence";
-import { ARTIFACT_SCHEME, IPC_CHANNELS, PUSH_CHANNEL, type IpcChannel, type PushMessage, type SaveFileRequest } from "@jaira/shared";
+import {
+  ARTIFACT_SCHEME,
+  IPC_CHANNELS,
+  PUSH_CHANNEL,
+  takeHomeFlag,
+  type IpcChannel,
+  type PushMessage,
+  type SaveFileRequest,
+} from "@jaira/shared";
 import { AppService, type CrashKind, type KeychainPort } from "./service";
 
 // Source maps are enabled in `entry.cjs`, which loads this bundle — NOT here. The flag registers a
@@ -132,7 +140,23 @@ function reportCrash(kind: CrashKind, error: unknown): void {
 process.on("unhandledRejection", (reason: unknown) => reportCrash("unhandledRejection", reason));
 process.on("uncaughtException", (error: unknown) => reportCrash("uncaughtException", error));
 
+/**
+ * `--home <dir>` off this launch's command line — the same flag the CLI takes.
+ *
+ * A COMMAND LINE beats a saved preference, which is why this is passed as `baseDir` rather than left
+ * to `settingsBaseDir()`: the setting is where the base root normally lives, and the flag is how you
+ * open a second window on a different one without changing what the first window will do next time.
+ * The precedence that falls out is the one people expect — flag, then `JAIRA_HOME`, then the saved
+ * setting, then `~/.jaira`.
+ *
+ * A malformed flag is ignored rather than fatal. There is no terminal to print usage into here, and
+ * refusing to launch a desktop app over a typo in an argument leaves somebody with a window that
+ * never appears and nothing that says why.
+ */
+const home = takeHomeFlag(process.argv.slice(1)).home;
+
 const service = new AppService({
+  ...(home !== undefined ? { baseDir: home } : {}),
   publish: (message: PushMessage) => {
     // GUARDED, because this is a send into another process and the service treats it as a statement.
     //

@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject, openProject } from "@jaira/persistence";
+import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
 let dir: string;
@@ -26,8 +27,8 @@ let service: AppService;
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-artifact-serve-"));
-  initProject(dir);
-  service = new AppService({ watchWorkflows: false });
+  initProject(dir, testHome());
+  service = new AppService({ baseDir: testHome(), watchWorkflows: false });
   await service.open(dir);
 });
 
@@ -43,7 +44,7 @@ afterEach(async () => {
  * a second handle left dangling keeps the database file locked past the cleanup that deletes it.
  */
 function record(path: string, content: string, extra: { format?: string; interactive?: boolean } = {}): void {
-  const project = openProject(dir);
+  const project = openProject(dir, { baseDir: testHome() });
   try {
     project.artifacts.put({
       taskId: "t-1",

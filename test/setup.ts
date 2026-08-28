@@ -1,16 +1,21 @@
 /**
- * Global test setup: point the shared BASE root at a scratch directory.
+ * The BACKSTOP: no test may resolve the developer's real `~/.jaira`, even one that forgot to say so.
  *
- * Every project resolves workflows against `~/.jaira` by default (DESIGN §3), and `openProject`
- * creates that layout. A suite left to the default would therefore read whatever the developer
- * happens to keep in their real base root — so a test could pass on one machine and fail on
- * another for reasons nothing in the test says — and would create directories in their home
- * directory as a side effect of running tests. Both are unacceptable, so `JAIRA_HOME` is
- * redirected before any test opens a project.
+ * Every project resolves workflows against `~/.jaira` by default (DESIGN §3), and opening one creates
+ * that layout. A suite left to that default reads whatever the developer happens to keep there — so
+ * a test passes on one machine and fails on another for reasons nothing in the test says — and
+ * writes into their home directory as a side effect of running. Both have happened here.
  *
- * A test that wants a base layer of its own writes into {@link BASE_DIR}, or passes an explicit
- * `baseDir` to `openProject`. This one is deliberately left EMPTY: an empty base is the state
- * every pre-existing test was written against.
+ * This is no longer the mechanism, though, only the floor under it. Tests name their own base root
+ * (`testHome()` in `test/testing.ts`, and `--home` for anything that goes through the CLI), and the
+ * suite passes with this file removed entirely — which is the property worth keeping, because it is
+ * what makes each test's isolation a fact about the test rather than about the runner's config.
+ * `defaultBaseDir` throws rather than answering `~/.jaira` under a test run, so a NEW test that
+ * forgets both this and an explicit root fails loudly instead of quietly reaching into a home.
+ *
+ * Left in place for the case that argument does not cover: a test file, or a subprocess it spawns,
+ * that reaches the default path before anything has had a chance to name a root. An empty scratch
+ * directory is the right answer there, and it costs one `mkdtemp` per worker.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

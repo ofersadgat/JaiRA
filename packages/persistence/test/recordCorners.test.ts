@@ -8,6 +8,7 @@
  * an empty conversation rather than an error.
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { testHome } from "@jaira/testing";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,8 +25,8 @@ const OTHER = "y".repeat(BLOB_THRESHOLD * 2);
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-records-"));
-  initProject(dir);
-  project = openProject(dir);
+  initProject(dir, testHome());
+  project = openProject(dir, { baseDir: testHome() });
 });
 afterEach(() => {
   project.close();

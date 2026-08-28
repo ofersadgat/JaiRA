@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
+import { testHome } from "@jaira/testing";
 import { initProject, openProject, type Project } from "../src/project";
 import { workflowDigest } from "../src/digest";
 
@@ -19,9 +20,9 @@ let project: Project;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-digest-"));
-  const paths = initProject(dir);
+  const paths = initProject(dir, testHome());
   writeWorkflowFiles(paths.workflowsDir, specPlanningFiles());
-  project = openProject(dir);
+  project = openProject(dir, { baseDir: testHome() });
 });
 
 afterEach(() => {
@@ -66,7 +67,7 @@ describe("workflowDigest", () => {
         "utf8",
       );
       project.close();
-      project = openProject(dir);
+      project = openProject(dir, { baseDir: testHome() });
     });
 
     it("is still rendered, from its files on disk", () => {

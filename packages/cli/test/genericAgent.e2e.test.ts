@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { jairaPaths } from "@jaira/shared";
 import { writeWorkflowFiles } from "@jaira/runtime";
+import { testHome } from "@jaira/testing";
 import { runCli, type CliIo } from "../src/cli";
 
 let dir: string;
@@ -52,7 +53,7 @@ const AGENT_WORKFLOW = {
 };
 
 function writeConfig(config: Record<string, unknown>): void {
-  writeFileSync(jairaPaths(dir).settingsFile, JSON.stringify(config, null, 2), "utf8");
+  writeFileSync(jairaPaths(dir, testHome()).settingsFile, JSON.stringify(config, null, 2), "utf8");
 }
 
 /**
@@ -68,7 +69,7 @@ function neverEscalates(agent: Record<string, unknown>): Record<string, unknown>
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-generic-"));
-  const paths = initProject(dir);
+  const paths = initProject(dir, testHome());
   writeWorkflowFiles(paths.workflowsDir, AGENT_WORKFLOW);
   // A stand-in coding agent: echoes what it was told to do.
   agentScript = join(dir, "agent.mjs");
@@ -87,7 +88,7 @@ async function cli(args: string[]): Promise<{ code: number; out: string; err: st
   let out = "";
   let err = "";
   const io: CliIo = { cwd: dir, stdout: (t) => (out += t), stderr: (t) => (err += t) };
-  const code = await runCli(args, io);
+  const code = await runCli(["--home", testHome(), ...args], io);
   return { code, out, err };
 }
 

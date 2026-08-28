@@ -270,7 +270,7 @@ describe("agentSpawn — the child's diagnostics", () => {
   it("forwards stderr to the observer", async () => {
     const seen: string[] = [];
     const spawn = agentSpawn({
-      
+
       observer: { onSpawn: () => 1, onExit: () => undefined, onOutput: (_t, e) => seen.push(`${e.stream}:${e.chunk}`) },
     });
 

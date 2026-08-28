@@ -29,6 +29,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject, SqliteSessionStore } from "@jaira/persistence";
 import type { PushMessage } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 import { kept } from "../src/renderer/chatPane";
 import { CHAT_ASSISTANT, chatWorkflowFiles, titleOf } from "../src/renderer/chatWorkflow";
@@ -39,14 +40,14 @@ let pushes: PushMessage[];
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-durable-"));
-  const paths = initProject(dir);
+  const paths = initProject(dir, testHome());
   for (const [stateId, state] of Object.entries(chatWorkflowFiles())) {
     const file = join(paths.workflowsDir, `${stateId}.json`);
     mkdirSync(join(file, ".."), { recursive: true });
     writeFileSync(file, JSON.stringify(state, null, 2), "utf8");
   }
   pushes = [];
-  service = new AppService({ publish: (m) => pushes.push(m) });
+  service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   await service.open(dir);
 });
 

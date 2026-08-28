@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { specPlanningFiles } from "@jaira/runtime";
 import { listSchemas, mergeSkeleton, propertiesOf, schemaById, skeletonOf } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
 let dir: string;
@@ -21,8 +22,8 @@ let service: AppService;
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-schema-"));
-  initProject(dir);
-  service = new AppService({ watchWorkflows: false });
+  initProject(dir, testHome());
+  service = new AppService({ baseDir: testHome(), watchWorkflows: false });
   await service.open(dir);
 });
 

@@ -9,12 +9,13 @@
 import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   baseAsProjectPaths,
   defaultConfig,
   jairaBasePaths,
   jairaPaths,
+  JAIRA_DIR_NAME,
   mergeConfigDocuments,
   parseConfig,
   readJsonFile,
@@ -125,9 +126,17 @@ ${SYS}/approvals.local.json
 .env.local
 `;
 
-/** Create the `.jaira/` layout (DESIGN §3). Idempotent; keeps an existing config. */
-export function initProject(projectDir: string): JairaPaths {
-  const paths = jairaPaths(projectDir);
+/**
+ * Create the `.jaira/` layout (DESIGN §3). Idempotent; keeps an existing config.
+ *
+ * `baseDir` for the same reason {@link openProject} takes one: {@link jairaPaths} resolves the shared
+ * root alongside the project's own directories, so a call that omits it reaches for `~/.jaira`
+ * whether or not anything here reads it. Nothing here does — every directory written below is the
+ * project's — but the resolution happens anyway, which is enough to make a test that only ever
+ * wanted a scratch project depend on the developer's home.
+ */
+export function initProject(projectDir: string, baseDir?: string): JairaPaths {
+  const paths = jairaPaths(projectDir, baseDir);
   mkdirSync(paths.workflowsDir, { recursive: true });
   mkdirSync(paths.skillsDir, { recursive: true });
   mkdirSync(paths.snapshotsDir, { recursive: true });
@@ -140,8 +149,16 @@ export function initProject(projectDir: string): JairaPaths {
   return paths;
 }
 
+/**
+ * Does this directory have a `.jaira/` in it?
+ *
+ * Asked directly rather than through {@link jairaPaths}, which resolves the SHARED root alongside the
+ * project's own directories — so a question about one directory used to depend on where the base
+ * root was, and answering "is this a project" for a path somebody typed reached into `~/.jaira`.
+ * Nothing about the answer needs it: the whole question is whether one directory exists.
+ */
 export function isProject(projectDir: string): boolean {
-  return existsSync(jairaPaths(projectDir).jairaDir);
+  return existsSync(join(resolve(projectDir), JAIRA_DIR_NAME));
 }
 
 /**

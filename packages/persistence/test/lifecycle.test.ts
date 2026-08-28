@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { testHome } from "@jaira/testing";
 import {
   beginTaskRun,
   cancelTask,
@@ -26,13 +27,13 @@ let dir: string;
 let project: Project | undefined;
 
 function open(): Project {
-  project = openProject(dir);
+  project = openProject(dir, { baseDir: testHome() });
   return project;
 }
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-life-"));
-  const paths = initProject(dir);
+  const paths = initProject(dir, testHome());
   writeFileSync(join(paths.workflowsDir, "wf.json"), JSON.stringify(WORKFLOW), "utf8");
 });
 
@@ -44,21 +45,21 @@ afterEach(() => {
 
 describe("project", () => {
   it("initProject creates the .jaira layout with a default config, idempotently", async () => {
-    const paths = initProject(dir);
+    const paths = initProject(dir, testHome());
     for (const p of [paths.workflowsDir, paths.snapshotsDir, paths.tasksDir, paths.skillsDir, paths.settingsFile]) {
       expect(existsSync(p)).toBe(true);
     }
     expect(isProject(dir)).toBe(true);
     expect(isProject(join(dir, "elsewhere"))).toBe(false);
-    expect(() => openProject(join(dir, "elsewhere"))).toThrow(/not a JaiRA project/);
+    expect(() => openProject(join(dir, "elsewhere"), { baseDir: testHome() })).toThrow(/not a JaiRA project/);
   });
 
   it("regenerates a missing system/ on open", () => {
     // Regression: a deleted `system/` — how state whose format has moved on is discarded — and a
     // clone that never had one both failed the open, on a message about a missing directory.
-    const paths = initProject(dir);
+    const paths = initProject(dir, testHome());
     rmSync(paths.systemDir, { recursive: true, force: true });
-    const reopened = openProject(dir);
+    const reopened = openProject(dir, { baseDir: testHome() });
     for (const p of [paths.dbFile, paths.snapshotsDir, paths.tasksDir]) expect(existsSync(p)).toBe(true);
     reopened.close();
   });

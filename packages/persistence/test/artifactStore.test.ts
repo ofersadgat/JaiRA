@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ArtifactRecord } from "@jaira/runtime";
 import { createReadFileTool, createWriteFileTool, parseDestination } from "@jaira/runtime";
+import { testHome } from "@jaira/testing";
 import type { ExecServices, Tool } from "@declarative-ai/exec";
 import { initProject, openProject, type Project } from "../src/project";
 
@@ -19,8 +20,8 @@ let project: Project;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-artstore-"));
-  initProject(dir);
-  project = openProject(dir);
+  initProject(dir, testHome());
+  project = openProject(dir, { baseDir: testHome() });
 });
 
 afterEach(() => {
@@ -87,7 +88,7 @@ describe("SqliteArtifactStore", () => {
     project.artifacts.put(record());
     project.close();
 
-    project = openProject(dir);
+    project = openProject(dir, { baseDir: testHome() });
     expect(project.artifacts.get("t-1", "docs/plan.md")).toMatchObject({ hash: "abc123" });
   });
 });
@@ -111,7 +112,7 @@ describe("the tools against the durable store", () => {
 
     // Reopen: a fresh store instance, backed by the same database.
     project.close();
-    project = openProject(dir);
+    project = openProject(dir, { baseDir: testHome() });
     const read: Tool = createReadFileTool({ ...options, store: project.artifacts });
 
     expect(await read.run({ path: "docs/plan.md" } as never, ctx)).toMatchObject({ content: "# the plan" });

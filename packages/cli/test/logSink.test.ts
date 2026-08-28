@@ -13,6 +13,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { testHome } from "@jaira/testing";
 import { runCli, type CliIo } from "../src/cli";
 
 let dir: string;
@@ -31,7 +32,7 @@ afterEach(() => {
 async function cli(args: string[]): Promise<{ code: number; err: string }> {
   let err = "";
   const io: CliIo = { cwd: dir, stdout: () => {}, stderr: (t) => (err += t) };
-  const code = await runCli(args, io);
+  const code = await runCli(["--home", testHome(), ...args], io);
   return { code, err };
 }
 

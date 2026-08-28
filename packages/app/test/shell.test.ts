@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { happyRules, specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
 import type { PushMessage } from "@jaira/shared";
+import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
 let dir: string;
@@ -19,10 +20,10 @@ let pushes: PushMessage[];
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-shell-"));
-  const paths = initProject(dir);
+  const paths = initProject(dir, testHome());
   writeWorkflowFiles(paths.workflowsDir, specPlanningFiles());
   pushes = [];
-  service = new AppService({ publish: (m) => pushes.push(m) });
+  service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   await service.open(dir);
 });
 
@@ -118,7 +119,7 @@ describe("with no project open", () => {
    * reporting a condition already visible on screen.
    */
   it("gives an empty board rather than throwing", async () => {
-    const bare = new AppService({ publish: () => undefined });
+    const bare = new AppService({ baseDir: testHome(), publish: () => undefined });
     try {
       const roots = bare.boardRoots();
       // A board is about tasks, and tasks belong to a project — so with none open there is nothing
@@ -172,7 +173,7 @@ describe("with no project open", () => {
   });
 
   it("still refuses a read that names a task, because tasks need a project", async () => {
-    const bare = new AppService({ publish: () => undefined });
+    const bare = new AppService({ baseDir: testHome(), publish: () => undefined });
     try {
       // Unlike a state, a task cannot exist without a project — so an empty answer would hide a
       // real mistake rather than describe a real situation.
@@ -188,7 +189,7 @@ describe("authoring into the shared root", () => {
     const home = mkdtempSync(join(tmpdir(), "jaira-home-"));
     const base = join(home, "shared");
     const other = mkdtempSync(join(tmpdir(), "jaira-shared-"));
-    initProject(other);
+    initProject(other, testHome());
     const svc = new AppService({ publish: () => undefined, baseDir: base });
     try {
       await svc.open(other);
@@ -474,7 +475,7 @@ describe("file operations", () => {
 
   it("passes a reveal through to the host, and does nothing when there is no host", () => {
     const revealed: string[] = [];
-    const withHost = new AppService({ publish: () => undefined, reveal: (f) => revealed.push(f) });
+    const withHost = new AppService({ baseDir: testHome(), publish: () => undefined, reveal: (f) => revealed.push(f) });
     try {
       withHost.revealFile({ file: "C:/somewhere/plan.json" });
       expect(revealed).toEqual(["C:/somewhere/plan.json"]);
