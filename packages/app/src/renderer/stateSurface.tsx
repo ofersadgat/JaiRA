@@ -207,14 +207,23 @@ export function StateHeader({
 export function StateBlock({
   open,
   header,
+  instance,
   children,
 }: {
   open: boolean;
   header: ReactNode;
+  /**
+   * Which instance this block heads, so something outside the conversation can send a reader to it.
+   *
+   * An attribute rather than a map of refs, for the same reason a fork's sides are addressed by
+   * `data-fork-place`: the sender knows the identity and nothing else about where the block ended up
+   * on the page — see `SessionBandsView`.
+   */
+  instance?: string | undefined;
   children?: ReactNode;
 }): JSX.Element {
   return (
-    <div className={`st-block${open ? "" : " is-shut"}`}>
+    <div className={`st-block${open ? "" : " is-shut"}`} {...(instance !== undefined ? { "data-instance": instance } : {})}>
       {header}
       {open ? children : null}
     </div>

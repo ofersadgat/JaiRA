@@ -8,26 +8,7 @@
 import type { JSX, ReactNode } from "react";
 import type { ConversationView, InstanceNode, TaskDetail } from "@jaira/shared/browser";
 import { Badge } from "./board";
-
-function Tree({ nodes }: { nodes: InstanceNode[] }): JSX.Element {
-  return (
-    <ul className="tree">
-      {nodes.map((node) => (
-        <li key={`${node.runId ?? ""}:${node.instanceId}`} className={node.superseded ? "superseded" : undefined}>
-          <span className="tree-row">
-            <Badge status={node.status} />
-            <span className="tree-label">{node.childKey ?? node.stateId}</span>
-            {node.index > 0 ? <span className="chip">step {node.index}</span> : null}
-            {node.operation ? <span className="chip">{node.operation.kind}</span> : null}
-            {node.superseded ? <span className="chip">superseded</span> : null}
-            {node.operation?.reason ? <span className="reason">{node.operation.reason}</span> : null}
-          </span>
-          {node.children.length > 0 ? <Tree nodes={node.children} /> : null}
-        </li>
-      ))}
-    </ul>
-  );
-}
+import { RunIndex } from "./runIndex";
 
 /**
  * What a task IS: its name, where it came from, and the two buttons that operate it.
@@ -135,17 +116,27 @@ export function TaskPanel({
  * Split from {@link TaskPanel} so the Tasks view can put them behind a toggle beside the
  * conversation without a second copy of five sections drifting away from this one.
  */
-export function TaskDetailSections({ detail, stream }: { detail: TaskDetail; stream: string[] }): JSX.Element {
+export function TaskDetailSections({
+  detail,
+  stream,
+  here,
+  onGoTo,
+}: {
+  detail: TaskDetail;
+  stream: string[];
+  /** The state the reader is on, by `keyOfNode` — see {@link RunIndex}. */
+  here?: string | undefined;
+  /** Take the conversation to a state. Absent ⇒ this host has no conversation beside it. */
+  onGoTo?: ((node: InstanceNode) => void) | undefined;
+}): JSX.Element {
   const latest = detail.runs[detail.runs.length - 1];
   return (
     <>
-      {detail.activePath.length > 0 ? (
-        <section>
-          <h3>Active path</h3>
-          <div className="path">{detail.activePath.map((s) => s.childKey ?? s.stateId).join(" › ")}</div>
-        </section>
-      ) : null}
-
+      {/*
+        No `Active path` section. It said which state the run is standing in as a `›`-joined string,
+        which the index now says in place: the deepest live row carries the letterhead's own tone, and
+        the lanes above it ARE the path. A second copy in words is a second thing to keep in agreement.
+      */}
       {detail.blocked.length > 0 ? (
         <section>
           <h3>Blocked</h3>
@@ -157,10 +148,7 @@ export function TaskDetailSections({ detail, stream }: { detail: TaskDetail; str
         </section>
       ) : null}
 
-      <section>
-        <h3>Instances</h3>
-        {detail.instances.length > 0 ? <Tree nodes={detail.instances} /> : <p className="empty">No run yet.</p>}
-      </section>
+      <RunIndex instances={detail.instances} {...(here !== undefined ? { here } : {})} {...(onGoTo !== undefined ? { onGoTo } : {})} />
 
       <section>
         <h3>Live events</h3>

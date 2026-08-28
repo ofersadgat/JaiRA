@@ -182,6 +182,29 @@ export function bumpPath(centres: readonly number[], from: number, to: number): 
   );
 }
 
+/**
+ * Out and straight back, CENTRED on the row — a state that opens a lane and closes it again inside
+ * the one row it owns.
+ *
+ * The same gesture as {@link bumpPath} and drawn for the same reason: a lane that leaves and rejoins
+ * immediately is a detour the run took, and the shape is the trace of it. The difference is where it
+ * sits. `bumpPath` hangs off the bottom half of a cap because there it TRAILS a fork; this one is the
+ * whole of its row, because a state with nothing under it has no fork to trail and no rows to run a
+ * straight through.
+ *
+ * Which is what makes it the right mark for an index. Drawn as an ordinary fork and join, such a
+ * state is a curve down-left and a curve down-right meeting in the middle — a chevron with no line
+ * in it — and a column of them is a saw blade rather than a list of states.
+ */
+export function lobePath(centres: readonly number[], from: number, to: number): string {
+  const a = centres[from] ?? PAD;
+  const b = centres[to] ?? PAD;
+  return (
+    `M${a} 0 C ${a} ${MID - 9}, ${b} ${MID - 8}, ${b} ${MID}` +
+    ` C ${b} ${MID + 8}, ${a} ${MID + 9}, ${a} ${CAP}`
+  );
+}
+
 // --- lane bookkeeping ---------------------------------------------------------
 
 /**
@@ -356,8 +379,14 @@ const HUE0 = 18;
  * ever appends — a state entered for the first time takes the next hue and no lane already on screen
  * changes colour underneath the person reading it. The cost is that one state is not the same colour
  * in two different runs, which is a comparison nothing in this view invites.
+ *
+ * ⚠️ WHICH LIST IS HANDED IN IS THE WHOLE ANSWER, and two readings of one run must not each build
+ * their own. A hue is a POSITION, so a list that omits a state — or orders it differently — moves
+ * every hue after it, and the conversation and the index then disagree about what colour `draft` is
+ * while both are drawing the same run. `paletteOfRun` in `runIndex.tsx` is the one list; this takes
+ * anything with a name so it can be given that rather than a set of rows.
  */
-export function paletteOf(steps: readonly RailStep[]): Map<string, string> {
+export function paletteOf(steps: readonly { stateId: string }[]): Map<string, string> {
   const hues = new Map<string, number>();
   for (const step of steps) {
     if (step.stateId === "" || hues.has(step.stateId)) continue;

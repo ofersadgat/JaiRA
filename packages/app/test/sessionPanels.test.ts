@@ -16,6 +16,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { InstanceNode, SessionRef } from "@jaira/shared/browser";
 import { bandsOf, piecesOf, type BandNote, type SessionPiece } from "../src/renderer/sessionBands";
 import { SessionBandsView, ZigDefs } from "../src/renderer/sessionPanels";
+import { keyOfNode } from "../src/renderer/runIndex";
 
 const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
   status: "completed",
@@ -508,5 +509,55 @@ describe("what a fold does", () => {
     // what pressing it will do rather than about what it is called.
     expect(twoStates(new Set())).toContain('aria-label="Collapse all"');
     expect(twoStates(new Set(["t-1::2:0", "t-1::3:0"]))).toContain('aria-label="Expand all"');
+  });
+});
+
+/**
+ * Where a bookmark from the Instances index LANDS — see `runIndex.tsx` and the `focus` prop.
+ *
+ * The scroll itself needs a browser and is not tested here. What is tested is the half that was
+ * actually missing when the bookmark did nothing: whether there is anything in the document to
+ * scroll TO. A jump that finds no target fails silently, so an absent stamp is invisible until
+ * somebody presses the row and nothing happens.
+ */
+describe("what a bookmark can land on", () => {
+  const landings = (html: string): string[] => [...html.matchAll(/data-instance="([^"]+)"/g)].map((m) => m[1]!);
+
+  it("stamps every state's letterhead with the instance the index names it by", () => {
+    const html = renderToStaticMarkup(
+      createElement(SessionBandsView, {
+        bands: bandsOf(
+          piecesOf(parentOf([{ id: 2, from: 0, to: 10 }, { id: 3, from: 11, to: 20 }]), [
+            ref(2, "planning", 0, 10),
+            ref(3, "planning", 11, 20),
+          ], 1),
+        ),
+        render: (piece) => createElement("p", null, `said by #${piece.node.instanceId}`),
+      }),
+    );
+    /*
+     * Asserted against `keyOfNode` rather than against a literal, because the property that matters
+     * is that the two AGREE — the index names a row by that key and the conversation stamps its
+     * landing with the same one. A literal would keep passing if both sides drifted together.
+     */
+    const kids = parentOf([{ id: 2, from: 0, to: 10 }, { id: 3, from: 11, to: 20 }]).children;
+    expect(landings(html)).toEqual(kids.map(keyOfNode));
+  });
+
+  it("stamps a SOLO sheet, which has no letterhead to stamp", () => {
+    /*
+     * One state in the view is drawn bare: the gutter above it already names the session, times it
+     * and says which state opened it, so the letterhead is dropped. That is the panel a reader is
+     * most likely to jump to — a leaf run is the whole page — and it was the one the bookmark could
+     * not reach, because the stamp lived on the header that is not there.
+     */
+    const html = renderToStaticMarkup(
+      createElement(SessionBandsView, {
+        bands: bandsOf(piecesOf(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)], 1)),
+        render: () => createElement("p", null, "the whole page"),
+      }),
+    );
+    expect(html).toContain("sb-bare");
+    expect(landings(html)).toEqual(parentOf([{ id: 2, from: 0, to: 10 }]).children.map(keyOfNode));
   });
 });
