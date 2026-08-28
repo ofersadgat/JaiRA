@@ -20,7 +20,7 @@ import { CHAT_INSTANCE_BASE, isChatInstance, runChatTurn, type ChatInstance } fr
 /** The host state, already merged — the shape a snapshot pins. */
 const host = {
   id: "plan/draft",
-  operation: { kind: "prompt", user: "draft", config: { model: "m" }, input: {}, output: { name: "text", kind: "text" } },
+  operation: { kind: "prompt", user: "draft", config: { model: "m" }, input: {}, output: { text: { kind: "text" } } },
 } as never;
 
 /** A journal that remembers, so a test can project it exactly as the app does. */
@@ -48,7 +48,7 @@ const instance = (patch: Partial<ChatInstance> = {}): ChatInstance => ({
   parentInstanceId: 2,
   stateId: "plan/draft",
   childKey: "ask",
-  iteration: 0,
+  index: 0,
   ...patch,
 });
 
@@ -134,8 +134,8 @@ describe("the loop is one instance", () => {
   it("takes a transition per message instead of re-entering, so nothing is superseded", async () => {
     const h = harness();
     await send(h, { message: "first", position: "s@1" });
-    await send(h, { message: "second", position: "s@2", instance: { iteration: 1 } });
-    await send(h, { message: "third", position: "s@3", instance: { iteration: 2 } });
+    await send(h, { message: "second", position: "s@2", instance: { index: 1 } });
+    await send(h, { message: "third", position: "s@3", instance: { index: 2 } });
 
     // One entry, three turns. A second `instance.entered` under this key would mark the first
     // superseded and the panel filters those out — every message but the last would vanish.
@@ -147,12 +147,12 @@ describe("the loop is one instance", () => {
   it("counts the exchanges, and stays one node in the tree", async () => {
     const h = harness();
     await send(h, { message: "first", position: "s@1" });
-    await send(h, { message: "second", position: "s@2", instance: { iteration: 1 } });
+    await send(h, { message: "second", position: "s@2", instance: { index: 1 } });
 
     const tree = projectRun(h.log.events, {}, h.log.atMs);
     const chats = tree.instances.flatMap((r) => r.children).filter((c) => isChatInstance(c.instanceId));
     expect(chats).toHaveLength(1);
-    expect(chats[0]!.iteration).toBe(1);
+    expect(chats[0]!.index).toBe(1);
     expect(chats[0]!.status).toBe("completed");
   });
 });
@@ -164,7 +164,7 @@ describe("the position it ends at", () => {
     // The join between a turn and its transcript. Without it the reply is recorded somewhere nothing
     // can find its way back to.
     expect(first.sessionRef).toBeDefined();
-    const second = await send(h, { message: "again", position: first.sessionRef!, instance: { iteration: 1 } });
+    const second = await send(h, { message: "again", position: first.sessionRef!, instance: { index: 1 } });
     expect(second.sessionRef).not.toBe(first.sessionRef);
   });
 });

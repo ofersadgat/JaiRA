@@ -49,7 +49,7 @@ describe("resolveLabel", () => {
     // `.children.*` and `.outputs.*` only exist once the run is over, and a label that appears
     // after the fact is useless on the card you are watching.
     expect(resolveLabel(".outputs.plan_doc", {}).issue).toMatchObject({ kind: "unsupported" });
-    expect(resolveLabel(".children.goals.outputs.g", {}).issue).toMatchObject({ kind: "unsupported" });
+    expect(resolveLabel(".children.goals.output.g", {}).issue).toMatchObject({ kind: "unsupported" });
   });
 
   it("refuses an expression richer than a path instead of half-evaluating it", () => {

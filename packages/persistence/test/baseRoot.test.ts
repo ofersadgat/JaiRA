@@ -59,7 +59,7 @@ function step(label: string): Record<string, unknown> {
       kind: "function",
       function: "echo",
       input: { value: { kind: "text", binding: { text: label } } },
-      output: { name: "value", kind: "text" },
+      output: { value: { kind: "text" } },
     },
   };
 }
@@ -163,7 +163,7 @@ describe("$ searches the layer roots", () => {
         kind: "prompt",
         prompt: { $ref: "$/prompts/critique.md" },
         config: { model: "anthropic/claude-sonnet-5" },
-        output: { name: "notes", kind: "text" },
+        output: { notes: { kind: "text" } },
       },
     });
 
@@ -182,7 +182,7 @@ describe("$ searches the layer roots", () => {
         kind: "prompt",
         prompt: { $ref: "$/prompts/critique.md" },
         config: { model: "anthropic/claude-sonnet-5" },
-        output: { name: "notes", kind: "text" },
+        output: { notes: { kind: "text" } },
       },
     });
 
@@ -199,7 +199,7 @@ describe("$ searches the layer roots", () => {
         kind: "prompt",
         prompt: { $ref: "$/prompts/absent.md" },
         config: { model: "anthropic/claude-sonnet-5" },
-        output: { name: "notes", kind: "text" },
+        output: { notes: { kind: "text" } },
       },
     });
 

@@ -312,17 +312,17 @@ export function changesetReviewFiles(options: ChangesetReviewOptions = {}): Reco
       description: "A human decides every change; settled decisions are applied, comments end the round.",
       inputs: { changeset: CHANGESET_SLOT },
       outputs: {
-        decisions: { ...DECISIONS_SLOT, binding: ".children.gate.outputs.decisions" },
-        settled: { schema: { type: "boolean" }, binding: ".children.status.outputs.settled" },
+        decisions: { ...DECISIONS_SLOT, binding: ".children.gate.output.decisions" },
+        settled: { schema: { type: "boolean" }, binding: ".children.status.output.settled" },
         comments: {
           schema: { type: "array", items: { type: "object" } },
-          binding: ".children.status.outputs.comments",
+          binding: ".children.status.output.comments",
         },
       },
       children: {
         gate: { inputs: { changeset: ".inputs.changeset" } },
-        status: { inputs: { decisions: ".children.gate.outputs.decisions" } },
-        apply: { inputs: { changeset: ".inputs.changeset", decisions: ".children.gate.outputs.decisions" } },
+        status: { inputs: { decisions: ".children.gate.output.decisions" } },
+        apply: { inputs: { changeset: ".inputs.changeset", decisions: ".children.gate.output.decisions" } },
       },
       // The whole spine is declared so the validator can prove every consumer's producers ran on
       // every path; the TRANSITIONS are the policy (§4.3) — an unsettled round terminates before
@@ -334,8 +334,8 @@ export function changesetReviewFiles(options: ChangesetReviewOptions = {}): Reco
       // soon as the operation completes" — which would un-prove the whole spine. Reading `status`
       // pins the first two to after it; the last conjunct reads `apply` for the same reason.
       transitions: [
-        { to: "terminate.success", when: ".run.cursor === 'status' && .children.status.outputs.settled === false" },
-        { to: "apply", when: ".run.cursor === 'status' && .children.status.outputs.settled === true" },
+        { to: "terminate.success", when: ".run.cursor === 'status' && .children.status.output.settled === false" },
+        { to: "apply", when: ".run.cursor === 'status' && .children.status.output.settled === true" },
         { to: "terminate.success", when: ".run.cursor === 'apply' && .children.apply.outcome === 'success'" },
       ],
       limits: { max_iterations: 5 },
@@ -444,7 +444,7 @@ export interface ChangesetReviewLoopOptions extends ChangesetReviewOptions {
  * binding is a null-coalesce over the VALUE:
  *
  * ```
- * coalesce(.children.revise.outputs.changeset, .inputs.changeset)
+ * coalesce(.children.revise.output.changeset, .inputs.changeset)
  * ```
  *
  * A never-entered child's outputs read as undefined (coalesces to the input — round one), a
@@ -463,7 +463,7 @@ export function changesetReviewLoopFiles(options: ChangesetReviewLoopOptions = {
   const tree = options.tree ?? "proposal";
   const maxRounds = options.maxRounds ?? 5;
   // The current changeset: last revision if a round has happened, the input on round one.
-  const CURRENT = "coalesce(.children.revise.outputs.changeset, .inputs.changeset)";
+  const CURRENT = "coalesce(.children.revise.output.changeset, .inputs.changeset)";
   const changesetSlot = { schema: CHANGESET_SLOT.schema, default: EMPTY_CHANGESET };
   const decisionsSlot = { ...DECISIONS_SLOT, default: [] };
   return {
@@ -472,36 +472,36 @@ export function changesetReviewLoopFiles(options: ChangesetReviewLoopOptions = {
       description: "Comments go back to the model, the revised changeset comes back to the gate; settled decisions apply.",
       inputs: { changeset: CHANGESET_SLOT },
       outputs: {
-        decisions: { ...DECISIONS_SLOT, optional: true, binding: ".children.gate.outputs.decisions" },
+        decisions: { ...DECISIONS_SLOT, optional: true, binding: ".children.gate.output.decisions" },
         changeset: { schema: CHANGESET_SLOT.schema, optional: true, binding: CURRENT },
-        applied: { schema: { type: "array", items: { type: "string" } }, optional: true, binding: ".children.apply.outputs.applied" },
+        applied: { schema: { type: "array", items: { type: "string" } }, optional: true, binding: ".children.apply.output.applied" },
       },
       children: {
         gate: { inputs: { changeset: CURRENT } },
-        status: { inputs: { decisions: ".children.gate.outputs.decisions" } },
-        apply: { inputs: { changeset: CURRENT, decisions: ".children.gate.outputs.decisions" } },
+        status: { inputs: { decisions: ".children.gate.output.decisions" } },
+        apply: { inputs: { changeset: CURRENT, decisions: ".children.gate.output.decisions" } },
         // Entered by TRANSITION only, and deliberately OUTSIDE the sequence: the loop-back to
         // `gate` clears the spine, and these two surviving it is what carries a round's answer
         // into the next round's gate.
         respond: {
           inputs: {
             changeset: CURRENT,
-            decisions: ".children.gate.outputs.decisions",
-            comments: ".children.status.outputs.comments",
+            decisions: ".children.gate.output.decisions",
+            comments: ".children.status.output.comments",
           },
         },
-        revise: { inputs: { changeset: CURRENT, edits: ".children.respond.outputs.edits" } },
+        revise: { inputs: { changeset: CURRENT, edits: ".children.respond.output.edits" } },
       },
       sequence: ["gate", "status", "apply"],
       transitions: [
-        { to: "respond", when: ".run.cursor === 'status' && .children.status.outputs.settled === false && .run.iteration < .limits.max_iterations" },
+        { to: "respond", when: ".run.cursor === 'status' && .children.status.output.settled === false && .run.iteration < .limits.max_iterations" },
         { to: "revise", when: ".run.cursor === 'respond' && .children.respond.outcome === 'success'" },
         { to: "gate", when: ".run.cursor === 'revise' && .children.revise.outcome === 'success'" },
-        { to: "apply", when: ".run.cursor === 'status' && .children.status.outputs.settled === true" },
+        { to: "apply", when: ".run.cursor === 'status' && .children.status.output.settled === true" },
         { to: "terminate.success", when: ".run.cursor === 'apply' && .children.apply.outcome === 'success'" },
         // Out of rounds with comments still open: fail loudly rather than applying an unsettled
         // review — the sequence would otherwise fall through to `apply`.
-        { to: "terminate.error", when: ".run.cursor === 'status' && .children.status.outputs.settled === false" },
+        { to: "terminate.error", when: ".run.cursor === 'status' && .children.status.output.settled === false" },
       ],
       limits: { max_iterations: maxRounds * 3 + 2 },
     },

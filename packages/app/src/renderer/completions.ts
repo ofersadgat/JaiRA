@@ -210,7 +210,7 @@ export function isKnownRef(ref: string, targets: readonly string[]): boolean {
  *
  * A binding is where a value COMES FROM, and until now it was a bare text box with a placeholder —
  * so the two most common bindings in the format, `.inputs.<slot>` and
- * `.children.<key>.outputs.<slot>`, were things you typed from memory. A slot name misremembered by
+ * `.children.<key>.output.<slot>`, were things you typed from memory. A slot name misremembered by
  * one character is not a syntax error; it is a binding that resolves to nothing, and it is caught by
  * the linter rather than by the box you typed it into.
  *
@@ -243,7 +243,7 @@ export function bindingTargets(
     const key = child.key.trim();
     if (key.length === 0) continue;
     for (const slot of declared[child.stateId]?.outputs ?? []) {
-      out.push(`.children.${key}.outputs.${slot.name}`);
+      out.push(`.children.${key}.output.${slot.name}`);
     }
     // How the CHILD terminated, which is a different thing from any output it declares — and the
     // usual way a parent turns "the review said block" into a transition or a derived output.
@@ -283,6 +283,7 @@ export function guardTargets(kind: OperationNamespace): string[] {
           ".operation.usage",
         ]),
     // Guard-only control-flow scalars (§8) — never a reference binding.
+    ".run.index",
     ".run.iteration",
     ".run.cursor",
     ".run.position",

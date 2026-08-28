@@ -32,7 +32,7 @@ const SOURCE = {
   operation: {
     prompt: "Extract goals from {{.inputs.issue}}.",
     model: "claude-opus-5",
-    outputs: { goals: { schema: { type: "array" } } },
+    output: { goals: { schema: { type: "array" } } },
   },
 };
 
@@ -63,7 +63,7 @@ const node = (patch: Partial<InstanceNode> = {}): InstanceNode => ({
   instanceId: 2,
   stateId: "feature/plan/goals",
   status: "completed",
-  iteration: 0,
+  index: 0,
   superseded: false,
   startedAt: 1,
   children: [],

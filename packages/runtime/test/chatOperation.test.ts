@@ -27,7 +27,7 @@ const speaking = (patch: {
       ...(patch.system !== undefined ? { system: patch.system } : {}),
       config: patch.config ?? {},
       input: {},
-      output: { name: "text", kind: "text" },
+      output: { text: { kind: "text" } },
     },
     ...(patch.environment !== undefined ? { environment: patch.environment } : {}),
   }) as unknown as LoadedState;

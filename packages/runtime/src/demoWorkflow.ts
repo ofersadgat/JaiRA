@@ -21,6 +21,8 @@ export const PLAN_ID = "feature/plan";
 export const HUMAN_REVIEW_FUNCTION = "choose_option";
 
 const artifact = (format: string) => ({ kind: "blob", schema: { type: "string", contentMediaType: format } });
+/** What a CALL returns where the state stores it as an artifact: a string, no `kind`. */
+const markdownText = (format: string) => ({ schema: { type: "string", contentMediaType: format } }) as const;
 const str = () => ({ schema: { type: "string" } });
 const strArray = () => ({ schema: { type: "array", items: { type: "string" } } });
 
@@ -46,30 +48,30 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
       outputs: {
         outcome: {
           schema: { type: "string", enum: ["complete", "blocked"] },
-          binding: { expr: ".children.critique.outputs.outcome === 'clean' ? 'complete' : 'blocked'" },
+          binding: { expr: ".children.critique.output.outcome === 'clean' ? 'complete' : 'blocked'" },
         },
         // `output` defaults to the slot's own name, so this is context's `plan_doc`.
-        plan_doc: { ...artifact("markdown"), binding: ".children.context.outputs.plan_doc" },
+        plan_doc: { ...artifact("markdown"), binding: ".children.context.output.plan_doc" },
         // A "passthrough" output: the whole child result as ONE value (`*`, WORKFLOWS.md §3.4).
-        critique: { binding: ".children.critique.outputs" },
+        critique: { binding: ".children.critique.output" },
       },
       children: {
         // No `state`: a child's key names the state it runs (WORKFLOWS.md §6).
         goals: { inputs: { issue: ".inputs.issue" } },
-        context: { inputs: { issue: ".inputs.issue", goals: ".children.goals.outputs.goals" } },
+        context: { inputs: { issue: ".inputs.issue", goals: ".children.goals.output.goals" } },
         critique: {
           inputs: {
-            plan_doc: ".children.context.outputs.plan_doc",
+            plan_doc: ".children.context.output.plan_doc",
             severity_threshold: { text: "significant" },
           },
         },
       },
       sequence: ["goals", "context", "critique"],
       transitions: [
-        { to: "terminate.success", when: ".children.critique.outputs.outcome === 'clean'" },
+        { to: "terminate.success", when: ".children.critique.output.outcome === 'clean'" },
         {
           to: "goals",
-          when: ".children.critique.outputs.outcome === 'needs_changes' && .run.iteration < .limits.max_iterations",
+          when: ".children.critique.output.outcome === 'needs_changes' && .run.iteration < .limits.max_iterations",
         },
         { to: "terminate.success", when: ".children.critique.outcome === 'success'" },
       ],
@@ -84,7 +86,7 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
       // NAME, silently, and a call that stops returning that name leaves a state that terminates
       // successfully having handed back nothing.
       outputs: { goals: { ...strArray(), binding: ".operation.output.goals" } },
-      operation: { prompt: "Extract goals from {{.inputs.issue}}.", outputs: { goals: strArray() } },
+      operation: { prompt: "Extract goals from {{.inputs.issue}}.", output: { goals: strArray() } },
     },
     "feature/plan/context": {
       label: "Context",
@@ -92,7 +94,7 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
       outputs: { plan_doc: { ...artifact("markdown"), binding: ".operation.output.plan_doc" } },
       operation: {
         prompt: "Write the plan for {{.inputs.issue}}.",
-        outputs: { plan_doc: artifact("markdown") },
+        output: { plan_doc: markdownText("markdown") },
       },
     },
     "feature/plan/critique": {
@@ -115,7 +117,7 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
         human_decision: {
           schema: { type: "string", enum: ["approve", "request_changes", "block"] },
           optional: true,
-          binding: ".children.human_review.outputs.decision",
+          binding: ".children.human_review.output.decision",
         },
       },
       environment: { conversation: { mode: "full_history" } },
@@ -124,10 +126,10 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
         prompt:
           "Review the plan document. Find significant weaknesses at or above the configured " +
           "severity threshold. Return structured output matching this operation's declared returns.",
-        outputs: {
+        output: {
           outcome: { schema: { type: "string", enum: ["clean", "needs_changes", "blocked"] } },
           weaknesses: strArray(),
-          critique_report: artifact("markdown"),
+          critique_report: markdownText("markdown"),
         },
       },
       // The children read the CALL's result rather than this state's slots, and that is what binding
@@ -161,7 +163,7 @@ export function specPlanningFiles(options: DemoWorkflowOptions = {}): Record<str
       label: "Address Weaknesses",
       inputs: { plan_doc: artifact("markdown"), weaknesses: strArray(), critique_report: artifact("markdown") },
       outputs: { resolution: { ...str(), binding: ".operation.output.resolution" } },
-      operation: { prompt: "Fix the listed weaknesses.", model: model("fixer"), outputs: { resolution: str() } },
+      operation: { prompt: "Fix the listed weaknesses.", model: model("fixer"), output: { resolution: str() } },
     },
     "feature/plan/critique/human_review": {
       label: "Human Review",

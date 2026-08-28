@@ -117,7 +117,7 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
           ...(event.childKey !== undefined ? { childKey: event.childKey } : {}),
           ...(event.parentInstanceId !== undefined ? { parentInstanceId: event.parentInstanceId } : {}),
           status: "running",
-          iteration: 0,
+          index: 0,
           superseded: false,
           startedAt: at,
           // What this run was CALLED WITH, and what to call it. Both come off the entry event, which
@@ -196,7 +196,7 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
       }
       case "transition.taken": {
         const node = byId.get(event.instanceId);
-        if (node) node.iteration = event.iteration;
+        if (node) node.index = event.index;
         break;
       }
       case "child.superseded": {

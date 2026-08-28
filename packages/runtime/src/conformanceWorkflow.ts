@@ -228,10 +228,10 @@ export function conformanceWorkflowFiles(options: ConformanceWorkflowOptions = {
       // Every output carries its own schema rather than riding on the child's: these are what the
       // CLI renders and what `--json` prints, so the shape is part of the command's contract.
       outputs: {
-        requirements: { schema: REQUIREMENT_SCHEMA, binding: ".children.requirements.outputs.requirements" },
-        verdict: { schema: VERDICT_SCHEMA, binding: ".children.assessment.outputs.verdict" },
-        findings: { schema: FINDING_SCHEMA, binding: ".children.assessment.outputs.findings" },
-        extras: { schema: EXTRA_SCHEMA, binding: ".children.assessment.outputs.extras" },
+        requirements: { schema: REQUIREMENT_SCHEMA, binding: ".children.requirements.output.requirements" },
+        verdict: { schema: VERDICT_SCHEMA, binding: ".children.assessment.output.verdict" },
+        findings: { schema: FINDING_SCHEMA, binding: ".children.assessment.output.findings" },
+        extras: { schema: EXTRA_SCHEMA, binding: ".children.assessment.output.extras" },
       },
       children: {
         // No `state`: a child's key names the state it runs (WORKFLOWS.md §6).
@@ -240,7 +240,7 @@ export function conformanceWorkflowFiles(options: ConformanceWorkflowOptions = {
           inputs: {
             spec: ".inputs.spec",
             implementation: ".inputs.implementation",
-            requirements: ".children.requirements.outputs.requirements",
+            requirements: ".children.requirements.output.requirements",
           },
         },
       },

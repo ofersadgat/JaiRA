@@ -44,12 +44,12 @@ const files: Record<string, unknown> = {
     inputs: { topic: { schema: { type: "string" } } },
     outputs: { text: { schema: { type: "string" } } },
     environment: { model: "child/model" },
-    operation: { kind: "prompt", prompt: "Draft something about {{.inputs.topic}}", output: { name: "text", kind: "text" } },
+    operation: { kind: "prompt", prompt: "Draft something about {{.inputs.topic}}", output: { text: { kind: "text" } } },
   },
   "chat/review": {
     inputs: { topic: { schema: { type: "string" } } },
     outputs: { text: { schema: { type: "string" } } },
-    operation: { kind: "prompt", prompt: "Review it", output: { name: "text", kind: "text" } },
+    operation: { kind: "prompt", prompt: "Review it", output: { text: { kind: "text" } } },
   },
 };
 

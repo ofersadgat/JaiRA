@@ -8,7 +8,7 @@
  *
  * ## The loop is one instance, not one per message
  *
- * A fifty-message conversation is ONE instance at `iteration: 50`, and that is load-bearing rather
+ * A fifty-message conversation is ONE instance at `index: 50`, and that is load-bearing rather
  * than tidy. `projection.ts` marks a previous instance under the same child key as superseded the
  * moment that key is re-entered, and a message-per-instance design would therefore leave
  * forty-nine of them superseded — every reader of the tree drawing them as work the engine has
@@ -81,8 +81,15 @@ export interface ChatInstance {
   stateId: string;
   /** The reserved key this conversation is mounted at. One per host, so the loop stays one node. */
   childKey: string;
-  /** 0 for the first message, then one per message. */
-  iteration: number;
+  /**
+   * 0 for the first message, then one per message.
+   *
+   * `index` rather than `iteration` since hw split the two: `index` counts every transition an
+   * instance takes and `iteration` counts only the backward ones — the passes of a loop. A chat has
+   * no sequence to step back into, so a message is a transition and never a pass, and its counter is
+   * the one that moves per message.
+   */
+  index: number;
 }
 
 export interface ChatTurnPorts {
@@ -129,7 +136,7 @@ export interface ChatTurnResult {
  * and message 5 cannot land on it.
  */
 function seedFor(instance: ChatInstance): string {
-  return `chat:${instance.instanceId}:${instance.iteration}`;
+  return `chat:${instance.instanceId}:${instance.index}`;
 }
 
 /**
@@ -148,7 +155,7 @@ export async function runChatTurn(ports: ChatTurnPorts, request: ChatTurnRequest
 
   // Entering once and transitioning after is what keeps a long conversation one node — see the
   // module header on why a second `instance.entered` under this key would hide everything above it.
-  if (instance.iteration === 0) {
+  if (instance.index === 0) {
     emit(
       {
         type: "instance.entered",
@@ -162,7 +169,7 @@ export async function runChatTurn(ports: ChatTurnPorts, request: ChatTurnRequest
       at,
     );
   } else {
-    emit({ type: "transition.taken", ...where, to: instance.stateId, iteration: instance.iteration }, at);
+    emit({ type: "transition.taken", ...where, to: instance.stateId, index: instance.index, iteration: 0 }, at);
   }
   emit({ type: "operation.started", ...where, op: "prompt" }, at);
 

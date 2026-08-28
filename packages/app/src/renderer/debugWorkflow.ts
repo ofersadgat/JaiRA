@@ -14,7 +14,7 @@
  * Two states, and the second is the point:
  *
  *  - `say`   asks for a greeting and publishes it as a typed `string`.
- *  - `check` takes that string as an INPUT — wired `.children.say.outputs.greeting` on the mount —
+ *  - `check` takes that string as an INPUT — wired `.children.say.output.greeting` on the mount —
  *    and reports whether it was a hello-world greeting.
  *
  * So a pass means more than "the provider answered". It means the first call's structured output was
@@ -56,14 +56,14 @@ export function selfTestFiles(): Record<string, JsonValue> {
       // this root stays a composite.
       environment: { kind: "prompt" },
       outputs: {
-        greeting: { schema: { type: "string" }, binding: ".children.say.outputs.greeting" },
-        passed: { schema: { type: "boolean" }, binding: ".children.check.outputs.passed" },
-        verdict: { schema: { type: "string" }, binding: ".children.check.outputs.verdict" },
+        greeting: { schema: { type: "string" }, binding: ".children.say.output.greeting" },
+        passed: { schema: { type: "boolean" }, binding: ".children.check.output.passed" },
+        verdict: { schema: { type: "string" }, binding: ".children.check.output.verdict" },
       },
       children: {
         say: {},
         // THE WIRE. `check` declares a required `greeting` input; this is where it comes from.
-        check: { inputs: { greeting: ".children.say.outputs.greeting" } },
+        check: { inputs: { greeting: ".children.say.output.greeting" } },
       },
       sequence: ["say", "check"],
     },

@@ -88,7 +88,7 @@ describe("what a seeded row does to the document", () => {
     // anyone touched it — and the JSON tab would then validate a draft nobody authored.
     const doc = {
       label: "Plan",
-      children: { goals: { state: "./goals" }, critique: { inputs: { plan: ".children.goals.outputs.plan" } } },
+      children: { goals: { state: "./goals" }, critique: { inputs: { plan: ".children.goals.output.plan" } } },
       sequence: ["goals", "critique"],
     };
     const form = formOf(doc);

@@ -942,19 +942,21 @@ describe("recovering an interrupted call's own transcript", () => {
   it("passes over a row with no handle, a live row, and one already captured", () => {
     crashed({ handle: null }); // nothing to find the file with
     crashed({ status: "open" }); // still running — a live process owns it
-    crashed({ result: JSON.stringify({ value: { nativeLines: [{ index: 0, line: {} }] } }) }); // done already
+    crashed({ result: JSON.stringify({ value: { capturedAt: "2026-08-27T00:00:00.000Z" } }) }); // done already
     expect(scoped().recoverable("t1")).toEqual([]);
   });
 
   it("folds a recovered capture into the payload, beside what the crash had already saved", () => {
-    const id = crashed({ result: JSON.stringify({ value: { messages: [turn("streamed")] } }) });
+    const id = crashed({ result: JSON.stringify({ value: { entries: [turn("streamed")] } }) });
     const s = scoped();
-    s.foldNativeCapture(id, { nativeLines: [{ index: 0, line: { type: "attachment" } }] } as never);
+    // The FOLD is the caller's rule — this package hands over the value and takes back the result,
+    // because merging a captured file into entries belongs to the runtime and cannot be imported here.
+    s.foldNativeCapture(id, (value) => ({ ...value, capturedAt: "2026-08-27T00:00:00.000Z" }));
 
     const row = db.prepare(`SELECT result_json FROM operation_records WHERE id = ?`).get(id) as { result_json: string };
-    // The partial the flush saved survives; the fuller capture joins it where the reader looks.
+    // The partial the flush saved survives; the fold's answer is what the record now holds.
     expect(JSON.parse(row.result_json)).toEqual({
-      value: { messages: [turn("streamed")], nativeLines: [{ index: 0, line: { type: "attachment" } }] },
+      value: { entries: [turn("streamed")], capturedAt: "2026-08-27T00:00:00.000Z" },
     });
     // …and it is no longer offered: a second open re-reads no files.
     expect(s.recoverable("t1")).toEqual([]);
@@ -964,7 +966,7 @@ describe("recovering an interrupted call's own transcript", () => {
     // A scripted value or a bare string has nowhere to put lines — wrapping it in a shape nothing
     // reads would corrupt the record to add an annotation.
     const id = crashed({ result: JSON.stringify({ value: "just text" }) });
-    scoped().foldNativeCapture(id, { nativeLines: [{ index: 0, line: {} }] } as never);
+    scoped().foldNativeCapture(id, (value) => ({ ...value, capturedAt: "x" }));
     expect(JSON.parse((db.prepare(`SELECT result_json FROM operation_records WHERE id = ?`).get(id) as { result_json: string }).result_json)).toEqual({
       value: "just text",
     });

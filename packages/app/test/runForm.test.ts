@@ -89,7 +89,7 @@ describe("reading a state's inputs", () => {
   });
 
   it("does not ask for a spread — it stands for N slots, not one value", () => {
-    const fields = fieldsOf({ inputs: { "ctx*": { binding: ".children.gather.outputs" } } });
+    const fields = fieldsOf({ inputs: { "ctx*": { binding: ".children.gather.output" } } });
     expect(fields[0]).toMatchObject({ name: "ctx*", spread: true });
     expect(isFilled(fields[0]!)).toBe(false);
   });

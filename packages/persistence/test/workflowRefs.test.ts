@@ -109,7 +109,7 @@ describe("inherited environment across files", () => {
       // Bound like every other output (see `workflows.ts`), so the only thing this leaf is testing
       // is where its `kind` and its model came from.
       outputs: { goals: { schema: { type: "string" }, binding: ".operation.output.goals" } },
-      operation: { prompt: "go", outputs: { goals: { schema: { type: "string" } } } },
+      operation: { prompt: "go", output: { goals: { schema: { type: "string" } } } },
     });
 
     const goals = load("feature/plan").states["feature/plan/goals"]!;

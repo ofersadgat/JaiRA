@@ -19,7 +19,7 @@ import { SessionBandsView, ZigDefs } from "../src/renderer/sessionPanels";
 
 const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
   status: "completed",
-  iteration: 0,
+  index: 0,
   superseded: false,
   startedAt: 0,
   children: [],

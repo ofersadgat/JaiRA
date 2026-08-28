@@ -68,8 +68,8 @@ describe("syncWorkflowFiles", () => {
     expect(authored.children.edits.inputs).toEqual({
       spec: ".inputs.spec",
       implementation: ".inputs.implementation",
-      requirements: ".children.requirements.outputs.requirements",
-      findings: ".children.assessment.outputs.findings",
+      requirements: ".children.requirements.output.requirements",
+      findings: ".children.assessment.output.findings",
     });
     // And those bindings resolve: a dangling one fails at RUN time, in the app, after two model
     // calls have already been paid for.

@@ -27,6 +27,7 @@ export * from "./workflowRefs";
 export * from "./userModules";
 export * from "./workflowSync";
 export * from "./descriptions";
+export * from "./blobStore";
 export * from "./artifactStore";
 export * from "./memoCache";
 export * from "./jobs";

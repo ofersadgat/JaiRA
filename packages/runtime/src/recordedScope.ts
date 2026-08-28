@@ -115,7 +115,7 @@ export interface RecordedRun {
  * The DSL context a state's own bindings read.
  *
  * `inputs` and `children.<key>.outputs` are what an authored expression names (`.inputs.scores`,
- * `.children.draft.outputs.docs`), and they are the two the recorded run can answer. Anything else
+ * `.children.draft.output.docs`), and they are the two the recorded run can answer. Anything else
  * an expression reaches for — `run`, `limits` — is absent rather than invented, and reading it
  * yields `undefined` through hw's own `memberOf`, which is what it would have done for a state that
  * never had one.

@@ -48,7 +48,7 @@ const promptOp = (model?: string): Operation<never> =>
     user: { kind: "text", binding: { text: "hi" } },
     config: model === undefined ? {} : { model },
     input: {},
-    output: { name: "answer", kind: "json" },
+    output: { answer: { kind: "json" } },
   }) as unknown as Operation<never>;
 
 /** An in-memory memo store, so the memoize step has somewhere real to write. */

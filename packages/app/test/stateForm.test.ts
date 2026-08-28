@@ -27,17 +27,17 @@ const PLAN = {
   environment: { kind: "prompt", model: "planner" },
   inputs: { issue: { kind: "blob", schema: { type: "string", contentMediaType: "markdown" } } },
   outputs: {
-    outcome: { schema: { type: "string" }, binding: { expr: ".children.critique.outputs.outcome === 'clean'" } },
-    plan_doc: { kind: "blob", binding: ".children.context.outputs.plan_doc" },
+    outcome: { schema: { type: "string" }, binding: { expr: ".children.critique.output.outcome === 'clean'" } },
+    plan_doc: { kind: "blob", binding: ".children.context.output.plan_doc" },
   },
   children: {
     goals: { inputs: { issue: ".inputs.issue" } },
-    context: { inputs: { goals: ".children.goals.outputs.goals" } },
-    critique: { inputs: { plan_doc: ".children.context.outputs.plan_doc" }, async: true },
+    context: { inputs: { goals: ".children.goals.output.goals" } },
+    critique: { inputs: { plan_doc: ".children.context.output.plan_doc" }, async: true },
   },
   sequence: ["goals", "context", "critique"],
   transitions: [
-    { to: "terminate.success", when: ".children.critique.outputs.outcome === 'clean'" },
+    { to: "terminate.success", when: ".children.critique.output.outcome === 'clean'" },
     { to: "goals" },
   ],
   limits: { max_iterations: 3 },
@@ -102,7 +102,7 @@ describe("applyForm", () => {
     expect(out["environment"]).toEqual({ kind: "prompt", model: "planner" });
     // Child wiring and slot schemas are the substance; the rows show neither.
     expect((out["children"] as Record<string, unknown>)["critique"]).toEqual({
-      inputs: { plan_doc: ".children.context.outputs.plan_doc" },
+      inputs: { plan_doc: ".children.context.output.plan_doc" },
       async: true,
     });
     expect((out["outputs"] as Record<string, Record<string, unknown>>)["outcome"]!["schema"]).toEqual({ type: "string" });
@@ -111,7 +111,7 @@ describe("applyForm", () => {
   it("never writes a structured binding back as a string", () => {
     const out = round(PLAN);
     expect((out["outputs"] as Record<string, Record<string, unknown>>)["outcome"]!["binding"]).toEqual({
-      expr: ".children.critique.outputs.outcome === 'clean'",
+      expr: ".children.critique.output.outcome === 'clean'",
     });
   });
 
@@ -573,7 +573,7 @@ describe("slot defaults, descriptions and spreads", () => {
 
   it("marks a spread and offers it no type of its own", () => {
     // §3.5: `ctx_*` declares N slots, each keeping the CHILD's schema. There is no one schema here.
-    const doc = { outputs: { "ctx_*": { binding: ".children.context.outputs" } } };
+    const doc = { outputs: { "ctx_*": { binding: ".children.context.output" } } };
     const row = formOf(doc).outputs[0]!;
 
     expect(row.spread).toBe(true);
@@ -581,12 +581,12 @@ describe("slot defaults, descriptions and spreads", () => {
   });
 
   it("does not write a schema onto a spread", () => {
-    const doc = { outputs: { "ctx_*": { binding: ".children.context.outputs" } } };
+    const doc = { outputs: { "ctx_*": { binding: ".children.context.output" } } };
     const out = round(doc, {
       outputs: formOf(doc).outputs.map((row) => ({ ...row, type: { name: "text" as const, list: false } })),
     });
     expect((out["outputs"] as Record<string, unknown>)["ctx_*"]).toEqual({
-      binding: ".children.context.outputs",
+      binding: ".children.context.output",
     });
   });
 });
@@ -597,7 +597,7 @@ describe("child wiring", () => {
     children: {
       critique: {
         state: "./critique",
-        inputs: { plan_doc: ".children.context.outputs.plan_doc", depth: { json: 3 } },
+        inputs: { plan_doc: ".children.context.output.plan_doc", depth: { json: 3 } },
         environment: { kind: "function", function: "claude-code", tools: ["read_file"] },
       },
     },
@@ -607,7 +607,7 @@ describe("child wiring", () => {
     const child = formOf(WIRED).children[0]!;
 
     expect(child.inputs.map((row) => row.name)).toEqual(["plan_doc", "depth"]);
-    expect(child.inputs[0]).toMatchObject({ value: ".children.context.outputs.plan_doc" });
+    expect(child.inputs[0]).toMatchObject({ value: ".children.context.output.plan_doc" });
     expect(child.inputs[1]!.structured).toBe(true);
   });
 
@@ -623,7 +623,7 @@ describe("child wiring", () => {
     });
 
     expect((out["children"] as Record<string, Record<string, unknown>>)["critique"]!["inputs"]).toEqual({
-      plan_doc: ".children.context.outputs.plan_doc",
+      plan_doc: ".children.context.output.plan_doc",
       depth: { json: 3 },
       issue: ".inputs.issue",
     });
@@ -636,7 +636,7 @@ describe("child wiring", () => {
     const out = round(WIRED, { children: [{ ...child, inputs: renamed }] });
 
     expect((out["children"] as Record<string, Record<string, unknown>>)["critique"]!["inputs"]).toEqual({
-      plan_doc: ".children.context.outputs.plan_doc",
+      plan_doc: ".children.context.output.plan_doc",
       levels: { json: 3 },
     });
   });

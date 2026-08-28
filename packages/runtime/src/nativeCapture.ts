@@ -29,6 +29,7 @@ import {
   type NativeSidechainFile,
 } from "@declarative-ai/agents-api";
 import type { JsonValue, RecordStore } from "@declarative-ai/exec";
+import { renderToolResult } from "@declarative-ai/llm";
 
 type Settled = Parameters<RecordStore["close"]>[1];
 
@@ -72,7 +73,15 @@ function enriched(settled: Settled, captured: Captured): Settled {
   const result = settled.result;
   const value = result !== undefined && "value" in result ? result.value : undefined;
   if (recordShaped(value)) {
-    return { ...settled, result: { ...result, value: { ...value, ...captured } } as unknown as Settled["result"] };
+    // MERGED into the entries, not stored beside them. The captured file and the streamed log were
+    // two encodings of one conversation with no key to join on, so the reader paired them by role
+    // and order on every read and said so. Pairing once, here, where both halves are in hand, is
+    // what makes the record one array — and the 62% of a capture that was `toolUseResult` restating
+    // a tool result the entries already held stops being stored twice.
+    return {
+      ...settled,
+      result: { ...result, value: foldIntoEntries(value, captured) } as unknown as Settled["result"],
+    };
   }
   const messages = settled.sessionOutcome?.messages;
   if (messages !== undefined) {
@@ -158,5 +167,168 @@ export function withNativeCapture(inner: RecordStore, options: NativeCaptureOpti
       // native file (codex, a fake) would otherwise stamp every record with an empty claim.
       return inner.close(id, isEmptyCapture(captured) ? settled : enriched(settled, captured));
     },
+  };
+}
+
+// --- folding the captured file into the entries ------------------------------
+
+/** The per-line facts that are the RECORD's, not an entry's — one value each across a whole file. */
+const RECORD_INVARIANTS = ["sessionId", "cwd", "version", "gitBranch", "entrypoint", "userType"] as const;
+
+/** The line types the agent writes that are not messages, and are not worth an entry of their own. */
+const DROPPED_LINE_TYPES = new Set(["last-prompt"]);
+
+const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
+
+/**
+ * Merge a captured session file into the payload's entries.
+ *
+ * Three things come out of the file that the stream never carried, and each lands where it belongs:
+ *
+ *  - **`toolUseResult`** — the agent's structured record of a tool execution — onto the
+ *    `tool_result` block it answers, as `data`. Where a registered renderer reproduces the rendered
+ *    text from it, the text is dropped: measured across one run, 82 of 83 file reads round-tripped
+ *    byte for byte, and that alone was 0.95 MB.
+ *  - **threading** (`uuid`, `parentUuid`) and the per-line timestamp, onto the entry itself.
+ *  - **non-message lines** — context injections, queued operations, the agent's own title — as
+ *    `kind: "event"` entries at their woven position. Without a place for them they are simply lost;
+ *    the transcript renders two of the three and names the conversation from the third.
+ *
+ * Paired by ROLE AND ORDER, which is the rule the reader used and the reason this now happens once:
+ * the file holds message lines the stream never carried (the prompt itself), so index arithmetic
+ * against the turns is off by one the moment a run begins.
+ */
+export function foldIntoEntries(value: Record<string, unknown>, captured: Captured): Record<string, unknown> {
+  const entries = Array.isArray(value["entries"]) ? [...(value["entries"] as Record<string, unknown>[])] : [];
+  const chains = captured.nativeSidechains ?? {};
+  if ((captured.nativeLines ?? []).length === 0 && Object.keys(chains).length === 0) return value;
+
+  const invariants: Record<string, unknown> = {};
+  const folded: Record<string, unknown>[] = [];
+
+  // The MAIN chain: entries with no `sidechain` marker.
+  foldChain(entries, captured.nativeLines ?? [], undefined, invariants, folded);
+
+  // Each SUBAGENT's own file, against the entries the stream already tagged with the call that
+  // spawned it. This is where §5's two key spaces close: the streamed turns are keyed by the tool
+  // call and the captured file by the agent id, and the fold is the one place that holds both — so
+  // it writes them onto one marker, `{ id: <agent>, parentToolUseId: <call> }`, and the pair stops
+  // being something a reader has to re-derive.
+  for (const [key, chain] of Object.entries(chains)) {
+    const marker = { id: chain.agentId, parentToolUseId: key };
+    const mine = entries.filter((e) => isRecord(e["sidechain"]) && (e["sidechain"] as { id?: unknown }).id === key);
+    for (const entry of mine) entry["sidechain"] = { ...marker };
+    foldChain(mine, chain.lines, marker, invariants, folded);
+    // The agent's own sidecar — why the subagent existed — has no message to hang on, so it is an
+    // event of the chain it describes rather than a map on the side.
+    folded.push({
+      kind: "event",
+      provider: "anthropic",
+      timestamp: "",
+      sidechain: { ...marker },
+      event: { type: "sidechain", data: { agentId: chain.agentId, ...(chain.meta !== undefined ? { meta: chain.meta } : {}) } },
+    });
+  }
+
+  const out: Record<string, unknown> = { ...value };
+  // THE MARKER a recovery reads. The fold used to be recognizable by the `nativeLines` field it
+  // left behind; there is no such field now, and without something saying so a re-open would
+  // re-read the agent's files for a record that already has them. It is a fact about the record
+  // either way — when its transport's own log was folded in — so it is recorded as one.
+  out["capturedAt"] = new Date().toISOString();
+  if (entries.length > 0 || folded.length > 0) out["entries"] = [...entries, ...folded];
+  if (Object.keys(invariants).length > 0) out["session"] = { ...(isRecord(value["session"]) ? value["session"] : {}), ...invariants };
+  // Neither capture survives as its own field: everything they carried is above, and keeping them
+  // would restore the duplication this fold exists to remove.
+  return out;
+}
+
+/**
+ * Walk one file's lines against the entries of one chain.
+ *
+ * Message lines ANNOTATE — threading, clock, the structured tool result — and everything else
+ * becomes an event at its woven position. A subagent's file marks its own message lines
+ * `isSidechain: true`, which is the transport saying the same thing `marker` does; inside its own
+ * chain those lines are the messages, so the test is against the chain being walked rather than
+ * against the flag.
+ */
+function foldChain(
+  entries: Record<string, unknown>[],
+  lines: readonly { line: unknown }[],
+  marker: { id: string; parentToolUseId: string } | undefined,
+  invariants: Record<string, unknown>,
+  folded: Record<string, unknown>[],
+): void {
+  let cursor = 0;
+  for (const { line } of lines) {
+    if (!isRecord(line)) continue;
+    for (const key of RECORD_INVARIANTS) {
+      if (invariants[key] === undefined && line[key] !== undefined) invariants[key] = line[key];
+    }
+    const type = typeof line["type"] === "string" ? (line["type"] as string) : "";
+    const inThisChain = marker !== undefined ? line["isSidechain"] === true : line["isSidechain"] !== true;
+    const isMessageLine = (type === "user" || type === "assistant") && inThisChain;
+    if (!isMessageLine) {
+      if (DROPPED_LINE_TYPES.has(type) || (type !== "user" && type !== "assistant" && !inThisChain && marker !== undefined)) continue;
+      folded.push({ ...eventEntryOf(line, type), ...(marker !== undefined ? { sidechain: { ...marker } } : {}) });
+      continue;
+    }
+    // A user line pairs only when it carries a tool result: the PROMPT user line is input, never
+    // rode the stream back, and pairing it would shift every annotation after it by one.
+    if (type === "user" && line["toolUseResult"] === undefined) continue;
+    const entry = nextEntryOfRole(entries, cursor, type);
+    if (entry === undefined) continue;
+    cursor = entry.at + 1;
+    annotate(entry.entry, line);
+  }
+}
+
+/** The next main-chain message entry of `role` at or after `from`. */
+function nextEntryOfRole(
+  entries: Record<string, unknown>[],
+  from: number,
+  role: string,
+): { entry: Record<string, unknown>; at: number } | undefined {
+  for (let i = from; i < entries.length; i++) {
+    const entry = entries[i]!;
+    if (entry["kind"] === "message" && entry["sidechain"] === undefined && entry["role"] === role) return { entry, at: i };
+  }
+  return undefined;
+}
+
+/** Copy a line's threading, its clock and its structured tool result onto the entry it belongs to. */
+function annotate(entry: Record<string, unknown>, line: Record<string, unknown>): void {
+  if (typeof line["uuid"] === "string") entry["uuid"] = line["uuid"];
+  if (typeof line["parentUuid"] === "string") entry["parentUuid"] = line["parentUuid"];
+  if (typeof line["timestamp"] === "string") entry["timestamp"] = line["timestamp"];
+  const result = line["toolUseResult"];
+  if (result === undefined) return;
+  const content = entry["content"];
+  if (!Array.isArray(content)) return;
+  for (const block of content as Record<string, unknown>[]) {
+    if (!isRecord(block) || block["type"] !== "tool_result") continue;
+    block["data"] = result;
+    // The rendered text goes only where a renderer puts it back exactly. Unregistered shapes keep
+    // theirs: a new tool or an unrecognized variant costs bytes, never fidelity.
+    const rendered = renderToolResult(result as never);
+    const shown = typeof block["content"] === "string" ? (block["content"] as string) : undefined;
+    if (rendered !== undefined && shown !== undefined && rendered === shown) delete block["content"];
+    return;
+  }
+}
+
+/** A non-message line as an entry. Its own type is kept — the vocabulary is the agent's, and grows. */
+function eventEntryOf(line: Record<string, unknown>, type: string): Record<string, unknown> {
+  const data: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(line)) {
+    if (key === "type" || RECORD_INVARIANTS.includes(key as (typeof RECORD_INVARIANTS)[number])) continue;
+    data[key] = v;
+  }
+  return {
+    kind: "event",
+    provider: "anthropic",
+    ...(typeof line["timestamp"] === "string" ? { timestamp: line["timestamp"] } : { timestamp: "" }),
+    ...(typeof line["uuid"] === "string" ? { uuid: line["uuid"] } : {}),
+    event: { type, ...(Object.keys(data).length > 0 ? { data } : {}) },
   };
 }

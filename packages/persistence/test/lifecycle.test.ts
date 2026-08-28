@@ -52,6 +52,16 @@ describe("project", () => {
     expect(isProject(join(dir, "elsewhere"))).toBe(false);
     expect(() => openProject(join(dir, "elsewhere"))).toThrow(/not a JaiRA project/);
   });
+
+  it("regenerates a missing system/ on open", () => {
+    // Regression: a deleted `system/` — how state whose format has moved on is discarded — and a
+    // clone that never had one both failed the open, on a message about a missing directory.
+    const paths = initProject(dir);
+    rmSync(paths.systemDir, { recursive: true, force: true });
+    const reopened = openProject(dir);
+    for (const p of [paths.dbFile, paths.snapshotsDir, paths.tasksDir]) expect(existsSync(p)).toBe(true);
+    reopened.close();
+  });
 });
 
 describe("task lifecycle", () => {

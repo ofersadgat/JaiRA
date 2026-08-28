@@ -116,7 +116,7 @@ How to read a state:
   (\`terminate.success\` ends the state), \`when\` is the guard expression.
   \`limits.max_iterations\` caps a loop.
 - \`inputs\` / \`outputs\` — the state's declared slots. A binding like
-  \`.children.critique.outputs.outcome\` is where a value comes from.
+  \`.children.critique.output.outcome\` is where a value comes from.
 
 Some states are marked **described elsewhere**. Another document is the account of
 how those work inside, and you are not reading it. For such a state you are given

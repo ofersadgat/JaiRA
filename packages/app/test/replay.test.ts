@@ -33,21 +33,21 @@ function replayFiles(): Record<string, JsonValue> {
   return {
     [ROOT]: {
       label: "Replay fixture",
-      outputs: { last: { schema: { type: "boolean" }, binding: ".children.loop.outputs.last" } },
+      outputs: { last: { schema: { type: "boolean" }, binding: ".children.loop.output.last" } },
       children: { loop: { state: `${ROOT}/loop` } },
       sequence: ["loop"],
     },
     [`${ROOT}/loop`]: {
       label: "Ask until told to stop",
-      outputs: { last: { schema: { type: "boolean" }, binding: ".children.tick.outputs.confirmed" } },
+      outputs: { last: { schema: { type: "boolean" }, binding: ".children.tick.output.confirmed" } },
       children: { tick: { state: `${ROOT}/loop/tick` } },
       sequence: ["tick"],
       transitions: [
         {
           to: "tick",
-          when: ".run.cursor === 'tick' && .children.tick.outputs.confirmed === true && .run.iteration < .limits.max_iterations",
+          when: ".run.cursor === 'tick' && .children.tick.output.confirmed === true && .run.iteration < .limits.max_iterations",
         },
-        { to: "terminate.success", when: ".run.cursor === 'tick' && .children.tick.outputs.confirmed === false" },
+        { to: "terminate.success", when: ".run.cursor === 'tick' && .children.tick.output.confirmed === false" },
       ],
       limits: { max_iterations: 5 },
     },
@@ -244,7 +244,7 @@ function promptFiles(): Record<string, JsonValue> {
       // Declared, so both children take a seat in the SAME transcript — the arrangement any real
       // workflow uses, and the one where positions rather than hashes are the record's key.
       environment: { session: "main" },
-      outputs: { last: { schema: { type: "string" }, binding: ".children.b.outputs.text" } },
+      outputs: { last: { schema: { type: "string" }, binding: ".children.b.output.text" } },
       children: { a: { state: `${PROMPTED}/a` }, b: { state: `${PROMPTED}/b` } },
       sequence: ["a", "b"],
     },

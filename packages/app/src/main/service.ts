@@ -154,6 +154,7 @@ import {
   statusOfResult,
   withNativeCapture,
   captureNativeSession,
+  foldIntoEntries,
   isEmptyCapture,
   chatOperationOf,
   chatPlanFor,
@@ -1166,7 +1167,7 @@ export class AppService {
         try {
           const captured = await capture(row.providerSessionId, { cwd, sinceMs: row.startedAt });
           if (isEmptyCapture(captured)) continue;
-          store.foldNativeCapture(row.id, captured as unknown as Record<string, JsonValue>);
+          store.foldNativeCapture(row.id, (value) => foldIntoEntries(value, captured) as Record<string, JsonValue>);
           recoveredAny = true;
           this.log({
             level: "info",
@@ -3074,7 +3075,7 @@ export class AppService {
    */
   async sendChatMessage(
     request: typeof AppService.chatSend,
-  ): Promise<ChatTurnResult & { instanceId: number; iteration: number; steered?: boolean }> {
+  ): Promise<ChatTurnResult & { instanceId: number; index: number; steered?: boolean }> {
     if (request.message.trim() === "") throw this.refusal("run", "a message cannot be empty");
     const open = this.session(request.project);
     // Taken before this send installs its own, so it names the PREDECESSOR rather than itself.
@@ -3105,7 +3106,7 @@ export class AppService {
     request: typeof AppService.chatSend,
     /** The typed turn ahead of this one, if there is one — resolves when it has landed. */
     settledAhead?: Promise<void>,
-  ): Promise<ChatTurnResult & { instanceId: number; iteration: number; steered?: boolean }> {
+  ): Promise<ChatTurnResult & { instanceId: number; index: number; steered?: boolean }> {
     const project = open.project;
     let context = this.chatContextOf(request.taskId, request.instanceId, request.project, request.branchAt);
 
@@ -3119,7 +3120,7 @@ export class AppService {
     const steer = request.branchAt === undefined ? this.steerOf(open, context.position) : undefined;
     if (steer !== undefined) {
       await steer.send(request.message);
-      return { instanceId: context.hostInstanceId, iteration: context.iteration, steered: true };
+      return { instanceId: context.hostInstanceId, index: context.index, steered: true };
     }
 
     /**
@@ -3404,7 +3405,7 @@ export class AppService {
           parentInstanceId: context.hostInstanceId,
           stateId: context.stateId,
           childKey: CHAT_CHILD_KEY,
-          iteration: context.iteration,
+          index: context.index,
         },
         operation,
         position: context.position,
@@ -3415,7 +3416,7 @@ export class AppService {
     // and only the task LIST on `tasks` — so the plural left the reply invisible: the box cleared,
     // the turn ran, and the panel above stayed byte-identical until something unrelated invalidated.
     this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: request.taskId });
-    return { ...result, instanceId: CHAT_INSTANCE_BASE + context.hostInstanceId, iteration: context.iteration };
+    return { ...result, instanceId: CHAT_INSTANCE_BASE + context.hostInstanceId, index: context.index };
   }
 
   /**
@@ -3544,7 +3545,7 @@ export class AppService {
     stateId: string;
     path: Array<LoadedState | undefined>;
     position: string;
-    iteration: number;
+    index: number;
   } {
     const open = this.session(projectKey);
     const project = open.project;
@@ -3616,7 +3617,7 @@ export class AppService {
       })(),
       // The loop's next turn. `iteration` counts transitions taken, so a child that has answered
       // twice is at 1 and the message about to be sent is 2.
-      iteration: chat === undefined ? 0 : chat.iteration + 1,
+      index: chat === undefined ? 0 : chat.index + 1,
     };
   }
 
@@ -6452,15 +6453,39 @@ function recordEventsOf(value: JsonValue | undefined): Array<{ index: number; ev
   return out.length > 0 ? out : undefined;
 }
 
-/** The agent's captured session-file lines — `nativeLines` on the stored payload, in file order. */
+/**
+ * The agent's captured session facts, as the transcript reads them — DERIVED from the record's
+ * entries rather than stored beside them.
+ *
+ * The capture used to ride the payload as `nativeLines`, a second encoding of the same conversation
+ * with no key joining it to the first; it is merged into the entries at close now (RECORDS.md). What
+ * the transcript wants out of it is unchanged — the non-message facts, in order — so this rebuilds
+ * exactly those rows and nothing else. `index` counts the main-chain MESSAGES that precede each
+ * one, which is what the woven position means.
+ *
+ */
 function nativeOf(value: JsonValue | undefined): Array<{ index: number; line: JsonValue }> | undefined {
-  const raw = (value as { value?: { nativeLines?: unknown } } | undefined)?.value?.nativeLines;
-  if (!Array.isArray(raw)) return undefined;
+  const payload = (value as { value?: { entries?: unknown } } | undefined)?.value;
+  if (!Array.isArray(payload?.entries)) return undefined;
   const out: Array<{ index: number; line: JsonValue }> = [];
-  for (const row of raw) {
-    const e = row as { index?: unknown; line?: unknown };
-    if (typeof e?.index !== "number" || e.line === undefined) continue;
-    out.push({ index: e.index, line: e.line as JsonValue });
+  let messages = 0;
+  for (const raw of payload.entries) {
+    const entry = raw as { kind?: unknown; sidechain?: unknown; event?: { type?: unknown; data?: unknown }; uuid?: unknown; timestamp?: unknown };
+    if (entry?.sidechain !== undefined) continue;
+    if (entry?.kind === "message") {
+      messages += 1;
+      continue;
+    }
+    if (entry?.kind !== "event" || typeof entry.event?.type !== "string") continue;
+    // Rebuilt in the shape the reader knows: the event's own type at the top, its fields beside it.
+    const data = entry.event.data;
+    const line = {
+      type: entry.event.type,
+      ...(typeof entry.uuid === "string" ? { uuid: entry.uuid } : {}),
+      ...(typeof entry.timestamp === "string" ? { timestamp: entry.timestamp } : {}),
+      ...(data !== null && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, JsonValue>) : {}),
+    } as JsonValue;
+    out.push({ index: messages, line });
   }
   return out.length > 0 ? out : undefined;
 }

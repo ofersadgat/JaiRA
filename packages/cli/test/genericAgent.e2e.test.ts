@@ -46,7 +46,7 @@ const AGENT_WORKFLOW = {
       kind: "function",
       function: "generic-cli",
       input: { prompt: { kind: "text", binding: ".inputs.instruction" } },
-      output: { kind: "blob", schema: { type: "string", contentMediaType: "text/markdown" } },
+      output: { report: { kind: "blob", schema: { type: "string", contentMediaType: "text/markdown" } } },
     },
   },
 };

@@ -131,14 +131,14 @@ export interface OperationFieldsForm {
    */
   input: SlotRow[];
   /**
-   * `operation.output` — one slot, or `null` for "let the loader build it".
+   * `operation.output` — a PARAMETER map keyed by returned name, exactly like {@link input}.
    *
-   * Absent means the loader assembles an object slot from the state's PRODUCED outputs, and the
-   * operation must return a record of them. Declaring it matters most for the blob rule (§4.4): a
-   * delegated agent returns one string, so its output must be blob-kind or the string is read as a
-   * record of named outputs, finds nothing, and the state fails.
+   * Empty means the loader assembles an object slot from the state's PRODUCED outputs. Declaring it
+   * matters most for the blob rule (§4.4): a delegated agent returns one string, so a LONE entry
+   * carrying `kind: "blob"` is how "the whole return is that value" is said — without it the string
+   * is read as a record of named outputs, finds nothing, and the state fails.
    */
-  output: SlotRow | null;
+  output: SlotRow[];
   session: SessionForm;
   conversation: ConversationForm;
   permissions: PermissionsForm;
@@ -154,7 +154,7 @@ export const EMPTY_OPERATION_FIELDS: OperationFieldsForm = {
   refs: {},
   fork: false,
   input: [],
-  output: null,
+  output: [],
   session: { mode: "absent", name: "", text: "" },
   conversation: { mode: "", artifacts: "" },
   permissions: { profile: "", default: "", tools: [] },
@@ -253,8 +253,8 @@ export function operationFieldsOf(raw: unknown): OperationFieldsForm {
     json,
     fork: op["fork"] === true,
     input: slotsOf(op["input"]),
-    // An authored `output` may name itself; the row's name column is that `name`.
-    output: op["output"] === undefined ? null : slotRowOf(readOutputName(op["output"]), op["output"]),
+    // A map like `input`: the row's name column IS the key, so nothing names itself twice.
+    output: slotsOf(op["output"]),
     session: readSession(op["session"]),
     conversation: readConversation(op["conversation"]),
     permissions: readPermissions(op["permissions"]),
@@ -412,15 +412,11 @@ export function applyOperationFields(previous: unknown, form: OperationFieldsFor
   if (input) op["input"] = input;
   else delete op["input"];
 
-  if (form.output === null) delete op["output"];
-  else {
-    const output = applySlotRow(op["output"], form.output, false);
-    // The name is a FIELD here rather than a map key, and it is optional — omitted, the slot is
-    // called `output`.
-    if (form.output.name.trim().length > 0) output["name"] = form.output.name.trim();
-    else delete output["name"];
-    op["output"] = output;
-  }
+  // §4.4: a PARAMETER map, same as `input`. `includeOptional` is off — an operation's RETURN is
+  // not optional; `optional` on an entry says the model may omit that field of the object.
+  const output = applySlots(op["output"], form.output, true);
+  if (output) op["output"] = output;
+  else delete op["output"];
 
   applySession(op, form.session);
   applyConversation(op, form.conversation);

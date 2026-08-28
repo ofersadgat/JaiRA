@@ -23,6 +23,8 @@ import type { Project } from "./project";
 import { removeJournal } from "./journalFile";
 import { removeConversations } from "./conversationFile";
 import { isFileBacked } from "./shadow";
+import { collectBlobs, release } from "./blobStore";
+import type { JsonValue } from "@declarative-ai/json";
 
 // The view models live in `@jaira/shared` so the renderer can name them too.
 export type { HistorySize, PrunePlanEntry, PruneResult } from "@jaira/shared";
@@ -120,6 +122,7 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
       // question of CHANGESETS.md §10.5 lands here, in the surface that already prunes).
       const dropPositions = project.db.prepare(`DELETE FROM session_positions WHERE run_id = ?`);
       const dropRecords = project.db.prepare(`DELETE FROM operation_records WHERE run_id = ?`);
+      const readRecords = project.db.prepare(`SELECT result_json, request_json FROM operation_records WHERE run_id = ?`);
       // A branch with no records left AND no descendant pointing at it. Both conditions matter, and
       // the first one alone is actively destructive:
       //
@@ -147,6 +150,14 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
         dropJobOutput.run(run.runId);
         dropJobs.run(run.runId);
         dropPositions.run(run.runId);
+        // The bytes a record REFERENCED are let go before the row goes, while there is still
+        // something to read the references off. A blob two records share survives the first delete
+        // and dies with the second, which is what the reference COUNT is for (RECORDS.md §8).
+        for (const row of readRecords.all(run.runId) as Array<{ result_json: string | null; request_json: string | null }>) {
+          for (const text of [row.result_json, row.request_json]) {
+            if (text !== null) release(project.db, JSON.parse(text) as JsonValue);
+          }
+        }
         dropRecords.run(run.runId);
         dropRun.run(run.runId);
       }
@@ -156,6 +167,10 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
       do {
         removed = dropSessions.run(before).changes;
       } while (removed > 0);
+      // And the bytes nothing names any more. Swept here rather than inside each delete: a prune
+      // removes thousands of rows and a blob released by one may be re-referenced by none, so the
+      // question is asked once, at the end, when the answer has stopped changing.
+      collectBlobs(project.db);
     })();
     // The FILES, after the rows and outside the transaction — a filesystem does not roll back, and a
     // journal file with no run row is recoverable noise where a run row with no journal is a run

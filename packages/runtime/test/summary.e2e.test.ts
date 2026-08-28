@@ -20,10 +20,10 @@ function twoStepFiles(mode: "summary" | "full_history"): Record<string, unknown>
     chain: {
       label: "Chain",
       inputs: { topic: { schema: { type: "string" } } },
-      outputs: { answer: { schema: { type: "string" }, binding: ".children.second.outputs.answer" } },
+      outputs: { answer: { schema: { type: "string" }, binding: ".children.second.output.answer" } },
       children: {
         first: { state: "chain/first", inputs: { topic: ".inputs.topic" } },
-        second: { state: "chain/second", inputs: { draft: ".children.first.outputs.draft" } },
+        second: { state: "chain/second", inputs: { draft: ".children.first.output.draft" } },
       },
       sequence: ["first", "second"],
       transitions: [{ to: "terminate.success", when: ".children.second.outcome === 'success'" }],

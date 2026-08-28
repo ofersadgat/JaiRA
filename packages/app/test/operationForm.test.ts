@@ -46,7 +46,7 @@ const FULL = {
   conversation: { mode: "selected_artifacts", artifacts: ["plan_doc"] },
   permissions: { profile: "read-only", default: "ask", tools: { run_command: "deny" } },
   input: { plan: { schema: { type: "string" }, binding: ".inputs.plan" } },
-  output: { name: "report", schema: { type: "string", contentMediaType: "text/markdown" } },
+  output: { report: { schema: { type: "string", contentMediaType: "text/markdown" } } },
   path: ["./ops", "$INHERITED"],
   providerOptions: { anthropic: { cacheControl: true } },
   // Genuinely not modelled — a knob hw itself does not know, which still has to reach the provider.
@@ -321,32 +321,37 @@ describe("operation.input", () => {
 });
 
 /**
- * §4.4, the blob rule: a delegated agent returns ONE STRING. Declare its output `json` and the string
- * is read as a record of named outputs, finds nothing, and the state fails.
+ * §4.4, the blob rule: a delegated agent returns ONE STRING. A LONE entry carrying `kind: "blob"`
+ * says the whole return IS that value; declare it `json` and the string is read as a record of
+ * named outputs, finds nothing, and the state fails.
  */
 describe("operation.output", () => {
   it("tells 'declared' apart from 'built by the loader'", () => {
-    expect(operationFieldsOf({}).output).toBeNull();
-    expect(operationFieldsOf({ output: { kind: "blob" } })).toMatchObject({ output: { name: "" } });
+    expect(operationFieldsOf({}).output).toEqual([]);
+    expect(operationFieldsOf({ output: { report: { kind: "blob" } } }).output).toMatchObject([{ name: "report" }]);
   });
 
   it("round-trips a named artifact output", () => {
-    const decl = { output: { name: "report", schema: { type: "string", contentMediaType: "text/markdown" } } };
+    const decl = { output: { report: { schema: { type: "string", contentMediaType: "text/markdown" } } } };
     expect(round(decl)).toEqual(decl);
-    expect(operationFieldsOf(decl).output).toMatchObject({
-      name: "report",
-      type: { name: "artifact", list: false, mediaType: "text/markdown" },
-    });
+    expect(operationFieldsOf(decl).output).toMatchObject([
+      { name: "report", type: { name: "artifact", list: false, mediaType: "text/markdown" } },
+    ]);
   });
 
-  it("omits the name when it is left blank rather than writing the default", () => {
-    // Absent, the slot is called `output`. Writing that out would add a line nobody authored.
-    const form = operationFieldsOf({ output: { kind: "blob" } });
-    expect(applyOperationFields({ output: { kind: "blob" } }, form)["output"]).toEqual({ kind: "blob" });
+  it("round-trips SEVERAL named returns — the map is the common case", () => {
+    const decl = {
+      output: {
+        outcome: { schema: { type: "string" } },
+        weaknesses: { schema: { type: "array", items: { type: "string" } } },
+      },
+    };
+    expect(round(decl)).toEqual(decl);
+    expect(operationFieldsOf(decl).output).toHaveLength(2);
   });
 
   it("removes the declaration and lets the loader build one", () => {
-    expect(round({ output: { kind: "blob" } }, { output: null })).toEqual({});
+    expect(round({ output: { report: { kind: "blob" } } }, { output: [] })).toEqual({});
   });
 });
 

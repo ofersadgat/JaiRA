@@ -237,7 +237,7 @@ describe("no project open", () => {
       // an error of its own now (see `workflows.ts`), and a fixture carrying two faults tests the
       // pair rather than the one it was written for.
       outputs: { goals: { schema: { type: "string" }, binding: ".operation.output.goals" } },
-      operation: { kind: "prompt", prompt: "go", outputs: { goals: { schema: { type: "string" } } } },
+      operation: { kind: "prompt", prompt: "go", output: { goals: { schema: { type: "string" } } } },
     });
   };
 
@@ -396,7 +396,7 @@ describe("binding and guard scopes", () => {
       problems({
         s: {
           inputs: { seed: { schema: { type: "string" } } },
-          outputs: { answer: { schema: { type: "string" }, binding: ".children.helper.outputs.result" } },
+          outputs: { answer: { schema: { type: "string" }, binding: ".children.helper.output.result" } },
           children: { helper: { state: "s/helper", inputs: { seed: ".inputs.seed" } } },
           sequence: ["helper"],
         },
@@ -414,7 +414,7 @@ describe("binding and guard scopes", () => {
     const [message] = problems({
       s: {
         inputs: { seed: { schema: { type: "number" } } },
-        outputs: { answer: { schema: { type: "string" }, binding: ".children.helper.outputs.result" } },
+        outputs: { answer: { schema: { type: "string" }, binding: ".children.helper.output.result" } },
         children: { helper: { state: "s/helper", inputs: { seed: ".inputs.seed" } } },
         sequence: ["helper"],
       },
@@ -470,7 +470,7 @@ describe("binding and guard scopes", () => {
           outputs: {
             summary: { schema: { type: "string" }, binding: ".operation.output.report" },
           },
-          operation: { kind: "prompt", prompt: "go", outputs: { report: { schema: { type: "string" } } } },
+          operation: { kind: "prompt", prompt: "go", output: { report: { schema: { type: "string" } } } },
         },
       }),
     ).toEqual([]);
@@ -484,7 +484,7 @@ describe("binding and guard scopes", () => {
         outputs: {
           summary: { schema: { type: "string" }, binding: ".operation.output.nope" },
         },
-        operation: { kind: "prompt", prompt: "go", outputs: { report: { schema: { type: "string" } } } },
+        operation: { kind: "prompt", prompt: "go", output: { report: { schema: { type: "string" } } } },
       },
     });
     expect(message).toMatch(/nope/);
@@ -508,13 +508,13 @@ describe("binding and guard scopes", () => {
           children: { kid: {} },
           sequence: ["kid"],
           outputs: {
-            note: { schema: { type: "string" }, binding: ".children.kid.outputs.note" },
+            note: { schema: { type: "string" }, binding: ".children.kid.output.note" },
             how: { schema: { type: "string" }, binding: ".children.kid.outcome" },
           },
         },
         "p/kid": {
           outputs: { note: { schema: { type: "string" }, binding: ".operation.output.note" } },
-          operation: { kind: "prompt", prompt: "go", outputs: { note: { schema: { type: "string" } } } },
+          operation: { kind: "prompt", prompt: "go", output: { note: { schema: { type: "string" } } } },
         },
       }),
     ).toEqual([]);

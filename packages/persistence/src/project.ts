@@ -250,6 +250,17 @@ function openAt(
   opts?: { now?: () => number; staleMs?: number },
 ): Project {
   const now = opts?.now ?? Date.now;
+  // Everything under `system/` is generated, so a missing one is regenerated rather than refused.
+  // Deleting it is how a person discards state whose format has moved on, and a clone of a project
+  // that committed only its settings never had one to begin with: the database is gitignored, and
+  // the directories beside it exist only once something has been written to them. Both used to fail
+  // the open, because `new Database` on a path whose directory is missing reports a missing
+  // directory rather than a project that needs one.
+  //
+  // The same two directories `initProject` guarantees under it, and no more — the JSONL directories
+  // belong to their writers, and only a file-backed concern gets one (see below).
+  mkdirSync(paths.snapshotsDir, { recursive: true });
+  mkdirSync(paths.tasksDir, { recursive: true });
   const db = openDb(paths.dbFile);
   // BEFORE anything reads. A file-backed concern is served by a `TEMP` table standing in front of
   // its `main` counterpart (DESIGN §4.4), and a store constructed against the connection first would

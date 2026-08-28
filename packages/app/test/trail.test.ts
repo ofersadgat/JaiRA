@@ -16,7 +16,7 @@ import type { FileSurfaceContext } from "../src/renderer/fileTypes";
 
 const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
   status: "completed",
-  iteration: 0,
+  index: 0,
   superseded: false,
   startedAt: patch.instanceId * 10,
   children: [],

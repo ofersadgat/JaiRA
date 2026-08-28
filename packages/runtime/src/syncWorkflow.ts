@@ -375,16 +375,16 @@ export function syncWorkflowFiles(options: SyncWorkflowOptions = {}): Record<str
     inputs: {
       spec: ".inputs.spec",
       implementation: ".inputs.implementation",
-      requirements: ".children.requirements.outputs.requirements",
+      requirements: ".children.requirements.output.requirements",
     },
   };
   // What the check produced, re-declared as outputs of the sync root: a caller reading the proposal
   // must be able to read the evidence for it from the same value.
   const reportOutputs = {
-    requirements: { schema: REQUIREMENTS_SCHEMA, binding: ".children.requirements.outputs.requirements" },
-    verdict: { schema: VERDICT_SCHEMA, binding: ".children.assessment.outputs.verdict" },
-    findings: { schema: FINDINGS_SCHEMA, binding: ".children.assessment.outputs.findings" },
-    extras: { schema: EXTRAS_SCHEMA, binding: ".children.assessment.outputs.extras" },
+    requirements: { schema: REQUIREMENTS_SCHEMA, binding: ".children.requirements.output.requirements" },
+    verdict: { schema: VERDICT_SCHEMA, binding: ".children.assessment.output.verdict" },
+    findings: { schema: FINDINGS_SCHEMA, binding: ".children.assessment.output.findings" },
+    extras: { schema: EXTRAS_SCHEMA, binding: ".children.assessment.output.extras" },
   };
 
   return {
@@ -397,9 +397,9 @@ export function syncWorkflowFiles(options: SyncWorkflowOptions = {}): Record<str
       inputs: { spec: markdown, implementation: markdown },
       outputs: {
         ...reportOutputs,
-        document: { schema: DOCUMENT_SCHEMA, binding: ".children.revision.outputs.document" },
-        changes: { schema: CHANGES_SCHEMA, binding: ".children.revision.outputs.changes" },
-        notes: { schema: NOTES_SCHEMA, binding: ".children.revision.outputs.notes" },
+        document: { schema: DOCUMENT_SCHEMA, binding: ".children.revision.output.document" },
+        changes: { schema: CHANGES_SCHEMA, binding: ".children.revision.output.changes" },
+        notes: { schema: NOTES_SCHEMA, binding: ".children.revision.output.notes" },
       },
       children: {
         requirements: requirementsChild,
@@ -408,9 +408,9 @@ export function syncWorkflowFiles(options: SyncWorkflowOptions = {}): Record<str
           inputs: {
             spec: ".inputs.spec",
             implementation: ".inputs.implementation",
-            requirements: ".children.requirements.outputs.requirements",
-            findings: ".children.assessment.outputs.findings",
-            extras: ".children.assessment.outputs.extras",
+            requirements: ".children.requirements.output.requirements",
+            findings: ".children.assessment.output.findings",
+            extras: ".children.assessment.output.extras",
           },
         },
       },
@@ -442,8 +442,8 @@ export function syncWorkflowFiles(options: SyncWorkflowOptions = {}): Record<str
       inputs: { spec: markdown, implementation: markdown },
       outputs: {
         ...reportOutputs,
-        edits: { schema: EDITS_SCHEMA, binding: ".children.edits.outputs.edits" },
-        notes: { schema: NOTES_SCHEMA, binding: ".children.edits.outputs.notes" },
+        edits: { schema: EDITS_SCHEMA, binding: ".children.edits.output.edits" },
+        notes: { schema: NOTES_SCHEMA, binding: ".children.edits.output.notes" },
       },
       children: {
         requirements: requirementsChild,
@@ -452,8 +452,8 @@ export function syncWorkflowFiles(options: SyncWorkflowOptions = {}): Record<str
           inputs: {
             spec: ".inputs.spec",
             implementation: ".inputs.implementation",
-            requirements: ".children.requirements.outputs.requirements",
-            findings: ".children.assessment.outputs.findings",
+            requirements: ".children.requirements.output.requirements",
+            findings: ".children.assessment.output.findings",
           },
         },
       },

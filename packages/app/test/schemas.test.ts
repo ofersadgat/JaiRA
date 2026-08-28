@@ -100,7 +100,7 @@ describe("what must NOT be reported", () => {
         },
         outputs: {
           weaknesses: { schema: { type: "array", items: { type: "string" } } },
-          outcome: { binding: { expr: ".children.critique.outputs.outcome" } },
+          outcome: { binding: { expr: ".children.critique.output.outcome" } },
         },
         children: {
           goals: { inputs: { issue: ".inputs.issue" } },
@@ -114,7 +114,7 @@ describe("what must NOT be reported", () => {
           },
         },
         transitions: [
-          { to: "terminate.success", when: ".children.critique.outputs.outcome === 'clean'" },
+          { to: "terminate.success", when: ".children.critique.output.outcome === 'clean'" },
           { to: "goals" },
         ],
         operation: {

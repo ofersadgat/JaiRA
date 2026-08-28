@@ -202,7 +202,7 @@ export function piecesOf(
         instanceId: ref.instanceId,
         stateId: ref.stateId,
         status: ref.status === "error" ? "failed" : ref.status === "interrupted" ? "canceled" : "completed",
-        iteration: 0,
+        index: 0,
         superseded: false,
         startedAt: ref.startedAt ?? ref.at,
         endedAt: ref.at,

@@ -424,7 +424,7 @@ describe("normaliseAgentModel", () => {
     user: { kind: "text", binding: { text: "hi" } },
     config: model === undefined ? {} : { model },
     input: {},
-    output: { name: "answer", kind: "json" },
+    output: { answer: { kind: "json" } },
   });
 
   function spy(): { seen: Array<Record<string, unknown>>; executor: never } {
@@ -457,7 +457,7 @@ describe("normaliseAgentModel", () => {
   it("leaves a function op alone — it has no model to normalise", () => {
     const { seen, executor } = spy();
     normaliseAgentModel("claude-cli", executor).start(
-      { kind: "function", functionRef: "x", input: {}, output: { name: "o", kind: "json" } } as never,
+      { kind: "function", functionRef: "x", input: {}, output: { o: { kind: "json" } } } as never,
       {} as never,
     );
     expect(seen).toHaveLength(1);

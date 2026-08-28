@@ -169,7 +169,7 @@ describe("browseWorkflows", () => {
           kind: "prompt",
           prompt: "Extract goals.",
           model: "planner",
-          outputs: { goals: { schema: { type: "array", items: { type: "string" } } } },
+          output: { goals: { schema: { type: "array", items: { type: "string" } } } },
         },
       }),
     );

@@ -521,7 +521,7 @@ export function rootContaining(browser: WorkflowBrowser, stateId: string): Workf
  * A run pins its workflow (DESIGN §5.3), and it would be better to hand back the pinned copy of the
  * file. It cannot: a snapshot stores the LOWERED states — bindings compiled into expression trees,
  * the inherited environment already folded into each operation — which is what the engine re-runs
- * and not what a form can draw. `.children.critique.outputs.outcome` does not survive that trip.
+ * and not what a form can draw. `.children.critique.output.outcome` does not survive that trip.
  *
  * What survives is the pin itself. So the file on disk is what is shown, and {@link
  * EffectiveState.from} says whether it is still the one that ran: `pinned` when the run's snapshot

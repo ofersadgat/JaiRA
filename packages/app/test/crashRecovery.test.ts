@@ -60,13 +60,13 @@ function crashedRun(over: { handle?: string | null } = {}): void {
 }
 
 /** What the record holds now, read the way a viewer would. */
-function recordValue(): { messages?: unknown[]; nativeLines?: unknown[] } {
+function recordValue(): { messages?: unknown[]; entries?: unknown[]; capturedAt?: string } {
   const project = openProject(dir);
   try {
     const row = project.db.prepare(`SELECT result_json FROM operation_records WHERE task_id = 't-crash'`).get() as {
       result_json: string;
     };
-    return (JSON.parse(row.result_json) as { value: { messages?: unknown[]; nativeLines?: unknown[] } }).value;
+    return (JSON.parse(row.result_json) as { value: { messages?: unknown[]; entries?: unknown[]; capturedAt?: string } }).value;
   } finally {
     project.close();
   }
@@ -74,7 +74,7 @@ function recordValue(): { messages?: unknown[]; nativeLines?: unknown[] } {
 
 /** Wait for the recovery, which runs unawaited behind `open` so the window is not held up by file I/O. */
 async function settled(): Promise<void> {
-  for (let i = 0; i < 100 && recordValue().nativeLines === undefined; i++) {
+  for (let i = 0; i < 100 && recordValue().capturedAt === undefined; i++) {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
@@ -99,9 +99,11 @@ describe("a crashed run's conversation is recovered at the next open", () => {
     // findable — the run's workspace, and the start time that cuts a resumed session's earlier lines.
     expect(asked).toEqual([{ id: "prov-7", cwd: dir, sinceMs: 1000 }]);
     const value = recordValue();
-    // The fuller capture joins what the crash had already saved, rather than replacing it.
+    // The fuller capture joins what the crash had already saved, rather than replacing it. The
+    // attachment has no message to annotate, so it becomes an event entry of its own.
     expect(value.messages).toEqual([{ role: "assistant", content: "as far as it got" }]);
-    expect(value.nativeLines).toEqual([{ index: 0, line: { type: "attachment" } }]);
+    expect(value.entries).toMatchObject([{ kind: "event", event: { type: "attachment" } }]);
+    expect(value.capturedAt).toEqual(expect.any(String));
     // …and the row is settled: 'open' must mean "a live process is streaming into this".
     const project = openProject(dir);
     try {

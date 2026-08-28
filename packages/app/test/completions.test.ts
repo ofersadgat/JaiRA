@@ -252,10 +252,10 @@ describe("binding targets", () => {
     );
     expect(targets).toEqual([
       ".inputs.issue",
-      ".children.goals.outputs.goals",
+      ".children.goals.output.goals",
       ".children.goals.outcome",
-      ".children.critique.outputs.outcome",
-      ".children.critique.outputs.notes",
+      ".children.critique.output.outcome",
+      ".children.critique.output.notes",
       ".children.critique.outcome",
     ]);
   });
@@ -264,7 +264,7 @@ describe("binding targets", () => {
     // `.children.<key>` — a state mounted under a different key is read under that key, and using
     // the id would produce a path that looks right and resolves to nothing.
     expect(bindingTargets([{ key: "first", stateId: "lib/review" }], { "lib/review": slots("outcome") }, [])).toEqual([
-      ".children.first.outputs.outcome",
+      ".children.first.output.outcome",
       ".children.first.outcome",
     ]);
   });
@@ -335,6 +335,7 @@ describe("guard targets", () => {
       ".operation.cost",
       ".operation.model",
       ".operation.usage",
+      ".run.index",
       ".run.iteration",
       ".run.cursor",
       ".run.position",

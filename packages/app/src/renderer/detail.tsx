@@ -17,7 +17,7 @@ function Tree({ nodes }: { nodes: InstanceNode[] }): JSX.Element {
           <span className="tree-row">
             <Badge status={node.status} />
             <span className="tree-label">{node.childKey ?? node.stateId}</span>
-            {node.iteration > 0 ? <span className="chip">iter {node.iteration}</span> : null}
+            {node.index > 0 ? <span className="chip">step {node.index}</span> : null}
             {node.operation ? <span className="chip">{node.operation.kind}</span> : null}
             {node.superseded ? <span className="chip">superseded</span> : null}
             {node.operation?.reason ? <span className="reason">{node.operation.reason}</span> : null}

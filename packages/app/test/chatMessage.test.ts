@@ -169,7 +169,7 @@ describe("sending a message", () => {
 
     expect(sent.failure).toBeUndefined();
     expect(sent.instanceId).toBe(CHAT_INSTANCE_BASE + instanceId);
-    expect(sent.iteration).toBe(0);
+    expect(sent.index).toBe(0);
 
     // Where the panel reads from: the child must be in the tree, under the right parent.
     const detail = service.taskDetail(taskId);
@@ -189,13 +189,13 @@ describe("sending a message", () => {
     // The second message reopens the SAME node at the next iteration. A new instance under this key
     // would supersede the first and the panel filters those out.
     expect(second.instanceId).toBe(first.instanceId);
-    expect(second.iteration).toBe(1);
+    expect(second.index).toBe(1);
 
     const detail = service.taskDetail(taskId);
     const parent = findNode(detail.instances, instanceId);
     const chats = parent!.children.filter((c) => c.instanceId >= CHAT_INSTANCE_BASE);
     expect(chats).toHaveLength(1);
-    expect(chats[0]!.iteration).toBe(1);
+    expect(chats[0]!.index).toBe(1);
   });
 
   it("continues the conversation when the REPLY is what was addressed, rather than nesting inside it", async () => {
@@ -208,7 +208,7 @@ describe("sending a message", () => {
     const second = await service.sendChatMessage({ taskId, instanceId: first.instanceId, message: "two", fake: happyRules() });
 
     expect(second.instanceId).toBe(first.instanceId);
-    expect(second.iteration).toBe(1);
+    expect(second.index).toBe(1);
     // And the plan for the reply is the HOST's plan — same state, same inherited settings.
     expect(planOf({ taskId, instanceId: first.instanceId }).from).toBe(planOf({ taskId, instanceId }).from);
   });

@@ -90,7 +90,7 @@ export interface GraphPort {
   /**
    * True when nothing declares this port and only a reference to it proves it exists.
    *
-   * Drawn as a port all the same. A binding that reads `.children.draft.outputs.plan` where `draft`
+   * Drawn as a port all the same. A binding that reads `.children.draft.output.plan` where `draft`
    * declares no `plan` is a real wire in the document and a lint error in the panel; a graph that
    * dropped it would be the one surface claiming the wiring is fine.
    */
@@ -309,7 +309,7 @@ export function guardLines(when: string): GuardLine[] {
 /**
  * Split one clause into the runtime paths it reads and the text between them.
  *
- * The paths are what a reader wants to follow — "where does `.children.critique.outputs.target` come
+ * The paths are what a reader wants to follow — "where does `.children.critique.output.target` come
  * from" is the same question the wires answer everywhere else — so they are marked here and become
  * hoverable terms with a line of their own. Everything else is text and stays text.
  */
@@ -387,7 +387,7 @@ const outPort = (name: string): string => `out:${name}`;
  */
 const NAME = String.raw`[A-Za-z_$][\w$]*`;
 const READS = [
-  String.raw`children\.${NAME}\.(?:outputs\.${NAME}|outcome)`,
+  String.raw`children\.${NAME}\.(?:output\.${NAME}|outcome)`,
   String.raw`inputs\.${NAME}`,
   String.raw`operation\.outputs?\.${NAME}`,
 ];
@@ -395,7 +395,7 @@ const PATH = new RegExp(String.raw`(^|[^\w.])\.(?:${READS.join("|")})`, "g");
 
 /** The port one runtime path names, or `null` when it names something that is not a port. */
 function portOfPath(path: string): WireEnd | null {
-  const child = /^\.children\.([A-Za-z_$][\w$]*)\.(?:outputs\.([A-Za-z_$][\w$]*)|outcome)$/.exec(path);
+  const child = /^\.children\.([A-Za-z_$][\w$]*)\.(?:output\.([A-Za-z_$][\w$]*)|outcome)$/.exec(path);
   if (child !== null) return { node: childNodeId(child[1]!), port: outPort(child[2] ?? "outcome") };
   const input = /^\.inputs\.([A-Za-z_$][\w$]*)$/.exec(path);
   if (input !== null) return { node: ENTRY, port: outPort(input[1]!) };
@@ -570,9 +570,10 @@ export function graphOf(doc: unknown, stateId = "", declared: Record<string, Sta
       const bare = asRecord(param)["binding"] === undefined && typeof param === "string";
       port(OPERATION, "in", name, bare ? "no binding:" : "");
     }
-    const single = asRecord(block["output"]);
-    if (typeof single["name"] === "string") port(OPERATION, "out", single["name"]);
-    for (const name of Object.keys(asRecord(block["outputs"]))) port(OPERATION, "out", name);
+    // One authored field, a MAP whose keys are the returned names — the single-slot spelling beside
+    // it is gone, and a lone entry carrying its own `kind` is how "the whole return is that value"
+    // is said now.
+    for (const name of Object.keys(asRecord(block["output"]))) port(OPERATION, "out", name);
   }
 
   // --- the children, in the order they run ----------------------------------

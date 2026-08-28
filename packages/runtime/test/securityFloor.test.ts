@@ -27,7 +27,7 @@ function recording() {
 }
 
 const promptOp = (config: Record<string, JsonValue>): Operation<InlineFamily> =>
-  ({ kind: "prompt", user: "hi", config, input: {}, output: { name: "text", kind: "text" } }) as unknown as Operation<InlineFamily>;
+  ({ kind: "prompt", user: "hi", config, input: {}, output: { text: { kind: "text" } } }) as unknown as Operation<InlineFamily>;
 
 const configOf = (op: Operation<InlineFamily>) => (op as unknown as { config: Record<string, JsonValue> }).config;
 

@@ -111,13 +111,13 @@ describe("projectRun", () => {
       entered(1, "feature/plan"),
       entered(2, "feature/plan/goals", 1, "goals"),
       terminated(2, "feature/plan/goals", "success"),
-      { type: "transition.taken", instanceId: 1, stateId: "feature/plan", to: "goals", iteration: 1 },
+      { type: "transition.taken", instanceId: 1, stateId: "feature/plan", to: "goals", index: 1, iteration: 1 },
       { type: "child.superseded", instanceId: 1, stateId: "feature/plan", childKey: "goals" },
       entered(4, "feature/plan/goals", 1, "goals"),
     ];
     const run = projectRun(events, SHAPE);
     const root = run.instances[0]!;
-    expect(root.iteration).toBe(1);
+    expect(root.index).toBe(1);
     // Both instances are kept (history preserved, DESIGN §4.2).
     expect(root.children).toHaveLength(2);
     expect(root.children[0]).toMatchObject({ instanceId: 2, superseded: true });

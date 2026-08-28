@@ -1188,7 +1188,7 @@ export interface IpcContract {
        */
       branchAt?: string;
     };
-    response: { instanceId: number; iteration: number; sessionRef?: string; failure?: string; steered?: boolean };
+    response: { instanceId: number; index: number; sessionRef?: string; failure?: string; steered?: boolean };
   };
   /**
    * Stop the turn this conversation is taking, if it is taking one.

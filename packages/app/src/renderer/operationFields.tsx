@@ -463,60 +463,25 @@ export function OperationFieldsEditor({
         onChange={(input) => onChange({ ...form, input })}
       />
 
-      {/* §4.4: absent, the loader builds one object slot from the state's produced outputs. A
-          delegated agent returns ONE STRING, so its output must be an artifact or the string is read
-          as a record of named outputs, finds nothing, and the state fails. */}
-      {readOnly && form.output === null && (path !== "operation" || reading?.output === undefined) ? null : (
-      <div {...(path === undefined ? { className: "slots" } : markFor(issues, `${path}.output`, "slots"))}>
-        <div className="slots-head">
-          <span>Operation output</span>
-          {readOnly ? null : (
-            <button
-              type="button"
-              className="ghost sm"
-              onClick={() => onChange({ ...form, output: form.output === null ? emptySlotRow() : null })}
-            >
-              {form.output === null ? "+ Declare" : "Remove"}
-            </button>
-          )}
-        </div>
-        {/* What the call actually RETURNED. On the declaration of the operation's output rather than
-            on any one slot, because that is what it is: one record, which the produced outputs are
-            then filled from by name.
-
-            Only on the OPERATION. The same editor draws the `environment` defaults layer, which
-            declares what descendants inherit and returns nothing — a result shown there would
-            attribute this state's answer to a block that never ran. */}
-        {path === "operation" ? <ReadValue value={reading?.output} /> : null}
-        {form.output === null ? (
-          <div className="sub">built from this state&apos;s produced outputs — the operation returns a record</div>
-        ) : (
-          <div className="slot-row">
-            <input
-              value={form.output.name}
-              placeholder="name (defaults to 'output')"
-              spellCheck={false}
-              onChange={(e) => onChange({ ...form, output: { ...form.output!, name: e.target.value } })}
-            />
-            {/* The link control belongs here as much as on a state's slots — the position is the
-                same one, and `"output": {"schema": "$/types/plan"}` is the ordinary way to give a
-                delegated agent's result a named type. Without it the picker had a linked schema it
-                could neither show nor change. */}
-            <SlotTypePicker
-              row={form.output}
-              targets={targets}
-              mark={path === undefined ? "" : fieldClass(issues, `${path}.output`)}
-              onChange={(type) => onChange({ ...form, output: { ...form.output!, type } })}
-              onLink={(ref) => {
-                const { typeRef: _dropped, ...rest } = form.output!;
-                onChange({ ...form, output: ref === null ? rest : { ...rest, typeRef: ref } });
-              }}
-            />
-            <span className="sub">an agent returning one string needs `artifact`</span>
-          </div>
-        )}
-      </div>
-      )}
+      {/* §4.4: a PARAMETER map keyed by returned name, the same table `input` uses — one field, one
+          shape. Empty, the loader builds one object slot from the state's produced outputs. A
+          delegated agent returns ONE STRING, so a LONE entry carrying `blob` is how "the whole
+          return is that value" is said; without it the string is read as a record of named outputs,
+          finds nothing, and the state fails. */}
+      <SlotTable
+        title="Operation output"
+        rows={form.output}
+        bindingHint=""
+        emptyBindingMeans="the call returns this name"
+        targets={targets}
+        bindingListId={bindingListId}
+        {...(path === undefined ? {} : { path: `${path}.output`, issues })}
+        onChange={(output) => onChange({ ...form, output })}
+      />
+      {/* What the call actually RETURNED. On the OPERATION only: the same editor draws the
+          `environment` defaults layer, which declares what descendants inherit and returns nothing,
+          so a result shown there would attribute this state's answer to a block that never ran. */}
+      {path === "operation" ? <ReadValue value={reading?.output} /> : null}
 
       <SessionControl
         value={form.session}

@@ -19,6 +19,11 @@
  * identical: they are the same thing.
  */
 import type { JsonValue } from "@declarative-ai/json";
+// The `/entry` subpath, not the package: llm's barrel re-exports `weights.js` and `localServer.js`,
+// which import `node:fs` and `node:child_process` — the renderer build fails on them. `entry.js` has
+// no imports at all, so the one implementation the capture side drops `text` against is the one that
+// puts it back here, with no restatement to drift.
+import { renderToolResult } from "@declarative-ai/llm/entry";
 import {
   writingPath,
   type ConversationTurn,
@@ -362,11 +367,18 @@ export function messagePartsOf(parts: JsonValue | undefined): MessagePart[] {
     const callId = pick(p, ["toolCallId", "tool_use_id", "toolUseId", "id"]);
     if (kind === "result") {
       const flagged = pick(p, ["is_error", "isError"]) === true;
+      // `data` is the agent's own structured record of the execution, folded onto this block at
+      // capture. It used to arrive from the side, off a session-file envelope paired with this turn
+      // by role and order; it is on the block that answered the call now, so there is nothing to
+      // pair. Where a renderer covers the shape, `content` was dropped and comes back from it.
+      const structured = p["data"] as JsonValue | undefined;
+      const shown = pick(p, ["result", "output", "content"]) ?? (structured === undefined ? null : renderToolResult(structured));
       out.push({
         kind: "result",
         ...(typeof callId === "string" ? { callId } : {}),
         ...(flagged ? { failed: true } : {}),
-        result: resultValueOf((pick(p, ["result", "output", "content"]) ?? null) as JsonValue),
+        result: resultValueOf((shown ?? null) as JsonValue),
+        ...(structured !== undefined ? { detail: structured } : {}),
       });
       continue;
     }
@@ -499,7 +511,6 @@ function eventOf(turn: ConversationTurn): EventEntry | undefined {
 function messageOf(
   turn: SessionTurn,
   at?: number,
-  toolRecord?: JsonValue,
   /** Which turn of the session this is — carried onto the message entry. See {@link MessageEntry.turn}. */
   index?: number,
   /** Set when this turn's text is the call's structured output. See {@link MessageEntry.output}. */
@@ -515,7 +526,7 @@ function messageOf(
   // holds exactly one result — ambiguity drops the annotation rather than guessing which call it
   // describes.
   const results = parts.filter((part): part is ResultPart => part.kind === "result");
-  if (toolRecord !== undefined && results.length === 1) results[0]!.detail = toolRecord;
+
   const stamp = <T extends { at?: number }>(entry: T): T => (at !== undefined ? { ...entry, at } : entry);
 
   // The thinking, above the answer it preceded. The turn's `thoughtMs` lands on the FIRST thought
@@ -661,41 +672,18 @@ export function eventEntry(event: JsonValue): TranscriptEntry[] {
 // --- native session lines -----------------------------------------------------
 
 /**
- * What the agent's own session file said around the conversation — `SessionView.native`, captured at
- * operation close because the file itself is the agent's and prunable.
+ * What the agent's own session file said around the conversation — `SessionView.native`.
  *
- * Two kinds of line reach here. A message ENVELOPE (`type: "user" | "assistant"`, body already in
- * the record's turns) is a position marker: it is paired with its turn by role, in order, and its
- * `toolUseResult` — the agent's structured record of a tool execution — lands on that turn's tool
- * line. Everything else (`attachment`, `queue-operation`, `ai-title`, whatever the agent adds next)
- * becomes an event row at its woven position.
- *
- * Paired by ROLE AND ORDER rather than by the stored index, deliberately: the file has message
- * lines the stream never carried (the prompt itself), so index arithmetic against the turns is off
- * by one the moment a run begins, and drifts further every time the agent's vocabulary grows. Role
- * pairing degrades instead of derailing — an envelope that matches no turn is dropped, and the
- * worst case is an annotation lost, never a conversation reordered.
+ * EVENTS only. The file's message lines used to arrive here too, as position markers to be paired
+ * with the record's turns by role and order so their `toolUseResult` could land on a tool line —
+ * a weave that existed because the file and the stream were two encodings with no key joining them,
+ * and that was off by one the moment a run began, since the file holds the prompt the stream never
+ * carried. They are merged into the entries at capture now (RECORDS.md), so what is left is what
+ * genuinely has no message to belong to: context injections, queued operations, the agent's own
+ * name for the conversation. Those splice by index, the way the pinned provider events always did.
  */
 function nativeRecordOf(raw: JsonValue): Record<string, JsonValue> | undefined {
   return raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, JsonValue>) : undefined;
-}
-
-/** The envelope's role, when the line is a main-chain message envelope. */
-function envelopeRoleOf(line: Record<string, JsonValue> | undefined): "user" | "assistant" | undefined {
-  if (line === undefined || line["isSidechain"] === true) return undefined;
-  return line["type"] === "user" || line["type"] === "assistant" ? (line["type"] as "user" | "assistant") : undefined;
-}
-
-/**
- * Whether this envelope has a turn in the record to pair with.
- *
- * An assistant line always does. A user line does only when it carries a tool result — the PROMPT
- * user line (and a mid-run steering message) is input, and input never rides the stream back, so
- * there is no turn for it and pairing it with the next tool-result turn would shift every
- * annotation after it by one.
- */
-function pairsWithTurn(line: Record<string, JsonValue>, role: "user" | "assistant"): boolean {
-  return role === "assistant" || line["toolUseResult"] !== undefined;
 }
 
 /** How a non-message native line reads as a row. `undefined` means it is not worth one. */
@@ -907,35 +895,11 @@ export function entriesOf(
   // below, these were measured against exactly the messages the turns came from: the index IS the seam.
   const stored = session?.providerEvents ?? [];
   let nextEvent = 0;
-  // The agent's own session-file lines, woven by role and order — see the native section above for
-  // why the stored index cannot be trusted the way the pinned events' can.
+  // The agent's own session-file facts. They are EVENTS only now — the message envelopes were
+  // folded onto the entries they annotate at capture — so they splice by index exactly as the pinned
+  // provider events do, and the role-and-order weave that used to pair them is gone with them.
   const native = session?.native ?? [];
-  let cursor = 0;
-  /**
-   * Emit the native lines that precede this turn, up to and including its own envelope; hand back
-   * the envelope's `toolUseResult` so it lands on the turn's tool line.
-   */
-  const drainFor = (turn: SessionTurn): JsonValue | undefined => {
-    while (cursor < native.length) {
-      const raw = native[cursor]!.line;
-      const line = nativeRecordOf(raw);
-      const role = envelopeRoleOf(line);
-      if (role === undefined) {
-        const event = nativeEventOf(raw);
-        if (event !== undefined) said.push(event);
-        cursor += 1;
-        continue;
-      }
-      if (!pairsWithTurn(line!, role)) {
-        cursor += 1;
-        continue;
-      }
-      if (role !== turn.role) return undefined; // an envelope for a later turn — leave it queued
-      cursor += 1;
-      return line!["toolUseResult"];
-    }
-    return undefined;
-  };
+  let nextNative = 0;
   // Where the call's structured output actually is — see `SessionOutput`. Two indexes because there
   // are two places it can be, and a `SessionOutput` sets exactly one of them.
   const outputs = { turn: new Map<number, SessionOutput>(), call: new Map<string, SessionOutput>() };
@@ -948,12 +912,15 @@ export function entriesOf(
     for (; nextEvent < stored.length && stored[nextEvent]!.index <= i; nextEvent++) {
       said.push(...eventEntry(stored[nextEvent]!.event));
     }
+    for (; nextNative < native.length && native[nextNative]!.index <= i; nextNative++) {
+      const event = nativeEventOf(native[nextNative]!.line);
+      if (event !== undefined) said.push(event);
+    }
     const output = outputs.turn.get(i);
     said.push(
       ...messageOf(
         turn,
         undefined,
-        drainFor(turn),
         i,
         output === undefined
           ? undefined
@@ -965,12 +932,9 @@ export function entriesOf(
       ),
     );
   }
-  // Whatever the file said after the last turn — a title, bookkeeping. Envelopes that never found a
-  // turn are dropped here: an annotation lost beats a conversation misattributed.
-  for (; cursor < native.length; cursor += 1) {
-    const raw = native[cursor]!.line;
-    if (envelopeRoleOf(nativeRecordOf(raw)) !== undefined) continue;
-    const event = nativeEventOf(raw);
+  // Whatever the file said after the last turn — a title, bookkeeping.
+  for (; nextNative < native.length; nextNative += 1) {
+    const event = nativeEventOf(native[nextNative]!.line);
     if (event !== undefined) said.push(event);
   }
   for (; nextEvent < stored.length; nextEvent++) said.push(...eventEntry(stored[nextEvent]!.event));

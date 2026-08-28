@@ -36,14 +36,14 @@ import {
 const PLAN = {
   label: "Planning",
   inputs: { issue: { schema: { type: "string" } }, depth: { schema: { type: "integer" }, default: 2 } },
-  outputs: { plan_doc: { binding: ".children.context.outputs.plan_doc" } },
+  outputs: { plan_doc: { binding: ".children.context.output.plan_doc" } },
   children: {
     goals: { inputs: { issue: ".inputs.issue" } },
-    context: { inputs: { goals: ".children.goals.outputs.goals" }, async: true },
+    context: { inputs: { goals: ".children.goals.output.goals" }, async: true },
     critique: {
-      inputs: { plan_doc: ".children.context.outputs.plan_doc", tone: { text: "strict" } },
+      inputs: { plan_doc: ".children.context.output.plan_doc", tone: { text: "strict" } },
       transitions: [
-        { to: "terminate.success", when: ".children.critique.outputs.outcome === 'clean'" },
+        { to: "terminate.success", when: ".children.critique.output.outcome === 'clean'" },
         { to: "goals" },
       ],
     },
@@ -151,7 +151,7 @@ describe("graphOf", () => {
   /** An expression reads several paths, and each one is a line: that is what makes it a join. */
   it("draws one wire per path an expression reads", () => {
     const graph = graphOf({
-      children: { a: {}, b: { inputs: { both: { expr: ".children.a.outputs.x + .inputs.y" } } } },
+      children: { a: {}, b: { inputs: { both: { expr: ".children.a.output.x + .inputs.y" } } } },
       inputs: { y: {} },
     });
     expect(wire(graph, childNodeId("b"), "both")).toBe(`${childNodeId("a")}.out:x + ${ENTRY}.out:y`);
@@ -185,7 +185,7 @@ describe("graphOf", () => {
     const graph = graphOf(PLAN, "plan");
     const out = graph.edges.filter((e) => e.kind === "mount" && e.from === childNodeId("critique"));
     expect(out.map((e) => [e.to, e.when, e.order, e.count])).toEqual([
-      [EXIT, ".children.critique.outputs.outcome === 'clean'", 0, 2],
+      [EXIT, ".children.critique.output.outcome === 'clean'", 0, 2],
       [childNodeId("goals"), null, 1, 2],
     ]);
   });
@@ -228,7 +228,7 @@ describe("graphOf", () => {
         model: "planner",
         prompt: { $ref: "$/prompts/plan.md" },
         input: { brief: { binding: ".inputs.issue" } },
-        outputs: { plan: {} },
+        output: { plan: {} },
       },
       inputs: { issue: {} },
       children: { a: {} },
@@ -258,7 +258,7 @@ describe("graphOf", () => {
 
   /** The implicit fill IS a value moving, and it is the only wire no line of the document spells. */
   it("wires the operation's result into the output of its own name", () => {
-    const graph = graphOf({ operation: { kind: "prompt", outputs: { plan: {} } }, outputs: { plan: {} } });
+    const graph = graphOf({ operation: { kind: "prompt", output: { plan: {} } }, outputs: { plan: {} } });
     expect(wire(graph, EXIT, "plan")).toBe(`${OPERATION}.out:plan`);
   });
 
@@ -277,8 +277,8 @@ const clauses = (when: string): { op: string; text: string }[] =>
 
 describe("guardLines", () => {
   it("leaves a simple condition alone", () => {
-    expect(clauses(".children.a.outputs.done === true")).toEqual([
-      { op: "", text: ".children.a.outputs.done === true" },
+    expect(clauses(".children.a.output.done === true")).toEqual([
+      { op: "", text: ".children.a.output.done === true" },
     ]);
   });
 
@@ -316,8 +316,8 @@ describe("guardLines", () => {
    * port it reads, so hovering it can light the value's own wire. Everything else stays text.
    */
   it("marks the runtime paths inside a clause, and only those", () => {
-    const terms = guardTerms(".children.critique.outputs.target === 'explore'");
-    expect(terms.map((t) => t.text)).toEqual([".children.critique.outputs.target", " === 'explore'"]);
+    const terms = guardTerms(".children.critique.output.target === 'explore'");
+    expect(terms.map((t) => t.text)).toEqual([".children.critique.output.target", " === 'explore'"]);
     expect(terms[0]?.read).toEqual({ node: childNodeId("critique"), port: "out:target" });
     expect(terms[1]?.read).toBeNull();
   });
@@ -340,7 +340,7 @@ describe("guard reads", () => {
     const graph = graphOf({
       children: {
         a: {},
-        b: { transitions: [{ to: "terminate.success", when: ".children.a.outputs.ok === true" }] },
+        b: { transitions: [{ to: "terminate.success", when: ".children.a.output.ok === true" }] },
       },
     });
     const edge = graph.edges.find((e) => e.kind === "mount")!;

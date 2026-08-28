@@ -23,7 +23,7 @@ const files: Record<string, unknown> = {
   review: {
     label: "Review",
     inputs: { change: { schema: { type: "string" } } },
-    outputs: { report: { schema: { type: "string" }, binding: ".children.second.outputs.report" } },
+    outputs: { report: { schema: { type: "string" }, binding: ".children.second.output.report" } },
     children: {
       first: { state: "review/first", inputs: { change: ".inputs.change" } },
       second: { state: "review/second", inputs: { change: ".inputs.change" } },
@@ -36,18 +36,18 @@ const files: Record<string, unknown> = {
     inputs: { change: { schema: { type: "string" } } },
     outputs: { report: { kind: "blob", schema: { type: "string", contentMediaType: "text/markdown" } } },
     environment: { session: "review" },
-    operation: { kind: "function", function: "agent", input: { prompt: { kind: "text", binding: ".inputs.change" } }, output: { name: "report", kind: "blob" } },
+    operation: { kind: "function", function: "agent", input: { prompt: { kind: "text", binding: ".inputs.change" } }, output: { report: { kind: "blob" } } },
   },
   "review/second": {
     inputs: { change: { schema: { type: "string" } } },
     outputs: { report: { kind: "blob", schema: { type: "string", contentMediaType: "text/markdown" } } },
     environment: { session: "review" },
-    operation: { kind: "function", function: "agent", input: { prompt: { kind: "text", binding: ".inputs.change" } }, output: { name: "report", kind: "blob" } },
+    operation: { kind: "function", function: "agent", input: { prompt: { kind: "text", binding: ".inputs.change" } }, output: { report: { kind: "blob" } } },
   },
   "review/alone": {
     inputs: { change: { schema: { type: "string" } } },
     outputs: { report: { kind: "blob", schema: { type: "string", contentMediaType: "text/markdown" } } },
-    operation: { kind: "function", function: "agent", input: { prompt: { kind: "text", binding: ".inputs.change" } }, output: { name: "report", kind: "blob" } },
+    operation: { kind: "function", function: "agent", input: { prompt: { kind: "text", binding: ".inputs.change" } }, output: { report: { kind: "blob" } } },
   },
 };
 

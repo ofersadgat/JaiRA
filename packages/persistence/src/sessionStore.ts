@@ -58,6 +58,7 @@ import {
   type StoredRecord,
 } from "@declarative-ai/exec";
 import type { JairaDb } from "./db";
+import { dehydrate, hydrate, release } from "./blobStore";
 import type { ConversationLog, PositionRow, RecordRow, SessionRow } from "./conversationFile";
 
 /** `<id>@<position>` — the ref spelling upstream uses, restated because both halves must agree. */
@@ -177,13 +178,18 @@ interface CallRow {
   ended_at: number | null;
 }
 
-/** One row, as a {@link RecordedCall}. Absent columns stay absent rather than becoming `null`. */
-function recordedCallOf(row: CallRow): RecordedCall {
+/**
+ * One row, as a {@link RecordedCall}. Absent columns stay absent rather than becoming `null`.
+ *
+ * HYDRATED here, which is the only place a record leaves the store — a caller never sees a
+ * `{"$blob"}` reference, and never has to know the layer exists (RECORDS.md §8).
+ */
+function recordedCallOf(db: JairaDb, row: CallRow): RecordedCall {
   return {
     recordId: row.record_id,
     status: row.status,
-    ...(row.request_json !== null ? { request: JSON.parse(row.request_json) as JsonValue } : {}),
-    ...(row.result_json !== null ? { result: JSON.parse(row.result_json) as JsonValue } : {}),
+    ...(row.request_json !== null ? { request: hydrate(db, JSON.parse(row.request_json) as JsonValue) as JsonValue } : {}),
+    ...(row.result_json !== null ? { result: hydrate(db, JSON.parse(row.result_json) as JsonValue) as JsonValue } : {}),
     ...(row.error_json !== null ? { error: JSON.parse(row.error_json) as JsonValue } : {}),
     ...(row.started_at !== null ? { startedAt: row.started_at } : {}),
     ...(row.ended_at !== null ? { endedAt: row.ended_at } : {}),
@@ -385,10 +391,10 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
           WHERE id = ?`,
       )
       .run(
-        result === undefined ? null : JSON.stringify(result),
+        result === undefined ? null : JSON.stringify(dehydrate(this.db, result)),
         error === undefined ? null : JSON.stringify(error),
         settled.metrics === undefined ? null : JSON.stringify(settled.metrics),
-        settled.sessionOutcome === undefined ? null : JSON.stringify(settled.sessionOutcome),
+        settled.sessionOutcome === undefined ? null : JSON.stringify(withoutDuplicateTurns(settled.sessionOutcome, result)),
         settled.sessionOutcome?.providerSessionId ?? null,
         error === undefined ? "completed" : "failed",
         Date.now(),
@@ -563,7 +569,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
           ORDER BY attempt DESC, id DESC LIMIT 1`,
       )
       .get(recordId, this.scope.taskId ?? null, this.scope.runId ?? null) as CallRow | undefined;
-    return row === undefined ? undefined : recordedCallOf(row);
+    return row === undefined ? undefined : recordedCallOf(this.db, row);
   }
 
   /**
@@ -590,7 +596,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
           ORDER BY started_at, id`,
       )
       .all(this.scope.taskId ?? null, this.scope.runId ?? null) as CallRow[];
-    return rows.map(recordedCallOf);
+    return rows.map((row) => recordedCallOf(this.db, row));
   }
 
   /**
@@ -602,14 +608,16 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * session's earlier lines out.
    *
    * Narrowed to rows that have a handle and no capture yet, so a second open after a successful
-   * recovery finds nothing and re-reads no files.
+   * recovery finds nothing and re-reads no files. `capturedAt` is what says so: the fold leaves no
+   * field of its own any more — the captured lines ARE the entries now — so the record states when
+   * it happened rather than being recognized by a leftover.
    */
   recoverable(taskId: string): Array<{ id: number; providerSessionId: string; startedAt: number }> {
     return this.db
       .prepare(
         `SELECT id, provider_session_id, started_at FROM operation_records
           WHERE task_id = ? AND status = 'failed' AND provider_session_id IS NOT NULL
-            AND (result_json IS NULL OR result_json NOT LIKE '%"nativeLines"%')`,
+            AND (result_json IS NULL OR result_json NOT LIKE '%"capturedAt"%')`,
       )
       .all(taskId)
       .map((row) => {
@@ -622,20 +630,24 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * Fold a recovered capture into a record that never got one — the crash counterpart of the close
    * decorator's enrichment.
    *
-   * The lines join the payload's `value`, exactly where `withNativeCapture` puts them, so the
-   * transcript reader finds them where it already looks. A row whose payload is not record-shaped
-   * (a scripted value, a bare string) is left alone rather than wrapped in a shape nothing reads.
+   * The FOLD itself is the caller's: merging a captured file into a payload's entries is the
+   * runtime's rule (`foldIntoEntries`) and this package must not import the runtime, so `fold` is
+   * handed the record's current value and answers with the folded one. A row whose payload is not
+   * record-shaped (a scripted value, a bare string) is left alone rather than wrapped in a shape
+   * nothing reads.
    */
-  foldNativeCapture(recordRowId: number, captured: Record<string, JsonValue>): void {
+  foldNativeCapture(recordRowId: number, fold: (value: Record<string, JsonValue>) => Record<string, JsonValue>): void {
     const row = this.db.prepare(`SELECT result_json FROM operation_records WHERE id = ?`).get(recordRowId) as
       | { result_json: string | null }
       | undefined;
     if (row === undefined) return;
-    const existing = row.result_json === null ? {} : (JSON.parse(row.result_json) as { value?: unknown });
+    const existing = row.result_json === null ? {} : (hydrate(this.db, JSON.parse(row.result_json) as JsonValue) as { value?: unknown });
     const value = existing.value;
     if (value !== undefined && (value === null || typeof value !== "object" || Array.isArray(value))) return;
-    const merged = { ...existing, value: { ...((value ?? {}) as object), ...captured } };
-    this.db.prepare(`UPDATE operation_records SET result_json = ? WHERE id = ?`).run(JSON.stringify(merged), recordRowId);
+    const merged = { ...existing, value: fold((value ?? {}) as Record<string, JsonValue>) };
+    this.db
+      .prepare(`UPDATE operation_records SET result_json = ? WHERE id = ?`)
+      .run(JSON.stringify(dehydrate(this.db, merged as JsonValue)), recordRowId);
     // A recovered capture is a change to the record like any other — and one that arrives long after
     // the run, which is exactly when a file that missed it would be the version anybody reads.
     this.logRecordRow(recordRowId);
@@ -853,7 +865,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     }>;
     return rows.map((row) => {
       const value = projectValue(
-        row.result_json === null ? undefined : (JSON.parse(row.result_json) as JsonValue),
+        row.result_json === null ? undefined : (hydrate(this.db, JSON.parse(row.result_json) as JsonValue) as JsonValue),
         row.session_outcome_json === null ? undefined : (JSON.parse(row.session_outcome_json) as JsonValue),
       );
       return {
@@ -873,23 +885,41 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
  * A record's conversational value — the projection `close()` used to bake into the write.
  *
  * The PAYLOAD WINS when it already is a conversation. A record-mode core answers with the whole
- * `LlmOutput` — messages plus `thinking`, `toolCalls`, `toolResults` — and replacing that with a
- * bare `{ messages }` would discard exactly what record mode was turned on to keep. The reported
- * outcome is for a payload that is NOT a conversation: a delegated agent answering with text, a
- * value-mode prompt core whose payload was projected away inside the call, a scripted fake.
+ * `LlmOutput` — its `entries`, which carry the reasoning and the tool trace as well as the turns —
+ * and replacing that with a bare `{ messages }` would discard exactly what record mode was turned
+ * on to keep. The reported outcome is for a payload that is NOT a conversation: a delegated agent
+ * answering with text, a value-mode prompt core whose payload was projected away inside the call, a
+ * scripted fake.
  */
 function projectValue(result: JsonValue | undefined, sessionOutcome: JsonValue | undefined): JsonValue | undefined {
-  const payload = result as { value?: { messages?: unknown } } | undefined;
-  if (payload?.value?.messages !== undefined) return result;
+  const payload = result as { value?: { entries?: unknown; messages?: unknown } } | undefined;
+  if (payload?.value?.entries !== undefined || payload?.value?.messages !== undefined) return result;
   const reported = (sessionOutcome as { messages?: JsonValue[] } | undefined)?.messages;
   if (reported !== undefined) return { value: { messages: reported } };
   return result;
 }
 
-/** A record's messages: upstream's `defaultMessagesOf`, over a stored record rather than a live one. */
+/**
+ * A record's messages: upstream's `defaultMessagesOf`, over a stored record rather than a live one.
+ *
+ * DERIVED from the record's entries — one array holds the conversation and the wire history is a
+ * projection of it, never a second copy stored beside it (RECORDS.md). A subagent's turns are left
+ * out for the same reason they always were: they are not the main thread's history.
+ */
 export function messagesOfRecord(value: JsonValue | undefined): JsonValue[] {
-  const messages = (value as { value?: { messages?: JsonValue[] } } | undefined)?.value?.messages;
-  return Array.isArray(messages) ? messages : [];
+  const payload = (value as { value?: { entries?: JsonValue[]; messages?: JsonValue[] } } | undefined)?.value;
+  if (Array.isArray(payload?.entries)) {
+    return payload.entries
+      .filter((e) => {
+        const entry = e as { kind?: unknown; sidechain?: unknown } | null;
+        return entry !== null && typeof entry === "object" && entry.kind === "message" && entry.sidechain === undefined;
+      })
+      .map((e) => {
+        const entry = e as { role?: JsonValue; content?: JsonValue };
+        return { role: entry.role, content: entry.content } as JsonValue;
+      });
+  }
+  return Array.isArray(payload?.messages) ? payload.messages : [];
 }
 
 /**
@@ -1088,4 +1118,28 @@ function parsed<T>(json: string | null): T | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The session outcome with its `messages` dropped when the RESULT already holds the conversation.
+ *
+ * Measured before this: one 894 KB record kept `result_json.value.messages` and
+ * `session_outcome_json.messages` and they were byte-identical, sha for sha — 269,008 bytes each,
+ * about 2.5 MB across one run of the `feature` workflow. Two writes of one fact, and a reader had no
+ * rule for which to believe.
+ *
+ * The outcome's copy is the one that goes, because the payload's is the authoritative one:
+ * `projectValue` already prefers it, and everything derived from a record — the wire history, the
+ * tool trace, the reasoning — is projected from the payload's entries. What stays is
+ * `providerSessionId`, which is the outcome's own fact and exists nowhere else.
+ *
+ * A payload that is NOT a conversation keeps the outcome whole: a value-mode core whose payload was
+ * projected away inside the call, a delegated agent answering with bare text, a scripted fake. There
+ * the outcome's turns are the only turns there are.
+ */
+function withoutDuplicateTurns<T extends object>(outcome: T, result: JsonValue | undefined): T {
+  const carriesConversation = (result as { value?: { entries?: unknown } } | undefined)?.value?.entries !== undefined;
+  if (!carriesConversation) return outcome;
+  const { messages: _duplicated, ...rest } = outcome as T & { messages?: unknown };
+  return rest as T;
 }

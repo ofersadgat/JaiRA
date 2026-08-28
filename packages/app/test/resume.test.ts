@@ -38,11 +38,11 @@ function files(): Record<string, JsonValue> {
   return {
     [ROOT]: {
       label: "Resume fixture",
-      outputs: { last: { schema: { type: "boolean" }, binding: ".children.c.outputs.confirmed" } },
+      outputs: { last: { schema: { type: "boolean" }, binding: ".children.c.output.confirmed" } },
       children: {
         a: { state: `${ROOT}/a` },
-        b: { state: `${ROOT}/b`, inputs: { previous: ".children.a.outputs.confirmed" } },
-        c: { state: `${ROOT}/c`, inputs: { previous: ".children.b.outputs.confirmed" } },
+        b: { state: `${ROOT}/b`, inputs: { previous: ".children.a.output.confirmed" } },
+        c: { state: `${ROOT}/c`, inputs: { previous: ".children.b.output.confirmed" } },
       },
       sequence: ["a", "b", "c"],
     },
@@ -287,7 +287,7 @@ function promptFiles(): Record<string, JsonValue> {
     [PROMPTED]: {
       label: "Two calls in one conversation",
       environment: { session: "main" },
-      outputs: { last: { schema: { type: "string" }, binding: ".children.b.outputs.text" } },
+      outputs: { last: { schema: { type: "string" }, binding: ".children.b.output.text" } },
       children: { a: { state: `${PROMPTED}/a` }, b: { state: `${PROMPTED}/b` } },
       sequence: ["a", "b"],
     },

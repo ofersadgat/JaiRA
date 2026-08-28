@@ -145,7 +145,7 @@ function Reorder({ index, count, onMove }: { index: number; count: number; onMov
  * One child's input wiring — the substance of a child declaration.
  *
  * A binding is one text field whatever form it takes: a runtime path
- * (`.children.goals.outputs.goals`), an expression, a literal. §8 makes them one grammar, so the
+ * (`.children.goals.output.goals`), an expression, a literal. §8 makes them one grammar, so the
  * form does not ask which one you meant. A binding the document holds as a STRUCTURED form —
  * `{ json }`, `{ $ref }`, an embedded operation — is shown read-only.
  */
@@ -1170,7 +1170,7 @@ export function WorkflowEditor({
             <SlotTable
               title="Outputs"
               rows={form.outputs}
-              bindingHint=".children.critique.outputs.outcome"
+              bindingHint=".children.critique.output.outcome"
               targets={targets}
               bindingListId={BINDING_TARGETS_ID}
               emptyBindingMeans={

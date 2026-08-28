@@ -25,7 +25,7 @@ const inputs = (): unknown => ({
   kind: "function",
   functionRef: "context.get",
   input: { name: { kind: "text", binding: { text: "inputs" } } },
-  output: { name: "value", kind: "json" },
+  output: { value: { kind: "json" } },
 });
 
 /** `.inputs.<name>`, lowered — a member read off that record. */
@@ -37,7 +37,7 @@ const input = (name: string): unknown => ({
       value: { kind: "json", binding: { op: inputs() } },
       prop: { kind: "text", binding: { text: name } },
     },
-    output: { name: "value", kind: "json" },
+    output: { value: { kind: "json" } },
   },
 });
 
@@ -56,7 +56,7 @@ describe("resolving a pure expression", () => {
         kind: "function",
         functionRef: "op.gt",
         input: { left: { kind: "json", binding: input("a") }, right: { kind: "json", binding: input("b") } },
-        output: { name: "value", kind: "json" },
+        output: { value: { kind: "json" } },
       },
     });
     expect(resolveRecorded(gt, { inputs: { a: 3, b: 1 }, record: () => undefined })).toEqual({
@@ -76,7 +76,7 @@ describe("resolving a pure expression", () => {
           value: { kind: "json", binding: input("composite_score") },
           prop: { kind: "text", binding: { text: "total" } },
         },
-        output: { name: "value", kind: "json" },
+        output: { value: { kind: "json" } },
       },
     });
     const out = resolveRecorded(nested, { inputs: { composite_score: { total: 0.62 } }, record: () => undefined });
@@ -103,7 +103,7 @@ describe("resolving through a record", () => {
       kind: "function",
       functionRef: "user:/fn.ts#confidence.score",
       input: { rank: { kind: "json", index: 0, schema: { type: "number" } } },
-      output: { name: "result", kind: "json", schema: { type: "number" } },
+      output: { result: { kind: "json", schema: { type: "number" } } },
     },
     parameters: { rank: { kind: "json", binding: input("rank") } },
   });

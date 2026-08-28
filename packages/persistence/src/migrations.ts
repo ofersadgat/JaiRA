@@ -277,6 +277,34 @@ export const MIGRATIONS: Migration[] = [
     // — re-runs the step against a table that already has the column.
     run: (db) => addColumn(db, "runs", "forked_at", "TEXT"),
   },
+  {
+    version: 10,
+    note: "a record's big leaves are stored once, by content hash, and referenced",
+    // RECORDS.md §8. Deduplicating INSIDE a record got the conversation stored once; this is what
+    // deduplicates ACROSS them. The same file read by three passes of a loop was three copies, and
+    // a resumed session re-reading its own context was more — the bytes are identical every time and
+    // the record has no way to say so.
+    //
+    // CONTENT-ADDRESSED rather than record-scoped, which is the choice §8 left open. Record-scoped
+    // needs no reachability question, but it misses exactly the case that motivated the layer: the
+    // repetition is BETWEEN records, not within one. The GC that buys is real and has a home —
+    // `prune` already walks runs and deletes what they owned, and an unreferenced blob is the same
+    // kind of thing as an orphaned job row.
+    //
+    // `refs` is a COUNT, not a flag. Two records sharing a blob is the point, so deleting one must
+    // not delete the bytes the other still names; a count is the smallest thing that can say which
+    // of those two happened.
+    sql: `
+      CREATE TABLE IF NOT EXISTS blobs (
+        hash       TEXT PRIMARY KEY,
+        content    TEXT NOT NULL,
+        bytes      INTEGER NOT NULL,
+        refs       INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS blobs_unreferenced ON blobs(refs) WHERE refs <= 0;
+    `,
+  },
 ];
 
 /**

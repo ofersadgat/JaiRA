@@ -26,7 +26,7 @@ const files: Record<string, unknown> = {
   review: {
     label: "Review the change",
     inputs: { change: { kind: "blob", schema: { type: "string", contentMediaType: "text/x-diff" } } },
-    outputs: { report: { binding: ".children.synthesize.outputs.report" } },
+    outputs: { report: { binding: ".children.synthesize.output.report" } },
     children: {
       // The SAME state, twice, under two agents. Two near-duplicate state files before this existed.
       claude_review: {
@@ -44,8 +44,8 @@ const files: Record<string, unknown> = {
         // No `state`: the key already names it (`./synthesize`).
       synthesize: {
         inputs: {
-          review_a: ".children.claude_review.outputs.report",
-          review_b: ".children.codex_review.outputs.report",
+          review_a: ".children.claude_review.output.report",
+          review_b: ".children.codex_review.output.report",
         },
       },
     },
@@ -65,7 +65,7 @@ const files: Record<string, unknown> = {
       input: {
         prompt: { kind: "text", binding: { expr: "concat('Review this change and list what is wrong: ', .inputs.change)" } },
       },
-      output: { name: "report", kind: "blob" },
+      output: { report: { kind: "blob" } },
     },
   },
   "review/synthesize": {

@@ -66,8 +66,8 @@ export interface InstanceNode {
   childKey?: string;
   parentInstanceId?: number;
   status: InstanceStatus;
-  /** Transitions taken so far (SPEC §3.4). */
-  iteration: number;
+  /** Transitions taken so far (SPEC §3.4) — every one, not just a loop's passes. */
+  index: number;
   operation?: OperationView;
   /**
    * True once a sequence reset cleared this instance (DESIGN §4.2): history is

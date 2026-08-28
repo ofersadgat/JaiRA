@@ -198,7 +198,7 @@ export function DebugPane({
             <li>
               <span className="mono">{SELF_TEST_ROOT}/check</span>
               <span className="sub">reads </span>
-              <span className="mono">.children.say.outputs.greeting</span>
+              <span className="mono">.children.say.output.greeting</span>
               <span className="sub">, publishes </span>
               <span className="mono">passed: boolean</span>
               <span className="sub"> and </span>

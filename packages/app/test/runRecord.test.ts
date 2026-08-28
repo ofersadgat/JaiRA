@@ -108,7 +108,7 @@ describe("what a stopped run can be read back from", () => {
       }
 
       // Every gate's answer is on disk, under the state that produced it — which is what a parent
-      // binding `.children.choose.outputs.decision` needs in order to be re-resolved.
+      // binding `.children.choose.output.decision` needs in order to be re-resolved.
       expect(returned.get("components/choose")).toEqual({ decision: "approve", comments: "looks fine" });
       expect(returned.get("components/review")).toEqual({ decision: "approve" });
       expect(returned.get("components/edit")).toEqual({ content: "# Edited\n\nnew body" });

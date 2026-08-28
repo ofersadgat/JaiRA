@@ -560,35 +560,34 @@ describe("folding a flat list into messages and the work between them", () => {
 });
 
 describe("weaving the agent's native session lines into the conversation", () => {
-  // The shape a real Claude session file has, reduced: the prompt user line (which never rides the
-  // stream), attachments injected before the first answer, the toolUseResult riding a tool-result
-  // envelope, and unstamped bookkeeping at the tail.
+  // The shape a real Claude session file leaves for the transcript: the EVENTS. Message envelopes
+  // are folded onto the entries they annotate at capture, so nothing here needs pairing — and the
+  // agent's structured tool record rides the tool_result block, where the fold put it.
   const withNative = (turns: unknown[], native: Array<{ index: number; line: unknown }>): SessionView =>
     ({ ...session(turns as never), native }) as unknown as SessionView;
   const line = (index: number, line: unknown): { index: number; line: unknown } => ({ index, line });
 
   const turns = [
     { role: "assistant", parts: [{ type: "tool_use", id: "tu1", name: "Read", input: { file_path: "a.ts" } }] },
-    { role: "user", parts: [{ type: "tool_result", tool_use_id: "tu1", content: "ok" }] },
+    { role: "user", parts: [{ type: "tool_result", tool_use_id: "tu1", content: "ok", data: { stdout: "rich", stderr: "" } }] },
     { role: "assistant", text: "done" },
   ];
   const native = [
     line(0, { type: "queue-operation", operation: "enqueue" }),
-    line(0, { type: "user", uuid: "u1", message: undefined }), // the prompt's envelope — input, no turn
     line(1, { type: "attachment", uuid: "a1", attachment: { type: "skill_listing", skills: ["x"] } }),
-    line(1, { type: "assistant", uuid: "s1" }),
-    line(2, { type: "user", uuid: "u2", toolUseResult: { stdout: "rich", stderr: "" } }),
     line(3, { type: "last-prompt", lastPrompt: "the prompt again" }),
     line(3, { type: "ai-title", aiTitle: "Reading a.ts" }),
-    line(3, { type: "assistant", uuid: "s2" }),
   ];
 
   it("shows the lines the stream never carried, at their place in the conversation", () => {
     const entries = entriesOf(withNative(turns, native));
+    // The index is honoured EXACTLY now — it counts the messages that preceded the line, so an
+    // event at 1 sits after the first turn. The old weave drained its queue ahead of each turn and
+    // put it earlier than the file said, which nothing depended on and nothing checked.
     expect(entries.map((e) => (e.kind === "event" ? e.text : e.kind))).toEqual([
       "queued: enqueue",
-      "context: skill_listing",
       "tool",
+      "context: skill_listing",
       "message",
     ]);
     // The attachment opens to the full line.
@@ -610,7 +609,7 @@ describe("weaving the agent's native session lines into the conversation", () =>
     expect(agentTitleOf(session(turns as never))).toBeUndefined();
   });
 
-  it("lands the toolUseResult on the paired call — the agent's own record beside the wire result", () => {
+  it("shows the agent's structured record on the tool line, off the block that carried it", () => {
     const [tool] = entriesOf(withNative(turns, native)).filter((e): e is ToolEntry => e.kind === "tool");
     expect(tool).toMatchObject({ name: "Read", result: "ok", detail: { stdout: "rich" } });
   });
@@ -625,13 +624,11 @@ describe("weaving the agent's native session lines into the conversation", () =>
     expect(entries[0]).toMatchObject({ kind: "event", text: "file-history-snapshot", detail: { type: "file-history-snapshot" } });
   });
 
-  it("drops an envelope that matches no turn instead of derailing the weave", () => {
-    // An assistant envelope with no turn left to pair: the annotation is lost, the events after it
-    // are not, and nothing is misattributed.
+  it("shows an event whose index runs past the last turn, at the tail", () => {
+    // There is no pairing left to derail: what used to be a queue of envelopes waiting for a turn
+    // is now events spliced by index, and one past the end is simply said last.
     const entries = entriesOf(withNative([{ role: "assistant", text: "hi" }], [
-      line(0, { type: "assistant", uuid: "s1" }),
-      line(1, { type: "assistant", uuid: "s-extra" }),
-      line(1, { type: "queue-operation", operation: "enqueue" }),
+      line(9, { type: "queue-operation", operation: "enqueue" }),
     ]));
     expect(entries.map((e) => (e.kind === "event" ? e.text : e.kind))).toEqual(["message", "queued: enqueue"]);
   });
