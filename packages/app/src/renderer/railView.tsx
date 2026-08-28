@@ -39,6 +39,7 @@ import {
   insideOf,
   joinPath,
   lanesOf,
+  lobePath,
   needsFan,
   paletteOf,
   railOf,
@@ -68,6 +69,9 @@ function RailGutter({
   columns,
   folded,
   palette,
+  mark,
+  hideExit,
+  here,
 }: {
   row: RailRow;
   centres: readonly number[];
@@ -76,8 +80,20 @@ function RailGutter({
   /** Whether the lane this row enters is rolled up — it gets a bump and a plus instead of a fork. */
   folded: boolean;
   palette: Palette;
+  /**
+   * A lane this row opens and closes again inside itself — drawn as a lobe off the column to its
+   * left. See {@link lobePath} and `RailedRows`' own `mark`.
+   */
+  mark?: RailLane | undefined;
+  /**
+   * Drop the join. Only ever true when the lane it would draw is FOLDED, in which case every row it
+   * was open in is gone and the curve would arrive out of blank space — see `RailedRows`.
+   */
+  hideExit?: boolean;
+  /** Halo the mark's knot: this is the row the reader is on. */
+  here?: boolean;
 }): JSX.Element {
-  const lanes = lanesOf(row);
+  const lanes = Math.max(lanesOf(row), mark === undefined ? 0 : row.open.length + 1);
   const width = gutterWidth(centres, lanes);
 
   const straights: JSX.Element[] = [];
@@ -111,17 +127,21 @@ function RailGutter({
     );
   }
 
+  const exit = hideExit === true ? undefined : row.exit;
   return (
     <div className="rail-gut" style={{ width: `${width}px` }}>
       {straights}
-      {row.turn && (
+      {(row.turn || mark !== undefined) && (
         <svg className="rail-cap" viewBox={`0 0 ${width} ${CAP}`} preserveAspectRatio="none" aria-hidden="true">
-          {row.exit !== undefined && (
+          {mark !== undefined && (
+            <RailLobe lane={mark} depth={row.open.length} centres={centres} palette={palette} here={here === true} />
+          )}
+          {exit !== undefined && (
             <path
-              d={joinPath(centres, row.exit.depth, row.exit.depth - 1)}
-              stroke={laneColour(row.exit.lane, row.exit.depth === 0, palette)}
-              data-lane={row.exit.lane.key}
-              data-name={row.exit.lane.stateId}
+              d={joinPath(centres, exit.depth, exit.depth - 1)}
+              stroke={laneColour(exit.lane, exit.depth === 0, palette)}
+              data-lane={exit.lane.key}
+              data-name={exit.lane.stateId}
             />
           )}
           {row.enter !== undefined && (
@@ -137,6 +157,50 @@ function RailGutter({
         </svg>
       )}
     </div>
+  );
+}
+
+/**
+ * A state that opens a lane and closes it inside its own row — see {@link lobePath}.
+ *
+ * The knot sits at the far side rather than on the parent, because the knot is what NAMES the thing
+ * this row is about, and here that is the lane going out rather than the one it left. It keeps the
+ * state's own hue in both cases: the colour is how a reader matches a row here to a panel in the
+ * conversation, and an accent knot would spend it on saying something the chip beside it already says.
+ */
+function RailLobe({
+  lane,
+  depth,
+  centres,
+  palette,
+  here,
+}: {
+  lane: RailLane;
+  /** How many lanes are already open — the column this one goes out from. */
+  depth: number;
+  centres: readonly number[];
+  palette: Palette;
+  here: boolean;
+}): JSX.Element {
+  const colour = laneColour(lane, false, palette);
+  const cx = centres[depth] ?? 0;
+  return (
+    <>
+      <path d={lobePath(centres, depth - 1, depth)} stroke={colour} data-lane={lane.key} data-name={lane.stateId} />
+      <circle
+        className="rail-knot"
+        cx={cx}
+        cy={MID}
+        r={3.5}
+        fill="var(--bg)"
+        stroke={colour}
+        strokeWidth={2}
+        data-lane={lane.key}
+        data-name={lane.stateId}
+      />
+      {here && <circle className="rail-halo" cx={cx} cy={MID} r={7.5} fill="none" stroke="var(--accent)" strokeWidth={1.5} />}
+      <circle className="rail-hit" cx={cx} cy={MID} r={9} data-lane={lane.key} data-name={lane.stateId} />
+    </>
   );
 }
 
@@ -197,16 +261,77 @@ export function RailedRows({
   steps,
   renderStep,
   className,
+  mark,
+  rowClass,
+  renderRolled,
+  palette: given,
+  shut: held,
+  onShut,
+  foldable,
+  onPick,
 }: {
   steps: readonly RailStep[];
   /** What row `index` of `steps` draws. */
   renderStep: (index: number) => ReactNode;
   className?: string;
+  /**
+   * A step that opens a lane and closes it again in its own row, drawn as a lobe rather than as a
+   * fork and a join — see {@link RailLobe}. Absent ⇒ every step is an ordinary row.
+   */
+  mark?: ((index: number) => RailLane | undefined) | undefined;
+  /** Extra classes for a step's row — what marks the row the reader is on. */
+  rowClass?: ((index: number) => string | undefined) | undefined;
+  /**
+   * What a rolled-up lane says in place of its contents. Absent ⇒ the standing `.rail-rolled` line.
+   *
+   * The index overrides it because there a fold hides LABELS rather than pages: swapping the row for
+   * a different kind of row would take away the name, the outcome and the chevron that was just
+   * clicked, which is the handle you fold with.
+   */
+  renderRolled?: ((lane: RailLane, held: number) => ReactNode) | undefined;
+  /**
+   * The lane colours, when the caller needs them STABLE across renders.
+   *
+   * A hue is a state's position in the order states first appear, so derived from whatever steps are
+   * currently on screen it moves: fold a loop and every state after it shifts one rung down the
+   * ladder. A caller that folds rows out of its own step list has to hand the palette in, built once.
+   */
+  palette?: Palette | undefined;
+  /** Folded lanes, controlled. Absent ⇒ this component remembers them itself. */
+  shut?: ReadonlySet<string> | undefined;
+  onShut?: ((next: ReadonlySet<string>) => void) | undefined;
+  /** Whether a lane can be folded at all. Absent ⇒ all of them can. */
+  foldable?: ((key: string) => boolean) | undefined;
+  /** A click on a lane that {@link foldable} refused — a lane with nothing under it to fold. */
+  onPick?: ((key: string) => void) | undefined;
 }): JSX.Element {
-  const { rows, deepest } = useMemo(() => railOf(steps), [steps]);
-  const palette = useMemo(() => paletteOf(steps), [steps]);
+  const { rows, deepest: reached } = useMemo(() => railOf(steps), [steps]);
+  // A lobe reaches one column past the lanes open on its row, and nothing else on the page knows to
+  // make room for it. Asked once, over the whole run, for the same reason the spacing is: centres
+  // that changed per row would kink every straight in the drawing.
+  const deepest = useMemo(
+    () =>
+      mark === undefined
+        ? reached
+        : rows.reduce(
+            (most, row) =>
+              row.step !== undefined && mark(row.step) !== undefined ? Math.max(most, row.open.length + 1) : most,
+            reached,
+          ),
+    [rows, reached, mark],
+  );
+  const derived = useMemo(() => paletteOf(steps), [steps]);
+  const palette = given ?? derived;
   const inside = useMemo(() => insideOf(rows), [rows]);
-  const [shut, setShut] = useState<ReadonlySet<string>>(() => new Set());
+  const [own, setOwn] = useState<ReadonlySet<string>>(() => new Set());
+  const shut = held ?? own;
+  const setShut = useCallback(
+    (next: (previous: ReadonlySet<string>) => ReadonlySet<string>): void => {
+      if (held !== undefined && onShut !== undefined) onShut(next(held));
+      else setOwn(next);
+    },
+    [held, onShut],
+  );
   /**
    * Whether the gutter is spread back to full pitch.
    *
@@ -305,12 +430,18 @@ export function RailedRows({
     const inGutter = event.target instanceof Element && event.target.closest(".rail-gut") !== null;
     const lane = hot.current;
     if (!inGutter || lane === null || hotStack.current) return;
-    setShut((held) => {
-      const next = new Set(held);
+    // A lane with nothing under it cannot be folded, and doing nothing is the wrong answer: it lit
+    // up under the pointer, so it has to answer. The caller says what that means.
+    if (foldable !== undefined && !foldable(lane)) {
+      onPick?.(lane);
+      return;
+    }
+    setShut((was) => {
+      const next = new Set(was);
       if (!next.delete(lane)) next.add(lane);
       return next;
     });
-  }, []);
+  }, [foldable, onPick, setShut]);
 
   return (
     <div className={className === undefined ? "rail" : `rail ${className}`} ref={host} onMouseMove={onMove} onMouseLeave={onLeave} onClick={onClick}>
@@ -325,28 +456,53 @@ export function RailedRows({
         // excludes the lane a row forks — which is exactly the row that has to stay as the handle.
         if (row.open.some((lane) => shut.has(lane.key))) return null;
         const rolled = row.enter !== undefined && shut.has(row.enter.lane.key) ? row.enter.lane : undefined;
-        // Nor is the join of a lane whose fork was rolled up: the bump already said it left and came
-        // back, and a join with no lane above it would come from nowhere.
-        if (row.exit !== undefined && shut.has(row.exit.lane.key) && row.enter === undefined) return null;
+        /*
+         * Nor is the join of a lane whose fork was rolled up: the bump already said it left and came
+         * back, and a join with no lane above it would come from nowhere.
+         *
+         * ⚠️ Only when the row does nothing ELSE. A join and the fork that follows it at the same
+         * depth are ONE row — see `push` in `rail.ts` — so on a folded lane whose sibling comes next,
+         * dropping the row takes that sibling's fork with it and keeping it draws a curve arriving
+         * out of blank space. Suppressing just the join is the only reading that leaves both true.
+         */
+        const orphan = row.exit !== undefined && shut.has(row.exit.lane.key);
+        if (orphan && row.enter === undefined) return null;
         const held = rolled === undefined ? 0 : (inside.get(rolled.key) ?? 0);
+        const lobe = row.step === undefined ? undefined : mark?.(row.step);
+        const extra = row.step === undefined ? undefined : rowClass?.(row.step);
         return (
           <div
-            className={row.turn ? "rail-row rail-turn" : "rail-row"}
+            className={
+              [row.turn || lobe !== undefined ? "rail-row rail-turn" : "rail-row", extra]
+                .filter((one) => one !== undefined && one.length > 0)
+                .join(" ")
+            }
             // Not the row index: a live run inserts rows, and an index key would make every row after
             // the insertion a different row. A lane forks once and joins once, and a content row is
             // its step — so this is both stable and unique.
             key={`${row.exit?.lane.key ?? ""}|${row.enter?.lane.key ?? ""}|${row.step ?? ""}`}
           >
-            <RailGutter row={row} centres={centres} columns={columns} folded={rolled !== undefined} palette={palette} />
+            <RailGutter
+              row={row}
+              centres={centres}
+              columns={columns}
+              folded={rolled !== undefined}
+              palette={palette}
+              {...(lobe !== undefined ? { mark: lobe } : {})}
+              {...(orphan ? { hideExit: true } : {})}
+              {...(extra !== undefined && extra.includes("is-here") ? { here: true } : {})}
+            />
             <div className="rail-content">
               {rolled !== undefined ? (
-                <span className="rail-rolled">
-                  <span className="rail-rolled-name mono">{rolled.stateId}</span>
-                  <span className="rail-rolled-tag">rolled up</span>
-                  <span>
-                    {held} state{held === 1 ? "" : "s"}
+                (renderRolled?.(rolled, held) ?? (
+                  <span className="rail-rolled">
+                    <span className="rail-rolled-name mono">{rolled.stateId}</span>
+                    <span className="rail-rolled-tag">rolled up</span>
+                    <span>
+                      {held} state{held === 1 ? "" : "s"}
+                    </span>
                   </span>
-                </span>
+                ))
               ) : row.step === undefined ? null : (
                 renderStep(row.step)
               )}

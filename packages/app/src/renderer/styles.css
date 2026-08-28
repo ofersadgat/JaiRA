@@ -4012,27 +4012,6 @@ ol.children li::marker {
   font-size: calc(var(--size-data) * 11 / 12);
   overflow-wrap: anywhere;
 }
-.tree {
-  list-style: none;
-  margin: 0;
-  padding-left: 12px;
-  border-left: 1px solid var(--line);
-}
-.tree-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 0;
-  flex-wrap: wrap;
-}
-.tree-label {
-  font-family: var(--font-data);
-  font-size: calc(var(--size-data) * 11 / 12);
-}
-.superseded > .tree-row {
-  opacity: 0.45;
-  text-decoration: line-through;
-}
 .stream,
 .outputs {
   background: var(--bg);
@@ -9052,6 +9031,12 @@ fieldset.reading {
 }
 /* Where a jump landed. The sides of a fork are the same state saying nearly the same thing, so
    arriving at one silently is indistinguishable from not having moved. Fades on its own. */
+/* A solo sheet has no letterhead to light, so the landing flashes the body it stands in for. */
+.sb-bare.sb-panel-lit {
+  border-radius: 8px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+  transition: box-shadow 0.4s ease-out;
+}
 .sb-panel-lit > .sb-sheet {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
@@ -10648,6 +10633,16 @@ fieldset.reading {
   inset: 0;
   /* The curves overshoot the box by a hair at the joins; clipping them would nick the strokes. */
   overflow: visible;
+  /* ⚠️ An absolutely positioned box over the WHOLE gutter. Without this it swallows every click
+     aimed at the straights underneath and a lane stops being foldable — which is exactly what
+     happened the moment a row carried a curve AND a lane you were meant to be able to click. Only
+     what is painted in it takes the pointer back. */
+  pointer-events: none;
+}
+.rail-cap path[data-lane],
+.rail-cap .rail-knot,
+.rail-cap .rail-hit {
+  pointer-events: auto;
 }
 .rail-cap path {
   fill: none;
@@ -10705,6 +10700,329 @@ fieldset.reading {
   border-radius: 3px;
   background: var(--panel-2);
 }
+/* ── the run index ──────────────────────────────────────────────────────────
+   The rail with the contents taken away — see `runIndex.tsx`. One row per state, in the panel that
+   used to draw the same shape as an indented tree out of entirely different material. */
+.rail.run-index {
+  /* A row that turns is a cap tall, and in the index EVERY row turns. At the conversation's 34px a
+     full run is thousands of pixels of panel; 30px is what the curves absorb without the knots
+     flattening past reading. */
+  --rail-cap: 30px;
+  max-width: none;
+}
+/* A state's own knot keeps its hue — the colour is how a row here is matched to a panel over there —
+   so the "you are here" mark on the drawing is a halo around it rather than a recolouring of it. */
+.rail-cap .rail-halo {
+  pointer-events: none;
+}
+
+/* One row: the letterhead's own three facts, minus the label, which belongs to the page it heads. */
+.rail-mark {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  width: 100%;
+  border-left: 2px solid transparent;
+  border-radius: 5px;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
+  color: var(--dim);
+}
+.rail-mark-chev {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  box-shadow: none;
+  color: var(--dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 120ms ease-out;
+}
+.rail-mark-chev.open {
+  transform: rotate(90deg);
+}
+.rail-mark-chev:hover {
+  color: var(--text);
+  background: none;
+}
+/* Kept rather than dropped, so every name in the column starts at the same x. A leaf has no fold. */
+.rail-mark-chev.pad {
+  pointer-events: none;
+  visibility: hidden;
+}
+/* The bookmark. Everything the row says is inside it, so the whole line is the target and the
+   chevron beside it is not — one row, two gestures, neither reachable by accident. */
+.rail-mark-go {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  box-shadow: none;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  /* Nothing spills past the button. Without it a long clock runs under the loop tag beside it, which
+     is two controls drawn on top of each other rather than a row that is too narrow. */
+  overflow: hidden;
+}
+.rail-mark-go:hover {
+  background: var(--fill-ghost-hover);
+  color: var(--text);
+}
+/* A host with no conversation beside it. The row still says everything; nothing pretends to be a
+   link, which is the honest degradation rather than a button that does nothing. */
+.rail-mark-go.static {
+  cursor: default;
+}
+.rail-mark-go.static:hover {
+  background: none;
+}
+.rail-mark-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+.rail-mark-name {
+  flex: none;
+  color: var(--text);
+  font-weight: 600;
+  font-size: calc(var(--size-data) * 12 / 12);
+}
+/* The operation's own reason, in the row it belongs to. One line: the whole of it is on the
+   letterhead this row is a bookmark to. */
+.rail-mark-why {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-app);
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  color: var(--bad);
+}
+/* The first thing to give way when the row runs out of room, and the only thing: the name is
+   `flex: none` and a loop's own control sits outside this button, so a clock is what a narrow panel
+   spends rather than the two things the row is for. */
+.rail-mark-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  padding-left: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+  font-size: calc(var(--size-data) * 10 / 12);
+}
+/* What a FOLDED module says instead of the states it is holding. The row survives the fold — same
+   name, same outcome, same timing, chevron closed — which is what the conversation's `.rail-rolled`
+   substitution cannot be here: there a fold hides pages, here it hides labels, and swapping the row
+   takes away the handle that was just clicked. */
+.rail-mark-count {
+  flex: none;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--panel-2);
+  color: var(--dim);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.rail-mark.gone {
+  opacity: 0.72;
+}
+.rail-mark.gone .rail-mark-name {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+/* The letterhead's title-block tones, at row scale — the same three states the conversation shouts,
+   said quietly enough to repeat forty times in a 360px column. */
+.rail-mark.tb .rail-mark-go {
+  background: var(--tb-fill);
+}
+.rail-mark.tb.accent {
+  --tb-fill: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+.rail-mark.tb.accent .rail-mark-name {
+  color: var(--accent);
+}
+.rail-mark.tb.amber {
+  --tb-fill: color-mix(in srgb, var(--warn) 14%, var(--panel));
+}
+.rail-mark.tb.amber .rail-mark-go {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 30%, var(--line));
+}
+.rail-mark.tb.amber .rail-mark-name {
+  color: var(--warn);
+}
+.rail-mark.tb.red {
+  --tb-fill: color-mix(in srgb, var(--bad) 11%, var(--panel));
+}
+.rail-mark.tb.red .rail-mark-name {
+  color: var(--bad);
+}
+
+/* --- where the reader is ---
+   The label, boxed. On an untinted row it fills; on a tinted one it keeps the tint and marks itself
+   with the ring alone, so being here and being asked are two statements rather than two claims on
+   one surface. The ring is the constant, and it is what the eye finds. */
+.rail-mark.here .rail-mark-go {
+  background: color-mix(in srgb, var(--accent) 15%, var(--panel));
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+.rail-mark.here .rail-mark-name {
+  color: var(--accent);
+}
+/* The tone wins the fill, and this wins the ring. ORDER decides it: the two selectors weigh the
+   same, so a here-chip declared before the tones would paint over an asking state. */
+.rail-mark.here.tb .rail-mark-go {
+  background: var(--tb-fill);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 62%, transparent);
+}
+
+/* --- a loop, and its control ---
+   Consecutive passes of one cycle. The one fold the index can offer that the conversation cannot:
+   its rows are pages, and a second pass is not a repeat of the first; here they are labels, and a
+   repeated label is genuinely redundant. */
+.rail-mark.in-loop {
+  border-left-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.loop-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  margin-left: 2px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  box-shadow: none;
+  color: var(--accent);
+  font-family: var(--font-data);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+.loop-tag:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+.loop-tag-glyph {
+  font-size: 11px;
+  line-height: 1;
+}
+/* Folded: the cycle's names on one row, its colours as swatches, and the same tag to put it back. */
+.loop-shut {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+}
+.loop-shut-go {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  box-shadow: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
+  color: var(--dim);
+}
+.loop-shut-go:hover {
+  background: var(--fill-ghost-hover);
+}
+.loop-shut-names {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-weight: 600;
+}
+.loop-swatches {
+  display: inline-flex;
+  gap: 2px;
+  flex: none;
+}
+.loop-swatches i {
+  display: block;
+  width: 3px;
+  height: 11px;
+  border-radius: 1px;
+}
+
+/* Collapse all / expand all, in the heading — the `.sb-foldall` idiom: a glyph that grows its word
+   on hover rather than carrying one permanently or waiting on a tooltip. */
+.foldall {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--dim);
+  font-family: var(--font-data);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.foldall:hover,
+.foldall:focus-visible {
+  color: var(--text);
+  background: none;
+}
+.foldall-label {
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0;
+  transition: max-width 160ms ease-out, opacity 160ms ease-out;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+.foldall:hover .foldall-label,
+.foldall:focus-visible .foldall-label {
+  max-width: 90px;
+  opacity: 1;
+}
+
 /* The lane's name, following the pointer. Fixed rather than absolute so it is not clipped by the
    scroller the conversation lives in. */
 .rail-tip {

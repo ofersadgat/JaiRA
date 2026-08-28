@@ -35,6 +35,7 @@ import type { TranscriptEntry } from "../src/renderer/transcript";
 import { RunActivity } from "../src/renderer/runViews";
 import { ForkMark, SessionBandsView, ZigDefs } from "../src/renderer/sessionPanels";
 import { bandsOf, piecesOf, runForksOf, type BandNote } from "../src/renderer/sessionBands";
+import { RunIndex, keyOfNode } from "../src/renderer/runIndex";
 
 /**
  * The clock the specimen's ages are measured back from.
@@ -1040,6 +1041,86 @@ function RailSpecimen(): JSX.Element {
   );
 }
 
+/**
+ * The same question the rail answers, asked in a 360px panel: what SHAPE did this run have.
+ *
+ * Trimmed to the six things the index has to get right and the conversation's rail never has to —
+ * a module that folds, a state drawn as a lobe off it, a REFINE LOOP with its own control, an
+ * operation that failed, a superseded retry beside the pass that replaced it, and the chip saying
+ * where the reader is. The last two are next to each other on purpose: a retry is the same state
+ * twice in a row, which is exactly what a one-pass loop looks like, and the loop reading has to
+ * refuse it. See `loopsIn`.
+ */
+const INDEX_RUN = ((): InstanceNode => {
+  let instanceId = 0;
+  let clock = Date.UTC(2026, 7, 28, 14, 2);
+  const leaf = (stateId: string, ms: number, extra: Partial<InstanceNode> = {}): InstanceNode => {
+    const startedAt = clock;
+    clock += ms;
+    return {
+      instanceId: ++instanceId,
+      stateId,
+      status: "completed",
+      index: 0,
+      superseded: false,
+      startedAt,
+      endedAt: clock,
+      runId: 1,
+      children: [],
+      ...extra,
+    };
+  };
+  const module = (stateId: string, children: InstanceNode[], extra: Partial<InstanceNode> = {}): InstanceNode => ({
+    instanceId: ++instanceId,
+    stateId,
+    status: "completed",
+    index: 0,
+    superseded: false,
+    startedAt: children[0]?.startedAt ?? clock,
+    endedAt: clock,
+    runId: 1,
+    children,
+    ...extra,
+  });
+
+  const product = module("product", [
+    leaf("context", 41_000),
+    leaf("draft", 130_000),
+    leaf("critique", 64_000),
+    leaf("draft", 108_000),
+    leaf("critique", 58_000),
+    leaf("confidence", 12_000),
+    leaf("gate", 91_000),
+  ]);
+  const engineering = module(
+    "engineering",
+    [
+      leaf("context", 33_000),
+      leaf("contracts", 115_000),
+      leaf("review", 22_000, {
+        status: "failed",
+        operation: { kind: "prompt", status: "failed", reason: "call failed — no JSON in the reply" },
+      } as Partial<InstanceNode>),
+      leaf("publish", 2_000, { status: "canceled", superseded: true }),
+      leaf("publish", 5_000),
+      leaf("gate", 0, { status: "waiting_for_user", endedAt: undefined }),
+    ],
+    { status: "running", endedAt: undefined },
+  );
+  return module("feature", [product, engineering], { status: "running", endedAt: undefined });
+})();
+
+/** `engineering/contracts` — a settled state part way down, which is where a reader tends to be. */
+const INDEX_HERE = keyOfNode(INDEX_RUN.children[1]!.children[1]!);
+
+function RunIndexSpecimen(): JSX.Element {
+  return (
+    <div className="detail" style={{ width: 360, padding: "12px 15px", background: "var(--panel)" }}>
+      <RunIndex instances={[INDEX_RUN]} here={INDEX_HERE} onGoTo={() => {}} />
+    </div>
+  );
+}
+
 export const SPECIMENS: readonly Specimen[] = [
   { id: "board-column", figure: "06 · Column", width: 276, height: 384, node: <BoardSpecimen board={ONE_COLUMN} /> },
   { id: "board-two", figure: "01 · Tasks", width: 560, height: 340, node: <BoardSpecimen board={TWO_COLUMNS} /> },
@@ -1058,4 +1139,6 @@ export const SPECIMENS: readonly Specimen[] = [
   { id: "fork", figure: "— · The fork mark", width: 900, height: 700, node: <ForkSpecimen /> },
   { id: "fork-runs", figure: "— · The fork mark, at run scale", width: 900, height: 460, node: <RunForkSpecimen /> },
   { id: "rail", figure: "— · The state rail", width: 1000, height: 1960, node: <RailSpecimen /> },
+  { id: "run-index", figure: "— · The Instances index", width: 392, height: 560, node: <RunIndexSpecimen /> },
+
 ];

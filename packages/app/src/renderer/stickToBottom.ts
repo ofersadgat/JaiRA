@@ -49,6 +49,16 @@ export interface StickToBottom<T extends HTMLElement> {
   away: boolean;
   /** Back to the live edge, and pinned again. */
   jump: () => void;
+  /**
+   * Stop following, without moving anybody.
+   *
+   * For a scroll this panel is about to make on the reader's behalf — a bookmark landing somewhere up
+   * the page. Nothing else needs it: an ordinary scroll decides the pin by where it ends up, and that
+   * is the whole rule. But a programmatic jump races the pin, and loses: the follow effect is a
+   * LAYOUT effect, so the next thing to arrive lands before the browser has painted the jump and
+   * yanks the reader back to the bottom before they have seen where they were sent.
+   */
+  unpin: () => void;
 }
 
 /**
@@ -88,6 +98,11 @@ export function useStickToBottom<T extends HTMLElement>(follow: DependencyList, 
     if (el !== null) el.scrollTop = el.scrollHeight;
   }, []);
 
+  const unpin = useCallback(() => {
+    pinned.current = false;
+    setAway(true);
+  }, []);
+
   // BEFORE paint, not after: an effect that runs afterwards shows one frame of the new content at
   // the old offset, which on a fast stream reads as the panel juddering.
   useLayoutEffect(() => {
@@ -105,5 +120,5 @@ export function useStickToBottom<T extends HTMLElement>(follow: DependencyList, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, reset);
 
-  return { ref, onScroll, away, jump };
+  return { ref, onScroll, away, jump, unpin };
 }

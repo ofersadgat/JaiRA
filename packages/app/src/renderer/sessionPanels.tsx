@@ -39,7 +39,7 @@
  * a context and nothing about what any of them is; the state that started it is the other half, and
  * it is a place you can go.
  */
-import { Fragment, useCallback, useRef, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
 import { Icon } from "./icons";
 import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
 import { clockOf, durationOf } from "./transcriptView";
@@ -344,6 +344,8 @@ function Piece({
   return (
     <StateBlock
       open={open}
+      // What the Instances index sends a reader to — see `keyOfNode` in `runIndex.tsx`.
+      instance={`${node.runId ?? ""}:${node.instanceId}`}
       header={
         <StateHeader
           open={open}
@@ -369,7 +371,7 @@ function Piece({
  * Formatted here rather than in the header because it is arithmetic over a node, and a header should
  * be handed words. A run still going has no duration to state, and says nothing rather than zero.
  */
-function metaOf(node: InstanceNode): string {
+export function metaOf(node: InstanceNode): string {
   const took = node.endedAt !== undefined ? durationOf(node.endedAt - node.startedAt) : undefined;
   return [clockOf(node.startedAt), took].filter((part) => part !== undefined && part.length > 0).join(" · ");
 }
@@ -613,7 +615,15 @@ function Sheet({
                   <RunForkMark fork={divides} onGoToRun={onGoToRun} inSheet />
                 ) : null}
                 {solo ? (
-                  allShut ? null : <div className="sb-bare">{render(piece)}</div>
+                  // Stamped like a letterhead even though there is none: a solo sheet still holds a
+                  // state, and a bookmark to it has to land somewhere. Without this the one panel a
+                  // reader is most likely to jump to — a leaf run, which is the whole view — was the
+                  // one the index could not reach.
+                  allShut ? null : (
+                    <div className="sb-bare" data-instance={`${piece.node.runId ?? ""}:${piece.node.instanceId}`}>
+                      {render(piece)}
+                    </div>
+                  )
                 ) : (
                   <Piece
                     piece={piece}
@@ -917,6 +927,8 @@ export function SessionBandsView({
   onToggle = () => undefined,
   onSetShut = () => undefined,
   scope = "",
+  focus,
+  palette,
   empty,
 }: {
   bands: readonly SessionBand[];
@@ -942,6 +954,22 @@ export function SessionBandsView({
   onOpenWorkflow?: ((piece: SessionPiece) => void) | undefined;
   /** Every place the TASK divided — see {@link runForksOf}. A run that never forked has none. */
   runForks?: readonly RunFork[];
+  /**
+   * A state to go to, asked for from outside this column — the Instances index's bookmark.
+   *
+   * `instance` is `runId:instanceId`; `at` is a stamp that changes on every ask, so pressing the
+   * same bookmark twice moves the page twice.
+   */
+  focus?: { instance: string; at: number } | undefined;
+  /**
+   * The run's colours, when the host has them — see `paletteOfRun`.
+   *
+   * A hue is a POSITION in the order states first appear, so a palette derived from the rows on
+   * screen is a palette about those rows. This view's rows are BANDS and the task panel's index is
+   * one row per state: two different lists, two different orders, and the same state coming out a
+   * different colour in each. Both are drawing one run, so both read one list.
+   */
+  palette?: ReadonlyMap<string, string> | undefined;
   empty?: string;
 }): JSX.Element {
   /**
@@ -973,6 +1001,43 @@ export function SessionBandsView({
     found.classList.add("sb-panel-lit");
     window.setTimeout(() => found.classList.remove("sb-panel-lit"), 1200);
   }, []);
+
+  /** The `focus.at` of the last ask this column actually served — see the effect below. */
+  const served = useRef<number | undefined>(undefined);
+  /**
+   * A bookmark landing: go to one state's letterhead, from outside this column.
+   *
+   * `focus.at` is a stamp rather than a flag, and it has to be: asking for the same state twice is a
+   * real request — you scrolled away and pressed it again — and a prop that only carried the id
+   * would look unchanged and do nothing the second time.
+   *
+   * ⚠️ THE PANEL IS NOT THERE YET when the ask arrives, and that is the ordinary case rather than
+   * the edge one. A bookmark pressed in the task panel's Details reading mounts this column for the
+   * first time, and its transcripts are FETCHED — so at the moment the ask lands, `bands` is empty
+   * and there is nothing in the document to scroll to. Running once and giving up silently is a
+   * bookmark that never works. So the ask is retried as the conversation fills in, and `served`
+   * records the stamp of the one that found its target, which is what stops it re-scrolling the
+   * reader every time another transcript arrives.
+   *
+   * The header rather than the sheet, because a sheet holds several states and the ask is for one of
+   * them. The flash is the same one a fork mark makes when it sends you to its other side: arriving
+   * somewhere with no confirmation is indistinguishable from not having moved.
+   */
+  useEffect(() => {
+    if (focus === undefined || served.current === focus.at) return;
+    // No `CSS.escape`: the value is `runId:instanceId` inside a quoted attribute selector, where the
+    // only characters that would need it are a quote and a backslash, and a key holds neither.
+    const found = sheets.current?.querySelector(`[data-instance="${focus.instance}"]`);
+    if (!(found instanceof HTMLElement)) return;
+    served.current = focus.at;
+    found.scrollIntoView({ block: "center", behavior: "smooth" });
+    found.classList.add("sb-panel-lit");
+    const clear = window.setTimeout(() => found.classList.remove("sb-panel-lit"), 1200);
+    return () => {
+      window.clearTimeout(clear);
+      found.classList.remove("sb-panel-lit");
+    };
+  }, [focus?.instance, focus?.at, bands, notes]);
 
   // Notes even with no bands, and that is the case worth having: a run whose first child was blocked
   // never opened a conversation at all, so "this run has not said anything yet" was the whole screen
@@ -1053,6 +1118,7 @@ export function SessionBandsView({
         steps={steps}
         renderStep={(i) => nodes[i]}
         {...(bands.some((band) => band.segments.length > 1) ? { className: "rail-wide" } : {})}
+        {...(palette !== undefined ? { palette } : {})}
       />
     </div>
   );

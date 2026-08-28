@@ -12,7 +12,7 @@
  * one card per EXECUTION, because a state that ran three times is three things that happened and a
  * single card cannot be clicked into three different transcripts.
  */
-import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState, type JSX, type ReactNode } from "react";
 import type {
   ChatPlanView,
   ChatSettings,
@@ -36,6 +36,7 @@ import { advanceTargetOf, surfaceKindOf } from "./stateSurface";
 import { Icon } from "./icons";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, runForksOf, type SessionPiece } from "./sessionBands";
 import { SessionBandsView } from "./sessionPanels";
+import { paletteOfRun } from "./runIndex";
 import type { FileSurfaceProps } from "./fileTypes";
 import { Composer } from "./composer";
 import { invoke } from "./store";
@@ -328,11 +329,14 @@ export function RunConversation({
   detail,
   context,
   onOpenSidechain,
+  focus,
 }: {
   /** The run whose conversation this is. Undefined ⇒ nothing has run here yet. */
   parent: InstanceNode | undefined;
   detail: TaskDetail | null;
   context: FileSurfaceProps["context"];
+  /** A state to go to, asked for by the Instances index — see `SessionBandsView`. */
+  focus?: { instance: string; at: number } | undefined;
   /**
    * Where "walk into this subagent conversation" goes, when this panel's host has somewhere for it.
    * Defaults to the trail (`context.onWalkIntoSidechain`); the task panel passes its own stack.
@@ -363,6 +367,17 @@ export function RunConversation({
   );
   const needed = useMemo(() => instancesOf(bands), [bands]);
   /**
+   * The run's colours, from the TREE rather than from the rows this view happens to draw.
+   *
+   * Its rows are bands — several states can share one — and the task panel's index is one row per
+   * state, so each deriving its own hue ladder made the two disagree about what colour a state is
+   * while both were drawing the same run. See `paletteOfRun`.
+   */
+  const palette = useMemo(
+    () => paletteOfRun(detail?.instances ?? (parent === undefined ? [] : [parent])),
+    [detail?.instances, parent],
+  );
+  /**
    * Follow the live edge — the behaviour this panel is watched in and did not have.
    *
    * Everything that makes the transcript taller is in the follow list: the bands (a state entered),
@@ -370,6 +385,18 @@ export function RunConversation({
    * different run is a different conversation, and the pin does not travel between them.
    */
   const follow = useStickToBottom<HTMLDivElement>([bands, sessions, liveTurn, conversation], [detail?.taskId]);
+  /**
+   * A bookmark takes the reader off the live edge, so stop following BEFORE it lands.
+   *
+   * A layout effect, and it has to be: the follow above is one too, and on the render that mounts
+   * this column it has already written `scrollTop = scrollHeight`. Left pinned, the next transcript
+   * to arrive would do it again — after the jump, before the paint — and the reader would be sent
+   * somewhere and returned without ever seeing it.
+   */
+  useLayoutEffect(() => {
+    if (focus !== undefined) follow.unpin();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus?.instance, focus?.at]);
   /**
    * What went wrong in the states that never opened a conversation.
    *
@@ -492,6 +519,8 @@ export function RunConversation({
           onToggle={onToggleShutState}
           onSetShut={onSetShutStates}
           scope={detail.taskId}
+          {...(focus !== undefined ? { focus } : {})}
+          palette={palette}
           empty="This run has not entered a child yet."
         />
         {/* AFTER the bands, always. A wait is the present tense of a run — it is where the thing
@@ -1057,6 +1086,19 @@ export function TaskContext({
   gateServices?: Partial<ComponentServices> | undefined;
 }): JSX.Element {
   const [mode, setMode] = useState<"conversation" | "detail">("conversation");
+  /**
+   * Where the Instances index last sent the reader.
+   *
+   * Held here rather than in the index because it has to outlive the mode: a bookmark pressed in
+   * Details flips this panel to Conversation, and the conversation that then MOUNTS is the thing
+   * that has to scroll. The alternative — doing nothing when the conversation is not on screen —
+   * makes every label in this panel inert, since the two readings share one column.
+   */
+  const [focus, setFocus] = useState<{ instance: string; at: number } | undefined>(undefined);
+  const goTo = (node: InstanceNode): void => {
+    setFocus({ instance: `${node.runId ?? ""}:${node.instanceId}`, at: Date.now() });
+    setMode("conversation");
+  };
   // The task's own root run. A task that has never run has none, and the conversation says so.
   const root = detail.instances[0];
   /**
@@ -1086,7 +1128,12 @@ export function TaskContext({
             Conversation
           </button>
         </TaskHead>
-        <TaskDetailSections detail={detail} stream={stream} />
+        <TaskDetailSections
+          detail={detail}
+          stream={stream}
+          onGoTo={goTo}
+          {...(focus !== undefined ? { here: focus.instance } : {})}
+        />
       </div>
     );
   }
@@ -1129,7 +1176,13 @@ export function TaskContext({
           <SidechainConversation step={standing} context={context} onOpen={pushHop} />
         </>
       ) : (
-        <RunConversation parent={root} detail={detail} context={context} onOpenSidechain={pushHop} />
+        <RunConversation
+          parent={root}
+          detail={detail}
+          context={context}
+          onOpenSidechain={pushHop}
+          {...(focus !== undefined ? { focus } : {})}
+        />
       )}
       {gate !== undefined && onGate !== undefined ? (
         // The newest thing in this conversation IS the review — rendered as its latest turn, not
