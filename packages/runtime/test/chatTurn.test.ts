@@ -12,7 +12,7 @@ import type { EngineEvent } from "@declarative-ai/hw";
 
 import { projectRun } from "@jaira/persistence";
 import { ScriptedFakeExecutor } from "../src/fakeExecutor";
-import { sessionServicesFor } from "../src/summary";
+import { sessionServicesFor } from "../src/sessionServices";
 import { withSessionLayers } from "../src/wiring";
 import { chatOperationOf, chatPlanFor } from "../src/chatOperation";
 import { CHAT_INSTANCE_BASE, isChatInstance, runChatTurn, type ChatInstance } from "../src/chatTurn";
@@ -80,7 +80,7 @@ async function send(
  */
 function harness(rules: Array<{ value?: string; error?: string }> = [{ value: "because the offset drifted" }]) {
   const log = journal();
-  const stores = sessionServicesFor({ states: {} } as never, async () => "");
+  const stores = sessionServicesFor();
   const executor = withSessionLayers(stores, new ScriptedFakeExecutor(rules as never));
   // The instance being read. Without it the chat child has no parent in the journal and projects as
   // a root, which would quietly make every `.children` assertion below vacuous.

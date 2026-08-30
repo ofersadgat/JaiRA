@@ -86,7 +86,7 @@ export function chatWorkflowFiles(): Record<string, JsonValue> {
       description:
         "A conversation with a model, started from the Chat view. The first message is this state's prompt; the rest continue it. No tools: it reads what you give it and answers.",
       inputs: message,
-      environment: { kind: "prompt", conversation: { mode: "full_history" } },
+      environment: { kind: "prompt" },
       operation: { prompt: "{{.inputs.message}}" },
     },
 
@@ -97,7 +97,6 @@ export function chatWorkflowFiles(): Record<string, JsonValue> {
       inputs: message,
       environment: {
         kind: "prompt",
-        conversation: { mode: "full_history" },
         // The GRANT, and then the fence. On a delegated agent route the list does not take the
         // agent's own built-ins away (WORKFLOWS.md §5.1) — the profile is what governs those, and
         // `full` is the honest name for "this conversation may change things", with the project

@@ -33,7 +33,7 @@ import {
   type ReplaySource,
   type WorkflowBundle,
 } from "@declarative-ai/hw";
-import type { ExecServices, MemoCache } from "@declarative-ai/exec";
+import type { ExecServices, MemoCache, RecordRef } from "@declarative-ai/exec";
 import type { ExecPolicy } from "@declarative-ai/permissions";
 import type { JsonValue } from "@declarative-ai/json";
 import {
@@ -156,7 +156,6 @@ import {
   NodeExec,
   parseFakeRules,
   policyCanEscalate,
-  promptSummarizer,
   ScriptedFunctions,
   sessionServicesFor,
   statusOfResult,
@@ -1151,7 +1150,7 @@ export class AppService {
    * this is that capture, run once at the open that discovered the interruption.
    *
    * It is possible only because the provider handle now reaches the row WHILE the call runs (see
-   * `streamPartial`): a crashed call used to have no handle at all, and a session file cannot be
+   * `update`): a crashed call used to have no handle at all, and a session file cannot be
    * found without one. The cwd is the run's own workspace, read exactly as the chat path reads it —
    * never ensured, because recovering a record must not create a worktree.
    *
@@ -2652,11 +2651,23 @@ export class AppService {
     // exactly as the run's own record store is — same task, same run — which is what makes the
     // position key match the row `withRecord` claimed.
     const liveStore = sessionStoreFor(project, { taskId, runId: started.runId });
+    // The record a flush lands in, resolved from the position ONCE and held while that position is
+    // what the live turn reports. A flush addresses a record, not a place: when the handle coming back
+    // says a call is not in the conversation the store assumed, the record moves to a branch, and a
+    // position-addressed flush after that would find nothing.
+    let flushingAt: string | undefined;
+    let flushingRef: RecordRef | undefined;
     const liveFlush = new LiveTurnFlusher(() => {
       const snap = open.liveTurns.snapshot(taskId);
       if (snap === null || snap.sessionId === undefined || snap.seq === undefined) return;
+      const at = `${snap.sessionId}@${snap.seq}`;
+      if (at !== flushingAt) {
+        flushingAt = at;
+        flushingRef = liveStore.recordAt({ id: snap.sessionId, seq: snap.seq });
+      }
+      if (flushingRef === undefined) return;
       const partial = partialRecordValue(snap);
-      if (partial !== null) liveStore.streamPartial(snap.sessionId, snap.seq, partial, snap.providerSessionId);
+      if (partial !== null) liveStore.update(flushingRef, { value: partial, providerSessionId: snap.providerSessionId });
     });
     // What "stop" writes down before it stops anything — see `ProjectSession.liveFlush`.
     open.liveFlush.set(taskId, () => liveFlush.flush());
@@ -2689,11 +2700,7 @@ export class AppService {
     // messages, thinking, tool calls, the provider's own handle — and dropped the whole thing when the
     // process exited. Scoped to this run, so a stored transcript can be found from the task that made
     // it (`stateSessions` is the other half of that join).
-    // The SUMMARIZER gets the raw executor: it runs out of band, and its deltas are not a state
-    // speaking — narrating a compaction as though it were the answer would be a lie in the viewer.
-    const { modes: _summaryModes, ...session } = sessionServicesFor(started.bundle, promptSummarizer(prompt), {
-      inner: sessionStoreFor(project, { taskId, runId: started.runId }),
-    });
+    const session = sessionServicesFor({ inner: sessionStoreFor(project, { taskId, runId: started.runId }) });
     // A delegated agent's record is its stream, and its stream is not its whole story: the agent's
     // own session file holds the context injections, `toolUseResult` records and line threading that
     // never ride the wire — and the file is the agent's, prunable on its schedule. Captured into the
@@ -3263,11 +3270,8 @@ export class AppService {
     const recordedWorktree = project.runtime.get(request.taskId)?.worktreePath;
     const workspaceRoot =
       recordedWorktree !== undefined && existsSync(recordedWorktree) ? recordedWorktree : project.paths.projectDir;
-    // The WIRED executor, not a bare one. Summarizing through `buildPromptExecutor()` with no options
-    // is a router with no tree, no routes and no keys, so a conversation in `summary` mode would
-    // compact through something that cannot reach a provider.
     const liveStore = sessionStoreFor(project, { taskId: request.taskId, runId: context.runId });
-    const stores = sessionServicesFor(context.bundle, promptSummarizer(prompt), { inner: liveStore });
+    const stores = sessionServicesFor({ inner: liveStore });
     // The same capture `startRun` wires: a chat turn is a real delegated call, and its record would
     // otherwise be the one kind missing the agent's own session lines.
     stores.records = withNativeCapture(stores.records, {
@@ -3283,7 +3287,7 @@ export class AppService {
      *  - **Nothing streamed.** The reply appeared when the call settled, so a long answer was a
      *    frozen box; and the run's own first message DID stream, which made the conversation appear
      *    to lose a capability after its opening exchange.
-     *  - **Nothing was persisted while it ran.** `streamPartial` writes the accumulated turn into the
+     *  - **Nothing was persisted while it ran.** `update` writes the accumulated turn into the
      *    open row on a throttle, and it is also what stamps the provider's handle early. Without it
      *    an interrupted turn's record held the error and nothing else: what the model had already
      *    said was gone, and the next message had no handle to resume from.
@@ -3294,11 +3298,20 @@ export class AppService {
      * Composed INSIDE the session layers, as in `startRun`: by then `ctx.session` is the resolved
      * position, so a delta names the conversation it belongs to instead of being attributed by guess.
      */
+    // Resolved once per position and held — see the same shape in `startRun`.
+    let flushingAt: string | undefined;
+    let flushingRef: RecordRef | undefined;
     const liveFlush = new LiveTurnFlusher(() => {
       const snap = open.liveTurns.snapshot(request.taskId);
       if (snap === null || snap.sessionId === undefined || snap.seq === undefined) return;
+      const at = `${snap.sessionId}@${snap.seq}`;
+      if (at !== flushingAt) {
+        flushingAt = at;
+        flushingRef = liveStore.recordAt({ id: snap.sessionId, seq: snap.seq });
+      }
+      if (flushingRef === undefined) return;
       const partial = partialRecordValue(snap);
-      if (partial !== null) liveStore.streamPartial(snap.sessionId, snap.seq, partial, snap.providerSessionId);
+      if (partial !== null) liveStore.update(flushingRef, { value: partial, providerSessionId: snap.providerSessionId });
     });
     // What "stop" writes down before it stops anything — see `ProjectSession.liveFlush`.
     open.liveFlush.set(request.taskId, () => liveFlush.flush());

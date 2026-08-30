@@ -49,8 +49,8 @@ const said = (text: string, role = "assistant", extra: Record<string, unknown> =
 
 /** Claim a position and settle it — what one model call does through `withRecord`. */
 async function write(store: Store, at: { id: string; seq: number }, id: string, text: string): Promise<void> {
-  await store.open({ id, source: undefined as never, session: at, startMs: Date.now() });
-  await store.close(id, { sessionOutcome: { messages: [turn(text)] } });
+  const ref = await store.append({ id, source: undefined as never, session: at, startMs: Date.now() });
+  await store.finish(ref, { sessionOutcome: { messages: [turn(text)] } });
 }
 
 /** Append one turn to a conversation at its head, which is the ordinary case. */
@@ -85,7 +85,7 @@ describe.each(BUILDERS)("%s — the shared session semantics", (_name, build) =>
     // never saw. `PositionTaken` is what the session layer watches for.
     let thrown: unknown;
     try {
-      await store.open({ id: "b", source: undefined as never, session: at.at, startMs: 0 });
+      await store.append({ id: "b", source: undefined as never, session: at.at, startMs: 0 });
     } catch (e) {
       thrown = e;
     }
@@ -137,14 +137,111 @@ describe.each(BUILDERS)("%s — the shared session semantics", (_name, build) =>
   it("resumes the provider's handle on an append, and withholds it from a deliberate fork", async () => {
     const store = build();
     const at = await store.resolve({ ref: "handled" });
-    await store.open({ id: "p1", source: undefined as never, session: at.at, startMs: 0 });
-    await store.close("p1", { sessionOutcome: { messages: [turn("hi")], providerSessionId: "prov-1" } });
+    const p1 = await store.append({ id: "p1", source: undefined as never, session: at.at, startMs: 0 });
+    await store.finish(p1, { sessionOutcome: { messages: [turn("hi")], providerSessionId: "prov-1" } });
 
     // An append resumes the handle the conversation currently sits on…
     expect((await store.resolve({ ref: "handled" })).providerSessionId).toBe("prov-1");
     // …and a resolve that BRANCHES gets none, because two branches sharing one remote session would
     // be two conversations writing into the same place.
     expect((await store.resolve({ ref: "handled", fork: true })).providerSessionId).toBeUndefined();
+  });
+
+  /**
+   * A handle names a conversation AT THE POINT IT HAS REACHED, not the conversation.
+   *
+   * Resolving an earlier position and handing back the head's handle offers a resume that would
+   * continue from the remote's tip rather than from where the caller asked — a turn the caller never
+   * saw, silently in front of its prompt. The position claim catches the collision afterwards and the
+   * divergence check catches remote drift after the call, but nothing refused the handle itself.
+   */
+  it("withholds the handle at a position the conversation has moved past", async () => {
+    const store = build();
+    const first = await store.resolve({ ref: "moved" });
+    const r1 = await store.append({ id: "m1", source: undefined as never, session: first.at, startMs: 0 });
+    await store.finish(r1, { sessionOutcome: { messages: [turn("one")], providerSessionId: "prov-1" } });
+    const second = await store.resolve({ ref: "moved" });
+    const r2 = await store.append({ id: "m2", source: undefined as never, session: second.at, startMs: 0 });
+    await store.finish(r2, { sessionOutcome: { messages: [turn("two")], providerSessionId: "prov-1" } });
+
+    // At the head, resuming is legal.
+    expect((await store.resolve({ ref: "moved" })).providerSessionId).toBe("prov-1");
+    // One position back, it is not: the remote holds a turn this caller has not seen.
+    expect((await store.resolve({ ref: "moved@1" })).providerSessionId).toBeUndefined();
+  });
+
+  /**
+   * The branch `fork()` mints is a NEW conversation with no remote of its own.
+   *
+   * Its records begin at the cursor and it has written nothing, so walking the lineage for "the latest
+   * handle" finds the PARENT's — and handing that back as `providerSessionId` on an append points two
+   * local branches at one remote session. That is the case `resolve` withholds the handle to prevent
+   * when the fork is deliberate; an automatic one reached it by the back door, because `fork()` then
+   * `resolve()` reports `append`.
+   */
+  it("gives a freshly forked branch no handle of its own", async () => {
+    const store = build();
+    const at = await store.resolve({ ref: "branched" });
+    const r1 = await store.append({ id: "b1", source: undefined as never, session: at.at, startMs: 0 });
+    await store.finish(r1, { sessionOutcome: { messages: [turn("one")], providerSessionId: "prov-1" } });
+
+    const forked = await store.fork("branched");
+    const branch = await store.resolve({ ref: forked });
+    // Nothing to RESUME — the branch has no remote of its own…
+    expect(branch.providerSessionId).toBeUndefined();
+    // …but the parent's handle is offered as what to branch FROM, on its own field, so an adapter that
+    // can copy a session server-side gets the free move and one that cannot never sees it.
+    expect(branch.forkFrom).toEqual({ handle: "prov-1" });
+    // The prefix still reads through — a branch is its parent's records up to the cursor.
+    expect(await store.messages(forked)).toEqual([turn("one")]);
+  });
+
+  /**
+   * A branch point BEHIND the parent's tip cannot be reached by a native fork.
+   *
+   * The provider primitive is `--resume <id> --fork-session`, and it copies the remote AS IT NOW
+   * STANDS — there is no "fork at turn 3" anywhere. So a branch whose cursor is behind the parent's
+   * head would come back holding turns it never had: the interloper's, in the automatic-fork case,
+   * which is precisely the position that was taken out from under it.
+   *
+   * The store is what knows, so the store is what withholds. `forkFrom` is offered only when copying
+   * the remote would produce this branch's prefix and nothing else; every other branch falls through
+   * to replay, which can reproduce any prefix.
+   */
+  it("names the CUT for a branch point the parent has moved past, when the entries can name one", async () => {
+    const store = build();
+    // Entries carrying the provider's own ids — what the native session capture stamps on a record.
+    const withIds = (uuid: string) => ({ value: { entries: [{ kind: "message", role: "assistant", content: "x", provider: "test", uuid }] } }) as never;
+    const first = await store.resolve({ ref: "cut" });
+    const r1 = await store.append({ id: "k1", source: undefined as never, session: first.at, startMs: 0 });
+    await store.finish(r1, { result: withIds("msg-1"), sessionOutcome: { providerSessionId: "prov-1" } });
+    const second = await store.resolve({ ref: "cut" });
+    const r2 = await store.append({ id: "k2", source: undefined as never, session: second.at, startMs: 0 });
+    await store.finish(r2, { result: withIds("msg-2"), sessionOutcome: { providerSessionId: "prov-1" } });
+
+    // At the tip: a plain copy reproduces the branch, so there is nothing to cut.
+    expect(await store.resolve({ ref: await store.fork("cut") })).toMatchObject({ forkFrom: { handle: "prov-1" } });
+    // Behind it: the copy has to stop at the last message the branch inherits.
+    expect(await store.resolve({ ref: await store.fork("cut@1") })).toMatchObject({ forkFrom: { handle: "prov-1", at: "msg-1" } });
+  });
+
+  it("offers no fork source behind the tip when nothing can name the cut", async () => {
+    const store = build();
+    const first = await store.resolve({ ref: "raced" });
+    const r1 = await store.append({ id: "x1", source: undefined as never, session: first.at, startMs: 0 });
+    await store.finish(r1, { sessionOutcome: { messages: [turn("one")], providerSessionId: "prov-1" } });
+    const second = await store.resolve({ ref: "raced" });
+    const r2 = await store.append({ id: "x2", source: undefined as never, session: second.at, startMs: 0 });
+    await store.finish(r2, { sessionOutcome: { messages: [turn("two")], providerSessionId: "prov-1" } });
+
+    // Branching at the TIP: copying the remote gives exactly this branch's prefix, uncut.
+    const atTip = await store.resolve({ ref: await store.fork("raced") });
+    expect(atTip.forkFrom).toEqual({ handle: "prov-1" });
+
+    // Branching one back: the remote holds a turn this branch does not, so there is nothing to copy.
+    const behind = await store.resolve({ ref: await store.fork("raced@1") });
+    expect(behind.forkFrom).toBeUndefined();
+    expect(await store.messages(store.refAt(behind.at))).toEqual([turn("one")]);
   });
 
   it("compacts into a NEW conversation, leaving every existing ref meaning what it meant", async () => {
@@ -188,8 +285,8 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
   it("keeps the record whole, so an agent's own turns survive rather than a summary of them", async () => {
     const store = new SqliteSessionStore(db) as unknown as Store;
     const at = await store.resolve({ ref: "agent" });
-    await store.open({ id: "a1", source: undefined as never, session: at.at, startMs: 0 });
-    await store.close("a1", {
+    const a1 = await store.append({ id: "a1", source: undefined as never, session: at.at, startMs: 0 });
+    await store.finish(a1, {
       sessionOutcome: {
         messages: [
           { role: "user", content: "do it" },
@@ -274,13 +371,124 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
 
   it("scopes records to the run that wrote them, so a transcript is findable from a task", async () => {
     const store = new SqliteSessionStore(db, { taskId: "t9", runId: 2 }) as unknown as Store;
-    await store.open({ id: "s1", source: undefined as never, session: { id: "scoped", seq: 0 }, startMs: 0 });
+    await store.append({ id: "s1", source: undefined as never, session: { id: "scoped", seq: 0 }, startMs: 0 });
 
     const row = db.prepare(`SELECT task_id, run_id FROM operation_records WHERE record_id = 's1'`).get() as {
       task_id: string;
       run_id: number;
     };
     expect(row).toEqual({ task_id: "t9", run_id: 2 });
+  });
+  /**
+   * Two records sharing an id and OPEN at once — which `close` cannot tell apart.
+   *
+   * A record with no position is keyed by `contentIdOf(op)`, so two identical operations dispatched in
+   * one run share an id. `close` resolves that id to "the newest open row", which is right for a RETRY
+   * — the previous attempt has settled, so only one row is open — and wrong here: both are open, so
+   * the first settle lands on the second call's row and the second lands on the first's. The results
+   * come back SWAPPED, silently, and every reader after them believes it.
+   *
+   * The id is not the problem; `close` taking one is. The database already enforces the key that would
+   * disambiguate — `UNIQUE (task_id, run_id, record_id, attempt)` — and `open` is the only thing that
+   * knows which attempt it just wrote, which is why it has to hand one back.
+   */
+  it("settles the record that closed, not merely the newest one sharing its id", () => {
+    const store = new SqliteSessionStore(db, { taskId: "t-dup", runId: 1 });
+    const stub = { id: "same-content", source: undefined as never, startMs: 1 };
+    const first = store.append(stub); // attempt 1
+    const second = store.append(stub); // attempt 2 — a second dispatch of an identical operation, still open
+    expect([first.attempt, second.attempt]).toEqual([1, 2]);
+
+    store.finish(first, { sessionOutcome: { messages: [turn("first")] } });
+    store.finish(second, { sessionOutcome: { messages: [turn("second")] } });
+
+    const settled = db
+      .prepare(
+        `SELECT attempt, session_outcome_json FROM operation_records
+          WHERE record_id = 'same-content' ORDER BY attempt`,
+      )
+      .all() as Array<{ attempt: number; session_outcome_json: string | null }>;
+    expect(settled.map((r) => r.attempt)).toEqual([1, 2]);
+    expect(settled[0]!.session_outcome_json).toContain("first");
+    expect(settled[1]!.session_outcome_json).toContain("second");
+  });
+
+});
+
+/**
+ * A derived conversation says where it came from.
+ *
+ * `compact` and `resync` mint a conversation whose first record is supplied rather than produced by a
+ * call, and that record used to be the only one in the store with a null `request_json`. Nothing broke
+ * — `openingMessage` finds no `user` and splices no turn — but a lineage that changed shape had only
+ * the shape to explain itself, which is the one thing provenance is for.
+ */
+describe("what a derived conversation records about itself", () => {
+  it("writes the request that produced the seed, not just its contents", async () => {
+    const store = new SqliteSessionStore(db, { taskId: "t-prov", runId: 1 }) as unknown as Store;
+    await append(store, "origin", "o1", "one");
+    const compacted = await store.compact!("origin", [turn("the summary")] as never);
+
+    // The conversation reads as its seed…
+    expect(await store.messages(compacted)).toEqual([turn("the summary")]);
+    // …and the record behind it says what made it.
+    const row = db
+      .prepare(`SELECT request_json FROM operation_records WHERE record_id LIKE '%~compact%' ORDER BY id DESC LIMIT 1`)
+      .get() as { request_json: string | null } | undefined;
+    expect(JSON.parse(row!.request_json!)).toEqual({ kind: "derive", word: "compact", from: "origin" });
+  });
+});
+
+/**
+ * The store ASSUMES an append and lets the call correct it.
+ *
+ * `resolve` offers the handle a conversation currently sits on. Whether that handle is usable is not
+ * a fact the store has — a different provider, a remote that compacted itself, an adapter that
+ * branched — so it assumes the ordinary case rather than guarding against ones it cannot see. What
+ * comes back says whether the assumption held: a call that reports a DIFFERENT remote than the one it
+ * was handed did not run in the conversation this record was claimed in.
+ *
+ * The correction is the record moving to a branch of that position, so the trunk keeps meaning what
+ * every existing ref into it meant and the branch carries the remote the call actually used. Applied
+ * from `update` as well as `finish`, because the handle rides nearly every envelope and a crashed
+ * call should already be on the right branch.
+ */
+describe("assume the append, correct from what comes back", () => {
+  it("moves a record to a branch when the call reports a remote it was not given", () => {
+    const s = new SqliteSessionStore(db, { taskId: "t-div", runId: 1 });
+    const first = s.resolve({ ref: "chat" });
+    s.finish(s.append({ id: "c1", source: undefined as never, session: first.at, startMs: 1 }), {
+      sessionOutcome: { messages: [turn("one")] as never, providerSessionId: "P1" },
+    });
+
+    const second = s.resolve({ ref: "chat" });
+    expect(second.providerSessionId).toBe("P1"); // the assumption the store hands over
+    s.finish(s.append({ id: "c2", source: undefined as never, session: second.at, startMs: 2 }), {
+      sessionOutcome: { messages: [turn("two")] as never, providerSessionId: "P2" },
+    });
+
+    // The trunk keeps only the turn that really happened in P1…
+    expect(s.messages("chat")).toEqual([turn("one")]);
+    // …and the other is on a branch of it, cut at the position it was claimed at.
+    const branch = db.prepare(`SELECT parent, cursor FROM sessions WHERE parent IS NOT NULL`).get() as
+      | { parent: string; cursor: number }
+      | undefined;
+    expect(branch).toMatchObject({ cursor: 1 });
+  });
+
+  it("leaves the lineage alone when the call reports the remote it was given", () => {
+    const s = new SqliteSessionStore(db, { taskId: "t-same", runId: 1 });
+    const first = s.resolve({ ref: "steady" });
+    s.finish(s.append({ id: "s1", source: undefined as never, session: first.at, startMs: 1 }), {
+      sessionOutcome: { messages: [turn("one")] as never, providerSessionId: "P1" },
+    });
+    const second = s.resolve({ ref: "steady" });
+    s.finish(s.append({ id: "s2", source: undefined as never, session: second.at, startMs: 2 }), {
+      sessionOutcome: { messages: [turn("two")] as never, providerSessionId: "P1" },
+    });
+
+    expect(s.messages("steady")).toEqual([turn("one"), turn("two")]);
+    expect(db.prepare(`SELECT COUNT(*) n FROM sessions WHERE parent IS NOT NULL`).get()).toEqual({ n: 0 });
   });
 });
 
@@ -535,11 +743,15 @@ describe("stateSessions — a run the process died inside", () => {
     ).run(recordId, runId, status);
     // The position points at the record's own KEY, not at a rowid — migration 8. Written out here
     // rather than through the store because these rows stand in for a process that died mid-run.
+    //
+    // SCOPED, as `SqliteSessionStore` writes it. This fixture used to store the bare id, which no
+    // store ever does, and the difference stayed invisible while the recovery view read the position
+    // out of the record id instead of out of this table.
     const cut = recordId.lastIndexOf(":");
     db.prepare(
       `INSERT INTO session_positions (session_id, seq, task_id, run_id, record_id, attempt)
        VALUES (?, ?, 't3', ?, ?, 1)`,
-    ).run(recordId.slice(0, cut), Number(recordId.slice(cut + 1)), runId, recordId);
+    ).run(`t3/${runId}/${recordId.slice(0, cut)}`, Number(recordId.slice(cut + 1)), runId, recordId);
   };
 
   it("recovers the in-flight call from its own record, and says it was interrupted", () => {
@@ -706,8 +918,8 @@ describe("streamed partials on open records", () => {
     const s = store();
     await append(s, "chat", "r1", "settled");
     const at = await s.resolve({ ref: "chat" });
-    await s.open({ id: "r2", source: undefined as never, session: at.at, startMs: 1 });
-    s.streamPartial("chat", at.at.seq, partial(["half", "written"]), "prov-3");
+    const r2 = await s.append({ id: "r2", source: undefined as never, session: at.at, startMs: 1 });
+    s.update(r2, { value: partial(["half", "written"]), providerSessionId: "prov-3" });
     // The provider handle lands EARLY — what makes an interrupted call resumable at all.
     expect(db.prepare(`SELECT provider_session_id FROM operation_records WHERE record_id = 'r2'`).get()).toEqual({
       provider_session_id: "prov-3",
@@ -726,11 +938,11 @@ describe("streamed partials on open records", () => {
   it("lets the settle replace the partial, and refuses a late flush after it", async () => {
     const s = store();
     const at = await s.resolve({ ref: "conv" });
-    await s.open({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
-    s.streamPartial("conv", 0, partial(["early"]));
-    await s.close("r1", { sessionOutcome: { messages: [turn("the whole answer")] } });
+    const r1 = await s.append({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
+    s.update(r1, { value: partial(["early"]) });
+    await s.finish(r1, { sessionOutcome: { messages: [turn("the whole answer")] } });
     // A debounce timer firing after the record settled matches no open row — the status guard.
-    s.streamPartial("conv", 0, partial(["stale"]));
+    s.update(r1, { value: partial(["stale"]) });
 
     expect(await s.messages("conv")).toEqual([turn("the whole answer")]);
     expect(s.transcript("conv")[0]).toMatchObject({ status: "completed" });
@@ -739,10 +951,10 @@ describe("streamed partials on open records", () => {
   it("keeps the partial when an ERRORED settle brings nothing better", async () => {
     const s = store();
     const at = await s.resolve({ ref: "err" });
-    await s.open({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
-    s.streamPartial("err", 0, partial(["what got said"]));
+    const r1 = await s.append({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
+    s.update(r1, { value: partial(["what got said"]) });
     // An agent's error settle: `{error, value:{finishReason}}` — no messages, no session outcome.
-    await s.close("r1", { result: { error: { classification: "permanent", reason: "boom" }, value: { finishReason: "error" } } as never });
+    await s.finish(r1, { result: { error: { classification: "permanent", reason: "boom" }, value: { finishReason: "error" } } as never });
 
     // The turns really were exchanged; a failed record keeping them is how errored calls already
     // represent turns that "may exist remotely". They now count as history too — settled, not open.
@@ -753,9 +965,9 @@ describe("streamed partials on open records", () => {
   it("lets an errored settle that DOES carry the conversation win over the partial", async () => {
     const s = store();
     const at = await s.resolve({ ref: "err2" });
-    await s.open({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
-    s.streamPartial("err2", 0, partial(["early copy"]));
-    await s.close("r1", {
+    const r1 = await s.append({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
+    s.update(r1, { value: partial(["early copy"]) });
+    await s.finish(r1, {
       result: { error: { classification: "permanent", reason: "boom" } } as never,
       sessionOutcome: { messages: [turn("authoritative")] },
     });
@@ -764,7 +976,7 @@ describe("streamed partials on open records", () => {
 
   it("writes nothing where no open row claims the position", () => {
     const s = store();
-    expect(() => s.streamPartial("nowhere", 3, partial(["x"]))).not.toThrow();
+    expect(() => s.update({ id: "nowhere", attempt: 1 }, { value: partial(["x"]) })).not.toThrow();
     expect(s.transcript("nowhere")).toEqual([]);
   });
 
@@ -791,7 +1003,7 @@ describe("streamed partials on open records", () => {
     it("is on the record from birth, before anything has streamed", async () => {
       const s = store();
       const at = await s.resolve({ ref: "ask" });
-      await s.open({ id: "r1", source: asked, session: at.at, startMs: 1 });
+      const r1 = await s.append({ id: "r1", source: asked, session: at.at, startMs: 1 });
       // The case that made this the record's birth rather than its first flush: a process killed
       // here reaches no later write, and the row is all anybody will ever have.
       expect(s.transcript("ask")[0]).toMatchObject({ status: "open", value: { value: { entries: [askedEntry] } } });
@@ -800,17 +1012,17 @@ describe("streamed partials on open records", () => {
     it("stays in front of the turns a flush writes over it", async () => {
       const s = store();
       const at = await s.resolve({ ref: "ask" });
-      await s.open({ id: "r1", source: asked, session: at.at, startMs: 1 });
-      s.streamPartial("ask", 0, partial(["it has two tables"]));
+      const r1 = await s.append({ id: "r1", source: asked, session: at.at, startMs: 1 });
+      s.update(r1, { value: partial(["it has two tables"]) });
       expect(s.transcript("ask")[0]!.value).toMatchObject({ value: { entries: [askedEntry, said("it has two tables")] } });
     });
 
     it("survives the settle of a call that was stopped, and reaches REPLAY as well as the screen", async () => {
       const s = store();
       const at = await s.resolve({ ref: "ask" });
-      await s.open({ id: "r1", source: asked, session: at.at, startMs: 1 });
-      s.streamPartial("ask", 0, partial(["it has two tables"]));
-      await s.close("r1", { result: { error: { classification: "canceled", reason: "stopped" } } as never });
+      const r1 = await s.append({ id: "r1", source: asked, session: at.at, startMs: 1 });
+      s.update(r1, { value: partial(["it has two tables"]) });
+      await s.finish(r1, { result: { error: { classification: "canceled", reason: "stopped" } } as never });
 
       // Replay is the half that had no workaround: the next call is sent this, and an assistant turn
       // with nothing in front of it is a conversation that never happened.
@@ -820,19 +1032,19 @@ describe("streamed partials on open records", () => {
     it("is not doubled by a settle that carries the question itself", async () => {
       const s = store();
       const at = await s.resolve({ ref: "ask" });
-      await s.open({ id: "r1", source: asked, session: at.at, startMs: 1 });
-      s.streamPartial("ask", 0, partial(["half an answer"]));
+      const r1 = await s.append({ id: "r1", source: asked, session: at.at, startMs: 1 });
+      s.update(r1, { value: partial(["half an answer"]) });
       // A call that finished: the provider's delta is authoritative and already opens with the
       // question, so the splice must stand down rather than print it twice.
-      await s.close("r1", { result: { value: { entries: [askedEntry, said("the whole answer")] } } as never });
+      await s.finish(r1, { result: { value: { entries: [askedEntry, said("the whole answer")] } } as never });
       expect(await s.messages("ask")).toEqual([question, turn("the whole answer")]);
     });
 
     it("pads the per-turn clocks it moves, so no turn wears its neighbour's duration", async () => {
       const s = store();
       const at = await s.resolve({ ref: "ask" });
-      await s.open({ id: "r1", source: asked, session: at.at, startMs: 1 });
-      s.streamPartial("ask", 0, timed(["thought about it", "answered"], [{ at: 200, thoughtMs: 90 }, { at: 300 }]));
+      const r1 = await s.append({ id: "r1", source: asked, session: at.at, startMs: 1 });
+      s.update(r1, { value: timed(["thought about it", "answered"], [{ at: 200, thoughtMs: 90 }, { at: 300 }]) });
       // The clocks are ON the turns they measure, so the spliced question simply has none —
       // there is no parallel array left to shift onto the wrong turn.
       expect(s.transcript("ask")[0]!.value).toMatchObject({
@@ -851,7 +1063,7 @@ describe("streamed partials on open records", () => {
       const at = await s.resolve({ ref: "fn" });
       // A function op, a gate, a pre-dispatch failure: no `user`, so nothing to splice and no record
       // invented to hold it.
-      await s.open({ id: "r1", source: { kind: "function", name: "review" } as never, session: at.at, startMs: 1 });
+      const r1 = await s.append({ id: "r1", source: { kind: "function", name: "review" } as never, session: at.at, startMs: 1 });
       expect(s.transcript("fn")[0]!.value).toBeUndefined();
     });
   });
@@ -869,11 +1081,11 @@ describe("streamed partials on open records", () => {
   it("carries the streamed per-turn times onto a successful settle, aligned as a suffix", async () => {
     const s = store();
     const at = await s.resolve({ ref: "timed" });
-    await s.open({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
-    s.streamPartial("timed", 0, timed(["thought about it", "answered"], [{ at: 200, thoughtMs: 90 }, { at: 300 }]));
+    const r1 = await s.append({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
+    s.update(r1, { value: timed(["thought about it", "answered"], [{ at: 200, thoughtMs: 90 }, { at: 300 }]) });
     // The settle holds the message the call was made WITH as well, so the stamps line up with the
     // TAIL of its list — padded at the front, never shifted onto the wrong turn.
-    await s.close("r1", {
+    await s.finish(r1, {
       result: { value: { entries: [said("go", "user"), said("thought about it"), said("answered")] } } as never,
     });
 
@@ -887,9 +1099,9 @@ describe("streamed partials on open records", () => {
   it("drops the times rather than mislabel a turn when the roles do not line up", async () => {
     const s = store();
     const at = await s.resolve({ ref: "askew" });
-    await s.open({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
-    s.streamPartial("askew", 0, timed(["one", "two"], [{ at: 1 }, { at: 2 }]));
-    await s.close("r1", {
+    const r1 = await s.append({ id: "r1", source: undefined as never, session: at.at, startMs: 1 });
+    s.update(r1, { value: timed(["one", "two"], [{ at: 1 }, { at: 2 }]) });
+    await s.finish(r1, {
       result: { value: { entries: [said("one"), said("not two", "user")] } } as never,
     });
     const row = s.transcript("askew")[0] as { value?: { value?: { entries?: Array<{ timing?: unknown }> } } };

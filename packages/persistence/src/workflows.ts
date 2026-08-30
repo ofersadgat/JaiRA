@@ -27,7 +27,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import type { FunctionCapabilities } from "@declarative-ai/exec";
 import { loadBundle, parseReferencedFile, resolveStateRef, snapshotHash, stateIdFromPath, validateBundle } from "@declarative-ai/hw";
-import { baseAsProjectPaths, componentConfigIssues, conversationModesOf, parseJsonText, type JairaPaths } from "@jaira/shared";
+import { baseAsProjectPaths, componentConfigIssues, parseJsonText, type JairaPaths } from "@jaira/shared";
 import { approvalRefusalMessage, approveCommandFor } from "@jaira/shared";
 import type { LintIssue, WorkflowBrowser, WorkflowEntry, WorkflowFileEntry } from "@jaira/shared";
 import type { Project } from "./project";
@@ -380,16 +380,6 @@ function browseLayers(
     const inClosure = Object.fromEntries(states.map((id) => [id, effective[id]]));
     for (const issue of componentConfigIssues(inClosure)) {
       issues.push({ ...issue, severity: "error" });
-    }
-    for (const conflict of conversationModesOf(bundle.states as unknown as Record<string, unknown>).conflicts) {
-      issues.push({
-        stateId: conflict.stateIds[0] ?? rootId,
-        path: "operation.conversation.mode",
-        message:
-          `session '${conflict.session}' declares both summary and full_history ` +
-          `(${conflict.stateIds.join(", ")}); the transcript is summarized for all of them`,
-        severity: "warning",
-      });
     }
     // A `label` that references an input the state does not declare. Reported here rather than
     // discovered as an unlabelled card three states into a run — the whole value of naming a run by

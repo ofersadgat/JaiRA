@@ -47,9 +47,13 @@
  * ({@link projectValue}), where changing it is a view change rather than a migration.
  */
 import type { JsonValue } from "@declarative-ai/json";
+import { createLogger } from "@declarative-ai/log";
 import {
   PositionTaken,
   resolveSessionRef,
+  type ForkSource,
+  type RecordPartial,
+  type RecordRef,
   type RecordStore,
   type RecordStub,
   type ResolvedSession,
@@ -102,7 +106,7 @@ interface Row {
   /**
    * The row's lifecycle, verbatim from the `status` column — THE state signal, now that an open
    * row can carry a value. Presence of `value` used to double as "the call settled" purely because
-   * `result_json` stayed NULL until close; streamed partials (see {@link SqliteSessionStore.streamPartial})
+   * `result_json` stayed NULL until the settle; streamed partials (see {@link SqliteSessionStore.update})
    * end that, so every reader that cares whether a turn HAPPENED must ask this field, never the value.
    */
   status: "open" | "completed" | "failed";
@@ -144,9 +148,26 @@ export interface SessionScope {
  * `sessionRef` (which carries the bare authored name) to the same string. A fork carries its lineage
  * in the name (`main[0:14]/b`), so prefixing is all there is to it either way.
  */
+const log = createLogger("jaira.persistence.sessions");
+
 export function scopedSessionId(scope: SessionScope, id: string): string {
   const { taskId, runId } = scope;
   return taskId === undefined && runId === undefined ? id : `${taskId ?? ""}/${runId ?? ""}/${id}`;
+}
+
+/**
+ * The inverse — the id as an AUTHOR wrote it, with the run namespace taken back off.
+ *
+ * A stored `session_id` carries the scope so two runs of one workflow do not share a conversation
+ * (`SessionScope`). Everything outside the store names a session the way the workflow file does, so a
+ * reader that surfaces one has to undo it. An id that does not carry this scope's prefix is returned
+ * unchanged: an unscoped store stores bare ids, and so did every row written before scoping existed.
+ */
+export function bareSessionId(scope: SessionScope, id: string): string {
+  const { taskId, runId } = scope;
+  if (taskId === undefined && runId === undefined) return id;
+  const prefix = `${taskId ?? ""}/${runId ?? ""}/`;
+  return id.startsWith(prefix) ? id.slice(prefix.length) : id;
 }
 
 /**
@@ -264,13 +285,21 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       seq = this.head(id);
       mode = "fork";
     }
-    // A FORK inherits no provider handle: two branches sharing one remote session would be two
+    // AT THE HEAD ONLY, and never on a fork. A handle names a conversation at the point it has
+    // reached, so offering one for an earlier position would offer a resume that continues from the
+    // remote's tip — a turn this caller never saw, in front of its prompt. A fork inherits none for
+    // the same reason from the other side: two branches sharing one remote session would be two
     // conversations writing into the same place.
-    const handle = mode === "append" ? this.handleAt(id, seq) : undefined;
+    const handle = mode === "append" && seq === this.head(id) ? this.handleAt(id, seq) : undefined;
+    // Nothing of our own to resume, but an ancestor has a remote: that is a branch POINT, not an
+    // append target. Offered as `forkFrom` so only an adapter that can copy a session server-side
+    // acts on it — see `ResolvedSession.forkFrom`.
+    const forkFrom = handle === undefined ? this.ancestorHandle(id) : undefined;
     return resolveSessionRef<JsonValue>(join(id, seq), {
       mode,
       at: { id, seq },
       ...(handle !== undefined ? { providerSessionId: handle } : {}),
+      ...(forkFrom !== undefined ? { forkFrom } : {}),
       // Carried so a FORK does not need the original request back — see `ResolvedSession.seed`.
       ...(request.seed !== undefined ? { seed: request.seed } : {}),
       messages: async () => this.materialize(id, seq),
@@ -309,13 +338,14 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
 
   // --- RecordStore -------------------------------------------------------------
 
-  open(stub: RecordStub): void {
+  append(stub: RecordStub): RecordRef {
     // EVERY record lands in operation_records — placed or not (CHANGESETS.md §5.2). The store that
     // holds transcripts is session_positions, and an unplaced call never touches it.
     const at = stub.session;
     if (at === undefined) {
-      this.logRecordRow(this.insertRecord(stub).rowid);
-      return;
+      const unplaced = this.insertRecord(stub);
+      this.logRecordRow(unplaced.rowid);
+      return { id: unplaced.recordId, attempt: unplaced.attempt };
     }
     this.branch(at.id, { cursor: this.cursorOf(at.id) });
     try {
@@ -339,6 +369,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       this.logSession(this.k(at.id));
       this.logRecordRow(placed.rowid);
       this.logPosition(this.k(at.id), at.seq);
+      return { id: placed.recordId, attempt: placed.attempt };
     } catch (e) {
       // The primary key IS the claim, so a duplicate is the position being held rather than a fault.
       // Reported as the class the session layer forks on, never as a database error.
@@ -347,18 +378,26 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     }
   }
 
-  close(id: string, settled: Pick<StoredRecord, "result" | "metrics" | "sessionOutcome">): void {
-    // Scoped, because a record id is unique only within a run — `#i2:0` names the first call of the
-    // second instance of EVERY run of a workflow. Closing on the bare id would settle another run's.
-    // Within the scope, the OPEN row wins (retries reuse an id; the settled one is not up for grabs),
-    // newest first.
+  finish(ref: RecordRef, settled: Pick<StoredRecord, "result" | "metrics" | "sessionOutcome">): void {
+    // Before the row is settled, so the comparison reads the lineage as it stood when this call was
+    // claimed. A run with no live view never calls `update`, so this is the only correction it gets.
+    this.correctLineage(ref, settled.sessionOutcome?.providerSessionId);
+    // The NATURAL KEY, whole. Scoped, because a record id is unique only within a run — `#i2:0` names
+    // the first call of the second instance of EVERY run of a workflow — and by `attempt`, because an
+    // id is not unique within one either: a content-keyed record repeats whenever the same operation
+    // is dispatched twice, which is exactly why `attempt` exists.
+    //
+    // This used to select `(status = 'open') DESC, id DESC LIMIT 1` — "the newest open row". That is
+    // right for a RETRY, where the earlier attempt has settled and only one row is open, and wrong
+    // when two dispatches of one operation are open at once: the first settle landed on the second
+    // call's row and the second on the first's, so both rows were written and their results swapped.
+    // No ordering can fix it, because an id alone does not say which call is closing — the ref does.
     const row = this.db
       .prepare(
         `SELECT id, result_json, request_json FROM operation_records
-          WHERE record_id = ? AND task_id IS ? AND run_id IS ?
-          ORDER BY (status = 'open') DESC, id DESC LIMIT 1`,
+          WHERE record_id = ? AND attempt = ? AND task_id IS ? AND run_id IS ?`,
       )
-      .get(id, this.scope.taskId ?? null, this.scope.runId ?? null) as
+      .get(ref.id, ref.attempt, this.scope.taskId ?? null, this.scope.runId ?? null) as
       | { id: number; result_json: string | null; request_json: string | null }
       | undefined;
     if (row === undefined) return;
@@ -421,19 +460,100 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * Only `result_json` moves. Status, timestamps and the provider handle stay the settle's to
    * write, which is what keeps "open" meaning exactly "a live process is streaming into this row".
    */
-  streamPartial(sessionId: string, seq: number, value: JsonValue, providerSessionId?: string): void {
+  /**
+   * Where a record sits NOW — see {@link RecordStore.positionOf}.
+   *
+   * Not where it was claimed: {@link SqliteSessionStore.correctLineage} moves a record whose call
+   * turned out to have run somewhere else, and the layer that claimed the position is the one thing
+   * that has to be told, because what it reports as the call's ending position is what everything
+   * downstream continues from.
+   */
+  positionOf(ref: RecordRef): { id: string; seq: number } | undefined {
+    const row = this.db
+      .prepare(`SELECT session_id, seq FROM session_positions WHERE record_id = ? AND attempt = ? AND task_id IS ? AND run_id IS ?`)
+      .get(ref.id, ref.attempt, this.scope.taskId ?? null, this.scope.runId ?? null) as
+      | { session_id: string; seq: number }
+      | undefined;
+    return row === undefined ? undefined : { id: bareSessionId(this.scope, row.session_id), seq: row.seq };
+  }
+
+  /**
+   * Move a record onto a branch when the call reports a remote it was not given.
+   *
+   * `resolve` hands over the handle the conversation currently sits on and ASSUMES the call will
+   * append to it. Whether that handle is usable is not a fact this store has — a different provider,
+   * a remote that compacted itself server-side, an adapter that branched on its own — so it assumes
+   * the ordinary case rather than guarding against ones it cannot see. What comes back settles it: a
+   * different handle means this call did not run in the conversation its record was claimed in.
+   *
+   * The correction is a BRANCH at that position. The trunk keeps meaning what every existing ref into
+   * it meant, and the record travels to a lineage whose handle is the remote actually used — so the
+   * next `handleAt` on either one answers truthfully instead of offering a handle that has moved on.
+   *
+   * Called from `update` as well as `finish`: the handle rides nearly every envelope, so a call that
+   * dies mid-stream is already on the right branch rather than sitting in a trunk it never joined.
+   * Idempotent by construction — once moved, the record's own position is the branch's, and the
+   * expected handle there is the one it reported.
+   */
+  private correctLineage(ref: RecordRef, reported: string | undefined): void {
+    if (reported === undefined) return; // nothing said; nothing to check against
+    const pos = this.db
+      .prepare(`SELECT session_id, seq FROM session_positions WHERE record_id = ? AND attempt = ? AND task_id IS ? AND run_id IS ?`)
+      .get(ref.id, ref.attempt, this.scope.taskId ?? null, this.scope.runId ?? null) as
+      | { session_id: string; seq: number }
+      | undefined;
+    if (pos === undefined) return; // unplaced: no lineage to be wrong about
+    const trunk = bareSessionId(this.scope, pos.session_id);
+    const expected = this.handleAt(trunk, pos.seq);
+    if (expected === undefined || expected === reported) return;
+
+    // SAID, as well as done. The branch and its position land in the journal below, which is the
+    // durable account — but a provider that quietly moves a conversation out from under a run reads
+    // as ordinary operation unless something says otherwise, and by the time anyone looks at the
+    // lineage they are already debugging.
+    log.warn(
+      `session '${trunk}' diverged at ${pos.seq}: resumed provider session ${expected}, but the call ran in ${reported} — ` +
+        `the record moves to a branch, so the trunk keeps meaning what every ref into it meant`,
+    );
+    const branch = this.branchFrom(trunk, pos.seq, "diverged");
+    this.db
+      .prepare(`UPDATE session_positions SET session_id = ? WHERE session_id = ? AND seq = ?`)
+      .run(this.k(branch), this.k(trunk), pos.seq);
+    this.logSession(this.k(branch));
+    this.logPosition(this.k(branch), pos.seq);
+  }
+
+  /**
+   * The record holding a POSITION, as the ref that names it.
+   *
+   * For a caller that watches a conversation rather than making the call — the live view, which knows
+   * where a turn is happening but never saw the `append` that claimed it. Resolved once per position
+   * and held: a record's ref outlives its lineage, so a flush addressed this way keeps landing even if
+   * the record moves to a branch mid-stream.
+   */
+  recordAt(at: { id: string; seq: number }): RecordRef | undefined {
+    const row = this.db
+      .prepare(`SELECT record_id, attempt FROM session_positions WHERE session_id = ? AND seq = ?`)
+      .get(this.k(at.id), at.seq) as { record_id: string; attempt: number } | undefined;
+    return row === undefined ? undefined : { id: row.record_id, attempt: row.attempt };
+  }
+
+  update(ref: RecordRef, partial: RecordPartial): void {
+    const { value, providerSessionId } = partial as { value: JsonValue; providerSessionId?: string };
+    // As early as the handle is known — see {@link SqliteSessionStore.correctLineage}.
+    this.correctLineage(ref, providerSessionId);
     // The row is found first rather than in a subselect, because the write needs the REQUEST on it:
     // a flush replaces `result_json` wholesale, and the question `insertRecord` put there would go
     // with it — leaving the record correct until the moment the model said something, which is the
     // worst of the three possible times to be wrong.
     const row = this.db
       .prepare(
-        `SELECT r.id AS id, r.request_json AS request_json FROM session_positions p
-           JOIN operation_records r ON ${ON_RECORD}
-          WHERE p.session_id = ? AND p.seq = ? AND r.status = 'open'
-          ORDER BY r.id DESC LIMIT 1`,
+        `SELECT id, request_json FROM operation_records
+          WHERE record_id = ? AND attempt = ? AND task_id IS ? AND run_id IS ? AND status = 'open'`,
       )
-      .get(this.k(sessionId), seq) as { id: number; request_json: string | null } | undefined;
+      .get(ref.id, ref.attempt, this.scope.taskId ?? null, this.scope.runId ?? null) as
+      | { id: number; request_json: string | null }
+      | undefined;
     if (row === undefined) return;
     // The provider handle is stamped EARLY when the stream carried one — it rides nearly every
     // envelope, and waiting for the settle is why a crashed call used to have no handle to resume
@@ -606,7 +726,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * Records a crashed run left behind that could still be recovered from the agent's own files.
    *
    * The pair a recovery needs and nothing else: the provider handle (streamed onto the row while
-   * the call ran — see {@link SqliteSessionStore.streamPartial} — which is the whole reason a call
+   * the call ran — see {@link SqliteSessionStore.update} — which is the whole reason a call
    * that never reached a close has one) and the start time, which is the cut that keeps a resumed
    * session's earlier lines out.
    *
@@ -738,18 +858,70 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     return chain;
   }
 
-  /** The latest handle at or before a position, walking the lineage as materializing does. */
+  /**
+   * The handle THIS conversation sits on — its own records only, never its parent's.
+   *
+   * It used to walk the lineage the way materializing does, and that is right for MESSAGES and wrong
+   * for a handle: a branch inherits its parent's turns by reference, but not its remote. A branch that
+   * has written nothing has no provider session at all, and the parent's is the point it forked FROM,
+   * not somewhere to append.
+   */
   private handleAt(id: string, upTo: number): string | undefined {
-    let at: string | undefined = id;
-    let bound = upTo;
+    for (const row of [...this.rowsOf(id)].reverse()) {
+      if (row.seq < upTo && row.externalId !== undefined) return row.externalId;
+    }
+    return undefined;
+  }
+
+  /**
+   * The remote a branch could COPY — the nearest handle above it, and only when copying would
+   * reproduce this branch's prefix exactly.
+   *
+   * The provider primitive is "resume this session and fork it", which copies the remote AS IT NOW
+   * STANDS; there is no fork-at-a-position anywhere. So a branch whose cursor is behind its parent's
+   * head has no fork source at all: copying would hand it turns it never had — in the automatic-fork
+   * case, the very turn that took its position. Withheld here rather than checked downstream, because
+   * the tip is the store's fact and an executor holding a handle has no way to know it is stale.
+   */
+  private ancestorHandle(id: string): ForkSource | undefined {
+    let branch = this.branchOf(id);
+    let at = branch?.parent;
+    let bound = branch?.cursor ?? 0;
     while (at !== undefined) {
-      for (const row of [...this.rowsOf(at)].reverse()) {
-        if (row.seq < bound && row.externalId !== undefined) return row.externalId;
+      const found = this.handleAt(at, bound);
+      if (found !== undefined) {
+        // AT THE TIP, a plain copy reproduces this branch. Behind it, the copy has to be cut — and
+        // naming the cut is the store's job, since only it knows which message the branch ends at.
+        // A conversation whose entries carry no provider ids cannot be cut, so it offers no source
+        // and the caller replays: correct, and the only honest answer.
+        if (bound === this.head(at)) return { handle: found };
+        const cut = this.messageIdAt(at, bound);
+        return cut === undefined ? undefined : { handle: found, at: cut };
       }
-      const branch = this.branchOf(at);
+      branch = this.branchOf(at);
       if (branch?.parent === undefined) return undefined;
       bound = branch.cursor;
       at = branch.parent;
+    }
+    return undefined;
+  }
+
+  /**
+   * The provider's own id for the last message before a position — where a copy would be cut.
+   *
+   * Read off the ENTRIES a record already holds: the native session capture stamps each one with the
+   * agent's `uuid`, so the mapping from "position N" to "the message a fork stops at" needs nothing
+   * recorded for it. A conversation whose entries carry none — a plain provider call, an older record
+   * — answers `undefined`, and the branch replays instead.
+   */
+  private messageIdAt(id: string, upTo: number): string | undefined {
+    for (const row of [...this.rowsOf(id, upTo)].reverse()) {
+      const entries = (row.value as { value?: { entries?: Array<{ uuid?: unknown }> } } | undefined)?.value?.entries;
+      if (!Array.isArray(entries)) continue;
+      for (let i = entries.length - 1; i >= 0; i -= 1) {
+        const uuid = entries[i]?.uuid;
+        if (typeof uuid === "string") return uuid;
+      }
     }
     return undefined;
   }
@@ -784,14 +956,23 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
         const attempt = this.attemptFor(recordId);
         const info = this.db
           .prepare(
-            `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, result_json, started_at, ended_at)
-             VALUES (?, ?, ?, ?, 'completed', ?, ?, ?)`,
+            `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, request_json, result_json, started_at, ended_at)
+             VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?)`,
           )
           .run(
             recordId,
             this.scope.taskId ?? null,
             this.scope.runId ?? null,
             attempt,
+            // WHAT PRODUCED THIS SEED. Every other record carries the operation it ran; this was the
+            // one row in the store with a null request, so a conversation that opened with a summary
+            // or a re-read said nothing about where it came from — and a reader looking at a lineage
+            // that changed shape had only the shape to go on.
+            //
+            // Not an operation: no model call is being described, so it does not pretend to be one.
+            // `openingMessage` reads `user` off a request and finds none here, which is why this adds
+            // provenance without adding a phantom turn.
+            JSON.stringify({ kind: "derive", word, from: ref }),
             // A compaction or a resync is a record like any other, so it holds its turns the one way
             // a record holds turns: as entries. The caller hands over messages because that is what a
             // summary IS at the point it is written; the shape it is stored in is not the caller's.
@@ -1017,7 +1198,7 @@ function preservePartial(
  * A record value with the call's own question in front of its messages, if it is not there already.
  *
  * The one place the splice is spelled out, used by all three writers — the row's birth
- * (`insertRecord`), every flush into it (`streamPartial`), and its settle (`preservePartial`) — so a
+ * (`insertRecord`), every flush into it (`update`), and its settle (`preservePartial`) — so a
  * record carries the same shape at every instant of its life rather than acquiring it at one of them.
  */
 function withOpening(value: JsonValue, requestJson: string | null): JsonValue {

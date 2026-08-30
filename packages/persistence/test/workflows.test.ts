@@ -154,34 +154,6 @@ describe("browseWorkflows", () => {
     expect(plan.driftedTasks).toEqual(["t-1"]);
   });
 
-  it("warns when one session declares both summary and full_history", () => {
-    // The planning workflow's `critique` already declares full_history; adding a
-    // summary state to the same (default) session is the conflict.
-    write(
-      "feature/plan/goals.json",
-      JSON.stringify({
-        label: "Goals",
-        inputs: { issue: { kind: "blob", schema: { type: "string", contentMediaType: "markdown" } } },
-        outputs: {
-          goals: { schema: { type: "array", items: { type: "string" } }, binding: ".operation.output.goals" },
-        },
-        environment: { conversation: { mode: "summary" } },
-        operation: {
-          kind: "prompt",
-          prompt: "Extract goals.",
-          model: "planner",
-          output: { goals: { schema: { type: "array", items: { type: "string" } } } },
-        },
-      }),
-    );
-    const plan = browseWorkflows(project).workflows[0]!;
-    const warning = plan.issues.find((i) => i.path === "operation.conversation.mode")!;
-    expect(warning.severity).toBe("warning");
-    expect(warning.message).toMatch(/declares both summary and full_history/);
-    // Advisory only: the run still works, it just summarizes for both.
-    expect(lintErrors(browseWorkflows(project))).toEqual([]);
-  });
-
   it("returns an empty browser for a project with no workflows", () => {
     rmSync(project.paths.workflowsDir, { recursive: true, force: true });
     expect(browseWorkflows(project)).toEqual({ workflows: [], files: [], unreachable: [] });

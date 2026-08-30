@@ -31,7 +31,7 @@ import {
 import type { JsonValue, RecordStore } from "@declarative-ai/exec";
 import { entriesOfMessages, renderToolResult } from "@declarative-ai/llm";
 
-type Settled = Parameters<RecordStore["close"]>[1];
+type Settled = Parameters<RecordStore["finish"]>[1];
 
 /** The captured delta: the main file's kept lines, and each subagent file's, keyed like `sidechains`. */
 export interface Captured {
@@ -154,13 +154,16 @@ export function isEmptyCapture(captured: Captured): boolean {
  */
 export function withNativeCapture(inner: RecordStore, options: NativeCaptureOptions): RecordStore {
   return {
-    open: (stub) => inner.open(stub),
+    append: (stub) => inner.append(stub),
+    // Passed through when the inner store has one — presence is part of the contract, same as
+    // `bySession`: a stub here would claim this store can hold a partial when the inner cannot.
+    ...(inner.update !== undefined ? { update: (at, partial) => inner.update!.call(inner, at, partial) } : {}),
     // Presence is part of the contract — `bySession` absent MEANS the store cannot read, and a stub
     // that appeared here would claim a capability the inner store does not have.
     ...(inner.bySession !== undefined ? { bySession: (session, upTo) => inner.bySession!.call(inner, session, upTo) } : {}),
-    close: async (id, settled) => {
+    finish: async (ref, settled) => {
       const providerSessionId = settled.sessionOutcome?.providerSessionId;
-      if (providerSessionId === undefined) return inner.close(id, settled);
+      if (providerSessionId === undefined) return inner.finish(ref, settled);
       let captured: Captured;
       try {
         captured = await captureNativeSession(providerSessionId, {
@@ -171,11 +174,11 @@ export function withNativeCapture(inner: RecordStore, options: NativeCaptureOpti
         });
       } catch (e) {
         options.onError?.(e as Error);
-        return inner.close(id, settled);
+        return inner.finish(ref, settled);
       }
       // An empty capture is stored as NOTHING rather than as `nativeLines: []` — a transport with no
       // native file (codex, a fake) would otherwise stamp every record with an empty claim.
-      return inner.close(id, isEmptyCapture(captured) ? settled : enriched(settled, captured));
+      return inner.finish(ref, isEmptyCapture(captured) ? settled : enriched(settled, captured));
     },
   };
 }

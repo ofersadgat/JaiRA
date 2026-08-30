@@ -26,7 +26,7 @@ export * from "./approval";
 export * from "./questions";
 export * from "./agents";
 export * from "./tools";
-export * from "./summary";
+export * from "./sessionServices";
 // The agent's own on-disk session file, captured into the record at operation close — the lines
 // (attachments, toolUseResult, threading) that never ride the stream and outlive nothing.
 export * from "./nativeCapture";

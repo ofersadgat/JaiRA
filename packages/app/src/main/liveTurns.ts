@@ -26,7 +26,7 @@ import type { TurnDelta } from "@jaira/runtime";
 
 /**
  * A snapshot as a PARTIAL record value — the shape streamed into the open row's `result_json`
- * (`SqliteSessionStore.streamPartial`), in the SAME encoding a settled record holds, so every
+ * (`SqliteSessionStore.update`), in the SAME encoding a settled record holds, so every
  * reader parses it unchanged.
  *
  * ONE ARRAY. A record's conversation is `entries`, grown as fragments arrive; there is deliberately
@@ -153,7 +153,7 @@ export function partialRecordValue(snapshot: LiveTurnSnapshot): JsonValue | null
  * `JobOutputSink`), so the interval is what bounds the UI cost of durability.
  *
  * The flush callback is trusted to be a no-op when there is nothing to write — a timer that fires
- * after the record settled matches no open row and writes nothing (`streamPartial`'s status guard).
+ * after the record settled matches no open row and writes nothing (`update`'s status guard).
  */
 export class LiveTurnFlusher {
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -187,7 +187,7 @@ export class LiveTurnFlusher {
    * all. That is a transcript that loses the words somebody was watching arrive, which is the
    * opposite of what the stream is for.
    *
-   * Called BEFORE the abort, so the row is still open and `streamPartial`'s status guard still
+   * Called BEFORE the abort, so the row is still open and `update`'s status guard still
    * matches. After it, the record has settled and this writes nothing.
    */
   flush(): void {

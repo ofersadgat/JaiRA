@@ -16,7 +16,6 @@ export * from "./ipc";
 export * from "./components";
 export * from "./reviewNotes";
 export * from "./componentGallery";
-export * from "./conversation";
 export * from "./slotTypes";
 export * from "./references";
 export * from "./changeset";

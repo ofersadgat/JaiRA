@@ -70,8 +70,8 @@ const fileLines = (): Array<Record<string, unknown>> =>
 async function call(p: Project, text: string, seq?: number): Promise<void> {
   const store = sessionStoreFor(p, { taskId: "t-1", runId: 1 }) as unknown as Store;
   const at = await store.resolve(seq === undefined ? { ref: "conv" } : { ref: `conv@${seq}` });
-  await store.open({ id: `conv:${at.at.seq}`, source: { kind: "prompt", user: text } as never, session: at.at, startMs: 1 });
-  await store.close(`conv:${at.at.seq}`, { result: said(text) as never });
+  const ref = await store.append({ id: `conv:${at.at.seq}`, source: { kind: "prompt", user: text } as never, session: at.at, startMs: 1 });
+  await store.finish(ref, { result: said(text) as never });
 }
 
 describe("the round trip — the file is the truth", () => {
@@ -219,13 +219,11 @@ describe("native turn lines — for the other tool's reader, never for replay", 
     createTask(p, { id: "t-1", title: "one", workflow: "w" });
     const store = sessionStoreFor(p, { taskId: "t-1", runId: 1 }) as unknown as Store;
     const at = await store.resolve({ ref: "conv" });
-    await store.open({ id: "conv:0", source: { kind: "prompt", user: "hi" } as never, session: at.at, startMs: 1 });
-    (store as unknown as { streamPartial: (s: string, q: number, v: unknown) => void }).streamPartial("conv", 0, {
-      value: said("partial one").value,
-    });
+    const ref = await store.append({ id: "conv:0", source: { kind: "prompt", user: "hi" } as never, session: at.at, startMs: 1 });
+    store.update!(ref, { value: { value: said("partial one").value } });
 
     expect(fileLines().some((l) => l["type"] === "assistant")).toBe(false);
-    await store.close("conv:0", { result: said("final") as never });
+    await store.finish(ref, { result: said("final") as never });
     expect(fileLines().some((l) => l["type"] === "assistant")).toBe(true);
   });
 });

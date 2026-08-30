@@ -51,8 +51,7 @@ const stub = (id: string) => ({ id, source: { kind: "function", functionRef: "wo
 /** Open a record, close it with this payload, and read it back the way a viewer would. */
 function roundTrip(value: Record<string, unknown>): { read: JsonValue | undefined; blobs: number } {
   const s = store();
-  s.open(stub("r1"));
-  s.close("r1", { result: { value } as never, metrics: { startMs: 1, durationMs: 1 } as never });
+  s.finish(s.append(stub("r1")), { result: { value } as never, metrics: { startMs: 1, durationMs: 1 } as never });
   const back = s.record("r1");
   const blobs = (project.db.prepare(`SELECT count(*) c FROM blobs`).get() as { c: number }).c;
   return { read: back?.result, blobs };
@@ -72,8 +71,7 @@ describe("a record round-trips through the Ref layer unchanged", () => {
   it("stores ONE row for a value two records share", () => {
     const s = store();
     for (const rid of ["r1", "r2"]) {
-      s.open(stub(rid));
-      s.close(rid, { result: { value: { entries: [message("user", BIG)] } } as never, metrics: { startMs: 1, durationMs: 1 } as never });
+      s.finish(s.append(stub(rid)), { result: { value: { entries: [message("user", BIG)] } } as never, metrics: { startMs: 1, durationMs: 1 } as never });
     }
     const rows = project.db.prepare(`SELECT hash, refs FROM blobs`).all() as Array<{ hash: string; refs: number }>;
     // The case the layer exists for: the same file read by two passes of a loop.
@@ -160,8 +158,7 @@ describe("releasing what a record referenced", () => {
   it("keeps bytes a second record still names, and collects them when it does not", () => {
     const s = store();
     for (const rid of ["r1", "r2"]) {
-      s.open(stub(rid));
-      s.close(rid, { result: { value: { entries: [message("user", BIG)] } } as never, metrics: { startMs: 1, durationMs: 1 } as never });
+      s.finish(s.append(stub(rid)), { result: { value: { entries: [message("user", BIG)] } } as never, metrics: { startMs: 1, durationMs: 1 } as never });
     }
     // Nothing has been released, so nothing is garbage.
     expect(collectBlobs(project.db)).toBe(0);

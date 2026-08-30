@@ -10,22 +10,44 @@
  */
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { testHome } from "@jaira/testing";
 
-/** What the previous test was given, so the next one can prove it did not inherit it. */
-let previous: string | undefined;
+/**
+ * Every home this file was given, recorded as each test ends.
+ *
+ * In an `afterEach` rather than inside one test, and asserted in `afterAll` rather than by a later
+ * sibling. The two properties are about a SEQUENCE of tests — each gets its own directory, and each
+ * is gone once its test is over — so a test that checks them by reading what "the last test" left
+ * behind is really asserting the runner's declaration order. That passes here (nothing shuffles) and
+ * fails the moment anyone runs `--sequence.shuffle` to debug something else, reporting `expected
+ * undefined to be defined` about a property that is perfectly fine.
+ *
+ * Collected and checked at the end, the same two properties hold whatever order the tests ran in —
+ * and they are checked across ALL of them rather than one adjacent pair.
+ */
+const given: string[] = [];
 let fromHook: string;
 
 beforeEach(() => {
   fromHook = testHome();
 });
 
+afterEach(() => {
+  given.push(fromHook);
+});
+
+afterAll(() => {
+  // One directory per test…
+  expect(new Set(given).size).toBe(given.length);
+  // …and none of them outlives the test that asked for it, so nothing accumulates across a file.
+  for (const home of given) expect(existsSync(home)).toBe(false);
+});
+
 describe("testHome", () => {
   it("is one directory per test, and it exists", () => {
     expect(testHome()).toBe(fromHook);
     expect(existsSync(fromHook)).toBe(true);
-    previous = fromHook;
   });
 
   it("is the SAME directory however often one test asks — a restart keeps its home", () => {
@@ -35,10 +57,9 @@ describe("testHome", () => {
     expect(existsSync(join(testHome(), "workflows"))).toBe(true);
   });
 
-  it("is a DIFFERENT directory from the last test's, and the last one is gone", () => {
-    expect(previous).toBeDefined();
-    expect(fromHook).not.toBe(previous);
-    // Removed when the test that asked for it finished, so nothing accumulates across a file.
-    expect(existsSync(previous!)).toBe(false);
+  it("hands the next test a different one, whichever test that is", () => {
+    // The pair-wise half of what `afterAll` checks across the whole file — kept as a test of its own
+    // because it is the property a reader comes here looking for.
+    expect(given).not.toContain(fromHook);
   });
 });

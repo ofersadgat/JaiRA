@@ -24,7 +24,7 @@ import {
   type WorkflowShape,
 } from "./projection";
 import { loadSnapshot, readWorkflowFiles } from "./snapshots";
-import { ON_RECORD } from "./sessionStore";
+import { bareSessionId, ON_RECORD, scopedSessionId } from "./sessionStore";
 import { workflowShape } from "./shape";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
@@ -316,8 +316,17 @@ function interruptedSessions(project: Project, taskId: string, runId?: number): 
           ORDER BY seq`,
       )
       .all(taskId, run.id) as Array<{ type: string; payload_json: string; session_ref: string | null; created_at: number }>;
+    const scope = { taskId, runId: run.id };
     const started = new Map<number, { stateId: string; at: number }>();
-    /** The record ids the journal ALREADY names — `<sessionId>:<seq>`, one back from the reported end. */
+    /**
+     * The POSITIONS the journal already accounts for — one back from the end each terminal event
+     * reported, spelled `<sessionId>@<seq>` here purely as a set key.
+     *
+     * Positions rather than record ids. A record's id is opaque: `withRecord` stamps a content hash on
+     * it, and the `<sessionId>:<seq>` spelling a placed record used to carry duplicated the pair
+     * `session_positions` already keys on (migration 8). Matching on the position asks the question
+     * directly instead of reconstructing an id and hoping the two agree.
+     */
     const listed = new Set<string>();
     for (const row of events) {
       const event = JSON.parse(row.payload_json) as { instanceId?: number; stateId?: string };
@@ -327,7 +336,9 @@ function interruptedSessions(project: Project, taskId: string, runId?: number): 
       } else {
         started.delete(event.instanceId);
         const end = row.session_ref === null ? undefined : parseSessionRef(row.session_ref);
-        if (end !== undefined) listed.add(`${end.id}:${end.seq - 1}`);
+        // SCOPED to match what the store wrote: a journal ref names a session the way the workflow
+        // file does, and `session_positions.session_id` carries the run namespace in front of it.
+        if (end !== undefined) listed.add(`${scopedSessionId(scope, end.id)}@${end.seq - 1}`);
       }
     }
     if (started.size === 0) continue;
@@ -338,29 +349,26 @@ function interruptedSessions(project: Project, taskId: string, runId?: number): 
     const records = (
       project.db
         .prepare(
-          `SELECT r.record_id AS record_id, r.status AS status FROM operation_records r
+          `SELECT p.session_id AS session_id, p.seq AS seq, r.status AS status FROM operation_records r
            JOIN session_positions p ON ${ON_RECORD}
           WHERE r.task_id = ? AND r.run_id = ?
           ORDER BY r.id`,
         )
-        .all(taskId, run.id) as Array<{ record_id: string; status: string }>
-    ).filter((record) => !listed.has(record.record_id));
+        .all(taskId, run.id) as Array<{ session_id: string; seq: number; status: string }>
+    ).filter((record) => !listed.has(`${record.session_id}@${record.seq}`));
     if (records.length !== started.size) continue; // ambiguous — see the header
     const inFlight = [...started.entries()];
     for (const [i, record] of records.entries()) {
-      // `<sessionId>:<seq>` — the id `withRecord` gives a placed record, which is the position
-      // itself. Split on the LAST colon: a session id may contain one (a seeded `review:draft`).
-      const cut = record.record_id.lastIndexOf(":");
-      if (cut <= 0) continue;
-      const seq = Number(record.record_id.slice(cut + 1));
-      if (!Number.isInteger(seq)) continue;
+      // The position, read off `session_positions` rather than parsed back out of a record id. The
+      // parse used to split on the LAST colon because a session id may contain one — a guess the
+      // position table makes unnecessary.
       const [instanceId, where] = inFlight[i]!;
       out.push({
         runId: run.id,
         instanceId,
         stateId: where.stateId,
-        sessionId: record.record_id.slice(0, cut),
-        seq,
+        sessionId: bareSessionId(scope, record.session_id),
+        seq: record.seq,
         at: where.at,
         // Read off the record rather than assumed. `completed` is the one status that means the call
         // RETURNED and lost only its event afterwards — reporting that answer as interrupted would

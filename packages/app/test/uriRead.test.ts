@@ -96,8 +96,8 @@ describe("db:// record reads", () => {
     try {
       const store = new SqliteSessionStore(project.db, { taskId: "t1", runId: 1 });
       const at = store.resolve({ ref: "review" }).at;
-      store.open({ id: "r1", source: undefined as never, session: at, startMs: 1 });
-      store.close("r1", { result: { value: { changeset: { source: "git:abcd1234", changes: [] } } } as never });
+      const ref = store.append({ id: "r1", source: undefined as never, session: at, startMs: 1 });
+      store.finish(ref, { result: { value: { changeset: { source: "git:abcd1234", changes: [] } } } as never });
     } finally {
       project.close();
     }

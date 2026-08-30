@@ -54,13 +54,10 @@ describe("where the settings come from", () => {
     expect(plan.system).toBe("You are a planner.");
   });
 
-  it("takes tools, permissions and conversation off the merged execution environment", () => {
-    const plan = chatPlanFor([
-      speaking({ environment: { tools: ["bash"], permissions: { profile: "read-only" }, conversation: { mode: "summary" } } }),
-    ]);
+  it("takes tools and permissions off the merged execution environment", () => {
+    const plan = chatPlanFor([speaking({ environment: { tools: ["bash"], permissions: { profile: "read-only" } } })]);
     expect(plan.settings.tools).toEqual(["bash"]);
     expect(plan.settings.permissions).toEqual({ profile: "read-only" });
-    expect(plan.conversation).toEqual({ mode: "summary" });
   });
 
   it("passes through every knob hw does not own, so a later one still reaches the model", () => {
@@ -149,13 +146,6 @@ describe("the operation one message runs as", () => {
     expect(operation.config).toEqual({ temperature: 0.3, model: "override-model" });
   });
 
-  it("carries the conversation mode the state ran under", () => {
-    // Inherited and not offered as a control: `summary` is per SESSION, so a per-message toggle would
-    // re-summarize the stream for every state sharing it.
-    const summarized = chatPlanFor([speaking({ environment: { conversation: { mode: "summary" } } })]);
-    const { environment } = chatOperationOf(summarized, { message: "hi", session: { id: "s@1" } });
-    expect(environment.conversation).toEqual({ mode: "summary" });
-  });
 });
 
 describe("tools on a continued turn", () => {

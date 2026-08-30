@@ -16,7 +16,7 @@ import { loadBundle } from "@declarative-ai/hw";
 import { runtimeFunction, RUNTIME_CAPABILITIES, type ExecServices, type ResolvedSession } from "@declarative-ai/exec";
 import { ScriptedFakeExecutor } from "../src/fakeExecutor";
 import { executeWorkflow, newRegistry } from "../src/wiring";
-import { sessionServicesFor } from "../src/summary";
+import { sessionServicesFor } from "../src/sessionServices";
 
 /** Two agent states naming one conversation, plus a third that names none. */
 const files: Record<string, unknown> = {
@@ -77,7 +77,7 @@ async function run() {
     "agent",
     runtimeFunction(agent.impl as never, { ...RUNTIME_CAPABILITIES, policyEnforcement: "config", sessionResume: true }) as never,
   );
-  const session = sessionServicesFor(bundle, async () => "");
+  const session = sessionServicesFor();
   const result = await executeWorkflow({
     bundle,
     inputs: { change: "the diff" },

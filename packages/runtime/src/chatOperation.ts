@@ -77,14 +77,6 @@ export interface ChatPlan extends Omit<ChatPlanView, "live" | "effective" | "ava
   /** Everything else hw passes through — temperature, `configRef`, provider options. */
   passthrough: Record<string, JsonValue>;
   /**
-   * How much transcript the call carries, inherited and not offered as a control.
-   *
-   * Left out of {@link ChatSettings} on purpose: §5.1 says `summary` is per SESSION rather than per
-   * state, so one message switching mode would re-summarize the conversation for every state sharing
-   * the stream — a per-message toggle for something that is not a per-message property.
-   */
-  conversation?: ExecEnvironmentDecl["conversation"];
-  /**
    * Inherited settings that are expressions rather than values.
    *
    * Reported rather than silently defaulted. A composer that showed the project default model beside
@@ -202,7 +194,6 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
       ? { system: host.operation.system }
       : {}),
     passthrough,
-    ...(host?.environment?.conversation !== undefined ? { conversation: host.environment.conversation } : {}),
     unresolved,
   };
 }
@@ -295,7 +286,6 @@ export function chatOperationOf(plan: ChatPlan, args: { message: string; session
     },
     environment: {
       session: args.session,
-      ...(plan.conversation !== undefined ? { conversation: plan.conversation } : {}),
       // Declared, and RESOLVED by the caller through `gateTools` — which puts each one under the
       // policy with the same primitive the engine uses. Declaring them without that would be worse
       // than dropping them: the model would be told about tools nothing had gated.

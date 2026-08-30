@@ -177,14 +177,14 @@ describe("1b. what a stopped turn had already SAID", () => {
     const where = { instanceId: 1_000_000 + thread.instanceId, stateId: CHAT_ASSISTANT };
     recorder.record({ type: "instance.entered", ...where, childKey: "ask", parentInstanceId: thread.instanceId, inputs: {} }, Date.now());
     recorder.record({ type: "operation.started", ...where, op: "prompt" }, Date.now());
-    store.open({
+    const ref = store.append({
       id: `${branch}:1`,
       source: { kind: "prompt", user: asked } as never,
       startMs: Date.now(),
       session: { id: branch, seq: 1 },
     });
-    store.streamPartial(branch, 1, { value: streamed } as never);
-    store.close(`${branch}:1`, { result: { error: { classification: "canceled", reason: "stopped" } } } as never);
+    store.update(ref, { value: { value: streamed } as never });
+    store.finish(ref, { result: { error: { classification: "canceled", reason: "stopped" } } } as never);
     recorder.record(
       {
         type: "operation.failed",
@@ -289,7 +289,7 @@ describe("2. a turn whose process died", () => {
     const where = { instanceId: 1_000_000 + thread.instanceId, stateId: CHAT_ASSISTANT };
     recorder.record({ type: "instance.entered", ...where, childKey: "ask", parentInstanceId: thread.instanceId, inputs: {} }, Date.now());
     recorder.record({ type: "operation.started", ...where, op: "prompt" }, Date.now());
-    new SqliteSessionStore(project.db, { taskId, runId: thread.runId }).open({
+    new SqliteSessionStore(project.db, { taskId, runId: thread.runId }).append({
       id: `${branch}:1`,
       source: { kind: "prompt", user: "the message it died on" } as never,
       startMs: Date.now(),

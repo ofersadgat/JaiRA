@@ -65,7 +65,6 @@ describe("the loader really does merge the chain into each state", () => {
     expect(plan.settings.model).toBe("root/model");
     expect(plan.settings.tools).toEqual(["bash"]);
     expect(plan.settings.permissions).toMatchObject({ profile: "read-only" });
-    expect(plan.conversation).toMatchObject({ mode: "summary" });
     expect(plan.origin.model).toBe("inherited");
   });
 

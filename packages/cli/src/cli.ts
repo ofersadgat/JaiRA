@@ -78,7 +78,6 @@ import {
   parseFakeRules,
   parseInteractionScript,
   policyCanEscalate,
-  promptSummarizer,
   enabledAdapters,
   enabledGenericAgents,
   registerAgentRuntimes,
@@ -406,8 +405,7 @@ function buildRunEnvironment(
 ): {
   registry: ReturnType<typeof newRegistry>;
   prompt: ReturnType<typeof buildPromptExecutor>;
-  session: Omit<ReturnType<typeof sessionServicesFor>, "modes">;
-  summaryModes: ReturnType<typeof sessionServicesFor>["modes"];
+  session: ReturnType<typeof sessionServicesFor>;
 } {
   const registry = newRegistry();
   // One Exec for the whole run, so every child it starts is recorded against the
@@ -508,11 +506,9 @@ function buildRunEnvironment(
     // refuse over a check it never ran.
     tree: defaultExecutorTree(config, bundle, { fake: scripted, secrets }).prompt,
   });
-  // Conversation `summary` mode: only installed when a state asked for it, and it
-  // summarizes through the run's own prompt executor, so a scripted run stays
-  // scripted (DESIGN §14 phase 7).
-  const { modes: summaryModes, ...session } = sessionServicesFor(bundle, promptSummarizer(prompt));
-  return { registry, prompt, session, summaryModes };
+  // One store for both halves — a conversation's messages ARE its records.
+  const session = sessionServicesFor();
+  return { registry, prompt, session };
 }
 
 /**
@@ -543,20 +539,6 @@ function assertCapabilities(
       `${issues.map((i) => `${i.stateId}: ${i.message}`).join("; ")}\n` +
         "  run this task in the JaiRA app, which can answer approvals, or set policy.builtins to false " +
         "in .jaira/settings.json if this workspace is disposable",
-    );
-  }
-}
-
-/**
- * One session has one transcript, so a session containing both a `summary` state
- * and a `full_history` state cannot honour both. Reported rather than resolved:
- * summarizing under a state that asked for full history would be a quiet lie.
- */
-function warnSummaryConflicts(modes: ReturnType<typeof sessionServicesFor>["modes"], io: CliIo): void {
-  for (const conflict of modes.conflicts) {
-    io.stderr(
-      `warning: session '${conflict.session}' mixes summary and full_history ` +
-        `(${conflict.stateIds.join(", ")}); the transcript is summarized for all of them\n`,
     );
   }
 }
@@ -612,8 +594,7 @@ async function cmdRun(argv: string[], io: CliIo): Promise<number> {
       const detail = report.errors.map((e) => `${e.stateId} ${e.path}: ${e.message}`).join("\n  ");
       throw new Error(`workflow validation failed:\n  ${detail}`);
     }
-    const { registry, prompt, session, summaryModes } = buildRunEnvironment(bundle, config, wiring, undefined, projectDir);
-    warnSummaryConflicts(summaryModes, io);
+    const { registry, prompt, session } = buildRunEnvironment(bundle, config, wiring, undefined, projectDir);
     assertCapabilities(registry, bundle, config);
     // Compile the workflow's own TypeScript before anything calls it. Deliberately the LAST step
     // before the run: `prepare()` is what turns resolved functions into runnable ones, and SPEC
@@ -940,14 +921,13 @@ async function runTaskNow(
       onCancelRequested: () => stop.abort(),
     });
 
-    const { registry, prompt, session, summaryModes } = buildRunEnvironment(
+    const { registry, prompt, session } = buildRunEnvironment(
       started.bundle,
       project.config,
       wiring,
       { artifacts, store: project.artifacts, observer: owner.observer() },
       project.paths.projectDir,
     );
-    warnSummaryConflicts(summaryModes, io);
     try {
       assertCapabilities(registry, started.bundle, project.config);
     } catch (e) {
@@ -1317,8 +1297,7 @@ async function cmdWorkflowCheck(argv: string[], io: CliIo): Promise<number> {
       conformanceWorkflowFiles(values.model !== undefined ? { model: values.model } : {}),
       CONFORMANCE_ID,
     );
-    const { registry, prompt, session, summaryModes } = buildRunEnvironment(bundle, project.config, wiring, undefined, project.paths.projectDir);
-    warnSummaryConflicts(summaryModes, io);
+    const { registry, prompt, session } = buildRunEnvironment(bundle, project.config, wiring, undefined, project.paths.projectDir);
     assertCapabilities(registry, bundle, project.config);
     io.stderr(`checking ${digest.roots.join(", ")} (${digest.states} states) against ${specPath}\n`);
     // Compile the workflow's own TypeScript before anything calls it. Deliberately the LAST step
