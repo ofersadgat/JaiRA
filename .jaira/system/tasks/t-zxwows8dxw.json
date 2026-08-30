@@ -1,0 +1,10 @@
+{
+  "id": "t-zxwows8dxw",
+  "title": "feature #1",
+  "workflow": "feature",
+  "createdAt": "2026-08-28T21:14:50.322Z",
+  "inputs": {
+    "issue": "I want to update the side panel. Files currently shows useful contents, but both chat and tasks can be improved. Tasks should show a list item per top level workflow that you can click on to show the task view contents of that workflow. For chat, there should be a list of runs ordered by completion date descending (uncompleted first, oldest last).",
+    "manual_advance": false
+  }
+}

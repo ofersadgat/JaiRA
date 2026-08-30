@@ -1,0 +1,473 @@
+{
+  "label": "Critique the implementation",
+  "description": "Does the code do what the unit doc says, and do the tests defend the claim rather than the code? (feature.md §5).",
+  "inputs": {
+    "changes": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "unit_tests": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "docs_touched": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "severity_threshold": {
+      "kind": "text",
+      "schema": {
+        "type": "string",
+        "enum": [
+          "blocker",
+          "significant",
+          "minor",
+          "note"
+        ]
+      }
+    },
+    "standards_amendment": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "prior_findings": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "severity",
+            "claim",
+            "disposition"
+          ],
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "blocker",
+                "significant",
+                "minor",
+                "note"
+              ]
+            },
+            "claim": {
+              "type": "string"
+            },
+            "target_id": {
+              "type": "string",
+              "description": "The deliverable, flow, component or unit id this is about."
+            },
+            "disposition": {
+              "type": "string",
+              "enum": [
+                "fixed",
+                "rejected",
+                "blocked"
+              ],
+              "description": "fixed: this pass changed to answer it. rejected: the finding is wrong, and `note` says why. blocked: this pass cannot see how to make progress on it — `note` says what it would need."
+            },
+            "note": {
+              "type": "string",
+              "description": "What changed, why the finding is wrong, or what is missing. Required for rejected and blocked."
+            }
+          }
+        }
+      }
+    },
+    "working_set": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "findings": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "findings"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "findings"
+    },
+    "max_severity": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "max_severity"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "max_severity"
+    },
+    "max_severity_rank": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "max_severity_rank"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "max_severity_rank"
+    },
+    "target": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "target"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "target"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Judge this implementation. Two questions: **does the code do what the unit doc\nsays, and do the tests defend the claim rather than the code?**\n\n## The changes\n\n{{.inputs.changes}}\n\n## The unit tests\n\n{{.inputs.unit_tests}}\n\n## The invariants they were supposed to defend\n\nThey are a section inside the unit docs above. Read them **verbatim from the file** —\nan invariant paraphrased on the way here is an invariant nobody can check the test against.\n\n## The docs this phase reads\n\n{{.inputs.working_set}}\n\n**These are paths, not contents.** Open each one with `read_file` before you start. Read the\nfile as it is now — an earlier state in this phase may have edited it since the run began.\n\n## The docs that were touched\n\n{{.inputs.docs_touched}}\n\n## Findings from the previous pass\n\n{{.inputs.prior_findings}}\n\nEach carries the author's own `disposition` — what it says it did:\n\n- `fixed` — check it. A finding recorded as fixed that is not fixed is worse than one\n  never addressed, and it is why this list is here rather than in your memory.\n- `rejected` — the author says the finding was wrong. It may be right. Read the `note`\n  and let it go if it holds; restating a finding already answered is how a loop spends\n  four passes going nowhere.\n- `blocked` — the author cannot see how to make progress. Decide whether that is true.\n  If it is, raise `target: 'ask'` and stop: nothing downstream of you can supply it.\n\nA finding that comes back unchanged twice is a finding about the author state, not the\nwork.\n\n## What to check\n\n- **Behaviour that diverges from the unit doc** — including the parts the doc\n  specified and the code merely approximated.\n- **Tests that assert the implementation rather than the invariant.** The tell: a\n  test that would have to change during any honest refactor, or one whose\n  structure mirrors the code's internals. It is testing shape, not behaviour.\n- **Invariants asserted only incidentally**, by a test aimed at something else.\n  That test will be rewritten one day by someone who does not know it was\n  load-bearing.\n- **Every invariant asserted, or raised as a `design` finding.** None silently\n  unverified.\n- **No assertion encoding an invariant was edited to make a test pass.** The\n  invariant text is in the unit doc, so this is checkable rather than a matter of\n  trust. Check it.\n- **Changes that only stand alone on paper.** Would change 2 really be safe to\n  merge without change 3? `verify` proved it built; this asks whether it was\n  *useful*.\n- Every irreversible change went through the confirm gate; every `doc_updates`\n  entry was edited in the same change.\n- **Departures from `standards.md`** are an exception or an amendment.\n\n## What to produce\n\n`findings` (severity · claim · evidence as `path:line` · target_id),\n`max_severity`, `max_severity_rank` (blocker=3, significant=2, minor=1, note=0),\nand `target` — `draft` to go back to `implement`, `explore` to re-open the\ndecomposition, `upstream` where the unit doc is what is wrong.\n\nThere is a fourth `target`, `ask` — neither you nor the author can see how to make\nprogress: what is missing is a measurement nobody has taken, a decision only a person can\nmake, or a fact that is not in the repo. A person always sees this one, and it leaves the\nloop AT ONCE rather than spending the passes that remain. Raise it the pass you know, not\nthe pass you run out — being stuck on pass 1 is not improved by two more passes of the\nsame. The author's `blocked` dispositions are where to look first; judge them rather than\ntaking them at their word.\n",
+    "config": {
+      "model": "claude-opus-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "severity",
+                "claim"
+              ],
+              "properties": {
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "blocker",
+                    "significant",
+                    "minor",
+                    "note"
+                  ]
+                },
+                "claim": {
+                  "type": "string"
+                },
+                "evidence": {
+                  "type": "string",
+                  "description": "A path:line, a quotation, or a reproduction."
+                },
+                "target_id": {
+                  "type": "string",
+                  "description": "The deliverable, flow, component or unit id this is about."
+                }
+              }
+            }
+          },
+          "max_severity": {
+            "type": "string",
+            "enum": [
+              "blocker",
+              "significant",
+              "minor",
+              "note"
+            ]
+          },
+          "max_severity_rank": {
+            "type": "integer"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "explore",
+              "upstream",
+              "ask"
+            ]
+          }
+        },
+        "required": [
+          "findings",
+          "max_severity",
+          "max_severity_rank",
+          "target"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "session": null,
+    "tools": [
+      "read_file"
+    ]
+  },
+  "scopeSession": null,
+  "slotMeta": {
+    "inputs.changes": {
+      "optional": true
+    },
+    "inputs.unit_tests": {
+      "optional": true
+    },
+    "inputs.docs_touched": {
+      "optional": true
+    },
+    "inputs.severity_threshold": {
+      "description": "Substantial means at or above this."
+    },
+    "inputs.standards_amendment": {
+      "optional": true,
+      "description": "The amendment this pass submits against a standing doc, when it submits one. It travels beside the deliverables rather than inside them, so judge it as its own claim — and do not report it missing when it is present here."
+    },
+    "inputs.prior_findings": {
+      "optional": true,
+      "description": "The previous pass's findings AND what the author did with each, so the loop converges instead of rediscovering the same weakness. A `blocked` disposition is the author saying it cannot see how to make progress — judge it, and raise `target: 'ask'` where it is right."
+    },
+    "inputs.working_set": {
+      "optional": true,
+      "description": "Paths to the docs this phase reads — its standing docs and the catalog entries that bear on the feature. Open them with read_file: the file as it is now, not a copy taken before this phase started editing."
+    }
+  }
+}

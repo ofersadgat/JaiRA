@@ -1,0 +1,381 @@
+{
+  "label": "Implement",
+  "description": "Write the code, one change at a time, in the plan's order (feature.md §5 step 4). A coding agent.",
+  "inputs": {
+    "plan": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    },
+    "units": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "working_set": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "prior_findings": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "severity",
+            "claim"
+          ],
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "blocker",
+                "significant",
+                "minor",
+                "note"
+              ]
+            },
+            "claim": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string",
+              "description": "A path:line, a quotation, or a reproduction."
+            },
+            "target_id": {
+              "type": "string",
+              "description": "The deliverable, flow, component or unit id this is about."
+            }
+          }
+        }
+      }
+    },
+    "returned_findings": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "reviewer_comments": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    }
+  },
+  "outputs": {
+    "changes": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "changes"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "changes"
+    },
+    "standards_amendment": {
+      "kind": "blob",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "standards_amendment"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "standards_amendment"
+    },
+    "responses": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "responses"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "responses"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Land this, one change at a time, in an order that keeps the tree green at every\nstep.\n\n## The plan\n\n{{.inputs.plan}}\n\n## The units to build\n\n{{.inputs.units}}\n\n## The invariants they declare\n\nThey are a section inside the unit docs above. Read them **verbatim from the file** —\nan invariant paraphrased on the way here is an invariant nobody can check the test against.\n\n## The docs this phase reads\n\n{{.inputs.working_set}}\n\n**These are paths, not contents.** Open each one with `read_file` before you start. Read the\nfile as it is now — an earlier state in this phase may have edited it since the run began.\n\nIf this conversation already contains an earlier pass, you have read most of this before.\nRe-open only what a finding below puts in question, or what another state may have edited\nsince; re-reading the rest is the largest single cost of a refine pass and buys nothing.\n\n## How to work\n\nWork **change by change**, in the plan's order. After each one the tree builds\nand the existing suite passes — a change that leaves it red is not a change, it\nis half of one.\n\nBefore you start, be able to answer these about the plan you were handed:\n\n1. What is the smallest thing that can land and be **useful — or at least safe —\n   on its own**?\n2. What order keeps the tree working? What hides behind a flag until the rest\n   arrives?\n3. What depends on what, and what could go in parallel?\n4. What is **deleted**? Does the old path go in this change, or a named\n   follow-up?\n5. What rolls back independently, and what is a one-way door?\n6. What does \"done\" mean for each change — **the observable, not the intent**?\n7. Which docs does this make wrong the moment it lands?\n\nIf the plan does not survive those questions, say so in the change list rather\nthan quietly building something else.\n\n## Do not write the tests\n\nA separate agent instance writes the unit tests, from the invariants rather than\nfrom your diff. That separation is deliberate: an agent that writes a test right\nafter writing the code tests what it built, not what was specified. Leave the\nseams reachable and leave the tests alone.\n\n## What the critique said about your last pass\n\n{{.inputs.prior_findings}}\n\nWhere those exist this is a REVISION, not a first attempt. Take each finding and\neither fix it or say plainly why it is wrong — a finding that comes back\nunchanged twice is a finding about this state rather than about the work.\n## What a later phase sent back\n\n{{.inputs.returned_findings}}\n\nWhere those exist, a phase downstream of this one found the work does not hold up\nwhere they stand — which is why you are running again. That is a different reader\nfrom your own critique: they are looking at what your output made possible, not at\nwhether it is well made. Fix what they name, or say plainly why they are wrong.\n## What the person at the gate said\n\n{{.inputs.reviewer_comments}}\n\nWhere that exists, a person read this and sent it back. It is a decision rather than\na critique — they are overriding a recommendation — so what they wrote is the whole of\nthe reason, and it outranks anything above.\n## What to produce\n\n`changes` — one row per change, in the order they landed: what it does, what it\ndepends on, its `done_when` **observable**, and its `doc_updates` (which docs it\nmakes wrong).\n\n`standards_amendment` — only when `standards.md` itself is wrong. A departure\nfrom it is an exception (with the reason, recorded) or an amendment. Never\nsilence: phase 8's standards row finds silent departures.\n\n`responses` — one entry per finding you were handed above, in the same order, and\nnothing at all on a first pass:\n\n```\n{ \"severity\": \"significant\",\n  \"claim\": \"<the finding, as it was put to you>\",\n  \"target_id\": \"<the id it is about>\",\n  \"disposition\": \"fixed\" | \"rejected\" | \"blocked\",\n  \"note\": \"what changed | why the finding is wrong | what you would need\" }\n```\n\n`note` is required for `rejected` and `blocked`. This is the only memory the loop has of\nits own passes: the critique reads it to tell an answered finding from a restated one.\n\nSaying you are stuck is a real answer, not a failure. If a finding asks for something\nthis phase cannot produce — a measurement nobody has taken, a decision only a person can\nmake, a fact that is not in the repo — mark it `blocked` and name what you would need.\nThree passes defending a gap costs more than asking once.\n",
+    "config": {
+      "model": "claude-cli/default"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "standards_amendment": {
+            "type": "string",
+            "contentMediaType": "text/markdown"
+          },
+          "responses": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "severity",
+                "claim",
+                "disposition"
+              ],
+              "properties": {
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "blocker",
+                    "significant",
+                    "minor",
+                    "note"
+                  ]
+                },
+                "claim": {
+                  "type": "string"
+                },
+                "target_id": {
+                  "type": "string",
+                  "description": "The deliverable, flow, component or unit id this is about."
+                },
+                "disposition": {
+                  "type": "string",
+                  "enum": [
+                    "fixed",
+                    "rejected",
+                    "blocked"
+                  ],
+                  "description": "fixed: this pass changed to answer it. rejected: the finding is wrong, and `note` says why. blocked: this pass cannot see how to make progress on it — `note` says what it would need."
+                },
+                "note": {
+                  "type": "string",
+                  "description": "What changed, why the finding is wrong, or what is missing. Required for rejected and blocked."
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "changes"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "session": "implementation-implement",
+    "tools": [
+      "read_file"
+    ]
+  },
+  "scopeSession": "implementation-implement",
+  "slotMeta": {
+    "inputs.plan": {
+      "optional": true
+    },
+    "inputs.working_set": {
+      "optional": true,
+      "description": "Paths to the docs this phase reads — its standing docs and the catalog entries that bear on the feature. Open them with read_file: the file as it is now, not a copy taken before this phase started editing."
+    },
+    "inputs.prior_findings": {
+      "optional": true,
+      "description": "What the critique said about the PREVIOUS pass. Absent on the first. Address each one and account for it in `responses`: a finding that comes back unchanged is a finding about this state, not about the work."
+    },
+    "inputs.returned_findings": {
+      "optional": true,
+      "description": "What a LATER phase sent back. Absent on the first pass through. Shapes differ by sender — a review finding carries `severity`/`claim`/`lens`, a design finding raised by acceptance or implementation carries whatever that phase recorded — so read each entry for what it says rather than expecting one shape."
+    },
+    "inputs.reviewer_comments": {
+      "optional": true,
+      "description": "What the person at the gate said when they sent this back. Absent unless they did. A decision, not a critique: they are overriding a recommendation, so what they wrote is the whole of the reason."
+    },
+    "outputs.standards_amendment": {
+      "optional": true
+    },
+    "outputs.responses": {
+      "optional": true,
+      "description": "One entry per prior finding, saying what this pass did with it. Feeds the critique so it can tell an addressed finding from a restated one — the loop's only memory of its own passes."
+    }
+  }
+}

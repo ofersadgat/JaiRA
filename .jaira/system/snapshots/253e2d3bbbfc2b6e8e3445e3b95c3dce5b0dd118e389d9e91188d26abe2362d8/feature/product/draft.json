@@ -1,0 +1,494 @@
+{
+  "label": "Draft deliverables",
+  "description": "Write the product deliverables and their docs (feature.md §1 step 3).",
+  "inputs": {
+    "issue": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "framing": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    },
+    "residue": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    },
+    "working_set": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "prior_findings": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "severity",
+            "claim"
+          ],
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "blocker",
+                "significant",
+                "minor",
+                "note"
+              ]
+            },
+            "claim": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string",
+              "description": "A path:line, a quotation, or a reproduction."
+            },
+            "target_id": {
+              "type": "string",
+              "description": "The deliverable, flow, component or unit id this is about."
+            }
+          }
+        }
+      }
+    },
+    "returned_findings": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "reviewer_comments": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    }
+  },
+  "outputs": {
+    "features": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "features"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "features"
+    },
+    "feature_docs": {
+      "kind": "blob",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "feature_docs"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "feature_docs"
+    },
+    "standing_amendment": {
+      "kind": "blob",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "standing_amendment"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "standing_amendment"
+    },
+    "responses": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "responses"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "responses"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Turn the issue into product deliverables: who is served, what they can do, and\nhow we would know it worked.\n\n## The issue\n\n{{.inputs.issue}}\n\n## The docs this phase reads\n\n{{.inputs.working_set}}\n\n**These are paths, not contents.** Open each one with `read_file` before you start. Read the\nfile as it is now — an earlier state in this phase may have edited it since the run began.\n\nIf this conversation already contains an earlier pass, you have read most of these\nbefore. Re-open only what a finding below puts in question, or what another state may\nhave edited since; re-reading the rest is the largest single cost of a refine pass and\nit buys nothing.\n\n\n## The framing this exploration chose\n\n{{.inputs.framing}}\n\n{{.inputs.residue}}\n\nIf those are empty, the catalog already answered the framing question and you\nshould work from the issue directly.\n\n## What the critique said about your last draft\n\n{{.inputs.prior_findings}}\n\nWhere those exist this is a REVISION, not a first attempt. Take each finding and\neither fix it, say plainly why it is wrong, or say that you cannot see how to make\nprogress on it — and record which, per finding, in `responses` below. A finding that\ncomes back unchanged twice is a finding about this state rather than about the document.\n\nSaying you are stuck is a real answer here, not a failure. If a finding asks for\nsomething this phase cannot produce — a measurement nobody has taken, a decision only a\nperson can make, a fact that is not in the repo — mark it `blocked` and name what you\nwould need. Three passes of prose defending a gap costs more than asking once.\n\n## Answer these, in order\n\n1. **Who are we serving?** The user, a developer, support, marketing? Name one\n   per deliverable, and name them the way they would describe themselves.\n2. **What are the goals?** How does this bring value to that person? Can we\n   measure that value — what does success look like, and what does failure look\n   like?\n3. **How does this feature bring that value?** What is necessary, what is\n   sufficient, and what is merely nice to have?\n4. **What other features must exist** for this one to deliver its value?\n5. **Where does this sit among the features that already exist** — what does it\n   overlap with, what does it make redundant, and what would a user expect it to\n   do because of a neighbour?\n6. **Does it conform to the product principles?** If not, this is an *exception*\n   (with the reason, on the doc claiming it) or an *amendment* (the principle is\n   wrong). Silence is neither, and phase 8 finds silent departures.\n\n## What a later phase sent back\n\n{{.inputs.returned_findings}}\n\nWhere those exist, a phase downstream of this one found the work does not hold up\nwhere they stand — which is why you are running again. That is a different reader\nfrom your own critique: they are looking at what your output made possible, not at\nwhether it is well made. Fix what they name, or say plainly why they are wrong.\n## What the person at the gate said\n\n{{.inputs.reviewer_comments}}\n\nWhere that exists, a person read this and sent it back. It is a decision rather than\na critique — they are overriding a recommendation — so what they wrote is the whole of\nthe reason, and it outranks anything above.\n## What to produce\n\n`features` — one entry per deliverable:\n\n```\n{ \"id\": \"feature-name\",\n  \"story\": \"As a [who], I should be able to [what] so that I can [value]\",\n  \"importance\": 0.0-1.0,\n  \"metrics\": [\"...\"],\n  \"requires\": [\"other-feature-name\"] }\n```\n\nTwo things to get right in the story. The **who** has to be someone who would\nrecognise this as their job. The **so that I can** has to name something the\nperson wanted *before this feature existed* — \"so that I can use the new panel\"\nis the feature wearing a story's clothes.\n\nThe metrics must measure the **value**, not the activity. Opens, clicks and\nruns-started measure that the feature was reached. Ask which metric would move\nif the feature were popular and useless, and do not write that one.\n\n`feature_docs` — one doc per deliverable, on the `docs/_templates/product-feature.md`\ntemplate. Each carries its upward link, a **Where this fits** section (serves /\nneighbors / depends on / history), and — where the exploration rejected a\nreading — a **Framings considered** row.\n\n`standing_amendment` — only when `product/principles.md` is itself wrong. The\ngate approves an amendment separately from the feature, so do not fold one into\na doc. It is handed to the critique as its own value, so a doc that cites it does not\nalso have to prove it exists.\n\n`responses` — one entry per finding in **What the critique said about your last draft**,\nin the same order, and nothing at all on a first pass:\n\n```\n{ \"severity\": \"significant\",\n  \"claim\": \"<the finding, as it was put to you>\",\n  \"target_id\": \"feature-name\",\n  \"disposition\": \"fixed\" | \"rejected\" | \"blocked\",\n  \"note\": \"what changed | why the finding is wrong | what you would need\" }\n```\n\n`note` is required for `rejected` and `blocked`. This is the only memory the loop has of\nits own passes: the critique reads it to tell an answered finding from a restated one.\n",
+    "config": {
+      "model": "claude-opus-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "story",
+                "importance",
+                "metrics"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "story": {
+                  "type": "string",
+                  "description": "As a [who], I should be able to [what] so that I can [value]."
+                },
+                "importance": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "metrics": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "requires": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "feature_docs": {
+            "type": "string",
+            "contentMediaType": "text/markdown"
+          },
+          "standing_amendment": {
+            "type": "string",
+            "contentMediaType": "text/markdown"
+          },
+          "responses": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "severity",
+                "claim",
+                "disposition"
+              ],
+              "properties": {
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "blocker",
+                    "significant",
+                    "minor",
+                    "note"
+                  ]
+                },
+                "claim": {
+                  "type": "string"
+                },
+                "target_id": {
+                  "type": "string",
+                  "description": "The deliverable, flow, component or unit id this is about."
+                },
+                "disposition": {
+                  "type": "string",
+                  "enum": [
+                    "fixed",
+                    "rejected",
+                    "blocked"
+                  ],
+                  "description": "fixed: the draft changed to answer it. rejected: the finding is wrong, and `note` says why. blocked: the draft cannot see how to make progress on it — `note` says what it would need."
+                },
+                "note": {
+                  "type": "string",
+                  "description": "What changed, why the finding is wrong, or what is missing. Required for rejected and blocked."
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "features",
+          "feature_docs"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "session": "product-draft",
+    "tools": [
+      "read_file"
+    ]
+  },
+  "scopeSession": "product-draft",
+  "slotMeta": {
+    "inputs.issue": {
+      "description": "What is being asked for."
+    },
+    "inputs.framing": {
+      "optional": true,
+      "description": "The winning framing from the exploration. Absent when the catalog already answered it."
+    },
+    "inputs.residue": {
+      "optional": true,
+      "description": "What the exploration leaves behind — the Framings considered rows."
+    },
+    "inputs.working_set": {
+      "optional": true,
+      "description": "Paths to the docs this phase reads — its standing docs and the catalog entries that bear on the feature. Open them with read_file: the file as it is now, not a copy taken before this phase started editing."
+    },
+    "inputs.prior_findings": {
+      "optional": true,
+      "description": "What the critique said about the PREVIOUS draft. Absent on the first pass. Address each one and account for it in `responses`: a finding that comes back unchanged is a finding about this state, not about the document."
+    },
+    "inputs.returned_findings": {
+      "optional": true,
+      "description": "What a LATER phase sent back. Absent on the first pass through. Shapes differ by sender — a review finding carries `severity`/`claim`/`lens`, a design finding raised by acceptance or implementation carries whatever that phase recorded — so read each entry for what it says rather than expecting one shape."
+    },
+    "inputs.reviewer_comments": {
+      "optional": true,
+      "description": "What the person at the gate said when they sent this back. Absent unless they did. A decision, not a critique: they are overriding a recommendation, so what they wrote is the whole of the reason."
+    },
+    "outputs.standing_amendment": {
+      "optional": true
+    },
+    "outputs.responses": {
+      "optional": true,
+      "description": "One entry per prior finding, saying what this pass did with it. Feeds the critique so it can check whether a finding was addressed or restated — the loop's only memory of its own passes."
+    }
+  }
+}
