@@ -146,7 +146,18 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAnchor; onClose: 
   const top = Math.min(anchor.y, Math.max(4, window.innerHeight - height - 4));
 
   return (
-    <div className="context-menu" role="menu" ref={ref} style={{ left, top, width }}>
+    /*
+     * The menu does not take focus, ever.
+     *
+     * `mousedown` on a `<button>` focuses it, which is fine for every verb that acts on a thing the
+     * item already names and fatal for the four that act on "whatever has focus" — Cut, Copy, Paste
+     * and Select all are performed by the browser process on the focused frame, and the focused frame
+     * was the field that was right-clicked until this menu was clicked. It was not: the button took
+     * focus on the way down, and `onClose` then unmounted it and dropped focus to `<body>`, so Paste
+     * pasted into nothing. Cancelling the default keeps focus exactly where the right-click left it,
+     * which is the only state in which those four mean what they say.
+     */
+    <div className="context-menu" role="menu" ref={ref} style={{ left, top, width }} onMouseDown={(e) => e.preventDefault()}>
       {anchor.title !== undefined ? <div className="menu-title">{anchor.title}</div> : null}
       {anchor.items.map((item, i) => (
         <button

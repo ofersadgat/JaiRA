@@ -123,10 +123,17 @@ async function pngOf(svg: SVGSVGElement): Promise<Blob | null> {
  * shape people know before they open it, and a Paste that moves position depending on what is on
  * the clipboard is a menu you have to read every time.
  */
-function editItems(flags: FrameContextMenu["editFlags"]): MenuItem[] {
+function editItems(flags: FrameContextMenu["editFlags"], field?: HTMLElement): MenuItem[] {
   const run =
-    (verb: "cut" | "copy" | "paste" | "selectAll") => () =>
+    (verb: "cut" | "copy" | "paste" | "selectAll") => () => {
+      // The verb acts on whatever has focus, and the flags above were decided about `field` — so the
+      // two agree only if `field` is what is focused. `ContextMenu` no longer takes focus away from
+      // it, which is what makes that true in the ordinary case; this covers the rest, where the
+      // right-click reached an element Chromium did not focus for it. Absent on the frame route,
+      // where there is no element to name and the focused frame is already the right answer.
+      if (field !== undefined && document.activeElement !== field) field.focus({ preventScroll: true });
       void invoke("shell:edit", { verb }).catch(() => undefined);
+    };
   return [
     { label: "Cut", disabled: !flags.canCut, onSelect: run("cut") },
     { label: "Copy", disabled: !flags.canCopy, onSelect: run("copy") },
@@ -207,12 +214,15 @@ function itemsForEvent(event: MouseEvent): MenuItem[] {
     // disabled field can be copied from and not written to, and the flags should say so.
     const input = field as HTMLInputElement & HTMLTextAreaElement;
     const writable = input.readOnly !== true && input.disabled !== true;
-    return editItems({
-      canCut: writable && selection !== "",
-      canCopy: selection !== "",
-      canPaste: writable,
-      canSelectAll: true,
-    });
+    return editItems(
+      {
+        canCut: writable && selection !== "",
+        canCopy: selection !== "",
+        canPaste: writable,
+        canSelectAll: true,
+      },
+      input,
+    );
   }
 
   const image = target.closest("img");
