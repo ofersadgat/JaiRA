@@ -6,7 +6,7 @@
  * reaches the filesystem at the configured destination, and that changing the
  * destination moves the file without touching the workflow.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -98,10 +98,13 @@ describe("a returned artifact reaches the filesystem", () => {
   it("derives the filename under $CENTRAL_FLAT", async () => {
     configure({ destination: "$CENTRAL_FLAT" });
     const { taskId } = await runTask();
-    // <instanceId>-<slot>.<ext>, with the instance the engine assigned.
+    // <instanceId>-<slot>.<ext>, with the instance the engine assigned — a minted UUID, so the
+    // name is discovered by its slot half rather than spelled out.
     const dirPath = join(dir, ".jaira", "system", "artifacts", taskId);
     expect(existsSync(dirPath)).toBe(true);
-    const files = readFileSync(join(dirPath, "1-summary.md"), "utf8");
+    const name = readdirSync(dirPath).find((f) => f.endsWith("-summary.md"));
+    expect(name).toBeDefined();
+    const files = readFileSync(join(dirPath, name!), "utf8");
     expect(files).toContain("Widgets");
   });
 

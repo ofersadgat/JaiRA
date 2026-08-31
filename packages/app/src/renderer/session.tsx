@@ -66,7 +66,7 @@ export interface SessionPanelProps {
   history: SessionRef[];
   session: SessionView | null;
   /** Which instance is being shown; null means the most recent. */
-  showing: number | null;
+  showing: string | null;
   /**
    * The answer being written right now, before it is a turn.
    *
@@ -74,7 +74,7 @@ export interface SessionPanelProps {
    * state's, and rendering it here would attribute one run's words to a different one.
    */
   live?: { sessionId?: string; seq?: number; text: string } | null;
-  onShow: (instanceId: number | null) => void;
+  onShow: (instanceId: string | null) => void;
 }
 
 /**

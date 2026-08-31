@@ -31,7 +31,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const entered = (id: number, stateId: string): EngineEvent => ({
+const entered = (id: string, stateId: string): EngineEvent => ({
   type: "instance.entered",
   instanceId: id,
   stateId,
@@ -45,8 +45,8 @@ function seedTask(taskId: string, status: "completed" | "failed" | "canceled" | 
   for (const age of ages) {
     const runId = project.runtime.beginRun(taskId, "hash", now - age - HOUR);
     const recorder = project.events.recorder(taskId, runId);
-    recorder.record(entered(1, "wf"), now - age - HOUR);
-    recorder.record({ type: "instance.terminated", instanceId: 1, stateId: "wf", outcome: "success" }, now - age);
+    recorder.record(entered("1", "wf"), now - age - HOUR);
+    recorder.record({ type: "instance.terminated", instanceId: "1", stateId: "wf", outcome: "success" }, now - age);
     project.commands.record({ taskId, runId, tool: "bash", command: "git status", decision: "allowed", decidedBy: "policy" });
     // A `running`/`interrupted` task keeps its last run open, like a real crash.
     const open = status === "running" || status === "interrupted";

@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
-import { happyRules, HUMAN_REVIEW_FUNCTION, JAIRA_TOOLS, specPlanningFiles, writeWorkflowFiles, CHAT_INSTANCE_BASE } from "@jaira/runtime";
+import { happyRules, HUMAN_REVIEW_FUNCTION, JAIRA_TOOLS, specPlanningFiles, writeWorkflowFiles, chatInstanceIdOf, isChatInstance } from "@jaira/runtime";
 import type { InstanceNode, PushMessage } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
@@ -44,7 +44,7 @@ async function until(predicate: () => boolean, label: string, budgetMs = 8000): 
 }
 
 /** A finished run, and the instance whose conversation a reader would be looking at. */
-async function ranTask(): Promise<{ taskId: string; instanceId: number }> {
+async function ranTask(): Promise<{ taskId: string; instanceId: string }> {
   const { taskId } = service.createTask({ title: "Plan it", workflow: "feature/plan", inputs: { issue: "the issue" } });
   await service.startTask({
     taskId,
@@ -142,7 +142,7 @@ describe("the settings a message would run under", () => {
     // The renderer holds an instance id from a projection main may have re-read since, so a
     // selection one refresh stale lands here routinely. Ordinary, therefore not an error.
     const { taskId } = await ranTask();
-    expect(service.chatPlan({ taskId, instanceId: 999_999 })).toBeNull();
+    expect(service.chatPlan({ taskId, instanceId: "no-such-instance" })).toBeNull();
   });
 
   it("keeps SENDING a refusal, because a typed message deserves a reason", async () => {
@@ -169,14 +169,14 @@ describe("sending a message", () => {
     });
 
     expect(sent.failure).toBeUndefined();
-    expect(sent.instanceId).toBe(CHAT_INSTANCE_BASE + instanceId);
+    expect(sent.instanceId).toBe(chatInstanceIdOf(instanceId));
     expect(sent.index).toBe(0);
 
     // Where the panel reads from: the child must be in the tree, under the right parent.
     const detail = service.taskDetail(taskId);
     const parent = findNode(detail.instances, instanceId);
     expect(parent).toBeDefined();
-    const chat = parent!.children.find((c) => c.instanceId === CHAT_INSTANCE_BASE + instanceId);
+    const chat = parent!.children.find((c) => c.instanceId === chatInstanceIdOf(instanceId));
     expect(chat).toBeDefined();
     expect(chat!.childKey).toBe("ask");
     expect(chat!.superseded).toBe(false);
@@ -194,7 +194,7 @@ describe("sending a message", () => {
 
     const detail = service.taskDetail(taskId);
     const parent = findNode(detail.instances, instanceId);
-    const chats = parent!.children.filter((c) => c.instanceId >= CHAT_INSTANCE_BASE);
+    const chats = parent!.children.filter((c) => isChatInstance(c.instanceId));
     expect(chats).toHaveLength(1);
     expect(chats[0]!.index).toBe(1);
   });
@@ -281,7 +281,7 @@ describe("a turn that was stopped", () => {
   it("appears in the session history, which is what the panel finds a conversation BY", async () => {
     const { taskId, instanceId } = await ranTask();
     await service.sendChatMessage({ taskId, instanceId, message: "the one that got stopped", fake: [{ error: "stopped" }] });
-    const chat = service.sessionHistory({ taskId }).find((h) => h.instanceId === CHAT_INSTANCE_BASE + instanceId);
+    const chat = service.sessionHistory({ taskId }).find((h) => h.instanceId === chatInstanceIdOf(instanceId));
     // Listed, and listed as what it was. Unlisted, its position was invisible and the next message
     // was sent straight into it.
     expect(chat).toBeDefined();
@@ -290,7 +290,7 @@ describe("a turn that was stopped", () => {
 });
 
 /** Depth-first by instance id — the projection's tree is only navigable downward. */
-function findNode(roots: readonly InstanceNode[], id: number): InstanceNode | undefined {
+function findNode(roots: readonly InstanceNode[], id: string): InstanceNode | undefined {
   for (const node of roots) {
     if (node.instanceId === id) return node;
     const found = findNode(node.children, id);

@@ -59,15 +59,17 @@ export function collectEngineArtifacts(value: JsonValue | undefined): EngineArti
 /**
  * Split the engine's artifact name into the pieces a destination template wants.
  *
- * `feature.plan.context#3.plan_doc` → state `feature/plan/context`, instance 3,
- * slot `plan_doc`. The engine flattens `/` to `.` when it builds the name, so the
- * state id cannot be recovered exactly — it is reported dotted, which is fine
- * because `$STATE_ID` is sanitized into one path segment anyway.
+ * `feature.plan.context#<uuid>.plan_doc` → state `feature/plan/context`, that
+ * instance, slot `plan_doc`. The engine flattens `/` to `.` when it builds the
+ * name, so the state id cannot be recovered exactly — it is reported dotted,
+ * which is fine because `$STATE_ID` is sanitized into one path segment anyway.
+ * The id half is a UUIDv7 (hex and dashes, never `.` or `#`), so the greedy
+ * state half and the final slot segment still split unambiguously.
  */
-export function parseArtifactName(name: string): { stateId?: string; instanceId?: number; slot?: string } {
-  const match = /^(.*)#(\d+)\.([^.]+)$/.exec(name);
+export function parseArtifactName(name: string): { stateId?: string; instanceId?: string; slot?: string } {
+  const match = /^(.*)#([^.#]+)\.([^.]+)$/.exec(name);
   if (!match) return {};
-  return { stateId: match[1]!, instanceId: Number(match[2]), slot: match[3]! };
+  return { stateId: match[1]!, instanceId: match[2]!, slot: match[3]! };
 }
 
 /** A sensible logical path for an engine artifact: `<slot>.<ext from format>`. */

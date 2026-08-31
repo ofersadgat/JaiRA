@@ -936,7 +936,7 @@ describe("AppService.effectiveState", () => {
     const goals = service.effectiveState({ stateId: "feature/plan/goals", taskId });
     // The inputs the engine resolved on the way in — the value behind `.inputs.issue`.
     expect(goals.values?.inputs).toEqual({ issue: "the issue" });
-    expect(goals.values?.instanceId).toBeGreaterThan(0);
+    expect(goals.values?.instanceId).toBeTruthy();
     // And what the call returned, which is where a produced output takes its value from by name.
     expect(goals.values?.output).toBeDefined();
 

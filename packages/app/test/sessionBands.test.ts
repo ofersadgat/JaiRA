@@ -38,18 +38,18 @@ const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "
   ...patch,
 });
 
-/** A session row: `ref(instance, session, from, to)`. */
+/** A session row: `ref(instance, session, from, to)`. Numeric for brevity; ids are strings. */
 const ref = (instanceId: number, sessionId: string, startedAt: number, at: number): SessionRef =>
-  ({ runId: 1, instanceId, stateId: `s${instanceId}`, sessionId, seq: 0, startedAt, at }) as SessionRef;
+  ({ runId: 1, instanceId: String(instanceId), stateId: `s${instanceId}`, sessionId, seq: 0, startedAt, at }) as SessionRef;
 
 /** A composite parent over leaves that ran between the given times. */
 const tree = (kids: Array<{ id: number; from: number; to: number }>): InstanceNode =>
   node({
-    instanceId: 1,
+    instanceId: "1",
     stateId: "plan",
     startedAt: 0,
     children: kids.map((kid) =>
-      node({ instanceId: kid.id, stateId: `s${kid.id}`, childKey: `k${kid.id}`, startedAt: kid.from, endedAt: kid.to }),
+      node({ instanceId: String(kid.id), stateId: `s${kid.id}`, childKey: `k${kid.id}`, startedAt: kid.from, endedAt: kid.to }),
     ),
   });
 
@@ -64,41 +64,41 @@ describe("piecesOf", () => {
       { id: 3, from: 11, to: 20 },
     ]);
     const pieces = piecesOf(parent, [ref(2, "A", 0, 10), ref(3, "A", 11, 20)], 1);
-    expect(pieces.map((p) => p.node.instanceId)).toEqual([2, 3]);
-    expect(pieces.some((p) => p.node.instanceId === 1)).toBe(false);
+    expect(pieces.map((p) => p.node.instanceId)).toEqual(["2", "3"]);
+    expect(pieces.some((p) => p.node.instanceId === "1")).toBe(false);
   });
 
   it("includes the run's OWN operation when it has one", () => {
     const parent = tree([{ id: 2, from: 5, to: 10 }]);
     const pieces = piecesOf(parent, [ref(1, "A", 0, 20), ref(2, "B", 5, 10)], 1);
     expect(pieces.map((p) => [p.node.instanceId, p.sessionId])).toEqual([
-      [1, "A"],
-      [2, "B"],
+      ["1", "A"],
+      ["2", "B"],
     ]);
   });
 
   it("flattens the whole subtree, so a grandchild lands in the session it continued", () => {
     const parent = node({
-      instanceId: 1,
+      instanceId: "1",
       stateId: "plan",
       children: [
         node({
-          instanceId: 2,
+          instanceId: "2",
           stateId: "plan/mid",
           startedAt: 0,
           endedAt: 30,
-          children: [node({ instanceId: 3, stateId: "plan/mid/leaf", startedAt: 5, endedAt: 25 })],
+          children: [node({ instanceId: "3", stateId: "plan/mid/leaf", startedAt: 5, endedAt: 25 })],
         }),
       ],
     });
     const pieces = piecesOf(parent, [ref(3, "A", 5, 25)], 1);
-    expect(pieces.map((p) => p.node.instanceId)).toEqual([3]);
+    expect(pieces.map((p) => p.node.instanceId)).toEqual(["3"]);
   });
 
   it("keeps a leaf that ran no model call — it happened, and a function op has no session", () => {
     const parent = tree([{ id: 2, from: 0, to: 10 }]);
     const [piece] = piecesOf(parent, [], 1);
-    expect(piece?.node.instanceId).toBe(2);
+    expect(piece?.node.instanceId).toBe("2");
     expect(piece?.sessionId).toBeUndefined();
   });
 
@@ -131,38 +131,38 @@ describe("piecesOf", () => {
     // response to. `superseded` governs expression resolution, not history; the projection keeps the
     // history in as many words, and every other reader already shows it.
     const parent = node({
-      instanceId: 1,
+      instanceId: "1",
       stateId: "plan",
       children: [
-        node({ instanceId: 2, stateId: "s2", startedAt: 0, endedAt: 10, superseded: true }),
-        node({ instanceId: 3, stateId: "s3", startedAt: 11, endedAt: 20 }),
+        node({ instanceId: "2", stateId: "s2", startedAt: 0, endedAt: 10, superseded: true }),
+        node({ instanceId: "3", stateId: "s3", startedAt: 11, endedAt: 20 }),
       ],
     });
     const pieces = piecesOf(parent, [ref(2, "A", 0, 10), ref(3, "A", 11, 20)], 1);
     // In time order, so the superseded pass reads as the earlier one it is.
-    expect(pieces.map((p) => p.node.instanceId)).toEqual([2, 3]);
+    expect(pieces.map((p) => p.node.instanceId)).toEqual(["2", "3"]);
   });
 
   it("keeps the whole subtree under a superseded pass, not only its root", () => {
     // The walk used to stop descending, so a superseded COMPOSITE took every conversation beneath it
     // off the page — which is exactly the shape a loop over a module produces.
     const parent = node({
-      instanceId: 1,
+      instanceId: "1",
       stateId: "plan",
       children: [
         node({
-          instanceId: 2,
+          instanceId: "2",
           stateId: "explore",
           startedAt: 0,
           endedAt: 10,
           superseded: true,
-          children: [node({ instanceId: 4, stateId: "explore/brief", startedAt: 1, endedAt: 9 })],
+          children: [node({ instanceId: "4", stateId: "explore/brief", startedAt: 1, endedAt: 9 })],
         }),
-        node({ instanceId: 3, stateId: "explore", startedAt: 11, endedAt: 20 }),
+        node({ instanceId: "3", stateId: "explore", startedAt: 11, endedAt: 20 }),
       ],
     });
     const pieces = piecesOf(parent, [ref(4, "A", 1, 9), ref(3, "B", 11, 20)], 1);
-    expect(pieces.map((p) => p.node.instanceId)).toEqual([4, 3]);
+    expect(pieces.map((p) => p.node.instanceId)).toEqual(["4", "3"]);
   });
 
   it("prefers the operation's start over the instance's — they differ by a whole subtree", () => {
@@ -268,16 +268,71 @@ describe("bandsOf", () => {
 
   it("lets a call still running overlap whatever starts after it", () => {
     const parent = node({
-      instanceId: 1,
+      instanceId: "1",
       stateId: "plan",
       children: [
-        node({ instanceId: 2, stateId: "s2", startedAt: 0, status: "running" }),
-        node({ instanceId: 3, stateId: "s3", startedAt: 5, endedAt: 9 }),
+        node({ instanceId: "2", stateId: "s2", startedAt: 0, status: "running" }),
+        node({ instanceId: "3", stateId: "s3", startedAt: 5, endedAt: 9 }),
       ],
     });
     const bands = bandsOf(piecesOf(parent, [ref(3, "B", 5, 9)], 1));
     expect(bands).toHaveLength(1);
     expect(bands[0]!.segments).toHaveLength(2);
+  });
+});
+
+describe("piecesOf over a resumed task", () => {
+  /**
+   * What the fold hands over after a resume, which is the shape that broke this.
+   *
+   * A replayed operation is never dispatched, so it writes no session position; the conversation
+   * stays under the id the ORIGINAL run recorded it beneath. `foldRuns` merges by position and the
+   * later node wins outright, so the folded node names the RESUMED run and an instance that never
+   * wrote a record. Joining on that pair finds nothing, and every state the resume replayed came
+   * back as "this state ran no model call" — about a state whose transcript was in the database.
+   */
+  const address = [{ childKey: "draft", occurrence: 0 }];
+  const folded = (): InstanceNode =>
+    node({
+      instanceId: "1",
+      stateId: "product",
+      address: [],
+      runId: 3,
+      children: [
+        node({ instanceId: "5", stateId: "product/draft", childKey: "draft", address, runId: 3, startedAt: 100, endedAt: 200 }),
+      ],
+    });
+  /** Run 1's call at that address — a different instance id, which is the whole difficulty. */
+  const original = (): SessionRef =>
+    ({ runId: 1, instanceId: "9", stateId: "product/draft", sessionId: "conv-1", seq: 0, startedAt: 5, at: 9, address }) as SessionRef;
+
+  it("finds the call the ORIGINAL run made at this address", () => {
+    const pieces = piecesOf(folded(), [original()]);
+    const draft = pieces.find((p) => p.node.stateId === "product/draft")!;
+    expect(draft.sessionId).toBe("conv-1");
+    // And it says whose it is, rather than letting the node's run speak for work it did not do.
+    expect(draft.runId).toBe(1);
+    expect(draft.instanceId).toBe("9");
+  });
+
+  it("does not draw the same call twice — once on the node, once synthesised beside it", () => {
+    // The synthesis exists for an earlier run's work the fold overwrote, and it decides what is
+    // already drawn from the pieces. That check used to read the NODE's run and instance, which was
+    // the same thing as the record's only while the join was by that pair. Under the address join a
+    // folded run-4 node holds a record filed under run 2, so nothing matched and every conversation
+    // was drawn a second time next to itself — and `runForksOf` read the pair as two sides.
+    const pieces = piecesOf(folded(), [original()]);
+    expect(pieces.filter((p) => p.node.stateId === "product/draft")).toHaveLength(1);
+    expect(runForksOf(pieces)).toEqual([]);
+  });
+
+  it("keeps the fallback for a state that genuinely ran no call", () => {
+    // The address join must not turn "nothing was recorded here" into a hunt through other runs: a
+    // function op is silent in every run, and the sentence saying so is an answer.
+    const pieces = piecesOf(folded(), []);
+    const draft = pieces.find((p) => p.node.stateId === "product/draft")!;
+    expect(draft.sessionId).toBeUndefined();
+    expect(draft.runId).toBeUndefined();
   });
 });
 
@@ -291,7 +346,7 @@ describe("instancesOf", () => {
     // By RUN and instance, because that is what a transcript is fetched under: an id minted per walk
     // names a different state in every run, and asking for it alone brings back whichever run wrote
     // it last. A single-run tree stamps no run, and then the id alone is the whole key.
-    expect(instancesOf(bands).map((one) => one.instanceId).sort()).toEqual([2, 3]);
+    expect(instancesOf(bands).map((one) => one.instanceId).sort()).toEqual(["2", "3"]);
     expect(instancesOf(bands).every((one) => one.runId === undefined)).toBe(true);
   });
 
@@ -324,7 +379,7 @@ describe("notesOf", () => {
   it("keeps the failure of a state that never opened a conversation", () => {
     const notes = notesOf([
       turn({ seq: 1, kind: "blocked", stateId: "plan/draft", path: "draft", text: "plan/draft: input 'framing' is not wired", ok: false }),
-      turn({ seq: 2, kind: "terminated", instanceId: 1, stateId: "plan", path: "", text: "child 'draft' terminated with error", ok: false }),
+      turn({ seq: 2, kind: "terminated", instanceId: "1", stateId: "plan", path: "", text: "child 'draft' terminated with error", ok: false }),
     ]);
     expect(notes.map((n) => [n.kind, n.path, n.text])).toEqual([
       // The state id the engine prefixed the reason with is dropped: the note carries it beside the
@@ -352,13 +407,13 @@ describe("notesOf", () => {
    */
   it("drops a failure whose instance ran an operation — that panel is already saying it", () => {
     const ran = node({
-      instanceId: 2,
+      instanceId: "2",
       stateId: "s2",
       operation: { kind: "prompt", status: "failed", reason: "the call failed" },
     });
     const notes = notesOf(
-      [turn({ seq: 1, kind: "failure", instanceId: 2, stateId: "s2", path: "a", text: "the call failed", ok: false })],
-      node({ instanceId: 1, stateId: "plan", children: [ran] }),
+      [turn({ seq: 1, kind: "failure", instanceId: "2", stateId: "s2", path: "a", text: "the call failed", ok: false })],
+      node({ instanceId: "1", stateId: "plan", children: [ran] }),
     );
     expect(notes).toEqual([]);
   });
@@ -367,8 +422,8 @@ describe("notesOf", () => {
     // A composite giving up because a child did. It has children and no operation of its own, so the
     // grey is the only account of it there can be.
     const notes = notesOf(
-      [turn({ seq: 1, kind: "terminated", instanceId: 1, stateId: "plan", path: "", text: "child 'draft' failed", ok: false })],
-      node({ instanceId: 1, stateId: "plan", children: [node({ instanceId: 2, stateId: "s2" })] }),
+      [turn({ seq: 1, kind: "terminated", instanceId: "1", stateId: "plan", path: "", text: "child 'draft' failed", ok: false })],
+      node({ instanceId: "1", stateId: "plan", children: [node({ instanceId: "2", stateId: "s2" })] }),
     );
     expect(notes.map((n) => [n.kind, n.text])).toEqual([["failure", "child 'draft' failed"]]);
   });
@@ -378,7 +433,7 @@ describe("notesOf", () => {
     // became one, so there is nothing to look up and nothing that could claim it.
     const notes = notesOf(
       [turn({ seq: 1, kind: "blocked", stateId: "plan/draft", path: "draft", text: "not wired", ok: false })],
-      node({ instanceId: 1, stateId: "plan", operation: { kind: "prompt", status: "completed" } }),
+      node({ instanceId: "1", stateId: "plan", operation: { kind: "prompt", status: "completed" } }),
     );
     expect(notes.map((n) => [n.kind, n.text])).toEqual([["blocked", "not wired"]]);
   });
@@ -386,7 +441,7 @@ describe("notesOf", () => {
   it("claims nothing when there is no tree to ask", () => {
     // A projection that has not landed yet. Hiding a run's only error while the panel that would
     // have shown it does not exist either is the one failure mode worth refusing.
-    const notes = notesOf([turn({ seq: 1, kind: "failure", instanceId: 2, stateId: "s2", path: "a", text: "boom", ok: false })]);
+    const notes = notesOf([turn({ seq: 1, kind: "failure", instanceId: "2", stateId: "s2", path: "a", text: "boom", ok: false })]);
     expect(notes.map((n) => n.text)).toEqual(["boom"]);
   });
 
@@ -394,19 +449,19 @@ describe("notesOf", () => {
     // The case that makes this worth having: a sequence walking down its spine takes no transitions
     // at all, so a canvas drawn from `transition.taken` alone would be blank for the run somebody
     // opens to ask how far it got.
-    const notes = notesOf([turn({ seq: 1, kind: "entered", instanceId: 2, stateId: "feature/product", path: "product" })]);
+    const notes = notesOf([turn({ seq: 1, kind: "entered", instanceId: "2", stateId: "feature/product", path: "product" })]);
     // The INSTANCE travels with it, which is what the rail keys a lane on: `explore` running twice is
     // two lanes with one colour, and a lane keyed on the state would draw the second pass as a
     // continuation of the first.
     expect(notes).toEqual([
-      { seq: 1, at: 10, kind: "entered", stateId: "feature/product", instanceId: 2, path: "product", text: "" },
+      { seq: 1, at: 10, kind: "entered", stateId: "feature/product", instanceId: "2", path: "product", text: "" },
     ]);
   });
 
   it("does not draw the ROOT entering itself — everything in the run is inside it", () => {
     const notes = notesOf([
-      turn({ seq: 1, kind: "entered", instanceId: 1, stateId: "feature", path: "" }),
-      turn({ seq: 2, kind: "entered", instanceId: 2, stateId: "feature/product", path: "product" }),
+      turn({ seq: 1, kind: "entered", instanceId: "1", stateId: "feature", path: "" }),
+      turn({ seq: 2, kind: "entered", instanceId: "2", stateId: "feature/product", path: "product" }),
     ]);
     expect(notes.map((n) => n.path)).toEqual(["product"]);
   });
@@ -417,8 +472,8 @@ describe("notesOf", () => {
     // rather than by a string — and a state whose label happens to be "entered" can no longer be
     // mistaken for the machine walking into it.
     const notes = notesOf([
-      turn({ seq: 1, kind: "started", instanceId: 2, stateId: "plan/draft", path: "draft", text: "prompt" }),
-      turn({ seq: 2, kind: "terminated", instanceId: 2, stateId: "plan/draft", path: "draft", text: "entered", ok: true }),
+      turn({ seq: 1, kind: "started", instanceId: "2", stateId: "plan/draft", path: "draft", text: "prompt" }),
+      turn({ seq: 2, kind: "terminated", instanceId: "2", stateId: "plan/draft", path: "draft", text: "entered", ok: true }),
     ]);
     expect(notes).toEqual([]);
   });
@@ -437,7 +492,7 @@ describe("notesOf", () => {
     // same block reported three times is one fact reported three times.
     const notes = notesOf([
       turn({ seq: 1, kind: "transition", stateId: "plan", path: "", text: "draft" }),
-      turn({ seq: 2, kind: "terminated", instanceId: 1, stateId: "plan", path: "", text: "success", ok: true }),
+      turn({ seq: 2, kind: "terminated", instanceId: "1", stateId: "plan", path: "", text: "success", ok: true }),
       turn({ seq: 3, kind: "failure", stateId: "plan/draft", path: "draft", text: "not wired", ok: false }),
       turn({ seq: 4, kind: "failure", stateId: "plan/draft", path: "draft", text: "not wired", ok: false }),
       turn({ seq: 5, kind: "transition", stateId: "plan", path: "", text: "draft" }),
@@ -451,8 +506,8 @@ describe("notesOf", () => {
 
   it("ignores the turns that are neither — a successful termination is not news on the grey", () => {
     const notes = notesOf([
-      turn({ seq: 1, kind: "terminated", instanceId: 1, stateId: "plan", path: "", text: "success", ok: true }),
-      turn({ seq: 2, kind: "output", instanceId: 1, stateId: "plan", path: "", ok: true }),
+      turn({ seq: 1, kind: "terminated", instanceId: "1", stateId: "plan", path: "", text: "success", ok: true }),
+      turn({ seq: 2, kind: "output", instanceId: "1", stateId: "plan", path: "", ok: true }),
     ]);
     expect(notes).toEqual([]);
   });
@@ -480,7 +535,7 @@ describe("pathFrom", () => {
 });
 
 describe("mountPathOf", () => {
-  const node = (instanceId: number, childKey: string | undefined, children: InstanceNode[] = []): InstanceNode =>
+  const node = (instanceId: string, childKey: string | undefined, children: InstanceNode[] = []): InstanceNode =>
     ({
       instanceId,
       stateId: `s${instanceId}`,
@@ -492,18 +547,18 @@ describe("mountPathOf", () => {
       ...(childKey !== undefined ? { childKey } : {}),
     }) as InstanceNode;
 
-  const forest = [node(1, undefined, [node(2, "product", [node(3, "context"), node(4, "explore")])])];
+  const forest = [node("1", undefined, [node("2", "product", [node("3", "context"), node("4", "explore")])])];
 
   it("is the chain of CHILD KEYS from the root", () => {
-    expect(mountPathOf(forest, 4)).toBe("product/explore");
+    expect(mountPathOf(forest, "4")).toBe("product/explore");
   });
 
   it("is empty for the root — which is how the view spells you are looking at it", () => {
-    expect(mountPathOf(forest, 1)).toBe("");
+    expect(mountPathOf(forest, "1")).toBe("");
   });
 
   it("is empty for an instance the tree does not have", () => {
-    expect(mountPathOf(forest, 99)).toBe("");
+    expect(mountPathOf(forest, "99")).toBe("");
   });
 });
 
@@ -554,18 +609,18 @@ describe("startersOf", () => {
     ]);
     // "A" runs, is interrupted by "B", and comes back — so it has two panels and one starter.
     const bands = bandsOf(piecesOf(parent, [ref(2, "A", 0, 10), ref(3, "B", 11, 20), ref(4, "A", 21, 30)], 1));
-    expect(startersOf(bands).get("A")?.node.instanceId).toBe(2);
-    expect(startersOf(bands).get("B")?.node.instanceId).toBe(3);
+    expect(startersOf(bands).get("A")?.node.instanceId).toBe("2");
+    expect(startersOf(bands).get("B")?.node.instanceId).toBe("3");
   });
 });
 
 describe("forksOf", () => {
   /** A retried state: the attempt that claimed the position, and the branch that had to leave it. */
   const retried = (): SessionRef[] => [
-    { runId: 1, instanceId: 2, stateId: "implement", sessionId: "default", seq: 6, startedAt: 10, at: 20, status: "error" },
+    { runId: 1, instanceId: "2", stateId: "implement", sessionId: "default", seq: 6, startedAt: 10, at: 20, status: "error" },
     {
       runId: 1,
-      instanceId: 3,
+      instanceId: "3",
       stateId: "implement",
       sessionId: "b7c1e4",
       seq: 6,
@@ -628,7 +683,7 @@ describe("runForksOf", () => {
     const at = [{ childKey: "implement", occurrence: 0 }];
     const make = (runId: number, startedAt: number): SessionPiece => ({
       node: {
-        instanceId: 3,
+        instanceId: "3",
         stateId: "implement",
         childKey: "implement",
         status: "completed",
@@ -668,6 +723,37 @@ describe("runForksOf", () => {
     expect(forks[0]!.sides.some((s) => s.runId === 3)).toBe(false);
   });
 
+  it("counts the run that MADE the call, not the run the folded node happens to name", () => {
+    // The resume, drawn the way the fold actually hands it over. Run 1 made the call; run 3 replayed
+    // the address, so `foldRuns` put ITS node at that position — the later node wins outright — and
+    // the piece hanging off it is still run 1's work, joined by address.
+    //
+    // Reading the run off the node made this a fork of run 1 against run 3, at every single address
+    // a resume walked over: "fork: 2 of 2 — run 3" under almost every panel in the conversation, for
+    // a run that dispatched nothing there. See `SessionPiece.runId`.
+    const at = [{ childKey: "implement", occurrence: 0 }];
+    const replayed: SessionPiece = {
+      node: {
+        instanceId: "5", // run 3's own id for this position — it never wrote a record under it
+        stateId: "implement",
+        childKey: "implement",
+        status: "completed",
+        index: 0,
+        superseded: false,
+        startedAt: 0,
+        runId: 3,
+        address: at,
+        children: [],
+      },
+      runId: 1,
+      instanceId: "3",
+      sessionId: "s1",
+      seq: 0,
+      startedAt: 0,
+    };
+    expect(runForksOf([replayed])).toEqual([]);
+  });
+
   it("orders the sides by when they ran, so the count reads as the attempt number", () => {
     const forks = runForksOf([...twice()].reverse());
     expect(forks[0]!.sides.map((s) => s.runId)).toEqual([1, 2]);
@@ -679,7 +765,7 @@ describe("where a run-scale mark goes", () => {
   const shared = (): SessionPiece[] => {
     const make = (stateId: string, runId: number, startedAt: number, seq: number): SessionPiece => ({
       node: {
-        instanceId: seq + 2,
+        instanceId: String(seq + 2),
         stateId,
         childKey: stateId,
         status: "completed",

@@ -103,6 +103,29 @@ export function surfaceKindOf(node: InstanceNode): SurfaceKind | undefined {
 }
 
 /**
+ * Whether this state is asking a question RIGHT NOW — where a parked gate is drawn.
+ *
+ * A function operation that started and never settled, which is exactly what a parked gate leaves in
+ * the projection: `operation.started` fires when the call is dispatched and neither terminal event
+ * has arrived. Nothing else in a run looks like that — a settled function reads `completed` or
+ * `failed`, and a prompt is not `function`.
+ *
+ * Deliberately NOT `status === "waiting_for_user"`. The projection only reaches that word when it
+ * was handed the workflow's SHAPE (which functions are interactive), so a view that fetched the tree
+ * without one would silently place nothing; and the same status is set for a transition parked on
+ * `on_user_event`, which is not an instance's own business and has no panel here to be drawn in.
+ *
+ * ⚠️ One open gate per state, which is all a state can have: SPEC §7.1 gives an instance one
+ * operation. Two gates open at once in one TASK — concurrent `async` children — are two different
+ * instances, so each still lands in its own panel; what the caller must not do is hand the same
+ * request to a tree where more than one instance matches, which for one task's tree cannot happen
+ * while each parked call belongs to a distinct instance.
+ */
+export function isAsking(node: InstanceNode): boolean {
+  return surfaceKindOf(node) === "asked" && node.operation?.status === "running";
+}
+
+/**
  * How loud a node's header is, from its own status and its operation's.
  *
  * Order is the whole rule, and it is failure first: a state whose call errored is the thing somebody

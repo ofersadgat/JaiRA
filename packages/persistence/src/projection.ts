@@ -99,13 +99,13 @@ function runLabelOf(
 }
 
 export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape, atMs?: readonly number[]): ProjectedRun {
-  const byId = new Map<number, MutableNode>();
+  const byId = new Map<string, MutableNode>();
   const roots: MutableNode[] = [];
   const blocked: BlockedChild[] = [];
   /** parent instanceId → child keys cleared by a sequence reset. */
-  const supersededKeys = new Map<number, Set<string>>();
+  const supersededKeys = new Map<string, Set<string>>();
   /** instanceId → the deferred calls it is waiting on right now (`call.waiting`/`call.settled`). */
-  const waitingCalls = new Map<number, Set<string>>();
+  const waitingCalls = new Map<string, Set<string>>();
 
   events.forEach((event, i) => {
     const at = atMs?.[i] ?? 0;
@@ -251,7 +251,7 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
  * run 10's six nodes over run 8's twelve. Nothing was lost — it was being asked the wrong question.
  *
  * Merged by ADDRESS rather than by instance id, for the reason `replay.ts` gives at length: ids are
- * minted `nextInstanceId++` as the engine walks, so two runs agree about them only by luck. Position
+ * minted fresh (UUIDv7) as the engine walks, so two walks never agree about them at all. Position
  * — the chain of child keys, each with an occurrence — is what is stable across runs of one pinned
  * definition, and it is what the replay index already keys on.
  *
@@ -261,8 +261,9 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
  * the truth from the run that got there. Once a replay cannot fail short of the frontier, the two
  * can no longer disagree and this degenerates into "the last run, plus its own tail".
  *
- * Every node carries the run it came from ({@link InstanceNode.runId}), because `instanceId` is
- * unique only within a run and this tree spans several — see that field's note.
+ * Every node carries the run it came from ({@link InstanceNode.runId}): the id alone no longer
+ * collides across runs, but the run is still what a consumer needs to reach that run's own records
+ * — see that field's note.
  */
 export function foldRuns(runs: readonly { runId: number; run: ProjectedRun }[]): ProjectedRun {
   const stamped = runs.map((entry) => ({ runId: entry.runId, run: entry.run }));

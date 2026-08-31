@@ -38,7 +38,7 @@ export interface ArtifactRecord {
    */
   interactive?: boolean;
   /** Which instance and output slot produced it, when it came from one. */
-  instanceId?: number;
+  instanceId?: string;
   stateId?: string;
   slot?: string;
   createdAt: number;

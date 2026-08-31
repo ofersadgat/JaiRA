@@ -162,7 +162,7 @@ export interface FileSurfaceContext {
   detail: TaskDetail | null;
   /** Transcripts by `runId:instanceId`, and how to fetch one — see `sessionKey`. */
   sessions: Record<string, SessionView>;
-  onLoadSession: (instanceId: number) => void;
+  onLoadSession: (instanceId: string) => void;
   /**
    * Fetch SEVERAL, in one round.
    *
@@ -171,11 +171,11 @@ export interface FileSurfaceContext {
    * draws and so wants every transcript in the subtree at once — as one patch, because eight separate
    * ones re-render the whole conversation eight times while it is still assembling itself.
    */
-  onLoadSessions: (at: ReadonlyArray<{ runId?: number; instanceId: number }>) => void;
+  onLoadSessions: (at: ReadonlyArray<{ runId?: number; instanceId: string }>) => void;
   /** Every state that task went through, and the transcript of the one being looked at. */
   sessionHistory: SessionRef[];
   session: SessionView | null;
-  sessionInstance: number | null;
+  sessionInstance: string | null;
   /** The answer being written right now, when there is one — text and thinking tails, every stream item. */
   liveTurn: {
     sessionId?: string;
@@ -192,7 +192,7 @@ export interface FileSurfaceContext {
     /** The tool call whose arguments are still streaming — see `WritingTool`. */
     writing?: WritingTool;
   } | null;
-  onShowSession: (instanceId: number | null) => void;
+  onShowSession: (instanceId: string | null) => void;
   waiting?: { component: string } | undefined;
   /**
    * Transitions parked on a gesture, across every project — `on_user_event` (WORKFLOWS.md §7.4).
@@ -263,7 +263,7 @@ export interface FileSurfaceContext {
    * Optional, like every other navigation on this bag — a surface rendered outside the shell has no
    * column to describe anything in, and the gutter then shows the session id alone.
    */
-  onOpenWorkflow?: ((stateId: string, instanceId: number) => void) | undefined;
+  onOpenWorkflow?: ((stateId: string, instanceId: string) => void) | undefined;
   /**
    * Walk SIDEWAYS: replace the path from `index` down with this run.
    *

@@ -18,17 +18,17 @@ import type { SessionView } from "@jaira/shared/browser";
 /** Where one transcript lives — a run and an instance, or an instance alone. See {@link sessionKey}. */
 export interface SessionAt {
   runId?: number;
-  instanceId: number;
+  instanceId: string;
 }
 
 /**
  * Run and instance, never the instance alone.
  *
- * Ids are minted `nextInstanceId++` per walk, so `#i2` names a different state in every run — a cache
- * keyed on it hands a resumed task's panel whichever run last wrote that id, and the failure is
- * silent: someone else's conversation, correctly drawn, under the wrong heading. A single-run
- * projection stamps no run, and then the id alone is the whole key because there is only one run to
- * confuse it with.
+ * Instance ids are durable UUIDs now, so two runs can no longer mint the same one — but the RECORD
+ * a transcript is read from is still filed per run, and legacy journals still hold counter ids that
+ * do repeat across runs. The pair stays the key until sessions stop being run-scoped (Identity and
+ * Resume §07 step 3). A single-run projection stamps no run, and then the id alone is the whole key
+ * because there is only one run to confuse it with.
  */
 export function sessionKey(at: SessionAt): string {
   return at.runId === undefined ? String(at.instanceId) : `${at.runId}:${at.instanceId}`;

@@ -47,7 +47,8 @@ export interface JournalLine {
   timestamp: string;
   taskId: string;
   runId: number;
-  instanceId?: number;
+  /** `number` only on lines journaled before instance ids became durable strings. */
+  instanceId?: string | number;
   event: EngineEvent;
 }
 
@@ -152,7 +153,8 @@ export function replayJournal(db: JairaDb, journalDir: string): number | undefin
         insert.run(
           line.taskId,
           line.runId,
-          line.instanceId ?? null,
+          // Stringified for lines journaled before ids were strings; `-1` was a sentinel for absence.
+          line.instanceId === undefined || line.instanceId === -1 ? null : String(line.instanceId),
           line.type,
           JSON.stringify(line.event),
           Date.parse(line.timestamp) || 0,

@@ -28,7 +28,7 @@ const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "
 });
 
 const ref = (instanceId: number, sessionId: string, startedAt: number, at: number): SessionRef =>
-  ({ runId: 1, instanceId, stateId: `s${instanceId}`, sessionId, seq: 0, startedAt, at }) as SessionRef;
+  ({ runId: 1, instanceId: String(instanceId), stateId: `s`, sessionId, seq: 0, startedAt, at }) as SessionRef;
 
 /**
  * A composite over leaves that each ran a PROMPT.
@@ -40,11 +40,11 @@ const ref = (instanceId: number, sessionId: string, startedAt: number, at: numbe
  */
 const parentOf = (kids: Array<{ id: number; from: number; to: number }>): InstanceNode =>
   node({
-    instanceId: 1,
+    instanceId: "1",
     stateId: "plan",
     children: kids.map((kid) =>
       node({
-        instanceId: kid.id,
+        instanceId: String(kid.id),
         stateId: `s${kid.id}`,
         childKey: `k${kid.id}`,
         startedAt: kid.from,
@@ -182,9 +182,9 @@ describe("what a conversation draws", () => {
    */
   it("gives a surface a letterhead and no gutter", () => {
     const parent = node({
-      instanceId: 1,
+      instanceId: "1",
       stateId: "plan",
-      children: [node({ instanceId: 2, stateId: "confidence", childKey: "confidence", startedAt: 0, endedAt: 5 })],
+      children: [node({ instanceId: "2", stateId: "confidence", childKey: "confidence", startedAt: 0, endedAt: 5 })],
     });
     const html = draw(parent, []);
     expect(html).toContain("said by #2");
@@ -395,10 +395,10 @@ describe("the workflow behind a conversation", () => {
 describe("a panel that is one side of a fork", () => {
   /** A retried state: the attempt that took the position, and the branch that had to leave it. */
   const RETRY: SessionRef[] = [
-    { runId: 1, instanceId: 2, stateId: "implement", sessionId: "default", seq: 6, startedAt: 0, at: 10, status: "error" },
+    { runId: 1, instanceId: "2", stateId: "implement", sessionId: "default", seq: 6, startedAt: 0, at: 10, status: "error" },
     {
       runId: 1,
-      instanceId: 3,
+      instanceId: "3",
       stateId: "implement",
       sessionId: "b7c1e4",
       seq: 6,

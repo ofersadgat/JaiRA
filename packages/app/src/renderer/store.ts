@@ -386,7 +386,7 @@ export interface AppState {
    * that already happened, and the boxes should hold what that pass was called with. Null is the
    * general case, which is the one the column click has always produced.
    */
-  taskWorkflowRun: number | null;
+  taskWorkflowRun: string | null;
 
   /**
    * Where the open description and the state files stand, and the last proposal.
@@ -490,7 +490,7 @@ export interface AppState {
   /** The conversation of the state being looked at — one operation, whole. */
   session: SessionView | null;
   /** Which instance the viewer is showing. Null ⇒ the task's most recent. */
-  sessionInstance: number | null;
+  sessionInstance: string | null;
   /**
    * Transcripts by instance id, for the composite view — several cards can be open at once.
    *
@@ -499,9 +499,9 @@ export interface AppState {
    * children produced. Fetched on expand rather than up front, because rendering a list of eight
    * folded headers would otherwise cost eight round trips before anyone had asked to read one.
    *
-   * Keyed by RUN and instance (`sessionKey`), because an instance id is minted per walk: `#i2` names
-   * a different state in every run of a task, and a cache keyed on it alone hands a resumed task's
-   * panel whichever run last wrote that id. Still cleared whenever the selected task changes.
+   * Keyed by RUN and instance (`sessionKey`) — see that function's note: durable ids no longer
+   * collide across runs, but the record a transcript is read from is still filed per run, and legacy
+   * journals hold counter ids that do repeat. Still cleared whenever the selected task changes.
    */
   sessions: Record<string, SessionView>;
   /**
@@ -1444,13 +1444,13 @@ export function useApp() {
   const refreshSession = useCallback(
     async (
       taskId: string | null,
-      instanceId: number | null = null,
+      instanceId: string | null = null,
       project?: string,
       atState?: string | null,
       // Which instance was resolved, so a NAVIGATION can start the trail at it. Returned rather than
       // patched here: this also runs on every invalidating push, and re-seeding the trail from one
       // would drop you back to the top of the walk on each engine event.
-    ): Promise<number | null> => {
+    ): Promise<string | null> => {
       if (taskId === null) {
         patch({ sessionHistory: [], session: null, sessionInstance: null });
         return null;
@@ -1701,7 +1701,7 @@ export function useApp() {
    * one already held would flicker a card someone is reading, so a hit is a no-op.
    */
   const loadSession = useCallback(
-    async (instanceId: number) => {
+    async (instanceId: string) => {
       const taskId = ref.current.selected;
       if (taskId === null || ref.current.sessions[instanceId] !== undefined) return;
       const scope = ref.current.selectedProject ?? undefined;
@@ -1735,7 +1735,7 @@ export function useApp() {
    * selection would file one task's words under another's instance ids.
    */
   const loadSessions = useCallback(
-    async (at: ReadonlyArray<{ runId?: number; instanceId: number }>) => {
+    async (at: ReadonlyArray<{ runId?: number; instanceId: string }>) => {
       const taskId = ref.current.selected;
       if (taskId === null) return;
       const scope = ref.current.selectedProject ?? undefined;
@@ -2131,8 +2131,8 @@ export function useApp() {
           // makes the conversation panel refetch (it loads whatever is missing), and the live tail
           // goes with it: the stored turn is the same content with its tool calls attached. Without
           // this, a transcript watched from the start stayed empty after the run finished.
-          const ev = message.event as { type?: string; instanceId?: number };
-          if ((ev.type === "operation.completed" || ev.type === "operation.failed") && typeof ev.instanceId === "number") {
+          const ev = message.event as { type?: string; instanceId?: string };
+          if ((ev.type === "operation.completed" || ev.type === "operation.failed") && typeof ev.instanceId === "string") {
             /**
              * Through {@link withoutSession}, which knows BOTH keys the cache can be holding it
              * under — this used to spell one of them itself, and spelled the wrong one.
@@ -2591,13 +2591,13 @@ export function useApp() {
       },
 
       /** Fetch one child run's transcript, for a card that has just been opened. */
-      loadSession: (instanceId: number) => void loadSession(instanceId),
+      loadSession: (instanceId: string) => void loadSession(instanceId),
 
       /** Fetch every transcript a session-panelled conversation is about to draw. */
-      loadSessions: (at: ReadonlyArray<{ runId?: number; instanceId: number }>) => void loadSessions(at),
+      loadSessions: (at: ReadonlyArray<{ runId?: number; instanceId: string }>) => void loadSessions(at),
 
       /** Look at another state's conversation — clicking a row of the task's history. */
-      showSession: (instanceId: number | null) => {
+      showSession: (instanceId: string | null) => {
         void refreshSession(ref.current.selected, instanceId);
       },
 
@@ -2709,7 +2709,7 @@ export function useApp() {
        * with the inputs this pass was actually called with, and the run history beside it marks this
        * task because `selected` is still pointing at it.
        */
-      inspectWorkflow: (stateId: string, instanceId: number, project?: string) => {
+      inspectWorkflow: (stateId: string, instanceId: string, project?: string) => {
         patch({
           inspect: "workflow",
           taskWorkflow: stateId,
@@ -3326,7 +3326,7 @@ export function useApp() {
        * list you are walking would end the walk after one step. The Back arrow still goes where the
        * context came from.
        */
-      openStateAt: (stateId: string, instanceId: number) => {
+      openStateAt: (stateId: string, instanceId: string) => {
         // `inspect` goes back to the path like every other move that changes the bar. This one used
         // to hold the column on the task so its list of states could be walked; it cannot any more,
         // because the rule is that the panel describes where the address ends. The list is one click

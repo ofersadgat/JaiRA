@@ -18,22 +18,22 @@ const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "
   status: "completed",
   index: 0,
   superseded: false,
-  startedAt: patch.instanceId * 10,
+  startedAt: Number(patch.instanceId) * 10,
   children: [],
   ...patch,
 });
 
 const tree = [
   node({
-    instanceId: 1,
+    instanceId: "1",
     stateId: "plan",
     children: [
-      node({ instanceId: 2, stateId: "plan/draft", childKey: "draft" }),
+      node({ instanceId: "2", stateId: "plan/draft", childKey: "draft" }),
       node({
-        instanceId: 3,
+        instanceId: "3",
         stateId: "plan/critique",
         childKey: "critique",
-        children: [node({ instanceId: 4, stateId: "plan/critique/read", childKey: "read" })],
+        children: [node({ instanceId: "4", stateId: "plan/critique/read", childKey: "read" })],
       }),
     ],
   }),
@@ -41,39 +41,39 @@ const tree = [
 
 describe("finding a run in the tree", () => {
   it("reaches any depth, because a walk can go to any depth", () => {
-    expect(nodeAt(tree, 4)?.stateId).toBe("plan/critique/read");
+    expect(nodeAt(tree, "4")?.stateId).toBe("plan/critique/read");
   });
 
   it("answers nothing for an instance this task has not got", () => {
-    expect(nodeAt(tree, 99)).toBeUndefined();
+    expect(nodeAt(tree, "99")).toBeUndefined();
   });
 });
 
 describe("what a step is called", () => {
   it("uses the run's own name when it has one", () => {
-    expect(stepOf(node({ instanceId: 5, stateId: "plan/draft", childKey: "draft", label: "span offsets" }))).toEqual({
-      instanceId: 5,
+    expect(stepOf(node({ instanceId: "5", stateId: "plan/draft", childKey: "draft", label: "span offsets" }))).toEqual({
+      instanceId: "5",
       stateId: "plan/draft",
       name: "span offsets",
     });
   });
 
   it("falls back to the key its parent mounted it under — the name on the card you clicked", () => {
-    expect(stepOf(node({ instanceId: 2, stateId: "plan/draft", childKey: "draft" })).name).toBe("draft");
+    expect(stepOf(node({ instanceId: "2", stateId: "plan/draft", childKey: "draft" })).name).toBe("draft");
   });
 
   it("has NO name for a run entered as a root — the state is the crumb before it", () => {
     // Which is what makes the bar spell it `#1`: see `runCrumbOf`. Falling back to the state id here
     // would produce `plan › plan`, whose second segment reads as another state.
-    expect(stepOf(node({ instanceId: 1, stateId: "feature/plan" }))).toEqual({ instanceId: 1, stateId: "feature/plan" });
+    expect(stepOf(node({ instanceId: "1", stateId: "feature/plan" }))).toEqual({ instanceId: "1", stateId: "feature/plan" });
   });
 });
 
 describe("pruning a trail against the run it describes", () => {
   const trail: TrailStep[] = [
-    { instanceId: 1, stateId: "plan" },
-    { instanceId: 3, stateId: "plan/critique", name: "critique" },
-    { instanceId: 4, stateId: "plan/critique/read", name: "read" },
+    { instanceId: "1", stateId: "plan" },
+    { instanceId: "3", stateId: "plan/critique", name: "critique" },
+    { instanceId: "4", stateId: "plan/critique/read", name: "read" },
   ];
 
   it("keeps a trail whose every step still resolves", () => {
@@ -81,7 +81,7 @@ describe("pruning a trail against the run it describes", () => {
   });
 
   it("TRUNCATES at the first miss rather than filtering — a path with a hole is not a path", () => {
-    const gone = [node({ instanceId: 1, stateId: "plan", children: [node({ instanceId: 4, stateId: "plan/critique/read" })] })];
+    const gone = [node({ instanceId: "1", stateId: "plan", children: [node({ instanceId: "4", stateId: "plan/critique/read" })] })];
     // 4 still exists, but the descent through 3 does not, so the walk ends at 1.
     expect(prunedTrail(trail, gone)).toEqual([trail[0]]);
   });
@@ -96,9 +96,9 @@ describe("pruning a trail against the run it describes", () => {
     // old label, and walked into somebody else's run.
     const rerun = [
       node({
-        instanceId: 1,
+        instanceId: "1",
         stateId: "plan",
-        children: [node({ instanceId: 3, stateId: "plan/goals", children: [node({ instanceId: 4, stateId: "plan/critique/read" })] })],
+        children: [node({ instanceId: "3", stateId: "plan/goals", children: [node({ instanceId: "4", stateId: "plan/critique/read" })] })],
       }),
     ];
     expect(prunedTrail(trail, rerun)).toEqual([trail[0]]);
@@ -111,12 +111,12 @@ describe("pruning a trail against the run it describes", () => {
 
   describe("a sidechain step — a subagent conversation on the path", () => {
     const walk: TrailStep[] = [
-      { instanceId: 1, stateId: "plan" },
-      { instanceId: 3, stateId: "plan/critique", name: "critique" },
-      { instanceId: 3, stateId: "plan/critique", sidechain: "toolu_task", name: "⑂ explore" },
+      { instanceId: "1", stateId: "plan" },
+      { instanceId: "3", stateId: "plan/critique", name: "critique" },
+      { instanceId: "3", stateId: "plan/critique", sidechain: "toolu_task", name: "⑂ explore" },
     ];
     const sessionWith = (chains: Record<string, unknown[]>): SessionView =>
-      ({ taskId: "t", runId: 1, instanceId: 3, seq: 0, turns: [], sidechains: chains }) as unknown as SessionView;
+      ({ taskId: "t", runId: 1, instanceId: "3", seq: 0, turns: [], sidechains: chains }) as unknown as SessionView;
 
     it("keeps the step while the host resolves and its session still holds the chain", () => {
       expect(prunedTrail(walk, tree, () => sessionWith({ toolu_task: [] }))).toEqual(walk);
@@ -135,7 +135,7 @@ describe("pruning a trail against the run it describes", () => {
     });
 
     it("cuts the step when its HOST no longer resolves, like any other step", () => {
-      const gone = [node({ instanceId: 1, stateId: "plan" })];
+      const gone = [node({ instanceId: "1", stateId: "plan" })];
       expect(prunedTrail(walk, gone, () => sessionWith({ toolu_task: [] }))).toEqual([walk[0]]);
     });
   });
@@ -271,8 +271,8 @@ describe("the address bar's crumbs", () => {
     const crumbs = crumbsOf(
       input({
         trail: [
-          { instanceId: 1, stateId: "plan/draft" },
-          { instanceId: 7, stateId: "plan/draft/critique", name: "Say Hello" },
+          { instanceId: "1", stateId: "plan/draft" },
+          { instanceId: "7", stateId: "plan/draft/critique", name: "Say Hello" },
         ],
       }),
     );
@@ -291,9 +291,9 @@ describe("the address bar's crumbs", () => {
     const crumbs = crumbsOf(
       input({
         trail: [
-          { instanceId: 1, stateId: "plan/draft" },
-          { instanceId: 7, stateId: "plan/draft/critique", name: "Say Hello" },
-          { instanceId: 9, stateId: "plan/draft/critique/read", name: "read" },
+          { instanceId: "1", stateId: "plan/draft" },
+          { instanceId: "7", stateId: "plan/draft/critique", name: "Say Hello" },
+          { instanceId: "9", stateId: "plan/draft/critique/read", name: "read" },
         ],
       }),
     );
@@ -305,7 +305,7 @@ describe("the address bar's crumbs", () => {
 
   it("makes the file's own crumb a way OUT once a run is on the path", () => {
     expect(crumbsOf(input({})).at(-1)!.go).toBeUndefined();
-    expect(crumbsOf(input({ trail: [{ instanceId: 1, stateId: "plan/draft" }] }))[3]!.go).toBeDefined();
+    expect(crumbsOf(input({ trail: [{ instanceId: "1", stateId: "plan/draft" }] }))[3]!.go).toBeDefined();
   });
 
   /**
@@ -316,7 +316,7 @@ describe("the address bar's crumbs", () => {
    * after, which is indistinguishable from a selection that did not happen.
    */
   describe("the base crumb, which is a run and therefore a task", () => {
-    const runOf = (taskTitle: string, stateId: string, instanceId = 1): string =>
+    const runOf = (taskTitle: string, stateId: string, instanceId = "1"): string =>
       crumbsOf(input({ taskTitle, stateId, trail: [{ instanceId, stateId }] })).at(-1)!.text;
 
     it("drops the part of the task's name the path already says", () => {
@@ -333,11 +333,11 @@ describe("the address bar's crumbs", () => {
     });
 
     it("falls back to the instance id when there is no task to name", () => {
-      expect(crumbsOf(input({ trail: [{ instanceId: 4, stateId: "plan/draft" }] })).at(-1)!.text).toBe("#4");
+      expect(crumbsOf(input({ trail: [{ instanceId: "4", stateId: "plan/draft" }] })).at(-1)!.text).toBe("#4");
     });
 
     it("keeps the whole name in the tooltip, which is where the short form's cost is paid", () => {
-      const crumbs = crumbsOf(input({ taskTitle: "plan/draft #2", trail: [{ instanceId: 1, stateId: "plan/draft" }] }));
+      const crumbs = crumbsOf(input({ taskTitle: "plan/draft #2", trail: [{ instanceId: "1", stateId: "plan/draft" }] }));
       expect(crumbs.at(-1)!.title).toBe("plan/draft #2 — run #1 of plan/draft");
     });
   });
@@ -346,8 +346,8 @@ describe("the address bar's crumbs", () => {
     const crumbs = crumbsOf(
       input({
         trail: [
-          { instanceId: 1, stateId: "plan/draft" },
-          { instanceId: 12, stateId: "plan/draft/pass" },
+          { instanceId: "1", stateId: "plan/draft" },
+          { instanceId: "12", stateId: "plan/draft/pass" },
         ],
       }),
     );
@@ -358,8 +358,8 @@ describe("the address bar's crumbs", () => {
     const crumbs = crumbsOf(
       input({
         trail: [
-          { instanceId: 1, stateId: "plan/draft" },
-          { instanceId: 1, stateId: "plan/draft", sidechain: "toolu_task", name: "⑂ explore the repo" },
+          { instanceId: "1", stateId: "plan/draft" },
+          { instanceId: "1", stateId: "plan/draft", sidechain: "toolu_task", name: "⑂ explore the repo" },
         ],
       }),
     );
@@ -373,9 +373,9 @@ describe("the address bar's crumbs", () => {
     const back = crumbsOf(
       input({
         trail: [
-          { instanceId: 1, stateId: "plan/draft" },
-          { instanceId: 1, stateId: "plan/draft", sidechain: "toolu_task", name: "⑂ explore the repo" },
-          { instanceId: 1, stateId: "plan/draft", sidechain: "toolu_inner", name: "⑂ deeper" },
+          { instanceId: "1", stateId: "plan/draft" },
+          { instanceId: "1", stateId: "plan/draft", sidechain: "toolu_task", name: "⑂ explore the repo" },
+          { instanceId: "1", stateId: "plan/draft", sidechain: "toolu_inner", name: "⑂ deeper" },
         ],
       }),
     );
@@ -478,7 +478,7 @@ describe("what a chevron drops down", () => {
       { taskId: "t-1", title: "Fix the parser", status: "completed" },
       { taskId: "t-2", title: "Ship it", status: "running", activeStateId: "draft" },
     ] as unknown as CrumbInput["runs"];
-    const crumbs = crumbsOf(input({ trail: [{ instanceId: 1, stateId: "draft" }], runs, selectedTask: "t-2" }));
+    const crumbs = crumbsOf(input({ trail: [{ instanceId: "1", stateId: "draft" }], runs, selectedTask: "t-2" }));
     const options = crumbs.at(-1)!.options!;
     expect(options.map((o) => o.label)).toEqual(["Fix the parser", "Ship it"]);
     expect(options.find((o) => o.checked)?.label).toBe("Ship it");
@@ -491,7 +491,7 @@ describe("what a chevron drops down", () => {
       { taskId: "t-1", title: "draft #1", status: "completed" },
       { taskId: "t-2", title: "draft #2", status: "completed" },
     ] as unknown as CrumbInput["runs"];
-    const crumbs = crumbsOf(input({ trail: [{ instanceId: 1, stateId: "draft" }], runs, selectedTask: "t-1" }));
+    const crumbs = crumbsOf(input({ trail: [{ instanceId: "1", stateId: "draft" }], runs, selectedTask: "t-1" }));
     expect(crumbs.at(-1)!.options?.map((o) => o.label)).toEqual(["#1", "#2"]);
   });
 
@@ -500,8 +500,8 @@ describe("what a chevron drops down", () => {
       input({
         stateId: "plan",
         trail: [
-          { instanceId: 1, stateId: "plan" },
-          { instanceId: 2, stateId: "plan/draft", name: "draft" },
+          { instanceId: "1", stateId: "plan" },
+          { instanceId: "2", stateId: "plan/draft", name: "draft" },
         ],
       }),
     );
@@ -535,14 +535,14 @@ describe("standingOn — what the viewer shows", () => {
 
   it("falls back to the file's own newest run when nothing has been walked into", () => {
     const at = standingOn(state, context({}));
-    expect(at.node?.instanceId).toBe(1);
+    expect(at.node?.instanceId).toBe("1");
     expect(at.declared).toBe(state.children);
     expect(at.deep).toBe(false);
   });
 
   it("stands on the LAST element of the trail, which is what makes the bar an address", () => {
-    const at = standingOn(state, context({ trail: [{ instanceId: 3, stateId: "plan/critique", name: "critique" }] }));
-    expect(at.node?.instanceId).toBe(3);
+    const at = standingOn(state, context({ trail: [{ instanceId: "3", stateId: "plan/critique", name: "critique" }] }));
+    expect(at.node?.instanceId).toBe("3");
     expect(at.stateId).toBe("plan/critique");
     expect(at.deep).toBe(true);
   });
@@ -551,20 +551,20 @@ describe("standingOn — what the viewer shows", () => {
     const deeper = { children: [{ key: "read" }, { key: "never-ran" }] } as unknown as StateView;
     const at = standingOn(
       state,
-      context({ trail: [{ instanceId: 3, stateId: "plan/critique", name: "critique" }], trailState: deeper }),
+      context({ trail: [{ instanceId: "3", stateId: "plan/critique", name: "critique" }], trailState: deeper }),
     );
     // Including the child that was never reached — a column the instance tree cannot know about.
     expect(at.declared.map((c) => c.key)).toEqual(["read", "never-ran"]);
   });
 
   it("keeps the file's own columns when the tail IS the file's state", () => {
-    const at = standingOn(state, context({ trail: [{ instanceId: 1, stateId: "plan" }] }));
+    const at = standingOn(state, context({ trail: [{ instanceId: "1", stateId: "plan" }] }));
     expect(at.declared).toBe(state.children);
     expect(at.deep).toBe(false);
   });
 
   it("stands on nothing when the trail names an instance the task no longer has", () => {
-    const at = standingOn(state, context({ trail: [{ instanceId: 99, stateId: "plan/gone", name: "gone" }] }));
+    const at = standingOn(state, context({ trail: [{ instanceId: "99", stateId: "plan/gone", name: "gone" }] }));
     expect(at.node).toBeUndefined();
   });
 
@@ -573,13 +573,13 @@ describe("standingOn — what the viewer shows", () => {
       state,
       context({
         trail: [
-          { instanceId: 3, stateId: "plan/critique", name: "critique" },
-          { instanceId: 3, stateId: "plan/critique", sidechain: "toolu_task", name: "⑂ explore" },
+          { instanceId: "3", stateId: "plan/critique", name: "critique" },
+          { instanceId: "3", stateId: "plan/critique", sidechain: "toolu_task", name: "⑂ explore" },
         ],
       }),
     );
     expect(at.sidechain).toBe("toolu_task");
     // The host is what has to resolve — the chain lives in ITS session.
-    expect(at.node?.instanceId).toBe(3);
+    expect(at.node?.instanceId).toBe("3");
   });
 });

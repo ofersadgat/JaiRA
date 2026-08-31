@@ -161,8 +161,8 @@ describe("folding a loop", () => {
 
 describe("identity", () => {
   it("keys a node by its run AND its instance, because instance ids repeat across runs", () => {
-    const a = node("draft", [], { instanceId: 2, runId: 7 });
-    const b = node("draft", [], { instanceId: 2, runId: 8 });
+    const a = node("draft", [], { instanceId: "2", runId: 7 });
+    const b = node("draft", [], { instanceId: "2", runId: 8 });
     expect(keyOfNode(a)).not.toBe(keyOfNode(b));
   });
 });

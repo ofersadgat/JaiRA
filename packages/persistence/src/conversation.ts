@@ -78,7 +78,7 @@ export function conversationView(project: Project, taskId: string, options: Conv
    * parent instance, and the path is the walk up. The root's own path is the empty string, which is
    * what makes "the module you are already looking at" distinguishable from a step inside it.
    */
-  const pathOf = new Map<number, string>();
+  const pathOf = new Map<string, string>();
   /**
    * The mount, or `undefined` when the event does not say.
    *
@@ -88,7 +88,7 @@ export function conversationView(project: Project, taskId: string, options: Conv
    * those as the root would put every historical block on the module itself and, worse, make two
    * blocks with the same reason indistinguishable.
    */
-  const under = (parentInstanceId: number | undefined, childKey: string | undefined): string | undefined => {
+  const under = (parentInstanceId: string | undefined, childKey: string | undefined): string | undefined => {
     if (parentInstanceId === undefined || childKey === undefined) return undefined;
     const base = pathOf.get(parentInstanceId) ?? "";
     return base === "" ? childKey : `${base}/${childKey}`;
@@ -109,7 +109,7 @@ export function conversationView(project: Project, taskId: string, options: Conv
      * which mount of a state file this is, and the instance says which RUN of that mount — a loop
      * makes the first ambiguous on its own. See `ConversationTurn.instanceId`.
      */
-    const at_ = (instanceId: number): { path?: string; instanceId: number } => ({
+    const at_ = (instanceId: string): { path?: string; instanceId: string } => ({
       ...mountedAt(pathOf.get(instanceId)),
       instanceId,
     });

@@ -141,7 +141,7 @@ export function runCauses(project: Project, taskId: string, runId?: number): Arr
  */
 export interface StateSession {
   runId: number;
-  instanceId: number;
+  instanceId: string;
   stateId: string;
   /** The conversation. Opaque — nothing here parses it beyond splitting the position off. */
   sessionId: string;
@@ -213,7 +213,7 @@ export function stateSessions(project: Project, taskId: string, runId?: number):
   for (const row of rows) {
     const position = parseSessionRef(row.session_ref);
     if (position === undefined) continue;
-    const event = JSON.parse(row.payload_json) as { instanceId: number; stateId: string };
+    const event = JSON.parse(row.payload_json) as { instanceId: string; stateId: string };
     out.push({
       runId: row.run_id,
       instanceId: event.instanceId,
@@ -317,7 +317,7 @@ function interruptedSessions(project: Project, taskId: string, runId?: number): 
       )
       .all(taskId, run.id) as Array<{ type: string; payload_json: string; session_ref: string | null; created_at: number }>;
     const scope = { taskId, runId: run.id };
-    const started = new Map<number, { stateId: string; at: number }>();
+    const started = new Map<string, { stateId: string; at: number }>();
     /**
      * The POSITIONS the journal already accounts for — one back from the end each terminal event
      * reported, spelled `<sessionId>@<seq>` here purely as a set key.
@@ -329,7 +329,7 @@ function interruptedSessions(project: Project, taskId: string, runId?: number): 
      */
     const listed = new Set<string>();
     for (const row of events) {
-      const event = JSON.parse(row.payload_json) as { instanceId?: number; stateId?: string };
+      const event = JSON.parse(row.payload_json) as { instanceId?: string; stateId?: string };
       if (event.instanceId === undefined) continue;
       if (row.type === "operation.started") {
         started.set(event.instanceId, { stateId: event.stateId ?? "", at: row.created_at });

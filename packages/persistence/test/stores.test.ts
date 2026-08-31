@@ -102,14 +102,14 @@ describe("SqliteEventLog", () => {
     const run2 = runtime.beginRun("t-1", "h", 2000);
     const log = new SqliteEventLog(db);
 
-    const entered: EngineEvent = { type: "instance.entered", instanceId: 1, stateId: "wf", inputs: { x: 1 } };
-    const terminated: EngineEvent = { type: "instance.terminated", instanceId: 1, stateId: "wf", outcome: "success" };
+    const entered: EngineEvent = { type: "instance.entered", instanceId: "1", stateId: "wf", inputs: { x: 1 } };
+    const terminated: EngineEvent = { type: "instance.terminated", instanceId: "1", stateId: "wf", outcome: "success" };
     log.recorder("t-1", run1).record(entered, 1500);
     log.recorder("t-1", run2).record(terminated, 2500);
 
     const all = log.list("t-1");
     expect(all).toHaveLength(2);
-    expect(all[0]).toMatchObject({ runId: run1, type: "instance.entered", instanceId: 1, createdAt: 1500 });
+    expect(all[0]).toMatchObject({ runId: run1, type: "instance.entered", instanceId: "1", createdAt: 1500 });
     expect(all[0]?.event).toEqual(entered);
     expect(log.list("t-1", { runId: run2 })).toHaveLength(1);
     expect(log.list("t-1", { afterSeq: all[0]!.seq })).toHaveLength(1);

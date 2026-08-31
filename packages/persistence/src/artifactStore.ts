@@ -22,7 +22,7 @@ interface RawArtifact {
   hash: string;
   bytes: number;
   format: string | null;
-  instance_id: number | null;
+  instance_id: string | number | null;
   state_id: string | null;
   slot: string | null;
   interactive: number;
@@ -39,7 +39,8 @@ function toRecord(row: RawArtifact): ArtifactRecord {
     hash: row.hash,
     bytes: row.bytes,
     ...(row.format !== null ? { format: row.format } : {}),
-    ...(row.instance_id !== null ? { instanceId: row.instance_id } : {}),
+    // `String(...)` for rows written before instance ids were strings.
+    ...(row.instance_id !== null ? { instanceId: String(row.instance_id) } : {}),
     ...(row.state_id !== null ? { stateId: row.state_id } : {}),
     ...(row.slot !== null ? { slot: row.slot } : {}),
     // Stored as 0/1, because SQLite has no boolean. Only `true` is carried onto the record, so a

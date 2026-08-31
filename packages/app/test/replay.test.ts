@@ -165,17 +165,18 @@ describe("the replay index", () => {
 
     const replay = replayOf(taskId);
     expect(replay.answers.size).toBe(0);
-    expect(replay.frontier).toEqual([
-      {
-        address: [
-          { childKey: "loop", occurrence: 0 },
-          { childKey: "tick", occurrence: 0 },
-        ],
-        stateId: `${ROOT}/loop/tick`,
-        instanceId: 3,
-        stopped: "mid-operation",
-      },
-    ]);
+    // The id itself is a minted UUID — diagnostics only, never an address — so the assertion is on
+    // everything the resume actually keys on.
+    expect(replay.frontier).toHaveLength(1);
+    expect(replay.frontier[0]).toMatchObject({
+      address: [
+        { childKey: "loop", occurrence: 0 },
+        { childKey: "tick", occurrence: 0 },
+      ],
+      stateId: `${ROOT}/loop/tick`,
+      stopped: "mid-operation",
+    });
+    expect(typeof replay.frontier[0]!.instanceId).toBe("string");
     expect(addressKey(replay.frontier[0]!.address)).toBe("loop#0/tick#0");
   }, 30000);
 

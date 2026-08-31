@@ -95,8 +95,19 @@ function runCrumbOf(step: TrailStep, index: number, taskTitle: string | undefine
   // A sidechain step is named at the doorway it was pushed from — the Task call's own description —
   // and the instance id would name its HOST, which is the crumb before it.
   if (step.sidechain !== undefined) return step.name ?? "⑂ subagent";
-  if (index > 0) return step.name ?? `#${step.instanceId}`;
-  return taskTitle === undefined ? `#${step.instanceId}` : shortRunName(taskTitle, stateId);
+  if (index > 0) return step.name ?? `#${shortId(step.instanceId)}`;
+  return taskTitle === undefined ? `#${shortId(step.instanceId)}` : shortRunName(taskTitle, stateId);
+}
+
+/**
+ * A durable instance id, cut to something a person can scan.
+ *
+ * The TAIL, never the head: a UUIDv7 leads with its timestamp, so every id minted in one run opens
+ * with the same characters and a head-truncated label would read identically across the whole bar.
+ * The random bits are at the end. A short legacy id passes through whole.
+ */
+function shortId(id: string): string {
+  return id.length > 12 ? id.slice(-8) : id;
 }
 
 /** What the tail of an address needs to draw itself. See {@link runCrumbs}. */
@@ -135,7 +146,7 @@ export function runCrumbs(input: RunCrumbInput): Crumb[] {
       return {
         text: runCrumbOf(step, i, taskTitle, stateId),
         kind: "run" as const,
-        title: `subagent conversation in run #${step.instanceId} of ${step.stateId}`,
+        title: `subagent conversation in run #${shortId(step.instanceId)} of ${step.stateId}`,
         ...(last ? {} : { go: () => input.onWalkBack(i) }),
       };
     }
@@ -159,7 +170,7 @@ export function runCrumbs(input: RunCrumbInput): Crumb[] {
             .map((child) => {
               const sibling = stepOf(child);
               return {
-                label: sibling.name ?? `#${child.instanceId}`,
+                label: sibling.name ?? `#${shortId(child.instanceId)}`,
                 note: child.status.replace(/_/g, " "),
                 checked: child.instanceId === step.instanceId,
                 onSelect: () => input.onWalkTo(i, child),
@@ -171,8 +182,8 @@ export function runCrumbs(input: RunCrumbInput): Crumb[] {
       kind: "run" as const,
       title:
         i === 0 && taskTitle !== undefined
-          ? `${taskTitle} — run #${step.instanceId} of ${step.stateId}`
-          : `run #${step.instanceId} of ${step.stateId}`,
+          ? `${taskTitle} — run #${shortId(step.instanceId)} of ${step.stateId}`
+          : `run #${shortId(step.instanceId)} of ${step.stateId}`,
       ...(last ? {} : { go: () => input.onWalkBack(i) }),
       ...(options !== undefined ? { options } : {}),
     };

@@ -38,7 +38,7 @@ const record = (over: Partial<ArtifactRecord> = {}): ArtifactRecord => ({
   hash: "abc123",
   bytes: 6,
   format: "text/markdown",
-  instanceId: 7,
+  instanceId: "7",
   stateId: "feature/plan",
   slot: "plan_doc",
   createdAt: 1_000,

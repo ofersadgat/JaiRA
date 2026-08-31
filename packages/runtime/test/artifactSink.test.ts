@@ -73,7 +73,7 @@ describe("finding artifacts in a result", () => {
   it("splits the engine's name into state, instance and slot", () => {
     expect(parseArtifactName("feature.plan.context#3.plan_doc")).toEqual({
       stateId: "feature.plan.context",
-      instanceId: 3,
+      instanceId: "3",
       slot: "plan_doc",
     });
     // A name that does not match is not forced into a shape.
@@ -98,7 +98,7 @@ describe("placement", () => {
     expect(store.get("t-1", "plan_doc.md")).toMatchObject({
       physicalPath: path,
       slot: "plan_doc",
-      instanceId: 1,
+      instanceId: "1",
       runId: 2,
       format: "text/markdown",
       bytes: 7,

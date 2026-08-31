@@ -1128,7 +1128,7 @@ export default function App(): JSX.Element {
    */
   const openConfigPanel = (
     stateId: string,
-    of?: { project?: string | null; taskId?: string; instanceId?: number },
+    of?: { project?: string | null; taskId?: string; instanceId?: string },
   ): void => {
     const project = of?.project ?? state.selectedProject ?? state.at;
     const taskId = of?.taskId;
@@ -1211,7 +1211,7 @@ export default function App(): JSX.Element {
     // The link in a session panel's gutter: describe the workflow that opened that conversation,
     // scoped to the run that opened it. In the project holding the selected task — a shared workflow
     // reached from a run of it is still that run's project's business.
-    onOpenWorkflow: (stateId: string, instanceId: number) =>
+    onOpenWorkflow: (stateId: string, instanceId: string) =>
       actions.inspectWorkflow(stateId, instanceId, state.selectedProject ?? undefined),
     onWalkTo: actions.walkTo,
     onOpenFile: actions.openPath,

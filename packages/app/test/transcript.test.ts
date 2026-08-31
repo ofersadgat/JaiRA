@@ -27,7 +27,7 @@ import {
 } from "../src/renderer/transcript";
 
 const session = (turns: SessionView["turns"]): SessionView =>
-  ({ taskId: "t", runId: 1, instanceId: 2, stateId: "plan/goals", sessionId: "#i2", seq: 0, turns }) as SessionView;
+  ({ taskId: "t", runId: 1, instanceId: "2", stateId: "plan/goals", sessionId: "#i2", seq: 0, turns }) as SessionView;
 
 /** The tool entries of a whole conversation, which is where a call and its result finally meet. */
 const toolsOf = (turns: unknown[]): ToolEntry[] =>

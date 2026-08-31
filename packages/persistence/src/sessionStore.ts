@@ -126,13 +126,20 @@ interface Row {
 /**
  * Which RUN a store's conversations belong to.
  *
- * Not merely a tag for finding them later — it namespaces them, and it has to. A session id is
- * instance-scoped (`#i2`), and instance ids restart at 1 on every run, so two runs of one workflow
- * name their conversations identically. That cost nothing while the store died with the run; a
- * durable one made run 2 continue run 1's conversation, read its whole transcript back as a preamble,
- * and store the result as its own — which compounds, and took the test suite out of memory.
+ * Not merely a tag for finding them later — it namespaces them, and historically it had to: session
+ * ids were instance-scoped (`#i2`) over counter ids that restarted at 1 on every run, so two runs of
+ * one workflow named their conversations identically. That cost nothing while the store died with
+ * the run; a durable one made run 2 continue run 1's conversation, read its whole transcript back as
+ * a preamble, and store the result as its own — which compounds, and took the test suite out of
+ * memory.
  *
- * So the scope is part of the key. Ids stay opaque and unprefixed to everything outside this class;
+ * Instance ids are durable UUIDs now, so the collision the prefix guards against cannot recur for
+ * new runs — but AUTHORED names (`session: "planning"`) still repeat across runs, legacy rows still
+ * hold counter-derived ids, and the prefix is the on-disk key of every existing row. It stays until
+ * sessions get assigned ids of their own (Identity and Resume §07 step 3), which is also what will
+ * let a resumed run continue a conversation an earlier run created.
+ *
+ * The scope is part of the key. Ids stay opaque and unprefixed to everything outside this class;
  * the mapping happens at the SQL boundary.
  */
 export interface SessionScope {

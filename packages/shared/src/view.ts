@@ -60,12 +60,12 @@ export type InstanceAddress = readonly AddressStep[];
 
 /** One state instance in a task's tree. */
 export interface InstanceNode {
-  instanceId: number;
+  instanceId: string;
   stateId: string;
   /** Key in the parent's `children` map — distinct from `stateId`, since one
    *  state file can be mounted under several keys. */
   childKey?: string;
-  parentInstanceId?: number;
+  parentInstanceId?: string;
   status: InstanceStatus;
   /** Transitions taken so far (SPEC §3.4) — every one, not just a loop's passes. */
   index: number;
@@ -100,9 +100,9 @@ export interface InstanceNode {
    * Which RUN this node was folded out of, for a task-level projection (`foldRuns`).
    *
    * A task's view is every run merged by position, so two nodes in one tree can come from different
-   * runs — and `instanceId` is minted per run, so it is unique only WITHIN one. The pair is the
-   * identity: a consumer keying nodes (a React list, a lookup back into the journal) must use
-   * `runId:instanceId`, never `instanceId` alone.
+   * runs. `instanceId` is a durable UUIDv7 — unique across runs on its own — but the run is still
+   * the fact a consumer needs to reach the journal rows this node was folded from, so keyed lookups
+   * back into per-run stores keep using `runId:instanceId`.
    *
    * Absent on a single-run projection, where every node trivially belongs to the run being read.
    */
@@ -130,7 +130,7 @@ export interface BlockedChild {
 
 /** One step of the active path, outermost first. */
 export interface PathStep {
-  instanceId: number;
+  instanceId: string;
   stateId: string;
   childKey?: string;
 }
@@ -223,7 +223,7 @@ export interface TimelineEntry {
   runId: number;
   type: string;
   at: number;
-  instanceId?: number;
+  instanceId?: string;
   stateId?: string;
   /** The event payload, for the raw view. */
   event: JsonValue;
@@ -716,7 +716,7 @@ export interface ConversationTurn {
    * blocked means — so it has no id to carry, and the absence is the fact rather than a sentinel
    * every reader would have to remember to test for.
    */
-  instanceId?: number;
+  instanceId?: string;
   /**
    * Where this happened, as the chain of CHILD KEYS from the run's root — `product/explore`, not
    * `explore`. Empty string for the root itself.
@@ -867,7 +867,7 @@ export interface TaskSummary {
  */
 export interface SessionRef {
   runId: number;
-  instanceId: number;
+  instanceId: string;
   stateId: string;
   /** The conversation. Opaque — the UI shows it, nothing parses it. */
   sessionId: string;
@@ -986,7 +986,7 @@ export interface SessionTurn {
 export interface SessionView {
   taskId: string;
   runId: number;
-  instanceId: number;
+  instanceId: string;
   stateId: string;
   sessionId: string;
   seq: number;
@@ -1108,7 +1108,7 @@ export interface ChatThreadView {
   taskId: string;
   runId: number;
   /** The instance whose conversation this is — what `chat:send` and `chat:plan` address. */
-  instanceId: number;
+  instanceId: string;
   /** The thread, shaped exactly like any other session so the same viewer renders it. */
   session: SessionView;
   /** Where a message may be sent INSTEAD of an existing one — see `chat:send`'s `branchAt`. */
@@ -1182,7 +1182,7 @@ export interface LogEntry {
   project?: string;
   taskId?: string;
   runId?: number;
-  instanceId?: number;
+  instanceId?: string;
   jobId?: number;
   /** A stack, an argv, an exit code — whatever the reader would want and the message cannot hold. */
   detail?: JsonValue;

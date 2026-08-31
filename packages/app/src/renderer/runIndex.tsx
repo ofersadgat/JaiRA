@@ -39,8 +39,9 @@ import { Icon } from "./icons";
 /**
  * A node's identity across the whole task.
  *
- * `instanceId` is minted per RUN, so a task's folded tree can hold two nodes with the same one. The
- * pair is the key everything here joins on — the same rule the projection states for its consumers.
+ * A durable id cannot repeat across runs, but a LEGACY journal's counter ids can — a task's folded
+ * tree can then hold two nodes with the same one. The pair is the key everything here joins on —
+ * the same rule the projection states for its consumers.
  */
 export function keyOfNode(node: InstanceNode): string {
   return `${node.runId ?? ""}:${node.instanceId}`;

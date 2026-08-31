@@ -373,15 +373,15 @@ describe("what a click opens", () => {
   });
 
   const ref = (instanceId: number, stateId: string): SessionRef =>
-    ({ runId: 1, instanceId, stateId, sessionId: `#i${instanceId}`, seq: 0 }) as SessionRef;
+    ({ runId: 1, instanceId: String(instanceId), stateId, sessionId: `#i`, seq: 0 }) as SessionRef;
   const history = [ref(1, "feature/plan"), ref(2, "feature/plan/goals"), ref(3, "feature/plan/goals"), ref(4, "feature/plan/critique")];
 
   it("opens the conversation of the state you are standing on, not the deepest one reached", () => {
-    expect(instanceAt(history, "feature/plan")).toBe(1);
+    expect(instanceAt(history, "feature/plan")).toBe("1");
   });
 
   it("takes the LAST pass through a state, because a loop runs it more than once", () => {
-    expect(instanceAt(history, "feature/plan/goals")).toBe(3);
+    expect(instanceAt(history, "feature/plan/goals")).toBe("3");
   });
 
   it("has no opinion when the task never reached the state, or no state is named", () => {

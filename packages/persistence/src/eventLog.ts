@@ -19,7 +19,7 @@ export interface StoredEvent {
   seq: number;
   taskId: string;
   runId: number;
-  instanceId?: number;
+  instanceId?: string;
   type: EngineEvent["type"];
   event: EngineEvent;
   createdAt: number;
@@ -31,10 +31,34 @@ interface RawEvent {
   seq: number;
   task_id: string;
   run_id: number;
-  instance_id: number | null;
+  /** `number` only on rows journaled before instance ids became durable strings. */
+  instance_id: string | number | null;
   type: string;
   payload_json: string;
   created_at: number;
+}
+
+/** The event's instance id, when the event names one — `instance.blocked` never does. */
+function instanceIdOf(event: EngineEvent): string | undefined {
+  return (event as { instanceId?: string }).instanceId;
+}
+
+/**
+ * Payloads journaled before instance ids became durable strings carry NUMBERS — a counter id, or
+ * the retired `-1` sentinel on `instance.blocked`. Coerced at the one read boundary every fold goes
+ * through, so a legacy task still projects; `-1` is dropped outright, because absence is what the
+ * sentinel always meant.
+ */
+function normalizeLegacyIds(event: EngineEvent): EngineEvent {
+  const raw = event as { instanceId?: unknown; parentInstanceId?: unknown };
+  if (typeof raw.instanceId !== "number" && typeof raw.parentInstanceId !== "number") return event;
+  const out = { ...raw };
+  if (typeof out.instanceId === "number") {
+    if (out.instanceId === -1) delete out.instanceId;
+    else out.instanceId = String(out.instanceId);
+  }
+  if (typeof out.parentInstanceId === "number") out.parentInstanceId = String(out.parentInstanceId);
+  return out as EngineEvent;
 }
 
 export class SqliteEventLog {
@@ -56,6 +80,7 @@ export class SqliteEventLog {
     const journalDir = this.journalDir;
     return {
       record: (event: EngineEvent, atMs: number): void => {
+        const instanceId = instanceIdOf(event);
         // The FILE first, and synchronously. It is the truth when there is one, so an event that
         // reached the table and not the disk would be an event a replay does not have — the exact
         // shape of loss the design refuses by not making the table a write-back cache.
@@ -65,11 +90,11 @@ export class SqliteEventLog {
             timestamp: new Date(atMs).toISOString(),
             taskId,
             runId,
-            ...(event.instanceId !== undefined ? { instanceId: event.instanceId } : {}),
+            ...(instanceId !== undefined ? { instanceId } : {}),
             event,
           });
         }
-        insert.run(taskId, runId, event.instanceId ?? null, event.type, JSON.stringify(event), atMs);
+        insert.run(taskId, runId, instanceId ?? null, event.type, JSON.stringify(event), atMs);
       },
     };
   }
@@ -92,13 +117,15 @@ export class SqliteEventLog {
     }
     const rows = this.db.prepare(sql).all(...params) as RawEvent[];
     return rows.map((row) => {
-      const event = JSON.parse(row.payload_json) as EngineEvent;
+      const event = normalizeLegacyIds(JSON.parse(row.payload_json) as EngineEvent);
       const operationId = (event as { operationId?: string }).operationId;
       return {
         seq: row.seq,
         taskId: row.task_id,
         runId: row.run_id,
-        instanceId: row.instance_id ?? undefined,
+        // `String(...)` for rows journaled before ids were strings — a legacy `5` and a UUID read
+        // back through one type. `-1` was only ever a sentinel meaning absence, so it reads as one.
+        instanceId: row.instance_id === null || row.instance_id === -1 ? undefined : String(row.instance_id),
         type: row.type as EngineEvent["type"],
         event,
         createdAt: row.created_at,

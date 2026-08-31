@@ -24,21 +24,21 @@ const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "
 
 describe("what a state is", () => {
   it("calls a prompt operation a conversation", () => {
-    const said = node({ instanceId: 3, stateId: "product/context", operation: { kind: "prompt", status: "completed" } });
+    const said = node({ instanceId: "3", stateId: "product/context", operation: { kind: "prompt", status: "completed" } });
     expect(surfaceKindOf(said)).toBe("conversation");
   });
 
   it("calls a state with no operation at all `computed`", () => {
     // `explore/verdict` and `product/confidence` in the feature workflow: every output is an
     // expression over values the state was handed, so there is no model and no host function.
-    expect(surfaceKindOf(node({ instanceId: 9, stateId: "explore/verdict" }))).toBe("computed");
+    expect(surfaceKindOf(node({ instanceId: "9", stateId: "explore/verdict" }))).toBe("computed");
   });
 
   it("calls a function operation `asked`", () => {
     // `product/gate` — a component was mounted and a person was asked. It is the case that read
     // worst under the old sentence: twenty-seven seconds of somebody's attention, reported as
     // silence.
-    const gate = node({ instanceId: 25, stateId: "product/gate", operation: { kind: "function", status: "running" } });
+    const gate = node({ instanceId: "25", stateId: "product/gate", operation: { kind: "function", status: "running" } });
     expect(surfaceKindOf(gate)).toBe("asked");
   });
 
@@ -46,7 +46,7 @@ describe("what a state is", () => {
     // What a state IS does not change with how it ended. The outcome belongs to the TONE, which is
     // the other half of this file.
     const canceled = node({
-      instanceId: 25,
+      instanceId: "25",
       stateId: "product/gate",
       status: "canceled",
       operation: { kind: "function", status: "failed", reason: "the operation was canceled" },
@@ -59,10 +59,10 @@ describe("what a state is", () => {
     // are what the check reads first — testing the operation first would take a composite whose own
     // op was a function and hide its whole subtree behind one heading.
     const both = node({
-      instanceId: 2,
+      instanceId: "2",
       stateId: "feature/product",
       operation: { kind: "function", status: "completed" },
-      children: [node({ instanceId: 3, stateId: "feature/product/context" })],
+      children: [node({ instanceId: "3", stateId: "feature/product/context" })],
     });
     expect(surfaceKindOf(both)).toBeUndefined();
   });
@@ -72,7 +72,7 @@ describe("what a state is", () => {
     // `call.waiting`, so the two are indistinguishable once projected. Reading it here would make an
     // asked state and a parked transition the same thing; the wait is named by a `UserEventRequest`.
     const parked = node({
-      instanceId: 2,
+      instanceId: "2",
       stateId: "feature/product",
       status: "waiting_for_user",
       operation: { kind: "prompt", status: "running" },
@@ -91,7 +91,7 @@ describe("what a state is", () => {
 describe("how loudly a header speaks", () => {
   it("is quiet for anything that has settled", () => {
     const done = node({
-      instanceId: 3,
+      instanceId: "3",
       stateId: "s",
       endedAt: 10,
       operation: { kind: "prompt", status: "completed" },
@@ -101,7 +101,7 @@ describe("how loudly a header speaks", () => {
 
   it("goes red when the call failed, whichever way it failed", () => {
     const threw = node({
-      instanceId: 3,
+      instanceId: "3",
       stateId: "s",
       status: "failed",
       endedAt: 10,
@@ -111,7 +111,7 @@ describe("how loudly a header speaks", () => {
     expect(failureWordOf(threw)).toBe("function threw");
 
     const errored = node({
-      instanceId: 3,
+      instanceId: "3",
       stateId: "s",
       endedAt: 10,
       operation: { kind: "prompt", status: "failed", reason: "no API key" },
@@ -122,7 +122,7 @@ describe("how loudly a header speaks", () => {
 
   it("stays quiet for a CANCELLATION, which is somebody pressing Stop", () => {
     // Nothing went wrong. A red bar over it would be the run accusing the person who stopped it.
-    const stopped = node({ instanceId: 3, stateId: "s", status: "canceled", endedAt: 10, operation: { kind: "prompt", status: "running" } });
+    const stopped = node({ instanceId: "3", stateId: "s", status: "canceled", endedAt: 10, operation: { kind: "prompt", status: "running" } });
     expect(headerToneOf(stopped, "conversation")).toBeUndefined();
   });
 
@@ -131,7 +131,7 @@ describe("how loudly a header speaks", () => {
     // `running` because no completion ever landed, while the instance is `canceled`. Reading the
     // operation first would draw that as a live question somebody could still answer.
     const gate = node({
-      instanceId: 25,
+      instanceId: "25",
       stateId: "product/gate",
       status: "canceled",
       endedAt: 27_200,
@@ -141,17 +141,17 @@ describe("how loudly a header speaks", () => {
   });
 
   it("is accent while a state is still asking, or still writing", () => {
-    const asking = node({ instanceId: 25, stateId: "gate", status: "waiting_for_user", operation: { kind: "function", status: "running" } });
+    const asking = node({ instanceId: "25", stateId: "gate", status: "waiting_for_user", operation: { kind: "function", status: "running" } });
     expect(headerToneOf(asking, "asked")).toBe("accent");
 
-    const writing = node({ instanceId: 3, stateId: "s", status: "running", operation: { kind: "prompt", status: "running" } });
+    const writing = node({ instanceId: "3", stateId: "s", status: "running", operation: { kind: "prompt", status: "running" } });
     expect(headerToneOf(writing, "conversation")).toBe("accent");
   });
 
   it("is quiet for a computation, however recently it ran", () => {
     // The one that makes the loud form mean something. A computation is a fact about the run, not a
     // demand on the reader — and a 5 ms state that shouted would make the tint noise.
-    const computed = node({ instanceId: 24, stateId: "confidence", endedAt: 5 });
+    const computed = node({ instanceId: "24", stateId: "confidence", endedAt: 5 });
     expect(headerToneOf(computed, "computed")).toBeUndefined();
   });
 });
@@ -170,13 +170,13 @@ describe("what a wait is read from", () => {
     // the same value once projected — so the surface kind stays what the operation says it is, and
     // the wait is named by a `UserEventRequest` instead.
     const asking = node({
-      instanceId: 25,
+      instanceId: "25",
       stateId: "product/gate",
       status: "waiting_for_user",
       operation: { kind: "function", status: "running" },
     });
     const parked = node({
-      instanceId: 2,
+      instanceId: "2",
       stateId: "feature/product",
       status: "waiting_for_user",
       operation: { kind: "prompt", status: "running" },

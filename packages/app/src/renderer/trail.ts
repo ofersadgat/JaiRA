@@ -25,7 +25,7 @@ import type { InstanceNode, SessionView } from "@jaira/shared/browser";
 /** One run in the path — the instance it names, and what it is called. */
 export interface TrailStep {
   /** The instance this crumb walks into. Unique within the task's run. */
-  instanceId: number;
+  instanceId: string;
   /** The state that instance ran, so the board below it knows which children to declare. */
   stateId: string;
   /**
@@ -51,7 +51,7 @@ export interface TrailStep {
 }
 
 /** Find one instance anywhere in a task's tree. */
-export function nodeAt(nodes: readonly InstanceNode[], instanceId: number): InstanceNode | undefined {
+export function nodeAt(nodes: readonly InstanceNode[], instanceId: string): InstanceNode | undefined {
   for (const node of nodes) {
     if (node.instanceId === instanceId) return node;
     const found = nodeAt(node.children, instanceId);
@@ -127,7 +127,7 @@ export function instanceOf(nodes: readonly InstanceNode[], stateId: string): Ins
 export function prunedTrail(
   trail: readonly TrailStep[],
   nodes: readonly InstanceNode[],
-  sessionOf?: (instanceId: number) => SessionView | undefined,
+  sessionOf?: (instanceId: string) => SessionView | undefined,
 ): TrailStep[] {
   const kept: TrailStep[] = [];
   for (const step of trail) {

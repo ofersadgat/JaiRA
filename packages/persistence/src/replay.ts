@@ -14,8 +14,8 @@
  * ## Why the address is structural
  *
  * The obvious key for "which operation is this" is the instance id, and it is wrong: ids are minted
- * `nextInstanceId++` as the engine walks, so a re-walk mints its own and the two runs agree only by
- * luck. The content hash is wrong for a different reason — a loop dispatching the identical operation
+ * fresh (UUIDv7) as the engine walks, so a re-walk mints its own and the two runs never agree.
+ * The content hash is wrong for a different reason — a loop dispatching the identical operation
  * twice hashes identically, which is exactly why `operation_records.attempt` exists.
  *
  * So an instance is addressed by its POSITION IN THE TREE: the chain of child keys from the root,
@@ -92,7 +92,7 @@ export interface ReplayAnswer {
   address: InstanceAddress;
   stateId: string;
   /** The id the recorded run minted. Diagnostics only — never an address. */
-  instanceId: number;
+  instanceId: string;
   /** The value the call produced, unwrapped from the record's `{ value }` envelope. */
   value: JsonValue;
 }
@@ -107,7 +107,7 @@ export interface ReplayAnswer {
 export interface FrontierEntry {
   address: InstanceAddress;
   stateId: string;
-  instanceId: number;
+  instanceId: string;
   /**
    * Which kind of stop this was.
    *
@@ -350,8 +350,8 @@ export function replaySourceOf(replay: RunReplay): ReplaySource {
  * iteration is occurrence 1 whether or not the first was cleared, and renumbering it to 0 would make
  * the address of a live instance depend on history it does not own.
  */
-function addressesOf(roots: readonly InstanceNode[]): Map<number, InstanceAddress> {
-  const out = new Map<number, InstanceAddress>();
+function addressesOf(roots: readonly InstanceNode[]): Map<string, InstanceAddress> {
+  const out = new Map<string, InstanceAddress>();
   const walk = (nodes: readonly InstanceNode[], prefix: InstanceAddress): void => {
     const seen = new Map<string, number>();
     for (const node of nodes) {

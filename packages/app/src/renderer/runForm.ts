@@ -377,7 +377,7 @@ export function newestRunOf(state: StateView | null): BoardCard | null {
  * `null` means "no opinion" — no state named, or the task never reached it — and the caller then
  * lets `session:view` pick the latest, which is the behaviour that was always there.
  */
-export function instanceAt(history: SessionRef[], stateId: string | null): number | null {
+export function instanceAt(history: SessionRef[], stateId: string | null): string | null {
   if (stateId == null) return null;
   return history.filter((row) => row.stateId === stateId).at(-1)?.instanceId ?? null;
 }

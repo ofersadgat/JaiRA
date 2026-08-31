@@ -285,8 +285,8 @@ function sideOf(
 /**
  * What a piece is remembered as when it is folded.
  *
- * Three parts, and each one is load-bearing. The RUN, because an instance id is minted per run and
- * so `#i2` names a different state in every one of them. The SEQUENCE, because a state that called
+ * Three parts, and each one is load-bearing. The RUN, because a legacy journal's counter ids repeat
+ * across runs — `#i2` named a different state in every one of them. The SEQUENCE, because a state that called
  * twice is two pieces. And the SCOPE — the task — because the other two are not enough: a folded
  * tree stamps `runId` on every node, but a single-run projection leaves it absent, and two tasks
  * would then both remember a state as `:2:0` and fold each other's.

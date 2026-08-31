@@ -125,7 +125,7 @@ export interface DebugPaneProps {
   conversation: ConversationView | null;
   sessionHistory: SessionRef[];
   session: SessionView | null;
-  sessionInstance: number | null;
+  sessionInstance: string | null;
   liveTurn: { sessionId?: string; seq?: number; text: string } | null;
   stream: string[];
   availability: AvailabilitySnapshot;
@@ -136,7 +136,7 @@ export interface DebugPaneProps {
   onRecheck: () => void;
   onDismissError: () => void;
   onOpenState: (stateId: string) => void;
-  onShowSession: (instanceId: number | null) => void;
+  onShowSession: (instanceId: string | null) => void;
   /** The schema check the gallery's JSON editors validate through — the store's. */
   validateSchema: (schemaId: string, text: string) => Promise<ValidateSchemaResult | null>;
 }

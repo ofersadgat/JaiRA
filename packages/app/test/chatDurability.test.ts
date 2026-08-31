@@ -28,6 +28,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject, SqliteSessionStore } from "@jaira/persistence";
+import { chatInstanceIdOf } from "@jaira/runtime";
 import type { PushMessage } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
@@ -168,13 +169,13 @@ describe("1b. what a stopped turn had already SAID", () => {
     partial: true,
     provider: "unknown",
   });
-  function stoppedTurn(taskId: string, asked: string, streamed: Record<string, unknown>): number {
+  function stoppedTurn(taskId: string, asked: string, streamed: Record<string, unknown>): string {
     const thread = service.chatThread({ taskId })!;
     const project = projectOf();
     const store = new SqliteSessionStore(project.db, { taskId, runId: thread.runId });
     const branch = thread.session.sessionId;
     const recorder = project.events.recorder(taskId, thread.runId);
-    const where = { instanceId: 1_000_000 + thread.instanceId, stateId: CHAT_ASSISTANT };
+    const where = { instanceId: chatInstanceIdOf(thread.instanceId), stateId: CHAT_ASSISTANT };
     recorder.record({ type: "instance.entered", ...where, childKey: "ask", parentInstanceId: thread.instanceId, inputs: {} }, Date.now());
     recorder.record({ type: "operation.started", ...where, op: "prompt" }, Date.now());
     const ref = store.append({
@@ -286,7 +287,7 @@ describe("2. a turn whose process died", () => {
     // Exactly what a kill -9 mid-turn leaves behind: the journal says a turn started under the chat
     // child, the record store holds its claimed position, and there is no terminal event for either.
     const recorder = project.events.recorder(taskId, thread.runId);
-    const where = { instanceId: 1_000_000 + thread.instanceId, stateId: CHAT_ASSISTANT };
+    const where = { instanceId: chatInstanceIdOf(thread.instanceId), stateId: CHAT_ASSISTANT };
     recorder.record({ type: "instance.entered", ...where, childKey: "ask", parentInstanceId: thread.instanceId, inputs: {} }, Date.now());
     recorder.record({ type: "operation.started", ...where, op: "prompt" }, Date.now());
     new SqliteSessionStore(project.db, { taskId, runId: thread.runId }).append({
@@ -403,7 +404,7 @@ describe("5. a read that answers nothing", () => {
     // The renderer's rule, which is the last line of defence: whatever main answers, a thread that
     // was on screen stays on screen. `null` from a read is a fact about a fetch — the records are on
     // disk either way, and nothing that was said stops having been said.
-    const thread = { taskId: "t", runId: 1, instanceId: 2, session: { turns: [{ role: "user", text: "one" }] }, points: [] } as never;
+    const thread = { taskId: "t", runId: 1, instanceId: "2", session: { turns: [{ role: "user", text: "one" }] }, points: [] } as never;
     expect(kept(thread, null)).toBe(thread);
     expect(kept(null, null)).toBeNull();
     // …and a real answer always wins, or the view would freeze on its first read.

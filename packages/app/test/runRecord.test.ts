@@ -131,11 +131,21 @@ describe("what a stopped run can be read back from", () => {
         project.db
           .prepare(`SELECT payload_json FROM state_machine_events WHERE task_id = ? AND type = 'instance.entered' ORDER BY seq`)
           .all(taskId) as Array<{ payload_json: string }>
-      ).map((r) => JSON.parse(r.payload_json) as { stateId: string; childKey?: string; parentInstanceId?: number; inputs: Record<string, JsonValue> });
+      ).map(
+        (r) =>
+          JSON.parse(r.payload_json) as {
+            stateId: string;
+            childKey?: string;
+            instanceId: string;
+            parentInstanceId?: string;
+            inputs: Record<string, JsonValue>;
+          },
+      );
 
       // The root's own inputs, and the parentage that makes the rest a tree.
       expect(entered[0]).toMatchObject({ stateId: "components", inputs: { doc: "# The Plan\n\nship it" } });
-      expect(entered.filter((e) => e.parentInstanceId === 1).map((e) => e.childKey)).toEqual([
+      const rootId = entered[0]!.instanceId;
+      expect(entered.filter((e) => e.parentInstanceId === rootId).map((e) => e.childKey)).toEqual([
         "choose",
         "review",
         "edit",

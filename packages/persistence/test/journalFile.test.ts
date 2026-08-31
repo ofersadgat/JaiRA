@@ -50,7 +50,7 @@ function project(journal: "file" | "db" | "both"): Project {
   return track(openProject(join(dir, "repo"), { baseDir }));
 }
 
-const event = (type: string, instanceId?: number): EngineEvent =>
+const event = (type: string, instanceId?: string): EngineEvent =>
   ({ type, ...(instanceId !== undefined ? { instanceId } : {}) }) as EngineEvent;
 
 /**
@@ -66,7 +66,7 @@ function record(p: Project, taskId: string, runId: number, types: string[]): voi
     .prepare(`INSERT OR IGNORE INTO main.runs (id, task_id, snapshot_hash, started_at) VALUES (?, ?, 'h', 1)`)
     .run(runId, taskId);
   const recorder = p.events.recorder(taskId, runId);
-  types.forEach((type, i) => recorder.record(event(type, i + 1), 1_000 + i));
+  types.forEach((type, i) => recorder.record(event(type, String(i + 1)), 1_000 + i));
 }
 
 describe("the round trip — the file is the truth", () => {
@@ -89,7 +89,7 @@ describe("the round trip — the file is the truth", () => {
       "operation.completed",
     ]);
     // Read back whole, not merely counted: the event, its instance, and the time it happened.
-    expect(second.events.list("t-1")[1]).toMatchObject({ runId: 1, instanceId: 2, createdAt: 1_001 });
+    expect(second.events.list("t-1")[1]).toMatchObject({ runId: 1, instanceId: "2", createdAt: 1_001 });
   });
 
   it("writes one file per run, which is what makes two people's appends not conflict", () => {

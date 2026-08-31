@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS task_runtime (
   snapshot_hash    TEXT,
   branch           TEXT,
   worktree_path    TEXT,
-  root_instance_id INTEGER,
+  root_instance_id TEXT,
   created_at       INTEGER NOT NULL,
   updated_at       INTEGER NOT NULL
 );
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS events (
   seq          INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id      TEXT NOT NULL,
   run_id       INTEGER NOT NULL REFERENCES runs(id),
-  instance_id  INTEGER,
+  instance_id  TEXT,           -- durable UUIDv7 (was a per-run counter; migration 12 retypes old databases)
   type         TEXT NOT NULL,
   payload_json TEXT NOT NULL,
   created_at   INTEGER NOT NULL
@@ -133,7 +133,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
   hash          TEXT NOT NULL,    -- sha-256: identity independent of location
   bytes         INTEGER NOT NULL,
   format        TEXT,
-  instance_id   INTEGER,
+  instance_id   TEXT,
   state_id      TEXT,
   slot          TEXT,
   -- The interactive flag is added by migration 6 and deliberately NOT declared here: a fresh

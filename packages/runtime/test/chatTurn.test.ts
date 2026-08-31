@@ -15,7 +15,7 @@ import { ScriptedFakeExecutor } from "../src/fakeExecutor";
 import { sessionServicesFor } from "../src/sessionServices";
 import { withSessionLayers } from "../src/wiring";
 import { chatOperationOf, chatPlanFor } from "../src/chatOperation";
-import { CHAT_INSTANCE_BASE, isChatInstance, runChatTurn, type ChatInstance } from "../src/chatTurn";
+import { chatInstanceIdOf, isChatInstance, runChatTurn, type ChatInstance } from "../src/chatTurn";
 
 /** The host state, already merged — the shape a snapshot pins. */
 const host = {
@@ -41,11 +41,14 @@ function journal() {
 
 /** Only the chat child's own events — the harness seeds the parent instance the child hangs off. */
 const chatEvents = (log: ReturnType<typeof journal>): EngineEvent[] =>
-  log.events.filter((e) => isChatInstance(e.instanceId));
+  log.events.filter((e) => {
+    const id = (e as { instanceId?: string }).instanceId;
+    return id !== undefined && isChatInstance(id);
+  });
 
 const instance = (patch: Partial<ChatInstance> = {}): ChatInstance => ({
-  instanceId: CHAT_INSTANCE_BASE,
-  parentInstanceId: 2,
+  instanceId: chatInstanceIdOf("2"),
+  parentInstanceId: "2",
   stateId: "plan/draft",
   childKey: "ask",
   index: 0,
@@ -84,7 +87,7 @@ function harness(rules: Array<{ value?: string; error?: string }> = [{ value: "b
   const executor = withSessionLayers(stores, new ScriptedFakeExecutor(rules as never));
   // The instance being read. Without it the chat child has no parent in the journal and projects as
   // a root, which would quietly make every `.children` assertion below vacuous.
-  log.record({ type: "instance.entered", instanceId: 2, stateId: "plan/draft", inputs: {} }, 900);
+  log.record({ type: "instance.entered", instanceId: "2", stateId: "plan/draft", inputs: {} }, 900);
   return { log, stores, executor };
 }
 
@@ -106,7 +109,7 @@ describe("what the journal says about one message", () => {
     await send(h, { message: "hi", position: "s@1" });
     expect(chatEvents(h.log)[0]).toMatchObject({
       type: "instance.entered",
-      parentInstanceId: 2,
+      parentInstanceId: "2",
       childKey: "ask",
       stateId: "plan/draft",
     });
@@ -201,12 +204,10 @@ describe("a turn that failed", () => {
 });
 
 describe("the id space", () => {
-  it("is disjoint from the engine's, which allocates from a counter it owns", async () => {
-    // A conversation can be continued while the engine is still running, so `max(id) + 1` off the
-    // journal would race a counter this process cannot see.
-    expect(isChatInstance(CHAT_INSTANCE_BASE)).toBe(true);
-    expect(isChatInstance(1)).toBe(false);
-    expect(isChatInstance(-1)).toBe(false);
+  it("is disjoint from the engine's, whose UUIDv7s never carry the reserved prefix", async () => {
+    expect(isChatInstance(chatInstanceIdOf("2"))).toBe(true);
+    expect(isChatInstance("01930f7a-1234-7000-8000-abcdefabcdef")).toBe(false);
+    expect(isChatInstance("2")).toBe(false);
   });
 });
 

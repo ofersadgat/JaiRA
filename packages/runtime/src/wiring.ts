@@ -254,6 +254,9 @@ export interface WorkflowRunConfig {
    * in-run default, which answers it only within one run: the same call in a later run pays again.
    */
   callCache?: CallCache;
+  /** Mints instance ids — hw's `EngineConfig.newInstanceId`. UUIDv7 by default; a test that asserts
+   *  on ids or on the `#i<id>` fresh-session keys they produce injects a counter here. */
+  newInstanceId?: () => string;
   /**
    * What a stopped run already answered — supplying it makes this run a RESUME (hw's `ReplaySource`).
    *
@@ -392,6 +395,7 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     // needs the store: what reaches an executor is the position it resolved to.
     ...(cfg.session !== undefined ? { sessions: cfg.session.sessions } : {}),
     ...(cfg.callCache !== undefined ? { callCache: cfg.callCache } : {}),
+    ...(cfg.newInstanceId !== undefined ? { newInstanceId: cfg.newInstanceId } : {}),
     ...(cfg.replay !== undefined ? { replay: cfg.replay } : {}),
     ...(cfg.persistence !== undefined ? { persistence: cfg.persistence } : {}),
   });
@@ -449,10 +453,17 @@ export function causesOfEvents(rows: readonly { event: EngineEvent }[]): RunCaus
   // Per INSTANCE, last word wins. A failure a transition handled is not a cause of anything: an
   // authored retry that fails once and then succeeds would otherwise be named in the run's reason
   // alongside whatever actually went wrong, blaming a state that recovered.
-  const byInstance = new Map<number, RunCause | undefined>();
-  const order: number[] = [];
+  //
+  // A `blocked` child never became an instance, so its event carries no `instanceId` — it is keyed
+  // by its MOUNT instead, which is also the retry semantics a block actually has: re-entering the
+  // same mount and resolving clears the earlier block at that mount.
+  const byInstance = new Map<string, RunCause | undefined>();
+  const order: string[] = [];
   for (const { event } of rows) {
-    const at = (event as { instanceId?: number }).instanceId;
+    const at =
+      event.type === "instance.blocked"
+        ? `blocked:${event.parentInstanceId ?? ""}:${event.childKey ?? event.stateId}`
+        : (event as { instanceId?: string }).instanceId;
     if (at === undefined) continue;
     if (!byInstance.has(at)) order.push(at);
     if (event.type === "operation.failed") byInstance.set(at, { stateId: event.stateId, reason: event.failure.reason });

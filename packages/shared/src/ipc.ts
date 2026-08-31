@@ -422,7 +422,7 @@ export interface EffectiveState {
 /** The values behind one execution's bindings — see {@link EffectiveState.values}. */
 export interface EffectiveStateValues {
   /** Which execution these are. A loop runs one state several times, and each pass had its own. */
-  instanceId: number;
+  instanceId: string;
   /** The inputs the engine resolved on the way in, by slot name (`instance.entered`). */
   inputs?: Record<string, JsonValue>;
   /** What the operation returned, when it completed — the record's own result. */
@@ -1104,7 +1104,7 @@ export interface IpcContract {
    * clicking through from a conversation is looking at.
    */
   "state:effective": {
-    request: { stateId: string; taskId?: string; instanceId?: number; project?: ProjectRef };
+    request: { stateId: string; taskId?: string; instanceId?: string; project?: ProjectRef };
     response: EffectiveState;
   };
   /** A task's run, read back out of the journal as turns. */
@@ -1135,7 +1135,7 @@ export interface IpcContract {
   };
   /** One state instance's conversation, whole — see {@link SessionView}. */
   "session:view": {
-    request: { taskId: string; runId?: number; instanceId?: number; project?: string };
+    request: { taskId: string; runId?: number; instanceId?: string; project?: string };
     response: SessionView;
   };
   /**
@@ -1161,7 +1161,7 @@ export interface IpcContract {
    * perfectly calm disabled box.
    */
   "chat:plan": {
-    request: { taskId: string; instanceId: number; project?: string; overrides?: ChatSettings };
+    request: { taskId: string; instanceId: string; project?: string; overrides?: ChatSettings };
     response: ChatPlanView | null;
   };
   /**
@@ -1186,7 +1186,7 @@ export interface IpcContract {
   "chat:send": {
     request: {
       taskId: string;
-      instanceId: number;
+      instanceId: string;
       message: string;
       project?: string;
       overrides?: ChatSettings;
@@ -1202,7 +1202,7 @@ export interface IpcContract {
        */
       branchAt?: string;
     };
-    response: { instanceId: number; index: number; sessionRef?: string; failure?: string; steered?: boolean };
+    response: { instanceId: string; index: number; sessionRef?: string; failure?: string; steered?: boolean };
   };
   /**
    * Stop the turn this conversation is taking, if it is taking one.

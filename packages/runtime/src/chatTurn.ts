@@ -44,20 +44,22 @@ import type { JsonValue } from "@declarative-ai/json";
 /**
  * Where a chat instance's id comes from.
  *
- * The engine allocates from `this.nextInstanceId++`, a counter it owns in memory, and a conversation
- * may be continued while that engine is still running — so picking `max(id) + 1` off the journal
- * would race it and silently reuse an id the engine is about to hand out. A disjoint space costs
- * nothing and cannot collide.
- *
- * A high base rather than a negative number: `instance.blocked` already uses `-1` as a sentinel
- * meaning "no instance exists to attach this to", and sitting beside a sentinel is a poor place to
- * put real instances.
+ * DERIVED from the host instance rather than minted, because the derivation is the determinism a
+ * chat needs: every turn of a conversation — across service restarts — must land on the SAME
+ * synthetic instance, and only a value computed from the host can promise that. The engine's own
+ * ids are UUIDv7 hex-and-dashes, so the `chat:` prefix is a namespace no engine id can ever occupy
+ * and no race with a running engine exists to lose.
  */
-export const CHAT_INSTANCE_BASE = 1_000_000;
+export const CHAT_INSTANCE_PREFIX = "chat:";
 
-/** True for an id this module minted rather than the engine — see {@link CHAT_INSTANCE_BASE}. */
-export function isChatInstance(instanceId: number): boolean {
-  return instanceId >= CHAT_INSTANCE_BASE;
+/** The synthetic instance a hand-continued conversation under `hostInstanceId` lives in. */
+export function chatInstanceIdOf(hostInstanceId: string): string {
+  return `${CHAT_INSTANCE_PREFIX}${hostInstanceId}`;
+}
+
+/** True for an id this module derived rather than the engine minted — see {@link CHAT_INSTANCE_PREFIX}. */
+export function isChatInstance(instanceId: string): boolean {
+  return instanceId.startsWith(CHAT_INSTANCE_PREFIX);
 }
 
 /**
@@ -73,10 +75,10 @@ export const CHAT_CHILD_KEY = "ask";
 
 /** Which conversation, and where in the tree it hangs. */
 export interface ChatInstance {
-  /** The synthetic child's own id. See {@link CHAT_INSTANCE_BASE}. */
-  instanceId: number;
+  /** The synthetic child's own id. See {@link CHAT_INSTANCE_PREFIX}. */
+  instanceId: string;
   /** The instance being read — the one this conversation is a child OF. */
-  parentInstanceId: number;
+  parentInstanceId: string;
   /** The state the child is recorded under, which is the host's own id. */
   stateId: string;
   /** The reserved key this conversation is mounted at. One per host, so the loop stays one node. */

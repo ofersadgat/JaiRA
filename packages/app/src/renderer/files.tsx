@@ -2039,7 +2039,7 @@ export function TaskInspector({
   /** Every state the task ran, with its outcome — the panel's links out. */
   states: SessionRef[];
   /** Which instance's transcript the middle panel is showing, so the list says where you are. */
-  showing: number | null;
+  showing: string | null;
   onBack: () => void;
   onStart: () => void;
   onCancel: () => void;
@@ -2051,7 +2051,7 @@ export function TaskInspector({
    * One action rather than the two it replaced (read the transcript here / open the file there):
    * "this is the state that failed" and "take me to it" are one thought.
    */
-  onOpenStateAt: (stateId: string, instanceId: number) => void;
+  onOpenStateAt: (stateId: string, instanceId: string) => void;
 }): JSX.Element {
   const back = (
     <button className="link back-arrow" onClick={onBack} title={stateId === null ? "Back" : `Back to ${stateId}`}>

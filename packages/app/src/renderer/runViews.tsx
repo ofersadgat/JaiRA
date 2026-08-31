@@ -32,9 +32,9 @@ import { useStickToBottom } from "./stickToBottom";
 import { sessionKey } from "./sessionCache";
 import { instanceOf as instanceOfState, nodeAt, prunedTrail, type TrailStep } from "./trail";
 import { Paper, Pulse, Transcript, clockOf, durationOf, useElapsed } from "./transcriptView";
-import { advanceTargetOf, surfaceKindOf } from "./stateSurface";
+import { advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
 import { Icon } from "./icons";
-import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, runForksOf, type SessionPiece } from "./sessionBands";
+import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, runForksOf, type SessionPiece } from "./sessionBands";
 import { SessionBandsView } from "./sessionPanels";
 import { paletteOfRun } from "./runIndex";
 import type { FileSurfaceProps } from "./fileTypes";
@@ -45,6 +45,11 @@ import { invoke } from "./store";
 // has to work for a composite, which has no session row to look one up by. Re-exported because this
 // is where the board that uses it has always found it.
 export { instanceOf } from "./trail";
+
+/** Whether this subtree holds a state that is asking right now — see {@link isAsking}. */
+function hasAsking(node: InstanceNode): boolean {
+  return isAsking(node) || node.children.some(hasAsking);
+}
 
 /** Every execution of each declared child, keyed by the child key the parent mounted it under. */
 export function runsByChild(parent: InstanceNode | undefined): Map<string, InstanceNode[]> {
@@ -140,7 +145,7 @@ export function RunBoard({
   /** The state's declared children, in run order — the columns, whether or not anything ran. */
   declared: readonly StateChild[];
   parent: InstanceNode | undefined;
-  openInstance: number | null;
+  openInstance: string | null;
   /** One click: mark it. */
   onSelect: (node: InstanceNode) => void;
   /** Two: walk into it. */
@@ -331,6 +336,10 @@ export function RunConversation({
   onOpenSidechain,
   focus,
   asking,
+  gate,
+  onGate,
+  gateServices,
+  gateEditor,
 }: {
   /** The run whose conversation this is. Undefined ⇒ nothing has run here yet. */
   parent: InstanceNode | undefined;
@@ -345,6 +354,18 @@ export function RunConversation({
    * over and throws the answer away, which is the opposite of what the button next to it does.
    */
   asking?: boolean | undefined;
+  /**
+   * The parked gate, hosted in the panel of the state that raised it — see {@link isAsking}.
+   *
+   * Passed down rather than drawn by the caller after this component, which is where it started and
+   * read wrong: a question appended below the whole conversation is a footnote about the run, and
+   * leaves the reader to work out which state is asking. The state already says so — its letterhead
+   * reads "asked of you" — so the answer belongs under that heading and nowhere else.
+   */
+  gate?: PendingInteraction | undefined;
+  onGate?: ((value: unknown) => void) | undefined;
+  gateServices?: Partial<ComponentServices> | undefined;
+  gateEditor?: EditorServices | undefined;
   /** A state to go to, asked for by the Instances index — see `SessionBandsView`. */
   focus?: { instance: string; at: number } | undefined;
   /**
@@ -482,9 +503,23 @@ export function RunConversation({
      * sitting right there in the record. A piece that wrote a session position said something,
      * whatever the tree remembers about it.
      */
+    // The question goes in the panel that is ASKING it, which is the whole point of hosting a gate
+    // in the conversation rather than over it. Appended after the transcript it read as a footnote
+    // about the run; here it is the body of the state whose letterhead says "asked of you", under
+    // the prompt that state wrote.
+    if (gate !== undefined && onGate !== undefined && isAsking(piece.node)) {
+      return (
+        <GateSurface
+          pending={gate}
+          onSubmit={onGate}
+          services={gateServices}
+          {...(gateEditor !== undefined ? { editor: gateEditor } : {})}
+        />
+      );
+    }
     const silent = piece.sessionId === undefined && surfaceKindOf(piece.node) !== "conversation";
     if (silent || piece.node.operation?.status === "failed") return <SilentState node={piece.node} />;
-    const view = sessions[sessionKey(piece.node)];
+    const view = sessions[sessionKey(recordAt(piece))];
     if (view === undefined) return <p className="empty">Loading…</p>;
     const matches =
       liveTurn !== null &&
@@ -638,7 +673,7 @@ function ChatComposer({
   onResume,
 }: {
   taskId: string;
-  instanceId: number | undefined;
+  instanceId: string | undefined;
   project?: string | undefined;
   /** The TASK is still going — what makes the button a stop button. See {@link stop}. */
   running?: boolean;
@@ -1040,7 +1075,7 @@ export function RunView({ context }: { context: FileSurfaceProps["context"] }): 
   const declared = trailState?.children ?? [];
   const [ownMode, setOwnMode] = useState<RunMode>("board");
   const mode = context.runMode ?? ownMode;
-  const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
 
   const openRun = (child: InstanceNode): void => {
     if (onWalkInto !== undefined) return onWalkInto(child);
@@ -1165,6 +1200,14 @@ export function TaskContext({
   useEffect(() => {
     if (asking !== undefined) setMode("conversation");
   }, [asking]);
+  /**
+   * Whether the conversation has a panel to put the question in.
+   *
+   * Asked of the same tree the panels are built from, with the same predicate the renderer uses, so
+   * the two cannot disagree about whether the gate was drawn — and the alternative to asking is a
+   * question that silently belongs to nobody.
+   */
+  const hosted = gate !== undefined && detail.instances.some((node) => hasAsking(node));
   const hops = prunedTrail(chain, detail.instances, (id) => context.sessions[id]);
   const pushHop = (node: InstanceNode, call: string, name: string): void =>
     setChain([...hops, { instanceId: node.instanceId, stateId: node.stateId, sidechain: call, name }]);
@@ -1237,15 +1280,24 @@ export function TaskContext({
           detail={detail}
           context={context}
           onOpenSidechain={pushHop}
-          {...(gate !== undefined && onGate !== undefined ? { asking: true } : {})}
+          {...(gate !== undefined && onGate !== undefined
+            ? {
+                asking: true,
+                gate,
+                onGate,
+                ...(gateServices !== undefined ? { gateServices } : {}),
+                ...(gateEditor !== undefined ? { gateEditor } : {}),
+              }
+            : {})}
           {...(focus !== undefined ? { focus } : {})}
         />
       )}
-      {gate !== undefined && onGate !== undefined ? (
-        // The newest thing in this conversation IS the question — rendered as its latest turn,
-        // not floated over it. Every component, not just the reviewer: a state that asks something
-        // is a state this run is SITTING in, and the place a task sits is its conversation
-        // (CHANGESETS.md §8.1's default host, finally the only one).
+      {gate !== undefined && onGate !== undefined && !hosted ? (
+        // The FALLBACK, and only that. The question belongs in the panel of the state that raised it
+        // — `RunConversation` puts it there — and this is what happens when the tree has no such
+        // panel to put it in: a record still loading, or a gate parked by an instance the projection
+        // has not caught up with. A question with nowhere to go must not disappear, so it goes here,
+        // at the end, which is where it used to live for everything.
         <section className="inline-gate" data-testid="inline-gate">
           <GateSurface
             pending={gate}
@@ -1344,7 +1396,7 @@ export function CompositeView(props: FileSurfaceProps & { state: StateView }): J
   // Which card the BOARD is showing as selected. It no longer decides anything in the conversation —
   // the panels there open every session they hold — so this is now what it always looked like: the
   // board's own selection.
-  const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
 
   const at = standingOn(state, context);
 

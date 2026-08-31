@@ -55,6 +55,28 @@ import {
  */
 export interface SessionPiece {
   node: InstanceNode;
+  /**
+   * The run that actually made this call — NOT `node.runId`, and the difference is load-bearing.
+   *
+   * The join is by address, so a folded node collects the calls made at its position by any run
+   * (see {@link piecesOf}); the node itself names whichever run the fold let win there. For a
+   * replayed state those are different runs, and taking the node's would report the resumed run as
+   * having done work it took from the record. See {@link runForksOf}, which is the reader that
+   * would otherwise call every replayed address a fork.
+   *
+   * Absent for a piece with no session row — a leaf that ran no call, where the node's own run is
+   * the only answer there is.
+   */
+  runId?: number;
+  /**
+   * The instance the RECORD is filed under, in {@link runId}'s walk.
+   *
+   * Same reason as `runId` and the same trap: a transcript is fetched and cached by run-and-instance
+   * (`sessionKey`), and for a replayed state the folded node names an instance of the resumed run
+   * that never wrote one. Asking for that pair returns nothing, so the panel stayed empty even once
+   * the join found the session. This is where the words actually are.
+   */
+  instanceId?: string;
   /** Absent ⇒ this operation ran in no conversation, or has not finished writing its position. */
   sessionId?: string;
   /** Where this operation's record sits in its session. Absent with {@link sessionId}. */
@@ -89,8 +111,8 @@ export interface SessionBand {
 
 /** What a segment is grouped by. A piece with no session is its own thread and cannot be shared. */
 function keyOf(piece: SessionPiece): string {
-  // Run and instance, for the same reason the join uses both: `#i2` names a different state in every
-  // run, and two runs' session-less pieces sharing a key would be drawn as one panel.
+  // Run and instance, for the same reason the join uses both: a legacy journal's counter ids repeat
+  // across runs, and two runs' session-less pieces sharing a key would be drawn as one panel.
   const run = piece.node.runId;
   return piece.sessionId ?? (run === undefined ? `#${piece.node.instanceId}` : `#${run}:${piece.node.instanceId}`);
 }
@@ -122,28 +144,56 @@ export function piecesOf(
 ): SessionPiece[] {
   if (root === undefined) return [];
   /**
-   * Keyed by RUN and instance, never by instance alone.
+   * By ADDRESS where there is one, and by run-and-instance otherwise.
    *
-   * Instance ids are minted per run, so `#i2` names a different state in each one — an unscoped join
-   * matched this run's second instance against every older run's, and the way that failed was silent:
-   * a panel drawn with another run's transcript in it. The tree is folded across runs (`foldRuns`),
-   * so every node carries the run it came from and the pair is the only key that means anything.
+   * Counter-minted ids repeated across runs, so `#i2` named a different state in each one — an
+   * unscoped join on the instance alone matched this run's second instance against every older
+   * run's, and the way that failed was silent: a panel drawn with another run's transcript in it.
+   * Durable ids cannot repeat, but legacy journals still hold counters, so the fallback pair stays
+   * run-scoped.
+   *
+   * But the pair is the WRONG key for a resumed task, and the tree is what makes it wrong. A replayed
+   * operation is never dispatched, so it writes no session position — the conversation stays under
+   * the id the ORIGINAL run recorded it beneath, which is run-scoped too (`t-.../2/#i9`). `foldRuns`
+   * merges by position and the later node wins outright, so the folded tree points every replayed
+   * state at the resumed run, where there is nothing to find. Every state a resume replayed came back
+   * as "this state ran no model call" — about states that had made one, and whose transcript was
+   * sitting in the database the whole time.
+   *
+   * The address is the fix and it is the reason the address exists: it is the one name that means the
+   * same thing in two runs (see `SessionRef.address`). Keyed by it, a folded node collects the calls
+   * made at its position by ANY run, which is what "the task's conversation" has meant all along.
    */
   const byInstance = new Map<string, SessionRef[]>();
-  const at = (run: number | undefined, instance: number): string => `${run ?? runId ?? ""}:${instance}`;
-  for (const ref of history) {
-    const key = at(ref.runId, ref.instanceId);
-    const list = byInstance.get(key);
-    if (list === undefined) byInstance.set(key, [ref]);
+  const byAddress = new Map<string, SessionRef[]>();
+  const at = (run: number | undefined, instance: string): string => `${run ?? runId ?? ""}:${instance}`;
+  const push = (map: Map<string, SessionRef[]>, key: string, ref: SessionRef): void => {
+    const list = map.get(key);
+    if (list === undefined) map.set(key, [ref]);
     else list.push(ref);
+  };
+  for (const ref of history) {
+    push(byInstance, at(ref.runId, ref.instanceId), ref);
+    if (ref.address !== undefined) push(byAddress, JSON.stringify(ref.address), ref);
   }
 
   const out: SessionPiece[] = [];
   const visit = (node: InstanceNode): void => {
-    const refs = [...(byInstance.get(at(node.runId, node.instanceId)) ?? [])].sort((a, b) => a.seq - b.seq);
+    // The address first, because it answers for every run at this position; the pair only ever
+    // answers for one. A node with no address is a run journaled before they were projected.
+    const found =
+      node.address !== undefined ? byAddress.get(JSON.stringify(node.address)) : byInstance.get(at(node.runId, node.instanceId));
+    // Oldest first, then by position within a conversation: two runs' calls at one address are two
+    // passes at the same work, and the order they happened in is the order to read them in.
+    const refs = [...(found ?? [])].sort((a, b) => a.runId - b.runId || a.seq - b.seq);
     for (const ref of refs) {
       out.push({
         node,
+        // WHOSE work this is, which the node can no longer say once the join is by address: the
+        // folded node names the newest run at this position, and the piece names the run that
+        // actually made the call. `runForksOf` is the reader that must not confuse the two.
+        runId: ref.runId,
+        instanceId: ref.instanceId,
         sessionId: ref.sessionId,
         seq: ref.seq,
         // The instance's entry is the fallback, and it is only ever wrong by being generous: a run
@@ -194,7 +244,23 @@ export function piecesOf(
    * A node built here is never walked into: it has no children by construction, because a composite
    * writes no session ref.
    */
-  const drawn = new Set(out.map((piece) => `${piece.node.runId ?? runId ?? ""}:${piece.node.instanceId}:${piece.seq ?? ""}`));
+  /**
+   * What has already been drawn, keyed by the RECORD rather than by the node that drew it.
+   *
+   * The two were the same thing while the join was `(run, instance)` — a piece could only ever come
+   * from a ref with the node's own pair. Under the address join they part company for exactly the
+   * case this synthesis exists for: a folded node from run 4 drawing run 2's call is `4:#i5` holding
+   * a record filed under `2:#i9`, so a key taken off the node matches no ref and every conversation
+   * on the page was synthesised a second time beside itself. Two panels of the same words, and — the
+   * louder symptom — two sides at every address, which `runForksOf` read as a fork of the resumed
+   * run against the run it replayed, under almost every panel in the conversation.
+   */
+  const drawn = new Set(
+    out.map(
+      (piece) =>
+        `${piece.runId ?? piece.node.runId ?? runId ?? ""}:${piece.instanceId ?? piece.node.instanceId}:${piece.seq ?? ""}`,
+    ),
+  );
   for (const ref of history) {
     if (drawn.has(`${ref.runId}:${ref.instanceId}:${ref.seq}`)) continue;
     out.push({
@@ -219,7 +285,11 @@ export function piecesOf(
     });
   }
 
-  out.sort((a, b) => a.startedAt - b.startedAt || (a.seq ?? 0) - (b.seq ?? 0) || a.node.instanceId - b.node.instanceId);
+  // `localeCompare` as the last tiebreak: instance ids are UUIDv7 strings, whose lexicographic
+  // order IS mint order — which is what the numeric subtraction used to buy.
+  out.sort(
+    (a, b) => a.startedAt - b.startedAt || (a.seq ?? 0) - (b.seq ?? 0) || a.node.instanceId.localeCompare(b.node.instanceId),
+  );
   return out;
 }
 
@@ -397,7 +467,13 @@ export interface RunFork {
 export function runForksOf(pieces: readonly SessionPiece[]): RunFork[] {
   const at = new Map<string, RunFork>();
   for (const piece of pieces) {
-    const { address, runId } = piece.node;
+    const address = piece.node.address;
+    // The PIECE's run, not the node's — see `SessionPiece.runId`. A folded node names the newest run
+    // at its position, so reading the run off it made every address a resume walked over look like
+    // two sides: the original run's work, and the resumed run "doing" the same address by replaying
+    // it. A replay produces nothing to read and is not a side, which is what this file already said
+    // and could not tell, because the only evidence it had was a node that had been overwritten.
+    const runId = piece.runId ?? piece.node.runId;
     if (address === undefined || runId === undefined) continue;
     const key = JSON.stringify(address);
     const held = at.get(key);
@@ -437,19 +513,40 @@ export function startersOf(bands: readonly SessionBand[]): Map<string, SessionPi
 }
 
 /** Every instance whose transcript the panels will need — what the host has to have fetched. */
-export function instancesOf(bands: readonly SessionBand[]): Array<{ runId?: number; instanceId: number }> {
-  const seen = new Map<string, { runId?: number; instanceId: number }>();
+export function instancesOf(bands: readonly SessionBand[]): Array<{ runId?: number; instanceId: string }> {
+  const seen = new Map<string, { runId?: number; instanceId: string }>();
   for (const band of bands) {
     for (const segment of band.segments) {
       for (const piece of segment.pieces) {
-        // The RUN as well as the instance: ids are minted per run, and a transcript fetched by the id
-        // alone comes back from whichever run wrote it last — someone else's words, silently.
-        const { runId, instanceId } = piece.node;
-        seen.set(`${runId ?? ""}:${instanceId}`, { instanceId, ...(runId !== undefined ? { runId } : {}) });
+        const at = recordAt(piece);
+        seen.set(`${at.runId ?? ""}:${at.instanceId}`, at);
       }
     }
   }
   return [...seen.values()];
+}
+
+/**
+ * Where a piece's transcript is filed — the ONE answer, so the fetch and the read cannot disagree.
+ *
+ * The RUN as well as the instance: ids are minted per run, and a transcript fetched by the id alone
+ * comes back from whichever run wrote it last — someone else's words, silently.
+ *
+ * And the piece's own pair before the node's, which is the part a resume broke. The node is the
+ * folded tree's, so for a state a later run REPLAYED it names that run and an instance which never
+ * wrote a record; the words are under the run that actually made the call. Falling back to the node
+ * is right for a leaf with no session at all, where there is nothing else to name.
+ */
+export function recordAt(piece: SessionPiece): { runId?: number; instanceId: string } {
+  // A node with no run is a SINGLE-RUN projection, and there the bare instance id is the whole key —
+  // `sessionKey`'s own rule, because there is no second run to confuse it with. The piece's `runId`
+  // comes off a `SessionRef`, which always carries one, so preferring it here would stamp a run onto
+  // every key in a view that has none and miss the cache the loader filled.
+  if (piece.node.runId === undefined) return { instanceId: piece.node.instanceId };
+  return {
+    runId: piece.runId ?? piece.node.runId,
+    instanceId: piece.instanceId ?? piece.node.instanceId,
+  };
 }
 
 // --- what no panel can hold ---------------------------------------------------
@@ -496,7 +593,7 @@ export interface BandNote {
    * second pass as a continuation of the first. Absent on a `blocked` note by construction: a child
    * that could not be entered never became an instance, which is what blocked means.
    */
-  instanceId?: number;
+  instanceId?: string;
   /**
    * Where it happened, as the chain of child keys from the run's root — `product/explore`.
    *
@@ -537,14 +634,14 @@ export interface BandNote {
  * A turn with NO instance is a `blocked` child — it never became one, which is what blocked means —
  * and answers `false`, correctly: there is no panel and there never will be.
  */
-function ranAnOperation(turn: ConversationTurn, byInstance: Map<number, InstanceNode>): boolean {
+function ranAnOperation(turn: ConversationTurn, byInstance: Map<string, InstanceNode>): boolean {
   if (turn.instanceId === undefined) return false;
   return byInstance.get(turn.instanceId)?.operation !== undefined;
 }
 
 /** Every instance in a run, by id — the index the rule above is a lookup into. */
-function instancesById(root: InstanceNode | undefined): Map<number, InstanceNode> {
-  const out = new Map<number, InstanceNode>();
+function instancesById(root: InstanceNode | undefined): Map<string, InstanceNode> {
+  const out = new Map<string, InstanceNode>();
   const visit = (node: InstanceNode): void => {
     out.set(node.instanceId, node);
     for (const child of node.children) visit(child);
@@ -572,7 +669,7 @@ function reasonOf(turn: ConversationTurn): string {
  * knows which instance is being READ and the projection does not. A run walked into two levels deep
  * needs its notes shown relative to where it is standing, not to the root of the workflow.
  */
-export function mountPathOf(instances: readonly InstanceNode[], instanceId: number): string {
+export function mountPathOf(instances: readonly InstanceNode[], instanceId: string): string {
   const walk = (nodes: readonly InstanceNode[], base: string): string | undefined => {
     for (const node of nodes) {
       const here = node.childKey === undefined ? base : base === "" ? node.childKey : `${base}/${node.childKey}`;

@@ -171,7 +171,7 @@ import {
   isChatInstance,
   runChatTurn,
   withSessionLayers,
-  CHAT_INSTANCE_BASE,
+  chatInstanceIdOf,
   CHAT_CHILD_KEY,
   type ChatSettings,
   type ChatTurnResult,
@@ -703,7 +703,7 @@ export { Refusal } from "@jaira/shared";
 const POINTERS = {
   taskId: "string",
   runId: "number",
-  instanceId: "number",
+  instanceId: "string",
   jobId: "number",
   project: "string",
 } as const;
@@ -736,7 +736,7 @@ function entryOfRecord(record: LogRecord): Omit<LogEntry, "id" | "at"> {
     level: record.level,
     source: record.scope,
     message: record.message,
-    ...(pointers as { taskId?: string; runId?: number; instanceId?: number; jobId?: number; project?: string }),
+    ...(pointers as { taskId?: string; runId?: number; instanceId?: string; jobId?: number; project?: string }),
     ...(Object.keys(detail).length > 0 ? { detail: detail as JsonValue } : {}),
   };
 }
@@ -1867,7 +1867,7 @@ export class AppService {
    * browser comes from, so a shared workflow's run reads its own recorded copy rather than whichever
    * checkout happens to be focused.
    */
-  effectiveState(request: { stateId: string; taskId?: string; instanceId?: number; project?: string }): EffectiveState {
+  effectiveState(request: { stateId: string; taskId?: string; instanceId?: string; project?: string }): EffectiveState {
     const open = this.session(request.project);
     const project = open.project;
     const run = request.taskId === undefined ? undefined : project.runtime.listRuns(request.taskId).at(-1);
@@ -1903,7 +1903,7 @@ export class AppService {
     taskId: string,
     runId: number,
     stateId: string,
-    instanceId?: number,
+    instanceId?: string,
   ): EffectiveStateValues | undefined {
     const events = open.project.events.list(taskId, { runId });
     const entered = events.filter(
@@ -1912,9 +1912,9 @@ export class AppService {
     const mine =
       instanceId === undefined
         ? entered.at(-1)
-        : entered.find((stored) => (stored.event as { instanceId: number }).instanceId === instanceId);
+        : entered.find((stored) => (stored.event as { instanceId: string }).instanceId === instanceId);
     if (mine === undefined) return undefined;
-    const id = (mine.event as { instanceId: number }).instanceId;
+    const id = (mine.event as { instanceId: string }).instanceId;
     const inputs = (mine.event as { inputs?: Record<string, JsonValue> }).inputs;
 
     // Every child of THIS instance, by the key it was mounted under — the other end of the wiring
@@ -1923,7 +1923,7 @@ export class AppService {
     for (const stored of events) {
       const event = stored.event as {
         type: string;
-        parentInstanceId?: number;
+        parentInstanceId?: string;
         childKey?: string;
         stateId?: string;
         inputs?: Record<string, JsonValue>;
@@ -2003,7 +2003,7 @@ export class AppService {
         // A failed call's SPEND, which used to be dropped on the floor: a post-dispatch failure
         // carries the metrics of the call it made (upstream), and an agent that billed a dollar
         // before failing spent it just as surely as one that succeeded.
-        const failed = row.event as { instanceId?: number; metrics?: { costUsd?: number } };
+        const failed = row.event as { instanceId?: string; metrics?: { costUsd?: number } };
         const metrics = runMetricsOf(failed.metrics as never);
         costs.set(`${row.runId}:${failed.instanceId}`, {
           status: "error",
@@ -2097,13 +2097,14 @@ export class AppService {
     return sessionStoreFor(session.project, { taskId: request.taskId, runId: request.runId }).records();
   }
 
-  sessionView(request: { taskId: string; runId?: number; instanceId?: number; project?: string }): SessionView {
+  sessionView(request: { taskId: string; runId?: number; instanceId?: string; project?: string }): SessionView {
     const session = this.session(request.project);
     const history = this.sessionHistory(request);
     // The LAST match, not the first. Without a `runId` the history spans every run of the task, and
-    // instance ids restart at 1 on each — so `#i2` names the second instance of every run there has
-    // ever been. Taking the first match showed run 1's conversation for a card belonging to run 4,
-    // which is the same failure as showing none except that it looks like an answer.
+    // a legacy journal's counter ids restart at 1 on each — so `#i2` named the second instance of
+    // every run there had ever been. Durable UUIDs cannot collide like that, but old rows are still
+    // read here, and taking the first match showed run 1's conversation for a card belonging to run
+    // 4 — the same failure as showing none except that it looks like an answer.
     const row =
       request.instanceId === undefined
         ? history.at(-1)
@@ -2111,7 +2112,7 @@ export class AppService {
     const base = {
       taskId: request.taskId,
       runId: row?.runId ?? request.runId ?? 0,
-      instanceId: row?.instanceId ?? request.instanceId ?? 0,
+      instanceId: row?.instanceId ?? request.instanceId ?? "",
       stateId: row?.stateId ?? "",
       sessionId: row?.sessionId ?? "",
       seq: row?.seq ?? 0,
@@ -2990,7 +2991,7 @@ export class AppService {
    * the moment a run is selected — and a control that only learned its value by sending a message
    * would be a control nobody could trust before they had already committed to using it.
    */
-  chatPlan(request: { taskId: string; instanceId: number; project?: string; overrides?: ChatSettings }): ChatPlanView | null {
+  chatPlan(request: { taskId: string; instanceId: string; project?: string; overrides?: ChatSettings }): ChatPlanView | null {
     const open = this.session(request.project);
     let context;
     try {
@@ -3218,7 +3219,7 @@ export class AppService {
   /** What one typed message is, as a request — the same shape whether it queues or goes straight in. */
   private static chatSend: {
     taskId: string;
-    instanceId: number;
+    instanceId: string;
     message: string;
     overrides?: ChatSettings;
     project?: string;
@@ -3252,7 +3253,7 @@ export class AppService {
    */
   async sendChatMessage(
     request: typeof AppService.chatSend,
-  ): Promise<ChatTurnResult & { instanceId: number; index: number; steered?: boolean }> {
+  ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean }> {
     if (request.message.trim() === "") throw this.refusal("run", "a message cannot be empty");
     const open = this.session(request.project);
     // Taken before this send installs its own, so it names the PREDECESSOR rather than itself.
@@ -3283,7 +3284,7 @@ export class AppService {
     request: typeof AppService.chatSend,
     /** The typed turn ahead of this one, if there is one — resolves when it has landed. */
     settledAhead?: Promise<void>,
-  ): Promise<ChatTurnResult & { instanceId: number; index: number; steered?: boolean }> {
+  ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean }> {
     const project = open.project;
     let context = this.chatContextOf(request.taskId, request.instanceId, request.project, request.branchAt);
 
@@ -3589,7 +3590,7 @@ export class AppService {
           // same node instead of entering a sibling that would supersede the first. Keyed on the
           // HOST rather than on whatever was clicked, so two composites under one speaking state
           // continue the same conversation instead of minting a chat child each.
-          instanceId: CHAT_INSTANCE_BASE + context.hostInstanceId,
+          instanceId: chatInstanceIdOf(context.hostInstanceId),
           parentInstanceId: context.hostInstanceId,
           stateId: context.stateId,
           childKey: CHAT_CHILD_KEY,
@@ -3604,7 +3605,7 @@ export class AppService {
     // and only the task LIST on `tasks` — so the plural left the reply invisible: the box cleared,
     // the turn ran, and the panel above stayed byte-identical until something unrelated invalidated.
     this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: request.taskId });
-    return { ...result, instanceId: CHAT_INSTANCE_BASE + context.hostInstanceId, index: context.index };
+    return { ...result, instanceId: chatInstanceIdOf(context.hostInstanceId), index: context.index };
   }
 
   /**
@@ -3721,7 +3722,7 @@ export class AppService {
    */
   private chatContextOf(
     taskId: string,
-    instanceId: number,
+    instanceId: string,
     projectKey?: string,
     /** Send at this position rather than after everything — see `chat:send`'s `branchAt`. */
     branchAt?: string,
@@ -3729,7 +3730,7 @@ export class AppService {
     bundle: WorkflowBundle;
     runId: number;
     /** The instance whose conversation is being continued — see below on why it may not be the one asked for. */
-    hostInstanceId: number;
+    hostInstanceId: string;
     stateId: string;
     path: Array<LoadedState | undefined>;
     position: string;
@@ -3778,7 +3779,7 @@ export class AppService {
       );
     }
     const host = found.path[hostAt]!;
-    const chatId = CHAT_INSTANCE_BASE + host.instanceId;
+    const chatId = chatInstanceIdOf(host.instanceId);
     const chat = host.children.find((c: InstanceNode) => c.instanceId === chatId);
     return {
       bundle,
@@ -3820,11 +3821,11 @@ export class AppService {
    * Takes the HOST's id, never the clicked one: a composite has no row here at all, which is what
    * `chatContextOf` resolves before it calls this.
    */
-  private chatPositionOf(taskId: string, runId: number, hostInstanceId: number, projectKey?: string): string {
+  private chatPositionOf(taskId: string, runId: number, hostInstanceId: string, projectKey?: string): string {
     const history = this.sessionHistory({ taskId, runId, project: projectKey });
     const mine = [...history]
       .reverse()
-      .find((h) => h.instanceId === CHAT_INSTANCE_BASE + hostInstanceId || h.instanceId === hostInstanceId);
+      .find((h) => h.instanceId === chatInstanceIdOf(hostInstanceId) || h.instanceId === hostInstanceId);
     if (mine === undefined) {
       throw new NoConversationHere(
         `instance ${hostInstanceId} ran no model call, so there is no conversation to continue`,
@@ -3955,7 +3956,7 @@ export class AppService {
    * turn of that same conversation. Chat children are skipped — they are the conversation, not its
    * host, which is the distinction `chatContextOf` also draws.
    */
-  private chatHostOf(taskId: string, projectKey?: string): number | null {
+  private chatHostOf(taskId: string, projectKey?: string): string | null {
     const history = this.sessionHistory({ taskId, project: projectKey });
     const run = history.at(-1)?.runId;
     const host = history.find((h) => h.runId === run && !isChatInstance(h.instanceId));
@@ -4156,7 +4157,7 @@ export class AppService {
    */
   private static findInstance(
     roots: readonly InstanceNode[],
-    instanceId: number,
+    instanceId: string,
     above: InstanceNode[] = [],
   ): { node: InstanceNode; path: InstanceNode[] } | undefined {
     for (const node of roots) {

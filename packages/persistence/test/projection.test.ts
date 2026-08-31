@@ -34,7 +34,7 @@ const SHAPE: WorkflowShape = {
   "feature/plan/critique/human_review": { children: [], interactive: true },
 };
 
-const entered = (id: number, stateId: string, parent?: number, childKey?: string): EngineEvent => ({
+const entered = (id: string, stateId: string, parent?: string, childKey?: string): EngineEvent => ({
   type: "instance.entered",
   instanceId: id,
   stateId,
@@ -42,13 +42,13 @@ const entered = (id: number, stateId: string, parent?: number, childKey?: string
   ...(childKey !== undefined ? { childKey } : {}),
   inputs: {},
 });
-const terminated = (id: number, stateId: string, outcome: "success" | "error" | "canceled" | "timeout"): EngineEvent => ({
+const terminated = (id: string, stateId: string, outcome: "success" | "error" | "canceled" | "timeout"): EngineEvent => ({
   type: "instance.terminated",
   instanceId: id,
   stateId,
   outcome,
 });
-const opStarted = (id: number, stateId: string, op: "prompt" | "function"): EngineEvent => ({
+const opStarted = (id: string, stateId: string, op: "prompt" | "function"): EngineEvent => ({
   type: "operation.started",
   instanceId: id,
   stateId,
@@ -58,13 +58,13 @@ const opStarted = (id: number, stateId: string, op: "prompt" | "function"): Engi
 describe("projectRun", () => {
   it("builds the instance tree and the active path from the journal", () => {
     const events: EngineEvent[] = [
-      entered(1, "feature/plan"),
-      entered(2, "feature/plan/goals", 1, "goals"),
-      opStarted(2, "feature/plan/goals", "prompt"),
-      { type: "operation.completed", instanceId: 2, stateId: "feature/plan/goals", op: "prompt", metrics: { durationMs: 1, costUsd: 0.02, costSource: "table" } },
-      terminated(2, "feature/plan/goals", "success"),
-      entered(3, "feature/plan/context", 1, "context"),
-      opStarted(3, "feature/plan/context", "prompt"),
+      entered("1", "feature/plan"),
+      entered("2", "feature/plan/goals", "1", "goals"),
+      opStarted("2", "feature/plan/goals", "prompt"),
+      { type: "operation.completed", instanceId: "2", stateId: "feature/plan/goals", op: "prompt", metrics: { durationMs: 1, costUsd: 0.02, costSource: "table" } },
+      terminated("2", "feature/plan/goals", "success"),
+      entered("3", "feature/plan/context", "1", "context"),
+      opStarted("3", "feature/plan/context", "prompt"),
     ];
     const run = projectRun(events, SHAPE, events.map((_, i) => 1000 + i));
 
@@ -85,9 +85,9 @@ describe("projectRun", () => {
 
   it("reports waiting_for_user while an interactive function runs", () => {
     const events: EngineEvent[] = [
-      entered(1, "feature/plan/critique"),
-      entered(2, "feature/plan/critique/human_review", 1, "human_review"),
-      opStarted(2, "feature/plan/critique/human_review", "function"),
+      entered("1", "feature/plan/critique"),
+      entered("2", "feature/plan/critique/human_review", "1", "human_review"),
+      opStarted("2", "feature/plan/critique/human_review", "function"),
     ];
     const run = projectRun(events, SHAPE);
     const gate = run.instances[0]!.children[0]!;
@@ -95,54 +95,54 @@ describe("projectRun", () => {
 
     // Answering it returns the instance to plain running.
     const answered = projectRun(
-      [...events, { type: "operation.completed", instanceId: 2, stateId: "feature/plan/critique/human_review", op: "function" }],
+      [...events, { type: "operation.completed", instanceId: "2", stateId: "feature/plan/critique/human_review", op: "function" }],
       SHAPE,
     );
     expect(answered.instances[0]!.children[0]!.status).toBe("running");
   });
 
   it("a non-interactive function state is not waiting_for_user", () => {
-    const events: EngineEvent[] = [entered(1, "feature/plan/goals"), opStarted(1, "feature/plan/goals", "function")];
+    const events: EngineEvent[] = [entered("1", "feature/plan/goals"), opStarted("1", "feature/plan/goals", "function")];
     expect(projectRun(events, SHAPE).instances[0]!.status).toBe("running");
   });
 
   it("supersedes cleared sequence members instead of dropping their history", () => {
     const events: EngineEvent[] = [
-      entered(1, "feature/plan"),
-      entered(2, "feature/plan/goals", 1, "goals"),
-      terminated(2, "feature/plan/goals", "success"),
-      { type: "transition.taken", instanceId: 1, stateId: "feature/plan", to: "goals", index: 1, iteration: 1 },
-      { type: "child.superseded", instanceId: 1, stateId: "feature/plan", childKey: "goals" },
-      entered(4, "feature/plan/goals", 1, "goals"),
+      entered("1", "feature/plan"),
+      entered("2", "feature/plan/goals", "1", "goals"),
+      terminated("2", "feature/plan/goals", "success"),
+      { type: "transition.taken", instanceId: "1", stateId: "feature/plan", to: "goals", index: 1, iteration: 1 },
+      { type: "child.superseded", instanceId: "1", stateId: "feature/plan", childKey: "goals" },
+      entered("4", "feature/plan/goals", "1", "goals"),
     ];
     const run = projectRun(events, SHAPE);
     const root = run.instances[0]!;
     expect(root.index).toBe(1);
     // Both instances are kept (history preserved, DESIGN §4.2).
     expect(root.children).toHaveLength(2);
-    expect(root.children[0]).toMatchObject({ instanceId: 2, superseded: true });
-    expect(root.children[1]).toMatchObject({ instanceId: 4, superseded: false });
+    expect(root.children[0]).toMatchObject({ instanceId: "2", superseded: true });
+    expect(root.children[1]).toMatchObject({ instanceId: "4", superseded: false });
     // The live instance is the one on the active path.
-    expect(run.activePath.map((s) => s.instanceId)).toEqual([1, 4]);
+    expect(run.activePath.map((s) => s.instanceId)).toEqual(["1", "4"]);
   });
 
   it("re-entering a child key supersedes the previous instance even without a reset event", () => {
     const run = projectRun([
-      entered(1, "feature/plan"),
-      entered(2, "feature/plan/goals", 1, "goals"),
-      terminated(2, "feature/plan/goals", "success"),
-      entered(3, "feature/plan/goals", 1, "goals"),
+      entered("1", "feature/plan"),
+      entered("2", "feature/plan/goals", "1", "goals"),
+      terminated("2", "feature/plan/goals", "success"),
+      entered("3", "feature/plan/goals", "1", "goals"),
     ]);
     const kids = run.instances[0]!.children;
     expect(kids.map((k) => k.superseded)).toEqual([true, false]);
   });
 
-  it("records a blocked child without inventing an instance for the -1 sentinel", () => {
+  it("records a blocked child without inventing an instance for it", () => {
     const run = projectRun([
-      entered(1, "feature/plan"),
-      { type: "instance.blocked", instanceId: -1, stateId: "feature/plan/context", reason: "input 'goals' is undefined" },
+      entered("1", "feature/plan"),
+      { type: "instance.blocked", stateId: "feature/plan/context", reason: "input 'goals' is undefined" },
     ]);
-    expect(flattenInstances(run.instances).map((n) => n.instanceId)).toEqual([1]);
+    expect(flattenInstances(run.instances).map((n) => n.instanceId)).toEqual(["1"]);
     expect(run.blocked).toEqual([{ stateId: "feature/plan/context", reason: "input 'goals' is undefined" }]);
   });
 
@@ -153,7 +153,7 @@ describe("projectRun", () => {
       ["canceled", "canceled"],
       ["timeout", "timeout"],
     ] as const) {
-      const run = projectRun([entered(1, "wf"), terminated(1, "wf", outcome)]);
+      const run = projectRun([entered("1", "wf"), terminated("1", "wf", outcome)]);
       expect(run.instances[0]!.status).toBe(status);
       expect(run.activePath).toEqual([]);
     }
@@ -161,17 +161,17 @@ describe("projectRun", () => {
 
   it("carries a terminating failure onto the operation view", () => {
     const run = projectRun([
-      entered(1, "wf"),
-      opStarted(1, "wf", "prompt"),
-      { type: "operation.failed", instanceId: 1, stateId: "wf", op: "prompt", failure: { classification: "permanent", reason: "boom" } },
-      { type: "instance.terminated", instanceId: 1, stateId: "wf", outcome: "error", failure: { classification: "permanent", reason: "boom" } },
+      entered("1", "wf"),
+      opStarted("1", "wf", "prompt"),
+      { type: "operation.failed", instanceId: "1", stateId: "wf", op: "prompt", failure: { classification: "permanent", reason: "boom" } },
+      { type: "instance.terminated", instanceId: "1", stateId: "wf", outcome: "error", failure: { classification: "permanent", reason: "boom" } },
     ]);
     expect(run.instances[0]!.status).toBe("failed");
     expect(run.instances[0]!.operation).toMatchObject({ status: "failed", reason: "boom" });
   });
 
   it("ignores events for unknown instances rather than throwing", () => {
-    const run = projectRun([opStarted(99, "ghost", "prompt"), terminated(99, "ghost", "success")]);
+    const run = projectRun([opStarted("99", "ghost", "prompt"), terminated("99", "ghost", "success")]);
     expect(run.instances).toEqual([]);
     expect(run.activePath).toEqual([]);
   });
@@ -180,9 +180,9 @@ describe("projectRun", () => {
 describe("activePathOf", () => {
   it("prefers the most recently entered live sibling", () => {
     const run = projectRun([
-      entered(1, "feature/plan"),
-      entered(2, "feature/plan/goals", 1, "goals"),
-      entered(3, "feature/plan/context", 1, "context"),
+      entered("1", "feature/plan"),
+      entered("2", "feature/plan/goals", "1", "goals"),
+      entered("3", "feature/plan/context", "1", "context"),
     ]);
     expect(activePathOf(run.instances).map((s) => s.childKey)).toEqual([undefined, "context"]);
   });
@@ -209,9 +209,9 @@ function runningAt(events: EngineEvent[], atMs?: number[]): TaskProjection["run"
 
 describe("projectBoard", () => {
   it("places each task in the column its active path enters", () => {
-    const inGoals = task("t-1", { run: runningAt([entered(1, "feature/plan"), entered(2, "feature/plan/goals", 1, "goals")]) });
+    const inGoals = task("t-1", { run: runningAt([entered("1", "feature/plan"), entered("2", "feature/plan/goals", "1", "goals")]) });
     const inCritique = task("t-2", {
-      run: runningAt([entered(1, "feature/plan"), entered(2, "feature/plan/critique", 1, "critique")]),
+      run: runningAt([entered("1", "feature/plan"), entered("2", "feature/plan/critique", "1", "critique")]),
     });
     const board = projectBoard(SHAPE, "feature/plan", [inGoals, inCritique]);
 
@@ -224,7 +224,7 @@ describe("projectBoard", () => {
   });
 
   it("puts a task running the level's own operation in atLevel, not a column", () => {
-    const board = projectBoard(SHAPE, "feature/plan", [task("t-1", { run: runningAt([entered(1, "feature/plan")]) })]);
+    const board = projectBoard(SHAPE, "feature/plan", [task("t-1", { run: runningAt([entered("1", "feature/plan")]) })]);
     expect(board.atLevel.map((c) => c.taskId)).toEqual(["t-1"]);
     expect(board.columns.every((c) => c.cards.length === 0)).toBe(true);
   });
@@ -232,10 +232,10 @@ describe("projectBoard", () => {
   it("flags a card that drills down and reports the deepest active state", () => {
     const deep = task("t-1", {
       run: runningAt([
-        entered(1, "feature/plan"),
-        entered(2, "feature/plan/critique", 1, "critique"),
-        entered(3, "feature/plan/critique/human_review", 2, "human_review"),
-        opStarted(3, "feature/plan/critique/human_review", "function"),
+        entered("1", "feature/plan"),
+        entered("2", "feature/plan/critique", "1", "critique"),
+        entered("3", "feature/plan/critique/human_review", "2", "human_review"),
+        opStarted("3", "feature/plan/critique/human_review", "function"),
       ]),
     });
     const root = projectBoard(SHAPE, "feature/plan", [deep]);
@@ -263,10 +263,10 @@ describe("projectBoard", () => {
     const done = task("t-done", {
       status: "completed",
       run: runningAt([
-        entered(1, "feature/plan"),
-        entered(2, "feature/plan/critique", 1, "critique"),
-        terminated(2, "feature/plan/critique", "success"),
-        terminated(1, "feature/plan", "success"),
+        entered("1", "feature/plan"),
+        entered("2", "feature/plan/critique", "1", "critique"),
+        terminated("2", "feature/plan/critique", "success"),
+        terminated("1", "feature/plan", "success"),
       ]),
     });
     const board = projectBoard(SHAPE, "feature/plan", [done]);
@@ -276,14 +276,14 @@ describe("projectBoard", () => {
 
   /** `finished` is a census of the runs that ended, and every one of them is in its column too. */
   it("lists an ended task in finished as well as in its column", () => {
-    const done = task("t-done", { status: "completed", run: runningAt([entered(1, "feature/plan"), terminated(1, "feature/plan", "success")]) });
+    const done = task("t-done", { status: "completed", run: runningAt([entered("1", "feature/plan"), terminated("1", "feature/plan", "success")]) });
     const board = projectBoard(SHAPE, "feature/plan", [done]);
     expect(board.finished.map((c) => c.taskId)).toEqual(["t-done"]);
     expect(board.atLevel.map((c) => c.taskId)).toEqual(["t-done"]);
   });
 
   it("leaves a task whose path never reached this level off the board entirely", () => {
-    const elsewhere = task("t-other", { workflow: "other", run: runningAt([entered(1, "other")]) });
+    const elsewhere = task("t-other", { workflow: "other", run: runningAt([entered("1", "other")]) });
     const board = projectBoard(SHAPE, "feature/plan", [elsewhere]);
     expect(board.columns.flatMap((c) => c.cards)).toEqual([]);
     expect(board.atLevel).toEqual([]);
@@ -311,10 +311,10 @@ describe("projectBoard", () => {
       updatedAt: 9_999,
       run: runningAt(
         [
-          entered(1, "feature/plan"),
-          entered(2, "feature/plan/critique", 1, "critique"),
-          terminated(2, "feature/plan/critique", "success"),
-          terminated(1, "feature/plan", "success"),
+          entered("1", "feature/plan"),
+          entered("2", "feature/plan/critique", "1", "critique"),
+          terminated("2", "feature/plan/critique", "success"),
+          terminated("1", "feature/plan", "success"),
         ],
         [10, 20, 30, 40],
       ),
@@ -328,10 +328,10 @@ describe("projectBoard", () => {
     const going = task("t-live", {
       run: runningAt(
         [
-          entered(1, "feature/plan"),
-          entered(2, "feature/plan/goals", 1, "goals"),
-          terminated(2, "feature/plan/goals", "success"),
-          entered(3, "feature/plan/critique", 1, "critique"),
+          entered("1", "feature/plan"),
+          entered("2", "feature/plan/goals", "1", "goals"),
+          terminated("2", "feature/plan/goals", "success"),
+          entered("3", "feature/plan/critique", "1", "critique"),
         ],
         [10, 20, 30, 40],
       ),
@@ -400,12 +400,12 @@ describe("folding a task's runs into one tree", () => {
 
   it("keeps what an earlier run reached past where a later one stopped", () => {
     const deep = run([
-      entered(1, "root"),
-      entered(2, "root/a", 1, "a"),
-      terminated(2, "root/a", "success"),
-      entered(3, "root/b", 1, "b"),
+      entered("1", "root"),
+      entered("2", "root/a", "1", "a"),
+      terminated("2", "root/a", "success"),
+      entered("3", "root/b", "1", "b"),
     ]);
-    const shallow = run([entered(1, "root"), entered(2, "root/a", 1, "a"), terminated(2, "root/a", "success")]);
+    const shallow = run([entered("1", "root"), entered("2", "root/a", "1", "a"), terminated("2", "root/a", "success")]);
 
     const folded = foldRuns([
       { runId: 1, run: deep },
@@ -421,13 +421,13 @@ describe("folding a task's runs into one tree", () => {
   it("distinguishes a loop's iterations instead of collapsing them onto one key", () => {
     // Two entries under one child key: occurrence, not the key, is what tells them apart.
     const looped = run([
-      entered(1, "root"),
-      entered(2, "root/tick", 1, "tick"),
-      terminated(2, "root/tick", "success"),
-      entered(3, "root/tick", 1, "tick"),
-      terminated(3, "root/tick", "success"),
+      entered("1", "root"),
+      entered("2", "root/tick", "1", "tick"),
+      terminated("2", "root/tick", "success"),
+      entered("3", "root/tick", "1", "tick"),
+      terminated("3", "root/tick", "success"),
     ]);
-    const once = run([entered(1, "root"), entered(2, "root/tick", 1, "tick")]);
+    const once = run([entered("1", "root"), entered("2", "root/tick", "1", "tick")]);
 
     const folded = foldRuns([
       { runId: 1, run: looped },

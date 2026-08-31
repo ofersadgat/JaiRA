@@ -175,7 +175,7 @@ describe("task lifecycle", () => {
     const meta = createTask(p, { title: "T", workflow: "wf", inputs: { x: "hi" } });
     const started = await beginTaskRun(p, meta.id);
     // One row in everything that hangs off a task, so the cascade is actually exercised.
-    p.events.recorder(meta.id, started.runId).record({ type: "instance.entered", instanceId: 1, stateId: "wf", inputs: {} }, Date.now());
+    p.events.recorder(meta.id, started.runId).record({ type: "instance.entered", instanceId: "1", stateId: "wf", inputs: {} }, Date.now());
     p.commands.record({ taskId: meta.id, runId: started.runId, tool: "bash", command: "ls", decision: "allowed", decidedBy: "policy" });
     const jobId = p.jobs.claimRun({ taskId: meta.id, runId: started.runId, ownerToken: "tok", nowMs: Date.now() });
     p.db

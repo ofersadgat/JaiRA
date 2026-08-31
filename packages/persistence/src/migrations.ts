@@ -336,6 +336,18 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS pending_interactions_task ON pending_interactions(task_id);
     `,
   },
+  {
+    version: 12,
+    note: "instance ids became durable strings (UUIDv7), so the journal column stops claiming they are integers",
+    // Identity-and-Resume step 1: the engine mints one UUIDv7 per instance instead of a per-run
+    // counter, so an id in the journal now survives a resume and joins across runs. The column is
+    // retyped by rebuild — SQLite cannot alter a column — and legacy rows come along: a counter id
+    // becomes its text, and the retired `-1` sentinel becomes NULL, which is what it always meant.
+    // Old payload_json keeps its numeric ids untouched (the journal is append-only); the read path
+    // coerces. `artifacts.instance_id` and `task_runtime.root_instance_id` are NOT rebuilt: nothing
+    // indexes, orders by, or compares either in SQL, so affinity is enough and the read path coerces.
+    run: retypeInstanceIds,
+  },
 ];
 
 /**
@@ -398,6 +410,55 @@ function keyPositionsByRecord(db: JairaDb): void {
         JOIN operation_records r ON r.id = p.operation_record_id;
 
     DROP TABLE session_positions_by_rowid;
+  `);
+}
+
+/**
+ * Migration 12's rebuild — see the note there.
+ *
+ * Guarded by the column's DECLARED TYPE rather than the version marker, the same reasoning as
+ * `keyPositionsByRecord`: a fresh database bootstraps the table with `instance_id TEXT` already
+ * (db.ts), so by the time this step runs there may be nothing to do, and the table itself is the
+ * only honest witness of which shape it is in.
+ */
+function retypeInstanceIds(db: JairaDb): void {
+  const column = db
+    .prepare(`SELECT type FROM pragma_table_info('state_machine_events') WHERE name = 'instance_id'`)
+    .get() as { type: string } | undefined;
+  if (column === undefined || column.type.toUpperCase() === "TEXT") return; // already this shape
+
+  db.exec(`
+    ALTER TABLE state_machine_events RENAME TO state_machine_events_numeric;
+    DROP INDEX IF EXISTS state_machine_events_task;
+    DROP INDEX IF EXISTS state_machine_events_run;
+    DROP INDEX IF EXISTS state_machine_events_session;
+    DROP INDEX IF EXISTS state_machine_events_operation;
+
+    -- The post-migration-5 shape, with both generated columns declared inline: a rebuild has no
+    -- ALTER steps to lean on, so the columns migrations 1 and 5 added are part of the CREATE.
+    CREATE TABLE state_machine_events (
+      seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id      TEXT NOT NULL,
+      run_id       INTEGER NOT NULL REFERENCES runs(id),
+      instance_id  TEXT,
+      type         TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at   INTEGER NOT NULL,
+      session_ref  TEXT GENERATED ALWAYS AS (json_extract(payload_json, '$.metrics.sessionRef')) VIRTUAL,
+      operation_id TEXT GENERATED ALWAYS AS (json_extract(payload_json, '$.operationId')) VIRTUAL
+    );
+
+    INSERT INTO state_machine_events (seq, task_id, run_id, instance_id, type, payload_json, created_at)
+      SELECT seq, task_id, run_id,
+             CASE WHEN instance_id IS NULL OR instance_id = -1 THEN NULL ELSE CAST(instance_id AS TEXT) END,
+             type, payload_json, created_at
+        FROM state_machine_events_numeric;
+    DROP TABLE state_machine_events_numeric;
+
+    CREATE INDEX IF NOT EXISTS state_machine_events_task ON state_machine_events(task_id, seq);
+    CREATE INDEX IF NOT EXISTS state_machine_events_run ON state_machine_events(run_id, seq);
+    CREATE INDEX IF NOT EXISTS state_machine_events_session ON state_machine_events(session_ref);
+    CREATE INDEX IF NOT EXISTS state_machine_events_operation ON state_machine_events(operation_id);
   `);
 }
 

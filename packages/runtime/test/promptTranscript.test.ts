@@ -79,6 +79,7 @@ describe("a prompt state's conversation is stored, not projected away", () => {
 
   it("keeps the messages the call produced, and still answers with the op's output value", async () => {
     const records = new SqliteSessionStore(db, { taskId: "t-1", runId: 1 });
+    let minted = 0;
     const prompt = buildPromptExecutor({
       routes: agentPromptRoutes({}, { spawn: claudeSpawn() }),
       tree: { kind: "agent", agent: "claude-cli" },
@@ -90,6 +91,7 @@ describe("a prompt state's conversation is stored, not projected away", () => {
       registry: newRegistry(),
       prompt,
       session: { sessions: records, records },
+      newInstanceId: () => String(++minted),
     });
 
     // The workflow still sees the VALUE. Record mode is invisible above the leaf, and a transcript
@@ -113,6 +115,7 @@ describe("a prompt state's conversation is stored, not projected away", () => {
     // divergence check — which compares the handle we resumed against the one the call ended in —
     // had nothing to compare.
     const records = new SqliteSessionStore(db, { taskId: "t-2", runId: 1 });
+    let minted = 0;
     const prompt = buildPromptExecutor({
       routes: agentPromptRoutes({}, { spawn: claudeSpawn() }),
       tree: { kind: "agent", agent: "claude-cli" },
@@ -124,6 +127,7 @@ describe("a prompt state's conversation is stored, not projected away", () => {
       registry: newRegistry(),
       prompt,
       session: { sessions: records, records },
+      newInstanceId: () => String(++minted),
     });
 
     expect(records.at("#i1", 0)?.externalId).toBe("sess-abc");

@@ -49,7 +49,7 @@ const resolved = (patch: Partial<EffectiveState> = {}): EffectiveState => ({
     exists: true,
   },
   values: {
-    instanceId: 2,
+    instanceId: "2",
     inputs: { issue: "the parser drops trailing commas" },
     output: { goals: ["stop dropping commas"] },
   },
@@ -60,7 +60,7 @@ const drawPanel = (patch: Partial<EffectiveState> = {}, props: Record<string, un
   renderToStaticMarkup(createElement(ConfigReading, { state: resolved(patch), ...props }));
 
 const node = (patch: Partial<InstanceNode> = {}): InstanceNode => ({
-  instanceId: 2,
+  instanceId: "2",
   stateId: "feature/plan/goals",
   status: "completed",
   index: 0,
