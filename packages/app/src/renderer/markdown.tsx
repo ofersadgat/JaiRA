@@ -282,6 +282,32 @@ function fold(tokens: readonly Token[], fence: FenceRenderer | undefined): React
   return root;
 }
 
+// --- front matter ------------------------------------------------------------
+
+/**
+ * The YAML block a document opens with, matched only at position 0.
+ *
+ * Not a markdown construct, which is exactly the problem: to the parser `---` is a thematic break,
+ * and `---` UNDER a paragraph is a setext underline — so `id: …\ntype: …\nstatus: proposed\n---`
+ * comes out as a rule followed by a three-line `<h2>`. That is not a near miss. It is the loudest
+ * thing on the page, it says something the document does not, and it lands on the first screen of
+ * every doc in `docs/` — which is what made it worth a rule of its own rather than a shrug.
+ *
+ * Kept rather than dropped, and collapsed rather than shown: the header is metadata about the
+ * document, so it is not part of the reading, but a renderer that silently deletes lines is one you
+ * cannot trust about the lines it kept.
+ */
+const FRONT_MATTER = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
+
+/** A document, as its header and its body. `front` is absent when it has none. */
+function splitFrontMatter(text: string): { front: string | undefined; body: string } {
+  const found = FRONT_MATTER.exec(text);
+  // An EMPTY header is not one: `---\n---` at the top of a page is two thematic breaks somebody
+  // typed, and swallowing them would be the renderer deciding it knew better.
+  if (found === null || found[1]!.trim() === "") return { front: undefined, body: text };
+  return { front: found[1]!, body: text.slice(found[0].length) };
+}
+
 // --- the components ----------------------------------------------------------
 
 /**
@@ -310,6 +336,19 @@ export function MarkdownView({ doc }: FileSurfaceProps): JSX.Element {
  * cycle back that the header opens by explaining.
  */
 export function Markdown({ text, fence }: { text: string; fence?: FenceRenderer | undefined }): JSX.Element {
-  const nodes = useMemo(() => fold(MARKDOWN.parse(text, {}), fence), [text, fence]);
-  return <div className="markdown">{nodes}</div>;
+  const { front, body } = useMemo(() => splitFrontMatter(text), [text]);
+  const nodes = useMemo(() => fold(MARKDOWN.parse(body, {}), fence), [body, fence]);
+  return (
+    <div className="markdown">
+      {front === undefined ? null : (
+        <details className="md-front">
+          <summary>front matter</summary>
+          <pre>
+            <code>{front}</code>
+          </pre>
+        </details>
+      )}
+      {nodes}
+    </div>
+  );
 }

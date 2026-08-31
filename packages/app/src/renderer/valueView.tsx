@@ -79,6 +79,7 @@ import { invoke } from "./store";
  */
 const MonacoDiffPane = lazy(() => import("./monacoDiff").then((m) => ({ default: m.MonacoDiffPane })));
 const MonacoCodePane = lazy(() => import("./monacoDiff").then((m) => ({ default: m.MonacoCodePane })));
+const CodeText = lazy(() => import("./monacoDiff").then((m) => ({ default: m.CodeText })));
 
 /** What each view is called on its button, and what the button's tooltip says it does. */
 const VIEW_META: Record<ViewId, { label: string; hint: string }> = {
@@ -651,6 +652,17 @@ export function ValueView({
       return <Html text={String(showing)} />;
     }
     if (view === "code") {
+      // The reading, for a surface that only ever reads — the same swap the markdown view makes
+      // just above, and for the same reason. `CodeText` is Monaco's tokenizer with no editor under
+      // it: a transcript's fenced blocks are read and copied, not typed into, and an editor apiece
+      // would cost dozens of instances and break a selection dragged across one.
+      if (edit === undefined && fence !== undefined) {
+        return (
+          <Suspense fallback={<Source value={showing} />}>
+            <CodeText text={String(showing)} mime={mime ?? "text/plain"} />
+          </Suspense>
+        );
+      }
       return (
         <Suspense fallback={<div className="diff-pane-loading">loading the editor…</div>}>
           <MonacoCodePane text={String(showing)} mime={mime ?? "text/plain"} />

@@ -20,7 +20,7 @@
  * the outcome that is not derivable — the pane reports edits up and the reviewer folds them into
  * the decision.
  */
-import { useEffect, useRef, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import * as monaco from "monaco-editor";
 // Monaco ≥0.53 maps subpaths through its exports table (`./*` → `./esm/vs/*.js`), so the worker
 // specifiers are spelled WITHOUT the `esm/vs` prefix the older guides show.
@@ -84,6 +84,55 @@ export function monacoLanguageOf(mime: string): string {
     case "application/xml":
     case "image/svg+xml":
       return "xml";
+    // The rest of `shared/mime.ts`'s TEXT table. Monaco's own language ids, which mostly are not
+    // the subtype: `text/x-c++src` is `cpp`, `text/x-csharp` is `csharp`. A type with no entry is
+    // plain text and shows uncoloured, which is the correct failure — never a wrong grammar.
+    case "text/x-c":
+      return "c";
+    case "text/x-c++src":
+      return "cpp";
+    case "text/x-csharp":
+      return "csharp";
+    case "text/x-java":
+      return "java";
+    case "text/x-go":
+      return "go";
+    case "text/x-rust":
+      return "rust";
+    case "text/x-ruby":
+      return "ruby";
+    case "text/x-php":
+      return "php";
+    case "text/x-swift":
+      return "swift";
+    case "text/x-kotlin":
+      return "kotlin";
+    case "text/x-scala":
+      return "scala";
+    case "text/x-lua":
+      return "lua";
+    case "text/x-r":
+      return "r";
+    case "text/x-perl":
+      return "perl";
+    case "text/x-dart":
+      return "dart";
+    case "text/x-sql":
+      return "sql";
+    case "application/graphql":
+      return "graphql";
+    case "text/x-scss":
+      return "scss";
+    case "text/x-less":
+      return "less";
+    case "text/x-ini":
+      return "ini";
+    case "text/x-dockerfile":
+      return "dockerfile";
+    case "application/x-powershell":
+      return "powershell";
+    case "application/x-bat":
+      return "bat";
     default:
       return "plaintext";
   }
@@ -440,4 +489,70 @@ export function MonacoCodePane({ text, mime }: { text: string; mime: string }): 
   }, [text, mime]);
 
   return <div className="monaco-host" ref={host} />;
+}
+
+/**
+ * One text, coloured, with NO editor behind it — what a fenced code block in a transcript gets.
+ *
+ * {@link MonacoCodePane} is the wrong tool at this size for three separate reasons, and only the
+ * first is cost. An editor per fence is an editor per fence, and a thread holds dozens; it cannot
+ * size itself to its content, so it needs a container height that a block inside a paragraph does
+ * not have; and a Monaco instance is a scroll region, so a selection dragged from the prose above a
+ * code block stops dead at its edge — copying an answer whole becomes impossible.
+ *
+ * `monaco.editor.colorize` is the tokenizer on its own. It returns the same spans the editor would
+ * draw, and it registers the theme's stylesheet as a side effect, so the `.mtk*` classes resolve
+ * with no editor anywhere on the page.
+ *
+ * ## Why this may set innerHTML when `markdown.tsx` may not
+ *
+ * The rule there is that nothing interpolates markup, and this does not break it. The string here
+ * is BUILT by Monaco's line renderer from tokens, not passed through it: the renderer escapes `<`,
+ * `>` and `&` as it appends each character, so the content arrives as text in every case and the
+ * only tags present are the `<span class="mtkN">` the tokenizer emitted. An unregistered language
+ * takes Monaco's own `_fakeColorize` path, which escapes identically and colours nothing.
+ */
+export function CodeText({ text, mime }: { text: string; mime: string }): JSX.Element {
+  const [theme, setTheme] = useState(themeOf);
+  const [html, setHtml] = useState<string | null>(null);
+
+  // The colour of a class is theme-dependent, and so is which class a token gets — so a theme
+  // change is a re-colorize, not just a restyle.
+  useEffect(() => {
+    const themes = new MutationObserver(() => setTheme(themeOf()));
+    themes.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => themes.disconnect();
+  }, []);
+
+  useEffect(() => {
+    let live = true;
+    monaco.editor.setTheme(theme);
+    void monaco.editor
+      .colorize(text, monacoLanguageOf(mime), { tabSize: 2 })
+      .then((out) => {
+        if (live) setHtml(out);
+      })
+      // Uncoloured is a rendering; a thrown grammar is not. The plain text below stands.
+      .catch(() => {
+        if (live) setHtml(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [text, mime, theme]);
+
+  // The source, plainly, until the tokens arrive — the same characters in the same box, so nothing
+  // moves when the colour lands.
+  if (html === null) {
+    return (
+      <pre className="code-text">
+        <code>{text}</code>
+      </pre>
+    );
+  }
+  return (
+    <pre className="code-text">
+      <code dangerouslySetInnerHTML={{ __html: html }} />
+    </pre>
+  );
 }

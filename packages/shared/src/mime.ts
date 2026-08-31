@@ -136,6 +136,7 @@ const TEXT: Record<string, string> = {
   log: "text/plain",
   csv: "text/csv",
   html: "text/html",
+  htm: "text/html",
   css: "text/css",
   js: "text/javascript",
   mjs: "text/javascript",
@@ -147,7 +148,93 @@ const TEXT: Record<string, string> = {
   toml: "application/toml",
   xml: "application/xml",
   svg: "image/svg+xml",
+  // The compiled languages. None of these had a name until a fenced ``` block needed one — see
+  // {@link mimeOfFenceLang} — and naming them pays twice: a `.cpp` opened in the Files view stops
+  // resolving to plain text as well. Every type here is one `monacoLanguageOf` can colour, which is
+  // the only promise a name makes.
+  c: "text/x-c",
+  h: "text/x-c",
+  cpp: "text/x-c++src",
+  cc: "text/x-c++src",
+  cxx: "text/x-c++src",
+  hpp: "text/x-c++src",
+  cs: "text/x-csharp",
+  java: "text/x-java",
+  go: "text/x-go",
+  rs: "text/x-rust",
+  rb: "text/x-ruby",
+  php: "text/x-php",
+  swift: "text/x-swift",
+  kt: "text/x-kotlin",
+  scala: "text/x-scala",
+  lua: "text/x-lua",
+  r: "text/x-r",
+  pl: "text/x-perl",
+  dart: "text/x-dart",
+  sql: "text/x-sql",
+  graphql: "application/graphql",
+  scss: "text/x-scss",
+  less: "text/x-less",
+  ini: "text/x-ini",
+  diff: "text/x-diff",
+  patch: "text/x-diff",
+  ps1: "application/x-powershell",
+  bat: "application/x-bat",
+  dockerfile: "text/x-dockerfile",
 };
+
+/**
+ * The names a FENCE goes by, for the ones that are not already an extension.
+ *
+ * A fence's info string is a language name, not a file name, and the two vocabularies only mostly
+ * agree: nobody writes ```rs, and nobody calls a file `main.python`. This is the difference between
+ * them and nothing else — a name absent here is looked up in {@link TEXT} as written, which is what
+ * makes ```json, ```yaml and ```md work without an entry apiece.
+ */
+const FENCE_ALIASES: Record<string, string> = {
+  "c++": "cpp",
+  "c#": "cs",
+  cplusplus: "cpp",
+  csharp: "cs",
+  javascript: "js",
+  jsx: "js",
+  node: "js",
+  typescript: "ts",
+  python: "py",
+  python3: "py",
+  bash: "sh",
+  zsh: "sh",
+  shell: "sh",
+  console: "sh",
+  golang: "go",
+  rust: "rs",
+  ruby: "rb",
+  kotlin: "kt",
+  perl: "pl",
+  powershell: "ps1",
+  docker: "dockerfile",
+};
+
+/**
+ * What a fenced code block's info string SAYS it is, as a MIME type.
+ *
+ * The same question {@link mimeOfPath} answers, asked with a different kind of name — so it is
+ * answered from the same tables rather than from a second list. The alternative was a map inside
+ * the renderer from ` ```html ` to a component, which is a third place to say what markdown is and
+ * a place that could disagree with the other two. With this, the renderer holds no map at all: a
+ * name becomes a type, and the type picks the view through `viewsFor` exactly as a file's does.
+ *
+ * `undefined` for a name nothing here recognises — and, deliberately, for one that resolves to
+ * `text/plain`. Both mean the same thing to a caller: nobody has a better reading of this than the
+ * source, so show the source. Answering `text/plain` instead would dress a plain block in a viewer
+ * that has nothing to add.
+ */
+export function mimeOfFenceLang(lang: string): string | undefined {
+  const name = lang.trim().toLowerCase();
+  if (name === "") return undefined;
+  const mime = TEXT[FENCE_ALIASES[name] ?? name];
+  return mime === undefined || mime === "text/plain" ? undefined : mime;
+}
 
 /** The lowercased extension, without the dot. Empty for a name that has none. */
 function extensionOf(name: string): string {

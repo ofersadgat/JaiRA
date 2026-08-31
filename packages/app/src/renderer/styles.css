@@ -2290,6 +2290,34 @@ button.side-twist:hover:not(:disabled) {
 .markdown .md-block {
   margin: 0 0 10px;
 }
+/* Code with Monaco's colours on it and no Monaco under it — `CodeText` in `monacoDiff.tsx`. The
+   `.mtk*` classes come from the theme's own stylesheet, which `colorize` registers; all this has to
+   supply is the box. A `pre`, deliberately: it stays in the page's flow and in the page's selection,
+   which is the whole reason an editor is not being used here. */
+.code-text {
+  font: var(--size-data) / 1.5 var(--font-data);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre;
+}
+/* A document's YAML header, kept but out of the way — see `markdown.tsx`'s FRONT_MATTER. One dim
+   line closed, the raw block open; it is metadata, so it never competes with the first heading. */
+.markdown .md-front {
+  margin: 0 0 10px;
+}
+.markdown .md-front > summary {
+  cursor: pointer;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 11 / 12.5);
+  user-select: none;
+}
+.markdown .md-front > pre {
+  margin: 6px 0 0;
+}
 .markdown blockquote {
   border-left: 3px solid var(--line);
   padding-left: 10px;

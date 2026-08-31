@@ -135,3 +135,34 @@ describe("what the sanitizer used to do", () => {
     expect(render("[a](./notes.md)\n")).toContain('href="./notes.md"');
   });
 });
+
+describe("front matter", () => {
+  it("does not let a document's header become its loudest heading", () => {
+    // The failure this rule exists for: `---` is a thematic break, and `---` UNDER a paragraph is a
+    // setext underline, so an unhandled header renders as a rule plus a three-line `<h2>` that says
+    // `id: … type: … status: proposed`. Nothing in the document claims that, and it sits above the
+    // real title.
+    const html = render("---\nid: product/x\nstatus: proposed\n---\n\n# Real title\n\nBody.\n");
+    expect(html).not.toContain("<h2>");
+    expect(html).toContain("<h1>Real title</h1>");
+  });
+
+  it("keeps the header rather than deleting it", () => {
+    // Collapsed, not dropped. A renderer that silently loses lines is one you cannot trust about
+    // the lines it kept.
+    const html = render("---\nid: product/x\n---\n\n# Title\n");
+    expect(html).toContain("front matter");
+    expect(html).toContain("id: product/x");
+  });
+
+  it("leaves two thematic breaks alone, because an empty header is not one", () => {
+    const html = render("---\n---\n\ntext\n");
+    expect(html).not.toContain("md-front");
+    expect(html).toContain("<hr/>");
+  });
+
+  it("only reads a header at the top, never mid-document", () => {
+    const html = render("# Title\n\n---\nnot: a header\n---\n");
+    expect(html).not.toContain("md-front");
+  });
+});

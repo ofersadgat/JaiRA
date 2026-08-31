@@ -16,6 +16,7 @@ import {
   isTextMime,
   isWorkflowDescription,
   mimeFallbacks,
+  mimeOfFenceLang,
   mimeOfPath,
   WORKFLOW_DESCRIPTION,
   WORKFLOW_JSON,
@@ -163,5 +164,43 @@ describe("extensionForMime", () => {
     for (const name of ["a.md", "a.json", "a.yaml", "a.png", "a.svg", "a.html", "a.ts", "a.py"]) {
       expect(`a.${extensionForMime(mimeOfPath(name))}`).toBe(name);
     }
+  });
+});
+
+describe("what a fence's info string says it is", () => {
+  it("answers the names that are already extensions, from the one table", () => {
+    expect(mimeOfFenceLang("md")).toBe("text/markdown");
+    expect(mimeOfFenceLang("json")).toBe("application/json");
+    expect(mimeOfFenceLang("html")).toBe("text/html");
+    expect(mimeOfFenceLang("svg")).toBe("image/svg+xml");
+  });
+
+  it("answers the names that are NOT extensions, which is all the aliases are for", () => {
+    // Nobody writes ```rs and nobody names a file `main.python`. This is the whole difference
+    // between the two vocabularies.
+    expect(mimeOfFenceLang("c++")).toBe("text/x-c++src");
+    expect(mimeOfFenceLang("cpp")).toBe("text/x-c++src");
+    expect(mimeOfFenceLang("python")).toBe("text/x-python");
+    expect(mimeOfFenceLang("bash")).toBe("application/x-sh");
+    expect(mimeOfFenceLang("typescript")).toBe("text/x-typescript");
+  });
+
+  it("is case- and space-insensitive, because an info string is typed by hand", () => {
+    expect(mimeOfFenceLang("  Markdown ")).toBe("text/markdown");
+    expect(mimeOfFenceLang("C++")).toBe("text/x-c++src");
+  });
+
+  it("declines a name nothing recognises, and a name that means plain text", () => {
+    // Both mean the same thing to the renderer: nobody has a better reading of this than the
+    // source, so show the source.
+    expect(mimeOfFenceLang("")).toBeUndefined();
+    expect(mimeOfFenceLang("brainfuck")).toBeUndefined();
+    expect(mimeOfFenceLang("txt")).toBeUndefined();
+    expect(mimeOfFenceLang("log")).toBeUndefined();
+  });
+
+  it("names the compiled languages for FILES too, which is the same table paying twice", () => {
+    expect(mimeOfPath("src/main.cpp")).toBe("text/x-c++src");
+    expect(mimeOfPath("Server.java")).toBe("text/x-java");
   });
 });

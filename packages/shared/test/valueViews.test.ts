@@ -292,3 +292,36 @@ describe("counting markdown marks", () => {
     expect(looksLikeMarkdown("# Title\n\n- one")).toBe(true);
   });
 });
+
+describe("code is not a document, whatever its comments look like", () => {
+  /** A doc-commented C++ file, which is where the sniffer used to go wrong. */
+  const cpp = [
+    "#include <iostream>",
+    "",
+    "/**",
+    " * Adds two numbers.",
+    " * @param a the first",
+    " * @param b the second",
+    " */",
+    "int add(int a, int b) {",
+    "  return a + b;",
+    "}",
+  ].join("\n");
+
+  it("does not read a doc comment's continuation lines as a bullet list", () => {
+    // ` * text` IS the bullet mark, and two of them is every C++, Java, JS and TS header ever
+    // written. Read as markdown, the comment became a list and the code under it became prose.
+    expect(looksLikeMarkdown(cpp)).toBe(false);
+  });
+
+  it("still reads a document that merely QUOTES a block comment", () => {
+    // The marks outside the comment are untouched — only the ones inside it stop counting.
+    expect(looksLikeMarkdown("# How to log\n\n- wrap it in `/* … */`\n- ship it")).toBe(true);
+  });
+
+  it("offers code rather than markdown once the type is declared", () => {
+    // The robust half: a declared type beats the sniffer, so a `.cpp` payload never depends on
+    // what its comments happen to look like.
+    expect(viewsFor(cpp, { mime: "text/x-c++src" })).toEqual(["code", "text"]);
+  });
+});

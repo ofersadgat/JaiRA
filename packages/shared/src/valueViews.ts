@@ -168,6 +168,23 @@ const MARKDOWN_MARKS = [
 const MARKDOWN_COUNTERS = MARKDOWN_MARKS.map((mark) => new RegExp(mark.source, `${mark.flags}g`));
 
 /**
+ * A C-style block comment, which is where the sniffer's worst false positive lives.
+ *
+ * The continuation lines of a doc comment are ` * like this`, and that is the bullet mark exactly.
+ * Two of them is every header this repo writes — and every C++, Java, TypeScript and JavaScript
+ * file in the world — so a tool result holding source code sniffed as markdown and came back as a
+ * bullet list with the code run together underneath it as prose. Measured before the fix: a C++
+ * file carrying a doc-comment header said `true`, the same file without one said `false`, which is
+ * the whole bug in two lines.
+ *
+ * Removed for the COUNT only, never from anything rendered. Inside a comment, `*` is punctuation
+ * and `#` is nothing at all; the marks there are not the document's structure, whatever else they
+ * look like. A real markdown document that happens to quote a block comment loses those marks and
+ * keeps every mark outside it, which is the correct trade in both directions.
+ */
+const BLOCK_COMMENT = /\/\*[\s\S]*?\*\//g;
+
+/**
  * Whether a string reads as markdown.
  *
  * TWO marks, not one. A single `- ` at the start of a line appears in every stack trace and every
@@ -188,12 +205,16 @@ const MARKDOWN_COUNTERS = MARKDOWN_MARKS.map((mark) => new RegExp(mark.source, `
  */
 export function looksLikeMarkdown(text: string): boolean {
   if (text.length === 0) return false;
+  // Block comments first — see {@link BLOCK_COMMENT}. Only when there is one to strip, so the
+  // ordinary case pays nothing for a scan that would find nothing.
+  const counted = text.includes("/*") ? text.replace(BLOCK_COMMENT, "") : text;
+  if (counted.length === 0) return false;
   let marks = 0;
   for (const counter of MARKDOWN_COUNTERS) {
     counter.lastIndex = 0;
     // Capped per kind, so no single repeated mark can carry the verdict alone beyond what it is
     // worth — two bullets is a list, and two hundred is the same list.
-    marks += Math.min(text.match(counter)?.length ?? 0, 2);
+    marks += Math.min(counted.match(counter)?.length ?? 0, 2);
     if (marks >= 2) return true;
   }
   return false;

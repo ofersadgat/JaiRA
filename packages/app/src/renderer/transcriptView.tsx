@@ -41,6 +41,8 @@ import { Fragment, useCallback, useEffect, useRef, useState, type JSX, type Reac
 import {
   artifactOf,
   detectedMime,
+  mimeOfFenceLang,
+  mimeOfPath,
   mimeOfSchema,
   OFFERED_TYPES,
   typeNameOf,
@@ -177,17 +179,6 @@ export function thoughtTime(ms: number): string {
 }
 
 /**
- * The fenced languages that are a PICTURE, and the type each one is.
- *
- * Only markup that a viewer can draw. A fence tagged `js` or `sql` is code, and code read as code is
- * already the best rendering of it — this exists for the two that have a second one.
- */
-const DRAWABLE_FENCES: Readonly<Record<string, string>> = {
-  html: "text/html",
-  svg: "image/svg+xml",
-};
-
-/**
  * A fenced block, drawn rather than quoted — the answer's half of the artifact story.
  *
  * A model that wants to hand over a page has two routes: `show_artifact`, which produces a real
@@ -197,6 +188,19 @@ const DRAWABLE_FENCES: Readonly<Record<string, string>> = {
  * artifacts pane and the payload blocks use, so one page looks identical wherever it turns up, and
  * the Rendered / Code / Text toggle comes with it rather than being built a second time here.
  *
+ * ## It holds no map of its own
+ *
+ * It used to, and the map was the bug. A table here from ` ```html ` to a viewer is a third opinion
+ * about what a type is worth showing as — beside `mimeOfPath`, which answers it for files, and
+ * `viewsFor`, which answers it for values — and a third opinion is a thing that can disagree. It
+ * did: `markdown` was missing, so a model quoting a document had the whole subject of the message
+ * rendered as a grey wall of `#` and `---`, one level below an answer that was being rendered.
+ *
+ * So the only new thing is the one piece neither existing map had — {@link mimeOfFenceLang}, a
+ * NAME to a type — and everything after it is the machinery that was already there. A language
+ * nothing recognises returns `undefined` and the fold shows the source, which is the same answer
+ * this gave before for everything that was not a page.
+ *
  * Static, and that is the difference from an artifact rather than an oversight. `Html` is a `srcdoc`
  * frame with an empty `sandbox`, so scripts do not run — the interactive path needs a served
  * `jaira-artifact:` URL, and a fence has no artifact behind it to serve. A model that wants its
@@ -205,9 +209,43 @@ const DRAWABLE_FENCES: Readonly<Record<string, string>> = {
  * Module-level so the reference is stable: `Markdown` memoises on it.
  */
 const drawFence: FenceRenderer = ({ lang, code }) => {
-  const mime = DRAWABLE_FENCES[lang];
-  return mime === undefined ? undefined : <ValueView value={code} hint={{ mime }} />;
+  const mime = mimeOfFenceLang(lang);
+  if (mime === undefined) return undefined;
+  // RECURSIVE, and passed rather than defaulted for the two reasons the prop exists. A document
+  // quoted inside a document is still a document, so a fence inside the quoted one gets the same
+  // dispatch — and handing `fence` down is also what asks `ValueView` for the reading renderers
+  // rather than the editors, which a transcript must never mount per block.
+  //
+  // It terminates on the nesting of the text: each level renders the CONTENTS of a fence, which is
+  // strictly shorter than the document holding it.
+  return <ValueView value={code} hint={{ mime }} fence={drawFence} />;
 };
+
+/**
+ * The type a tool call's OWN arguments say its payload is.
+ *
+ * A `Read` of `main.cpp` produces a string, and nothing downstream knew what kind of string — so
+ * `viewsFor` sniffed, and sniffing is weakest exactly on source code. The call already carries the
+ * answer: a path, in an argument the tool itself named. Reading it turns a guess into a
+ * declaration, and a declaration beats the sniffer everywhere in `viewsFor`.
+ *
+ * Absolute paths are what a tool is given, so the vendor rules in {@link mimeOfPath} — which key
+ * off a position under a layer root — simply do not fire, and the extension answers. `text/plain`
+ * comes back as `undefined` for the same reason it does in {@link mimeOfFenceLang}: it is not a
+ * statement worth making, and making it would silence sniffing on a value nobody classified.
+ */
+function pathMimeOf(args: JsonValue | undefined): string | undefined {
+  if (args === null || args === undefined || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const at = args as Record<string, JsonValue | undefined>;
+  for (const key of ["file_path", "filePath", "notebook_path", "path"]) {
+    const named = at[key];
+    if (typeof named === "string" && named !== "") {
+      const mime = mimeOfPath(named.replace(/\\/g, "/"));
+      return mime === "text/plain" ? undefined : mime;
+    }
+  }
+  return undefined;
+}
 
 /**
  * A payload block, or the honest statement that the record kept none.
@@ -216,14 +254,22 @@ const drawFence: FenceRenderer = ({ lang, code }) => {
  * keeps the JSON one press away. That is not decoration here: a structured output whose value is a
  * set of files is the single most common large payload in this app, and it was being printed as an
  * array of strings with `\n` in them — the whole of what a run produced, in its least readable form.
+ *
+ * `fence` for the same reason a message gets one: this is a reading surface. Without it a payload
+ * that reads as markdown mounted the CodeMirror live-preview editor — one per block, in a column of
+ * forty — which is precisely the cost that prop exists to avoid, and it was being paid here only
+ * because nobody passed it.
  */
 function Payload({
   label,
   value,
+  hint,
   artifacts,
 }: {
   label: string;
   value: JsonValue | undefined;
+  /** What the call says this is — see {@link pathMimeOf}. Absent ⇒ `viewsFor` sniffs, as before. */
+  hint?: string | undefined;
   /** How to show one that RUNS. Absent ⇒ interactive artifacts render statically — see {@link ArtifactSurface}. */
   artifacts?: ArtifactSurface | undefined;
 }): JSX.Element {
@@ -233,6 +279,8 @@ function Payload({
       <ValueView
         value={value}
         label={label}
+        fence={drawFence}
+        {...(hint !== undefined ? { hint: { mime: hint } } : {})}
         {...(artifacts !== undefined ? { serve: artifacts.serve } : {})}
         {...(artifacts?.onPrompt !== undefined ? { onPrompt: artifacts.onPrompt } : {})}
       />
@@ -397,6 +445,10 @@ function Tool({
   // the one name a person chose for this subagent. The tool's own name is the honest fallback.
   const chainName = `⑂ ${entry.summary.length > 0 ? entry.summary : entry.name}`;
   const produced = producedArtifact(entry.result);
+  // What the call itself says its payload is — see {@link pathMimeOf}. Read from the ARGUMENTS and
+  // applied to what came back, because a file's type is a property of the file, not of the string
+  // a tool happened to return.
+  const pathMime = pathMimeOf(entry.args);
   return (
     <Row
       entry={entry}
@@ -467,12 +519,22 @@ function Tool({
           {entry.ok === undefined && entry.result === undefined ? (
             <div className="ts-payload ts-payload-empty">still running</div>
           ) : (
-            <Payload label="result" value={entry.result} {...(artifacts !== undefined ? { artifacts } : {})} />
+            <Payload
+              label="result"
+              value={entry.result}
+              {...(pathMime !== undefined ? { hint: pathMime } : {})}
+              {...(artifacts !== undefined ? { artifacts } : {})}
+            />
           )}
           {/* The agent's OWN record of the execution, when the native capture kept one — richer than
               the wire result and shown beside it, never instead of it. */}
           {entry.detail !== undefined ? (
-            <Payload label="record" value={entry.detail} {...(artifacts !== undefined ? { artifacts } : {})} />
+            <Payload
+              label="record"
+              value={entry.detail}
+              {...(pathMime !== undefined ? { hint: pathMime } : {})}
+              {...(artifacts !== undefined ? { artifacts } : {})}
+            />
           ) : null}
         </>
       }
