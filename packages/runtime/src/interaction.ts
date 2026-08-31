@@ -11,6 +11,20 @@
  * the caller (the main process), and nothing running *inside* a workflow can
  * reach it or this hub. An answer can only arrive through `submit`, which only
  * the IPC layer calls — so an agent cannot fabricate a human decision.
+ *
+ * ## This hub is the process, and the question is not
+ *
+ * Everything here lives in one Map for as long as one process does. That used to be the whole
+ * story, and it made quitting the app an ANSWER: every parked call was rejected, the state took a
+ * failure the author never wrote a rule for, and the question somebody was in the middle of
+ * reading was gone. A gate is a place a task sits — the same thing `on_user_event` says about a
+ * wait — and a place has to still be there when you come back.
+ *
+ * So a park is now published to a host that writes it down (`pending_interactions` in
+ * `@jaira/persistence`), and {@link RequestFate} is how this hub tells that host which of the two
+ * things happened: a person decided, or the process left. The second one keeps the row, the next
+ * open offers the same gate, and answering it starts the task again with the answer already in
+ * hand — see {@link InteractionHub.seed}, which is the half of that round trip that lives here.
  */
 import {
   failureOf,
@@ -44,20 +58,78 @@ type Pending = {
   resolve: (result: FunctionResult<ResolvedValue, WorkflowMetrics>) => void;
 };
 
+/**
+ * The seeded-answer map key: one task's one component.
+ *
+ * `\u0000` as the separator, and it is not decoration. A task id and a function name are both
+ * caller-supplied strings, and any printable joiner is a string one of them could contain — which
+ * would let `unseed` clear a neighbour's answer, or let two different pairs collide on one queue.
+ */
+function seedKey(taskId: string, component: string): string {
+  return `${taskId}\u0000${component}`;
+}
+
+/**
+ * How a parked request stopped being parked.
+ *
+ * `settled` is a person: an answer, or a decline, either way a decision that belongs to the run.
+ * `abandoned` is the process going away with the question still open — and the difference is the
+ * whole of what makes a gate durable, because only the first means the question is over. A host
+ * keeping a record of parked gates deletes on `settled` and keeps on `abandoned`.
+ */
+export type RequestFate = "settled" | "abandoned";
+
 export interface InteractionHubOptions {
   /** Called when a state parks awaiting a human. */
   onRequest?: (request: HubRequest) => void;
   /** Called when a parked request is answered, canceled, or rejected. */
-  onResolved?: (requestId: string) => void;
+  onResolved?: (requestId: string, fate: RequestFate) => void;
   /** Request id generator — injectable so tests are deterministic. */
   nextId?: () => string;
 }
 
 export class InteractionHub {
   private readonly pending = new Map<string, Pending>();
+  /**
+   * Answers given BEFORE the call that wants them — keyed by {@link seedKey}, FIFO.
+   *
+   * A gate survives the process that parked it (`pending_interactions`), so a person can answer one
+   * whose run is long gone. Answering it starts the task again from the record; the resumed run
+   * replays everything that completed and re-dispatches the state it stopped in, which is this
+   * function — and re-asking a question already answered is the one thing that must not happen.
+   *
+   * So the answer is handed to the hub before the run starts and consumed by the park it was meant
+   * for. Deliberately NOT the {@link ScriptedFunctions} path, which REPLACES the registration for a
+   * function name and so would leave a second park later in the same run with an exhausted queue
+   * and no live hub behind it. This is one shot, and everything after it parks normally.
+   */
+  private readonly seeded = new Map<string, JsonValue[]>();
   private counter = 0;
 
   constructor(private readonly options: InteractionHubOptions = {}) {}
+
+  /**
+   * Answer the NEXT park of `component` by `taskId` without ever showing it — see {@link seeded}.
+   *
+   * Scoped to a task because a component name is not an identity: `choose_option` is parked by every
+   * workflow that asks a question, and an answer meant for one task must not be eaten by another
+   * task's run that happens to reach its gate first.
+   */
+  seed(taskId: string, component: string, value: JsonValue): void {
+    const key = seedKey(taskId, component);
+    this.seeded.set(key, [...(this.seeded.get(key) ?? []), value]);
+  }
+
+  /**
+   * Drop every seeded answer for a task.
+   *
+   * A resumed run may never reach the state it was seeded for — an earlier transition can take it
+   * somewhere else — and an answer left lying about would be spent on whatever asked next, which
+   * from the person's side is a question that answered itself.
+   */
+  unseed(taskId: string): void {
+    for (const key of [...this.seeded.keys()]) if (key.startsWith(seedKey(taskId, ""))) this.seeded.delete(key);
+  }
 
   /** Requests currently awaiting an answer, oldest first. */
   list(): HubRequest[] {
@@ -84,6 +156,15 @@ export class InteractionHub {
     inputs: FunctionInputs,
     taskId?: string,
   ): Promise<FunctionResult<ResolvedValue, WorkflowMetrics>> {
+    // The answer somebody already gave, if this is the park it was given for — see {@link seeded}.
+    // Consumed before a request id is minted, because there is no request: nothing is shown, nothing
+    // is published, and the engine gets its value in the same turn it asked.
+    const queue = taskId === undefined ? undefined : this.seeded.get(seedKey(taskId, component));
+    if (queue !== undefined && queue.length > 0) {
+      const value = queue.shift()!;
+      if (queue.length === 0) this.seeded.delete(seedKey(taskId!, component));
+      return Promise.resolve({ value } as FunctionResult<ResolvedValue, WorkflowMetrics>);
+    }
     const requestId = this.options.nextId?.() ?? `ui-${++this.counter}`;
     const request: HubRequest = {
       requestId,
@@ -99,28 +180,40 @@ export class InteractionHub {
 
   /** Answer a parked request. Returns false when the id is unknown (or already answered). */
   submit(requestId: string, value: JsonValue): boolean {
-    return this.settle(requestId, { value });
+    return this.settle(requestId, { value }, "settled");
   }
 
   /** Fail a parked request — a declined gate, as DATA (the engine's contract). */
   reject(requestId: string, reason: string): boolean {
-    return this.settle(requestId, { error: failureOf(new Error(reason)) });
+    return this.settle(requestId, { error: failureOf(new Error(reason)) }, "settled");
   }
 
   /**
    * Fail every parked request — used when a run is canceled or the window
    * closes, so a workflow never hangs on a gate nobody can answer any more.
+   *
+   * `fate` is what the host is told about each. The default is `abandoned`, because every caller of
+   * the whole-hub form is a shutdown: the promise has to settle so the engine can unwind and the
+   * database can close, and that is a fact about THIS PROCESS rather than an answer to the question.
+   * A host holding the question durably keeps it — which is what makes closing the app not a
+   * decision, and reopening it not a fresh start.
    */
-  rejectAll(reason: string): void {
-    for (const requestId of [...this.pending.keys()]) this.reject(requestId, reason);
+  rejectAll(reason: string, fate: RequestFate = "abandoned"): void {
+    for (const requestId of [...this.pending.keys()]) {
+      this.settle(requestId, { error: failureOf(new Error(reason)) }, fate);
+    }
   }
 
-  private settle(requestId: string, result: FunctionResult<ResolvedValue, WorkflowMetrics>): boolean {
+  private settle(
+    requestId: string,
+    result: FunctionResult<ResolvedValue, WorkflowMetrics>,
+    fate: RequestFate,
+  ): boolean {
     const entry = this.pending.get(requestId);
     if (!entry) return false;
     this.pending.delete(requestId);
     entry.resolve(result);
-    this.options.onResolved?.(requestId);
+    this.options.onResolved?.(requestId, fate);
     return true;
   }
 }

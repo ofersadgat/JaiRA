@@ -270,6 +270,46 @@ describe("the replay index over a conversation", () => {
     expect(replay.answers.get("a#0")?.value).toMatchObject({ text: "hi" });
     expect(replay.frontier).toEqual([]);
   }, 30000);
+
+  /**
+   * A record does not store its big strings any more, and the index has to know that.
+   *
+   * Since RECORDS.md §8 a string over `BLOB_THRESHOLD` is written once into `blobs` and the record
+   * keeps `{"$blob": "<sha>"}` where it was. Every other reader of `result_json` hydrates; this one
+   * parsed the row raw, so a replayed answer handed the engine the REFERENCE.
+   *
+   * The consequence is not cosmetic. A state whose output is `kind: "blob"` takes a string and makes
+   * an artifact of it, and given an object with one reserved key it refuses — "expects an artifact
+   * (bytes, a byte stream, an artifact ref, or inline string content)". So a resume died on the
+   * first state that had produced a document, which in a real workflow is the first state.
+   *
+   * 1 KB is why it shipped green: every fixture above answers "hi" or `true`, and nothing under the
+   * threshold is ever referenced. The test therefore has to cross it deliberately.
+   */
+  it("hydrates a value the record stored by reference, rather than replaying the reference", async () => {
+    writeWorkflowFiles(workflowsDir, promptFiles());
+    const { taskId } = service.createTask({ title: "Big", workflow: PROMPTED });
+    // Comfortably over BLOB_THRESHOLD (1 KB), which is what sends it through the ref layer.
+    const document = `# Feature\n\n${"a document long enough to be worth storing once. ".repeat(60)}`;
+    expect(document.length).toBeGreaterThan(1024);
+    await service.startTask({ taskId, fake: [{ output: { text: document } }] as never });
+    await until(() => pushes.some((p) => p.type === "run:finished"), "the run to finish");
+
+    // The row really does hold a reference — otherwise this test proves nothing about hydration.
+    const project = openProject(dir, { baseDir: testHome() });
+    try {
+      const rows = project.db
+        .prepare("SELECT result_json FROM operation_records WHERE task_id = ?")
+        .all(taskId) as Array<{ result_json: string }>;
+      expect(rows.some((r) => r.result_json.includes('"$blob"'))).toBe(true);
+    } finally {
+      project.close();
+    }
+
+    const replay = replayOf(taskId);
+    expect(replay.unreadable).toEqual([]);
+    expect(replay.answers.get("a#0")?.value).toMatchObject({ text: document });
+  }, 30000);
 });
 
 /**

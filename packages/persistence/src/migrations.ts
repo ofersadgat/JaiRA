@@ -306,6 +306,36 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS blobs_unreferenced ON blobs(refs) WHERE refs <= 0;
     `,
   },
+  {
+    version: 11,
+    note: "a parked gate outlives the process that parked it, so closing the app is not an answer",
+    // An interactive state's request lived in `InteractionHub`'s Map and nowhere else, so quitting
+    // rejected it: the workflow took a failure it never asked for, and the question the person was
+    // being asked simply vanished. A gate is a place a task SITS — the same thing `on_user_event`
+    // says about a wait — and a place has to still be there when you come back.
+    //
+    // `inputs_json` is the whole request rather than a reference to one, because the journal does
+    // not hold the right object: `operation.started` fires before input resolution and carries
+    // none, and `instance.entered` carries the STATE's inputs rather than the merged args the
+    // function was actually called with. What is stored is what the renderer draws a gate from,
+    // which is exactly what the hub handed it live.
+    //
+    // Rows go when a person ANSWERS, never when the process goes away — see `InteractionStore`.
+    // That asymmetry is the whole feature.
+    sql: `
+      CREATE TABLE IF NOT EXISTS pending_interactions (
+        request_id      TEXT PRIMARY KEY,
+        task_id         TEXT NOT NULL,
+        run_id          INTEGER,
+        component       TEXT NOT NULL,
+        inputs_json     TEXT NOT NULL,
+        about           TEXT,
+        subject_project TEXT,
+        created_at      INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS pending_interactions_task ON pending_interactions(task_id);
+    `,
+  },
 ];
 
 /**

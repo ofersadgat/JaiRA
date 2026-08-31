@@ -4921,7 +4921,12 @@ button.layer-on:hover:not(:disabled) {
   max-width: min(720px, 90vw);
   box-shadow: var(--lift);
 }
-.modal h3 {
+/* The gate's heading, in EITHER host — the conversation it belongs to and the modal the gallery
+   still mounts it in. Paired selectors rather than a wrapper element, because `.modal-wide` is a
+   flex column whose scrolling depends on `.mount-host` being its own child; a div around the
+   surface to hang one class on would take that apart to save a comma. */
+.modal h3,
+.inline-gate h3 {
   /* The question is the loudest thing in the dialog. It was one notch above body text, which put it
      level with the labels under it — and a heading that does not read as one is a heading nobody
      starts at. */
@@ -4938,13 +4943,16 @@ button.layer-on:hover:not(:disabled) {
   margin-top: 14px;
   flex-wrap: wrap;
 }
-.modal .field {
+.modal .field,
+.inline-gate .field {
   margin-top: 12px;
 }
-.modal .field small {
+.modal .field small,
+.inline-gate .field small {
   color: var(--dim);
 }
-.modal .field input[type="checkbox"] {
+.modal .field input[type="checkbox"],
+.inline-gate .field input[type="checkbox"] {
   width: auto;
   justify-self: start;
 }
@@ -5252,7 +5260,8 @@ button.layer-on:hover:not(:disabled) {
    `.modal h3` is already `display: block` with its own type rules, and making it a flex container
    re-laid the heading out — the icon at one end and the words at the other. A glyph beside a word
    is punctuation for that word; it aligns to the baseline and stays out of the layout. */
-.modal h3 .gate-icon {
+.modal h3 .gate-icon,
+.inline-gate h3 .gate-icon {
   width: 16px;
   height: 16px;
   color: var(--dim);
@@ -5744,13 +5753,17 @@ button.link.change-path {
   margin-top: 12px;
   padding-top: 8px;
 }
-.inline-gate h3 {
-  font-size: calc(var(--size-app) * 13 / 12.5);
-  color: var(--text);
-}
 .inline-gate .review-artifacts {
   max-height: 60vh;
   overflow: auto;
+}
+/* Said quietly, under the question, because it is a fact about the RUN and not part of what is
+   being asked: nothing is blocked on this answer, and giving one starts the task again. See
+   `PendingInteraction.resumes`. */
+.gate-resumes {
+  margin: 4px 0 0;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 11 / 12.5);
 }
 /* The full-pane diff view (§8.3): one change in Monaco, floated over the reviewer. */
 .diff-pane {

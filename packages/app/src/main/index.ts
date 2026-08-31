@@ -141,6 +141,31 @@ process.on("unhandledRejection", (reason: unknown) => reportCrash("unhandledReje
 process.on("uncaughtException", (error: unknown) => reportCrash("uncaughtException", error));
 
 /**
+ * Node's own warnings, which went to a console this app does not own.
+ *
+ * The third silence, and the same shape as the two above: `MaxListenersExceededWarning` named a real
+ * accumulation, and the only place it appeared was the terminal of whoever happened to have started
+ * the app from one. The Logs panel — the surface built for exactly this — said nothing.
+ *
+ * This one incurs NO debt, unlike its neighbours. `unhandledRejection` and `uncaughtException` are
+ * "default runs only if nobody listens" events, so registering there took the terminal away and had
+ * to buy it back with a `console.error`. `warning` is not: Node's printer is an ordinary listener
+ * registered at bootstrap, so adding another one is purely additive and the terminal keeps its copy.
+ *
+ * `--trace-warnings` is therefore not needed and is not the fix. It changes what Node's printer
+ * prints; the `Error` handed to a listener has carried `.stack` all along, and that stack names the
+ * exact line that added the eleventh listener. Recording it is the difference between "something in
+ * this process leaks" and a file and a line number.
+ */
+process.on("warning", (warning: Error) => {
+  try {
+    service.recordWarning(warning);
+  } catch {
+    // Same last-resort rule as `reportCrash`: the reporter must not become the failure.
+  }
+});
+
+/**
  * `--home <dir>` off this launch's command line — the same flag the CLI takes.
  *
  * A COMMAND LINE beats a saved preference, which is why this is passed as `baseDir` rather than left

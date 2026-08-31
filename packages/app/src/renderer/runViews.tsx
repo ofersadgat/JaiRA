@@ -24,7 +24,7 @@ import type {
   TaskDetail,
 } from "@jaira/shared/browser";
 import { Board, Column, Tile } from "./board";
-import { ChangesetGate } from "./components";
+import { GateSurface, type EditorServices } from "./components";
 import type { ComponentServices } from "./changesetReview";
 import { TaskDetailSections, TaskHead } from "./detail";
 import { entriesOf, journalFor, previewOf, sidechainEntriesOf, signatureOf } from "./transcript";
@@ -330,11 +330,21 @@ export function RunConversation({
   context,
   onOpenSidechain,
   focus,
+  asking,
 }: {
   /** The run whose conversation this is. Undefined ⇒ nothing has run here yet. */
   parent: InstanceNode | undefined;
   detail: TaskDetail | null;
   context: FileSurfaceProps["context"];
+  /**
+   * A gate is on offer below — so the run is WAITING, whatever its row says.
+   *
+   * The row can say `canceled` and be telling the truth: the process that was blocked on the gate
+   * went away, and the question outlived it. What must not happen is the strip reporting a stop and
+   * offering "Retry" directly above a question somebody is about to answer — Retry starts the task
+   * over and throws the answer away, which is the opposite of what the button next to it does.
+   */
+  asking?: boolean | undefined;
   /** A state to go to, asked for by the Instances index — see `SessionBandsView`. */
   focus?: { instance: string; at: number } | undefined;
   /**
@@ -539,6 +549,7 @@ export function RunConversation({
         project={context.project}
         running={detail.status === "running"}
         detail={detail}
+        {...(asking === true ? { asking: true } : {})}
         {...(context.onRerun !== undefined ? { onRerun: context.onRerun } : {})}
         {...(context.onResume !== undefined ? { onResume: context.onResume } : {})}
       />
@@ -622,6 +633,7 @@ function ChatComposer({
   project,
   running,
   detail,
+  asking,
   onRerun,
   onResume,
 }: {
@@ -630,6 +642,8 @@ function ChatComposer({
   project?: string | undefined;
   /** The TASK is still going — what makes the button a stop button. See {@link stop}. */
   running?: boolean;
+  /** A gate is on offer below — passed straight through, see {@link RunConversation}. */
+  asking?: boolean | undefined;
   /** The run itself, for the case where there is no conversation to compose into — {@link RunActivity}. */
   detail: TaskDetail;
   /** Set a stopped run going again. Passed straight through — see {@link RunActivity}. */
@@ -695,7 +709,11 @@ function ChatComposer({
    * is task-scoped, so it does: there is no per-instance abort to reach for and none is wanted.
    */
   const stop = (): void => {
-    if (running === true) {
+    // `asking` counts as running for this decision, and it is the case the split was written before
+    // gates were durable: a task holding a recovered gate has no run to abort, but stopping it is
+    // exactly what withdraws the question (`task:cancel` clears the gate). `chat:cancel` there would
+    // reach for a turn nobody typed and quietly do nothing.
+    if (running === true || asking === true) {
       void invoke("task:cancel", { taskId, ...(project !== undefined ? { project } : {}) }).catch((e: unknown) =>
         setError(e instanceof Error ? e.message : String(e)),
       );
@@ -724,6 +742,7 @@ function ChatComposer({
         <RunActivity
           detail={detail}
           onStop={stop}
+          {...(asking === true ? { asking: true } : {})}
           {...(onRerun !== undefined ? { onRerun } : {})}
           {...(onResume !== undefined ? { onResume } : {})}
         />
@@ -777,11 +796,21 @@ function ChatComposer({
 export function RunActivity({
   detail,
   onStop,
+  asking,
   onRerun,
   onResume,
 }: {
   detail: TaskDetail;
   onStop: () => void;
+  /**
+   * A gate is on offer under this strip — see {@link RunConversation}.
+   *
+   * It outranks the row's own status because a durable gate makes those two things independent: the
+   * question is live and the process that was blocked on it is not. Reporting the stop here would
+   * put "Retry" — which starts over and discards the answer — immediately above the control that
+   * answers.
+   */
+  asking?: boolean | undefined;
   /** Set it going again. Absent ⇒ the strip reports the stop and offers nothing — see the context field. */
   onRerun?: ((taskId: string) => void) | undefined;
   /** Pick it up where it stopped. Absent ⇒ the strip only ever offers the restart. */
@@ -791,7 +820,7 @@ export function RunActivity({
   const node = deepest === undefined ? undefined : nodeAt(detail.instances, deepest.instanceId);
   // A gate is not motion but it is still something happening, and it is happening to YOU — which is
   // the one status here worth colouring differently, because it is the one you can end by acting.
-  const waiting = node?.status === "waiting_for_user";
+  const waiting = node?.status === "waiting_for_user" || asking === true;
   const going = detail.status === "running" || waiting;
   // A stop has been asked for and the run has not settled. Neither going nor stopped: the agent is
   // finishing the tool it is inside, and what it says on the way out is still arriving.
@@ -931,13 +960,21 @@ const STOPPED: Partial<Record<TaskDetail["status"], { said: string; verb: string
  * dispatched, and the first real call is wherever the answers stop. What differs is the fact each
  * one is reporting, and that difference is not a preference — it is how the run ended.
  *
- *  - **Resume** — the process died with instances still LIVE. There is a frontier: somewhere the run
- *    was in the middle of, which is what it will pick up.
- *  - **Retry** — a state failed and the run ended with it, so every instance terminated and there is
- *    no frontier at all. What the same walk does here is replay everything that worked and re-run
- *    the state that broke, which is a retry of that state with its history intact. Its conversation
- *    position was claimed by the failed attempt, so re-entering forks automatically (SESSIONS.md §4)
- *    rather than stacking a second answer on top of the first.
+ *  - **Resume** — there is a frontier: somewhere the run was in the middle of, which is what it will
+ *    pick up. Two ways to get one, and they are the same fact about the task — a crash that left
+ *    instances live, and a STOP, which unwinds and terminates them but is still an interruption
+ *    rather than a verdict (`replay.ts`'s `stoppedInside`).
+ *  - **Retry** — a state FAILED and the run ended with it, so there is no frontier at all. What the
+ *    same walk does here is replay everything that worked and re-run the state that broke, which is
+ *    a retry of that state with its history intact. Its conversation position was claimed by the
+ *    failed attempt, so re-entering forks automatically (SESSIONS.md §4) rather than stacking a
+ *    second answer on top of the first.
+ *
+ * The fork belongs to Retry alone, and that is why the split has to be right rather than nearly
+ * right. A stop used to land here — every stopped run reported an empty frontier, because the abort
+ * had tidied the tree away — so a task paused on a human gate offered "Retry" and the story that
+ * goes with it, about a state that had done nothing but ask a question. A gate places no call, so
+ * it claims no position and there is nothing there to fork.
  *
  * Calling both "Resume" would say "picks up where it left off" about a run that left off nowhere;
  * calling both "Retry" would say "runs it again" about a run that is being continued. Neither is a
@@ -1068,6 +1105,7 @@ export function TaskContext({
   gate,
   onGate,
   gateServices,
+  gateEditor,
 }: {
   detail: TaskDetail;
   stream: string[];
@@ -1077,13 +1115,19 @@ export function TaskContext({
   onOpenState?: ((stateId: string) => void) | undefined;
   onReviewChanges?: (() => void) | undefined;
   /**
-   * A parked changeset gate ABOUT this task, hosted here rather than in the modal — §8.1's default
-   * host: a review is part of what happened in this conversation, and reading it here is where
-   * someone will look for it.
+   * A parked gate ABOUT this task, hosted here rather than in a modal — §8.1's default host: what a
+   * state asked is part of what happened in this conversation, and reading it here is where someone
+   * will look for it.
+   *
+   * Any component, not only the reviewer. The gate that survives a restart arrives the same way and
+   * is drawn the same way; `PendingInteraction.resumes` is the only thing that differs, and
+   * {@link GateSurface} is where it is said.
    */
   gate?: PendingInteraction | undefined;
   onGate?: ((value: unknown) => void) | undefined;
   gateServices?: Partial<ComponentServices> | undefined;
+  /** What `edit_artifact` and the artifact viewers need to be the app's editor. */
+  gateEditor?: EditorServices | undefined;
 }): JSX.Element {
   const [mode, setMode] = useState<"conversation" | "detail">("conversation");
   /**
@@ -1109,6 +1153,18 @@ export function TaskContext({
    */
   const [chain, setChain] = useState<TrailStep[]>([]);
   useEffect(() => setChain([]), [detail.taskId]);
+  /**
+   * A question arriving takes the panel to where the question IS.
+   *
+   * The two readings share one column and Details returns before the gate is drawn, so a person who
+   * had left the panel on Details would have a task that had stopped, no visible reason, and the
+   * one thing that would explain it hidden behind a toggle. Nothing else in this panel moves the
+   * reader; this does, because the alternative is silence.
+   */
+  const asking = gate?.requestId;
+  useEffect(() => {
+    if (asking !== undefined) setMode("conversation");
+  }, [asking]);
   const hops = prunedTrail(chain, detail.instances, (id) => context.sessions[id]);
   const pushHop = (node: InstanceNode, call: string, name: string): void =>
     setChain([...hops, { instanceId: node.instanceId, stateId: node.stateId, sidechain: call, name }]);
@@ -1181,30 +1237,22 @@ export function TaskContext({
           detail={detail}
           context={context}
           onOpenSidechain={pushHop}
+          {...(gate !== undefined && onGate !== undefined ? { asking: true } : {})}
           {...(focus !== undefined ? { focus } : {})}
         />
       )}
       {gate !== undefined && onGate !== undefined ? (
-        // The newest thing in this conversation IS the review — rendered as its latest turn, not
-        // floated over it. The same ChangesetGate the modal mounts, exercised by a second host,
-        // which is what the mount contract is FOR (CHANGESETS.md §8.1).
+        // The newest thing in this conversation IS the question — rendered as its latest turn,
+        // not floated over it. Every component, not just the reviewer: a state that asks something
+        // is a state this run is SITTING in, and the place a task sits is its conversation
+        // (CHANGESETS.md §8.1's default host, finally the only one).
         <section className="inline-gate" data-testid="inline-gate">
-          <h3>Review requested</h3>
-          {gate.configError !== undefined ? (
-            <p className="reason">
-              This state&apos;s <code>{gate.component}</code> config is invalid: {gate.configError}
-            </p>
-          ) : gate.config?.component === "review_artifacts" ? (
-            <ChangesetGate
-              config={gate.config}
-              inputs={gate.inputs as Record<string, unknown>}
-              onSubmit={onGate}
-              about={gate.about}
-              project={gate.project}
-              services={gateServices}
-              mountKey={gate.requestId}
-            />
-          ) : null}
+          <GateSurface
+            pending={gate}
+            onSubmit={onGate}
+            services={gateServices}
+            {...(gateEditor !== undefined ? { editor: gateEditor } : {})}
+          />
         </section>
       ) : null}
     </div>

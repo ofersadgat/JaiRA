@@ -33,6 +33,7 @@ import { SqliteSessionStore, type SessionScope } from "./sessionStore";
 import { SqliteArtifactStore } from "./artifactStore";
 import { CommandLog } from "./commandLog";
 import { JobStore, type JobRow } from "./jobs";
+import { InteractionStore } from "./interactions";
 import { SqliteEventLog } from "./eventLog";
 import { RuntimeStore } from "./runtime";
 import { TaskFileStore } from "./taskStore";
@@ -62,6 +63,13 @@ export interface Project {
   artifacts: SqliteArtifactStore;
   /** Process claims and child processes (DESIGN §4.2a). */
   jobs: JobStore;
+  /**
+   * Gates parked and not yet answered (DESIGN §7.1).
+   *
+   * Durable on purpose: a run that dies with a state parked on a person leaves the question behind
+   * rather than taking it with it — see {@link InteractionStore}.
+   */
+  interactions: InteractionStore;
   /** What `config.storage` did to this connection — see {@link applyStorage}. Empty when everything
    *  is in the database, which is the default. */
   storage: ShadowReport;
@@ -322,6 +330,7 @@ function openAt(
     commands: new CommandLog(db),
     artifacts: new SqliteArtifactStore(db, artifactLog),
     jobs,
+    interactions: new InteractionStore(db),
     recovered,
     orphans,
     storage,

@@ -46,8 +46,10 @@ import type {
 import type { AddressStep as ViewAddressStep, InstanceNode } from "@jaira/shared";
 import { SqliteEventLog } from "./eventLog";
 import { eventsOf, foldRuns, isLive, projectRun, type ProjectedRun } from "./projection";
+import { hydrate } from "./blobStore";
 import { ON_RECORD, scopedSessionId } from "./sessionStore";
 import { parseSessionRef } from "./views";
+import type { JairaDb } from "./db";
 import type { Project } from "./project";
 
 /**
@@ -197,7 +199,7 @@ export function buildRunReplay(project: Project, taskId: string, runId: number):
     // `completed` is the whole filter — see the header. A record settled `failed`, or left `open` by
     // a crash, is the frontier rather than an answer, and the projection has already put it there.
     if (row.status !== "completed") continue;
-    const value = valueOf(row.result_json, event.op);
+    const value = valueOf(project.db, row.result_json, event.op);
     if (value === undefined) {
       unreadable.push({ address, stateId: event.stateId, reason: "the record holds no readable value" });
       continue;
@@ -368,7 +370,31 @@ function addressesOf(roots: readonly InstanceNode[]): Map<number, InstanceAddres
   return out;
 }
 
-/** Live leaves — a live instance with no live child under it. */
+/**
+ * A leaf a STOP caught in the middle of its operation.
+ *
+ * A crash leaves instances live, because nothing ran to tidy them up. A cancel does not: the abort
+ * unwinds the tree on the way out and terminates every instance it passes, so by the time the run
+ * settles there is nothing live anywhere — and a frontier read off liveness alone is empty for
+ * every stopped run, whatever it was in the middle of.
+ *
+ * That made the two ways of stopping report differently about the same fact. `isStartableStatus`
+ * already says they are the same fact: "a stop is an INTERRUPTION — the difference between it and a
+ * crash is who caused it, which is not a fact about whether there is anything left to pick up." The
+ * frontier is the half that never got the message, so a run stopped on a human gate came back
+ * offering `retry` — the word for a state that FAILED — about a state that did nothing wrong.
+ *
+ * The signature is exact and it is not "status is canceled". It is an operation that STARTED and
+ * never settled: `completed` has its answer in the replay index and is walked past, `failed` is a
+ * genuine retry and keeps that word, and a composite has no operation of its own, so an ancestor
+ * the same abort terminated cannot match. What is left is the one instance the process was actually
+ * inside — which is what a frontier is.
+ */
+function stoppedInside(node: InstanceNode): boolean {
+  return !node.superseded && node.status === "canceled" && node.operation?.status === "running";
+}
+
+/** Live leaves — a live instance with no live child under it, plus whatever a stop caught mid-operation. */
 function frontierOf(roots: readonly InstanceNode[]): FrontierEntry[] {
   const out: FrontierEntry[] = [];
   /** How many frontier entries this subtree contributed — see the descent rule below. */
@@ -398,7 +424,7 @@ function frontierOf(roots: readonly InstanceNode[]): FrontierEntry[] {
         pushed += 1;
         continue;
       }
-      if (!isLive(node)) continue;
+      if (!isLive(node) && !stoppedInside(node)) continue;
       out.push({
         address,
         stateId: node.stateId,
@@ -536,7 +562,7 @@ function takeRecord(
  * `files[0].bytes`; this module cannot see `op.output.kind`, and bytes do not survive the row's JSON
  * anyway. Such a payload carries no `value` either, so it lands on the same refusal.
  */
-function valueOf(resultJson: string | null, op?: string): JsonValue | undefined {
+function valueOf(db: JairaDb, resultJson: string | null, op?: string): JsonValue | undefined {
   if (resultJson === null) return undefined;
   let parsed: unknown;
   try {
@@ -544,8 +570,19 @@ function valueOf(resultJson: string | null, op?: string): JsonValue | undefined 
   } catch {
     return undefined;
   }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
-  const value = (parsed as { value?: JsonValue }).value;
+  // HYDRATED, like every other reader of `result_json` (see `sessionStore`). A record does not store
+  // its big string leaves any more — since RECORDS.md §8 they are written once by content hash and
+  // the record keeps `{"$blob": "<sha>"}` in their place — so a raw parse hands back the reference
+  // instead of the value.
+  //
+  // That is not a cosmetic difference to a replayed answer. A state whose output is `kind: "blob"`
+  // takes a string and makes an artifact of it; handed an object with one reserved key it refuses,
+  // and the resume dies on the first state that produced a document — which for any real workflow
+  // is the first state. The threshold is 1 KB, so a fixture answering "ok" replays perfectly and
+  // everything that does actual work does not, which is why this survived its tests.
+  const hydrated = hydrate(db, parsed as JsonValue);
+  if (hydrated === null || typeof hydrated !== "object" || Array.isArray(hydrated)) return undefined;
+  const value = (hydrated as { value?: JsonValue }).value;
   if (value === undefined) return undefined;
   return isLlmPayload(value, op) ? (value as { value?: JsonValue }).value : value;
 }

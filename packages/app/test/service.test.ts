@@ -9,6 +9,7 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { setMaxListeners } from "node:events";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { blockedRules, happyRules, HUMAN_REVIEW_FUNCTION, specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
@@ -814,6 +815,40 @@ describe("diagnostics", () => {
     expect(entry?.message).toBe("unhandledRejection: NaN is not allowed");
     // The STACK is the point. A bare message is what made the original report unactionable.
     expect(JSON.stringify(entry?.detail)).toContain("Error: NaN is not allowed");
+  });
+
+  it("records a Node warning with the stack that names where it came from", async () => {
+    // The REAL warning, provoked the way the app provoked it — listeners past the limit on a signal
+    // whose tracking is armed. Constructing a `MaxListenersExceededWarning` by hand would test the
+    // logging and skip the only interesting question: whether the stack a real one carries names
+    // the line that caused it.
+    const controller = new AbortController();
+    setMaxListeners(10, controller.signal);
+    const addOne = (): void => controller.signal.addEventListener("abort", () => {}, { once: true });
+    const seen: Error[] = [];
+    const capture = (w: Error): void => void seen.push(w);
+    process.on("warning", capture);
+    let warning: Error | undefined;
+    try {
+      for (let i = 0; i < 12; i++) addOne();
+      // Node emits on a later macrotask than the `addEventListener` that provoked it — a microtask
+      // drain is not enough, and a test that only drains those watches nothing arrive.
+      await new Promise((r) => setTimeout(r, 20));
+      warning = seen.find((w) => w.name === "MaxListenersExceededWarning");
+    } finally {
+      process.off("warning", capture);
+    }
+    expect(warning).toBeDefined();
+    service.recordWarning(warning!);
+
+    const entry = service.listLogs({ source: "runtime" }).at(-1);
+    // `warn`, and NOT `crash`: nothing failed and nothing escaped. See `recordWarning`.
+    expect(entry).toMatchObject({ level: "warn", source: "runtime" });
+    expect(entry?.message).toContain("MaxListenersExceededWarning");
+    // The whole point of recording these. Node fills the stack in whether or not `--trace-warnings`
+    // was passed — that flag only changes what Node's OWN printer shows — so the frames are here
+    // for the taking, and they name the `addEventListener` that crossed the line.
+    expect(JSON.stringify(entry?.detail)).toContain("addOne");
   });
 
   it("never throws out of the crash reporter, whatever it is handed", () => {

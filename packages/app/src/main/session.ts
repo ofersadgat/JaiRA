@@ -241,7 +241,11 @@ export class ProjectSession {
     this.watchTimer = undefined;
     for (const watcher of this.watchers) watcher.close();
     this.watchers = [];
-    this.hub.rejectAll(reason);
+    // ABANDONED, not settled — the default, and stated here because it is the whole of what makes a
+    // gate durable. The promise has to settle or the engine never unwinds and the database never
+    // closes; that is a fact about this process and not an answer to the question, so the row stays
+    // and the next open asks the same thing again. See `RequestFate`.
+    this.hub.rejectAll(reason, "abandoned");
     this.approvals.denyAll();
     // A parked question parks the agent's tool loop just as hard — dismissed, the agent proceeds
     // on its own judgment, which is the honest answer from a project that is going away.

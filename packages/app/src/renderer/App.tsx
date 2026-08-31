@@ -41,7 +41,7 @@ import { Board, lanesOf } from "./board";
 import { dragOffersOf } from "./taskDrag";
 import { ChatListPanel, ChatView, chatProjectOf, conversationsOf, type ChatSurface } from "./chatPane";
 import { isChatWorkflow } from "./chatWorkflow";
-import { ApprovalDialog, InteractionDialog, ModuleApprovalDialog, QuestionDialog } from "./components";
+import { ApprovalDialog, ModuleApprovalDialog, QuestionDialog } from "./components";
 import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem, type MenuPoint } from "./menu";
 import { AppearancePane } from "./appearancePane";
 import {
@@ -577,13 +577,21 @@ export default function App(): JSX.Element {
    * joins a review run to the task whose worktree it reviews; the review task itself matches too,
    * for a reader who followed the run into JaiRA's own project. Everything else keeps the modal.
    */
+  /**
+   * The gate this conversation is holding — EVERY component, not only the reviewer.
+   *
+   * A gate used to float over the window in a modal, which got two things wrong. It interrupted
+   * whatever the person was doing, including reading a different task's conversation; and it put the
+   * question somewhere that vanishes, so a workflow parked on one looked, from every other view,
+   * like a workflow that had simply stopped. A state that asks something is a state the task is
+   * SITTING in, and where a task sits is its conversation (CHANGESETS.md §8.1's default host).
+   *
+   * `about` before `taskId` for the one component whose two are different: a changeset review runs
+   * as its own task and belongs in the conversation of the task it reviews.
+   */
   const inlineGate =
-    view === "tasks" &&
-    detail !== null &&
-    pending[0] !== undefined &&
-    pending[0].component === "review_artifacts" &&
-    (pending[0].about === detail.taskId || pending[0].taskId === detail.taskId)
-      ? pending[0]
+    view === "tasks" && detail !== null
+      ? (pending.find((p) => p.about === detail.taskId || p.taskId === detail.taskId) ?? null)
       : null;
 
   /**
@@ -1914,6 +1922,13 @@ export default function App(): JSX.Element {
                           gate: inlineGate,
                           onGate: (value: unknown) => actions.answer(inlineGate.requestId, value),
                           gateServices: reviewerServices,
+                          gateEditor: {
+                            drafts: state.drafts,
+                            onDraft: actions.setDraft,
+                            validateSchema: actions.validateSchema,
+                            wrapJson: state.settings.wrapJson,
+                            onWrapJson: (wrap: boolean) => void actions.setWrapJson(wrap),
+                          },
                         }
                       : {})}
                   />
@@ -2094,7 +2109,13 @@ export default function App(): JSX.Element {
           questions={state.questions}
           projects={state.projects}
           hues={projectHues}
-          onSelect={actions.select}
+          // The view comes with the selection now, because for a gate this strip is the whole way
+          // in: the question renders in its task's conversation and nowhere else, so a click that
+          // selected the task without going to it left the person looking at the same footer.
+          onSelect={(taskId, project) => {
+            actions.setView("tasks");
+            actions.select(taskId, project);
+          }}
         />
       </div>
 
@@ -2122,23 +2143,13 @@ export default function App(): JSX.Element {
           error={state.error}
           onDecide={(decision, scope) => actions.decideApproval(state.approvals[0]!.requestId, decision, scope)}
         />
-      ) : pending.length > 0 && inlineGate === null ? (
-        // The modal is the FALLBACK host now, not the only one (CHANGESETS.md §8.1): a changeset
-        // gate whose task's conversation is on screen renders there instead — see `inlineGate`.
-        <InteractionDialog
-          pending={pending[0]!}
-          error={state.error}
-          onSubmit={(value) => actions.answer(pending[0]!.requestId, value)}
-          services={reviewerServices}
-          editor={{
-            drafts: state.drafts,
-            onDraft: actions.setDraft,
-            validateSchema: actions.validateSchema,
-            wrapJson: state.settings.wrapJson,
-            onWrapJson: (wrap) => void actions.setWrapJson(wrap),
-          }}
-        />
       ) : null}
+      {/* And no fourth dialog. A gate is NOT a modal any more (CHANGESETS.md §8.1): it renders in
+          its task's conversation — see `inlineGate` — and the strip below is how you get there from
+          anywhere else. The three above stay modal because each is a question about the thing you
+          are doing right now: a module about to be trusted, an agent addressing you mid-turn, a
+          command waiting on the other side of the approval gate. A workflow state's question is not
+          that. It is a place its task is sitting, and it will still be sitting there tomorrow. */}
 
       {taskMenu !== null ? <ContextMenu anchor={taskMenu} onClose={() => setTaskMenu(null)} /> : null}
       {taskAsk !== null ? <AskDialog spec={taskAsk} onCancel={() => setTaskAsk(null)} /> : null}

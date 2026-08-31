@@ -35,3 +35,4 @@ export * from "./jobOwner";
 export * from "./migrations";
 export * from "./sessionStore";
 export * from "./jobOutput";
+export * from "./interactions";

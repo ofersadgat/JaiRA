@@ -104,6 +104,7 @@ import {
   type DescriptionBoundary,
   type DescriptionOwnership,
   type Project,
+  type StoredInteraction,
   type TaskWorkspace,
   type WorkflowDigestOptions,
   type LayerSource,
@@ -654,6 +655,28 @@ function pendingApprovalOf(request: ApprovalRequest, project: string): PendingAp
 }
 
 /**
+ * Stamp a gate with its parsed contract — the one step a live park and a recovered row share.
+ *
+ * Parsed here, once, so the renderer receives a normalized contract instead of re-deriving it, and
+ * so a malformed state file surfaces as a parse error on the request rather than an empty dialog.
+ *
+ * From `inputs` itself, not from `inputs["config"]`. There is no `config` key and there never was:
+ * a component's authored surface IS `operation.args` — which is what `componentConfigIssues` lints
+ * — and a function receives its args merged with the state's resolved inputs, flat. Reading a key
+ * nothing writes meant `config` was undefined for every component ever parked, and the renderer got
+ * `configError` instead of a contract.
+ */
+function withContract(pending: PendingInteraction): PendingInteraction {
+  if (!isComponentName(pending.component)) return pending;
+  try {
+    pending.config = parseComponentConfig(pending.component, pending.inputs);
+  } catch (e) {
+    pending.configError = (e as Error).message;
+  }
+  return pending;
+}
+
+/**
  * `startTask` as the service sees it. The IPC contract carries `fake` as opaque
  * JSON (it is parsed with `parseFakeRules`); in-process callers usually have
  * typed rules already, so both are accepted here.
@@ -872,8 +895,13 @@ export class AppService {
   private hubsFor(key: string): { hub: InteractionHub; approvals: ApprovalHub; questions: QuestionHub; userEvents: UserEventHub } {
     const hub = new InteractionHub({
       onRequest: (request) => this.publishInteraction(key, request),
-      onResolved: (requestId) => {
-        this.sessions.get(key)?.requestTask.delete(requestId);
+      onResolved: (requestId, fate) => {
+        const session = this.sessions.get(key);
+        // A DECISION ends the question; the process going away does not (see `RequestFate`). Only
+        // the first deletes the durable row — leaving it on shutdown is exactly what lets the next
+        // open ask the same thing again instead of pretending it was answered.
+        if (fate === "settled") session?.project.interactions.close(requestId);
+        session?.requestTask.delete(requestId);
         this.requestOwner.delete(requestId);
         this.publish({ type: "interaction:resolved", requestId });
       },
@@ -1498,6 +1526,33 @@ export class AppService {
    *
    * NEVER THROWS: it is reached from a process-level handler, where there is nothing above to catch.
    */
+  /**
+   * A Node process warning — `MaxListenersExceededWarning`, a deprecation, anything `emitWarning`.
+   *
+   * `warn` rather than `error`, and a source of its own: nothing failed. A warning is the runtime
+   * telling us about a shape it does not like, which is a different claim from either "the code
+   * malfunctioned" or "a child process said something", and filing it as either would put it where
+   * a reader is not looking for it.
+   *
+   * The STACK is the entire point of recording these. The message names a symptom that could have
+   * come from anywhere — "11 abort listeners added to [AbortSignal]" is true of every signal in the
+   * process — and the stack names the `addEventListener` that crossed the line. Node fills it in
+   * whether or not `--trace-warnings` was passed; that flag only changes what Node's OWN printer
+   * shows, so a handler that reads `.stack` gets the frames for free.
+   */
+  recordWarning(warning: Error): void {
+    try {
+      this.log({
+        level: "warn",
+        source: "runtime",
+        message: `${warning.name}: ${warning.message}`,
+        ...(warning.stack !== undefined ? { detail: { stack: warning.stack } as JsonValue } : {}),
+      });
+    } catch {
+      // A warning is the least important thing in this process; losing one must not cost anything.
+    }
+  }
+
   recordCrash(kind: CrashKind, error: unknown): void {
     try {
       const e = error instanceof Error ? error : new Error(String(error));
@@ -1552,7 +1607,24 @@ export class AppService {
     const session = this.sessions.get(key);
     const taskId = request.taskId ?? [...(session?.live.keys() ?? [])][0] ?? "";
     session?.requestTask.set(request.requestId, taskId);
-    this.publish({ type: "interaction:requested", pending: this.pendingOf(request) });
+    const pending = this.pendingOf(request);
+    // Written down before it is published, so the row exists for every renderer that could act on
+    // the event. This is what makes a gate survive the process: the hub's Map is the run, and the
+    // question is not — see `InteractionStore`. A request with no task has nothing to be resumed
+    // against, so it stays live-only rather than becoming a row nothing can ever answer.
+    if (session !== undefined && pending.taskId !== "") {
+      session.project.interactions.open({
+        requestId: pending.requestId,
+        taskId: pending.taskId,
+        component: pending.component,
+        inputs: pending.inputs,
+        ...(session.live.get(pending.taskId) !== undefined ? { runId: session.live.get(pending.taskId)!.runId } : {}),
+        ...(pending.about !== undefined ? { about: pending.about } : {}),
+        ...(pending.subjectProject !== undefined ? { subjectProject: pending.subjectProject } : {}),
+        createdAt: Date.now(),
+      });
+    }
+    this.publish({ type: "interaction:requested", pending });
   }
 
   /**
@@ -1589,30 +1661,42 @@ export class AppService {
       const about = at >= 0 ? labels[at + 1] : undefined;
       if (about !== undefined && about !== pending.taskId) pending.about = about;
     }
-    // Parse the authored config here, once, so the renderer receives a normalized
-    // contract instead of re-deriving it — and so a malformed state file surfaces
-    // as a parse error on the request rather than an empty dialog.
-    //
-    // From `request.inputs` itself, not from `request.inputs["config"]`. There is no `config` key
-    // and there never was: a component's authored surface IS `operation.args` — which is what
-    // `componentConfigIssues` lints — and a function receives its args merged with the state's
-    // resolved inputs, flat. Reading a key nothing writes meant `pending.config` was undefined for
-    // every component ever parked, and the renderer got `configError` instead of a contract.
-    if (isComponentName(request.component)) {
-      try {
-        pending.config = parseComponentConfig(request.component, request.inputs);
-      } catch (e) {
-        pending.configError = (e as Error).message;
-      }
-    }
-    return pending;
+    return withContract(pending);
+  }
+
+  /**
+   * A gate read back off disk, in the shape a live one is published in.
+   *
+   * The row already holds everything `pendingOf` had to derive — the joins that produced `about` and
+   * `subjectProject` were made when it parked and stored with it, because the session that could
+   * make them is exactly the one that went away. What is left is the contract parse, which is a pure
+   * function of the inputs and so is done here rather than stored.
+   *
+   * `resumes` is what the renderer needs to say the true thing: nothing is waiting on this answer
+   * right now, and giving one starts the task again from its record.
+   */
+  private pendingOfStored(key: string, row: StoredInteraction): PendingInteraction {
+    return withContract({
+      requestId: row.requestId,
+      taskId: row.taskId,
+      project: this.refOf(key),
+      component: row.component,
+      inputs: row.inputs,
+      resumes: true,
+      ...(row.about !== undefined ? { about: row.about } : {}),
+      ...(row.subjectProject !== undefined ? { subjectProject: row.subjectProject } : {}),
+    });
   }
 
   /** The parsed contract for a parked request, when it has one — with the request's own inputs,
    *  because `review_artifacts` is validated against the changeset it was asked about. */
   private configOf(requestId: string): { config: ComponentConfig; inputs: Record<string, JsonValue> } | undefined {
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
-    const request = owner?.hub.list().find((r) => r.requestId === requestId);
+    // The live park, then the stored row. A recovered gate is answered through the same channel and
+    // must be held to the same contract — skipping the check because the engine is not waiting yet
+    // would make "close the app first" a way past main's validation.
+    const request: { component: string; inputs: Record<string, JsonValue> } | undefined =
+      owner?.hub.list().find((r) => r.requestId === requestId) ?? this.findStoredInteraction(requestId)?.row;
     if (!request || !isComponentName(request.component)) return undefined;
     try {
       return { config: parseComponentConfig(request.component, request.inputs), inputs: request.inputs };
@@ -2518,6 +2602,13 @@ export class AppService {
     const userFns = userModules();
     if (userFns !== undefined) registerUserFunctions(registry, userFns.userFunctions);
 
+    // Gates this task was holding from an earlier process go now, not when this run reaches them.
+    // A run walking the same workflow parks its OWN request with its own id, and a row from the
+    // process before it would sit beside that one as a second copy of one question — the first
+    // answerable only by resuming a task that is already running. What this run re-reaches it
+    // re-asks; what it does not, nobody should be answering.
+    project.interactions.clearTask(taskId);
+
     const started = await beginTaskRun(project, taskId, {
       functions: registry.functions,
       ...(opts.bundle !== undefined ? { bundle: opts.bundle } : {}),
@@ -2865,6 +2956,10 @@ export class AppService {
         // with the run that produced them, not with whatever timer was pending when it ended.
         output.flush();
         owner?.release();
+        // An answer this run never reached is an answer nothing is owed. Leaving it on the hub would
+        // spend it on whatever the NEXT run of this task asks first, which from the person's side is
+        // a gate that answered itself with something they said about a different question.
+        open.hub.unseed(taskId);
         open.live.delete(taskId);
         open.liveTurns.drop(taskId);
         liveFlush.dispose();
@@ -3991,8 +4086,9 @@ export class AppService {
     }
     return {
       taskId,
-      // A frontier means live instances the process died inside; none means the run ended, and what
-      // is left to do is the state that ended it.
+      // A frontier is somewhere the run was IN — an instance a crash left live, or one a stop caught
+      // mid-operation (`stoppedInside`). None of either means the run ran out on its own terms, and
+      // what is left to do is the state that ended it.
       kind: replay.frontier.length > 0 ? "continue" : "retry",
       replayed: replay.answers.size,
       frontier: replay.frontier.map((entry) => ({ stateId: entry.stateId, stopped: entry.stopped })),
@@ -4109,9 +4205,19 @@ export class AppService {
       // Another process is driving it. Raise the flag its heartbeat polls — cross-
       // process cancel needs no socket, unlike answering a parked gate (§4.2a).
       session.project.jobs.requestCancel(taskId, Date.now());
-    } else if (this.cancelable(session, taskId)) {
-      cancelTask(session.project, taskId);
-      this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+    } else {
+      // Nothing is running HERE, so there is no park to reject — but a gate an earlier process left
+      // behind is still on offer, and saying stop is a decision about it. See `InteractionStore`:
+      // the row survives a process, not a person saying no.
+      //
+      // Outside the `cancelable` guard, deliberately. A task that quit while parked is already
+      // `canceled` — so the status transition is a no-op and the offer would be the only thing left,
+      // which is a question about a task the person has just said they are done with.
+      session.project.interactions.clearTask(taskId);
+      if (this.cancelable(session, taskId)) {
+        cancelTask(session.project, taskId);
+        this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+      }
     }
     return { taskId };
   }
@@ -4211,8 +4317,39 @@ export class AppService {
     return this.session(request.project).liveTurns.snapshot(request.taskId);
   }
 
+  /**
+   * Every gate awaiting a person — the live ones and the ones an earlier process left behind.
+   *
+   * The two are one list on purpose. From where somebody is sitting there is no difference between
+   * a question whose run is blocked on it and a question whose run died holding it: both are things
+   * being asked of them, in the same conversation, and both are answered the same way. What differs
+   * is what answering DOES, and that is `resumes` on the row rather than a second channel.
+   *
+   * The live park wins when a request id is both — which is the moment a resumed run re-reaches its
+   * gate, before the row is deleted.
+   */
   pendingInteractions(): PendingInteraction[] {
-    return [...this.sessions.values()].flatMap((s) => s.hub.list().map((request) => this.pendingOf(request)));
+    const live = [...this.sessions.values()].flatMap((s) => s.hub.list().map((request) => this.pendingOf(request)));
+    const seen = new Set(live.map((p) => p.requestId));
+    const stored = [...this.sessions.entries()].flatMap(([key, s]) =>
+      this.storedInteractionsOf(key, s).filter((row) => !seen.has(row.requestId)),
+    );
+    return [...live, ...stored];
+  }
+
+  /**
+   * One session's recovered gates — the rows whose run is NOT in flight here.
+   *
+   * A row for a task this process is currently running is filtered out rather than shown: that run
+   * either still holds the park (in which case it is in `hub.list()` and is the live copy) or has
+   * moved past it and the row is about to go. Offering both would put two copies of one question in
+   * front of the person.
+   */
+  private storedInteractionsOf(key: string, session: ProjectSession): PendingInteraction[] {
+    return session.project.interactions
+      .list()
+      .filter((row) => !session.live.has(row.taskId))
+      .map((row) => this.pendingOfStored(key, row));
   }
 
   /**
@@ -4223,6 +4360,12 @@ export class AppService {
    * boundary, so an undeclared decision or a missing required field is refused
    * before it can become a workflow output — the engine's own output-schema check
    * is a second, independent gate.
+   *
+   * Two things can be on the other end. A LIVE park is an engine waiting on this promise, and
+   * submitting hands it over. A RECOVERED one has no engine at all: the process that parked it is
+   * gone, so the answer is seeded on the hub and the task is resumed — it replays what it already
+   * did, re-reaches the state it stopped in, and takes the seeded answer without asking again. From
+   * the renderer both are `interaction:submit` with a value, which is the point.
    */
   submitInteraction(requestId: string, value: JsonValue): { requestId: string } {
     const contract = this.configOf(requestId);
@@ -4231,10 +4374,45 @@ export class AppService {
       if (!check.ok) throw this.refusal("run", `invalid ${contract.config.component} response: ${check.errors}`);
     }
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
-    if (owner === undefined || !owner.hub.submit(requestId, value)) {
-      throw this.refusal("run", `no pending interaction '${requestId}'`);
-    }
+    if (owner !== undefined && owner.hub.submit(requestId, value)) return { requestId };
+    return this.answerRecoveredInteraction(requestId, value);
+  }
+
+  /**
+   * Answer a gate whose run is no longer in this process — see {@link submitInteraction}.
+   *
+   * The row goes FIRST, inside the same call that starts the resume, because the resumed run parks
+   * a fresh request the moment it gets there and a stale row beside it is two questions where there
+   * is one. If the resume then refuses — a task somebody deleted, a snapshot that will not load —
+   * the seed is dropped with it, so nothing is left holding an answer for a run that never comes.
+   */
+  private answerRecoveredInteraction(requestId: string, value: JsonValue): { requestId: string } {
+    const found = this.findStoredInteraction(requestId);
+    if (found === undefined) throw this.refusal("run", `no pending interaction '${requestId}'`);
+    const { session, row } = found;
+    session.hub.seed(row.taskId, row.component, value);
+    session.project.interactions.close(requestId);
+    this.publish({ type: "interaction:resolved", requestId });
+    void this.resumeTask({ taskId: row.taskId, project: session.dir }).catch((e: unknown) => {
+      session.hub.unseed(row.taskId);
+      this.log({
+        level: "error",
+        source: "run",
+        message: `answering ${row.component} could not continue ${row.taskId}: ${(e as Error).message}`,
+        project: session.key,
+        taskId: row.taskId,
+      });
+    });
     return { requestId };
+  }
+
+  /** Which session is holding a stored gate, and the row itself. */
+  private findStoredInteraction(requestId: string): { session: ProjectSession; row: StoredInteraction } | undefined {
+    for (const session of this.sessions.values()) {
+      const row = session.project.interactions.get(requestId);
+      if (row !== undefined) return { session, row };
+    }
+    return undefined;
   }
 
   // --- settings --------------------------------------------------------------

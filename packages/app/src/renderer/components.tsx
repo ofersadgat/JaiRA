@@ -714,11 +714,19 @@ const COMPONENT_ICON: Record<ComponentName, Parameters<typeof Icon>[0]["name"]> 
 };
 
 /**
- * The gate dialog: dispatches on the parsed component contract. This modal is the
- * only path by which a human decision enters a run (SPEC §11.4) — it reaches the
+ * A gate, drawn — the author's question and whatever control answers it, and NOTHING about where it
+ * is (CHANGESETS.md §8.1).
+ *
+ * Split out from the modal it used to be welded to, because the modal was the wrong default. A gate
+ * is a turn in a conversation: the state asked something, and the answer is the next thing that
+ * happens in that run. Floating it over the window made it an interruption of whatever the person
+ * was doing — including reading a different task — and made it unreadable at the one width a review
+ * needs. So the conversation view hosts this, and the modal is one more caller.
+ *
+ * This is still the only path by which a human decision enters a run (SPEC §11.4): it reaches the
  * engine through `interaction:submit`, which nothing inside a workflow can call.
  */
-export function InteractionDialog({
+export function GateSurface({
   pending,
   error,
   onSubmit,
@@ -797,32 +805,55 @@ export function InteractionDialog({
     }
   })();
 
+  return (
+    <>
+      {/* The glyph belongs to the TITLE, and the title is the author's question.
+          It used to sit on the line below, beside the component's wire name — which put a picture
+          next to `review_artifact`, a string that means nothing to the person answering, and left
+          the heading bare. The wire name is gone from here entirely for the same reason: which
+          function is running is a fact about the implementation. */}
+      <h3>
+        {isComponentName(pending.component) ? (
+          <Icon name={COMPONENT_ICON[pending.component]} className="gate-icon" />
+        ) : null}{" "}
+        {config?.prompt ?? pending.component}
+      </h3>
+      {/* The one thing a person cannot see for themselves: whether a run is BLOCKED on this or
+          waiting to be picked back up. Both are answered here and neither reads differently, so a
+          gate whose process went away says so rather than letting somebody wonder why the task is
+          not running while a question about it is on the screen. */}
+      {pending.resumes ? <p className="gate-resumes">Answering this continues the task.</p> : null}
+      {/* No sub-line beyond that. It carried the function name (an implementation fact) and then the
+          task id (an opaque rowid) — neither is something the person answering the question needs,
+          and both sat between the question and its answers. */}
+      {body}
+      {error ? <p className="reason">{error}</p> : null}
+    </>
+  );
+}
+
+/**
+ * The gate as a modal — {@link GateSurface} with a backdrop over it.
+ *
+ * Kept for the component gallery and the debug pane, which are ABOUT the dialogs and mount them
+ * with made-up requests. The shell does not use it any more: a real gate belongs to a conversation,
+ * and §8.1 always said the conversation was the default host.
+ */
+export function InteractionDialog(props: {
+  pending: PendingInteraction;
+  error?: string | null;
+  onSubmit: (value: unknown) => void;
+  services?: Partial<ComponentServices>;
+  editor?: EditorServices | undefined;
+}): JSX.Element {
   // A multi-file review is far too big for the gate modal (CHANGESETS.md §11's rejected modal
   // reviewer) — the same host widens for it, which is the caller exercising the room §8.1 gives it.
-  const wide =
-    config?.component === "review_artifacts" ||
-    config?.component === "edit_artifact" ||
-    config?.component === "review_artifact";
-
+  const component = props.pending.config?.component;
+  const wide = component === "review_artifacts" || component === "edit_artifact" || component === "review_artifact";
   return (
     <div className="modal-backdrop">
       <div className={wide ? "modal modal-wide" : "modal"} data-testid="interaction">
-        {/* The glyph belongs to the TITLE, and the title is the author's question.
-            It used to sit on the line below, beside the component's wire name — which put a picture
-            next to `review_artifact`, a string that means nothing to the person answering, and left
-            the heading bare. The wire name is gone from here entirely for the same reason: which
-            function is running is a fact about the implementation. */}
-        <h3>
-          {isComponentName(pending.component) ? (
-            <Icon name={COMPONENT_ICON[pending.component]} className="gate-icon" />
-          ) : null}{" "}
-          {config?.prompt ?? pending.component}
-        </h3>
-        {/* No sub-line at all. It carried the function name (an implementation fact) and then the
-            task id (an opaque rowid) — neither is something the person answering the question needs,
-            and both sat between the question and its answers. */}
-        {body}
-        {error ? <p className="reason">{error}</p> : null}
+        <GateSurface {...props} />
       </div>
     </div>
   );

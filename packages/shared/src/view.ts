@@ -1168,7 +1168,14 @@ export interface LogEntry {
   id: number;
   at: number;
   level: LogLevel;
-  /** Where it came from — `ipc`, `engine`, `process`, `crash`, `project`, `availability`, `app`. */
+  /**
+   * Where it came from — `ipc`, `engine`, `process`, `crash`, `runtime`, `project`, `availability`,
+   * `app`.
+   *
+   * `process` is a CHILD process and `runtime` is the Node process this app is: a warning Node
+   * emitted about itself is not a job, and filing it as one would put it under a task that does not
+   * exist. `crash` is the third of that family and the loudest — something escaped.
+   */
   source: string;
   message: string;
   /** The session key of the project it concerns, when it concerns one. */

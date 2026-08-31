@@ -286,6 +286,19 @@ export interface PendingInteraction {
   /** Set instead of `config` when the state's authored config is malformed, so the
    *  UI can show the authoring error rather than an empty dialog. */
   configError?: string;
+  /**
+   * Nothing is blocked on this answer right now — giving one CONTINUES the task rather than
+   * unblocking it.
+   *
+   * A gate outlives the process that parked it (`pending_interactions`), so a question asked before
+   * the app was closed is still being asked after it reopens. The engine that was waiting is not:
+   * answering seeds the reply and resumes the run, which replays what it already did and picks the
+   * answer up at the state it stopped in. Absent ⇒ a live park, with a run blocked on it.
+   *
+   * The renderer needs this only to say the true thing on the button. It is not a second way to
+   * answer — both go through `interaction:submit` with a value.
+   */
+  resumes?: boolean;
 }
 
 /**
