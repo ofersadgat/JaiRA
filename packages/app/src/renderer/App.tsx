@@ -42,7 +42,7 @@ import { dragOffersOf } from "./taskDrag";
 import { ChatListPanel, ChatView, chatProjectOf, conversationsOf, type ChatSurface } from "./chatPane";
 import { isChatWorkflow } from "./chatWorkflow";
 import { ApprovalDialog, InteractionDialog, ModuleApprovalDialog, QuestionDialog } from "./components";
-import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem } from "./menu";
+import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem, type MenuPoint } from "./menu";
 import { AppearancePane } from "./appearancePane";
 import {
   addCounts,
@@ -779,9 +779,84 @@ export default function App(): JSX.Element {
     const floor = pinned?.node === undefined ? 0 : PANE_SURFACE;
     return Math.max(floor, Math.min(paneOf(ui, id), held ? PANE_WIDE : ceiling));
   };
+  /** "3 tasks", "1 task" — the count a group verb is labelled with. */
+  const plural = (k: number): string => `${k} task${k === 1 ? "" : "s"}`;
+
+  /**
+   * The verbs a GROUP of tasks is offered — a multi-selection, or every card in a column.
+   *
+   * One builder for both, because they are the same menu asked for two different ways: a set
+   * somebody gathered by shift-clicking, and a set the board had already drawn as a column. Two
+   * copies of "re-run these, cancel these, delete these" is two copies that stop agreeing about
+   * which of them a running task is exempt from.
+   *
+   * Each verb is labelled with the count it will ACTUALLY touch, and one a member is ineligible for
+   * skips that member and says so in the note — "Re-run 3 tasks" doing something to two of them is
+   * how trust in a menu dies.
+   */
+  const groupItems = useCallback(
+    (project: string, cards: readonly BoardCard[]): MenuItem[] => {
+      const n = cards.length;
+      const notRunning = cards.filter((c) => c.status !== "running");
+      const cancelable = cards.filter(
+        (c) => c.status === "queued" || c.status === "running" || c.status === "interrupted",
+      );
+      return [
+        {
+          label: `Re-run ${plural(notRunning.length)}`,
+          disabled: notRunning.length === 0,
+          ...(notRunning.length < n ? { note: "running skipped" } : {}),
+          onSelect: () =>
+            void actions.rerunTasks(
+              notRunning.map((c) => c.taskId),
+              project,
+            ),
+        },
+        {
+          label: `Cancel ${plural(cancelable.length)}`,
+          disabled: cancelable.length === 0,
+          ...(cancelable.length < n ? { note: "finished skipped" } : {}),
+          onSelect: () =>
+            void actions.cancelTasks(
+              cancelable.map((c) => c.taskId),
+              project,
+            ),
+        },
+        {
+          label: "Copy task ids",
+          separator: true,
+          disabled: n === 0,
+          onSelect: () => void navigator.clipboard?.writeText(cards.map((c) => c.taskId).join("\n")),
+        },
+        {
+          label: `Delete ${plural(notRunning.length)}…`,
+          separator: true,
+          danger: true,
+          disabled: notRunning.length === 0,
+          ...(notRunning.length < n ? { note: "running skipped" } : {}),
+          onSelect: () =>
+            setTaskAsk({
+              title: `Delete ${plural(notRunning.length)}?`,
+              note: "This deletes each task, every run it made, and its worktree — uncommitted work included. None of it comes back.",
+              confirmLabel: "Delete",
+              danger: true,
+              onConfirm: () => {
+                setTaskAsk(null);
+                setPicked(null);
+                void actions.deleteTasks(
+                  notRunning.map((c) => c.taskId),
+                  project,
+                );
+              },
+            }),
+        },
+      ];
+    },
+    [actions],
+  );
+
   const openTaskMenu = useCallback(
-    (project: string, card: BoardCard, x: number, y: number) => {
-      const plural = (k: number): string => `${k} task${k === 1 ? "" : "s"}`;
+    (project: string, card: BoardCard, at: MenuPoint) => {
       const set =
         picked !== null && picked.project === project && picked.ids.length > 1 && picked.ids.includes(card.taskId)
           ? picked.ids
@@ -790,64 +865,7 @@ export default function App(): JSX.Element {
       if (set !== null) {
         const byId = new Map(boardCardsOf(project).map((c) => [c.taskId, c] as const));
         const cards = set.map((id) => byId.get(id)).filter((c): c is BoardCard => c !== undefined);
-        const n = cards.length;
-        const notRunning = cards.filter((c) => c.status !== "running");
-        const cancelable = cards.filter(
-          (c) => c.status === "queued" || c.status === "running" || c.status === "interrupted",
-        );
-        setTaskMenu({
-          x,
-          y,
-          items: [
-            {
-              label: `Re-run ${plural(notRunning.length)}`,
-              disabled: notRunning.length === 0,
-              ...(notRunning.length < n ? { note: "running skipped" } : {}),
-              onSelect: () =>
-                void actions.rerunTasks(
-                  notRunning.map((c) => c.taskId),
-                  project,
-                ),
-            },
-            {
-              label: `Cancel ${plural(cancelable.length)}`,
-              disabled: cancelable.length === 0,
-              ...(cancelable.length < n ? { note: "finished skipped" } : {}),
-              onSelect: () =>
-                void actions.cancelTasks(
-                  cancelable.map((c) => c.taskId),
-                  project,
-                ),
-            },
-            {
-              label: "Copy task ids",
-              separator: true,
-              onSelect: () => void navigator.clipboard?.writeText(cards.map((c) => c.taskId).join("\n")),
-            },
-            {
-              label: `Delete ${plural(notRunning.length)}…`,
-              separator: true,
-              danger: true,
-              disabled: notRunning.length === 0,
-              ...(notRunning.length < n ? { note: "running skipped" } : {}),
-              onSelect: () =>
-                setTaskAsk({
-                  title: `Delete ${plural(notRunning.length)}?`,
-                  note: "This deletes each task, every run it made, and its worktree — uncommitted work included. None of it comes back.",
-                  confirmLabel: "Delete",
-                  danger: true,
-                  onConfirm: () => {
-                    setTaskAsk(null);
-                    setPicked(null);
-                    void actions.deleteTasks(
-                      notRunning.map((c) => c.taskId),
-                      project,
-                    );
-                  },
-                }),
-            },
-          ],
-        });
+        setTaskMenu({ ...at, title: plural(cards.length), items: groupItems(project, cards) });
         return;
       }
 
@@ -911,9 +929,55 @@ export default function App(): JSX.Element {
             }),
         },
       ];
-      setTaskMenu({ x, y, items });
+      setTaskMenu({ ...at, items });
     },
-    [actions, boardCardsOf, picked, state.boards],
+    [actions, boardCardsOf, groupItems, picked, state.boards],
+  );
+
+  /**
+   * Right-clicking a COLUMN — the place, and everything standing in it.
+   *
+   * A column already had a left-click meaning (describe the state it stands for) and a double-click
+   * one (open it), and no right-click at all — so the gesture that works on every card in a column
+   * did nothing on the column those cards are in.
+   *
+   * The menu is the column's own two verbs, then "select", then the group's. "Select" is what joins
+   * this to the multi-selection: it fills the same set a shift-click builds, so a column is a way of
+   * GATHERING tasks rather than a second, parallel way of acting on them.
+   */
+  const openColumnMenu = useCallback(
+    (project: string, stateId: string, at: MenuPoint) => {
+      // Every column standing for this state, in the order the board draws its cards — a menu that
+      // said "select 6 tasks" and then picked a different six than the ones under it would be worse
+      // than no menu. `boardCardsOf` is the same order shift-click measures its ranges in.
+      const here = new Set(
+        (state.boards[project]?.columns ?? [])
+          .filter((c) => c.stateId === stateId)
+          .flatMap((c) => c.cards.map((k) => k.taskId)),
+      );
+      const cards = boardCardsOf(project).filter((c) => here.has(c.taskId));
+      setTaskMenu({
+        ...at,
+        title: stateId,
+        items: [
+          { label: "Open", onSelect: () => actions.drillProject(project, stateId) },
+          { label: "Describe", onSelect: () => actions.selectWorkflow(stateId, project) },
+          {
+            label: `Select ${plural(cards.length)}`,
+            separator: true,
+            disabled: cards.length === 0,
+            onSelect: () => {
+              // The ANCHOR is the column's FIRST card, so a shift-click afterwards extends from the
+              // top of what was just selected rather than from wherever the panel is pointing.
+              setPicked({ project, ids: cards.map((c) => c.taskId), anchor: cards[0]!.taskId });
+              actions.select(cards[cards.length - 1]!.taskId, project);
+            },
+          },
+          ...groupItems(project, cards).map((item, i) => (i === 0 ? { ...item, separator: true } : item)),
+        ],
+      });
+    },
+    [actions, boardCardsOf, groupItems, state.boards],
   );
 
   /**
@@ -1765,7 +1829,9 @@ export default function App(): JSX.Element {
                               state.boards[p.project]!.level === "" ? card.workflow : state.boards[p.project]!.level,
                             )
                           }
-                          onTaskMenu={(card, x, y) => openTaskMenu(p.project, card, x, y)}
+                          onTaskMenu={(card, at) => openTaskMenu(p.project, card, at)}
+                          // The column's own right-click: the place, and every task standing in it.
+                          onColumnMenu={(stateId, at) => openColumnMenu(p.project, stateId, at)}
                           // What the running workflows are WAITING for somebody to do
                           // (`on_user_event`, WORKFLOWS.md §7.4). Computed per board, because a wait
                           // is an offer only where both ends of it are on screen: the card, and the

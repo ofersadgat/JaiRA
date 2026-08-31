@@ -49,7 +49,7 @@ import { projectName } from "./projects";
 import { ForkMark, ZigDefs } from "./sessionPanels";
 import { useStickToBottom } from "./stickToBottom";
 import { CHAT_AGENT, isChatWorkflow, titleOf } from "./chatWorkflow";
-import { ContextMenu, AskDialog, type AskSpec, type MenuAnchor } from "./menu";
+import { ContextMenu, AskDialog, pointOf, type AskSpec, type MenuAnchor } from "./menu";
 import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from "./transcript";
 import { DayChip, LiveStatusBar, Paper, sizeOf, Transcript, type ArtifactSurface } from "./transcriptView";
 import { ValueView } from "./valueView";
@@ -320,8 +320,9 @@ export function ChatListPanel({ surface, find = false }: { surface: ChatSurface;
               onContextMenu={(e) => {
                 e.preventDefault();
                 setMenu({
-                  x: e.clientX,
-                  y: e.clientY,
+                  // The point AND the row — opening a conversation scrolls the transcript beside it,
+                  // and a menu that closed on that scroll never got read. See `menu.tsx`.
+                  ...pointOf(e),
                   items: [
                     { label: "Open", onSelect: () => open(task) },
                     { label: "Rename…", onSelect: () => setRenaming({ taskId: task.taskId, title: task.title }) },

@@ -1336,7 +1336,18 @@ export function CompositeView(props: FileSurfaceProps & { state: StateView }): J
           // No run walked into: the workflow's own shape, from the task board. Cards are tasks here
           // because there is no run to take executions from — which is the honest answer, not a
           // second design. Clicking one selects it, which is what puts a run on the path.
-          <Board board={state.board!} selected={selected} trays={false} onSelectTask={onSelectTask} onDrill={onDrill} />
+          // The click event the board hands over is dropped here on purpose, and it has to be: this
+          // surface's `onSelectTask` is `(taskId) => void` over `actions.select(taskId, project)`,
+          // so passing the board's second argument straight through handed a MouseEvent to a
+          // parameter that names a database. There is no multi-selection on this board to read it
+          // for — that lives on the Tasks view, which keeps the set.
+          <Board
+            board={state.board!}
+            selected={selected}
+            trays={false}
+            onSelectTask={(taskId) => onSelectTask(taskId)}
+            onDrill={onDrill}
+          />
         ) : (
           <RunBoard
             declared={at.declared}

@@ -13,6 +13,7 @@
  */
 import { useState, type DragEvent as ReactDragEvent, type JSX, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { BoardCard, BoardView, InstanceStatus, TaskStatus } from "@jaira/shared/browser";
+import { pointOf, type MenuPoint } from "./menu";
 import { Pill, PILL_WORD, pillKindOf } from "./pill";
 import { canDrag, requestFor, NO_DRAG_OFFERS, type DragOffers } from "./taskDrag";
 
@@ -255,6 +256,7 @@ export function Column({
   tip,
   onOpen,
   onSelect,
+  onMenu,
   selected = false,
   drop,
   children,
@@ -282,6 +284,13 @@ export function Column({
    * placeholder, a lane heading — is the place.
    */
   onSelect?: (() => void) | undefined;
+  /**
+   * Right-clicking the column — the PLACE, and the tasks standing in it.
+   *
+   * Same target as {@link onSelect} and for the same reason: everything that is not a card is the
+   * column. A card has its own menu and claims the click before this one is reached.
+   */
+  onMenu?: ((at: MenuPoint) => void) | undefined;
   /** The panel is describing this column right now. */
   selected?: boolean;
   /**
@@ -310,10 +319,17 @@ export function Column({
     if ((e.target as Element).closest(".card") !== null) return;
     onSelect?.();
   };
+  /** The same click, right-handed — and the same guard, so a card's own menu is never overwritten. */
+  const raise = (e: ReactMouseEvent): void => {
+    if ((e.target as Element).closest(".card") !== null) return;
+    e.preventDefault();
+    onMenu?.(pointOf(e));
+  };
   return (
     <section
       className={`column${selected ? " sel" : ""}${accepts ? " drop-target" : ""}${accepts && over ? " drop-over" : ""}`}
       {...(onSelect !== undefined ? { onClick: pick } : {})}
+      {...(onMenu !== undefined ? { onContextMenu: raise } : {})}
       {...(onOpen !== undefined ? { onDoubleClick: onOpen } : {})}
       {...(tip !== undefined ? { title: tip } : {})}
       {...(accepts
@@ -563,6 +579,7 @@ export function Board({
   onDrill,
   onOpenTask,
   onTaskMenu,
+  onColumnMenu,
   dragOffers = NO_DRAG_OFFERS,
   onTaskDrop,
 }: {
@@ -598,7 +615,15 @@ export function Board({
    */
   onOpenTask?: ((card: BoardCard) => void) | undefined;
   /** Right-clicking a card. The caller owns the menu — the board only says which card, and where. */
-  onTaskMenu?: ((card: BoardCard, x: number, y: number) => void) | undefined;
+  onTaskMenu?: ((card: BoardCard, at: MenuPoint) => void) | undefined;
+  /**
+   * Right-clicking a COLUMN — the state it stands for, and every task standing in it.
+   *
+   * Separate from {@link onTaskMenu} because they are menus of different things: a card's verbs act
+   * on one run, a column's act on the place and on the group. Absent in the Files view, where a
+   * column's tasks belong to boards this panel is not describing.
+   */
+  onColumnMenu?: ((stateId: string, at: MenuPoint) => void) | undefined;
   /**
    * The moves waiting transitions are offering, by task (`on_user_event`, WORKFLOWS.md §7.4).
    *
@@ -664,6 +689,7 @@ export function Board({
             }
             onOpen={() => onDrill(column.stateId)}
             {...(onSelectColumn !== undefined ? { onSelect: () => onSelectColumn(column.stateId) } : {})}
+            {...(onColumnMenu !== undefined ? { onMenu: (at: MenuPoint) => onColumnMenu(column.stateId, at) } : {})}
             selected={column.stateId === selectedColumn}
             {...(dropFor(column.key) !== undefined ? { drop: dropFor(column.key)! } : {})}
           >
@@ -709,14 +735,19 @@ export function Board({
   );
 }
 
-/** A right-click, translated to "this card, at this point" — the shape the menu's owner wants. */
+/**
+ * A right-click, translated to "this card, at this point" — the shape the menu's owner wants.
+ *
+ * The point carries the CARD element as well as the coordinates ({@link pointOf}), because the menu
+ * has one decision it cannot make without it: which scrolls close it. See `menu.tsx`.
+ */
 function menuHandler(
   card: BoardCard,
-  onTaskMenu: (card: BoardCard, x: number, y: number) => void,
+  onTaskMenu: (card: BoardCard, at: MenuPoint) => void,
 ): (e: ReactMouseEvent) => void {
   return (e) => {
     e.preventDefault();
-    onTaskMenu(card, e.clientX, e.clientY);
+    onTaskMenu(card, pointOf(e));
   };
 }
 
@@ -736,7 +767,7 @@ function Tray({
   selectedSet?: ReadonlySet<string> | undefined;
   onSelectTask: (taskId: string, e: ReactMouseEvent) => void;
   onOpenTask?: ((card: BoardCard) => void) | undefined;
-  onTaskMenu?: ((card: BoardCard, x: number, y: number) => void) | undefined;
+  onTaskMenu?: ((card: BoardCard, at: MenuPoint) => void) | undefined;
 }): JSX.Element {
   return (
     <div className="tray">

@@ -288,7 +288,10 @@ export function PointerMenus(): JSX.Element | null {
       // later, for the document we have just decided had nothing to show.
       event.preventDefault();
       const items = itemsForEvent(event);
-      setAnchor(items.length === 0 ? null : { x: event.clientX, y: event.clientY, items });
+      // The element right-clicked, so a scroll somewhere else in the window does not take the menu
+      // down with it — see `MenuPoint`.
+      const origin = event.target instanceof Element ? { origin: event.target } : {};
+      setAnchor(items.length === 0 ? null : { x: event.clientX, y: event.clientY, ...origin, items });
     };
     window.addEventListener("contextmenu", onMenu);
     return () => window.removeEventListener("contextmenu", onMenu);

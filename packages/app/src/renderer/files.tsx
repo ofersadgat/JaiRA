@@ -35,7 +35,7 @@ import { Badge } from "./board";
 import { CrumbBar, alternatives, runCrumbs, shortRunName, type Crumb } from "./crumbs";
 import { TaskPanel } from "./detail";
 import { resolveFileSurface, type FileSurfaceContext } from "./fileTypes";
-import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem } from "./menu";
+import { AskDialog, ContextMenu, pointOf, type AskSpec, type MenuAnchor, type MenuItem, type MenuPoint } from "./menu";
 import { RunPanel, type RunSurface } from "./runPanel";
 import { RunModeToggle } from "./runViews";
 import { signatureOf } from "./transcript";
@@ -138,7 +138,7 @@ function TreeNode({
   collapsed: ReadonlySet<string>;
   onToggle: (key: string) => void;
   onSelect: (node: FileNode) => void;
-  onMenu: (node: FileNode, rootDir: string, x: number, y: number) => void;
+  onMenu: (node: FileNode, rootDir: string, at: MenuPoint) => void;
 }): JSX.Element {
   // The FOLD key stays per layer, deliberately: `SHUT.folders` is keyed per layer and not per
   // checkout so it does not grow without bound as projects come and go, and two projects that both
@@ -187,7 +187,10 @@ function TreeNode({
           // Right-click selects too, so the menu always acts on the row that is highlighted — a menu
           // operating on something other than what looks selected is how the wrong file gets deleted.
           if (selectable) onSelect(node);
-          onMenu(node, rootDir, e.clientX, e.clientY);
+          // The ROW travels with the point: selecting a file swaps the surface beside the tree, and
+          // a surface that follows a transcript scrolls itself — which used to close this menu
+          // before it could be read. See `menu.tsx`.
+          onMenu(node, rootDir, pointOf(e));
         }}
         title={node.error ?? lintTitle(node, isDir) ?? node.path}
       >
@@ -651,8 +654,8 @@ export function FileTreePanel({
     ];
   };
 
-  const openMenu = (node: FileNode, rootDir: string, x: number, y: number): void =>
-    setMenu({ x, y, items: itemsFor(node, rootDir) });
+  const openMenu = (node: FileNode, rootDir: string, at: MenuPoint): void =>
+    setMenu({ ...at, items: itemsFor(node, rootDir) });
 
   const toggle = (key: string): void => {
     if (onToggleCollapsed !== undefined) return onToggleCollapsed(key);
@@ -705,8 +708,7 @@ export function FileTreePanel({
               e.preventDefault();
               e.stopPropagation();
               setMenu({
-                x: e.clientX,
-                y: e.clientY,
+                ...pointOf(e),
                 items: [
                   {
                     label: "New state…",

@@ -57,9 +57,29 @@ export interface MenuItem {
  */
 export const MENU_WIDTH = 232;
 
-export interface MenuAnchor {
+/**
+ * Where a menu was asked for: the point, and the thing that was under it.
+ *
+ * The point is what the menu is drawn at. `origin` is what it is ABOUT, and it exists for one
+ * decision — see the scroll rule in {@link ContextMenu}. A menu that knows its row can tell a scroll
+ * that carried that row away from a scroll somewhere else in the window entirely, and the second
+ * kind is not rare: selecting a card also swaps the panel beside it, and a panel that follows a live
+ * transcript scrolls itself the moment it has one. Without this, opening a card's menu closed it.
+ */
+export interface MenuPoint {
   x: number;
   y: number;
+  /** Absent where there is no element to name — a menu forwarded from a frame we cannot reach in. */
+  origin?: Element;
+}
+
+/** A right-click, as the point it happened at. `currentTarget` is the row the handler is on. */
+export function pointOf(e: { clientX: number; clientY: number; currentTarget: EventTarget | null }): MenuPoint {
+  const origin = e.currentTarget;
+  return { x: e.clientX, y: e.clientY, ...(origin instanceof Element ? { origin } : {}) };
+}
+
+export interface MenuAnchor extends MenuPoint {
   items: MenuItem[];
   /** A dim caption above the items, for a menu that answers a question rather than offering verbs. */
   title?: string;
@@ -70,11 +90,13 @@ export interface MenuAnchor {
  *
  * Positioned by clamping rather than by measuring: a menu opened near the right or bottom edge would
  * otherwise render off-screen, and the window's own size is the only measurement needed to prevent
- * it. Closes on Escape, on any outside click, and on scroll — a menu anchored to a row that has
- * scrolled away is pointing at the wrong thing.
+ * it. Closes on Escape, on any outside click, and on the scroll that carried its own row away — a
+ * menu anchored to a row that has scrolled off is pointing at the wrong thing, and a menu closed by
+ * some other column scrolling is a menu nobody gets to read.
  */
 export function ContextMenu({ anchor, onClose }: { anchor: MenuAnchor; onClose: () => void }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
+  const origin = anchor.origin;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -83,18 +105,38 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAnchor; onClose: 
     const onDown = (e: MouseEvent): void => {
       if (!ref.current?.contains(e.target as Node)) onClose();
     };
+    /**
+     * A scroll that moved THIS menu's row, as opposed to any scroll anywhere.
+     *
+     * The listener has to be a capture one — scroll does not bubble — so it hears every scrolling box
+     * in the window, and the ones it hears most are not the reader's. Clicking a card selects it, and
+     * a panel that follows a live transcript writes `scrollTop` the moment a different conversation
+     * lands in it; that is a scroll, it arrives a frame or two after the menu opened, and it used to
+     * close the menu before anybody had read a word of it. The Tasks board's right-click has been
+     * unusable for exactly that reason.
+     *
+     * So: only a scroller that CONTAINS the row the menu is about has carried it away. Everything
+     * else is another column moving, which the menu has no opinion about. A menu that never said what
+     * it was about keeps the old rule — a menu whose row we cannot name is a menu we cannot check.
+     */
+    const onScroll = (e: Event): void => {
+      const scroller = e.target;
+      // The document itself, which moves everything on it, this menu's row included.
+      if (!(scroller instanceof Element)) return onClose();
+      if (origin === undefined || scroller.contains(origin)) onClose();
+    };
     window.addEventListener("keydown", onKey);
     // Capture, so a click on something that stops propagation still dismisses the menu.
     window.addEventListener("mousedown", onDown, true);
-    window.addEventListener("scroll", onClose, true);
+    window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onClose);
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousedown", onDown, true);
-      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onClose);
     };
-  }, [onClose]);
+  }, [onClose, origin]);
 
   const width = MENU_WIDTH;
   // A noted item is two lines. Only the tallest case has to be right — this is a clamp against the
