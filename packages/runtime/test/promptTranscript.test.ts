@@ -78,7 +78,7 @@ describe("a prompt state's conversation is stored, not projected away", () => {
   });
 
   it("keeps the messages the call produced, and still answers with the op's output value", async () => {
-    const records = new SqliteSessionStore(db, { taskId: "t-1", runId: 1 });
+    const records = new SqliteSessionStore(db, { taskId: "t-1" });
     let minted = 0;
     const prompt = buildPromptExecutor({
       routes: agentPromptRoutes({}, { spawn: claudeSpawn() }),
@@ -114,7 +114,7 @@ describe("a prompt state's conversation is stored, not projected away", () => {
     // stored, `external_id` was null on every row, nothing could be resumed by handle, and the
     // divergence check — which compares the handle we resumed against the one the call ended in —
     // had nothing to compare.
-    const records = new SqliteSessionStore(db, { taskId: "t-2", runId: 1 });
+    const records = new SqliteSessionStore(db, { taskId: "t-2" });
     let minted = 0;
     const prompt = buildPromptExecutor({
       routes: agentPromptRoutes({}, { spawn: claudeSpawn() }),

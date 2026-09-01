@@ -94,7 +94,7 @@ describe("db:// record reads", () => {
     // Write a record the way a run would: through the store, at a claimed position.
     const project = openProject(dir, { baseDir: testHome() });
     try {
-      const store = new SqliteSessionStore(project.db, { taskId: "t1", runId: 1 });
+      const store = new SqliteSessionStore(project.db, { taskId: "t1" });
       const at = store.resolve({ ref: "review" }).at;
       const ref = store.append({ id: "r1", source: undefined as never, session: at, startMs: 1 });
       store.finish(ref, { result: { value: { changeset: { source: "git:abcd1234", changes: [] } } } as never });
@@ -105,13 +105,12 @@ describe("db:// record reads", () => {
     const content = await service.readUri({
       uri: "db://operation_records/review@0.result.value.changeset",
       taskId: "t1",
-      runId: 1,
     });
     expect(content.mime).toBe("application/json");
     expect(JSON.parse(content.text)).toEqual({ source: "git:abcd1234", changes: [] });
 
     await expect(
-      service.readUri({ uri: "db://operation_records/review@7.result", taskId: "t1", runId: 1 }),
+      service.readUri({ uri: "db://operation_records/review@7.result", taskId: "t1" }),
     ).rejects.toThrow(/no record has claimed/);
     await expect(service.readUri({ uri: "db://artifacts/x@0.y" })).rejects.toThrow(/operation_records/);
   });

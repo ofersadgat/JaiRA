@@ -33,23 +33,22 @@ describe("RuntimeStore", () => {
     expect(() => store.setStatus("t-none", "running", 1)).toThrow(/no task_runtime row/);
   });
 
-  it("tracks runs per task", () => {
+  it("tracks the machine's one execution on the task row", () => {
     const store = new RuntimeStore(db);
     store.insert("t-1", 1000);
-    const run1 = store.beginRun("t-1", "hash1", 1100);
-    store.endRun(run1, "success", 1200, { outputsJson: '{"x":1}' });
-    const run2 = store.beginRun("t-1", "hash1", 1300);
-    const runs = store.listRuns("t-1");
-    expect(runs).toHaveLength(2);
-    expect(runs[0]).toMatchObject({ id: run1, outcome: "success", outputsJson: '{"x":1}', endedAt: 1200 });
-    expect(runs[1]).toMatchObject({ id: run2, outcome: undefined, endedAt: undefined });
+    store.beginTask("t-1", "hash1", 1100);
+    store.endTask("t-1", "success", 1200, { outputsJson: '{"x":1}' });
+    expect(store.get("t-1")).toMatchObject({ outcome: "success", outputsJson: '{"x":1}', startedAt: 1100, endedAt: 1200 });
+    // A resume re-stamps the same row: how the LAST stretch ended is cleared while it runs.
+    store.beginTask("t-1", "hash1", 1300);
+    expect(store.get("t-1")).toMatchObject({ startedAt: 1300, outcome: undefined, endedAt: undefined, outputsJson: undefined });
   });
 
   it("recovery marks running tasks interrupted and closes their dangling runs", () => {
     const store = new RuntimeStore(db);
     store.insert("t-running", 1000);
     store.setStatus("t-running", "running", 1001);
-    store.beginRun("t-running", "h", 1001);
+    store.beginTask("t-running", "h", 1001);
     store.insert("t-queued", 1000);
     store.insert("t-done", 1000);
     store.setStatus("t-done", "completed", 1002);
@@ -57,7 +56,7 @@ describe("RuntimeStore", () => {
     const recovered = store.recoverInterrupted(2000);
     expect(recovered).toEqual(["t-running"]);
     expect(store.get("t-running")?.status).toBe("interrupted");
-    expect(store.listRuns("t-running")[0]).toMatchObject({ outcome: "interrupted", endedAt: 2000 });
+    expect(store.get("t-running")).toMatchObject({ outcome: "interrupted", endedAt: 2000 });
     expect(store.get("t-queued")?.status).toBe("queued");
     expect(store.get("t-done")?.status).toBe("completed");
   });
@@ -69,16 +68,16 @@ describe("RuntimeStore", () => {
     const store = new RuntimeStore(db);
     store.insert("t-crash", 1000);
     store.setStatus("t-crash", "running", 1001);
-    store.beginRun("t-crash", "h", 1001);
+    store.beginTask("t-crash", "h", 1001);
     store.insert("t-live", 1000);
     store.setStatus("t-live", "running", 1001);
     db.prepare(
-      `INSERT INTO operation_records (id, task_id, run_id, status, result_json, started_at)
-       VALUES ('s:0#crash', 't-crash', 1, 'open', '{"value":{"messages":[{"role":"assistant","content":"partial"}]}}', 1001)`,
+      `INSERT INTO operation_records (id, task_id, status, result_json, started_at)
+       VALUES ('s:0#crash', 't-crash', 'open', '{"value":{"messages":[{"role":"assistant","content":"partial"}]}}', 1001)`,
     ).run();
     db.prepare(
-      `INSERT INTO operation_records (id, task_id, run_id, status, started_at)
-       VALUES ('s:0#live', 't-live', 2, 'open', 1001)`,
+      `INSERT INTO operation_records (id, task_id, status, started_at)
+       VALUES ('s:0#live', 't-live', 'open', 1001)`,
     ).run();
 
     store.recoverInterrupted(2000, (taskId) => taskId === "t-live");
@@ -98,20 +97,17 @@ describe("SqliteEventLog", () => {
   it("records EngineEvents through the Persistence port and lists them back", () => {
     const runtime = new RuntimeStore(db);
     runtime.insert("t-1", 1000);
-    const run1 = runtime.beginRun("t-1", "h", 1000);
-    const run2 = runtime.beginRun("t-1", "h", 2000);
     const log = new SqliteEventLog(db);
 
     const entered: EngineEvent = { type: "instance.entered", instanceId: "1", stateId: "wf", inputs: { x: 1 } };
     const terminated: EngineEvent = { type: "instance.terminated", instanceId: "1", stateId: "wf", outcome: "success" };
-    log.recorder("t-1", run1).record(entered, 1500);
-    log.recorder("t-1", run2).record(terminated, 2500);
+    log.recorder("t-1").record(entered, 1500);
+    log.recorder("t-1").record(terminated, 2500);
 
     const all = log.list("t-1");
     expect(all).toHaveLength(2);
-    expect(all[0]).toMatchObject({ runId: run1, type: "instance.entered", instanceId: "1", createdAt: 1500 });
+    expect(all[0]).toMatchObject({ type: "instance.entered", instanceId: "1", createdAt: 1500 });
     expect(all[0]?.event).toEqual(entered);
-    expect(log.list("t-1", { runId: run2 })).toHaveLength(1);
     expect(log.list("t-1", { afterSeq: all[0]!.seq })).toHaveLength(1);
     expect(log.list("t-other")).toHaveLength(0);
   });

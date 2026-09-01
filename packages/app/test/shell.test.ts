@@ -99,7 +99,6 @@ describe("the conversation inside a task", () => {
 
     const convo = service.conversation(taskId);
 
-    expect(convo.runId).toBeDefined();
     expect(convo.turns.length).toBeGreaterThan(0);
     // The states that ran are named, and the output turns say whether they validated — which is the
     // whole reason to read the journal this way rather than as raw events.

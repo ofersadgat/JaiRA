@@ -44,14 +44,13 @@ function crashedRun(over: { handle?: string | null } = {}): void {
   try {
     project.runtime.insert("t-crash", 1000);
     project.runtime.setStatus("t-crash", "running", 1000);
-    const runId = project.runtime.beginRun("t-crash", "h", 1000);
+    project.runtime.beginTask("t-crash", "h", 1000);
     project.db
       .prepare(
-        `INSERT INTO operation_records (id, task_id, run_id, status, provider_session_id, result_json, started_at)
-         VALUES ('s:0', 't-crash', ?, 'open', ?, ?, 1000)`,
+        `INSERT INTO operation_records (id, task_id, status, provider_session_id, result_json, started_at)
+         VALUES ('s:0', 't-crash', 'open', ?, ?, 1000)`,
       )
       .run(
-        runId,
         over.handle === undefined ? "prov-7" : over.handle,
         JSON.stringify({ value: { messages: [{ role: "assistant", content: "as far as it got" }] } }),
       );

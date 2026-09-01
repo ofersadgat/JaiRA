@@ -24,7 +24,6 @@ import { LiveTurnLog } from "./liveTurns";
 /** A run this session started and has not yet settled. */
 export interface LiveRun {
   taskId: string;
-  runId: number;
   abort: AbortController;
   /** Resolves when the run has finished recording and settled its task row. */
   done: Promise<void>;
@@ -180,8 +179,8 @@ export class ProjectSession {
   readonly interactive = new Set<string>();
   /** Per-command approvals (DESIGN §10.2) — provider-initiated, so not authored states. */
   readonly approvals: ApprovalHub;
-  /** requestId → the run it belongs to, so a decision can be audited against it. */
-  readonly approvalRun = new Map<string, { taskId: string; runId: number }>();
+  /** requestId → the task it belongs to, so a decision can be audited against it. */
+  readonly approvalRun = new Map<string, { taskId: string }>();
   /** Requests seen, kept until resolved so the audit entry can name the command. */
   readonly approvalsSeen = new Map<string, ApprovalRequest>();
   /** Mid-run questions (`AskUserQuestion`) — the call IS the question, so not an approval. */

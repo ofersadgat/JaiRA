@@ -15,9 +15,10 @@
  * A continuing run re-states `instance.entered` for the live spine — with the SAME ids — and
  * journals nothing that already happened. So folding every run's events into one table keyed by id
  * yields one tree: a re-stated entry merges into the instance it continues, and history entered
- * once stays entered once. The machine's root is the first parentless entry of the LAST run — a
- * continuation re-states its root first, and an old-style re-run's fresh attempt starts there too —
- * which also keeps a sub-workflow journaling into the same task from being mistaken for the task.
+ * once stays entered once. The machine's root is the task's NEWEST parentless entry — a task is one
+ * machine now, so there is normally exactly one, and where history holds several trees (an
+ * in-place restart) the newest attempt is the task's own. `task_runtime.root_instance_id`
+ * (stamped by migration 16 while run boundaries still existed) wins where present.
  *
  * ## Revival: what counts as still-to-do
  *
@@ -169,8 +170,13 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
 
   // --- fold the journal into one instance table, keyed by durable id -------
   const nodes = new Map<string, FoldNode>();
-  /** runId → the id of that run's first parentless entry: the run's own root. */
-  const rootOfRun = new Map<number, string>();
+  /**
+   * The LAST first-time parentless entry — the machine. One task normally has exactly one (a
+   * continuation re-states the same root, which merges above rather than landing here), and where
+   * history holds several — an in-place restart, before re-runs minted tasks — the newest attempt
+   * is the task's machine and the older trees are history it does not stand on.
+   */
+  let lastRootId: string | undefined;
   const deferredOps = new Set<string>();
   let legacy = false;
   for (const row of rows) {
@@ -187,9 +193,6 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
           // structure is already known, and the entry means it is LIVE again. Deliberately not an
           // advancement of the parent — a re-statement answers nothing.
           delete existing.terminated;
-          if (rootOfRun.get(row.runId) === undefined && event.parentInstanceId === undefined) {
-            rootOfRun.set(row.runId, event.instanceId);
-          }
           break;
         }
         const node: FoldNode = {
@@ -212,8 +215,8 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
           parent.children.push(node);
           // Entering a NEW child is the parent acting: whatever finished before this was answered.
           parent.advancedAt = at;
-        } else if (rootOfRun.get(row.runId) === undefined) {
-          rootOfRun.set(row.runId, node.id);
+        } else {
+          lastRootId = node.id;
         }
         break;
       }
@@ -286,11 +289,11 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
   if (legacy) {
     return none("this task's history predates durable instance ids — run it again instead");
   }
-  // The machine is the LAST run's root. Earlier runs either fed it (a continuation re-states the
-  // same id, already merged above) or were separate attempts it superseded.
-  const runIds = [...rootOfRun.keys()].sort((a, b) => b - a);
-  const rootId = runIds.length > 0 ? rootOfRun.get(runIds[0]!) : undefined;
-  const root = rootId === undefined ? undefined : nodes.get(rootId);
+  // The machine's root: the newest parentless tree (see `lastRootId`). The migration's
+  // `root_instance_id` stamp — written for pre-collapse history while run boundaries still existed
+  // to read — wins where present, because it is the same answer computed with more information.
+  const stamped = project.runtime.get(taskId)?.rootInstanceId;
+  const root = (stamped !== undefined ? nodes.get(stamped) : undefined) ?? (lastRootId !== undefined ? nodes.get(lastRootId) : undefined);
   if (root === undefined) return none();
 
   // --- join the record store: call sites, call answers, operation values ---

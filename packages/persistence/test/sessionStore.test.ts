@@ -260,7 +260,7 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
   it("reads a transcript back after the process that wrote it is gone", async () => {
     const file = join(dir, "reopen.db");
     const first = openDb(file);
-    const writer = new SqliteSessionStore(first, { taskId: "t1", runId: 3 }) as unknown as Store;
+    const writer = new SqliteSessionStore(first, { taskId: "t1" }) as unknown as Store;
     await append(writer, "kept", "k1", "still here");
     first.close();
 
@@ -269,17 +269,17 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
       // Read under the SAME task. A name is a task-scoped alias to an assigned session id
       // (migration 15) — run-free, which is the whole point: a resumed run's `kept` IS the
       // conversation an earlier run created, the continuation the old run-scoping made impossible.
-      const reader = new SqliteSessionStore(second, { taskId: "t1", runId: 3 }) as unknown as Store;
+      const reader = new SqliteSessionStore(second, { taskId: "t1" }) as unknown as Store;
       // The claim the whole phase rests on: every transcript JaiRA ever produced used to be computed
       // and dropped, and `conversation.ts` said "there is no separate transcript to show" because of it.
       expect(await reader.messages("kept")).toEqual([turn("still here")]);
 
       // A LATER RUN of the same task continues it — the artifact's §01 defect, closed.
-      const laterRun = new SqliteSessionStore(second, { taskId: "t1", runId: 4 }) as unknown as Store;
+      const laterRun = new SqliteSessionStore(second, { taskId: "t1" }) as unknown as Store;
       expect(await laterRun.messages("kept")).toEqual([turn("still here")]);
 
       // …and another TASK, asking with the same name, sees nothing of it.
-      const otherTask = new SqliteSessionStore(second, { taskId: "t2", runId: 1 }) as unknown as Store;
+      const otherTask = new SqliteSessionStore(second, { taskId: "t2" }) as unknown as Store;
       expect(await otherTask.messages("kept")).toEqual([]);
     } finally {
       second.close();
@@ -308,7 +308,7 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
   });
 
   it("says where a branch came from, which is the other direction from `forks`", async () => {
-    const durable = new SqliteSessionStore(db, { taskId: "t7", runId: 1 });
+    const durable = new SqliteSessionStore(db, { taskId: "t7" });
     const store = durable as unknown as Store;
     await append(store, "base", "b1", "shared");
     await append(store, "base", "b2", "on the trunk");
@@ -337,8 +337,8 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
   it("lists a run's calls once each — a legacy id's attempts fold to their base, latest kept", () => {
     const at = (id: string, started: number, status: string, result: unknown): void => {
       db.prepare(
-        `INSERT INTO operation_records (id, task_id, run_id, status, request_json, result_json, started_at)
-         VALUES (?, 'tr', 9, ?, ?, ?, ?)`,
+        `INSERT INTO operation_records (id, task_id, status, request_json, result_json, started_at)
+         VALUES (?, 'tr', ?, ?, ?, ?)`,
       ).run(id, status, JSON.stringify({ functionRef: id }), JSON.stringify(result), started);
     };
     // Migration 13's legacy shape: a retried content-hash id kept its history under `~~` suffixes,
@@ -348,43 +348,42 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
     at("a", 30, "completed", { value: "second try" });
     at("b", 20, "completed", { value: 1 });
 
-    const store = new SqliteSessionStore(db, { taskId: "tr", runId: 9 });
+    const store = new SqliteSessionStore(db, { taskId: "tr" });
     const calls = store.records();
     expect(calls.map((c) => c.recordId)).toEqual(["b", "a"]);
     expect(calls.find((c) => c.recordId === "a")).toMatchObject({ status: "completed", result: { value: "second try" } });
   });
 
-  it("keeps a run's calls out of another run's list", () => {
+  it("keeps a task's calls out of another task's list", () => {
     db.prepare(
-      `INSERT INTO operation_records (id, task_id, run_id, status, started_at)
-       VALUES ('x', 'tr2', 1, 'completed', 1)`,
+      `INSERT INTO operation_records (id, task_id, status, started_at)
+       VALUES ('x', 'tr2', 'completed', 1)`,
     ).run();
-    expect(new SqliteSessionStore(db, { taskId: "tr2", runId: 1 }).records().map((c) => c.recordId)).toEqual(["x"]);
-    expect(new SqliteSessionStore(db, { taskId: "tr2", runId: 2 }).records()).toEqual([]);
+    expect(new SqliteSessionStore(db, { taskId: "tr2" }).records().map((c) => c.recordId)).toEqual(["x"]);
+    expect(new SqliteSessionStore(db, { taskId: "tr-other" }).records()).toEqual([]);
   });
 
   it("hands back status separately from the error, because a killed call has neither", () => {
     // A run killed mid-flight leaves `failed` with no payload. A reader that inferred failure from a
     // missing result would report a call still in flight as one that went wrong.
     db.prepare(
-      `INSERT INTO operation_records (id, task_id, run_id, status, started_at)
-       VALUES ('k', 'tr3', 1, 'failed', 5)`,
+      `INSERT INTO operation_records (id, task_id, status, started_at)
+       VALUES ('k', 'tr3', 'failed', 5)`,
     ).run();
-    const [call] = new SqliteSessionStore(db, { taskId: "tr3", runId: 1 }).records();
+    const [call] = new SqliteSessionStore(db, { taskId: "tr3" }).records();
     expect(call).toMatchObject({ status: "failed" });
     expect(call?.error).toBeUndefined();
     expect(call?.result).toBeUndefined();
   });
 
-  it("scopes records to the run that wrote them, so a transcript is findable from a task", async () => {
-    const store = new SqliteSessionStore(db, { taskId: "t9", runId: 2 }) as unknown as Store;
+  it("scopes records to the task that wrote them, so a transcript is findable from it", async () => {
+    const store = new SqliteSessionStore(db, { taskId: "t9" }) as unknown as Store;
     await store.append({ id: "s1", source: undefined as never, session: { id: "scoped", seq: 0 }, startMs: 0 });
 
-    const row = db.prepare(`SELECT task_id, run_id FROM operation_records WHERE id = 's1'`).get() as {
+    const row = db.prepare(`SELECT task_id FROM operation_records WHERE id = 's1'`).get() as {
       task_id: string;
-      run_id: number;
     };
-    expect(row).toEqual({ task_id: "t9", run_id: 2 });
+    expect(row).toEqual({ task_id: "t9" });
   });
   /**
    * A record's id names ONE ask now — the hash of the scoped request — so re-dispatching it is not
@@ -395,7 +394,7 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
    * existed to patch cannot be constructed at all.
    */
   it("reopens a re-dispatched id in place, and refuses one that already completed", () => {
-    const store = new SqliteSessionStore(db, { taskId: "t-dup", runId: 1 });
+    const store = new SqliteSessionStore(db, { taskId: "t-dup" });
     const stub = { id: "same-scoped-ask", source: undefined as never, startMs: 1 };
     const first = store.append(stub);
     expect(first).toEqual({ id: "same-scoped-ask" });
@@ -423,7 +422,7 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
  */
 describe("what a derived conversation records about itself", () => {
   it("writes the request that produced the seed, not just its contents", async () => {
-    const store = new SqliteSessionStore(db, { taskId: "t-prov", runId: 1 }) as unknown as Store;
+    const store = new SqliteSessionStore(db, { taskId: "t-prov" }) as unknown as Store;
     await append(store, "origin", "o1", "one");
     const compacted = await store.compact!("origin", [turn("the summary")] as never);
 
@@ -455,7 +454,7 @@ describe("what a derived conversation records about itself", () => {
  */
 describe("assume the append, correct from what comes back", () => {
   it("moves a record to a branch when the call reports a remote it was not given", () => {
-    const s = new SqliteSessionStore(db, { taskId: "t-div", runId: 1 });
+    const s = new SqliteSessionStore(db, { taskId: "t-div" });
     const first = s.resolve({ ref: "chat" });
     s.finish(s.append({ id: "c1", source: undefined as never, session: first.at, startMs: 1 }), {
       sessionOutcome: { messages: [turn("one")] as never, providerSessionId: "P1" },
@@ -477,7 +476,7 @@ describe("assume the append, correct from what comes back", () => {
   });
 
   it("leaves the lineage alone when the call reports the remote it was given", () => {
-    const s = new SqliteSessionStore(db, { taskId: "t-same", runId: 1 });
+    const s = new SqliteSessionStore(db, { taskId: "t-same" });
     const first = s.resolve({ ref: "steady" });
     s.finish(s.append({ id: "s1", source: undefined as never, session: first.at, startMs: 1 }), {
       sessionOutcome: { messages: [turn("one")] as never, providerSessionId: "P1" },
@@ -501,12 +500,11 @@ describe("the migration runner", () => {
     // The generated column exists and reads NULL for an event that carried no position — which is what
     // every journal written before this migration looks like.
     db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t', 'queued', 1, 1)`).run();
-    db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at) VALUES ('t', 'h', 1)`).run();
     db.prepare(
-      `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at) VALUES ('t', 1, 'operation.completed', ?, 1)`,
+      `INSERT INTO state_machine_events (task_id, type, payload_json, created_at) VALUES ('t', 'operation.completed', ?, 1)`,
     ).run(JSON.stringify({ type: "operation.completed", instanceId: 1, stateId: "s", op: "prompt" }));
     db.prepare(
-      `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at) VALUES ('t', 1, 'operation.completed', ?, 2)`,
+      `INSERT INTO state_machine_events (task_id, type, payload_json, created_at) VALUES ('t', 'operation.completed', ?, 2)`,
     ).run(JSON.stringify({ type: "operation.completed", instanceId: 2, stateId: "s2", op: "prompt", metrics: { sessionRef: "review@3" } }));
 
     const refs = db.prepare(`SELECT session_ref FROM state_machine_events ORDER BY seq`).all() as Array<{
@@ -557,7 +555,7 @@ describe("the migration runner", () => {
 
     const migrated = openDb(file);
     try {
-      const reader = new SqliteSessionStore(migrated, { taskId: "t1", runId: 3 }) as unknown as Store;
+      const reader = new SqliteSessionStore(migrated, { taskId: "t1" }) as unknown as Store;
       expect(await reader.messages("old")).toEqual([turn("kept")]);
       // The provider handle rode `external_id`; the migration carries it into its own column, which
       // is what `handleAt` resumes from.
@@ -623,7 +621,7 @@ it("moves a position onto the record's own key, and renumbers attempts so that k
         { id: "conv:0~~1", session_id: "t1/1/conv", session_seq: 0 },
       ]);
       // And it still finds its record — the assertion the rowid used to carry, carried by the id.
-      const reader = new SqliteSessionStore(after, { taskId: "t1", runId: 1 }) as unknown as Store;
+      const reader = new SqliteSessionStore(after, { taskId: "t1" }) as unknown as Store;
       expect(await reader.messages("conv")).toEqual([turn("first")]);
     } finally {
       after.close();
@@ -638,8 +636,8 @@ it("moves a position onto the record's own key, and renumbers attempts so that k
     const insert = (): void =>
       void db
         .prepare(
-          `INSERT INTO operation_records (id, task_id, run_id, status, started_at)
-           VALUES ('dup:0', 't9', 1, 'open', 1)`,
+          `INSERT INTO operation_records (id, task_id, status, started_at)
+           VALUES ('dup:0', 't9', 'open', 1)`,
         )
         .run();
     insert();
@@ -678,9 +676,8 @@ describe("stateSessions", () => {
     // Written through the real journal so the GENERATED column is what the query reads — the point of
     // migration 1 is that the link is derived from the payload and so cannot drift from it.
     db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t1','queued',1,1)`).run();
-    db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at) VALUES ('t1','h',1)`).run();
     const add = db.prepare(
-      `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at) VALUES ('t1', 1, ?, ?, ?)`,
+      `INSERT INTO state_machine_events (task_id, type, payload_json, created_at) VALUES ('t1', ?, ?, ?)`,
     );
     add.run(
       "operation.completed",
@@ -699,8 +696,8 @@ describe("stateSessions", () => {
       // seq is one BACK from the reported end: the record was written at the position the call started
       // from, and the layer reports the end because that is what a caller cannot otherwise learn — a
       // call that had to fork ended somewhere it did not begin.
-      { runId: 1, instanceId: 2, stateId: "wf/first", sessionId: "chat", seq: 0, at: 10, outcome: "success" },
-      { runId: 1, instanceId: 4, stateId: "wf/second", sessionId: "chat", seq: 1, at: 12, outcome: "success" },
+      { instanceId: 2, stateId: "wf/first", sessionId: "chat", seq: 0, at: 10, outcome: "success" },
+      { instanceId: 4, stateId: "wf/second", sessionId: "chat", seq: 1, at: 12, outcome: "success" },
     ]);
   });
 
@@ -709,17 +706,15 @@ describe("stateSessions", () => {
     // that lists them. It is listable at all because `operation.failed` now carries the metrics a
     // post-dispatch failure has, and `session_ref` is derived from them.
     db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t2','failed',1,1)`).run();
-    db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at) VALUES ('t2','h',1)`).run();
     const add = db.prepare(
-      `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at) VALUES ('t2', ?, ?, ?, ?)`,
+      `INSERT INTO state_machine_events (task_id, type, payload_json, created_at) VALUES ('t2', ?, ?, ?)`,
     );
-    const runId = (db.prepare(`SELECT id FROM runs WHERE task_id = 't2'`).get() as { id: number }).id;
-    add.run(runId, "operation.failed", JSON.stringify({ instanceId: 2, stateId: "wf/x", metrics: { sessionRef: "chat@1" } }), 10);
+    add.run("operation.failed", JSON.stringify({ instanceId: 2, stateId: "wf/x", metrics: { sessionRef: "chat@1" } }), 10);
     // A failure that never dispatched carries no metrics, so no position — nothing ran to show.
-    add.run(runId, "operation.failed", JSON.stringify({ instanceId: 3, stateId: "wf/y", failure: { reason: "no inputs" } }), 11);
+    add.run("operation.failed", JSON.stringify({ instanceId: 3, stateId: "wf/y", failure: { reason: "no inputs" } }), 11);
 
     expect(stateSessions({ db } as never, "t2")).toEqual([
-      { runId, instanceId: 2, stateId: "wf/x", sessionId: "chat", seq: 0, at: 10, outcome: "error" },
+      { instanceId: 2, stateId: "wf/x", sessionId: "chat", seq: 0, at: 10, outcome: "error" },
     ]);
   });
 });
@@ -734,34 +729,35 @@ describe("stateSessions", () => {
  * one.
  */
 describe("stateSessions — a run the process died inside", () => {
-  const crashedRun = (): number => {
-    db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t3','interrupted',1,1)`).run();
-    db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at, ended_at, outcome) VALUES ('t3','h',1,9,'interrupted')`).run();
-    return (db.prepare(`SELECT id FROM runs WHERE task_id = 't3'`).get() as { id: number }).id;
-  };
-  const started = (runId: number, instanceId: number, stateId: string, at: number): void => {
+  const crashedTask = (outcome = "interrupted", status = "interrupted"): void => {
     db.prepare(
-      `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at) VALUES ('t3', ?, 'operation.started', ?, ?)`,
-    ).run(runId, JSON.stringify({ instanceId, stateId, op: "prompt" }), at);
+      `INSERT INTO task_runtime (task_id, status, outcome, started_at, ended_at, created_at, updated_at)
+       VALUES ('t3', ?, ?, 1, 9, 1, 1)`,
+    ).run(status, outcome);
   };
-  const record = (runId: number, recordId: string, status = "interrupted"): void => {
-    // The position rides INSIDE the request now (migration 14), scoped as `SqliteSessionStore`
-    // writes it. Written out here rather than through the store because these rows stand in for a
-    // process that died mid-run.
+  const started = (instanceId: number, stateId: string, at: number): void => {
+    db.prepare(
+      `INSERT INTO state_machine_events (task_id, type, payload_json, created_at) VALUES ('t3', 'operation.started', ?, ?)`,
+    ).run(JSON.stringify({ instanceId, stateId, op: "prompt" }), at);
+  };
+  const record = (recordId: string, status = "interrupted"): void => {
+    // The position rides INSIDE the request now (migration 14), scoped the way a pre-15 store
+    // wrote it (`task/run/name`) so the legacy read is exercised too. Written out here rather than
+    // through the store because these rows stand in for a process that died mid-run.
     const cut = recordId.lastIndexOf(":");
-    const session = { id: `t3/${runId}/${recordId.slice(0, cut)}`, seq: Number(recordId.slice(cut + 1)) };
+    const session = { id: `t3/1/${recordId.slice(0, cut)}`, seq: Number(recordId.slice(cut + 1)) };
     db.prepare(
-      `INSERT INTO operation_records (id, task_id, run_id, status, request_json, started_at)
-       VALUES (?, 't3', ?, ?, ?, 5)`,
-    ).run(recordId, runId, status, JSON.stringify({ session }));
+      `INSERT INTO operation_records (id, task_id, status, request_json, started_at)
+       VALUES (?, 't3', ?, ?, 5)`,
+    ).run(recordId, status, JSON.stringify({ session }));
   };
 
   it("recovers the in-flight call from its own record, and says it was interrupted", () => {
-    const runId = crashedRun();
-    started(runId, 7, "wf/thinking", 20);
-    record(runId, "chat:3");
+    crashedTask();
+    started(7, "wf/thinking", 20);
+    record("chat:3");
     expect(stateSessions({ db } as never, "t3")).toEqual([
-      { runId, instanceId: 7, stateId: "wf/thinking", sessionId: "chat", seq: 3, at: 20, outcome: "interrupted" },
+      { instanceId: 7, stateId: "wf/thinking", sessionId: "chat", seq: 3, at: 20, outcome: "interrupted" },
     ]);
   });
 
@@ -778,14 +774,12 @@ describe("stateSessions — a run the process died inside", () => {
    * streaming into it, which is the whole reason that status exists.
    */
   it("calls a live run's in-flight conversation running rather than interrupted", () => {
-    db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t3','running',1,1)`).run();
-    db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at) VALUES ('t3','h',1)`).run();
-    const runId = (db.prepare(`SELECT id FROM runs WHERE task_id = 't3'`).get() as { id: number }).id;
-    started(runId, 4, "wf/critique", 20);
-    record(runId, "#i4:0", "open");
+    db.prepare(`INSERT INTO task_runtime (task_id, status, started_at, created_at, updated_at) VALUES ('t3','running',1,1,1)`).run();
+    started(4, "wf/critique", 20);
+    record("#i4:0", "open");
 
     expect(stateSessions({ db } as never, "t3")).toEqual([
-      { runId, instanceId: 4, stateId: "wf/critique", sessionId: "#i4", seq: 0, at: 20, outcome: "running" },
+      { instanceId: 4, stateId: "wf/critique", sessionId: "#i4", seq: 0, at: 20, outcome: "running" },
     ]);
   });
 
@@ -795,21 +789,21 @@ describe("stateSessions — a run the process died inside", () => {
    * runs the honest reading of a row nobody is writing to is the interruption it is.
    */
   it("still calls an open record interrupted once the run it belongs to has ended", () => {
-    const runId = crashedRun();
-    started(runId, 4, "wf/critique", 20);
-    record(runId, "#i4:0", "open");
+    crashedTask();
+    started(4, "wf/critique", 20);
+    record("#i4:0", "open");
 
     expect(stateSessions({ db } as never, "t3")).toEqual([
-      { runId, instanceId: 4, stateId: "wf/critique", sessionId: "#i4", seq: 0, at: 20, outcome: "interrupted" },
+      { instanceId: 4, stateId: "wf/critique", sessionId: "#i4", seq: 0, at: 20, outcome: "interrupted" },
     ]);
   });
 
   it("pairs several in-flight calls in start order, which both lists share", () => {
-    const runId = crashedRun();
-    started(runId, 7, "wf/a", 20);
-    started(runId, 8, "wf/b", 21);
-    record(runId, "chat:0");
-    record(runId, "other:0");
+    crashedTask();
+    started(7, "wf/a", 20);
+    started(8, "wf/b", 21);
+    record("chat:0");
+    record("other:0");
     expect(stateSessions({ db } as never, "t3").map((s) => [s.instanceId, s.sessionId])).toEqual([
       [7, "chat"],
       [8, "other"],
@@ -817,27 +811,27 @@ describe("stateSessions — a run the process died inside", () => {
   });
 
   it("says nothing rather than guessing when the two lists disagree", () => {
-    const runId = crashedRun();
-    started(runId, 7, "wf/a", 20);
-    started(runId, 8, "wf/b", 21);
-    record(runId, "chat:0"); // one record, two in-flight calls — which is which?
+    crashedTask();
+    started(7, "wf/a", 20);
+    started(8, "wf/b", 21);
+    record("chat:0"); // one record, two in-flight calls — which is which?
     expect(stateSessions({ db } as never, "t3")).toEqual([]);
   });
 
   it("leaves a settled call out of the in-flight set", () => {
-    const runId = crashedRun();
-    started(runId, 7, "wf/done", 20);
+    crashedTask();
+    started(7, "wf/done", 20);
     db.prepare(
-      `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at) VALUES ('t3', ?, 'operation.completed', ?, ?)`,
-    ).run(runId, JSON.stringify({ instanceId: 7, stateId: "wf/done", metrics: { sessionRef: "chat@1" } }), 22);
-    started(runId, 8, "wf/dying", 23);
+      `INSERT INTO state_machine_events (task_id, type, payload_json, created_at) VALUES ('t3', 'operation.completed', ?, ?)`,
+    ).run(JSON.stringify({ instanceId: 7, stateId: "wf/done", metrics: { sessionRef: "chat@1" } }), 22);
+    started(8, "wf/dying", 23);
     // The settled one, at the position its event reports the call ending one past (`chat@1`) — which
     // is how it is excluded: the journal already names it, whatever its status says.
-    record(runId, "chat:0", "completed");
-    record(runId, "chat:2");
+    record("chat:0", "completed");
+    record("chat:2");
     expect(stateSessions({ db } as never, "t3")).toEqual([
-      { runId, instanceId: 7, stateId: "wf/done", sessionId: "chat", seq: 0, at: 22, outcome: "success" },
-      { runId, instanceId: 8, stateId: "wf/dying", sessionId: "chat", seq: 2, at: 23, outcome: "interrupted" },
+      { instanceId: 7, stateId: "wf/done", sessionId: "chat", seq: 0, at: 22, outcome: "success" },
+      { instanceId: 8, stateId: "wf/dying", sessionId: "chat", seq: 2, at: 23, outcome: "interrupted" },
     ]);
   });
 
@@ -849,14 +843,12 @@ describe("stateSessions — a run the process died inside", () => {
    * `interrupted`. Listed, and listed as the success it was.
    */
   it("lists a call that SETTLED and then lost its event, on a run the engine died in", () => {
-    db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t3','failed',1,1)`).run();
-    db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at, ended_at, outcome) VALUES ('t3','h',1,9,'error')`).run();
-    const runId = (db.prepare(`SELECT id FROM runs WHERE task_id = 't3'`).get() as { id: number }).id;
-    started(runId, 1, "chat/agent", 20);
-    record(runId, "#i1:0", "completed");
+    crashedTask("error", "failed");
+    started(1, "chat/agent", 20);
+    record("#i1:0", "completed");
 
     expect(stateSessions({ db } as never, "t3")).toEqual([
-      { runId, instanceId: 1, stateId: "chat/agent", sessionId: "#i1", seq: 0, at: 20, outcome: "success" },
+      { instanceId: 1, stateId: "chat/agent", sessionId: "#i1", seq: 0, at: 20, outcome: "success" },
     ]);
   });
 
@@ -872,32 +864,28 @@ describe("stateSessions — a run the process died inside", () => {
    * anything yet" on the screen.
    */
   it("recovers the call somebody STOPPED, on a run whose outcome is canceled", () => {
-    db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t3','canceled',1,1)`).run();
-    db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at, ended_at, outcome) VALUES ('t3','h',1,9,'canceled')`).run();
-    const runId = (db.prepare(`SELECT id FROM runs WHERE task_id = 't3'`).get() as { id: number }).id;
-    started(runId, 1, "chat/agent", 20);
-    // Cancellation settles the row rather than leaving it open, so the EXISTS arm of the run filter
+    crashedTask("canceled", "canceled");
+    started(1, "chat/agent", 20);
+    // Cancellation settles the row rather than leaving it open, so the EXISTS arm of the task filter
     // does not catch this one either — the outcome is the only thing that admits it.
-    record(runId, "#i1:0", "failed");
+    record("#i1:0", "failed");
 
     expect(stateSessions({ db } as never, "t3")).toEqual([
-      { runId, instanceId: 1, stateId: "chat/agent", sessionId: "#i1", seq: 0, at: 20, outcome: "interrupted" },
+      { instanceId: 1, stateId: "chat/agent", sessionId: "#i1", seq: 0, at: 20, outcome: "interrupted" },
     ]);
   });
 
   it("still says nothing about a run that ended in an ordinary error, every call accounted for", () => {
-    db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t3','failed',1,1)`).run();
-    db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at, ended_at, outcome) VALUES ('t3','h',1,9,'error')`).run();
-    const runId = (db.prepare(`SELECT id FROM runs WHERE task_id = 't3'`).get() as { id: number }).id;
-    started(runId, 1, "wf/a", 20);
+    crashedTask("error", "failed");
+    started(1, "wf/a", 20);
     db.prepare(
-      `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at) VALUES ('t3', ?, 'operation.failed', ?, ?)`,
-    ).run(runId, JSON.stringify({ instanceId: 1, stateId: "wf/a", metrics: { sessionRef: "chat@1" } }), 21);
-    record(runId, "chat:0", "failed");
+      `INSERT INTO state_machine_events (task_id, type, payload_json, created_at) VALUES ('t3', 'operation.failed', ?, ?)`,
+    ).run(JSON.stringify({ instanceId: 1, stateId: "wf/a", metrics: { sessionRef: "chat@1" } }), 21);
+    record("chat:0", "failed");
 
     // One row, from the journal — the recovery path adds nothing, because nothing is unaccounted for.
     expect(stateSessions({ db } as never, "t3")).toEqual([
-      { runId, instanceId: 1, stateId: "wf/a", sessionId: "chat", seq: 0, at: 21, outcome: "error" },
+      { instanceId: 1, stateId: "wf/a", sessionId: "chat", seq: 0, at: 21, outcome: "error" },
     ]);
   });
 });
@@ -1118,7 +1106,7 @@ describe("streamed partials on open records", () => {
  * before its close would otherwise have none, and a session file cannot be found without one.
  */
 describe("recovering an interrupted call's own transcript", () => {
-  const scoped = () => new SqliteSessionStore(db, { taskId: "t1", runId: 1 });
+  const scoped = () => new SqliteSessionStore(db, { taskId: "t1" });
 
   let minted = 0;
   const crashed = (over: { status?: string; handle?: string | null; result?: string | null } = {}): string => {
@@ -1126,8 +1114,8 @@ describe("recovering an interrupted call's own transcript", () => {
     // the attempt column this fixture used to count.
     const id = `s:0#${++minted}`;
     db.prepare(
-      `INSERT INTO operation_records (id, task_id, run_id, status, provider_session_id, result_json, started_at)
-       VALUES (?, 't1', 1, ?, ?, ?, 900)`,
+      `INSERT INTO operation_records (id, task_id, status, provider_session_id, result_json, started_at)
+       VALUES (?, 't1', ?, ?, ?, 900)`,
     ).run(id, over.status ?? "interrupted", over.handle === undefined ? "prov-1" : over.handle, over.result ?? null);
     return id;
   };

@@ -161,15 +161,15 @@ describe("what a stopped run can be read back from", () => {
     }
   }, 30000);
 
-  it("keeps the root's own outputs on the run row", async () => {
+  it("keeps the root's own outputs on the task row", async () => {
     // The one set of outputs stored outright rather than joined — `finishTaskRun` writes the
-    // workflow's result to `runs.outputs_json`. It is the END of the run, so it answers nothing
-    // about where a stopped one got to; it is here to mark the boundary between what is stored and
-    // what is reconstructed.
+    // workflow's result to `task_runtime.outputs_json`. It is the END of the run, so it answers
+    // nothing about where a stopped one got to; it is here to mark the boundary between what is
+    // stored and what is reconstructed.
     const taskId = await runToCompletion();
     const project = openProject(dir, { baseDir: testHome() });
     try {
-      const run = project.db.prepare(`SELECT outcome, outputs_json FROM runs WHERE task_id = ?`).get(taskId) as {
+      const run = project.db.prepare(`SELECT outcome, outputs_json FROM task_runtime WHERE task_id = ?`).get(taskId) as {
         outcome: string;
         outputs_json: string;
       };

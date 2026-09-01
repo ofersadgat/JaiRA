@@ -61,14 +61,14 @@ const said = (text: string) => ({
 
 /** Every line of the one run's file, parsed — the tests below ask what SHAPE was written. */
 const fileLines = (): Array<Record<string, unknown>> =>
-  readFileSync(conversationFileFor(convDir(), "t-1", 1), "utf8")
+  readFileSync(conversationFileFor(convDir(), "t-1"), "utf8")
     .trimEnd()
     .split(/\r?\n/)
     .map((l) => JSON.parse(l) as Record<string, unknown>);
 
 /** One call, opened at a position and settled — the ordinary shape of a recorded turn. */
 async function call(p: Project, text: string, seq?: number): Promise<void> {
-  const store = sessionStoreFor(p, { taskId: "t-1", runId: 1 }) as unknown as Store;
+  const store = sessionStoreFor(p, { taskId: "t-1" }) as unknown as Store;
   const at = await store.resolve(seq === undefined ? { ref: "conv" } : { ref: `conv@${seq}` });
   const ref = await store.append({ id: `conv:${at.at.seq}`, source: { kind: "prompt", user: text } as never, session: at.at, startMs: 1 });
   await store.finish(ref, { result: said(text) as never });
@@ -88,7 +88,7 @@ describe("the round trip — the file is the truth", () => {
     }
 
     const second = project("file");
-    const reader = sessionStoreFor(second, { taskId: "t-1", runId: 1 }) as unknown as Store;
+    const reader = sessionStoreFor(second, { taskId: "t-1" }) as unknown as Store;
     // The transcript, whole — which needs all three tables back: the records, the positions that
     // order them, and the lineage row the branch hangs off. A SUCCESS settle's payload is the
     // authoritative version of the turn, so the opening message `insertRecord` spliced in is
@@ -106,7 +106,7 @@ describe("the round trip — the file is the truth", () => {
     p.close();
     open.pop();
 
-    const entries = readConversationFile(conversationFileFor(convDir(), "t-1", 1));
+    const entries = readConversationFile(conversationFileFor(convDir(), "t-1"));
     const records = entries.filter((e) => e.kind === "record");
     expect(records.length).toBeGreaterThan(1); // it really did append more than once
     expect(records.map((e) => (e.row as { status: string }).status)).toEqual(["open", "completed"]);
@@ -141,7 +141,7 @@ describe("dialects", () => {
     open.pop();
 
     const line = JSON.parse(
-      readFileSync(conversationFileFor(convDir(), "t-1", 1), "utf8").split("\n")[0]!,
+      readFileSync(conversationFileFor(convDir(), "t-1"), "utf8").split("\n")[0]!,
     ) as Record<string, unknown>;
     // Claude Code's threading envelope — what its own reader walks.
     expect(line).toMatchObject({ type: expect.stringMatching(/^jaira\./) as unknown as string });
@@ -160,7 +160,7 @@ describe("dialects", () => {
     p.close();
     open.pop();
 
-    const file = conversationFileFor(convDir(), "t-1", 1);
+    const file = conversationFileFor(convDir(), "t-1");
     const codexLine = JSON.parse(readFileSync(file, "utf8").split("\n")[0]!) as Record<string, unknown>;
     expect(codexLine).toHaveProperty("payload");
     expect(codexLine).not.toHaveProperty("uuid");
@@ -170,7 +170,7 @@ describe("dialects", () => {
       rmSync(join(dir, "repo", ".jaira", "system", `jaira.db${suffix}`), { force: true });
     }
     const asClaude = project("file", "claude");
-    const reader = sessionStoreFor(asClaude, { taskId: "t-1", runId: 1 }) as unknown as Store;
+    const reader = sessionStoreFor(asClaude, { taskId: "t-1" }) as unknown as Store;
     expect(await reader.messages("conv")).toEqual([turn("codex-written")]);
   });
 });
@@ -217,7 +217,7 @@ describe("native turn lines — for the other tool's reader, never for replay", 
   it("is emitted at the SETTLE only, so a streaming call does not spray transcripts", async () => {
     const p = project("file");
     createTask(p, { id: "t-1", title: "one", workflow: "w" });
-    const store = sessionStoreFor(p, { taskId: "t-1", runId: 1 }) as unknown as Store;
+    const store = sessionStoreFor(p, { taskId: "t-1" }) as unknown as Store;
     const at = await store.resolve({ ref: "conv" });
     const ref = await store.append({ id: "conv:0", source: { kind: "prompt", user: "hi" } as never, session: at.at, startMs: 1 });
     store.update!(ref, { value: { value: said("partial one").value } });
@@ -238,7 +238,7 @@ describe("switching the concern on", () => {
 
     const flipped = project("file");
     expect(flipped.storage.seeded).toMatchObject({ operation_records: 1, sessions: 1 });
-    const reader = sessionStoreFor(flipped, { taskId: "t-1", runId: 1 }) as unknown as Store;
+    const reader = sessionStoreFor(flipped, { taskId: "t-1" }) as unknown as Store;
     expect(await reader.messages("conv")).toEqual([turn("already recorded")]);
     flipped.close();
     open.pop();
@@ -259,7 +259,7 @@ describe("what a file can arrive looking like", () => {
     p.close();
     open.pop();
 
-    const file = conversationFileFor(convDir(), "t-1", 1);
+    const file = conversationFileFor(convDir(), "t-1");
     const lines = readFileSync(file, "utf8").trimEnd().split("\n");
     const rows = lines.filter((l) => l.includes('"jaira.')).length;
     writeFileSync(file, [...lines, "<<<<<<< HEAD", '{"type":"jaira.record"'].join("\n") + "\n", "utf8");

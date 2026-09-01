@@ -284,7 +284,7 @@ describe("the record-id seam (§10.6, settled)", () => {
     // recomputable long after the worktree moved, addressed by the id the event carries.
     const db = openDb(join(dir, "review.db"));
     try {
-      const stores = new SqliteSessionStore(db, { taskId: "t-review", runId: 1 });
+      const stores = new SqliteSessionStore(db, { taskId: "t-review" });
       const persistence = new InMemoryPersistence();
       const registry = newRegistry();
       registerChangesetFunctions(registry);

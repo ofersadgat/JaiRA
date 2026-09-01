@@ -7,7 +7,7 @@ import { rmSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { testHome } from "@jaira/testing";
 import { runCli, type CliIo } from "../src/cli";
-import { blockedRules, happyRules, HUMAN_REVIEW_FUNCTION, makePlanningProject } from "./fixtures";
+import { happyRules, HUMAN_REVIEW_FUNCTION, makePlanningProject } from "./fixtures";
 
 let dir: string;
 
@@ -29,11 +29,11 @@ async function cli(args: string[]): Promise<{ code: number; out: string; err: st
 
 interface PruneOut {
   dryRun?: boolean;
-  runsPruned: number;
+  tasksPruned: number;
   events: number;
-  runs: Array<{ taskId: string; runId: number }>;
+  tasks: Array<{ taskId: string }>;
   skipped: Array<{ taskId: string; status: string; reason: string }>;
-  remaining: { runs: number; events: number; commands: number };
+  remaining: { tasks: number; events: number; commands: number };
 }
 
 async function prune(args: string[] = []): Promise<PruneOut> {
@@ -42,28 +42,26 @@ async function prune(args: string[] = []): Promise<PruneOut> {
   return JSON.parse(res.out) as PruneOut;
 }
 
-/** A completed task with two runs behind it. */
-async function taskWithTwoRuns(): Promise<string> {
+/** A task run to completion — history worth pruning, and a card worth keeping. */
+async function completedTask(): Promise<string> {
   const created = await cli([
     "task", "create", "--title", "Plan the feature", "--workflow", "feature/plan",
     "--inputs", '{"issue":"the issue"}',
   ]);
   const taskId = (JSON.parse(created.out) as { taskId: string }).taskId;
-  const gate = JSON.stringify({ [HUMAN_REVIEW_FUNCTION]: [{ decision: "block" }] });
-  // First attempt fails (no scripted gate answer), second succeeds — two runs.
-  await cli(["task", "start", taskId, "--fake", JSON.stringify(blockedRules())]);
+  const gate = JSON.stringify({ [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" }] });
   await cli(["task", "start", taskId, "--fake", JSON.stringify(happyRules()), "--interactions", gate]);
   return taskId;
 }
 
 describe("jaira prune", () => {
   it("is a dry run by default and says so", async () => {
-    await taskWithTwoRuns();
+    await completedTask();
     const before = (await prune()).remaining;
 
     const plan = await prune();
     expect(plan.dryRun).toBe(true);
-    expect(plan.runsPruned).toBe(1);
+    expect(plan.tasksPruned).toBe(1);
     expect(plan.events).toBeGreaterThan(0);
     // Nothing moved: the same numbers are still there.
     expect(plan.remaining).toEqual(before);
@@ -72,27 +70,28 @@ describe("jaira prune", () => {
     expect(res.err).toMatch(/re-run with --apply/);
   });
 
-  it("deletes the older run only once --apply is given, keeping the latest", async () => {
-    const taskId = await taskWithTwoRuns();
+  it("deletes the history only once --apply is given, keeping the task itself", async () => {
+    const taskId = await completedTask();
     const applied = await prune(["--apply"]);
     expect(applied.dryRun).toBeUndefined();
-    expect(applied.runsPruned).toBe(1);
-    expect(applied.remaining.runs).toBe(1);
+    expect(applied.tasksPruned).toBe(1);
+    expect(applied.remaining.events).toBe(0);
 
-    // The task's history still renders — the point of keeping the latest run.
+    // The task's card still says what happened — the point of pruning the how and not the what.
     const status = await cli(["task", "status", taskId]);
-    const parsed = JSON.parse(status.out) as { runs: Array<{ runId: number }> };
-    expect(parsed.runs).toHaveLength(1);
+    const parsed = JSON.parse(status.out) as { status: string; runs: Array<{ outcome: string }> };
+    expect(parsed.status).toBe("completed");
+    expect(parsed.runs[0]?.outcome).toBe("success");
 
     // A second prune has nothing left to do.
-    expect((await prune(["--apply"])).runsPruned).toBe(0);
+    expect((await prune(["--apply"])).tasksPruned).toBe(0);
   });
 
-  it("--older-than protects recent runs", async () => {
-    await taskWithTwoRuns();
+  it("--older-than protects recent history", async () => {
+    await completedTask();
     // Everything just ran, so a one-day cutoff spares all of it.
-    const plan = await prune(["--older-than", "1", "--keep-runs", "0"]);
-    expect(plan.runsPruned).toBe(0);
+    const plan = await prune(["--older-than", "1"]);
+    expect(plan.tasksPruned).toBe(0);
   });
 
   it("refuses a queued task and reports why", async () => {
@@ -101,7 +100,7 @@ describe("jaira prune", () => {
       "--inputs", '{"issue":"x"}',
     ]);
     const taskId = (JSON.parse(created.out) as { taskId: string }).taskId;
-    const plan = await prune(["--keep-runs", "0"]);
+    const plan = await prune();
     expect(plan.skipped.map((s) => s.taskId)).toContain(taskId);
     expect(plan.skipped[0]!.reason).toMatch(/required to resume/);
   });
@@ -109,7 +108,6 @@ describe("jaira prune", () => {
   it("rejects nonsense options rather than guessing", async () => {
     // `=` form, because bare `-3` is consumed by parseArgs as an option.
     expect((await cli(["prune", "--older-than=-3"])).code).toBe(2);
-    expect((await cli(["prune", "--keep-runs", "1.5"])).code).toBe(2);
     expect((await cli(["prune", "--older-than", "later"])).code).toBe(2);
   });
 });

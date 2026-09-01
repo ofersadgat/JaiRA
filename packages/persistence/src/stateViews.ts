@@ -44,7 +44,7 @@ import type { Project } from "./project";
 import { boardPathOf, breadcrumbOf, endedAtOf, projectBoard, type TaskProjection, type WorkflowShape } from "./projection";
 import { isStateFile } from "./snapshots";
 import { workflowShape } from "./shape";
-import { bundleFor, latestRun, taskSummaries, type ViewOptions } from "./views";
+import { bundleFor, taskRun, taskSummaries, type ViewOptions } from "./views";
 
 /** What the Files view needs to know about the machine, on top of the project itself. */
 export interface StateViewOptions extends ViewOptions {
@@ -494,7 +494,7 @@ function projectionsFor(project: Project, shape: WorkflowShape | undefined, work
       workflow: summary.workflow,
       ...(summary.labels !== undefined ? { labels: summary.labels } : {}),
       updatedAt: summary.updatedAt,
-      run: latestRun(project, summary.taskId, shape),
+      run: taskRun(project, summary.taskId, shape),
     }));
 }
 
@@ -662,13 +662,13 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
 
   for (const summary of summaries) {
     // One bundle per workflow would be cheaper, but a card at this level only needs the task's own
-    // active path, and `latestRun` without a shape still yields one.
+    // active path, and `taskRun` without a shape still yields one.
     const bundle = bundleFor(project, summary.workflow, summary.snapshotHash);
     const interactive = options?.interactiveFunctions;
     const shape = bundle
       ? workflowShape(bundle, interactive !== undefined ? { interactiveFunctions: interactive } : {})
       : undefined;
-    const run = latestRun(project, summary.taskId, shape);
+    const run = taskRun(project, summary.taskId, shape);
     // Where it is, or where it stopped — one rule, so a card does not change column the moment its
     // run ends. See `boardPathOf`.
     const path = boardPathOf(run);

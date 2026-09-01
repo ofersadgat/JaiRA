@@ -43,14 +43,14 @@ import type { JairaStorageConcern, JairaStorageConfig } from "@jaira/shared";
  * two stores with different durability and different merge behaviour, and nothing would catch it.
  *
  * `sessions` rides with `conversations` because it is the lineage a transcript hangs off — a fork
- * that lost its parent row is a conversation that silently truncates its inherited prefix. `runs`
- * rides with `tasks` for the same reason in the other direction: "what was asked for" and "where
- * each run of it got to" are one answer.
+ * that lost its parent row is a conversation that silently truncates its inherited prefix. The
+ * `tasks` concern is one table since the runs collapse (migration 16): a task IS its machine, and
+ * "what was asked for" and "where it got to" are one row.
  */
 export const CONCERN_TABLES: Record<JairaStorageConcern, readonly string[]> = {
   journal: ["state_machine_events"],
   conversations: ["operation_records", "sessions", "session_names"],
-  tasks: ["task_runtime", "runs"],
+  tasks: ["task_runtime"],
   artifacts: ["artifacts"],
 };
 

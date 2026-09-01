@@ -8,7 +8,7 @@ import { createLogger } from "@declarative-ai/log";
 import { ApprovalRequired, approvalRefusalMessage, refusal } from "@jaira/shared";
 import type { Failure, FunctionCapabilities, JsonValue } from "@declarative-ai/exec";
 import { loadBundle, validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
-import { newTaskId, isStartableStatus, type InstanceAddress, type TaskMeta, type TaskStatus } from "@jaira/shared";
+import { newTaskId, isStartableStatus, type TaskMeta, type TaskStatus } from "@jaira/shared";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "./snapshots";
 import { freezeForRun, moduleApprovalsFor, moduleEntriesOf, userModules, watchingForUnapproved, type WithheldSymbol } from "./userModules";
 import { nodeVfs } from "./vfs";
@@ -54,17 +54,21 @@ export function createTask(project: Project, input: CreateTaskInput, nowMs = Dat
   };
   if (project.runtime.get(meta.id)) throw refusal(log, `task '${meta.id}' already exists`, { taskId: meta.id });
   project.tasks.write(meta);
-  project.runtime.insert(meta.id, nowMs, { branch: meta.branch });
+  project.runtime.insert(meta.id, nowMs, {
+    branch: meta.branch,
+    // The re-run chain (Identity and Resume §05): a task minted as another's re-run points back at
+    // it on its runtime row, where a query can walk it — the JSON meta carries it for people.
+    ...(meta.parentTaskId !== undefined ? { parentTaskId: meta.parentTaskId } : {}),
+  });
   return meta;
 }
 
 export interface StartedRun {
   meta: TaskMeta;
-  runId: number;
   bundle: WorkflowBundle;
   snapshotHash: string;
   snapshotDir: string;
-  /** true when this run re-uses a previously pinned snapshot (re-run after interruption). */
+  /** true when this start re-uses a previously pinned snapshot (a resume of the same machine). */
   pinned: boolean;
 }
 
@@ -89,16 +93,6 @@ export interface BeginRunOptions {
    * "re-run after interruption" branch below, and a reader would never find it there.
    */
   bundle?: WorkflowBundle;
-  /**
-   * Where this run's own work will begin — `forkPointOf` over the replay index it is resuming from.
-   *
-   * Written on the run row rather than derived later, because it is knowable NOW and stops being so
-   * afterwards: replay leaves no record of its own, and the trace it does leave (a completion with
-   * no session ref) is what a function op looks like too. See `RunRow.forkedAt`.
-   *
-   * Omitted for a run that shares nothing — every run started from the top.
-   */
-  forkedAt?: InstanceAddress;
   nowMs?: number;
 }
 
@@ -189,13 +183,14 @@ export async function beginTaskRun(project: Project, taskId: string, options: Be
     bundle = snap.bundle;
   }
 
-  const runId = project.db.transaction(() => {
-    project.runtime.setSnapshot(taskId, hash, nowMs);
+  project.db.transaction(() => {
+    // `beginTask` pins the snapshot, stamps when execution started, and clears how the last
+    // stretch ended — one machine, one row (Identity and Resume §05).
+    project.runtime.beginTask(taskId, hash, nowMs);
     project.runtime.setStatus(taskId, "running", nowMs);
-    return project.runtime.beginRun(taskId, hash, nowMs, options.forkedAt);
   })();
 
-  return { meta, runId, bundle, snapshotHash: hash, snapshotDir: dir, pinned };
+  return { meta, bundle, snapshotHash: hash, snapshotDir: dir, pinned };
 }
 
 /**
@@ -264,14 +259,13 @@ export type RunEndStatus = Extract<TaskStatus, "completed" | "failed" | "cancele
 export function finishTaskRun(
   project: Project,
   taskId: string,
-  runId: number,
   status: RunEndStatus,
   result?: { outputs?: unknown; failure?: Failure },
   nowMs = Date.now(),
 ): void {
   const outcome = status === "completed" ? "success" : status === "canceled" ? "canceled" : "error";
   project.db.transaction(() => {
-    project.runtime.endRun(runId, outcome, nowMs, {
+    project.runtime.endTask(taskId, outcome, nowMs, {
       outputsJson: result?.outputs !== undefined ? JSON.stringify(result.outputs) : undefined,
       failureJson: result?.failure !== undefined ? JSON.stringify(result.failure) : undefined,
     });
@@ -288,9 +282,7 @@ export function finishTaskRun(
 export function cancelTask(project: Project, taskId: string, nowMs = Date.now()): void {
   project.runtime.assertCancelable(taskId);
   project.db.transaction(() => {
-    project.db
-      .prepare(`UPDATE runs SET ended_at = ?, outcome = 'canceled' WHERE task_id = ? AND ended_at IS NULL`)
-      .run(nowMs, taskId);
+    project.runtime.endTask(taskId, "canceled", nowMs);
     project.runtime.setStatus(taskId, "canceled", nowMs);
   })();
 }
@@ -315,19 +307,16 @@ export function deleteTask(project: Project, taskId: string): void {
   if (row.status === "running") {
     throw refusal(log, `task '${taskId}' is running; cancel it before deleting it`, { taskId });
   }
-  // One transaction, children before parents: events and jobs reference runs, runs reference the
-  // runtime row, and foreign keys are ON. Jobs are matched by task OR by run — a process job records
-  // both, but only one is guaranteed — and their captured output goes first because it references
-  // them. The self-referencing parent_job_id is safe in one statement: SQLite checks immediate
-  // foreign keys at statement end, so a parent and its child leave together.
+  // One transaction, children before parents. A process job's captured output goes first because it
+  // references the job rows. The self-referencing parent_job_id is safe in one statement: SQLite
+  // checks immediate foreign keys at statement end, so a parent and its child leave together.
   project.db.transaction(() => {
-    const runs = `SELECT id FROM runs WHERE task_id = ?`;
-    const jobs = `SELECT id FROM jobs WHERE task_id = ? OR run_id IN (${runs})`;
+    const jobs = `SELECT id FROM jobs WHERE task_id = ?`;
     project.db.prepare(`DELETE FROM state_machine_events WHERE task_id = ?`).run(taskId);
     project.db.prepare(`DELETE FROM command_log WHERE task_id = ?`).run(taskId);
-    project.db.prepare(`DELETE FROM job_output WHERE job_id IN (${jobs})`).run(taskId, taskId);
-    project.db.prepare(`DELETE FROM jobs WHERE task_id = ? OR run_id IN (${runs})`).run(taskId, taskId);
-    // Straight off the position row since migration 8: it carries the scope its record does, so the
+    project.db.prepare(`DELETE FROM job_output WHERE job_id IN (${jobs})`).run(taskId);
+    project.db.prepare(`DELETE FROM jobs WHERE task_id = ?`).run(taskId);
+    // Straight off the record row since migration 8: it carries the scope its record does, so the
     // subquery that used to reach through `operation_record_id` has nothing left to do.
     project.db.prepare(`DELETE FROM operation_records WHERE task_id = ?`).run(taskId);
     project.db.prepare(`DELETE FROM session_names WHERE task_id = ?`).run(taskId);
@@ -335,7 +324,6 @@ export function deleteTask(project: Project, taskId: string): void {
     // A gate outlives the process that parked it, so it also has to leave with its task — otherwise
     // the strip goes on offering a question about a task that is no longer there to answer it.
     project.db.prepare(`DELETE FROM pending_interactions WHERE task_id = ?`).run(taskId);
-    project.db.prepare(`DELETE FROM runs WHERE task_id = ?`).run(taskId);
     project.db.prepare(`DELETE FROM task_runtime WHERE task_id = ?`).run(taskId);
   })();
   // The task's journal files, for the reason `prune` deletes a run's: with the file as the truth, a

@@ -230,14 +230,14 @@ export function openSharedProject(opts?: { now?: () => number; staleMs?: number;
  *
  * THE constructor for one, and the reason it exists rather than nine `new SqliteSessionStore(db, …)`
  * calls: a store built by hand writes to the table and not to the file, which is invisible until the
- * database is thrown away and the conversations are not there. An unscoped store — no task, no run —
- * gets no log because it has nothing to name a file by; it is a read of one run already narrowed.
+ * database is thrown away and the conversations are not there. An unscoped store — no task — gets no
+ * log because it has nothing to name a file by; it is a read already narrowed.
  */
 export function sessionStoreFor(project: Project, scope: SessionScope = {}): SqliteSessionStore {
   const filed = isFileBacked(project.config.storage.conversations);
   const log =
-    filed && scope.taskId !== undefined && scope.runId !== undefined
-      ? new ConversationLog(project.paths.conversationsDir, project.config.storage.format, scope.taskId, scope.runId)
+    filed && scope.taskId !== undefined
+      ? new ConversationLog(project.paths.conversationsDir, project.config.storage.format, scope.taskId)
       : undefined;
   return new SqliteSessionStore(project.db, scope, log);
 }

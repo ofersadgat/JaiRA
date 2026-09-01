@@ -411,6 +411,20 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 16,
+    note: "a task is one machine, so the runs table folded into it and run_id left every row",
+    // Identity-and-Resume step 5. The runs table existed because resume RE-RAN: every attempt
+    // re-walked the workflow and journaled its own copy, and the attempts had to be told apart.
+    // Loading (step 4) ends that — a resumed machine continues under its own ids, a re-run mints a
+    // NEW task linked by `parent_task_id` — so a task has exactly one machine and the run row's
+    // facts (when it started, how it ended, what it produced) are facts about the TASK. The last
+    // run's are folded up; earlier attempts stay in the journal as history, and the machine's root
+    // is stamped on `root_instance_id` so a reader never has to guess which parentless entry it is
+    // (a legacy re-run's older tree, or a sub-workflow journaling into the same task, also enter
+    // parentless).
+    run: collapseRunsIntoTasks,
+  },
 ];
 
 /**
@@ -666,6 +680,70 @@ function foldPositionsIntoRequests(db: JairaDb): void {
        AND json_extract(session_outcome_json, '$.messages') IS NOT NULL
        AND json_extract(result_json, '$.value.entries') IS NULL;
     ALTER TABLE operation_records DROP COLUMN session_outcome_json;
+  `);
+}
+
+/**
+ * Migration 16's collapse — see the note there. Guarded by the runs table's existence, per the
+ * house rule: the table is the only honest witness of which shape the database is in.
+ */
+function collapseRunsIntoTasks(db: JairaDb): void {
+  // The COLUMN is the witness, not the runs table: the bootstrap recreates an empty `runs` shell on
+  // every open (openDb drops it again), and the session-store tests rewind `user_version` against a
+  // database already in the new shape — where re-running the fold would read columns that are gone.
+  const hasRunColumn =
+    (
+      db.prepare(`SELECT COUNT(*) AS n FROM pragma_table_info('state_machine_events') WHERE name = 'run_id'`).get() as {
+        n: number;
+      }
+    ).n > 0;
+  if (!hasRunColumn) return; // already this shape
+
+  // The re-run chain: a task minted as another's re-run points back at it. Guarded per column
+  // because the bootstrap schema will eventually declare it.
+  addColumn(db, "task_runtime", "parent_task_id", "TEXT");
+  // The last run's lifecycle facts, now the task's own.
+  addColumn(db, "task_runtime", "started_at", "INTEGER");
+  addColumn(db, "task_runtime", "ended_at", "INTEGER");
+  addColumn(db, "task_runtime", "outcome", "TEXT");
+  addColumn(db, "task_runtime", "outputs_json", "TEXT");
+  addColumn(db, "task_runtime", "failure_json", "TEXT");
+
+  db.exec(`
+    UPDATE task_runtime SET
+      started_at   = (SELECT r.started_at   FROM runs r WHERE r.task_id = task_runtime.task_id ORDER BY r.id DESC LIMIT 1),
+      ended_at     = (SELECT r.ended_at     FROM runs r WHERE r.task_id = task_runtime.task_id ORDER BY r.id DESC LIMIT 1),
+      outcome      = (SELECT r.outcome      FROM runs r WHERE r.task_id = task_runtime.task_id ORDER BY r.id DESC LIMIT 1),
+      outputs_json = (SELECT r.outputs_json FROM runs r WHERE r.task_id = task_runtime.task_id ORDER BY r.id DESC LIMIT 1),
+      failure_json = (SELECT r.failure_json FROM runs r WHERE r.task_id = task_runtime.task_id ORDER BY r.id DESC LIMIT 1);
+
+    -- The machine's root, stamped while run boundaries still exist to read: the LAST run's first
+    -- parentless entry. This is the one fact run_id carried that the journal alone cannot restate —
+    -- an old-style re-run grew a second tree, and only the newest is the task's machine.
+    UPDATE task_runtime SET root_instance_id = COALESCE(
+      (SELECT e.instance_id FROM state_machine_events e
+        WHERE e.task_id = task_runtime.task_id
+          AND e.run_id = (SELECT MAX(r.id) FROM runs r WHERE r.task_id = task_runtime.task_id)
+          AND e.type = 'instance.entered'
+          AND json_extract(e.payload_json, '$.parentInstanceId') IS NULL
+        ORDER BY e.seq LIMIT 1),
+      root_instance_id);
+
+    DROP INDEX IF EXISTS state_machine_events_run;
+    ALTER TABLE state_machine_events DROP COLUMN run_id;
+
+    DROP INDEX IF EXISTS operation_records_scope;
+    DROP INDEX IF EXISTS operation_records_run;
+    ALTER TABLE operation_records DROP COLUMN run_id;
+    CREATE INDEX IF NOT EXISTS operation_records_scope ON operation_records(task_id, id);
+
+    DROP INDEX IF EXISTS command_log_run;
+    ALTER TABLE command_log DROP COLUMN run_id;
+    ALTER TABLE jobs DROP COLUMN run_id;
+    ALTER TABLE artifacts DROP COLUMN run_id;
+    ALTER TABLE pending_interactions DROP COLUMN run_id;
+
+    DROP TABLE runs;
   `);
 }
 

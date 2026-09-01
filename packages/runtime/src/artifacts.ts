@@ -16,7 +16,6 @@
 /** One recorded write: the logical path an agent used → where it landed. */
 export interface ArtifactRecord {
   taskId: string;
-  runId?: number;
   /** The path as the producer addressed it, relative to the workspace, `/`-separated. */
   logicalPath: string;
   /** Absolute host path. Absent when the destination is `virtual:`. */

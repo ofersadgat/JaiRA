@@ -53,19 +53,9 @@ function project(journal: "file" | "db" | "both"): Project {
 const event = (type: string, instanceId?: string): EngineEvent =>
   ({ type, ...(instanceId !== undefined ? { instanceId } : {}) }) as EngineEvent;
 
-/**
- * One run's worth of events, through the ordinary `Persistence` port the engine calls.
- *
- * The `runs` row is inserted first because `state_machine_events.run_id` references it — and only in
- * the DATABASE, since a shadow drops foreign keys (a temp child cannot resolve a main parent). The
- * asymmetry is real and worth writing into the helper rather than discovering per test: a file-backed
- * journal accepts a row the table-backed one refuses.
- */
-function record(p: Project, taskId: string, runId: number, types: string[]): void {
-  p.db
-    .prepare(`INSERT OR IGNORE INTO main.runs (id, task_id, snapshot_hash, started_at) VALUES (?, ?, 'h', 1)`)
-    .run(runId, taskId);
-  const recorder = p.events.recorder(taskId, runId);
+/** One task's worth of events, through the ordinary `Persistence` port the engine calls. */
+function record(p: Project, taskId: string, types: string[]): void {
+  const recorder = p.events.recorder(taskId);
   types.forEach((type, i) => recorder.record(event(type, String(i + 1)), 1_000 + i));
 }
 
@@ -73,7 +63,7 @@ describe("the round trip — the file is the truth", () => {
   it("survives the database being thrown away, which is what 'truth' means", () => {
     const first = project("file");
     createTask(first, { id: "t-1", title: "one", workflow: "w" });
-    record(first, "t-1", 1, ["instance.entered", "operation.started", "operation.completed"]);
+    record(first, "t-1", ["instance.entered", "operation.started", "operation.completed"]);
     first.close();
     open.pop();
 
@@ -89,21 +79,22 @@ describe("the round trip — the file is the truth", () => {
       "operation.completed",
     ]);
     // Read back whole, not merely counted: the event, its instance, and the time it happened.
-    expect(second.events.list("t-1")[1]).toMatchObject({ runId: 1, instanceId: "2", createdAt: 1_001 });
+    expect(second.events.list("t-1")[1]).toMatchObject({ instanceId: "2", createdAt: 1_001 });
   });
 
-  it("writes one file per run, which is what makes two people's appends not conflict", () => {
+  it("writes one file per task, which is what makes two people's appends not conflict", () => {
     const p = project("file");
     createTask(p, { id: "t-1", title: "one", workflow: "w" });
-    record(p, "t-1", 1, ["a"]);
-    record(p, "t-1", 2, ["b"]);
+    createTask(p, { id: "t-2", title: "two", workflow: "w" });
+    record(p, "t-1", ["a"]);
+    record(p, "t-2", ["b"]);
 
     const journal = join(dir, "repo", ".jaira", "system", "journal");
-    expect(existsSync(journalFileFor(journal, "t-1", 1))).toBe(true);
-    expect(existsSync(journalFileFor(journal, "t-1", 2))).toBe(true);
+    expect(existsSync(journalFileFor(journal, "t-1"))).toBe(true);
+    expect(existsSync(journalFileFor(journal, "t-2"))).toBe(true);
     // One JSON object per line, and legible — a person who greps a Claude session file can grep this.
-    const line = JSON.parse(readFileSync(journalFileFor(journal, "t-1", 1), "utf8").trim()) as Record<string, unknown>;
-    expect(line).toMatchObject({ type: "a", taskId: "t-1", runId: 1, timestamp: "1970-01-01T00:00:01.000Z" });
+    const line = JSON.parse(readFileSync(journalFileFor(journal, "t-1"), "utf8").trim()) as Record<string, unknown>;
+    expect(line).toMatchObject({ type: "a", taskId: "t-1", timestamp: "1970-01-01T00:00:01.000Z" });
     // NOT `seq`: it is assigned by whichever database holds the rows, and a file outlives databases.
     expect(line).not.toHaveProperty("seq");
   });
@@ -111,7 +102,7 @@ describe("the round trip — the file is the truth", () => {
   it("writes nothing to disk when the journal is a table, which is the default", () => {
     const p = project("db");
     createTask(p, { id: "t-1", title: "one", workflow: "w" });
-    record(p, "t-1", 1, ["a"]);
+    record(p, "t-1", ["a"]);
 
     expect(existsSync(join(dir, "repo", ".jaira", "system", "journal"))).toBe(false);
     expect(p.events.list("t-1")).toHaveLength(1);
@@ -124,7 +115,7 @@ describe("switching a concern on", () => {
     // database and no files at all; the first open after the change has to start from those rows.
     const before = project("db");
     createTask(before, { id: "t-1", title: "one", workflow: "w" });
-    record(before, "t-1", 1, ["a", "b"]);
+    record(before, "t-1", ["a", "b"]);
     before.close();
     open.pop();
 
@@ -137,7 +128,7 @@ describe("switching a concern on", () => {
   it("prefers the files once there are any, because that is what truth means", () => {
     const p = project("file");
     createTask(p, { id: "t-1", title: "one", workflow: "w" });
-    record(p, "t-1", 1, ["from-the-file"]);
+    record(p, "t-1", ["from-the-file"]);
     p.close();
     open.pop();
 
@@ -145,8 +136,8 @@ describe("switching a concern on", () => {
     const stale = project("file");
     stale.db
       .prepare(
-        `INSERT INTO main.state_machine_events (task_id, run_id, type, payload_json, created_at)
-         VALUES ('t-1', 1, 'from-the-database', '{}', 1)`,
+        `INSERT INTO main.state_machine_events (task_id, type, payload_json, created_at)
+         VALUES ('t-1', 'from-the-database', '{}', 1)`,
       )
       .run();
     stale.close();
@@ -165,11 +156,11 @@ describe("what a file can arrive looking like", () => {
     // the whole history; dropping it costs one event and leaves everything either side readable.
     const p = project("file");
     createTask(p, { id: "t-1", title: "one", workflow: "w" });
-    record(p, "t-1", 1, ["before", "after"]);
+    record(p, "t-1", ["before", "after"]);
     p.close();
     open.pop();
 
-    const file = journalFileFor(join(dir, "repo", ".jaira", "system", "journal"), "t-1", 1);
+    const file = journalFileFor(join(dir, "repo", ".jaira", "system", "journal"), "t-1");
     const lines = readFileSync(file, "utf8").trimEnd().split("\n");
     writeFileSync(file, [lines[0], "<<<<<<< HEAD", lines[1], '{"type":"truncated"'].join("\n") + "\n", "utf8");
 
@@ -177,16 +168,22 @@ describe("what a file can arrive looking like", () => {
     expect(project("file").events.list("t-1").map((e) => e.type)).toEqual(["before", "after"]);
   });
 
-  it("orders a task's runs by run, so a re-minted seq still means something", () => {
-    // `seq` is not in the file, so replay re-mints it. Files are read task then run, which keeps a
-    // run's own events in sequence and runs of one task in the order they happened.
+  it("replays legacy per-run files first, oldest run first, then the task file", () => {
+    // Files written before the runs collapse are named `<runId>.jsonl`. `seq` is not in any file,
+    // so replay re-mints it — and the read order is what keeps a re-minted seq meaning something:
+    // the old attempts in the order they happened, then everything the collapsed journal appended.
     const p = project("file");
     createTask(p, { id: "t-1", title: "one", workflow: "w" });
-    record(p, "t-1", 2, ["second-run"]);
-    record(p, "t-1", 1, ["first-run"]);
+    record(p, "t-1", ["current"]);
     p.close();
     open.pop();
 
-    expect(project("file").events.list("t-1").map((e) => e.type)).toEqual(["first-run", "second-run"]);
+    const taskDir = join(dir, "repo", ".jaira", "system", "journal", "t-1");
+    const legacy = (runId: number, type: string): string =>
+      JSON.stringify({ type, timestamp: "1970-01-01T00:00:00.500Z", taskId: "t-1", runId, event: { type } }) + "\n";
+    writeFileSync(join(taskDir, "2.jsonl"), legacy(2, "second-run"), "utf8");
+    writeFileSync(join(taskDir, "1.jsonl"), legacy(1, "first-run"), "utf8");
+
+    expect(project("file").events.list("t-1").map((e) => e.type)).toEqual(["first-run", "second-run", "current"]);
   });
 });

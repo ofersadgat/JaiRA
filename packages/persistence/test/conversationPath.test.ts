@@ -42,10 +42,10 @@ const entered = (id: string, stateId: string, parent?: string, childKey?: string
 /** Record a run and read it back as turns. */
 function turnsOf(events: EngineEvent[]) {
   project.runtime.insert("t-1", now);
-  const runId = project.runtime.beginRun("t-1", "hash", now);
-  const recorder = project.events.recorder("t-1", runId);
+  project.runtime.beginTask("t-1", "hash", now);
+  const recorder = project.events.recorder("t-1");
   events.forEach((event, i) => recorder.record(event, now + i));
-  project.runtime.endRun(runId, "error", now + events.length);
+  project.runtime.endTask("t-1", "error", now + events.length);
   return conversationView(project, "t-1").turns;
 }
 

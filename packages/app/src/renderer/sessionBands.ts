@@ -42,7 +42,6 @@ import {
   type ConversationTurn,
   type InstanceAddress,
   type InstanceNode,
-  type RunView,
   type SessionRef,
 } from "@jaira/shared/browser";
 
@@ -56,25 +55,10 @@ import {
 export interface SessionPiece {
   node: InstanceNode;
   /**
-   * The run that actually made this call — NOT `node.runId`, and the difference is load-bearing.
+   * The instance the RECORD is filed under — where the words actually are.
    *
-   * The join is by address, so a folded node collects the calls made at its position by any run
-   * (see {@link piecesOf}); the node itself names whichever run the fold let win there. For a
-   * replayed state those are different runs, and taking the node's would report the resumed run as
-   * having done work it took from the record. See {@link runForksOf}, which is the reader that
-   * would otherwise call every replayed address a fork.
-   *
-   * Absent for a piece with no session row — a leaf that ran no call, where the node's own run is
-   * the only answer there is.
-   */
-  runId?: number;
-  /**
-   * The instance the RECORD is filed under, in {@link runId}'s walk.
-   *
-   * Same reason as `runId` and the same trap: a transcript is fetched and cached by run-and-instance
-   * (`sessionKey`), and for a replayed state the folded node names an instance of the resumed run
-   * that never wrote one. Asking for that pair returns nothing, so the panel stayed empty even once
-   * the join found the session. This is where the words actually are.
+   * Usually the node's own id, and different exactly where a record was written by something the
+   * tree holds no node for: a chat child filed under `chat:<host>`, or history synthesised below.
    */
   instanceId?: string;
   /** Absent ⇒ this operation ran in no conversation, or has not finished writing its position. */
@@ -111,10 +95,7 @@ export interface SessionBand {
 
 /** What a segment is grouped by. A piece with no session is its own thread and cannot be shared. */
 function keyOf(piece: SessionPiece): string {
-  // Run and instance, for the same reason the join uses both: a legacy journal's counter ids repeat
-  // across runs, and two runs' session-less pieces sharing a key would be drawn as one panel.
-  const run = piece.node.runId;
-  return piece.sessionId ?? (run === undefined ? `#${piece.node.instanceId}` : `#${run}:${piece.node.instanceId}`);
+  return piece.sessionId ?? `#${piece.node.instanceId}`;
 }
 
 /**
@@ -124,75 +105,35 @@ function keyOf(piece: SessionPiece): string {
  * conversation belongs in that conversation's panel, and a view that nested by state would put it
  * two boxes away from the turns it is answering.
  *
- * `runId` is NOT a filter. It is the run a single-run projection belongs to, for a tree whose nodes
- * carry no `runId` of their own — a folded tree stamps every node and needs no such fallback. The
- * conversation being the TASK's rather than the newest run's is the whole point: a resumed run
- * dispatches only what it did not replay, so reading one run alone shows a conversation with holes
- * where the replayed states are, and each of those holes used to be drawn as a panel reading "this
- * state ran no model call" about a state that had one.
- *
  * A state is a piece when it RAN something. A composite that only orchestrates contributes nothing —
  * it has no session, and the panel it used to get was filled by whichever conversation happened to be
  * last in the task, which is the bug this rewrite exists to fix. A leaf is always a piece even with
  * no session row, because "this state ran no model call" is an answer and dropping it would lose a
  * run from the picture entirely.
  */
-export function piecesOf(
-  root: InstanceNode | undefined,
-  history: readonly SessionRef[],
-  runId?: number,
-): SessionPiece[] {
+export function piecesOf(root: InstanceNode | undefined, history: readonly SessionRef[]): SessionPiece[] {
   if (root === undefined) return [];
   /**
-   * By ADDRESS where there is one, and by run-and-instance otherwise.
-   *
-   * Counter-minted ids repeated across runs, so `#i2` named a different state in each one — an
-   * unscoped join on the instance alone matched this run's second instance against every older
-   * run's, and the way that failed was silent: a panel drawn with another run's transcript in it.
-   * Durable ids cannot repeat, but legacy journals still hold counters, so the fallback pair stays
-   * run-scoped.
-   *
-   * But the pair is the WRONG key for a resumed task, and the tree is what makes it wrong. A replayed
-   * operation is never dispatched, so it writes no session position — the conversation stays under
-   * the id the ORIGINAL run recorded it beneath, which is run-scoped too (`t-.../2/#i9`). `foldRuns`
-   * merges by position and the later node wins outright, so the folded tree points every replayed
-   * state at the resumed run, where there is nothing to find. Every state a resume replayed came back
-   * as "this state ran no model call" — about states that had made one, and whose transcript was
-   * sitting in the database the whole time.
-   *
-   * The address is the fix and it is the reason the address exists: it is the one name that means the
-   * same thing in two runs (see `SessionRef.address`). Keyed by it, a folded node collects the calls
-   * made at its position by ANY run, which is what "the task's conversation" has meant all along.
+   * By INSTANCE ID, which is durable and continues across a stop and its resume (Identity and
+   * Resume �05) — so a node collects every call its instance ever made, however many stretches of
+   * execution they span. History with no node in the tree (a chat child, a legacy attempt the
+   * machine-root filter dropped) is synthesised below rather than lost.
    */
   const byInstance = new Map<string, SessionRef[]>();
-  const byAddress = new Map<string, SessionRef[]>();
-  const at = (run: number | undefined, instance: string): string => `${run ?? runId ?? ""}:${instance}`;
-  const push = (map: Map<string, SessionRef[]>, key: string, ref: SessionRef): void => {
-    const list = map.get(key);
-    if (list === undefined) map.set(key, [ref]);
-    else list.push(ref);
-  };
   for (const ref of history) {
-    push(byInstance, at(ref.runId, ref.instanceId), ref);
-    if (ref.address !== undefined) push(byAddress, JSON.stringify(ref.address), ref);
+    const list = byInstance.get(ref.instanceId);
+    if (list === undefined) byInstance.set(ref.instanceId, [ref]);
+    else list.push(ref);
   }
 
   const out: SessionPiece[] = [];
   const visit = (node: InstanceNode): void => {
-    // The address first, because it answers for every run at this position; the pair only ever
-    // answers for one. A node with no address is a run journaled before they were projected.
-    const found =
-      node.address !== undefined ? byAddress.get(JSON.stringify(node.address)) : byInstance.get(at(node.runId, node.instanceId));
-    // Oldest first, then by position within a conversation: two runs' calls at one address are two
-    // passes at the same work, and the order they happened in is the order to read them in.
-    const refs = [...(found ?? [])].sort((a, b) => a.runId - b.runId || a.seq - b.seq);
+    const found = byInstance.get(node.instanceId);
+    // In the order they happened, which within one instance is position order.
+    const refs = [...(found ?? [])].sort((a, b) => a.seq - b.seq);
     for (const ref of refs) {
       out.push({
         node,
-        // WHOSE work this is, which the node can no longer say once the join is by address: the
-        // folded node names the newest run at this position, and the piece names the run that
-        // actually made the call. `runForksOf` is the reader that must not confuse the two.
-        runId: ref.runId,
         instanceId: ref.instanceId,
         sessionId: ref.sessionId,
         seq: ref.seq,
@@ -233,36 +174,17 @@ export function piecesOf(
   visit(root);
 
   /**
-   * Operations the FOLDED TREE has no node for — an earlier run's work that a later run overwrote.
+   * Operations the TREE has no node for — a chat child filed beside its host, or a legacy
+   * attempt's work the machine-root filter keeps out of the tree. The call is still in the history,
+   * still cost money and still said things, and without this it is on screen nowhere.
    *
-   * `mergeNodes` merges by position and the later run wins, so a state that ran in run 1 and again in
-   * run 2 leaves one node, run 2's. The earlier call is still in the history, still cost money and
-   * still said things, and without this it is on screen nowhere: the fork mark would name a side that
-   * has no panels, which is the same disappearance the mark exists to stop.
-   *
-   * Synthesised from the ref, which carries everything a panel needs — the state, the run, the span.
-   * A node built here is never walked into: it has no children by construction, because a composite
-   * writes no session ref.
+   * Synthesised from the ref, which carries everything a panel needs — the state, the span. A node
+   * built here is never walked into: it has no children by construction, because a composite writes
+   * no session ref.
    */
-  /**
-   * What has already been drawn, keyed by the RECORD rather than by the node that drew it.
-   *
-   * The two were the same thing while the join was `(run, instance)` — a piece could only ever come
-   * from a ref with the node's own pair. Under the address join they part company for exactly the
-   * case this synthesis exists for: a folded node from run 4 drawing run 2's call is `4:#i5` holding
-   * a record filed under `2:#i9`, so a key taken off the node matches no ref and every conversation
-   * on the page was synthesised a second time beside itself. Two panels of the same words, and — the
-   * louder symptom — two sides at every address, which `runForksOf` read as a fork of the resumed
-   * run against the run it replayed, under almost every panel in the conversation.
-   */
-  const drawn = new Set(
-    out.map(
-      (piece) =>
-        `${piece.runId ?? piece.node.runId ?? runId ?? ""}:${piece.instanceId ?? piece.node.instanceId}:${piece.seq ?? ""}`,
-    ),
-  );
+  const drawn = new Set(out.map((piece) => `${piece.instanceId ?? piece.node.instanceId}:${piece.seq ?? ""}`));
   for (const ref of history) {
-    if (drawn.has(`${ref.runId}:${ref.instanceId}:${ref.seq}`)) continue;
+    if (drawn.has(`${ref.instanceId}:${ref.seq}`)) continue;
     out.push({
       node: {
         instanceId: ref.instanceId,
@@ -272,7 +194,6 @@ export function piecesOf(
         superseded: false,
         startedAt: ref.startedAt ?? ref.at,
         endedAt: ref.at,
-        runId: ref.runId,
         ...(ref.address !== undefined ? { address: ref.address } : {}),
         children: [],
       },
@@ -427,63 +348,6 @@ export function forksOf(pieces: readonly SessionPiece[]): Map<string, SessionPie
   return out;
 }
 
-/**
- * One run-scale divergence: where the task divided, and the runs whose own work begins there.
- *
- * A run forks at the first operation it DISPATCHED rather than replayed — `RunView.forkedAt`, written
- * on the row when the resume plan was made. Everything before it that run took from the record, so it
- * is shared with whichever earlier runs produced it; everything from there is the run's own. Runs
- * that begin at the same place are the sides of one mark.
- *
- * Grouped by the address SERIALIZED, which is a map key and nothing more — the address itself is
- * compared structurally, and is never encoded to be stored or sent.
- *
- * A place with one side is not a fork: the first run of a task diverges from nothing, and so does
- * every run of a task nobody has resumed.
- */
-export interface RunFork {
-  /** Where the sides diverge — the address every side ran for itself. */
-  at: InstanceAddress;
-  /** The runs that ran it, oldest first. */
-  sides: Array<{ runId: number; piece: SessionPiece }>;
-}
-
-/**
- * Every place the TASK divided: an address more than one run did its own work at.
- *
- * The same shape as {@link forksOf} one scale up, and for the same reason. A session forks when two
- * calls claim one position; a task forks when two RUNS dispatch one address — and the second is what
- * a restart, a retry and a resume-into-a-failed-state all produce. Everything above such a place the
- * later run replayed, which is to say it is shared; everything from there is that run's own.
- *
- * Derived from the pieces rather than from `RunView.forkedAt`, and that is deliberate: a side of a
- * mark has to be a side you can READ, and a piece is exactly the evidence that a run has panels here
- * to show. `forkedAt` answers the other question — where a run's own work begins, which is what says
- * a run REPLAYED an address rather than never reaching it — and a run that replayed this address is
- * correctly not a side of it: it produced nothing here to choose.
- *
- * One side is not a fork. Most addresses in most tasks were run exactly once.
- */
-export function runForksOf(pieces: readonly SessionPiece[]): RunFork[] {
-  const at = new Map<string, RunFork>();
-  for (const piece of pieces) {
-    const address = piece.node.address;
-    // The PIECE's run, not the node's — see `SessionPiece.runId`. A folded node names the newest run
-    // at its position, so reading the run off it made every address a resume walked over look like
-    // two sides: the original run's work, and the resumed run "doing" the same address by replaying
-    // it. A replay produces nothing to read and is not a side, which is what this file already said
-    // and could not tell, because the only evidence it had was a node that had been overwritten.
-    const runId = piece.runId ?? piece.node.runId;
-    if (address === undefined || runId === undefined) continue;
-    const key = JSON.stringify(address);
-    const held = at.get(key);
-    if (held === undefined) at.set(key, { at: address, sides: [{ runId, piece }] });
-    else if (!held.sides.some((side) => side.runId === runId)) held.sides.push({ runId, piece });
-  }
-  for (const fork of at.values()) fork.sides.sort((a, c) => a.piece.startedAt - c.piece.startedAt);
-  return [...at.values()].filter((fork) => fork.sides.length > 1);
-}
-
 /** Whether two addresses name the same place. Structural, because an address is not a string. */
 export function sameAddress(a: InstanceAddress | undefined, c: InstanceAddress | undefined): boolean {
   if (a === undefined || c === undefined) return a === c;
@@ -513,13 +377,13 @@ export function startersOf(bands: readonly SessionBand[]): Map<string, SessionPi
 }
 
 /** Every instance whose transcript the panels will need — what the host has to have fetched. */
-export function instancesOf(bands: readonly SessionBand[]): Array<{ runId?: number; instanceId: string }> {
-  const seen = new Map<string, { runId?: number; instanceId: string }>();
+export function instancesOf(bands: readonly SessionBand[]): Array<{ instanceId: string }> {
+  const seen = new Map<string, { instanceId: string }>();
   for (const band of bands) {
     for (const segment of band.segments) {
       for (const piece of segment.pieces) {
         const at = recordAt(piece);
-        seen.set(`${at.runId ?? ""}:${at.instanceId}`, at);
+        seen.set(at.instanceId, at);
       }
     }
   }
@@ -529,24 +393,12 @@ export function instancesOf(bands: readonly SessionBand[]): Array<{ runId?: numb
 /**
  * Where a piece's transcript is filed — the ONE answer, so the fetch and the read cannot disagree.
  *
- * The RUN as well as the instance: ids are minted per run, and a transcript fetched by the id alone
- * comes back from whichever run wrote it last — someone else's words, silently.
- *
- * And the piece's own pair before the node's, which is the part a resume broke. The node is the
- * folded tree's, so for a state a later run REPLAYED it names that run and an instance which never
- * wrote a record; the words are under the run that actually made the call. Falling back to the node
- * is right for a leaf with no session at all, where there is nothing else to name.
+ * The piece's own instance before the node's: a chat child's record is filed under `chat:<host>`,
+ * which the tree holds no node for. Falling back to the node is right for a leaf with no session at
+ * all, where there is nothing else to name.
  */
-export function recordAt(piece: SessionPiece): { runId?: number; instanceId: string } {
-  // A node with no run is a SINGLE-RUN projection, and there the bare instance id is the whole key —
-  // `sessionKey`'s own rule, because there is no second run to confuse it with. The piece's `runId`
-  // comes off a `SessionRef`, which always carries one, so preferring it here would stamp a run onto
-  // every key in a view that has none and miss the cache the loader filled.
-  if (piece.node.runId === undefined) return { instanceId: piece.node.instanceId };
-  return {
-    runId: piece.runId ?? piece.node.runId,
-    instanceId: piece.instanceId ?? piece.node.instanceId,
-  };
+export function recordAt(piece: SessionPiece): { instanceId: string } {
+  return { instanceId: piece.instanceId ?? piece.node.instanceId };
 }
 
 // --- what no panel can hold ---------------------------------------------------
@@ -802,53 +654,6 @@ export function notesOf(turns: readonly ConversationTurn[], root?: InstanceNode)
  * "the conversation was already under way", which drew `entered product → context` UNDERNEATH the
  * context conversation it opened.
  */
-/**
- * Which run-scale marks go above which band — one bucket per gap, as {@link placeNotes} does.
- *
- * A mark belongs immediately above the first panel of the side it opens: the fork's address is where
- * a run's own work BEGINS, so the panel at that address is that side's first, and the divergence is
- * the gap in front of it. The root fork — runs that share nothing — goes above everything.
- *
- * A mark whose address matches no panel is dropped rather than floated to the end. It names a place
- * this view is not showing (a walk into a child, a state whose record was pruned), and a fork drawn
- * away from the work it divides is pointing at the wrong thing.
- */
-export function placeRunForks(forks: readonly RunFork[], bands: readonly SessionBand[]): RunFork[][] {
-  const buckets: RunFork[][] = bands.map(() => []);
-  buckets.push([]);
-  for (const fork of forks) {
-    const first = fork.sides[0]?.piece;
-    if (first === undefined) continue;
-    const where = bands.findIndex((band) => band.segments.some((segment) => segment.pieces.includes(first)));
-    if (where < 0) continue;
-    // Only a fork that OPENS a panel belongs in the gap above it. One that divides a panel part-way
-    // down is drawn inside it, between the two cards — see {@link runForkAt}. Otherwise the mark
-    // would sit above work that is shared, and the one thing it claims is that everything above it
-    // is common to both sides.
-    if (bands[where]!.segments.some((segment) => segment.pieces[0] === first)) buckets[where]!.push(fork);
-  }
-  return buckets;
-}
-
-/**
- * Forks by the piece they open, for a panel that has to draw one BETWEEN two of its cards.
- *
- * A panel holds every operation of one conversation, so a workflow that puts several states on one
- * thread (`environment.session`) has the shared work and the divided work as cards in the same
- * sheet. The gap above the sheet is then the wrong place: it puts a shared operation below the line.
- *
- * Identity, not a key: these are the very piece objects the bands were built from, so a `Map` on
- * them needs no serialisation and cannot collide.
- */
-export function runForkAt(forks: readonly RunFork[]): Map<SessionPiece, RunFork> {
-  const at = new Map<SessionPiece, RunFork>();
-  for (const fork of forks) {
-    const first = fork.sides[0]?.piece;
-    if (first !== undefined) at.set(first, fork);
-  }
-  return at;
-}
-
 export function placeNotes(notes: readonly BandNote[], bands: readonly SessionBand[]): BandNote[][] {
   const buckets: BandNote[][] = bands.map(() => []);
   buckets.push([]);

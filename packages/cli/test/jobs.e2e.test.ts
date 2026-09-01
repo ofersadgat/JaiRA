@@ -92,8 +92,8 @@ describe("a second process", () => {
     const taskId = await createTask();
     // Simulate a live owner elsewhere.
     const project = openProject(dir, { baseDir: testHome() });
-    project.runtime.beginRun(taskId, "hash", Date.now());
-    project.jobs.claimRun({ taskId, runId: 1, ownerToken: newOwnerToken(), pid: 999, nowMs: Date.now() });
+    project.runtime.beginTask(taskId, "hash", Date.now());
+    project.jobs.claimRun({ taskId, ownerToken: newOwnerToken(), pid: 999, nowMs: Date.now() });
     project.close();
 
     const res = await cli(["task", "start", taskId, "--fake", JSON.stringify(happyRules()), "--interactions", gate]);
@@ -105,9 +105,9 @@ describe("a second process", () => {
   it("requests a cancel instead of writing a terminal status", async () => {
     const taskId = await createTask();
     const project = openProject(dir, { baseDir: testHome() });
-    project.runtime.beginRun(taskId, "hash", Date.now());
+    project.runtime.beginTask(taskId, "hash", Date.now());
     project.runtime.setStatus(taskId, "running", Date.now());
-    project.jobs.claimRun({ taskId, runId: 1, ownerToken: newOwnerToken(), nowMs: Date.now() });
+    project.jobs.claimRun({ taskId, ownerToken: newOwnerToken(), nowMs: Date.now() });
     project.close();
 
     const res = await cli(["task", "cancel", taskId]);
@@ -130,7 +130,7 @@ describe("orphan reporting", () => {
     const project = openProject(dir, { baseDir: testHome() });
     const stale = Date.now() - 10 * 60_000;
     const token = newOwnerToken();
-    project.jobs.claimRun({ taskId: "t-old", runId: 1, ownerToken: token, nowMs: stale });
+    project.jobs.claimRun({ taskId: "t-old", ownerToken: token, nowMs: stale });
     project.jobs.spawned({ ownerToken: token, taskId: "t-old", command: "claude -p", pid: 4321, nowMs: stale });
     project.close();
 

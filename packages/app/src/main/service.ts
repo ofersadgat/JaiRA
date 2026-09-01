@@ -64,7 +64,7 @@ import {
   RunOwner,
   runCauses,
   runCostUsd,
-  addressesByRun,
+  instanceAddresses,
   stateSessions,
   cancelTask,
   createTask,
@@ -704,7 +704,6 @@ export { Refusal } from "@jaira/shared";
  */
 const POINTERS = {
   taskId: "string",
-  runId: "number",
   instanceId: "string",
   jobId: "number",
   project: "string",
@@ -738,7 +737,7 @@ function entryOfRecord(record: LogRecord): Omit<LogEntry, "id" | "at"> {
     level: record.level,
     source: record.scope,
     message: record.message,
-    ...(pointers as { taskId?: string; runId?: number; instanceId?: string; jobId?: number; project?: string }),
+    ...(pointers as { taskId?: string; instanceId?: string; jobId?: number; project?: string }),
     ...(Object.keys(detail).length > 0 ? { detail: detail as JsonValue } : {}),
   };
 }
@@ -924,7 +923,6 @@ export class AppService {
           const request = session.approvalsSeen.get(requestId);
           session.project.commands.record({
             taskId: run.taskId,
-            runId: run.runId,
             tool: request?.tool ?? "unknown",
             ...(request?.command !== undefined ? { command: request.command } : {}),
             decision: decision.decision === "allow" ? "approved" : "denied",
@@ -1578,15 +1576,14 @@ export class AppService {
     return this.diagnostics.list(request);
   }
 
-  /** The child processes one run started, newest last. */
-  listJobs(request: { project?: string; taskId?: string; runId?: number } = {}): JobRow[] {
+  /** The child processes one task's run started, newest last. */
+  listJobs(request: { project?: string; taskId?: string } = {}): JobRow[] {
     // No silent fall-through to the base root: a job id is a rowid in ONE database, so answering
     // an unqualified ask with the system project's rows would show an unrelated process under an id
     // the caller took from somewhere else.
     const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
     if (session === undefined) return [];
-    const rows = request.taskId === undefined ? session.project.jobs.live(Date.now()) : session.project.jobs.list(request.taskId);
-    return request.runId === undefined ? rows : rows.filter((row) => row.runId === request.runId);
+    return request.taskId === undefined ? session.project.jobs.live(Date.now()) : session.project.jobs.list(request.taskId);
   }
 
   /**
@@ -1620,7 +1617,6 @@ export class AppService {
         taskId: pending.taskId,
         component: pending.component,
         inputs: pending.inputs,
-        ...(session.live.get(pending.taskId) !== undefined ? { runId: session.live.get(pending.taskId)!.runId } : {}),
         ...(pending.about !== undefined ? { about: pending.about } : {}),
         ...(pending.subjectProject !== undefined ? { subjectProject: pending.subjectProject } : {}),
         createdAt: Date.now(),
@@ -1872,18 +1868,12 @@ export class AppService {
   effectiveState(request: { stateId: string; taskId?: string; instanceId?: string; project?: string }): EffectiveState {
     const open = this.session(request.project);
     const project = open.project;
-    const run = request.taskId === undefined ? undefined : project.runtime.listRuns(request.taskId).at(-1);
-    const pinned =
-      request.taskId === undefined
-        ? undefined
-        : // The task's own pin first: it is what a re-run would use, and what the board reports drift
-          // against. The last run's is the fallback for a task whose row carries none.
-          (project.runtime.get(request.taskId)?.snapshotHash ?? run?.snapshotHash);
+    const pinned = request.taskId === undefined ? undefined : project.runtime.get(request.taskId)?.snapshotHash;
     const document = effectiveState(project, request.stateId, this.browseWorkflowsIn(open), {
       ...(pinned !== undefined ? { snapshotHash: pinned } : {}),
     });
-    if (request.taskId === undefined || run === undefined) return document;
-    const values = this.runValuesOf(open, request.taskId, run.id, request.stateId, request.instanceId);
+    if (request.taskId === undefined) return document;
+    const values = this.runValuesOf(open, request.taskId, request.stateId, request.instanceId);
     return values === undefined ? document : { ...document, values };
   }
 
@@ -1903,11 +1893,10 @@ export class AppService {
   private runValuesOf(
     open: ProjectSession,
     taskId: string,
-    runId: number,
     stateId: string,
     instanceId?: string,
   ): EffectiveStateValues | undefined {
-    const events = open.project.events.list(taskId, { runId });
+    const events = open.project.events.list(taskId);
     const entered = events.filter(
       (stored) => stored.event.type === "instance.entered" && stored.event.stateId === stateId,
     );
@@ -1939,11 +1928,11 @@ export class AppService {
     // `operation.completed` also carries a content id, and it is the wrong key here: a record that
     // sat in a conversation — which every prompt op does — is stored under `#i<instance>:<seq>`, and
     // only an unplaced one is filed under its content hash.
-    const placed = this.sessionHistory({ taskId, runId, project: open.key }).find((row) => row.instanceId === id);
+    const placed = this.sessionHistory({ taskId, project: open.key }).find((row) => row.instanceId === id);
     const output =
       placed === undefined
         ? undefined
-        : sessionStoreFor(open.project, { taskId, runId }).at(placed.sessionId, placed.seq)?.value;
+        : sessionStoreFor(open.project, { taskId }).at(placed.sessionId, placed.seq)?.value;
 
     return {
       instanceId: id,
@@ -1978,7 +1967,7 @@ export class AppService {
    * One half of what selecting a task at a leaf must answer. The other is {@link sessionView}, which
    * takes one of these rows and returns the transcript behind it.
    */
-  sessionHistory(request: { taskId: string; runId?: number; project?: string }): SessionRef[] {
+  sessionHistory(request: { taskId: string; project?: string }): SessionRef[] {
     const session = this.session(request.project);
     const costs = new Map<string, { status: "success" | "error"; costUsd?: number; metrics?: RunMetrics }>();
     // When each CALL began, which `stateSessions` cannot see — it reads `operation.completed` alone,
@@ -1990,13 +1979,13 @@ export class AppService {
     // both of them the same timestamp — putting the older call at the newer one's position, which is
     // exactly the ordering the conversation panel lays out by.
     const starts = new Map<string, number[]>();
-    for (const row of session.project.events.list(request.taskId, ...(request.runId !== undefined ? [{ runId: request.runId }] : []))) {
+    for (const row of session.project.events.list(request.taskId)) {
       if (row.event.type === "operation.started") {
-        const key = `${row.runId}:${row.event.instanceId}`;
+        const key = row.event.instanceId;
         starts.set(key, [...(starts.get(key) ?? []), row.createdAt]);
       } else if (row.event.type === "operation.completed") {
         const metrics = runMetricsOf(row.event.metrics);
-        costs.set(`${row.runId}:${row.event.instanceId}`, {
+        costs.set(row.event.instanceId, {
           status: "success",
           ...(typeof row.event.metrics?.costUsd === "number" ? { costUsd: row.event.metrics.costUsd } : {}),
           ...(metrics !== undefined ? { metrics } : {}),
@@ -2007,7 +1996,7 @@ export class AppService {
         // before failing spent it just as surely as one that succeeded.
         const failed = row.event as { instanceId?: string; metrics?: { costUsd?: number } };
         const metrics = runMetricsOf(failed.metrics as never);
-        costs.set(`${row.runId}:${failed.instanceId}`, {
+        costs.set(failed.instanceId ?? "", {
           status: "error",
           ...(typeof failed.metrics?.costUsd === "number" ? { costUsd: failed.metrics.costUsd } : {}),
           ...(metrics !== undefined ? { metrics } : {}),
@@ -2025,23 +2014,19 @@ export class AppService {
      * it. Memoised for the same reason the costs above are folded in one pass: a run of forty states
      * through four sessions should open four lineage reads, not forty.
      *
-     * Scoped to the run that WROTE the session, because a session id is instance-scoped and instance
-     * ids restart on every run — the same reason `sessionView` opens its store per row.
      */
-    // Every operation's place in the workflow, per run — the one name two runs share. Without it a
-    // call the folded tree dropped is on the page with nothing to group it by, and a run-scale fork
-    // loses the sides it exists to offer.
-    const addresses = addressesByRun(session.project, request.taskId);
+    // Every operation's place in the workflow — the one name a stop and its continuation share.
+    const addresses = instanceAddresses(session.project, request.taskId);
+    const store = sessionStoreFor(session.project, { taskId: request.taskId });
     const lineage = new Map<string, { parent: string; at: number } | undefined>();
-    const branchOf = (runId: number, sessionId: string): { parent: string; at: number } | undefined => {
-      const key = `${runId}:${sessionId}`;
-      if (!lineage.has(key)) {
-        lineage.set(key, sessionStoreFor(session.project, { taskId: request.taskId, runId }).lineageOf(sessionId));
+    const branchOf = (sessionId: string): { parent: string; at: number } | undefined => {
+      if (!lineage.has(sessionId)) {
+        lineage.set(sessionId, store.lineageOf(sessionId));
       }
-      return lineage.get(key);
+      return lineage.get(sessionId);
     };
-    return stateSessions(session.project, request.taskId, request.runId).map((s) => {
-      const key = `${s.runId}:${s.instanceId}`;
+    return stateSessions(session.project, request.taskId).map((s) => {
+      const key = s.instanceId;
       const nth = taken.get(key) ?? 0;
       taken.set(key, nth + 1);
       const startedAt = starts.get(key)?.[nth];
@@ -2051,9 +2036,8 @@ export class AppService {
       const settled = costs.get(key);
       const status =
         s.outcome === "interrupted" || s.outcome === "running" || s.outcome === "error" ? s.outcome : settled?.status;
-      const branch = branchOf(s.runId, s.sessionId);
+      const branch = branchOf(s.sessionId);
       return {
-        runId: s.runId,
         instanceId: s.instanceId,
         stateId: s.stateId,
         sessionId: s.sessionId,
@@ -2063,9 +2047,7 @@ export class AppService {
         ...(settled ?? {}),
         ...(status !== undefined ? { status } : {}),
         ...(branch !== undefined ? { branch } : {}),
-        ...(addresses.get(`${s.runId}:${s.instanceId}`) !== undefined
-          ? { address: addresses.get(`${s.runId}:${s.instanceId}`)! }
-          : {}),
+        ...(addresses.get(s.instanceId) !== undefined ? { address: addresses.get(s.instanceId)! } : {}),
       };
     });
   }
@@ -2094,26 +2076,25 @@ export class AppService {
    * hash — one round trip for a whole conversation rather than one per state, and no attribution by
    * time, which is the thing that would be ambiguous when two instances run at once.
    */
-  runRecords(request: { taskId: string; runId: number; project?: string }): OperationRecordView[] {
+  runRecords(request: { taskId: string; project?: string }): OperationRecordView[] {
     const session = this.session(request.project);
-    return sessionStoreFor(session.project, { taskId: request.taskId, runId: request.runId }).records();
+    return sessionStoreFor(session.project, { taskId: request.taskId }).records();
   }
 
-  sessionView(request: { taskId: string; runId?: number; instanceId?: string; project?: string }): SessionView {
+  sessionView(request: { taskId: string; instanceId?: string; project?: string }): SessionView {
     const session = this.session(request.project);
-    const history = this.sessionHistory(request);
-    // The LAST match, not the first. Without a `runId` the history spans every run of the task, and
-    // a legacy journal's counter ids restart at 1 on each — so `#i2` named the second instance of
-    // every run there had ever been. Durable UUIDs cannot collide like that, but old rows are still
-    // read here, and taking the first match showed run 1's conversation for a card belonging to run
-    // 4 — the same failure as showing none except that it looks like an answer.
+    const history = this.sessionHistory({ taskId: request.taskId, ...(request.project !== undefined ? { project: request.project } : {}) });
+    // The LAST match, not the first. The history spans the task's whole life, and a legacy journal's
+    // counter ids restarted at 1 on each run — so `#i2` named the second instance of every run there
+    // had ever been. Durable UUIDs cannot collide like that, but old rows are still read here, and
+    // taking the first match showed run 1's conversation for a card belonging to run 4 — the same
+    // failure as showing none except that it looks like an answer.
     const row =
       request.instanceId === undefined
         ? history.at(-1)
         : [...history].reverse().find((h) => h.instanceId === request.instanceId);
     const base = {
       taskId: request.taskId,
-      runId: row?.runId ?? request.runId ?? 0,
       instanceId: row?.instanceId ?? request.instanceId ?? "",
       stateId: row?.stateId ?? "",
       sessionId: row?.sessionId ?? "",
@@ -2123,9 +2104,8 @@ export class AppService {
     if (row === undefined) {
       return { ...base, empty: "this state ran no model call, so there is no conversation to show" };
     }
-    // Scoped to the RUN that wrote it: a session id is instance-scoped and instance ids restart on
-    // every run, so an unscoped read would find whichever run happened to write that id last.
-    const store = sessionStoreFor(session.project, { taskId: request.taskId, runId: row.runId });
+    // Scoped to the task that wrote it, which is where its aliases and legacy spellings resolve.
+    const store = sessionStoreFor(session.project, { taskId: request.taskId });
     const record = store.at(row.sessionId, row.seq);
     if (record === undefined) {
       return { ...base, empty: "this run was recorded before conversations were kept" };
@@ -2319,18 +2299,15 @@ export class AppService {
     const project = open.project;
     const days = request.olderThanDays ?? 0;
     if (!Number.isFinite(days) || days < 0) throw this.refusal("project", "olderThanDays must be a non-negative number");
-    const keep = request.keepRunsPerTask ?? 1;
-    if (!Number.isInteger(keep) || keep < 0) throw this.refusal("project", "keepRunsPerTask must be a non-negative integer");
     const result = pruneHistory(project, {
       before: Date.now() - days * 86_400_000,
-      keepRunsPerTask: keep,
       dryRun: request.apply !== true,
     });
-    if (!result.dryRun && result.runs.length > 0) {
-      // Run history backs the detail view and the board's finished cards.
+    if (!result.dryRun && result.tasks.length > 0) {
+      // History backs the detail view and the board's finished cards.
       this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
       this.publishFor(open, { type: "store:invalidate", scope: "board" });
-      for (const run of result.runs) this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: run.taskId });
+      for (const task of result.tasks) this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: task.taskId });
     }
     return { ...result, remaining: historySize(project) };
   }
@@ -2416,7 +2393,7 @@ export class AppService {
     return { approved };
   }
 
-  async startTask(request: StartRunRequest): Promise<{ taskId: string; runId: number }> {
+  async startTask(request: StartRunRequest): Promise<{ taskId: string }> {
     // The session that HOLDS the task, which is also whose config and secrets govern it — see the
     // rule on {@link startRun}. For a system task those are the shared root's, which is the pairing
     // a workflow that lives in the shared root wants.
@@ -2514,7 +2491,7 @@ export class AppService {
       /** Where this run's own work begins, recorded on its row — see `RunRow.forkedAt`. */
       forkedAt?: InstanceAddress;
     },
-  ): Promise<{ taskId: string; runId: number }> {
+  ): Promise<{ taskId: string }> {
     const project = open.project;
     const config = opts.config;
     if (open.live.has(taskId)) throw this.refusal("run", `task '${taskId}' is already running in this process`);
@@ -2628,7 +2605,6 @@ export class AppService {
       artifactDir: config.artifacts.dir,
       inlineMaxBytes: config.artifacts.inlineMaxBytes,
       taskId,
-      runId: started.runId,
       workspaceRoot: workspace.root,
       projectDir: project.paths.projectDir,
       jairaDir: project.paths.jairaDir,
@@ -2658,7 +2634,7 @@ export class AppService {
       policyNeedsApproval: policyCanEscalate(config.policy),
     });
     if (gateIssues.length > 0) {
-      finishTaskRun(project, taskId, started.runId, "failed", {
+      finishTaskRun(project, taskId, "failed", {
         failure: { classification: "permanent", reason: gateIssues[0]!.message },
       });
       throw this.refusal("run", gateIssues.map((i) => `${i.stateId}: ${i.message}`).join("; "));
@@ -2666,7 +2642,7 @@ export class AppService {
     const abort = new AbortController();
     let settle!: () => void;
     const done = new Promise<void>((resolve) => (settle = resolve));
-    open.live.set(taskId, { taskId, runId: started.runId, abort, done });
+    open.live.set(taskId, { taskId, abort, done });
 
     // Claim the run (DESIGN §4.2a). Two things follow: another process opening this
     // project will see a live heartbeat and leave the task alone instead of
@@ -2679,10 +2655,9 @@ export class AppService {
     owner = new RunOwner({
       jobs: project.jobs,
       taskId,
-      runId: started.runId,
       output,
       onObserverError: (error, phase) =>
-        this.log({ level: "warn", source: "process", message: `recording a child process failed (${phase}): ${error.message}`, project: open.key, taskId, runId: started.runId }),
+        this.log({ level: "warn", source: "process", message: `recording a child process failed (${phase}): ${error.message}`, project: open.key, taskId }),
       onCancelRequested: () => this.cancelTaskIn(open, taskId),
     });
     observe = owner.observer();
@@ -2746,7 +2721,7 @@ export class AppService {
     // throttle, so a crash loses at most one flush window of finished turns. The store is scoped
     // exactly as the run's own record store is — same task, same run — which is what makes the
     // position key match the row `withRecord` claimed.
-    const liveStore = sessionStoreFor(project, { taskId, runId: started.runId });
+    const liveStore = sessionStoreFor(project, { taskId });
     // The record a flush lands in, resolved from the position ONCE and held while that position is
     // what the live turn reports. A flush addresses a record, not a place: when the handle coming back
     // says a call is not in the conversation the store assumed, the record moves to a branch, and a
@@ -2778,7 +2753,6 @@ export class AppService {
       this.publish({
         type: "session:turn",
         taskId,
-        runId: started.runId,
         n,
         ...(delta.session !== undefined ? { sessionId: delta.session.id, seq: delta.session.seq } : {}),
         ...(delta.stateId !== undefined ? { stateId: delta.stateId } : {}),
@@ -2796,7 +2770,7 @@ export class AppService {
     // messages, thinking, tool calls, the provider's own handle — and dropped the whole thing when the
     // process exited. Scoped to this run, so a stored transcript can be found from the task that made
     // it (`stateSessions` is the other half of that join).
-    const session = sessionServicesFor({ inner: sessionStoreFor(project, { taskId, runId: started.runId }) });
+    const session = sessionServicesFor({ inner: sessionStoreFor(project, { taskId }) });
     // A delegated agent's record is its stream, and its stream is not its whole story: the agent's
     // own session file holds the context injections, `toolUseResult` records and line threading that
     // never ride the wire — and the file is the agent's, prunable on its schedule. Captured into the
@@ -2813,7 +2787,6 @@ export class AppService {
       open.approvals.noteDecision(entry);
       project.commands.record({
         taskId,
-        runId: started.runId,
         tool: entry.tool,
         ...(entry.command !== undefined ? { command: entry.command } : {}),
         ...(entry.parsed !== undefined ? { parsed: entry.parsed as never } : {}),
@@ -2843,7 +2816,7 @@ export class AppService {
     open.approvals.allow(taskId);
     const approve = open.approvals.approver({ taskId });
 
-    const recorder = project.events.recorder(taskId, started.runId);
+    const recorder = project.events.recorder(taskId);
     let seq = 0;
     // A run STARTING is the first thing anyone looking for it wants to see, and nothing said it. The
     // logs held failures and process spawns, so a run that was merely slow looked identical to a
@@ -2854,7 +2827,6 @@ export class AppService {
       message: `started ${started.meta.workflow} (${taskId})`,
       project: open.key,
       taskId,
-      runId: started.runId,
     });
     this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
 
@@ -2884,7 +2856,6 @@ export class AppService {
               this.publishFor(open, {
                 type: "engine:event",
                 taskId,
-                runId: started.runId,
                 seq: ++seq,
                 at: atMs,
                 event: event as unknown as JsonValue,
@@ -2912,12 +2883,10 @@ export class AppService {
           store: project.artifacts,
           vars: artifacts.vars,
           inlineMaxBytes: artifacts.inlineMaxBytes,
-          runId: started.runId,
           onError: (name, error) =>
             this.publish({
               type: "engine:event",
               taskId,
-              runId: started.runId,
               seq: ++seq,
               at: Date.now(),
               event: { type: "artifact.failed", name, reason: error.message } as unknown as JsonValue,
@@ -2929,14 +2898,13 @@ export class AppService {
           message: `${status} ${started.meta.workflow} (${taskId})`,
           project: open.key,
           taskId,
-          runId: started.runId,
           ...("error" in result && result.error !== undefined ? { detail: { reason: result.error.reason } } : {}),
         });
-        finishTaskRun(project, taskId, started.runId, status, {
+        finishTaskRun(project, taskId, status, {
           outputs: result.value,
           ...("error" in result && result.error !== undefined ? { failure: result.error } : {}),
         });
-        this.publishFor(open, { type: "run:finished", taskId, runId: started.runId, status });
+        this.publishFor(open, { type: "run:finished", taskId, status });
       } catch (e) {
         // A crash between beginTaskRun and finishTaskRun would otherwise leave the
         // task `running` forever (recovery would call it interrupted next open).
@@ -2948,13 +2916,12 @@ export class AppService {
           message: `the run loop crashed: ${(e as Error).message}`,
           project: open.key,
           taskId,
-          runId: started.runId,
           ...((e as Error).stack !== undefined ? { detail: { stack: (e as Error).stack! } } : {}),
         });
-        finishTaskRun(project, taskId, started.runId, "failed", {
+        finishTaskRun(project, taskId, "failed", {
           failure: { classification: "permanent", reason: (e as Error).message },
         });
-        this.publishFor(open, { type: "run:finished", taskId, runId: started.runId, status: "failed" });
+        this.publishFor(open, { type: "run:finished", taskId, status: "failed" });
       } finally {
         // Give up the claim and close any child still recorded as running, so the
         // next project open sees no phantom owner and no phantom orphans.
@@ -2976,7 +2943,7 @@ export class AppService {
       }
     })();
 
-    return { taskId, runId: started.runId };
+    return { taskId };
   }
 
   // --- continuing a conversation by hand ---------------------------------------
@@ -3035,7 +3002,7 @@ export class AppService {
         open,
         router,
         plan,
-        this.modelOfRecord(open, request.taskId, context.runId, context.position),
+        this.modelOfRecord(open, request.taskId, context.position),
         tools,
       ),
       available: this.availableFor(open, router, tools),
@@ -3122,15 +3089,15 @@ export class AppService {
    * answer exists: routing happens inside the call, so a state naming `claude-cli` and a state naming
    * nothing at all both resolve to a model that no configuration file mentions.
    */
-  private modelOfRecord(open: ProjectSession, taskId: string, runId: number, position: string): string | undefined {
+  private modelOfRecord(open: ProjectSession, taskId: string, position: string): string | undefined {
     const at = position.lastIndexOf("@");
     if (at <= 0) return undefined;
     const id = position.slice(0, at);
     const seq = Number(position.slice(at + 1));
     if (!Number.isInteger(seq)) return undefined;
-    // Scoped to the RUN that wrote it, exactly as sessionView is: a session id is instance-scoped
-    // and instance ids restart every run, so an unscoped read finds whichever run wrote that id last.
-    const store = sessionStoreFor(open.project, { taskId, runId });
+    // Scoped to the task that wrote it, exactly as sessionView is — where its aliases and legacy
+    // spellings resolve.
+    const store = sessionStoreFor(open.project, { taskId });
     // The position is where the NEXT turn goes, so the last one written is the seq below it.
     const record = store.at(id, seq - 1) ?? store.at(id, seq);
     // `record.value` is the ENVELOPE; the `LlmOutput` is its own `value` inside it — the same nesting
@@ -3371,7 +3338,7 @@ export class AppService {
     const recordedWorktree = project.runtime.get(request.taskId)?.worktreePath;
     const workspaceRoot =
       recordedWorktree !== undefined && existsSync(recordedWorktree) ? recordedWorktree : project.paths.projectDir;
-    const liveStore = sessionStoreFor(project, { taskId: request.taskId, runId: context.runId });
+    const liveStore = sessionStoreFor(project, { taskId: request.taskId });
     const stores = sessionServicesFor({ inner: liveStore });
     // The same capture `startRun` wires: a chat turn is a real delegated call, and its record would
     // otherwise be the one kind missing the agent's own session lines.
@@ -3422,7 +3389,6 @@ export class AppService {
       this.publish({
         type: "session:turn",
         taskId: request.taskId,
-        runId: context.runId,
         n,
         ...(delta.session !== undefined ? { sessionId: delta.session.id, seq: delta.session.seq } : {}),
         ...(delta.stateId !== undefined ? { stateId: delta.stateId } : {}),
@@ -3452,7 +3418,6 @@ export class AppService {
       artifactDir: config.artifacts.dir,
       inlineMaxBytes: config.artifacts.inlineMaxBytes,
       taskId: request.taskId,
-      runId: context.runId,
       workspaceRoot,
       projectDir: project.paths.projectDir,
       jairaDir: project.paths.jairaDir,
@@ -3510,7 +3475,7 @@ export class AppService {
     });
 
     const { operation } = chatOperationOf(plan, { message: request.message, session: { id: context.position } });
-    const recorder = project.events.recorder(request.taskId, context.runId);
+    const recorder = project.events.recorder(request.taskId);
     /** Push ordering for this turn's journal events — the renderer's own `seq`, as a run supplies. */
     let chatSeq = 0;
     /**
@@ -3550,7 +3515,6 @@ export class AppService {
           this.publishFor(open, {
             type: "engine:event",
             taskId: request.taskId,
-            runId: context.runId,
             seq: ++chatSeq,
             at: atMs,
             event: event as unknown as JsonValue,
@@ -3733,7 +3697,6 @@ export class AppService {
     branchAt?: string,
   ): {
     bundle: WorkflowBundle;
-    runId: number;
     /** The instance whose conversation is being continued — see below on why it may not be the one asked for. */
     hostInstanceId: string;
     stateId: string;
@@ -3743,19 +3706,17 @@ export class AppService {
   } {
     const open = this.session(projectKey);
     const project = open.project;
-    const runs = project.runtime.listRuns(taskId);
-    const run = runs[runs.length - 1];
-    if (run === undefined) throw new NoConversationHere(`task '${taskId}' has never run`);
     const task = project.runtime.get(taskId);
-    const bundle = bundleFor(project, task?.snapshotHash ?? run.snapshotHash, run.snapshotHash);
-    if (bundle === undefined) throw this.refusal("run", `the snapshot for run ${run.id} is missing`);
+    if (task?.snapshotHash === undefined) throw new NoConversationHere(`task '${taskId}' has never run`);
+    const bundle = bundleFor(project, task.snapshotHash, task.snapshotHash);
+    if (bundle === undefined) throw this.refusal("run", `the snapshot for task ${taskId} is missing`);
 
-    const { events, atMs } = eventsOf(project.events.list(taskId, { runId: run.id }));
+    const { events, atMs } = eventsOf(project.events.list(taskId));
     const tree = projectRun(events, undefined, atMs);
     const found = AppService.findInstance(tree.instances, instanceId);
     // Ordinary rather than a fault: the renderer holds an instance id from a projection main may
     // have re-read since, so a selection that is one refresh stale lands here routinely.
-    if (found === undefined) throw new NoConversationHere(`run ${run.id} has no instance ${instanceId}`);
+    if (found === undefined) throw new NoConversationHere(`task ${taskId} has no instance ${instanceId}`);
 
     // Nearest first: the clicked instance, then its ancestors.
     const path = found.path.map((node) => bundle.states[node.stateId]);
@@ -3788,21 +3749,20 @@ export class AppService {
     const chat = host.children.find((c: InstanceNode) => c.instanceId === chatId);
     return {
       bundle,
-      runId: run.id,
       hostInstanceId: host.instanceId,
       stateId: host.stateId,
       // From the host outward. `chatPlanFor` would find the same state in the longer list, but the
       // states BELOW the host are not ancestors of the conversation and have no business in it.
       path: path.slice(hostAt),
       position: (() => {
-        if (branchAt === undefined) return this.chatPositionOf(taskId, run.id, host.instanceId, projectKey);
+        if (branchAt === undefined) return this.chatPositionOf(taskId, host.instanceId, projectKey);
         // The handle came from `chat:thread`, which read this task's chain — but it may have been on
         // screen a while, and a position that names nothing here must not be written into. Checked
-        // against the RUN-SCOPED store, which is the boundary that matters: a ref only resolves in
-        // it if this run's records are what it names. Not checked against the current session id —
+        // against the TASK-SCOPED store, which is the boundary that matters: a ref only resolves in
+        // it if this task's records are what it names. Not checked against the current session id —
         // every edit forks a new branch, so turns before an earlier edit legitimately carry the id
         // the conversation had then.
-        const store = sessionStoreFor(project, { taskId, runId: run.id });
+        const store = sessionStoreFor(project, { taskId });
         const seq = Number(branchAt.slice(branchAt.lastIndexOf("@") + 1));
         if (!Number.isInteger(seq) || store.at(sessionOf(branchAt), seq) === undefined) {
           throw new NoConversationHere(`'${branchAt}' is not a message in this conversation`);
@@ -3826,8 +3786,8 @@ export class AppService {
    * Takes the HOST's id, never the clicked one: a composite has no row here at all, which is what
    * `chatContextOf` resolves before it calls this.
    */
-  private chatPositionOf(taskId: string, runId: number, hostInstanceId: string, projectKey?: string): string {
-    const history = this.sessionHistory({ taskId, runId, project: projectKey });
+  private chatPositionOf(taskId: string, hostInstanceId: string, projectKey?: string): string {
+    const history = this.sessionHistory({ taskId, project: projectKey });
     const mine = [...history]
       .reverse()
       .find((h) => h.instanceId === chatInstanceIdOf(hostInstanceId) || h.instanceId === hostInstanceId);
@@ -3868,7 +3828,7 @@ export class AppService {
       if (e instanceof NoConversationHere) return null;
       throw e;
     }
-    const store = sessionStoreFor(project, { taskId: request.taskId, runId: context.runId });
+    const store = sessionStoreFor(project, { taskId: request.taskId });
     const rows = store.transcript(context.position);
 
     const turns: SessionTurn[] = [];
@@ -3907,7 +3867,6 @@ export class AppService {
 
     const session: SessionView = {
       taskId: request.taskId,
-      runId: context.runId,
       instanceId: host,
       stateId: context.stateId,
       sessionId: sessionOf(context.position),
@@ -3944,7 +3903,6 @@ export class AppService {
     }
     return {
       taskId: request.taskId,
-      runId: context.runId,
       instanceId: host,
       session,
       points,
@@ -3963,8 +3921,7 @@ export class AppService {
    */
   private chatHostOf(taskId: string, projectKey?: string): string | null {
     const history = this.sessionHistory({ taskId, project: projectKey });
-    const run = history.at(-1)?.runId;
-    const host = history.find((h) => h.runId === run && !isChatInstance(h.instanceId));
+    const host = history.find((h) => !isChatInstance(h.instanceId));
     return host?.instanceId ?? null;
   }
 
@@ -4020,7 +3977,7 @@ export class AppService {
    * the engine would DISPATCH, and for a state that already wrote a file that is a double-apply
    * nobody asked for. Better to say so and let the caller start over deliberately.
    */
-  async resumeTask(request: StartRunRequest): Promise<{ taskId: string; runId: number }> {
+  async resumeTask(request: StartRunRequest): Promise<{ taskId: string }> {
     const open = this.session(request.project);
     const taskId = request.taskId;
     const at = { project: open.key, taskId };
@@ -4117,30 +4074,33 @@ export class AppService {
     };
   }
 
-  async rerunTask(request: StartRunRequest): Promise<{ taskId: string; runId: number }> {
+  /**
+   * Run a task's work AGAIN, as a new task ("task:rerun").
+   *
+   * A re-run creates a new state machine instance with the same inputs (Identity and Resume §05):
+   * new task id, new sessions, linked to its predecessor by `parentTaskId`. It is not a
+   * continuation and does not pretend to be one — that is {@link resumeTask}, which loads the
+   * SAME machine. Minting unconditionally is what keeps a task one machine: restarting in place
+   * would grow a second tree in one journal, which is exactly the shape the runs collapse retired.
+   */
+  async rerunTask(request: StartRunRequest): Promise<{ taskId: string }> {
     const open = this.session(request.project);
     const row = open.project.runtime.get(request.taskId);
     if (row === undefined) throw this.refusal("run", `unknown task '${request.taskId}'`);
     if (row.status === "running") throw this.refusal("run", `task '${request.taskId}' is already running`);
-    const spokenTo = this.sessionHistory({ taskId: request.taskId, project: request.project }).some((h) =>
-      isChatInstance(h.instanceId),
-    );
-    let target = request.taskId;
-    if (!isStartableStatus(row.status) || spokenTo) {
-      const meta = open.project.tasks.read(request.taskId);
-      const copy = createTask(open.project, {
-        title: meta.title,
-        workflow: meta.workflow,
-        ...(meta.description !== undefined ? { description: meta.description } : {}),
-        ...(meta.labels !== undefined ? { labels: meta.labels } : {}),
-        ...(meta.inputs !== undefined ? { inputs: meta.inputs } : {}),
-        ...(meta.branch !== undefined ? { branch: meta.branch } : {}),
-        ...(meta.parentTaskId !== undefined ? { parentTaskId: meta.parentTaskId } : {}),
-      });
-      target = copy.id;
-      this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
-    }
-    return this.startTask({ ...request, taskId: target });
+    const meta = open.project.tasks.read(request.taskId);
+    const copy = createTask(open.project, {
+      title: meta.title,
+      workflow: meta.workflow,
+      ...(meta.description !== undefined ? { description: meta.description } : {}),
+      ...(meta.labels !== undefined ? { labels: meta.labels } : {}),
+      ...(meta.inputs !== undefined ? { inputs: meta.inputs } : {}),
+      ...(meta.branch !== undefined ? { branch: meta.branch } : {}),
+      // The predecessor, not its parent: the chain reads newest → oldest.
+      parentTaskId: request.taskId,
+    });
+    this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
+    return this.startTask({ ...request, taskId: copy.id });
   }
 
   /**
@@ -5253,7 +5213,6 @@ export class AppService {
       }
       const store = sessionStoreFor(project, {
         ...(request.taskId !== undefined ? { taskId: request.taskId } : {}),
-        ...(request.runId !== undefined ? { runId: request.runId } : {}),
       });
       let value: unknown;
       if ("recordId" in source) {
@@ -5642,9 +5601,8 @@ export class AppService {
     // `beginTaskRun` refuses a bundle — and that layer then reported "a sync is already running" for
     // the life of the process, with no way to clear it.
     owner.syncTask = task.id;
-    let started: { taskId: string; runId: number };
     try {
-      started = await this.startRun(system, task.id, {
+      await this.startRun(system, task.id, {
         config,
         secrets,
         bundle,
@@ -5662,12 +5620,12 @@ export class AppService {
       owner.syncTask = undefined;
     }
 
-    const run = system.project.runtime.listRuns(task.id).at(-1);
+    const run = system.project.runtime.get(task.id);
     if (run?.outcome !== "success") {
       // The operation-level reasons, out of the journal this run now keeps — the same thing
       // `jaira task start` prints, rather than the parent composite's view of its child. This is what
       // the run's own `InMemoryPersistence` was standing in for before it had somewhere to write.
-      const causes = runCauses(system.project, task.id, started.runId).map((c: { stateId: string; reason: string }) => `${c.stateId}: ${c.reason}`);
+      const causes = runCauses(system.project, task.id).map((c: { stateId: string; reason: string }) => `${c.stateId}: ${c.reason}`);
       const failure = run?.failureJson === undefined ? undefined : (JSON.parse(run.failureJson) as { reason?: string });
       throw this.refusal("sync", causes.length > 0 ? causes.join("; ") : (failure?.reason ?? "the sync did not finish"));
     }
@@ -5678,7 +5636,7 @@ export class AppService {
     );
     // Summed from the journal rather than read off the result: the run settled into the database, and
     // its spend is the roll-up of what each operation reported.
-    const costUsd = runCostUsd(system.project, task.id, started.runId);
+    const costUsd = runCostUsd(system.project, task.id);
     // A clipped state is evidence the run did not see in full, and the caller must be told rather
     // than shown a proposal that quietly ignored half a workflow.
     const notes = [
@@ -5860,9 +5818,8 @@ export class AppService {
       message: `reviewing ${changeset.changes.length} change(s) in ${request.taskId}'s worktree against ${request.base ?? "HEAD"}`,
       project: system.key,
       taskId: task.id,
-      runId: started.runId,
     });
-    return { reviewTaskId: task.id, runId: started.runId, changes: changeset.changes.length };
+    return { reviewTaskId: task.id, changes: changeset.changes.length };
   }
 
   /**
@@ -5938,7 +5895,7 @@ export class AppService {
     void (async () => {
       try {
         await system.live.get(task.id)?.done;
-        const run = system.project.runtime.listRuns(task.id).at(-1);
+        const run = system.project.runtime.get(task.id);
         if (run?.outcome !== "success" || run.outputsJson === undefined) return;
         // The loop terminates successfully only through `apply`, so `applied` present IS "the
         // review settled"; `decisions` are the FINAL round's — the ones the application acted on.
@@ -5952,7 +5909,7 @@ export class AppService {
         // The review run's own failure is already visible on its task; the baseline simply stays.
       }
     })();
-    return { reviewTaskId: task.id, runId: started.runId, changes: changeset.changes.length };
+    return { reviewTaskId: task.id, changes: changeset.changes.length };
   }
 
   /** Abort a sync in flight. False when there was nothing running. */

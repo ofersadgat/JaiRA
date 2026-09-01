@@ -78,10 +78,9 @@ describe("task lifecycle", () => {
     expect(p.runtime.get(meta.id)?.snapshotHash).toBe(started.snapshotHash);
     expect(existsSync(join(p.paths.snapshotsDir, started.snapshotHash, "wf.json"))).toBe(true);
 
-    finishTaskRun(p, meta.id, started.runId, "completed", { outputs: { y: "done" } });
+    finishTaskRun(p, meta.id, "completed", { outputs: { y: "done" } });
     expect(p.runtime.get(meta.id)?.status).toBe("completed");
-    const run = p.runtime.listRuns(meta.id)[0];
-    expect(run).toMatchObject({ outcome: "success", outputsJson: '{"y":"done"}' });
+    expect(p.runtime.get(meta.id)).toMatchObject({ outcome: "success", outputsJson: '{"y":"done"}' });
     // Terminal task cannot start again.
     await expect(() => beginTaskRun(p, meta.id)).rejects.toThrow(/completed/);
   });
@@ -123,7 +122,7 @@ describe("task lifecycle", () => {
     const meta = createTask(p, { title: "B", workflow: "bad" });
     await expect(() => beginTaskRun(p, meta.id)).rejects.toThrow(/validation failed/);
     expect(p.runtime.get(meta.id)?.status).toBe("queued");
-    expect(p.runtime.listRuns(meta.id)).toHaveLength(0);
+    expect(p.runtime.get(meta.id)?.startedAt).toBeUndefined();
   });
 
   it("re-runs an interrupted task from the pinned snapshot, even after workflow edits", async () => {
@@ -140,15 +139,16 @@ describe("task lifecycle", () => {
     p = open();
     expect(p.recovered).toEqual([meta.id]);
     expect(p.runtime.get(meta.id)?.status).toBe("interrupted");
-    expect(p.runtime.listRuns(meta.id)[0]?.outcome).toBe("interrupted");
+    expect(p.runtime.get(meta.id)?.outcome).toBe("interrupted");
 
     const rerun = await beginTaskRun(p, meta.id);
     expect(rerun.pinned).toBe(true);
     expect(rerun.snapshotHash).toBe(firstHash);
     expect(rerun.bundle.states["wf"]?.label).toBe("Wf"); // pinned content, not the edit
-    finishTaskRun(p, meta.id, rerun.runId, "completed");
+    finishTaskRun(p, meta.id, "completed");
     expect(p.runtime.get(meta.id)?.status).toBe("completed");
-    expect(p.runtime.listRuns(meta.id)).toHaveLength(2);
+    // One machine, one row: the second start re-stamped the same task rather than growing a run.
+    expect(p.runtime.get(meta.id)?.outcome).toBe("success");
   });
 
   it("cancel settles the run and closes dangling ones — and leaves the task resumable", async () => {
@@ -157,7 +157,7 @@ describe("task lifecycle", () => {
     await beginTaskRun(p, meta.id);
     cancelTask(p, meta.id);
     expect(p.runtime.get(meta.id)?.status).toBe("canceled");
-    expect(p.runtime.listRuns(meta.id)[0]?.outcome).toBe("canceled");
+    expect(p.runtime.get(meta.id)?.outcome).toBe("canceled");
     // Cancelling twice is still someone stating something untrue about a task they named.
     expect(() => cancelTask(p, meta.id)).toThrow(/already canceled/);
     // But the RUN ending is not the TASK's life ending. A stop is an interruption — the difference
@@ -175,22 +175,22 @@ describe("task lifecycle", () => {
     const meta = createTask(p, { title: "T", workflow: "wf", inputs: { x: "hi" } });
     const started = await beginTaskRun(p, meta.id);
     // One row in everything that hangs off a task, so the cascade is actually exercised.
-    p.events.recorder(meta.id, started.runId).record({ type: "instance.entered", instanceId: "1", stateId: "wf", inputs: {} }, Date.now());
-    p.commands.record({ taskId: meta.id, runId: started.runId, tool: "bash", command: "ls", decision: "allowed", decidedBy: "policy" });
-    const jobId = p.jobs.claimRun({ taskId: meta.id, runId: started.runId, ownerToken: "tok", nowMs: Date.now() });
+    p.events.recorder(meta.id).record({ type: "instance.entered", instanceId: "1", stateId: "wf", inputs: {} }, Date.now());
+    p.commands.record({ taskId: meta.id, tool: "bash", command: "ls", decision: "allowed", decidedBy: "policy" });
+    const jobId = p.jobs.claimRun({ taskId: meta.id, ownerToken: "tok", nowMs: Date.now() });
     p.db
       .prepare(`INSERT INTO job_output (job_id, stream, seq, chunk, created_at) VALUES (?, 'stdout', 0, 'hi', ?)`)
       .run(jobId, Date.now());
     p.db
-      .prepare(`INSERT INTO artifacts (task_id, run_id, logical_path, hash, bytes, created_at) VALUES (?, ?, 'out.txt', 'h', 2, ?)`)
-      .run(meta.id, started.runId, Date.now());
-    finishTaskRun(p, meta.id, started.runId, "completed");
+      .prepare(`INSERT INTO artifacts (task_id, logical_path, hash, bytes, created_at) VALUES (?, 'out.txt', 'h', 2, ?)`)
+      .run(meta.id, Date.now());
+    finishTaskRun(p, meta.id, "completed");
 
     deleteTask(p, meta.id);
 
     expect(p.runtime.get(meta.id)).toBeUndefined();
     expect(p.tasks.tryRead(meta.id)).toBeUndefined();
-    for (const table of ["runs", "state_machine_events", "command_log", "jobs", "job_output", "artifacts"]) {
+    for (const table of ["state_machine_events", "command_log", "jobs", "job_output", "artifacts"]) {
       const n = (p.db.prepare(`SELECT COUNT(*) n FROM ${table}`).get() as { n: number }).n;
       expect({ table, n }).toEqual({ table, n: 0 });
     }
@@ -217,7 +217,6 @@ describe("task lifecycle", () => {
 
     deleteTask(p, meta.id);
     expect(p.runtime.get(meta.id)).toBeUndefined();
-    expect(p.runtime.listRuns(meta.id)).toHaveLength(0);
   });
 
   it("delete is an error for an unknown task", async () => {

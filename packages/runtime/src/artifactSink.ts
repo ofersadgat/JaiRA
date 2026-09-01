@@ -103,7 +103,6 @@ export interface PersistArtifactsOptions {
   destination: Destination;
   store: ArtifactStore;
   vars: Omit<DestinationVars, "relPath" | "instanceId" | "stateId" | "slot">;
-  runId?: number;
   inlineMaxBytes?: number;
   now?: () => number;
   /** Reported rather than thrown: one unwritable artifact must not fail a finished run. */
@@ -130,7 +129,6 @@ export function artifactWiring(input: {
   artifactDir: string;
   inlineMaxBytes: number;
   taskId: string;
-  runId?: number;
   /** The task's workspace (worktree, or the project dir when unbound). */
   workspaceRoot: string;
   projectDir: string;
@@ -145,7 +143,6 @@ export function artifactWiring(input: {
       jaira: input.jairaDir,
       artifactDir: input.artifactDir,
       taskId: input.taskId,
-      ...(input.runId !== undefined ? { runId: input.runId } : {}),
     },
   };
 }
@@ -190,7 +187,6 @@ export function persistEngineArtifacts(
       }
       const record: ArtifactRecord = {
         taskId: options.vars.taskId,
-        ...(options.runId !== undefined ? { runId: options.runId } : {}),
         logicalPath,
         ...(resolved.path !== undefined ? { physicalPath: resolved.path } : {}),
         ...(resolved.scheme === "virtual" || bytes <= inlineMax ? { content } : {}),

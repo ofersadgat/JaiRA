@@ -31,19 +31,18 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-/** A task with an open run, as a live process would leave it. */
-function runningTask(taskId = "t-1"): number {
+/** A task with an open machine, as a live process would leave it. */
+function runningTask(taskId = "t-1"): void {
   project.runtime.insert(taskId, NOW);
-  const runId = project.runtime.beginRun(taskId, "hash", NOW);
+  project.runtime.beginTask(taskId, "hash", NOW);
   project.runtime.setStatus(taskId, "running", NOW);
-  return runId;
 }
 
 describe("liveness", () => {
   it("reports a claim as live while it keeps beating", () => {
     const jobs = new JobStore(project.db);
     const token = newOwnerToken();
-    jobs.claimRun({ taskId: "t-1", runId: 1, ownerToken: token, nowMs: NOW });
+    jobs.claimRun({ taskId: "t-1", ownerToken: token, nowMs: NOW });
 
     expect(jobs.liveRunJob("t-1", NOW)).toMatchObject({ ownerToken: token, kind: "run" });
     // One beat short of the window: still live.
@@ -59,7 +58,7 @@ describe("liveness", () => {
     // A pid is not an identity — after a reboot, 1234 is some other program.
     const jobs = new JobStore(project.db);
     const mine = newOwnerToken();
-    jobs.claimRun({ taskId: "t-1", runId: 1, ownerToken: mine, pid: 1234, nowMs: NOW });
+    jobs.claimRun({ taskId: "t-1", ownerToken: mine, pid: 1234, nowMs: NOW });
 
     expect(jobs.isClaimedElsewhere("t-1", mine, NOW)).toBe(false);
     expect(jobs.isClaimedElsewhere("t-1", newOwnerToken(), NOW)).toBe(true);
@@ -68,7 +67,7 @@ describe("liveness", () => {
   it("treats a released claim as gone even within the window", () => {
     const jobs = new JobStore(project.db);
     const token = newOwnerToken();
-    const jobId = jobs.claimRun({ taskId: "t-1", runId: 1, ownerToken: token, nowMs: NOW });
+    const jobId = jobs.claimRun({ taskId: "t-1", ownerToken: token, nowMs: NOW });
     jobs.end(jobId, "released", NOW + 10);
     expect(jobs.liveRunJob("t-1", NOW + 20)).toBeUndefined();
   });
@@ -79,7 +78,7 @@ describe("recovery", () => {
     // This is the whole point. Before §4.2a the second open took the task away from
     // a process that was still running it.
     runningTask();
-    project.jobs.claimRun({ taskId: "t-1", runId: 1, ownerToken: newOwnerToken(), nowMs: Date.now() });
+    project.jobs.claimRun({ taskId: "t-1", ownerToken: newOwnerToken(), nowMs: Date.now() });
     project.close();
 
     project = openProject(dir, { baseDir: testHome() });
@@ -91,7 +90,7 @@ describe("recovery", () => {
   it("interrupts a task whose owner stopped breathing", () => {
     runningTask();
     // A claim from long ago: the process that made it is gone.
-    project.jobs.claimRun({ taskId: "t-1", runId: 1, ownerToken: newOwnerToken(), nowMs: Date.now() - 10 * 60_000 });
+    project.jobs.claimRun({ taskId: "t-1", ownerToken: newOwnerToken(), nowMs: Date.now() - 10 * 60_000 });
     project.close();
 
     project = openProject(dir, { baseDir: testHome() });
@@ -112,7 +111,7 @@ describe("recovery", () => {
 
 describe("child processes", () => {
   it("records a spawn against the run that owns it, and closes it on exit", () => {
-    const owner = new RunOwner({ jobs: project.jobs, taskId: "t-1", runId: 1, now: () => NOW });
+    const owner = new RunOwner({ jobs: project.jobs, taskId: "t-1", now: () => NOW });
     const observer = owner.observer();
 
     const token = observer.onSpawn({ command: "git", argv: ["status"], pid: 42 });
@@ -131,7 +130,7 @@ describe("child processes", () => {
     // billing, and nothing records that it ever existed.
     const stale = Date.now() - 10 * 60_000;
     const token = newOwnerToken();
-    project.jobs.claimRun({ taskId: "t-1", runId: 1, ownerToken: token, nowMs: stale });
+    project.jobs.claimRun({ taskId: "t-1", ownerToken: token, nowMs: stale });
     project.jobs.spawned({ ownerToken: token, taskId: "t-1", command: "claude -p", pid: 999, nowMs: stale });
     project.close();
 
@@ -144,7 +143,7 @@ describe("child processes", () => {
   });
 
   it("releasing an owner closes children it never saw exit", () => {
-    const owner = new RunOwner({ jobs: project.jobs, taskId: "t-1", runId: 1 });
+    const owner = new RunOwner({ jobs: project.jobs, taskId: "t-1" });
     owner.observer().onSpawn({ command: "bash", argv: ["-lc", "sleep 100"], pid: 7 });
 
     owner.release("run finished");
@@ -160,7 +159,6 @@ describe("cross-process cancel", () => {
     const owner = new RunOwner({
       jobs: project.jobs,
       taskId: "t-1",
-      runId: 1,
       onCancelRequested: () => (canceled = true),
     });
 

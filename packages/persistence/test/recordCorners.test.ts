@@ -33,7 +33,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const store = () => new SqliteSessionStore(project.db, { taskId: "t1", runId: 1 });
+const store = () => new SqliteSessionStore(project.db, { taskId: "t1" });
 
 /** One entry as an agent produces it — provider parts VERBATIM, which is the format's whole rule. */
 const message = (role: string, content: unknown, extra: Record<string, unknown> = {}) => ({

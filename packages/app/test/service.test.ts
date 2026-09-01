@@ -88,17 +88,16 @@ describe("AppService reads", () => {
 describe("AppService.startTask (scripted)", () => {
   it("runs to completion, streams events, and records the run", async () => {
     const taskId = newTask();
-    const { runId } = await service.startTask({
+    await service.startTask({
       taskId,
       fake: happyRules(),
       interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" }] },
     });
-    expect(runId).toBe(1);
     await until(() => finished(taskId), "the run to finish");
 
     // Stamped with the project it is about, so a window showing another one can ignore it — see the
     // `project` field on `store:invalidate`.
-    expect(pushes).toContainEqual({ type: "run:finished", taskId, runId, status: "completed", project: dir });
+    expect(pushes).toContainEqual({ type: "run:finished", taskId, status: "completed", project: dir });
     // The journal streamed live, in order, as engine events.
     const streamed = pushes.filter((m) => m.type === "engine:event");
     expect(streamed.length).toBeGreaterThan(5);
@@ -107,7 +106,7 @@ describe("AppService.startTask (scripted)", () => {
     const detail = service.taskDetail(taskId);
     expect(detail.status).toBe("completed");
     expect(detail.runs).toHaveLength(1);
-    expect(detail.runs[0]).toMatchObject({ runId, outcome: "success" });
+    expect(detail.runs[0]).toMatchObject({ outcome: "success" });
     expect(JSON.stringify(detail.runs[0]!.outputs)).toContain("# The Plan");
     // The instance tree is projected from the journal, not tracked separately.
     expect(detail.instances).toHaveLength(1);
@@ -142,22 +141,29 @@ describe("AppService.startTask (scripted)", () => {
     await until(() => pushes.filter((m) => m.type === "run:finished").length === 2, "the retry to finish");
     const detail = service.taskDetail(taskId);
     expect(detail.status).toBe("completed");
-    expect(detail.runs.map((r) => r.outcome)).toEqual(["error", "success"]);
+    // One machine, one summary: the retry re-stamped the same task, and how it ends now is what it says.
+    expect(detail.runs.map((r) => r.outcome)).toEqual(["success"]);
   });
 });
 
 describe("AppService.rerunTask and deleteTask", () => {
   const approve = { interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" } as JsonValue] } };
 
-  it("reruns a failed task in place — same task, fresh run", async () => {
+  it("reruns a failed task as a NEW task, chained to its predecessor", async () => {
+    // Identity and Resume §05: a re-run creates a new state machine instance with the same inputs.
+    // It is not a continuation and does not pretend to be one — the failed task keeps its verdict,
+    // and the fresh attempt is a fresh machine linked back by `parentTaskId`.
     const taskId = newTask();
     await service.startTask({ taskId, fake: [{ error: "provider exploded" }] });
     await until(() => finished(taskId), "the failing run to finish");
 
     const started = await service.rerunTask({ taskId, fake: happyRules(), ...approve });
-    expect(started.taskId).toBe(taskId);
-    await until(() => pushes.filter((m) => m.type === "run:finished").length === 2, "the rerun to finish");
-    expect(service.taskDetail(taskId).status).toBe("completed");
+    expect(started.taskId).not.toBe(taskId);
+    await until(() => finished(started.taskId), "the rerun to finish");
+    expect(service.taskDetail(started.taskId).status).toBe("completed");
+    expect(service.listTasks().find((t) => t.taskId === started.taskId)?.parentTaskId).toBe(taskId);
+    // The original is untouched: still failed, its history intact.
+    expect(service.taskDetail(taskId).status).toBe("failed");
   });
 
   it("reruns a completed task as a fresh copy, since a finished lifecycle cannot restart", async () => {
@@ -504,13 +510,12 @@ describe("the base root as a project", () => {
       expect(bare.listSystemTasks().map((t) => t.taskId)).toEqual([task.taskId]);
       expect(() => bare.listTasks()).toThrow(/no project is open/);
 
-      const { runId } = await bare.startTask({
+      await bare.startTask({
         taskId: task.taskId,
         project: SHARED_SESSION,
         fake: happyRules(),
         interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" }] },
       });
-      expect(runId).toBe(1);
       await until(() => bare.listTasks(SHARED_SESSION)[0]?.status === "completed", "the shared run to finish");
       expect(bare.taskDetail(task.taskId, SHARED_SESSION).status).toBe("completed");
     } finally {
@@ -772,13 +777,13 @@ describe("diagnostics", () => {
     // `LogRecord.fields` is `Record<string, unknown>`, so `{ taskId: 42 }` is a typo nothing stops —
     // and a `LogEntry.taskId` holding a number crashes whichever renderer treats it as the string
     // its type declares. A wrong-shaped value stays in `detail`, visible and harmless.
-    createLogger("test.pointers").warn("mistyped", { taskId: 42, runId: 7 });
+    createLogger("test.pointers").warn("mistyped", { taskId: 42, jobId: 7 });
 
     const entry = service.listLogs({ source: "test.pointers" }).at(-1);
     expect(entry?.taskId).toBeUndefined();
     expect(JSON.stringify(entry?.detail)).toContain("42");
     // The correctly-typed one beside it still gets through — this rejects values, not the feature.
-    expect(entry?.runId).toBe(7);
+    expect(entry?.jobId).toBe(7);
   });
 
   it("hands the log back when it closes, so a later service is not written over", async () => {

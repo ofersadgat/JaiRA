@@ -50,7 +50,6 @@ function persist(outputs: unknown, destination = "$CENTRAL") {
       artifactDir: "artifacts",
       taskId: "t-1",
     },
-    runId: 2,
     now: () => 5_000,
   });
 }
@@ -99,7 +98,6 @@ describe("placement", () => {
       physicalPath: path,
       slot: "plan_doc",
       instanceId: "1",
-      runId: 2,
       format: "text/markdown",
       bytes: 7,
     });

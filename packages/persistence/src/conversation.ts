@@ -31,8 +31,6 @@ const log = createLogger("jaira.persistence.conversation");
 export const CONVERSATION_LIMIT = 400;
 
 export interface ConversationOptions {
-  /** Which run to read. Defaults to the latest. */
-  runId?: number;
   limit?: number;
 }
 
@@ -63,13 +61,10 @@ export function conversationView(project: Project, taskId: string, options: Conv
   // of the report is which one was asked, not which id was missing.
   if (!row) throw refusal(log, `unknown task '${taskId}' in ${project.paths.projectDir}`, { taskId });
   const meta = project.tasks.tryRead(taskId);
-  const runs = project.runtime.listRuns(taskId);
-  const runId = options.runId ?? runs[runs.length - 1]?.id;
-  if (runId === undefined) {
+  const events = project.events.list(taskId);
+  if (events.length === 0) {
     return { taskId, title: meta?.title ?? taskId, turns: [] };
   }
-
-  const events = project.events.list(taskId, { runId });
 
   /**
    * Where each instance sits, as the chain of child KEYS from the root — see `ConversationTurn.path`.
@@ -182,7 +177,7 @@ export function conversationView(project: Project, taskId: string, options: Conv
   // The command log has its own ids, not journal seqs. Offsetting them past the journal's range
   // keeps the merge stable without pretending the two streams share a sequence.
   const seqBase = (events[events.length - 1]?.seq ?? 0) + 1;
-  for (const entry of project.commands.list(taskId, { runId })) {
+  for (const entry of project.commands.list(taskId)) {
     const escalated = entry.decidedBy === "user";
     turns.push({
       seq: seqBase + entry.id,
@@ -202,7 +197,6 @@ export function conversationView(project: Project, taskId: string, options: Conv
   return {
     taskId,
     title: meta?.title ?? taskId,
-    runId,
     turns: turns.length > limit ? turns.slice(-limit) : turns,
   };
 }

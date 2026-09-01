@@ -24,7 +24,7 @@
  *
  * A row is a fact about a task, keyed by the request id its hub minted. Nothing here decides
  * whether a gate is still worth showing; that is `pendingInteractions()`'s job, which joins these
- * rows against the runs that are actually live.
+ * rows against the tasks that are actually live.
  */
 import type { JsonValue } from "@declarative-ai/json";
 import type { JairaDb } from "./db";
@@ -33,7 +33,6 @@ import type { JairaDb } from "./db";
 export interface StoredInteraction {
   requestId: string;
   taskId: string;
-  runId?: number;
   /** The registered function name — `choose_option`, `review_artifacts`, … */
   component: string;
   /** The function's arguments: the state's resolved inputs merged with its authored `args`. */
@@ -48,7 +47,6 @@ export interface StoredInteraction {
 interface RawInteraction {
   request_id: string;
   task_id: string;
-  run_id: number | null;
   component: string;
   inputs_json: string;
   about: string | null;
@@ -60,7 +58,6 @@ function toStored(row: RawInteraction): StoredInteraction {
   return {
     requestId: row.request_id,
     taskId: row.task_id,
-    ...(row.run_id !== null ? { runId: row.run_id } : {}),
     component: row.component,
     // A row whose JSON will not parse is a row nothing can draw. Answering `{}` rather than throwing
     // keeps one corrupt gate from making a project impossible to open — the renderer reports a
@@ -94,11 +91,10 @@ export class InteractionStore {
     this.db
       .prepare(
         `INSERT INTO pending_interactions
-           (request_id, task_id, run_id, component, inputs_json, about, subject_project, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           (request_id, task_id, component, inputs_json, about, subject_project, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(request_id) DO UPDATE SET
            task_id = excluded.task_id,
-           run_id = excluded.run_id,
            component = excluded.component,
            inputs_json = excluded.inputs_json,
            about = excluded.about,
@@ -107,7 +103,6 @@ export class InteractionStore {
       .run(
         request.requestId,
         request.taskId,
-        request.runId ?? null,
         request.component,
         JSON.stringify(request.inputs),
         request.about ?? null,

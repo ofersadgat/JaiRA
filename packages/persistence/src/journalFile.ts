@@ -7,12 +7,14 @@
  * is no flush policy to lose a journal across a crash. That inversion is the whole reason the design
  * does not describe a cache.
  *
- * ## One file per run
+ * ## One file per task
  *
- * `<system>/journal/<taskId>/<runId>.jsonl`. Two people running tasks on one branch write different
- * filenames, so their appends never conflict — and after a pull, their runs replay into the same
- * table and appear on the board. "Clean merges" and "shared history" stop being a trade-off, which
- * is the answer to the question the design asked and got "being able to do both would be cool".
+ * `<system>/journal/<taskId>/journal.jsonl`. A task IS one machine now (Identity and Resume §05) —
+ * a resume continues the same journal and a re-run is a new task with a new directory — so the
+ * per-run split has nothing left to separate. Two people running tasks on one branch still write
+ * different filenames (different task ids), so their appends never conflict — and after a pull,
+ * both replay into the same table and appear on the board. Files written before the collapse are
+ * named `<runId>.jsonl`; they replay first, in run order, and nothing writes them any more.
  *
  * ## The line, and why it is JaiRA's own shape
  *
@@ -40,27 +42,28 @@ import { join } from "node:path";
 import type { EngineEvent } from "@declarative-ai/hw";
 import type { JairaDb } from "./db";
 
-/** One line of a run's journal — the row, minus the id the database assigns. */
+/** One line of a task's journal — the row, minus the id the database assigns. */
 export interface JournalLine {
   type: string;
   /** ISO 8601, because a file is read by people. `created_at` keeps the epoch millis. */
   timestamp: string;
   taskId: string;
-  runId: number;
+  /** Only on lines written before the runs collapse (migration 16) — read, never written. */
+  runId?: number;
   /** `number` only on lines journaled before instance ids became durable strings. */
   instanceId?: string | number;
   event: EngineEvent;
 }
 
-/** Where one run's journal lives. */
-export function journalFileFor(journalDir: string, taskId: string, runId: number): string {
-  return join(journalDir, sanitize(taskId), `${sanitize(String(runId))}.jsonl`);
+/** Where a task's journal lives. */
+export function journalFileFor(journalDir: string, taskId: string): string {
+  return join(journalDir, sanitize(taskId), "journal.jsonl");
 }
 
 /**
- * Task ids are minted (`t-…`) and run ids are integers, so neither can carry a separator today.
- * Checked anyway, because a path built from a value that turns out to be caller-supplied is the
- * ordinary way a writer escapes its own directory.
+ * Task ids are minted (`t-…`), so they cannot carry a separator today. Checked anyway, because a
+ * path built from a value that turns out to be caller-supplied is the ordinary way a writer escapes
+ * its own directory.
  */
 function sanitize(segment: string): string {
   const clean = segment.replace(/[^A-Za-z0-9._-]/g, "_");
@@ -75,15 +78,15 @@ function sanitize(segment: string): string {
  * being killed, which is exactly when the last line matters most.
  */
 export function appendJournal(journalDir: string, line: JournalLine): void {
-  const file = journalFileFor(journalDir, line.taskId, line.runId);
+  const file = journalFileFor(journalDir, line.taskId);
   mkdirSync(join(journalDir, sanitize(line.taskId)), { recursive: true });
   appendFileSync(file, JSON.stringify(line) + "\n", "utf8");
 }
 
-/** The runs a journal directory holds, in a deterministic order. */
-export function journalFiles(journalDir: string): Array<{ taskId: string; runId: number; file: string }> {
+/** The journal files a directory holds, in a deterministic order. */
+export function journalFiles(journalDir: string): Array<{ taskId: string; file: string }> {
   if (!existsSync(journalDir)) return [];
-  const out: Array<{ taskId: string; runId: number; file: string }> = [];
+  const out: Array<{ taskId: string; file: string }> = [];
   for (const taskId of readdirSync(journalDir).sort()) {
     const dir = join(journalDir, taskId);
     let names: string[];
@@ -92,14 +95,15 @@ export function journalFiles(journalDir: string): Array<{ taskId: string; runId:
     } catch {
       continue; // a file where a task directory was expected — not ours to explain
     }
-    for (const name of names.filter((n) => n.endsWith(".jsonl"))) {
-      const runId = Number(name.slice(0, -".jsonl".length));
-      if (Number.isInteger(runId)) out.push({ taskId, runId, file: join(dir, name) });
-    }
+    // Legacy per-run files first, in run order, then the task file — so `seq` is re-minted in the
+    // order things happened: the old runs, then everything the collapsed journal appended.
+    const legacy = names
+      .filter((n) => n.endsWith(".jsonl") && Number.isInteger(Number(n.slice(0, -".jsonl".length))))
+      .sort((a, b) => Number(a.slice(0, -".jsonl".length)) - Number(b.slice(0, -".jsonl".length)));
+    for (const name of legacy) out.push({ taskId, file: join(dir, name) });
+    if (names.includes("journal.jsonl")) out.push({ taskId, file: join(dir, "journal.jsonl") });
   }
-  // By task then by run, so `seq` is re-minted in an order that means something: a run's own events
-  // stay in sequence, and runs of one task stay in the order they happened.
-  return out.sort((a, b) => (a.taskId === b.taskId ? a.runId - b.runId : a.taskId < b.taskId ? -1 : 1));
+  return out;
 }
 
 /**
@@ -143,8 +147,8 @@ export function replayJournal(db: JairaDb, journalDir: string): number | undefin
   const files = journalFiles(journalDir);
   if (files.length === 0) return undefined;
   const insert = db.prepare(
-    `INSERT INTO state_machine_events (task_id, run_id, instance_id, type, payload_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO state_machine_events (task_id, instance_id, type, payload_json, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
   );
   let rows = 0;
   db.transaction(() => {
@@ -152,7 +156,6 @@ export function replayJournal(db: JairaDb, journalDir: string): number | undefin
       for (const line of readJournalFile(file)) {
         insert.run(
           line.taskId,
-          line.runId,
           // Stringified for lines journaled before ids were strings; `-1` was a sentinel for absence.
           line.instanceId === undefined || line.instanceId === -1 ? null : String(line.instanceId),
           line.type,
@@ -166,12 +169,7 @@ export function replayJournal(db: JairaDb, journalDir: string): number | undefin
   return rows;
 }
 
-/** Delete one run's file — what pruning a run does now that the file is the truth (DESIGN §4.4). */
-export function removeJournal(journalDir: string, taskId: string, runId: number): void {
-  rmSync(journalFileFor(journalDir, taskId, runId), { force: true });
-}
-
-/** Delete a task's whole journal directory, for the same reason. */
+/** Delete a task's whole journal directory — what deleting the task does now that the file is the truth. */
 export function removeTaskJournal(journalDir: string, taskId: string): void {
   rmSync(join(journalDir, sanitize(taskId)), { recursive: true, force: true });
 }

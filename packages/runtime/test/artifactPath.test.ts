@@ -20,7 +20,6 @@ const vars: DestinationVars = {
   jaira: "/work/project/.jaira",
   artifactDir: "artifacts",
   taskId: "t-1",
-  runId: 4,
   instanceId: 7,
   stateId: "feature/plan/context",
   slot: "plan_doc",
@@ -67,8 +66,10 @@ describe("aliases", () => {
   });
 
   it("lets an alias be extended rather than requiring a new mode", () => {
+    // `$RUN_ID` is a legacy variable that resolves empty since the runs collapse — an authored
+    // template keeps working rather than refusing, it just says less.
     expect(resolve("$WORKTREE/$ARTIFACT_DIR/$TASK_ID/run-$RUN_ID/$RELPATH", "a/b.md")).toMatch(
-      /t-1\/run-4\/a\/b\.md$/,
+      /t-1\/run-\/a\/b\.md$/,
     );
   });
 });

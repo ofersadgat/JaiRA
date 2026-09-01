@@ -31,7 +31,6 @@ afterEach(() => {
 
 const record = (over: Partial<ArtifactRecord> = {}): ArtifactRecord => ({
   taskId: "t-1",
-  runId: 3,
   logicalPath: "docs/plan.md",
   physicalPath: join(dir, ".jaira", "system", "artifacts", "t-1", "docs", "plan.md"),
   content: "# plan",

@@ -207,11 +207,7 @@ export function Conversation({
     <div className="convo">
       <h3>
         <span>Conversation · {conversation.title}</span>
-        {conversation.runId !== undefined ? (
-          <span className="sub">
-            run #{conversation.runId} · {conversation.turns.length} turns
-          </span>
-        ) : null}
+        <span className="sub">{conversation.turns.length} turns</span>
       </h3>
       <div className="turns">
         {conversation.turns.map((turn) => (

@@ -82,7 +82,9 @@ CREATE TABLE IF NOT EXISTS command_log (
   created_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS command_log_task ON command_log(task_id, id);
-CREATE INDEX IF NOT EXISTS command_log_run ON command_log(run_id, id);
+-- No command_log_run index: migration 16 drops the run_id column, and an index statement here would
+-- fail against every migrated database on its next open. The bootstrap column itself is harmless —
+-- CREATE TABLE IF NOT EXISTS never touches an existing table — and leaves with the same migration.
 
 -- Process claims (DESIGN §4.2a). A run is HISTORY; a claim on a run is a fact about
 -- NOW, and the two have different lifetimes — so columns on runs would leave dead
@@ -186,6 +188,15 @@ export function openDb(file: string): JairaDb {
   if (tableExists("state_machine_events") && tableExists("events")) {
     const shell = db.prepare(`SELECT COUNT(*) AS n FROM events`).get() as { n: number };
     if (shell.n === 0) db.exec(`DROP TABLE events`);
+  }
+  // Same story for `runs`: SCHEMA bootstraps it for migrations 1-15 to build on, and migration 16
+  // collapsed it into task_runtime — so on every later open the create above leaves an empty shell.
+  // Guarded by emptiness AND by the collapse having happened (task_runtime carries `outcome` only
+  // after migration 16): rows, or a pre-16 database, mean the table is still the real one.
+  const collapsed = (db.prepare(`SELECT COUNT(*) AS n FROM pragma_table_info('task_runtime') WHERE name = 'outcome'`).get() as { n: number }).n > 0;
+  if (collapsed && tableExists("runs")) {
+    const shell = db.prepare(`SELECT COUNT(*) AS n FROM runs`).get() as { n: number };
+    if (shell.n === 0) db.exec(`DROP TABLE runs`);
   }
   return db;
 }

@@ -308,7 +308,7 @@ export function DebugPane({
                     {result.passed === true ? "PASS" : result.passed === false ? "FAIL" : "NO VERDICT"}
                   </span>
                   <span className="sub">
-                    run #{run.runId} · {run.outcome}
+                    {run.outcome}
                   </span>
                 </div>
                 {/* Both halves, always — the greeting is the evidence and the verdict is the judgement,

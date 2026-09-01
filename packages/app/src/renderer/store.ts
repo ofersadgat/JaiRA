@@ -1822,7 +1822,7 @@ export function useApp() {
   const refreshHistory = useCallback(async () => {
     // Same rule as {@link refreshTasks}: run history belongs to a project, so with none open there is
     // nothing to size.
-    if (ref.current.at === null) return patch({ history: { runs: 0, events: 0, commands: 0 } });
+    if (ref.current.at === null) return patch({ history: { tasks: 0, events: 0, commands: 0 } });
     try {
       patch({ history: await invoke("history:size", { ...(ref.current.at !== null ? { project: ref.current.at } : {}) }) });
     } catch (e) {
@@ -2137,15 +2137,11 @@ export function useApp() {
              * Through {@link withoutSession}, which knows BOTH keys the cache can be holding it
              * under — this used to spell one of them itself, and spelled the wrong one.
              *
-             * A single-run projection files a transcript under the bare instance id; the folded
-             * task-level one — which is what the transcript panel actually reads — files it under
-             * `runId:instanceId`. Dropping only the bare key dropped nothing on the view that
-             * matters, so every panel a person had open while a run was going stayed frozen on
-             * whatever the record held mid-call, and the settled answer never arrived. The live tail
-             * was cleared in the same breath, so what was left on screen was a half transcript with
-             * an interrupted marker under it, describing a state that had finished.
+             * Dropping a stale key is what lets the settled answer arrive: every panel a person had
+             * open while a run was going would otherwise stay frozen on whatever the record held
+             * mid-call. The live tail is cleared in the same breath.
              */
-            const rest = withoutSession(ref.current.sessions, { runId: message.runId, instanceId: ev.instanceId });
+            const rest = withoutSession(ref.current.sessions, { instanceId: ev.instanceId });
             if (rest !== ref.current.sessions) patch({ sessions: rest, liveTurn: null });
             else patch({ liveTurn: null });
           }
@@ -3056,17 +3052,17 @@ export function useApp() {
        * Preview a prune (SPEC §13). Always a dry run: the panel shows what would
        * go before the user confirms, because deleted history does not come back.
        */
-      planPrune: async (olderThanDays: number, keepRunsPerTask: number) => {
+      planPrune: async (olderThanDays: number) => {
         try {
-          patch({ prune: await invoke("history:prune", { olderThanDays, keepRunsPerTask }) });
+          patch({ prune: await invoke("history:prune", { olderThanDays }) });
         } catch (e) {
           fail(e);
         }
       },
-      applyPrune: async (olderThanDays: number, keepRunsPerTask: number) => {
+      applyPrune: async (olderThanDays: number) => {
         patch({ busy: true, error: null });
         try {
-          const result = await invoke("history:prune", { olderThanDays, keepRunsPerTask, apply: true });
+          const result = await invoke("history:prune", { olderThanDays, apply: true });
           patch({ prune: result, history: result.remaining, busy: false });
         } catch (e) {
           fail(e);

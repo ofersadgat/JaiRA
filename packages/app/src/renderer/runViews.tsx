@@ -34,7 +34,7 @@ import { instanceOf as instanceOfState, nodeAt, prunedTrail, type TrailStep } fr
 import { Paper, Pulse, Transcript, clockOf, durationOf, useElapsed } from "./transcriptView";
 import { advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
 import { Icon } from "./icons";
-import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, runForksOf, type SessionPiece } from "./sessionBands";
+import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type SessionPiece } from "./sessionBands";
 import { SessionBandsView } from "./sessionPanels";
 import { paletteOfRun } from "./runIndex";
 import type { FileSurfaceProps } from "./fileTypes";
@@ -167,7 +167,7 @@ export function RunBoard({
             <Column key={child.key} name={child.label ?? child.key} seq={index + 1} count={runs.length} empty="not reached">
               {runs.map((node, i) => (
                 <RunTile
-                  key={`${node.runId ?? ""}:${node.instanceId}`}
+                  key={node.instanceId}
                   node={node}
                   index={i}
                   total={runs.length}
@@ -391,11 +391,6 @@ export function RunConversation({
    * thing standing between `#i2` and three older runs' `#i2`.
    */
   const bands = useMemo(() => bandsOf(piecesOf(parent, sessionHistory)), [parent, sessionHistory]);
-  /** Every place the task divided — an address more than one run did its own work at. */
-  const runForks = useMemo(
-    () => runForksOf(bands.flatMap((band) => band.segments.flatMap((segment) => segment.pieces))),
-    [bands],
-  );
   const needed = useMemo(() => instancesOf(bands), [bands]);
   /**
    * The run's colours, from the TREE rather than from the rows this view happens to draw.
@@ -555,7 +550,6 @@ export function RunConversation({
           bands={bands}
           render={render}
           notes={notes}
-          runForks={runForks}
           {...(rootPath !== undefined ? { root: rootPath } : {})}
           {...(onOpenWorkflow !== undefined
             ? { onOpenWorkflow: (piece: SessionPiece) => onOpenWorkflow(piece.node.stateId, piece.node.instanceId) }
@@ -624,7 +618,7 @@ export function SidechainConversation({
 
   useEffect(() => {
     // A sidechain's host is a node of the folded tree, so it carries the run it came from.
-    const at = { instanceId: step.instanceId, ...(host?.runId !== undefined ? { runId: host.runId } : {}) };
+    const at = { instanceId: step.instanceId };
     if (sessions[sessionKey(at)] === undefined) onLoadSessions([at]);
   }, [sessions, step.instanceId, host, onLoadSessions]);
 
@@ -1175,7 +1169,7 @@ export function TaskContext({
    */
   const [focus, setFocus] = useState<{ instance: string; at: number } | undefined>(undefined);
   const goTo = (node: InstanceNode): void => {
-    setFocus({ instance: `${node.runId ?? ""}:${node.instanceId}`, at: Date.now() });
+    setFocus({ instance: node.instanceId, at: Date.now() });
     setMode("conversation");
   };
   // The task's own root run. A task that has never run has none, and the conversation says so.

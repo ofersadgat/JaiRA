@@ -1,10 +1,15 @@
 /**
- * Task lifecycle rows (`task_runtime` + `runs`). The status column is the
- * engine-facing truth; the JSON task file never carries status (DESIGN §4.1).
+ * Task lifecycle rows (`task_runtime`). The status column is the engine-facing truth; the JSON task
+ * file never carries status (DESIGN §4.1).
+ *
+ * A task IS one state machine instance (Identity and Resume §02/§05): resume loads the machine and
+ * continues it under the same task id, and a re-run mints a NEW task pointing back through
+ * `parent_task_id`. So the lifecycle facts the retired `runs` table held per attempt — when it
+ * started, how it ended, what it produced — are facts about the task, and live on its one row.
  */
 import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
-import type { InstanceAddress, TaskStatus } from "@jaira/shared";
+import type { TaskStatus } from "@jaira/shared";
 import { isTerminalStatus } from "@jaira/shared";
 import type { JairaDb } from "./db";
 import type { RowLog } from "./rowFile";
@@ -18,31 +23,26 @@ export interface TaskRuntimeRow {
   snapshotHash?: string;
   branch?: string;
   worktreePath?: string;
+  /**
+   * The machine's root instance — which parentless journal entry is the task's own tree.
+   *
+   * A reader never has to guess against two shapes history still contains: a legacy re-run grew a
+   * second tree in the same journal, and a sub-workflow journaling into the task enters parentless
+   * too. Stamped by migration 16 for tasks that predate the collapse; a task begun since has one
+   * machine and its first parentless entry is it, so absence means exactly that.
+   */
   rootInstanceId?: string;
+  /** The task this one re-ran — the re-run chain (§05). Absent for a task started on its own. */
+  parentTaskId?: string;
   createdAt: number;
   updatedAt: number;
-}
-
-export interface RunRow {
-  id: number;
-  taskId: string;
-  snapshotHash: string;
-  startedAt: number;
+  /** When the machine last started executing. Absent for a task that never ran. */
+  startedAt?: number;
+  /** When it last stopped — cleared by {@link RuntimeStore.beginTask}, so absent means "running or never ran". */
   endedAt?: number;
   outcome?: "success" | "error" | "canceled" | "interrupted";
   outputsJson?: string;
   failureJson?: string;
-  /**
-   * Where this run's own work began — see `RunView.forkedAt`, which this becomes.
-   *
-   * Stored as JSON, and read back as structure. Never `addressKey`: that is a map key, it joins with
-   * characters a child key may legally contain, and a stored string nothing can parse back is worse
-   * than no column at all.
-   *
-   * Absent is the ROOT — this run shares nothing. Which is what a re-run from the top does, and what
-   * every row written before the column existed says.
-   */
-  forkedAt?: InstanceAddress;
 }
 
 interface RawRuntime {
@@ -52,20 +52,14 @@ interface RawRuntime {
   branch: string | null;
   worktree_path: string | null;
   root_instance_id: string | number | null;
+  parent_task_id: string | null;
   created_at: number;
   updated_at: number;
-}
-
-interface RawRun {
-  id: number;
-  task_id: string;
-  snapshot_hash: string;
-  started_at: number;
+  started_at: number | null;
   ended_at: number | null;
   outcome: string | null;
   outputs_json: string | null;
   failure_json: string | null;
-  forked_at: string | null;
 }
 
 function toRuntime(row: RawRuntime): TaskRuntimeRow {
@@ -76,47 +70,14 @@ function toRuntime(row: RawRuntime): TaskRuntimeRow {
     branch: row.branch ?? undefined,
     worktreePath: row.worktree_path ?? undefined,
     rootInstanceId: row.root_instance_id === null ? undefined : String(row.root_instance_id),
+    parentTaskId: row.parent_task_id ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-  };
-}
-
-/**
- * The stored fork point, read back as structure — or nothing, which is the root.
- *
- * Tolerant on purpose. A column read back as something other than an array of steps is a row this
- * process did not write, and the honest answer to that is "this run shares nothing" — the same thing
- * NULL means. Throwing would take down a task list over a field that only decides where a mark goes.
- */
-function forkedAtOf(raw: string | null): { forkedAt: InstanceAddress } | undefined {
-  if (raw === null) return undefined;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return undefined;
-    const steps = parsed.filter(
-      (step): step is InstanceAddress[number] =>
-        typeof step === "object" &&
-        step !== null &&
-        typeof (step as { childKey?: unknown }).childKey === "string" &&
-        typeof (step as { occurrence?: unknown }).occurrence === "number",
-    );
-    return steps.length === parsed.length ? { forkedAt: steps } : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function toRun(row: RawRun): RunRow {
-  return {
-    id: row.id,
-    taskId: row.task_id,
-    snapshotHash: row.snapshot_hash,
-    startedAt: row.started_at,
+    startedAt: row.started_at ?? undefined,
     endedAt: row.ended_at ?? undefined,
-    outcome: (row.outcome as RunRow["outcome"]) ?? undefined,
+    outcome: (row.outcome as TaskRuntimeRow["outcome"]) ?? undefined,
     outputsJson: row.outputs_json ?? undefined,
     failureJson: row.failure_json ?? undefined,
-    ...(forkedAtOf(row.forked_at) ?? {}),
   };
 }
 
@@ -124,7 +85,7 @@ export class RuntimeStore {
   /**
    * `log` is present only when `config.storage.tasks` puts them in files (DESIGN §4.4). Every write
    * below re-reads the row it just changed and appends THAT — never a reconstruction of what it
-   * thinks it wrote, which with eight writers over two tables is how a file drifts from a table.
+   * thinks it wrote, which with eight writers over one table is how a file drifts from it.
    */
   constructor(
     private readonly db: JairaDb,
@@ -135,19 +96,13 @@ export class RuntimeStore {
     this.log?.appendFrom(this.db, taskId, "task_runtime", "task_id = ?", [taskId]);
   }
 
-  private logRun(runId: number): void {
-    if (this.log === undefined) return;
-    const row = this.db.prepare(`SELECT task_id FROM runs WHERE id = ?`).get(runId) as { task_id: string } | undefined;
-    if (row !== undefined) this.log.appendFrom(this.db, row.task_id, "runs", "id = ?", [runId]);
-  }
-
-  insert(taskId: string, nowMs: number, fields?: { branch?: string }): void {
+  insert(taskId: string, nowMs: number, fields?: { branch?: string; parentTaskId?: string }): void {
     this.db
       .prepare(
-        `INSERT INTO task_runtime (task_id, status, branch, created_at, updated_at)
-         VALUES (?, 'queued', ?, ?, ?)`,
+        `INSERT INTO task_runtime (task_id, status, branch, parent_task_id, created_at, updated_at)
+         VALUES (?, 'queued', ?, ?, ?, ?)`,
       )
-      .run(taskId, fields?.branch ?? null, nowMs, nowMs);
+      .run(taskId, fields?.branch ?? null, fields?.parentTaskId ?? null, nowMs, nowMs);
     this.logTask(taskId);
   }
 
@@ -196,40 +151,38 @@ export class RuntimeStore {
   }
 
   /**
-   * `forkedAt` is where this run's own work will begin — absent for a run that shares nothing, which
-   * is every run started from the top. See `RunRow.forkedAt`.
+   * The machine (re)starts executing: stamp when, pin what, and clear how the LAST stretch ended —
+   * `ended_at IS NULL` while running is what makes "how did this end" unambiguous to read.
    */
-  beginRun(taskId: string, snapshotHash: string, nowMs: number, forkedAt?: InstanceAddress): number {
+  beginTask(taskId: string, snapshotHash: string, nowMs: number): void {
     const res = this.db
-      .prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at, forked_at) VALUES (?, ?, ?, ?)`)
-      .run(taskId, snapshotHash, nowMs, forkedAt === undefined ? null : JSON.stringify(forkedAt));
-    // The id is written down because it is REFERENCED — see the note in `rowFile.ts`.
-    this.logRun(Number(res.lastInsertRowid));
-    return Number(res.lastInsertRowid);
+      .prepare(
+        `UPDATE task_runtime
+            SET snapshot_hash = ?, started_at = ?, ended_at = NULL, outcome = NULL,
+                outputs_json = NULL, failure_json = NULL, updated_at = ?
+          WHERE task_id = ?`,
+      )
+      .run(snapshotHash, nowMs, nowMs, taskId);
+    if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
+    this.logTask(taskId);
   }
 
-  endRun(
-    runId: number,
-    outcome: NonNullable<RunRow["outcome"]>,
+  endTask(
+    taskId: string,
+    outcome: NonNullable<TaskRuntimeRow["outcome"]>,
     nowMs: number,
     extra?: { outputsJson?: string; failureJson?: string },
   ): void {
     const res = this.db
-      .prepare(`UPDATE runs SET ended_at = ?, outcome = ?, outputs_json = ?, failure_json = ? WHERE id = ?`)
-      .run(nowMs, outcome, extra?.outputsJson ?? null, extra?.failureJson ?? null, runId);
-    if (res.changes === 0) throw refusal(log, `no run row with id ${runId}`, { runId });
-    this.logRun(runId);
-  }
-
-  listRuns(taskId: string): RunRow[] {
-    const rows = this.db.prepare(`SELECT * FROM runs WHERE task_id = ? ORDER BY id`).all(taskId) as RawRun[];
-    return rows.map(toRun);
+      .prepare(`UPDATE task_runtime SET ended_at = ?, outcome = ?, outputs_json = ?, failure_json = ?, updated_at = ? WHERE task_id = ?`)
+      .run(nowMs, outcome, extra?.outputsJson ?? null, extra?.failureJson ?? null, nowMs, taskId);
+    if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
+    this.logTask(taskId);
   }
 
   /**
    * Workflow-level crash recovery (DESIGN §4.3 as revised by §1a item 1): a task
-   * still `running` at open time is marked `interrupted` and its dangling runs
-   * closed. Returns the recovered task ids.
+   * still `running` at open time is marked `interrupted`. Returns the recovered task ids.
    *
    * `isLive` is the §4.2a fix. Without it this had to *assume* no other process
    * existed, so opening a project while a run was live falsely interrupted it.
@@ -246,11 +199,11 @@ export class RuntimeStore {
     const recover = this.db.transaction(() => {
       for (const id of ids) {
         this.db
-          .prepare(`UPDATE task_runtime SET status = 'interrupted', updated_at = ? WHERE task_id = ?`)
-          .run(nowMs, id);
-        this.db
-          .prepare(`UPDATE runs SET ended_at = ?, outcome = 'interrupted' WHERE task_id = ? AND ended_at IS NULL`)
-          .run(nowMs, id);
+          .prepare(
+            `UPDATE task_runtime SET status = 'interrupted', outcome = 'interrupted', ended_at = ?, updated_at = ?
+              WHERE task_id = ?`,
+          )
+          .run(nowMs, nowMs, id);
         // The task's operation records left 'open' by the crash settle with it. 'open' means "a live
         // process is streaming into this row" — the state signal every record reader now keys on —
         // and no such process exists. The streamed partial in result_json is deliberately KEPT: those
@@ -273,12 +226,7 @@ export class RuntimeStore {
     recover();
     // Recovery is a write like any other, and one that happens at OPEN — so a file-backed task
     // whose interruption was never appended would come back `running` on the next open, forever.
-    for (const id of ids) {
-      this.logTask(id);
-      for (const run of this.db.prepare(`SELECT id FROM runs WHERE task_id = ?`).all(id) as Array<{ id: number }>) {
-        this.logRun(run.id);
-      }
-    }
+    for (const id of ids) this.logTask(id);
     return ids;
   }
 

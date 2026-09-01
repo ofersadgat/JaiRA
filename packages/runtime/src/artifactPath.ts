@@ -34,7 +34,6 @@ export interface DestinationVars {
   /** `config.artifacts.dir`, a name relative to `$SYSTEM`. */
   artifactDir: string;
   taskId: string;
-  runId?: number | string;
   instanceId?: number | string;
   stateId?: string;
   slot?: string;
@@ -204,7 +203,9 @@ export function resolveDestination(
     SYSTEM: `${vars.jaira}/${SYSTEM_DIR_NAME}`,
     ARTIFACT_DIR: vars.artifactDir,
     TASK_ID: sanitizeSegment(vars.taskId),
-    RUN_ID: vars.runId !== undefined ? sanitizeSegment(String(vars.runId)) : "",
+    // Legacy template variable: run ids left the schema with the runs collapse (Identity and
+    // Resume §05), so an authored `$RUN_ID` resolves empty rather than refusing the template.
+    RUN_ID: "",
     INSTANCE_ID: vars.instanceId !== undefined ? sanitizeSegment(String(vars.instanceId)) : "",
     STATE_ID: vars.stateId !== undefined ? sanitizeSegment(vars.stateId) : "",
     SLOT: vars.slot !== undefined ? sanitizeSegment(vars.slot) : "",

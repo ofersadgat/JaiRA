@@ -58,7 +58,7 @@ const parentOf = (kids: Array<{ id: number; from: number; to: number }>): Instan
 const draw = (parent: InstanceNode, refs: SessionRef[]): string =>
   renderToStaticMarkup(
     createElement(SessionBandsView, {
-      bands: bandsOf(piecesOf(parent, refs, 1)),
+      bands: bandsOf(piecesOf(parent, refs)),
       render: (piece) => createElement("p", null, `said by #${piece.node.instanceId}`),
     }),
   );
@@ -274,7 +274,7 @@ const drawWith = (
 ): string =>
   renderToStaticMarkup(
     createElement(SessionBandsView, {
-      bands: bandsOf(piecesOf(parent, refs, 1)),
+      bands: bandsOf(piecesOf(parent, refs)),
       render: (piece) => createElement("p", null, `said by #${piece.node.instanceId}`),
       ...extra,
     }),
@@ -395,9 +395,8 @@ describe("the workflow behind a conversation", () => {
 describe("a panel that is one side of a fork", () => {
   /** A retried state: the attempt that took the position, and the branch that had to leave it. */
   const RETRY: SessionRef[] = [
-    { runId: 1, instanceId: "2", stateId: "implement", sessionId: "default", seq: 6, startedAt: 0, at: 10, status: "error" },
+    { instanceId: "2", stateId: "implement", sessionId: "default", seq: 6, startedAt: 0, at: 10, status: "error" },
     {
-      runId: 1,
       instanceId: "3",
       stateId: "implement",
       sessionId: "b7c1e4",
@@ -473,7 +472,7 @@ describe("what a fold does", () => {
           piecesOf(parentOf([{ id: 2, from: 0, to: 10 }, { id: 3, from: 11, to: 20 }]), [
             ref(2, "planning", 0, 10),
             ref(3, "planning", 11, 20),
-          ], 1),
+          ]),
         ),
         shut,
         scope: "t-1",
@@ -491,7 +490,7 @@ describe("what a fold does", () => {
   it("hides the body of a folded state and keeps its letterhead", () => {
     // The letterhead has to stay: it is the only thing left to click, and folded it carries the
     // summary of what is behind it. A fold that removed the row would be a delete.
-    const html = twoStates(new Set(["t-1::2:0"]));
+    const html = twoStates(new Set(["t-1:2:0"]));
     expect(html).not.toContain("said by #2");
     expect(html).toContain("said by #3");
     expect(html).toContain("lh shut");
@@ -500,15 +499,15 @@ describe("what a fold does", () => {
   it("keys a fold by TASK, run and instance, so nothing folds another task's states", () => {
     // Instance ids are minted per run, so `#i2` names a different state in every one of them — and a
     // single-run projection stamps no run at all, which is why the task has to be in the key too.
-    expect(twoStates(new Set(["t-2::2:0"]))).toContain("said by #2");
-    expect(twoStates(new Set(["t-1:9:2:0"]))).toContain("said by #2");
+    expect(twoStates(new Set(["t-2:2:0"]))).toContain("said by #2");
+    expect(twoStates(new Set(["t-1:9:0"]))).toContain("said by #2");
   });
 
   it("says `expand all` once every state in the sheet is folded", () => {
     // The control has one meaning — fold what is in this session — so its label is a statement about
     // what pressing it will do rather than about what it is called.
     expect(twoStates(new Set())).toContain('aria-label="Collapse all"');
-    expect(twoStates(new Set(["t-1::2:0", "t-1::3:0"]))).toContain('aria-label="Expand all"');
+    expect(twoStates(new Set(["t-1:2:0", "t-1:3:0"]))).toContain('aria-label="Expand all"');
   });
 });
 
@@ -530,7 +529,7 @@ describe("what a bookmark can land on", () => {
           piecesOf(parentOf([{ id: 2, from: 0, to: 10 }, { id: 3, from: 11, to: 20 }]), [
             ref(2, "planning", 0, 10),
             ref(3, "planning", 11, 20),
-          ], 1),
+          ]),
         ),
         render: (piece) => createElement("p", null, `said by #${piece.node.instanceId}`),
       }),
@@ -553,7 +552,7 @@ describe("what a bookmark can land on", () => {
      */
     const html = renderToStaticMarkup(
       createElement(SessionBandsView, {
-        bands: bandsOf(piecesOf(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)], 1)),
+        bands: bandsOf(piecesOf(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)])),
         render: () => createElement("p", null, "the whole page"),
       }),
     );

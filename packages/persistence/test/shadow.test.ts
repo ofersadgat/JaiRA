@@ -30,27 +30,25 @@ afterEach(() => {
 
 const storageOf = (over: Partial<JairaStorageConfig>): JairaStorageConfig => ({ ...defaultConfig().storage, ...over });
 
-/** A run to hang journal rows off — `state_machine_events.run_id` names one. */
-function seedRun(): number {
+/** A task to hang journal rows off. */
+function seedTask(): void {
   db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t1','running',1,1)`).run();
-  const info = db.prepare(`INSERT INTO runs (task_id, snapshot_hash, started_at) VALUES ('t1','h',1)`).run();
-  return Number(info.lastInsertRowid);
 }
 
-const event = (runId: number, payload: object): void =>
+const event = (payload: object): void =>
   void db
     .prepare(
-      `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at)
-       VALUES ('t1', ?, 'operation.completed', ?, 1)`,
+      `INSERT INTO state_machine_events (task_id, type, payload_json, created_at)
+       VALUES ('t1', 'operation.completed', ?, 1)`,
     )
-    .run(runId, JSON.stringify(payload));
+    .run(JSON.stringify(payload));
 
 describe("what a shadow stands in front of", () => {
   it("serves an unqualified read while main stays reachable — the claim every query rests on", () => {
-    const runId = seedRun();
-    event(runId, { operationId: "in-main" });
+    seedTask();
+    event({ operationId: "in-main" });
     shadowTable(db, "state_machine_events");
-    event(runId, { operationId: "in-shadow" });
+    event({ operationId: "in-shadow" });
 
     // Not one query in the codebase says `temp.` — this is why they do not have to.
     expect(db.prepare(`SELECT payload_json FROM state_machine_events`).all()).toEqual([
@@ -66,9 +64,9 @@ describe("what a shadow stands in front of", () => {
     // `operation_id` and `session_ref` are `GENERATED ALWAYS AS (json_extract(payload_json, …))`.
     // Copied as declarations rather than as values, so they recompute on insert into the shadow —
     // and the two indexes over them mean the same thing they did.
-    const runId = seedRun();
+    seedTask();
     shadowTable(db, "state_machine_events");
-    event(runId, { operationId: "op-7" });
+    event({ operationId: "op-7" });
 
     expect(db.prepare(`SELECT operation_id FROM state_machine_events WHERE operation_id = 'op-7'`).all()).toEqual([
       { operation_id: "op-7" },
@@ -76,7 +74,7 @@ describe("what a shadow stands in front of", () => {
   });
 
   it("brings the indexes, so a shadowed table is not a table scan", () => {
-    seedRun();
+    seedTask();
     shadowTable(db, "state_machine_events");
     const plan = db
       .prepare(`EXPLAIN QUERY PLAN SELECT * FROM state_machine_events WHERE task_id = 't1'`)
@@ -87,12 +85,16 @@ describe("what a shadow stands in front of", () => {
 
   it("drops the foreign keys, because a temp child cannot resolve a main parent", () => {
     // Not a weaker constraint — an error on every insert. SQLite looks for the parent in the child's
-    // own database, so `state_machine_events.run_id REFERENCES runs(id)` would look for `temp.runs`.
-    // The honest reading: choosing `file` for a concern gives up the referential integrity SQLite
-    // was enforcing for it, which nothing could preserve once half the rows live in a merged file.
-    shadowTable(db, "state_machine_events");
+    // own database, so `sessions.parent REFERENCES sessions(id)` would look for the parent row in
+    // `temp.sessions`. The honest reading: choosing `file` for a concern gives up the referential
+    // integrity SQLite was enforcing for it, which nothing could preserve once half the rows live in
+    // a merged file.
+    db.prepare(`INSERT INTO sessions (id, cursor, created_at) VALUES ('parent-in-main', 0, 1)`).run();
+    shadowTable(db, "sessions");
     expect(db.pragma("foreign_keys", { simple: true })).toBe(1);
-    expect(() => event(4242, { operationId: "no such run" })).not.toThrow();
+    expect(() =>
+      db.prepare(`INSERT INTO sessions (id, parent, cursor, created_at) VALUES ('child', 'parent-in-main', 0, 2)`).run(),
+    ).not.toThrow();
   });
 
   it("keeps every constraint that is about one row", () => {
@@ -103,8 +105,8 @@ describe("what a shadow stands in front of", () => {
     const claim = (id: string, seq: number): void =>
       void db
         .prepare(
-          `INSERT INTO operation_records (id, task_id, run_id, status, request_json, started_at)
-           VALUES (?, 't1', 1, 'open', ?, 1)`,
+          `INSERT INTO operation_records (id, task_id, status, request_json, started_at)
+           VALUES (?, 't1', 'open', ?, 1)`,
         )
         .run(id, JSON.stringify({ session: { id: "conv", seq } }));
     claim("r:0", 0);
@@ -125,9 +127,9 @@ describe("seeding from main — the flip path", () => {
   it("copies the rows already in the database, identities included", () => {
     // Turning a concern from `db` to `file` has to start from what is already there, or the first
     // open after the change looks like the history was deleted.
-    const runId = seedRun();
-    event(runId, { operationId: "a" });
-    event(runId, { operationId: "b" });
+    seedTask();
+    event({ operationId: "a" });
+    event({ operationId: "b" });
     shadowTable(db, "state_machine_events");
 
     expect(seedFromMain(db, "state_machine_events")).toBe(2);
@@ -154,8 +156,8 @@ describe("applyStorage", () => {
   });
 
   it("shadows a concern's whole table group, not one table of it", () => {
-    // The grouping is the point of concerns: `task_runtime` in a file and `runs` in the database
-    // would split one task's truth across two stores with different durability.
+    // The grouping is the point of concerns: half a concern in a file and half in the database
+    // would split one truth across two stores with different durability.
     expect(shadowedTables(storageOf({ tasks: "file" }))).toEqual([...CONCERN_TABLES.tasks]);
     expect(shadowedTables(storageOf({ conversations: "both" }))).toEqual([...CONCERN_TABLES.conversations]);
   });
@@ -165,8 +167,8 @@ describe("applyStorage", () => {
   });
 
   it("reports what it shadowed and what it carried over", () => {
-    const runId = seedRun();
-    event(runId, { operationId: "carried" });
+    seedTask();
+    event({ operationId: "carried" });
 
     const report = applyStorage(db, parseConfig({ storage: { journal: "file" } }).storage);
     expect(report.shadowed).toEqual(["state_machine_events"]);

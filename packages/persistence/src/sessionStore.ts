@@ -148,50 +148,44 @@ interface Row {
 }
 
 /**
- * Which RUN a store's conversations belong to.
+ * Which TASK a store's conversations belong to.
  *
- * What the scope does NOW (migration 15): it stamps the RECORDS (`task_id`/`run_id` on every row,
- * which is what pruning and per-run reads key on), and its task half scopes the NAME ALIASES — an
- * authored `session: "planning"` resolves through `session_names(task_id, name)` to an assigned
- * session id, run-free, so a resumed run's `planning` IS the conversation an earlier run created.
+ * What the scope does NOW (migration 16): it stamps the RECORDS (`task_id` on every row, which is
+ * what pruning and per-task reads key on), and it scopes the NAME ALIASES — an authored
+ * `session: "planning"` resolves through `session_names(task_id, name)` to an assigned session id,
+ * so a resumed machine's `planning` IS the conversation it created before it stopped.
  *
  * What it no longer does is namespace session ids. Historically it had to: ids were derived from
  * names and instance counters, two runs named their conversations identically, and the `task/run/`
  * prefix that stopped the collision also made the intended continuation impossible (Identity and
  * Resume §01). Ids are assigned now — minted once, opaque, never parsed — and the prefix survives
- * only as {@link k}'s legacy twin lookup over conversations recorded before the change.
+ * only as {@link k}'s legacy twin lookup over conversations recorded before the change. The RUN
+ * half of the old scope is gone with the runs table; a legacy row's run number is matched as a
+ * wildcard, newest first, because nothing knows it any more.
  */
 export interface SessionScope {
   taskId?: string;
-  runId?: number;
 }
 
 const log = createLogger("jaira.persistence.sessions");
 
-/**
- * LEGACY: the run-namespaced spelling a pre-migration-15 store keyed every session by.
- *
- * Nothing writes this any more — session ids are assigned, and an authored name is a task-scoped
- * alias. It survives because history was written this way: {@link k}'s twin lookup, the replay
- * index's fallback for old journals, and `interruptedSessions`' second set key all use it to find
- * rows recorded before the change.
- */
-export function scopedSessionId(scope: SessionScope, id: string): string {
-  const { taskId, runId } = scope;
-  return taskId === undefined && runId === undefined ? id : `${taskId ?? ""}/${runId ?? ""}/${id}`;
+/** `LIKE` pattern text from a literal — the twin lookup's escaping, shared with nothing else. */
+function likeEscape(text: string): string {
+  return text.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
 /**
- * LEGACY, the inverse — a pre-migration-15 stored id with the run namespace taken back off.
+ * LEGACY, read-only — a pre-migration-15 stored id (`task/run/name`) with the namespace taken off.
  *
  * An assigned id carries no prefix and passes through unchanged, which is every id written since
- * the change; only rows recorded under the old spelling are affected.
+ * the change; only rows recorded under the old spelling are affected. The run segment is matched as
+ * bare digits (run ids were integers) because the runs table is gone and nothing knows the number.
  */
 export function bareSessionId(scope: SessionScope, id: string): string {
-  const { taskId, runId } = scope;
-  if (taskId === undefined && runId === undefined) return id;
-  const prefix = `${taskId ?? ""}/${runId ?? ""}/`;
-  return id.startsWith(prefix) ? id.slice(prefix.length) : id;
+  const taskId = scope.taskId;
+  if (taskId === undefined) return id;
+  const match = new RegExp(`^${taskId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/[0-9]*/`).exec(id);
+  return match !== null ? id.slice(match[0].length) : id;
 }
 
 /**
@@ -270,7 +264,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     if (this.log === undefined) return;
     const row = this.db
       .prepare(
-        `SELECT id AS record_id, task_id, run_id, status, request_json, result_json, error_json,
+        `SELECT id AS record_id, task_id, status, request_json, result_json, error_json,
                 metrics_json, provider_session_id, landed_session_id, landed_seq, started_at, ended_at
            FROM operation_records WHERE id = ?`,
       )
@@ -395,9 +389,9 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     const row = this.db
       .prepare(
         `SELECT id, result_json, request_json FROM operation_records
-          WHERE id = ? AND task_id IS ? AND run_id IS ?`,
+          WHERE id = ? AND task_id IS ?`,
       )
-      .get(ref.id, this.scope.taskId ?? null, this.scope.runId ?? null) as
+      .get(ref.id, this.scope.taskId ?? null) as
       | { id: string; result_json: string | null; request_json: string | null }
       | undefined;
     if (row === undefined) return;
@@ -514,9 +508,9 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       .prepare(
         `SELECT COALESCE(landed_session_id, session_id) AS session_id,
                 COALESCE(landed_seq, session_seq) AS seq
-           FROM operation_records WHERE id = ? AND task_id IS ? AND run_id IS ?`,
+           FROM operation_records WHERE id = ? AND task_id IS ?`,
       )
-      .get(ref.id, this.scope.taskId ?? null, this.scope.runId ?? null) as
+      .get(ref.id, this.scope.taskId ?? null) as
       | { session_id: string | null; seq: number | null }
       | undefined;
     if (row === undefined || row.session_id === null || row.seq === null) return undefined;
@@ -546,9 +540,9 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     const pos = this.db
       .prepare(
         `SELECT COALESCE(landed_session_id, session_id) AS session_id, COALESCE(landed_seq, session_seq) AS seq
-           FROM operation_records WHERE id = ? AND task_id IS ? AND run_id IS ?`,
+           FROM operation_records WHERE id = ? AND task_id IS ?`,
       )
-      .get(ref.id, this.scope.taskId ?? null, this.scope.runId ?? null) as
+      .get(ref.id, this.scope.taskId ?? null) as
       | { session_id: string | null; seq: number | null }
       | undefined;
     if (pos === undefined || pos.session_id === null || pos.seq === null) return; // unplaced: no lineage to be wrong about
@@ -609,9 +603,9 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     const row = this.db
       .prepare(
         `SELECT id, request_json FROM operation_records
-          WHERE id = ? AND task_id IS ? AND run_id IS ? AND status = 'open'`,
+          WHERE id = ? AND task_id IS ? AND status = 'open'`,
       )
-      .get(ref.id, this.scope.taskId ?? null, this.scope.runId ?? null) as
+      .get(ref.id, this.scope.taskId ?? null) as
       | { id: string; request_json: string | null }
       | undefined;
     if (row === undefined) return;
@@ -754,9 +748,9 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       .prepare(
         `SELECT id AS record_id, status, request_json, result_json, error_json, started_at, ended_at
            FROM operation_records
-          WHERE id = ? AND task_id IS ? AND run_id IS ?`,
+          WHERE id = ? AND task_id IS ?`,
       )
-      .get(recordId, this.scope.taskId ?? null, this.scope.runId ?? null) as CallRow | undefined;
+      .get(recordId, this.scope.taskId ?? null) as CallRow | undefined;
     if (row !== undefined) return recordedCallOf(this.db, row);
     // A legacy row this scope owns may sit under a migration-13 suffix (`<id>~~<n>`) when another
     // run's row kept the bare id. The newest such row is the old ORDER BY attempt DESC answer.
@@ -764,10 +758,10 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       .prepare(
         `SELECT id AS record_id, status, request_json, result_json, error_json, started_at, ended_at
            FROM operation_records
-          WHERE id LIKE ? || '~~%' AND task_id IS ? AND run_id IS ?
+          WHERE id LIKE ? || '~~%' AND task_id IS ?
           ORDER BY rowid DESC LIMIT 1`,
       )
-      .get(recordId, this.scope.taskId ?? null, this.scope.runId ?? null) as CallRow | undefined;
+      .get(recordId, this.scope.taskId ?? null) as CallRow | undefined;
     return legacy === undefined ? undefined : recordedCallOf(this.db, legacy);
   }
 
@@ -775,7 +769,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * Every call this run made, oldest first — what a derivation reads and what a gate's own request
    * is recovered from.
    *
-   * Scoped by the store's own `(taskId, runId)`, which is the index `operation_records_scope`
+   * Scoped by the store's own `taskId`, which is the index `operation_records_scope`
    * already covers, so this is a range scan rather than a table walk.
    *
    * One row per record, by construction now: the id is a primary key, and a retried call reopens
@@ -787,10 +781,10 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       .prepare(
         `SELECT id AS record_id, status, request_json, result_json, error_json, started_at, ended_at, rowid AS rowid
            FROM operation_records
-          WHERE task_id IS ? AND run_id IS ?
+          WHERE task_id IS ?
           ORDER BY started_at, rowid`,
       )
-      .all(this.scope.taskId ?? null, this.scope.runId ?? null) as Array<CallRow & { rowid: number }>;
+      .all(this.scope.taskId ?? null) as Array<CallRow & { rowid: number }>;
     const byBase = new Map<string, CallRow & { rowid: number }>();
     for (const row of rows) byBase.set(baseRecordId(row.record_id), row); // later wins — the last attempt
     return [...byBase.values()]
@@ -900,10 +894,10 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     try {
       this.db
         .prepare(
-          `INSERT INTO operation_records (id, task_id, run_id, status, request_json, result_json, started_at)
-           VALUES (?, ?, ?, 'open', ?, ?, ?)`,
+          `INSERT INTO operation_records (id, task_id, status, request_json, result_json, started_at)
+           VALUES (?, ?, 'open', ?, ?, ?)`,
         )
-        .run(stub.id, this.scope.taskId ?? null, this.scope.runId ?? null, request, born, stub.startMs ?? Date.now());
+        .run(stub.id, this.scope.taskId ?? null, request, born, stub.startMs ?? Date.now());
       return false;
     } catch (e) {
       const message = String((e as Error).message);
@@ -1084,13 +1078,12 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
         // position pointed at — the replace states that instead of leaving an unreachable twin.
         this.db
           .prepare(
-            `INSERT OR REPLACE INTO operation_records (id, task_id, run_id, status, request_json, result_json, started_at, ended_at)
-             VALUES (?, ?, ?, 'completed', ?, ?, ?, ?)`,
+            `INSERT OR REPLACE INTO operation_records (id, task_id, status, request_json, result_json, started_at, ended_at)
+             VALUES (?, ?, 'completed', ?, ?, ?, ?)`,
           )
           .run(
             recordId,
             this.scope.taskId ?? null,
-            this.scope.runId ?? null,
             // WHAT PRODUCED THIS SEED. Every other record carries the operation it ran; this was the
             // one row in the store with a null request, so a conversation that opened with a summary
             // or a re-read said nothing about where it came from — and a reader looking at a lineage
@@ -1161,11 +1154,8 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       .get(this.scope.taskId ?? "", ref) as { session_id: string } | undefined;
     if (alias !== undefined) return alias.session_id;
     // The legacy spelling last: a conversation recorded before ids were assigned sits under the
-    // run-scoped id, and this scope's own rows keep resolving — run-scoped, exactly as they were
-    // written, which is also why a LATER run of a legacy task starts fresh rather than continuing.
-    const scoped = scopedSessionId(this.scope, ref);
-    if (scoped !== ref && this.hasSession(scoped)) return scoped;
-    return undefined;
+    // run-scoped id, and this scope's own rows keep resolving — exactly as they were written.
+    return this.legacyTwin(ref);
   }
 
   private hasSession(id: string): boolean {
@@ -1189,9 +1179,22 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * spelling never exists as a row, so everything minted from now on keys by itself.
    */
   private k(id: string): string {
-    const scoped = scopedSessionId(this.scope, id);
-    if (scoped !== id && this.hasSession(scoped)) return scoped;
-    return id;
+    return this.legacyTwin(id) ?? id;
+  }
+
+  /**
+   * The run-scoped row a bare id was recorded under, when one exists — matched with the run segment
+   * as a wildcard (`task/%/id`), NEWEST first, because the runs table is gone and nothing knows the
+   * number any more. A new id's scoped spelling never exists as a row, so everything minted since
+   * migration 15 keys by itself and this answers nothing.
+   */
+  private legacyTwin(id: string): string | undefined {
+    const taskId = this.scope.taskId;
+    if (taskId === undefined) return undefined;
+    const row = this.db
+      .prepare(`SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\\' ORDER BY rowid DESC LIMIT 1`)
+      .get(`${likeEscape(taskId)}/%/${likeEscape(id)}`) as { id: string } | undefined;
+    return row?.id;
   }
 
   private branch(id: string, branch: Branch): void {

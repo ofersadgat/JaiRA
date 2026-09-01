@@ -87,7 +87,7 @@ function said(taskId: string): string[] {
 const branchOf = (taskId: string): string => service.chatThread({ taskId })!.session.sessionId;
 
 /** The project behind the open service — for the tests that have to act like a crash. */
-function projectOf(): { db: never; events: { recorder(t: string, r: number): { record(e: unknown, at: number): void } } } {
+function projectOf(): { db: never; events: { recorder(t: string): { record(e: unknown, at: number): void } } } {
   const sessions = (service as never as { sessions: Map<string, { project: unknown }> }).sessions;
   return [...sessions.values()][0]!.project as never;
 }
@@ -172,9 +172,9 @@ describe("1b. what a stopped turn had already SAID", () => {
   function stoppedTurn(taskId: string, asked: string, streamed: Record<string, unknown>): string {
     const thread = service.chatThread({ taskId })!;
     const project = projectOf();
-    const store = new SqliteSessionStore(project.db, { taskId, runId: thread.runId });
+    const store = new SqliteSessionStore(project.db, { taskId });
     const branch = thread.session.sessionId;
-    const recorder = project.events.recorder(taskId, thread.runId);
+    const recorder = project.events.recorder(taskId);
     const where = { instanceId: chatInstanceIdOf(thread.instanceId), stateId: CHAT_ASSISTANT };
     recorder.record({ type: "instance.entered", ...where, childKey: "ask", parentInstanceId: thread.instanceId, inputs: {} }, Date.now());
     recorder.record({ type: "operation.started", ...where, op: "prompt" }, Date.now());
@@ -286,11 +286,11 @@ describe("2. a turn whose process died", () => {
 
     // Exactly what a kill -9 mid-turn leaves behind: the journal says a turn started under the chat
     // child, the record store holds its claimed position, and there is no terminal event for either.
-    const recorder = project.events.recorder(taskId, thread.runId);
+    const recorder = project.events.recorder(taskId);
     const where = { instanceId: chatInstanceIdOf(thread.instanceId), stateId: CHAT_ASSISTANT };
     recorder.record({ type: "instance.entered", ...where, childKey: "ask", parentInstanceId: thread.instanceId, inputs: {} }, Date.now());
     recorder.record({ type: "operation.started", ...where, op: "prompt" }, Date.now());
-    new SqliteSessionStore(project.db, { taskId, runId: thread.runId }).append({
+    new SqliteSessionStore(project.db, { taskId }).append({
       id: `${branch}:1`,
       source: { kind: "prompt", user: "the message it died on" } as never,
       startMs: Date.now(),
@@ -335,13 +335,18 @@ describe("3. re-running a task somebody has talked to", () => {
     expect(said(taskId)).toEqual(before);
   });
 
-  it("still re-runs a task nobody has talked to in place — there is nothing to lose", async () => {
+  it("mints a task nobody has talked to a fresh machine too, chained back", async () => {
+    // A re-run is a new state machine instance unconditionally (Identity and Resume §05) — the
+    // one-journal model has no "in place" left: restarting the same task would grow a second tree
+    // where its machine lives. The spoken-to distinction stopped mattering the day it stopped
+    // being what decided.
     const { taskId } = service.createTask({ title: titleOf("one"), workflow: CHAT_ASSISTANT, inputs: { message: "one" } });
     await service.startTask({ taskId, fake: STOPPED });
     await until(() => pushes.some((m) => m.type === "run:finished" && m.taskId === taskId), "the opening run to end");
 
     const rerun = await service.rerunTask({ taskId, fake: REPLY("second try") });
-    expect(rerun.taskId).toBe(taskId);
+    expect(rerun.taskId).not.toBe(taskId);
+    expect(service.listTasks().find((t) => t.taskId === rerun.taskId)?.parentTaskId).toBe(taskId);
   });
 });
 

@@ -171,7 +171,7 @@ const USAGE = `usage:
   jaira worktree remove <taskId> [--force] [--project <dir>]
   jaira changeset review [--task <taskId> | --dir <path>] [--base <rev>] [--loop]
             [--interactions <json|@file>] [--fake <json|@file>] [--project <dir>]
-  jaira prune [--older-than <days>] [--keep-runs <n>] [--apply] [--project <dir>]
+  jaira prune [--older-than <days>] [--apply] [--project <dir>]
   jaira workflow list [--json] [--project <dir>]
   jaira workflow lint [--json] [--project <dir>]
   jaira functions list [--json] [--project <dir>]
@@ -898,13 +898,12 @@ async function runTaskNow(
       artifactDir: project.config.artifacts.dir,
       inlineMaxBytes: project.config.artifacts.inlineMaxBytes,
       taskId,
-      runId: started.runId,
       workspaceRoot: workspace.root,
       projectDir: project.paths.projectDir,
       jairaDir: project.paths.jairaDir,
     });
     io.stderr(
-      `task ${taskId} run ${started.runId}: workflow '${started.meta.workflow}' ` +
+      `task ${taskId}: workflow '${started.meta.workflow}' ` +
         `snapshot ${started.snapshotHash.slice(0, 12)}${started.pinned ? " (pinned)" : ""}` +
         `${workspace.isWorktree ? ` · worktree ${workspace.root} (${workspace.branch})` : ""}\n`,
     );
@@ -917,7 +916,6 @@ async function runTaskNow(
     owner = new RunOwner({
       jobs: project.jobs,
       taskId,
-      runId: started.runId,
       onCancelRequested: () => stop.abort(),
     });
 
@@ -933,7 +931,7 @@ async function runTaskNow(
     } catch (e) {
       // The run row is already open, so a refusal must close it — otherwise the task
       // stays `running` and the next open would call it interrupted.
-      finishTaskRun(project, taskId, started.runId, "failed", {
+      finishTaskRun(project, taskId, "failed", {
         failure: { classification: "permanent", reason: (e as Error).message },
       });
       throw e;
@@ -948,7 +946,7 @@ async function runTaskNow(
       registry,
       prompt,
       session,
-      persistence: project.events.recorder(taskId, started.runId),
+      persistence: project.events.recorder(taskId),
       workspace: { root: workspace.root, ...(workspace.treeHash !== undefined ? { treeHash: workspace.treeHash } : {}) },
       // Merged: SIGINT here, or a cancel another process requested through the job.
       abortSignal: stop.signal,
@@ -963,21 +961,19 @@ async function runTaskNow(
       store: project.artifacts,
       vars: artifacts.vars,
       inlineMaxBytes: artifacts.inlineMaxBytes,
-      runId: started.runId,
       onError: (name, error) => io.stderr(`warning: could not store artifact '${name}': ${error.message}\n`),
     });
-    finishTaskRun(project, taskId, started.runId, status, {
+    finishTaskRun(project, taskId, status, {
       outputs: result.value,
       ...("error" in result && result.error !== undefined ? { failure: result.error } : {}),
     });
     // A composite failure reads "child 'goals' terminated with error…", which hides
     // what broke; the journal has the operation-level reason, so report both.
-    const causes = status === "completed" ? [] : runCauses(project, taskId, started.runId);
+    const causes = status === "completed" ? [] : runCauses(project, taskId);
     io.stdout(
       JSON.stringify(
         {
           taskId,
-          runId: started.runId,
           ...resultReport(result),
           ...(causes.length > 0 ? { causes } : {}),
           ...(placed.length > 0
@@ -1397,26 +1393,23 @@ async function cmdPrune(argv: string[], io: CliIo): Promise<number> {
     options: {
       project: { type: "string" },
       "older-than": { type: "string" },
-      "keep-runs": { type: "string" },
       apply: { type: "boolean" },
     },
   });
   const days = values["older-than"] !== undefined ? Number(values["older-than"]) : 0;
   if (!Number.isFinite(days) || days < 0) throw new UsageError("--older-than must be a non-negative number of days");
-  const keep = values["keep-runs"] !== undefined ? Number(values["keep-runs"]) : 1;
-  if (!Number.isInteger(keep) || keep < 0) throw new UsageError("--keep-runs must be a non-negative integer");
   const project = await openWithRecoveryNote(projectDirOf(values, io), io);
   try {
     const before = Date.now() - days * 86_400_000;
-    const result = pruneHistory(project, { before, keepRunsPerTask: keep, dryRun: values.apply !== true });
+    const result = pruneHistory(project, { before, dryRun: values.apply !== true });
     io.stdout(
       JSON.stringify(
         {
           ...(result.dryRun ? { dryRun: true } : {}),
-          runsPruned: result.runs.length,
+          tasksPruned: result.tasks.length,
           events: result.events,
           commands: result.commands,
-          runs: result.runs,
+          tasks: result.tasks,
           skipped: result.skippedTasks,
           remaining: historySize(project),
         },
@@ -1465,17 +1458,21 @@ async function cmdTaskStatus(argv: string[], io: CliIo): Promise<number> {
     const runtime = project.runtime.get(taskId);
     if (!runtime) throw new Error(`unknown task '${taskId}'`);
     const meta = project.tasks.tryRead(taskId);
-    const runs = project.runtime.listRuns(taskId).map((run) => ({
-      runId: run.id,
-      outcome: run.outcome ?? "running",
-      startedAt: new Date(run.startedAt).toISOString(),
-      ...(run.endedAt !== undefined ? { endedAt: new Date(run.endedAt).toISOString() } : {}),
-      ...(run.outputsJson !== undefined ? { outputs: JSON.parse(run.outputsJson) as unknown } : {}),
-      ...(run.failureJson !== undefined ? { failure: JSON.parse(run.failureJson) as unknown } : {}),
-    }));
+    const runs =
+      runtime.startedAt === undefined
+        ? []
+        : [
+            {
+              outcome: runtime.outcome ?? "running",
+              startedAt: new Date(runtime.startedAt).toISOString(),
+              ...(runtime.endedAt !== undefined ? { endedAt: new Date(runtime.endedAt).toISOString() } : {}),
+              ...(runtime.outputsJson !== undefined ? { outputs: JSON.parse(runtime.outputsJson) as unknown } : {}),
+              ...(runtime.failureJson !== undefined ? { failure: JSON.parse(runtime.failureJson) as unknown } : {}),
+            },
+          ];
     const eventLimit = values.events !== undefined ? Number(values.events) : 0;
     const allEvents = eventLimit > 0 ? project.events.list(taskId) : [];
-    const events = allEvents.slice(-eventLimit).map((e) => ({ seq: e.seq, runId: e.runId, ...e.event }));
+    const events = allEvents.slice(-eventLimit).map((e) => ({ seq: e.seq, ...e.event }));
     io.stdout(
       JSON.stringify(
         {

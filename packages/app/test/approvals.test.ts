@@ -131,7 +131,7 @@ describe("policy → approval → audit", () => {
   it("records what policy decided and what the human then chose", async () => {
     // A run row references a task row (the FK the schema declares), so both exist.
     project.runtime.insert("t-1", Date.now());
-    const run = project.runtime.beginRun("t-1", "hash", Date.now());
+    project.runtime.beginTask("t-1", "hash", Date.now());
 
     const audit: PolicyAuditEntry[] = [];
     const hub = new ApprovalHub({ onRequest: () => undefined, nextId: () => "a1" });
@@ -143,7 +143,6 @@ describe("policy → approval → audit", () => {
           hub.noteDecision(entry);
           project.commands.record({
             taskId: "t-1",
-            runId: run,
             tool: entry.tool,
             ...(entry.command !== undefined ? { command: entry.command } : {}),
             decision: entry.action === "deny" ? "blocked" : "allowed",
@@ -165,7 +164,6 @@ describe("policy → approval → audit", () => {
     hub.decide("a1", "allow", "workflow-run");
     project.commands.record({
       taskId: "t-1",
-      runId: run,
       tool: "bash",
       command: "git push origin main",
       decision: "approved",
@@ -189,10 +187,9 @@ describe("policy → approval → audit", () => {
 
   it("keeps the parsed intent in the log, so the audit shows what was matched", () => {
     project.runtime.insert("t-2", Date.now());
-    const run = project.runtime.beginRun("t-2", "hash", Date.now());
+    project.runtime.beginTask("t-2", "hash", Date.now());
     project.commands.record({
       taskId: "t-2",
-      runId: run,
       tool: "bash",
       command: "git -C /x reset --hard",
       parsed: { program: "git", subcommand: "reset", flags: ["--hard"] },

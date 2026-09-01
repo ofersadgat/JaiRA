@@ -8,7 +8,6 @@ import { describe, expect, it } from "vitest";
 import type { EngineEvent } from "@declarative-ai/hw";
 import {
   activePathOf,
-  foldRuns,
   breadcrumbOf,
   flattenInstances,
   projectBoard,
@@ -389,55 +388,44 @@ describe("breadcrumbOf", () => {
 });
 
 /**
- * Folding a task's runs (`foldRuns`) — the merge a resume makes necessary.
- *
- * The subtle half is the KEY. A loop re-enters one child key, so position means the key plus its
- * occurrence; merging on the key alone would collapse three iterations into one, and merging on the
- * instance id would not match at all, since ids are minted per run.
+ * A re-stated entry merges by durable id (Identity and Resume §04/§05): the live spine of a
+ * continuation — and a revived failure re-entering — journals `instance.entered` again under the
+ * SAME id, and the projection must read that as "the machine is in this instance again" rather than
+ * growing a twin beside the original.
  */
-describe("folding a task's runs into one tree", () => {
-  const run = (events: EngineEvent[]) => projectRun(events);
-
-  it("keeps what an earlier run reached past where a later one stopped", () => {
-    const deep = run([
-      entered("1", "root"),
-      entered("2", "root/a", "1", "a"),
-      terminated("2", "root/a", "success"),
-      entered("3", "root/b", "1", "b"),
+describe("one machine across a stop and its continuation", () => {
+  it("merges a re-stated spine into the instance it continues", () => {
+    const tree = projectRun([
+      entered("i-root", "root"),
+      entered("i-a", "root/a", "i-root", "a"),
+      terminated("i-a", "root/a", "success"),
+      // the process died; the continuation re-states the live spine under the same ids
+      entered("i-root", "root"),
+      entered("i-b", "root/b", "i-root", "b"),
     ]);
-    const shallow = run([entered("1", "root"), entered("2", "root/a", "1", "a"), terminated("2", "root/a", "success")]);
-
-    const folded = foldRuns([
-      { runId: 1, run: deep },
-      { runId: 2, run: shallow },
-    ]);
-    const root = folded.instances[0]!;
-    expect(root.children.map((c) => [c.childKey, c.runId])).toEqual([
-      ["a", 2],
-      ["b", 1],
+    expect(tree.instances).toHaveLength(1);
+    const root = tree.instances[0]!;
+    expect(root.status).toBe("running");
+    expect(root.children.map((c) => [c.childKey, c.status])).toEqual([
+      ["a", "completed"],
+      ["b", "running"],
     ]);
   });
 
-  it("distinguishes a loop's iterations instead of collapsing them onto one key", () => {
-    // Two entries under one child key: occurrence, not the key, is what tells them apart.
-    const looped = run([
-      entered("1", "root"),
-      entered("2", "root/tick", "1", "tick"),
-      terminated("2", "root/tick", "success"),
-      entered("3", "root/tick", "1", "tick"),
-      terminated("3", "root/tick", "success"),
+  it("reads a revived failure's re-entry as running again", () => {
+    const tree = projectRun([
+      entered("i-root", "root"),
+      entered("i-a", "root/a", "i-root", "a"),
+      terminated("i-a", "root/a", "error"),
+      terminated("i-root", "root", "error"),
+      // the resume presents the failed chain live again and re-enters it
+      entered("i-root", "root"),
+      entered("i-a", "root/a", "i-root", "a"),
     ]);
-    const once = run([entered("1", "root"), entered("2", "root/tick", "1", "tick")]);
-
-    const folded = foldRuns([
-      { runId: 1, run: looped },
-      { runId: 2, run: once },
-    ]);
-    const ticks = folded.instances[0]!.children;
-    // The later run re-answered the FIRST iteration only; the second survives from the earlier run.
-    expect(ticks.map((c) => [c.status, c.runId])).toEqual([
-      ["running", 2],
-      ["completed", 1],
-    ]);
+    const root = tree.instances[0]!;
+    expect(root.status).toBe("running");
+    expect(root.children.map((c) => c.status)).toEqual(["running"]);
+    // One node per durable id — the re-entry did not grow a second occurrence.
+    expect(root.children).toHaveLength(1);
   });
 });

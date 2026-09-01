@@ -68,7 +68,7 @@ const op = {
 
 describe("a call that reports a remote it was not given", () => {
   it("leaves the record in exactly one lineage, and points later readers at that one", async () => {
-    const store = new SqliteSessionStore(db, { taskId: "t-div", runId: 1 });
+    const store = new SqliteSessionStore(db, { taskId: "t-div" });
 
     // The trunk, sitting on P1.
     const first = store.resolve({ ref: "chat" });

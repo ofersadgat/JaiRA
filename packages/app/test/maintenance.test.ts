@@ -81,31 +81,28 @@ describe("history pruning", () => {
   it("reports the stored size", async () => {
     await runTask();
     const size = service.historySize();
-    expect(size.runs).toBe(1);
+    expect(size.tasks).toBe(1);
     expect(size.events).toBeGreaterThan(0);
   });
 
   it("plans without deleting, then applies", async () => {
     await runTask("First");
     await runTask("Second");
-    expect(service.historySize().runs).toBe(2);
+    expect(service.historySize().tasks).toBe(2);
 
-    // The default keeps each task's latest run, so nothing is eligible until the
-    // panel is asked to keep none.
-    expect(service.pruneHistory({}).runs).toEqual([]);
-
-    const plan = service.pruneHistory({ keepRunsPerTask: 0 });
+    const plan = service.pruneHistory({});
     expect(plan.dryRun).toBe(true);
-    expect(plan.runs).toHaveLength(2);
+    expect(plan.tasks).toHaveLength(2);
     expect(plan.events).toBeGreaterThan(0);
     // A plan is a read: the numbers have not moved.
-    expect(service.historySize().runs).toBe(2);
+    expect(service.historySize().events).toBeGreaterThan(0);
 
     const pushesBefore = pushes.length;
-    const applied = service.pruneHistory({ keepRunsPerTask: 0, apply: true });
+    const applied = service.pruneHistory({ apply: true });
     expect(applied.dryRun).toBe(false);
-    expect(applied.remaining).toEqual({ runs: 0, events: 0, commands: 0 });
-    // Deleting run history changes the board and the detail view.
+    // The tasks themselves stay  the board still says what happened; the how is gone.
+    expect(applied.remaining).toEqual({ tasks: 2, events: 0, commands: 0 });
+    // Deleting history changes the board and the detail view.
     expect(pushes.slice(pushesBefore).some((m) => m.type === "store:invalidate" && m.scope === "board")).toBe(true);
   });
 
@@ -114,13 +111,12 @@ describe("history pruning", () => {
     // No scripted answer: the run parks on the human gate, so the task is running.
     await service.startTask({ taskId, fake: happyRules() });
 
-    const plan = service.pruneHistory({ keepRunsPerTask: 0 });
-    expect(plan.runs).toEqual([]);
+    const plan = service.pruneHistory({});
+    expect(plan.tasks).toEqual([]);
     expect(plan.skippedTasks.map((s) => s.taskId)).toContain(taskId);
   });
 
   it("rejects nonsense arguments rather than deleting the wrong thing", () => {
     expect(() => service.pruneHistory({ olderThanDays: -1 })).toThrow(/non-negative/);
-    expect(() => service.pruneHistory({ keepRunsPerTask: 0.5 })).toThrow(/non-negative integer/);
   });
 });

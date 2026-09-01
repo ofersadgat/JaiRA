@@ -20,7 +20,6 @@ export type CommandDecider = "policy" | "user";
 
 export interface CommandLogEntry {
   taskId: string;
-  runId: number;
   tool: string;
   /** The raw command line, when the tool takes one. */
   command?: string;
@@ -43,7 +42,6 @@ export interface StoredCommandLogEntry extends CommandLogEntry {
 interface RawRow {
   id: number;
   task_id: string;
-  run_id: number;
   tool: string;
   command: string | null;
   parsed_json: string | null;
@@ -62,12 +60,11 @@ export class CommandLog {
     const res = this.db
       .prepare(
         `INSERT INTO command_log
-           (task_id, run_id, tool, command, parsed_json, decision, decided_by, reason, scope, session_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (task_id, tool, command, parsed_json, decision, decided_by, reason, scope, session_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         entry.taskId,
-        entry.runId,
         entry.tool,
         entry.command ?? null,
         entry.parsed !== undefined ? JSON.stringify(entry.parsed) : null,
@@ -81,13 +78,9 @@ export class CommandLog {
     return Number(res.lastInsertRowid);
   }
 
-  list(taskId: string, opts?: { runId?: number; limit?: number }): StoredCommandLogEntry[] {
+  list(taskId: string, opts?: { limit?: number }): StoredCommandLogEntry[] {
     const clauses = ["task_id = ?"];
     const params: unknown[] = [taskId];
-    if (opts?.runId !== undefined) {
-      clauses.push("run_id = ?");
-      params.push(opts.runId);
-    }
     let sql = `SELECT * FROM command_log WHERE ${clauses.join(" AND ")} ORDER BY id`;
     if (opts?.limit !== undefined) {
       sql += " LIMIT ?";
@@ -96,7 +89,6 @@ export class CommandLog {
     return (this.db.prepare(sql).all(...params) as RawRow[]).map((row) => ({
       id: row.id,
       taskId: row.task_id,
-      runId: row.run_id,
       tool: row.tool,
       ...(row.command !== null ? { command: row.command } : {}),
       ...(row.parsed_json !== null ? { parsed: JSON.parse(row.parsed_json) as JsonValue } : {}),
@@ -109,10 +101,10 @@ export class CommandLog {
     }));
   }
 
-  /** Counts per decision, for a run summary. */
-  summary(taskId: string, runId?: number): Record<CommandDecision, number> {
+  /** Counts per decision, for a task summary. */
+  summary(taskId: string): Record<CommandDecision, number> {
     const totals: Record<CommandDecision, number> = { allowed: 0, blocked: 0, approved: 0, denied: 0 };
-    for (const entry of this.list(taskId, runId !== undefined ? { runId } : {})) totals[entry.decision]++;
+    for (const entry of this.list(taskId)) totals[entry.decision]++;
     return totals;
   }
 }

@@ -306,10 +306,8 @@ export interface PendingInteraction {
  * response is a plan, which is what the UI shows before asking.
  */
 export interface PruneRequest {
-  /** Only prune runs that ended more than this many days ago. Default 0 (any age). */
+  /** Only prune tasks whose machine ended more than this many days ago. Default 0 (any age). */
   olderThanDays?: number;
-  /** Most-recent runs to keep per task. Default 1. */
-  keepRunsPerTask?: number;
   apply?: boolean;
 }
 
@@ -834,9 +832,8 @@ export interface ReadUriRequest {
    */
   uri: string;
   project?: ProjectRef;
-  /** Resolves `$WORKTREE` and scopes a `db://` session id to the run that wrote it. */
+  /** Resolves `$WORKTREE` and scopes a `db://` session id to the task that wrote it. */
   taskId?: string;
-  runId?: number;
 }
 
 export interface UriContent {
@@ -936,7 +933,6 @@ export interface ReviewChangesRequest {
 export interface ReviewChangesResult {
   /** The review run's own task, in JaiRA's project — where the round is recorded (§4.4, §5.3). */
   reviewTaskId: string;
-  runId: number;
   /** How many changes the produced changeset carries. */
   changes: number;
 }
@@ -1041,7 +1037,7 @@ export interface IpcContract {
   "task:all": { request: { workflows?: string[] } | void; response: ProjectTask[] };
   "task:detail": { request: { taskId: string; project?: string }; response: TaskDetail };
   "task:create": { request: CreateTaskRequest; response: TaskSummary };
-  "task:start": { request: StartTaskRequest; response: { taskId: string; runId: number } };
+  "task:start": { request: StartTaskRequest; response: { taskId: string } };
   "task:cancel": { request: { taskId: string; project?: ProjectRef }; response: { taskId: string } };
   /**
    * Run a task again. A startable task (queued / interrupted / failed) simply starts; a finished one
@@ -1049,7 +1045,7 @@ export interface IpcContract {
    * workflow, inputs and branch, a fresh id — and the COPY starts. The response names the task that
    * actually ran, which is why it can differ from the one asked about.
    */
-  "task:rerun": { request: StartTaskRequest; response: { taskId: string; runId: number } };
+  "task:rerun": { request: StartTaskRequest; response: { taskId: string } };
   /**
    * Pick a stopped task up where it left off, instead of starting it over.
    *
@@ -1061,7 +1057,7 @@ export interface IpcContract {
    * Refused for a task that is not startable, and refused when the record cannot be read in full:
    * an operation with no answer is one the engine would run again, and saying so beats doing it.
    */
-  "task:resume": { request: StartTaskRequest; response: { taskId: string; runId: number } };
+  "task:resume": { request: StartTaskRequest; response: { taskId: string } };
   /** What resuming would do — see {@link ResumePlan}. Cheap enough to ask whenever the panel draws. */
   "task:resumable": { request: { taskId: string; project?: ProjectRef }; response: ResumePlan };
   /**
@@ -1120,7 +1116,7 @@ export interface IpcContract {
   /** Every project this window can draw a board for — the user's, and JaiRA's own. */
   "project:list": { request: void; response: ProjectSummary[] };
   /** Every state a task went through, with the conversation each ran in (§11.3). */
-  "session:history": { request: { taskId: string; runId?: number; project?: string }; response: SessionRef[] };
+  "session:history": { request: { taskId: string; project?: string }; response: SessionRef[] };
   /**
    * Every call a run made — see {@link OperationRecordView}.
    *
@@ -1130,12 +1126,12 @@ export interface IpcContract {
    * conversation instead of one per state.
    */
   "run:records": {
-    request: { taskId: string; runId: number; project?: string };
+    request: { taskId: string; project?: string };
     response: OperationRecordView[];
   };
   /** One state instance's conversation, whole — see {@link SessionView}. */
   "session:view": {
-    request: { taskId: string; runId?: number; instanceId?: string; project?: string };
+    request: { taskId: string; instanceId?: string; project?: string };
     response: SessionView;
   };
   /**
@@ -1231,7 +1227,7 @@ export interface IpcContract {
     response: LogEntry[];
   };
   /** The child processes a run started. */
-  "job:list": { request: { project?: string; taskId?: string; runId?: number } | void; response: JobRow[] };
+  "job:list": { request: { project?: string; taskId?: string } | void; response: JobRow[] };
   /**
    * What one of them printed — POLLED, never pushed: a chatty child would flood the channel with
    * output nobody is looking at, and a fetch cannot flood.
@@ -1745,7 +1741,7 @@ export function startsThinking(entry: JsonValue): boolean {
  * board consistent without the renderer re-deriving engine semantics.
  */
 export type PushMessage =
-  | { type: "engine:event"; taskId: string; runId: number; seq: number; at: number; event: JsonValue; project?: string }
+  | { type: "engine:event"; taskId: string; seq: number; at: number; event: JsonValue; project?: string }
   /**
    * `workflows` fires when a watched workflows directory changes on disk (§11.1's re-lint) — the
    * project's and the shared base root's alike, since a base edit changes what this project runs.
@@ -1779,7 +1775,6 @@ export type PushMessage =
   | {
       type: "run:finished";
       taskId: string;
-      runId: number;
       status: "completed" | "failed" | "canceled";
       /** Whose run it was — see `store:invalidate`. */
       project?: string;
@@ -1797,7 +1792,6 @@ export type PushMessage =
   | {
       type: "session:turn";
       taskId: string;
-      runId: number;
       sessionId?: string;
       seq?: number;
       stateId?: string;

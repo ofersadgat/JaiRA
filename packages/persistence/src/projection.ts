@@ -111,6 +111,16 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
     const at = atMs?.[i] ?? 0;
     switch (event.type) {
       case "instance.entered": {
+        // A RE-STATED entry — the live spine of a continuation, or a revived failure re-entering
+        // (Identity and Resume §04) — merges into the instance it continues rather than growing a
+        // twin: the id is durable, the structure is already known, and the entry means the machine
+        // is IN this instance again.
+        const existing = byId.get(event.instanceId);
+        if (existing !== undefined) {
+          existing.status = "running";
+          delete existing.endedAt;
+          break;
+        }
         const node: MutableNode = {
           instanceId: event.instanceId,
           stateId: event.stateId,
@@ -241,49 +251,6 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
 }
 
 /**
- * Whether an instance still counts as somewhere the run IS.
- *
- * Exported because a resume asks the same question the board does and must get the same answer — the
- * frontier it re-enters is the live leaves (`replay.ts`). A second definition of "live" is a second
- * chance for the two to disagree about whether a run has anything left to do.
- */
-/**
- * Every run of a task, merged by POSITION into the one tree the task actually is.
- *
- * A resume starts a new run that re-walks from the root, so a run's own journal holds only what that
- * walk reached. Reading the latest alone is what made a task's history appear to shrink: run 8 got
- * as far as `confidence`, run 10 replayed five calls and died at `verdict`, and opening the task drew
- * run 10's six nodes over run 8's twelve. Nothing was lost — it was being asked the wrong question.
- *
- * Merged by ADDRESS rather than by instance id, for the reason `replay.ts` gives at length: ids are
- * minted fresh (UUIDv7) as the engine walks, so two walks never agree about them at all. Position
- * — the chain of child keys, each with an occurrence — is what is stable across runs of one pinned
- * definition, and it is what the replay index already keys on.
- *
- * LATER WINS wherever a later run actually reached, and earlier runs fill in only what it did not.
- * That is the rule the fold needs while a replay can still fail behind the frontier: the newest
- * attempt is the truth about every state it touched, and everything past where it stopped is still
- * the truth from the run that got there. Once a replay cannot fail short of the frontier, the two
- * can no longer disagree and this degenerates into "the last run, plus its own tail".
- *
- * Every node carries the run it came from ({@link InstanceNode.runId}): the id alone no longer
- * collides across runs, but the run is still what a consumer needs to reach that run's own records
- * — see that field's note.
- */
-export function foldRuns(runs: readonly { runId: number; run: ProjectedRun }[]): ProjectedRun {
-  const stamped = runs.map((entry) => ({ runId: entry.runId, run: entry.run }));
-  let merged: InstanceNode[] = [];
-  const blocked: BlockedChild[] = [];
-  for (const { runId, run } of stamped) {
-    merged = mergeNodes(merged, run.instances.map((node) => stampRun(node, runId)));
-    for (const entry of run.blocked) {
-      if (!blocked.some((b) => b.stateId === entry.stateId && b.reason === entry.reason)) blocked.push(entry);
-    }
-  }
-  return { instances: merged, activePath: activePathOf(merged), blocked };
-}
-
-/**
  * Every node's ADDRESS, stamped as the tree is handed out — see `InstanceNode.address`.
  *
  * Here rather than in the renderer because the walk is already happening and because the address has
@@ -308,50 +275,13 @@ function stampAddresses(roots: readonly InstanceNode[], prefix: InstanceAddress 
   });
 }
 
-/** The run a node came from, stamped through the whole subtree. */
-function stampRun(node: InstanceNode, runId: number): InstanceNode {
-  return { ...node, runId, children: node.children.map((child) => stampRun(child, runId)) };
-}
-
 /**
- * One sibling list merged into another, keyed by position.
+ * Whether an instance still counts as somewhere the run IS.
  *
- * The key is the child key plus its occurrence — `addressesOf`' rule, counted over ALL siblings so a
- * superseded first iteration still makes the second occurrence 1. A root has no child key, so it is
- * keyed by state id instead; a task has one root and the distinction never bites, but keying it on
- * `undefined` would merge two unrelated roots if it ever did.
- *
- * Order follows the LATER list, with anything only the earlier one has appended after — which for
- * the case this exists for is exactly right: the earlier run's extra nodes are the ones further along
- * the sequence than the later run managed to get.
+ * Exported because a resume asks the same question the board does and must get the same answer. A
+ * second definition of "live" is a second chance for the two to disagree about whether a run has
+ * anything left to do.
  */
-function mergeNodes(prev: readonly InstanceNode[], next: readonly InstanceNode[]): InstanceNode[] {
-  const index = (nodes: readonly InstanceNode[]): Map<string, InstanceNode> => {
-    const seen = new Map<string, number>();
-    const out = new Map<string, InstanceNode>();
-    for (const node of nodes) {
-      const base = node.childKey ?? `@${node.stateId}`;
-      const occurrence = seen.get(base) ?? 0;
-      seen.set(base, occurrence + 1);
-      out.set(`${base}#${occurrence}`, node);
-    }
-    return out;
-  };
-  const before = index(prev);
-  const after = index(next);
-  const out: InstanceNode[] = [];
-  for (const [key, node] of after) {
-    const earlier = before.get(key);
-    // The later node wins outright — its status, operation and inputs are what the newest attempt
-    // found — but its CHILDREN are merged, because that is where the earlier run's extra tail lives.
-    out.push(earlier === undefined ? node : { ...node, children: mergeNodes(earlier.children, node.children) });
-  }
-  for (const [key, node] of before) {
-    if (!after.has(key)) out.push(node);
-  }
-  return out;
-}
-
 export function isLive(node: MutableNode | InstanceNode): boolean {
   return !node.superseded && (node.status === "running" || node.status === "waiting_for_user" || node.status === "blocked");
 }

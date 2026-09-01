@@ -103,24 +103,12 @@ export interface InstanceNode {
    */
   label?: string;
   /**
-   * Which RUN this node was folded out of, for a task-level projection (`foldRuns`).
+   * Where this instance sits, as an address — see {@link AddressStep}.
    *
-   * A task's view is every run merged by position, so two nodes in one tree can come from different
-   * runs. `instanceId` is a durable UUIDv7 — unique across runs on its own — but the run is still
-   * the fact a consumer needs to reach the journal rows this node was folded from, so keyed lookups
-   * back into per-run stores keep using `runId:instanceId`.
-   *
-   * Absent on a single-run projection, where every node trivially belongs to the run being read.
-   */
-  runId?: number;
-  /**
-   * Where this instance sits, as the address the replay index keys on — see {@link AddressStep}.
-   *
-   * Stamped by the projection, because that is where the walk already happens and because the view
-   * has to compare a panel against a run's recorded fork point ({@link RunView.forkedAt}). Doing it
-   * there rather than in the renderer keeps the replay index and the drawing speaking one language:
-   * a second walk counting occurrences even slightly differently would disagree about which
-   * iteration of a loop a panel belongs to, and nothing would say so.
+   * Stamped by the projection, because that is where the walk already happens. Doing it there
+   * rather than in the renderer keeps every consumer speaking one language: a second walk counting
+   * occurrences even slightly differently would disagree about which iteration of a loop a panel
+   * belongs to, and nothing would say so.
    *
    * Absent on a projection built before this existed.
    */
@@ -226,7 +214,6 @@ export interface BoardView {
 /** A recorded event, as the detail view's timeline shows it. */
 export interface TimelineEntry {
   seq: number;
-  runId: number;
   type: string;
   at: number;
   instanceId?: string;
@@ -235,30 +222,21 @@ export interface TimelineEntry {
   event: JsonValue;
 }
 
-/** One execution attempt of a task. */
+/**
+ * The machine's execution summary — when it last started, how it ended, what it produced.
+ *
+ * One per task since the runs collapse (Identity and Resume §05): a resume CONTINUES the machine
+ * under the same task, and a re-run is a new task linked by `parentTaskId`, so there is no second
+ * attempt to list and no run-scale fork mark to draw. The name survives because "the run" is still
+ * what a person calls a task's execution.
+ */
 export interface RunView {
-  runId: number;
   outcome: "success" | "error" | "canceled" | "interrupted" | "running";
   snapshotHash: string;
   startedAt: number;
   endedAt?: number;
   outputs?: JsonValue;
   failure?: JsonValue;
-  /**
-   * Where this run's OWN work begins — the first operation it dispatched rather than replayed.
-   *
-   * Everything before it in walk order this run took from the record, which is to say it is shared
-   * with whichever earlier runs answered it. That is the whole content of a run-scale fork: the mark
-   * goes here, what is above it is drawn once, and what is below belongs to the side you pick.
-   *
-   * ABSENT IS THE ROOT — this run shares nothing. That is what a re-run from the top does, and what
-   * every run recorded before this field existed gets. Absent never claims a prefix was carried over
-   * when it was not, which is the direction that stays honest when the record cannot say.
-   *
-   * Also absent for a run whose own work is empty: one that replayed and then stopped without
-   * dispatching anything has no place where its work begins. See `forkPointOf`.
-   */
-  forkedAt?: InstanceAddress;
 }
 
 /** The task detail panel (DESIGN §11.1). */
@@ -276,15 +254,15 @@ export interface TaskDetail {
   createdAt: string;
   inputs?: Record<string, JsonValue>;
   /**
-   * Instance forest for the TASK — every run folded by position (`foldRuns`), roots first.
+   * Instance forest for the TASK — its one machine, projected from its one journal.
    *
-   * Not the latest run, which is what this said and stopped being true when the fold landed: a
-   * resume is a new run that re-walks from the root, so no single run's journal is the task's
-   * history once one has happened. Every node carries the run it was folded out of.
+   * Instance ids are durable and a resume continues them, so the whole history projects in one
+   * pass; the fold-by-position that reconciled re-walked attempts went with the runs table.
    */
   instances: InstanceNode[];
   activePath: PathStep[];
   blocked: BlockedChild[];
+  /** Empty for a task that never started; otherwise the machine's one summary. */
   runs: RunView[];
   /** Most recent events last. */
   timeline: TimelineEntry[];
@@ -746,7 +724,6 @@ export interface ConversationTurn {
 export interface ConversationView {
   taskId: string;
   title: string;
-  runId?: number;
   turns: ConversationTurn[];
   /** The interaction this task is parked on, when it is one. */
   waitingOn?: { requestId: string; component: string };
@@ -754,10 +731,9 @@ export interface ConversationView {
 
 // --- history pruning (SPEC §13) ----------------------------------------------
 
-/** One run's worth of history in a prune plan. */
+/** One task's worth of history in a prune plan — the machine's how, never its what. */
 export interface PrunePlanEntry {
   taskId: string;
-  runId: number;
   endedAt?: number;
   events: number;
   commands: number;
@@ -765,7 +741,7 @@ export interface PrunePlanEntry {
 
 /** What a prune did, or (when `dryRun`) would do. */
 export interface PruneResult {
-  runs: PrunePlanEntry[];
+  tasks: PrunePlanEntry[];
   events: number;
   commands: number;
   /** Tasks the §13 safety rule refused to touch, with the reason. */
@@ -775,7 +751,7 @@ export interface PruneResult {
 
 /** Rows currently stored — the "before you prune" summary. */
 export interface HistorySize {
-  runs: number;
+  tasks: number;
   events: number;
   commands: number;
 }
@@ -872,7 +848,6 @@ export interface TaskSummary {
  * `operation.completed`'s metrics, so the link needed nothing new recorded.
  */
 export interface SessionRef {
-  runId: number;
   instanceId: string;
   stateId: string;
   /** The conversation. Opaque — the UI shows it, nothing parses it. */
@@ -991,7 +966,6 @@ export interface SessionTurn {
  */
 export interface SessionView {
   taskId: string;
-  runId: number;
   instanceId: string;
   stateId: string;
   sessionId: string;
@@ -1112,7 +1086,6 @@ export interface SessionOutput {
  */
 export interface ChatThreadView {
   taskId: string;
-  runId: number;
   /** The instance whose conversation this is — what `chat:send` and `chat:plan` address. */
   instanceId: string;
   /** The thread, shaped exactly like any other session so the same viewer renders it. */
@@ -1187,7 +1160,6 @@ export interface LogEntry {
   /** The session key of the project it concerns, when it concerns one. */
   project?: string;
   taskId?: string;
-  runId?: number;
   instanceId?: string;
   jobId?: number;
   /** A stack, an argv, an exit code — whatever the reader would want and the message cannot hold. */
@@ -1201,7 +1173,6 @@ export interface JobRow {
   id: number;
   kind: JobKind;
   taskId?: string;
-  runId?: number;
   parentJobId?: number;
   ownerToken: string;
   pid?: number;

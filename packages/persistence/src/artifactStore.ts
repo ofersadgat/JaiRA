@@ -15,7 +15,6 @@ import type { RowLog } from "./rowFile";
 
 interface RawArtifact {
   task_id: string;
-  run_id: number | null;
   logical_path: string;
   physical_path: string | null;
   content: string | null;
@@ -32,7 +31,6 @@ interface RawArtifact {
 function toRecord(row: RawArtifact): ArtifactRecord {
   return {
     taskId: row.task_id,
-    ...(row.run_id !== null ? { runId: row.run_id } : {}),
     logicalPath: row.logical_path,
     ...(row.physical_path !== null ? { physicalPath: row.physical_path } : {}),
     ...(row.content !== null ? { content: row.content } : {}),
@@ -63,11 +61,10 @@ export class SqliteArtifactStore implements ArtifactStore {
     this.db
       .prepare(
         `INSERT INTO artifacts
-           (task_id, run_id, logical_path, physical_path, content, hash, bytes, format,
+           (task_id, logical_path, physical_path, content, hash, bytes, format,
             instance_id, state_id, slot, interactive, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(task_id, logical_path) DO UPDATE SET
-           run_id = excluded.run_id,
            physical_path = excluded.physical_path,
            content = excluded.content,
            hash = excluded.hash,
@@ -81,7 +78,6 @@ export class SqliteArtifactStore implements ArtifactStore {
       )
       .run(
         record.taskId,
-        record.runId ?? null,
         record.logicalPath,
         record.physicalPath ?? null,
         record.content ?? null,

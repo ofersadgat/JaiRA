@@ -2091,7 +2091,7 @@ export function TaskInspector({
           <div className="task-states">
             {states.map((row) => (
               <div
-                key={`${row.runId}:${row.instanceId}`}
+                key={row.instanceId}
                 className={`leaf-row task-state-row${row.instanceId === showing ? " sel" : ""}`}
                 onClick={() => onOpenStateAt(row.stateId, row.instanceId)}
                 title={`open ${row.stateId} and read this run's pass through it`}

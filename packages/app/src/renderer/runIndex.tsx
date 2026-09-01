@@ -44,7 +44,7 @@ import { Icon } from "./icons";
  * the same rule the projection states for its consumers.
  */
 export function keyOfNode(node: InstanceNode): string {
-  return `${node.runId ?? ""}:${node.instanceId}`;
+  return node.instanceId;
 }
 
 /** How many states a lane is holding — every descendant, not just its own children. */

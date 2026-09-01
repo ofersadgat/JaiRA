@@ -100,7 +100,7 @@ export function SessionPanel({ history, session, showing, live, onShow }: Sessio
         </h3>
         {history.map((row) => (
           <div
-            key={`${row.runId}:${row.instanceId}`}
+            key={row.instanceId}
             className={`session-row${row.instanceId === at ? " sel" : ""}`}
             onClick={() => onShow(row.instanceId)}
             title={`${row.sessionId} @ ${row.seq}`}

@@ -51,12 +51,9 @@ import {
   pathFrom,
   placeNotes,
   placeOf,
-  placeRunForks,
-  runForkAt,
   segmentsFrom,
   startersOf,
   type BandNote,
-  type RunFork,
   type SessionBand,
   type SessionPiece,
   type SessionSegment,
@@ -296,7 +293,7 @@ function sideOf(
  * is one entry to forget rather than one per task nobody can enumerate.
  */
 function keyOfPiece(piece: SessionPiece, scope: string): string {
-  return `${scope}:${piece.node.runId ?? ""}:${piece.node.instanceId}:${piece.seq ?? ""}`;
+  return `${scope}:${piece.node.instanceId}:${piece.seq ?? ""}`;
 }
 
 /**
@@ -345,7 +342,7 @@ function Piece({
     <StateBlock
       open={open}
       // What the Instances index sends a reader to — see `keyOfNode` in `runIndex.tsx`.
-      instance={`${node.runId ?? ""}:${node.instanceId}`}
+      instance={node.instanceId}
       header={
         <StateHeader
           open={open}
@@ -426,9 +423,7 @@ function Sheet({
   bare = false,
   starter,
   forks,
-  runForks,
   onGoTo,
-  onGoToRun,
   onOpenWorkflow,
   shut,
   onToggle,
@@ -452,10 +447,6 @@ function Sheet({
   starter?: SessionPiece | undefined;
   /** Every fork in the run, by position — see {@link forksOf}. */
   forks?: Map<string, SessionPiece[]> | undefined;
-  /** Run-scale forks by the piece they open, for one that divides this panel — see {@link runForkAt}. */
-  runForks?: Map<SessionPiece, RunFork> | undefined;
-  /** Go and read another RUN's side of a divergence. */
-  onGoToRun?: ((runId: number) => void) | undefined;
   /** Go and read another side of a fork. Absent ⇒ no host that can scroll to one. */
   onGoTo?: ((place: string) => void) | undefined;
   /** Describe that run's workflow beside this. Absent ⇒ no host with a panel to describe it in. */
@@ -521,7 +512,6 @@ function Sheet({
     <div
       className="sb-panel"
       {...(side !== undefined ? { "data-fork-place": side.place } : {})}
-      {...(segment.pieces[0]?.node.runId !== undefined ? { "data-run": segment.pieces[0].node.runId } : {})}
     >
       {named && !surface ? (
         <div
@@ -604,23 +594,15 @@ function Sheet({
         <div className="sb-body">
           {segment.pieces.map((piece, i) => {
             const key = `${piece.node.instanceId}:${piece.seq ?? "—"}`;
-            // A run-scale fork that divides this conversation PART-WAY down is drawn here, between
-            // the card that is shared and the card that is not. The gap above the sheet is the right
-            // place only when the divided work opens it — otherwise the mark would sit above an
-            // operation both sides share, which is the one thing it must never say.
-            const divides = i > 0 ? runForks?.get(piece) : undefined;
             return (
               <Fragment key={key}>
-                {divides !== undefined && onGoToRun !== undefined ? (
-                  <RunForkMark fork={divides} onGoToRun={onGoToRun} inSheet />
-                ) : null}
                 {solo ? (
                   // Stamped like a letterhead even though there is none: a solo sheet still holds a
                   // state, and a bookmark to it has to land somewhere. Without this the one panel a
                   // reader is most likely to jump to — a leaf run, which is the whole view — was the
                   // one the index could not reach.
                   allShut ? null : (
-                    <div className="sb-bare" data-instance={`${piece.node.runId ?? ""}:${piece.node.instanceId}`}>
+                    <div className="sb-bare" data-instance={piece.node.instanceId}>
                       {render(piece)}
                     </div>
                   )
@@ -663,9 +645,7 @@ function Band({
   bare = false,
   starters,
   forks,
-  runForks,
   onGoTo,
-  onGoToRun,
   onOpenWorkflow,
   shut,
   onToggle,
@@ -684,10 +664,7 @@ function Band({
   starters: Map<string, SessionPiece>;
   /** Every fork in the run, by position — see {@link forksOf}. */
   forks: Map<string, SessionPiece[]>;
-  /** Run-scale forks by the piece they open — see {@link runForkAt}. */
-  runForks: Map<SessionPiece, RunFork>;
   onGoTo: (place: string) => void;
-  onGoToRun: (runId: number) => void;
   onOpenWorkflow?: ((piece: SessionPiece) => void) | undefined;
   render: (piece: SessionPiece) => ReactNode;
 }): JSX.Element {
@@ -704,9 +681,7 @@ function Band({
           bare={bare}
           starter={starters.get(band.segments[0]!.key)}
           forks={forks}
-          runForks={runForks}
           onGoTo={onGoTo}
-          onGoToRun={onGoToRun}
           {...(onOpenWorkflow !== undefined ? { onOpenWorkflow } : {})}
           shut={shut}
           onToggle={onToggle}
@@ -764,9 +739,7 @@ function Band({
             segment={band.segments[shown]!}
             named={false}
             forks={forks}
-            runForks={runForks}
             onGoTo={onGoTo}
-            onGoToRun={onGoToRun}
             shut={shut}
             onToggle={onToggle}
             onSetShut={onSetShut}
@@ -782,9 +755,7 @@ function Band({
               segment={segment}
               starter={starters.get(segment.key)}
               forks={forks}
-              runForks={runForks}
               onGoTo={onGoTo}
-              onGoToRun={onGoToRun}
               {...(onOpenWorkflow !== undefined ? { onOpenWorkflow } : {})}
               shut={shut}
               onToggle={onToggle}
@@ -866,55 +837,6 @@ export function stepOfNote(note: BandNote, root: string): RailStep {
   };
 }
 
-/**
- * Where the TASK divided, drawn on the grey between the panels.
- *
- * The same mark as the one inside a sheet and the one in a gutter — teeth and a chip — because it is
- * the same fact at a third scale. All that differs is what the label names: a RUN, because a run is
- * what a reader is choosing between here.
- *
- * Everything above it is shared by every side. A resumed run replays what an earlier one answered
- * and dispatches from here on, and where "here" is comes off the run's own row (`RunView.forkedAt`)
- * rather than being inferred from the shape of what it left behind — replay leaves no record, and
- * the one trace it does leave is indistinguishable from a function op.
- *
- * NOTHING SAYS WHAT IS SHARED, deliberately. The mark's position is the whole statement, and a panel
- * that also announced "carried over" would be repeating it in words that then have to be kept true.
- *
- * The sides are all already on the page — `piecesOf` draws every run's work, including a call the
- * fold's latest-wins merge dropped — so choosing one takes you to it rather than swapping it in.
- */
-function RunForkMark({
-  fork,
-  onGoToRun,
-  inSheet = false,
-}: {
-  fork: RunFork;
-  onGoToRun: (runId: number) => void;
-  /** Between two cards of one panel rather than between panels — same mark, no measure of its own. */
-  inSheet?: boolean;
-}): JSX.Element {
-  const newest = fork.sides[fork.sides.length - 1];
-  return (
-    <div className={inSheet ? undefined : "sb-notes"}>
-      <ForkMark
-        sides={fork.sides.map((side) => ({
-          key: String(side.runId),
-          label: `run ${side.runId}`,
-          note: sideName(side.piece),
-        }))}
-        shown={String(newest?.runId ?? "")}
-        onShow={(key) => onGoToRun(Number(key))}
-        note={
-          fork.at.length === 0
-            ? "these runs share nothing — each one started from the top"
-            : `the task divided at ${fork.at.map((step) => step.childKey).join(" / ")}`
-        }
-      />
-    </div>
-  );
-}
-
 /** The whole conversation: bands down the page, in the order they happened. */
 export function SessionBandsView({
   bands,
@@ -922,7 +844,6 @@ export function SessionBandsView({
   notes = [],
   root = "",
   onOpenWorkflow,
-  runForks = [],
   shut = EMPTY_SHUT,
   onToggle = () => undefined,
   onSetShut = () => undefined,
@@ -952,12 +873,10 @@ export function SessionBandsView({
   root?: string;
   /** Describe the workflow a panel's conversation was opened by — see the gutter in {@link Sheet}. */
   onOpenWorkflow?: ((piece: SessionPiece) => void) | undefined;
-  /** Every place the TASK divided — see {@link runForksOf}. A run that never forked has none. */
-  runForks?: readonly RunFork[];
   /**
    * A state to go to, asked for from outside this column — the Instances index's bookmark.
    *
-   * `instance` is `runId:instanceId`; `at` is a stamp that changes on every ask, so pressing the
+   * `instance` is the instance id; `at` is a stamp that changes on every ask, so pressing the
    * same bookmark twice moves the page twice.
    */
   focus?: { instance: string; at: number } | undefined;
@@ -993,15 +912,6 @@ export function SessionBandsView({
     window.setTimeout(() => found.classList.remove("sb-panel-lit"), 1200);
   }, []);
 
-  /** The same jump one scale up: the first panel the chosen RUN produced. */
-  const goToRun = useCallback((runId: number): void => {
-    const found = sheets.current?.querySelector(`[data-run="${runId}"]`);
-    if (!(found instanceof HTMLElement)) return;
-    found.scrollIntoView({ block: "center", behavior: "smooth" });
-    found.classList.add("sb-panel-lit");
-    window.setTimeout(() => found.classList.remove("sb-panel-lit"), 1200);
-  }, []);
-
   /** The `focus.at` of the last ask this column actually served — see the effect below. */
   const served = useRef<number | undefined>(undefined);
   /**
@@ -1025,8 +935,8 @@ export function SessionBandsView({
    */
   useEffect(() => {
     if (focus === undefined || served.current === focus.at) return;
-    // No `CSS.escape`: the value is `runId:instanceId` inside a quoted attribute selector, where the
-    // only characters that would need it are a quote and a backslash, and a key holds neither.
+    // No `CSS.escape`: the value is an instance id inside a quoted attribute selector, where the
+    // only characters that would need it are a quote and a backslash, and an id holds neither.
     const found = sheets.current?.querySelector(`[data-instance="${focus.instance}"]`);
     if (!(found instanceof HTMLElement)) return;
     served.current = focus.at;
@@ -1047,9 +957,6 @@ export function SessionBandsView({
   const placed = placeNotes(notes, bands);
   const starters = startersOf(bands);
   const forks = forksOf(bands.flatMap((band) => band.segments.flatMap((segment) => segment.pieces)));
-  const placedForks = placeRunForks(runForks, bands);
-  /** The rest of them: a fork that divides a panel rather than opening one. */
-  const byPiece = runForkAt(runForks);
 
   /**
    * The page as one flat sequence of rows, so the rail can draw the hierarchy beside it.
@@ -1074,13 +981,6 @@ export function SessionBandsView({
   };
 
   for (const [i, band] of bands.entries()) {
-    for (const fork of placedForks[i]!) {
-      const opened = fork.sides[0]!.piece;
-      add(
-        { key: `f${i}:${JSON.stringify(fork.at)}`, stateId: opened.node.stateId, at: atPiece(opened), opens: false },
-        <RunForkMark fork={fork} onGoToRun={goToRun} />,
-      );
-    }
     addNotes(placed[i]!);
     // A band can hold several conversations at once, and they are laid out ACROSS. Its place on the
     // rail is its first piece's: the row is one row however many panels are in it.
@@ -1097,9 +997,7 @@ export function SessionBandsView({
         bare={bare}
         starters={starters}
         forks={forks}
-        runForks={byPiece}
         onGoTo={goTo}
-        onGoToRun={goToRun}
         {...(onOpenWorkflow !== undefined ? { onOpenWorkflow } : {})}
         shut={shut}
         onToggle={onToggle}

@@ -373,7 +373,7 @@ describe("what a click opens", () => {
   });
 
   const ref = (instanceId: number, stateId: string): SessionRef =>
-    ({ runId: 1, instanceId: String(instanceId), stateId, sessionId: `#i`, seq: 0 }) as SessionRef;
+    ({ instanceId: String(instanceId), stateId, sessionId: `#i`, seq: 0 }) as unknown as SessionRef;
   const history = [ref(1, "feature/plan"), ref(2, "feature/plan/goals"), ref(3, "feature/plan/goals"), ref(4, "feature/plan/critique")];
 
   it("opens the conversation of the state you are standing on, not the deepest one reached", () => {

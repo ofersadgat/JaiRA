@@ -14,9 +14,9 @@ import type { BoardView, InstanceAddress, InstanceNode, TaskDetail, TaskSummary,
 import type { Project } from "./project";
 import { workflowLoadOptions } from "./workflowRefs";
 import {
+  activePathOf,
   breadcrumbOf,
   eventsOf,
-  foldRuns,
   projectBoard,
   projectRun,
   type ProjectedRun,
@@ -24,7 +24,7 @@ import {
   type WorkflowShape,
 } from "./projection";
 import { loadSnapshot, readWorkflowFiles } from "./snapshots";
-import { EFFECTIVE_SEQ, EFFECTIVE_SESSION, bareSessionId, scopedSessionId } from "./sessionStore";
+import { EFFECTIVE_SEQ, EFFECTIVE_SESSION, bareSessionId } from "./sessionStore";
 import { workflowShape } from "./shape";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
@@ -114,12 +114,9 @@ function shapeFor(
  * what actually went wrong. The root cause is in the journal, so surfacing it is
  * how a failed run becomes diagnosable instead of a shrug.
  */
-export function runCauses(project: Project, taskId: string, runId?: number): Array<{ stateId: string; reason: string }> {
-  const runs = project.runtime.listRuns(taskId);
-  const target = runId ?? runs[runs.length - 1]?.id;
-  if (target === undefined) return [];
+export function runCauses(project: Project, taskId: string): Array<{ stateId: string; reason: string }> {
   const causes: Array<{ stateId: string; reason: string }> = [];
-  for (const row of project.events.list(taskId, { runId: target })) {
+  for (const row of project.events.list(taskId)) {
     if (row.event.type === "operation.failed") {
       causes.push({ stateId: row.event.stateId, reason: row.event.failure.reason });
     } else if (row.event.type === "instance.blocked") {
@@ -140,7 +137,6 @@ export function runCauses(project: Project, taskId: string, runId?: number): Arr
  * which is what the `session_ref` generated column fixed.
  */
 export interface StateSession {
-  runId: number;
   instanceId: string;
   stateId: string;
   /** The conversation. Opaque — nothing here parses it beyond splitting the position off. */
@@ -180,12 +176,10 @@ export function parseSessionRef(ref: string): { id: string; seq: number } | unde
 }
 
 /**
- * Every operation of a task that ran in a conversation, oldest first.
- *
- * `runId` narrows it to one run; absent, it is the task's whole history — which is what the "all the
- * other states the executor went through" half of the leaf panel reads.
+ * Every operation of a task that ran in a conversation, oldest first — the task's whole history,
+ * which is what the "all the other states the executor went through" half of the leaf panel reads.
  */
-export function stateSessions(project: Project, taskId: string, runId?: number): StateSession[] {
+export function stateSessions(project: Project, taskId: string): StateSession[] {
   // Queried through the `session_ref` generated column rather than by folding the whole journal: the
   // rows wanted are a small fraction of a run's events, the column is indexed, and NOT NULL on it is
   // precisely "this operation ran in a conversation". That column is what migration 1 exists for.
@@ -197,13 +191,11 @@ export function stateSessions(project: Project, taskId: string, runId?: number):
   // `session_ref` is derived from them.
   const rows = project.db
     .prepare(
-      `SELECT run_id, type, payload_json, session_ref, created_at FROM state_machine_events
+      `SELECT type, payload_json, session_ref, created_at FROM state_machine_events
         WHERE task_id = ? AND type IN ('operation.completed', 'operation.failed') AND session_ref IS NOT NULL
-          ${runId === undefined ? "" : "AND run_id = ?"}
         ORDER BY seq`,
     )
-    .all(...(runId === undefined ? [taskId] : [taskId, runId])) as Array<{
-    run_id: number;
+    .all(taskId) as Array<{
     type: string;
     payload_json: string;
     session_ref: string;
@@ -215,7 +207,6 @@ export function stateSessions(project: Project, taskId: string, runId?: number):
     if (position === undefined) continue;
     const event = JSON.parse(row.payload_json) as { instanceId: string; stateId: string };
     out.push({
-      runId: row.run_id,
       instanceId: event.instanceId,
       stateId: event.stateId,
       sessionId: position.id,
@@ -227,7 +218,7 @@ export function stateSessions(project: Project, taskId: string, runId?: number):
       outcome: row.type === "operation.failed" ? "error" : "success",
     });
   }
-  out.push(...interruptedSessions(project, taskId, runId));
+  out.push(...interruptedSessions(project, taskId));
   // One list in time order, however each row was found — the panel reads a run top to bottom, and a
   // recovered call belongs where it happened rather than appended after everything that outlived it.
   return out.sort((a, b) => a.at - b.at);
@@ -291,123 +282,118 @@ export function stateSessions(project: Project, taskId: string, runId?: number):
  * upstream's to keep, not ours to assume), and the honest answer to an ambiguous pairing is no rows
  * at all. A conversation attributed to the wrong state is worse than one that is merely missing.
  */
-function interruptedSessions(project: Project, taskId: string, runId?: number): StateSession[] {
+function interruptedSessions(project: Project, taskId: string): StateSession[] {
   // Read through `project.db` like the query above it, rather than through the runtime and event
   // STORES: everything here is one join over three tables, and depending on the wrappers would make
   // this the only projection in the file that cannot run against a bare database handle.
-  const runs = project.db
+  //
+  // One machine per task now, so the question is asked of the TASK: did it stop other than cleanly,
+  // or is anything still streaming into an open record?
+  const task = project.db
     .prepare(
-      `SELECT id, ended_at FROM runs
+      `SELECT outcome, ended_at, status FROM task_runtime
         WHERE task_id = ?
-          AND (outcome IN ('interrupted', 'error', 'canceled')
+          AND (outcome IN ('interrupted', 'error', 'canceled') OR status = 'running'
                OR EXISTS (SELECT 1 FROM operation_records r
-                           WHERE r.task_id = runs.task_id AND r.run_id = runs.id AND r.status = 'open'))
-          ${runId === undefined ? "" : "AND id = ?"} ORDER BY id`,
+                           WHERE r.task_id = task_runtime.task_id AND r.status = 'open'))`,
     )
-    .all(...(runId === undefined ? [taskId] : [taskId, runId])) as Array<{ id: number; ended_at: number | null }>;
-  const out: StateSession[] = [];
-  for (const run of runs) {
-    // Which instances started an operation that never settled — the calls that were in flight.
-    const events = project.db
+    .get(taskId) as { outcome: string | null; ended_at: number | null; status: string } | undefined;
+  if (task === undefined) return [];
+  const running = task.status === "running" || task.ended_at === null;
+  // Which instances started an operation that never settled — the calls that were in flight. Keyed
+  // by durable instance id, which is what lets one pass cover a machine that stopped and continued:
+  // a re-dispatch on the continuation starts the same instance's operation again.
+  const events = project.db
+    .prepare(
+      `SELECT type, payload_json, session_ref, created_at FROM state_machine_events
+        WHERE task_id = ?
+          AND type IN ('operation.started', 'operation.completed', 'operation.failed')
+        ORDER BY seq`,
+    )
+    .all(taskId) as Array<{ type: string; payload_json: string; session_ref: string | null; created_at: number }>;
+  const scope = { taskId };
+  const started = new Map<string, { stateId: string; at: number }>();
+  /**
+   * The POSITIONS the journal already accounts for — one back from the end each terminal event
+   * reported, spelled `<sessionId>@<seq>` here purely as a set key.
+   *
+   * Positions rather than record ids. A record's id is opaque: `withRecord` stamps a content hash on
+   * it, and the `<sessionId>:<seq>` spelling a placed record used to carry duplicated the pair
+   * `session_positions` already keys on (migration 8). Matching on the position asks the question
+   * directly instead of reconstructing an id and hoping the two agree.
+   */
+  const listed = new Set<string>();
+  for (const row of events) {
+    const event = JSON.parse(row.payload_json) as { instanceId?: string; stateId?: string };
+    if (event.instanceId === undefined) continue;
+    if (row.type === "operation.started") {
+      started.set(event.instanceId, { stateId: event.stateId ?? "", at: row.created_at });
+    } else {
+      started.delete(event.instanceId);
+      const end = row.session_ref === null ? undefined : parseSessionRef(row.session_ref);
+      if (end !== undefined) listed.add(`${end.id}@${end.seq - 1}`);
+    }
+  }
+  if (started.size === 0) return [];
+  // The records those calls left: placed ones — an unplaced call has no conversation to list —
+  // that no terminal event accounts for. Asking the journal rather than the record's status is what
+  // finds a call that SETTLED and then lost its event; a status test would call that one listed and
+  // leave the answer it holds unreachable. Ordered by insertion, which is start order. Matched
+  // under BOTH spellings: a new ref carries the session's own id — the row's key since ids became
+  // assigned (migration 15) — while a legacy row carries the run namespace in front of it, taken
+  // back off with `bareSessionId`.
+  const records = (
+    project.db
       .prepare(
-        `SELECT type, payload_json, session_ref, created_at FROM state_machine_events
-          WHERE task_id = ? AND run_id = ?
-            AND type IN ('operation.started', 'operation.completed', 'operation.failed')
-          ORDER BY seq`,
+        `SELECT ${EFFECTIVE_SESSION} AS session_id, ${EFFECTIVE_SEQ} AS seq, status FROM operation_records
+        WHERE task_id = ? AND session_id IS NOT NULL
+        ORDER BY rowid`,
       )
-      .all(taskId, run.id) as Array<{ type: string; payload_json: string; session_ref: string | null; created_at: number }>;
-    const scope = { taskId, runId: run.id };
-    const started = new Map<string, { stateId: string; at: number }>();
-    /**
-     * The POSITIONS the journal already accounts for — one back from the end each terminal event
-     * reported, spelled `<sessionId>@<seq>` here purely as a set key.
-     *
-     * Positions rather than record ids. A record's id is opaque: `withRecord` stamps a content hash on
-     * it, and the `<sessionId>:<seq>` spelling a placed record used to carry duplicated the pair
-     * `session_positions` already keys on (migration 8). Matching on the position asks the question
-     * directly instead of reconstructing an id and hoping the two agree.
-     */
-    const listed = new Set<string>();
-    for (const row of events) {
-      const event = JSON.parse(row.payload_json) as { instanceId?: string; stateId?: string };
-      if (event.instanceId === undefined) continue;
-      if (row.type === "operation.started") {
-        started.set(event.instanceId, { stateId: event.stateId ?? "", at: row.created_at });
-      } else {
-        started.delete(event.instanceId);
-        const end = row.session_ref === null ? undefined : parseSessionRef(row.session_ref);
-        // BOTH spellings: a new run's ref carries the session's own id — the row's key since ids
-        // became assigned (migration 15) — while a legacy journal named the bare authored name and
-        // the row carried the run namespace in front of it.
-        if (end !== undefined) {
-          listed.add(`${end.id}@${end.seq - 1}`);
-          listed.add(`${scopedSessionId(scope, end.id)}@${end.seq - 1}`);
-        }
-      }
-    }
-    if (started.size === 0) continue;
-    // The records those calls left: placed ones — an unplaced call has no conversation to list —
-    // that no terminal event accounts for. Asking the journal rather than the record's status is what
-    // finds a call that SETTLED and then lost its event; a status test would call that one listed and
-    // leave the answer it holds unreachable. Ordered by insertion, which is start order.
-    const records = (
-      project.db
-        .prepare(
-          `SELECT ${EFFECTIVE_SESSION} AS session_id, ${EFFECTIVE_SEQ} AS seq, status FROM operation_records
-          WHERE task_id = ? AND run_id = ? AND session_id IS NOT NULL
-          ORDER BY rowid`,
-        )
-        .all(taskId, run.id) as Array<{ session_id: string; seq: number; status: string }>
-    ).filter((record) => !listed.has(`${record.session_id}@${record.seq}`));
-    if (records.length !== started.size) continue; // ambiguous — see the header
-    const inFlight = [...started.entries()];
-    for (const [i, record] of records.entries()) {
-      // The position, read off `session_positions` rather than parsed back out of a record id. The
-      // parse used to split on the LAST colon because a session id may contain one — a guess the
-      // position table makes unnecessary.
-      const [instanceId, where] = inFlight[i]!;
-      out.push({
-        runId: run.id,
-        instanceId,
-        stateId: where.stateId,
-        sessionId: bareSessionId(scope, record.session_id),
-        seq: record.seq,
-        at: where.at,
-        // Read off the record rather than assumed. `completed` is the one status that means the call
-        // RETURNED and lost only its event afterwards — reporting that answer as interrupted would
-        // be as wrong as not listing it. `open` is the opposite end: a live process is streaming
-        // into that row right now, and calling it interrupted is a death notice on a call still
-        // talking — which is what a person watching a run saw on every state as it ran. The run
-        // still has to be going for that reading to hold: an `open` row left behind by a run that
-        // ENDED is a crash nothing has recovered yet, and that one really is interrupted.
-        // Everything else is interrupted, `failed` included: a call that really failed wrote a
-        // terminal event and would not be in this list at all, so a failed row with none is what
-        // `recoverInterrupted` wrote over a row the crash left open.
-        outcome:
-          record.status === "completed"
-            ? "success"
-            : record.status === "open" && run.ended_at === null
-              ? "running"
-              : "interrupted",
-      });
-    }
+      .all(taskId) as Array<{ session_id: string; seq: number; status: string }>
+  ).filter(
+    (record) =>
+      !listed.has(`${record.session_id}@${record.seq}`) &&
+      !listed.has(`${bareSessionId(scope, record.session_id)}@${record.seq}`),
+  );
+  if (records.length !== started.size) return []; // ambiguous — see the header
+  const out: StateSession[] = [];
+  const inFlight = [...started.entries()];
+  for (const [i, record] of records.entries()) {
+    const [instanceId, where] = inFlight[i]!;
+    out.push({
+      instanceId,
+      stateId: where.stateId,
+      sessionId: bareSessionId(scope, record.session_id),
+      seq: record.seq,
+      at: where.at,
+      // Read off the record rather than assumed. `completed` is the one status that means the call
+      // RETURNED and lost only its event afterwards — reporting that answer as interrupted would
+      // be as wrong as not listing it. `open` is the opposite end: a live process is streaming
+      // into that row right now, and calling it interrupted is a death notice on a call still
+      // talking — which is what a person watching a run saw on every state as it ran. The machine
+      // still has to be going for that reading to hold: an `open` row left behind by a task that
+      // ENDED is a crash nothing has recovered yet, and that one really is interrupted.
+      // Everything else is interrupted, `failed` included: a call that really failed wrote a
+      // terminal event and would not be in this list at all, so a failed row with none is what
+      // `recoverInterrupted` wrote over a row the crash left open.
+      outcome:
+        record.status === "completed" ? "success" : record.status === "open" && running ? "running" : "interrupted",
+    });
   }
   return out;
 }
 
 /**
- * What one run spent, summed from the journal.
+ * What this task spent, summed from the journal.
  *
- * The engine reports cost per completed operation, and the run row does not carry a total — so this
+ * The engine reports cost per completed operation, and the task row does not carry a total — so this
  * is the roll-up, computed where the events already are. `undefined` when no operation reported one,
  * which is a different claim from zero: a scripted run costs nothing, and a run whose transport does
  * not price its calls costs an unknown amount.
  */
-export function runCostUsd(project: Project, taskId: string, runId?: number): number | undefined {
-  const target = runId ?? project.runtime.listRuns(taskId).at(-1)?.id;
-  if (target === undefined) return undefined;
+export function runCostUsd(project: Project, taskId: string): number | undefined {
   let total: number | undefined;
-  for (const row of project.events.list(taskId, { runId: target })) {
+  for (const row of project.events.list(taskId)) {
     if (row.event.type !== "operation.completed") continue;
     const cost = row.event.metrics?.costUsd;
     if (typeof cost === "number") total = (total ?? 0) + cost;
@@ -416,56 +402,51 @@ export function runCostUsd(project: Project, taskId: string, runId?: number): nu
 }
 
 /**
- * The projected TASK — every run folded by position (`foldRuns`).
+ * The projected TASK — its one machine, from its one journal.
  *
- * What a person means by "this task": a resume is a new run that re-walks from the root, so no single
- * run's journal is the task's history once one has happened. This is what the detail view reads, and
- * it is why a failed resume no longer draws over what an earlier run reached.
+ * A task IS a machine now (Identity and Resume §05): a resume continues the same instances under
+ * the same ids, so the whole journal projects in one pass and the fold-by-address that survived
+ * re-walking is gone. History from before the collapse can hold several trees — old-style re-runs
+ * each grew one — and for those `root_instance_id` (stamped by migration 16) names the newest
+ * attempt's, which is what the projection keeps as the task's own; sub-workflow trees and older
+ * attempts stay in the timeline without being drawn over it.
  */
 export function taskRun(project: Project, taskId: string, shape?: WorkflowShape): ProjectedRun {
-  const runs = project.runtime.listRuns(taskId);
-  if (runs.length === 0) return { instances: [], activePath: [], blocked: [] };
-  return foldRuns(
-    runs.map((run) => {
-      const { events, atMs } = eventsOf(project.events.list(taskId, { runId: run.id }));
-      return { runId: run.id, run: projectRun(events, shape, atMs) };
-    }),
-  );
+  const { events, atMs } = eventsOf(project.events.list(taskId));
+  if (events.length === 0) return { instances: [], activePath: [], blocked: [] };
+  const projected = projectRun(events, shape, atMs);
+  if (projected.instances.length <= 1) return projected;
+  // Several parentless trees is history's shape, not the machine's: an in-place restart before
+  // re-runs minted tasks grew one per attempt. The NEWEST is the task's own — the same rule the
+  // load fold applies — with the migration's stamp winning where present, since it is the same
+  // answer computed while run boundaries still existed to read.
+  const stamped = project.runtime.get(taskId)?.rootInstanceId;
+  const keep =
+    (stamped !== undefined && projected.instances.some((node) => node.instanceId === stamped)
+      ? stamped
+      : undefined) ?? projected.instances.at(-1)!.instanceId;
+  const kept = projected.instances.filter((node) => node.instanceId === keep);
+  return { ...projected, instances: kept, activePath: activePathOf(kept) };
 }
 
 /**
- * Every operation's ADDRESS, by the run and instance that ran it.
+ * Every instance's ADDRESS, keyed by its durable id.
  *
- * The join `SessionRef` needs to be self-describing. A ref carries the run and the instance, and
- * instance ids are minted per walk — so two runs' calls at one place in the workflow have nothing in
- * common to group them by, which is precisely what a run-scale fork has to do. The address is that
- * thing, and every run's own projection already stamps it.
- *
- * Per RUN and not folded: a fold keeps one node per position and drops the losers, and the losers
- * are exactly the earlier attempts a fork mark exists to offer.
+ * The join `SessionRef` needs to be self-describing: a ref carries the instance, and the address is
+ * the one name that means the same thing across a stop and its continuation. The projection already
+ * stamps it; this flattens the walk into the lookup the view layer asks by.
  */
-export function addressesByRun(project: Project, taskId: string): Map<string, InstanceAddress> {
+export function instanceAddresses(project: Project, taskId: string): Map<string, InstanceAddress> {
   const out = new Map<string, InstanceAddress>();
-  for (const run of project.runtime.listRuns(taskId)) {
-    const { events, atMs } = eventsOf(project.events.list(taskId, { runId: run.id }));
-    const walk = (nodes: readonly InstanceNode[]): void => {
-      for (const node of nodes) {
-        if (node.address !== undefined) out.set(`${run.id}:${node.instanceId}`, node.address);
-        walk(node.children);
-      }
-    };
-    walk(projectRun(events, undefined, atMs).instances);
-  }
+  const { events, atMs } = eventsOf(project.events.list(taskId));
+  const walk = (nodes: readonly InstanceNode[]): void => {
+    for (const node of nodes) {
+      if (node.address !== undefined) out.set(node.instanceId, node.address);
+      walk(node.children);
+    }
+  };
+  walk(projectRun(events, undefined, atMs).instances);
   return out;
-}
-
-/** The projected latest run of a task (empty when it has never run). */
-export function latestRun(project: Project, taskId: string, shape?: WorkflowShape): ProjectedRun {
-  const runs = project.runtime.listRuns(taskId);
-  const latest = runs[runs.length - 1];
-  if (!latest) return { instances: [], activePath: [], blocked: [] };
-  const { events, atMs } = eventsOf(project.events.list(taskId, { runId: latest.id }));
-  return projectRun(events, shape, atMs);
 }
 
 /**
@@ -490,7 +471,7 @@ export function boardView(project: Project, level?: string, options?: ViewOption
     workflow: summary.workflow,
     ...(summary.labels !== undefined ? { labels: summary.labels } : {}),
     updatedAt: summary.updatedAt,
-    run: latestRun(project, summary.taskId, shape),
+    run: taskRun(project, summary.taskId, shape),
   }));
   return projectBoard(shape, target, projections, { breadcrumb: breadcrumbOf(shape, rootId, target) });
 }
@@ -513,7 +494,6 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
     .slice(-TIMELINE_LIMIT)
     .map((r) => ({
       seq: r.seq,
-      runId: r.runId,
       type: r.type,
       at: r.createdAt,
       ...(r.instanceId !== undefined ? { instanceId: r.instanceId } : {}),
@@ -535,16 +515,21 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
     instances: run.instances,
     activePath: run.activePath,
     blocked: run.blocked,
-    runs: project.runtime.listRuns(taskId).map((r) => ({
-      runId: r.id,
-      outcome: r.outcome ?? "running",
-      snapshotHash: r.snapshotHash,
-      startedAt: r.startedAt,
-      ...(r.endedAt !== undefined ? { endedAt: r.endedAt } : {}),
-      ...(r.outputsJson !== undefined ? { outputs: JSON.parse(r.outputsJson) as JsonValue } : {}),
-      ...(r.failureJson !== undefined ? { failure: JSON.parse(r.failureJson) as JsonValue } : {}),
-      ...(r.forkedAt !== undefined ? { forkedAt: r.forkedAt } : {}),
-    })),
+    // The machine's one execution summary — an array still, because a task that never started has
+    // nothing to summarize and the renderer maps over what there is.
+    runs:
+      row.startedAt === undefined || row.snapshotHash === undefined
+        ? []
+        : [
+            {
+              outcome: row.outcome ?? "running",
+              snapshotHash: row.snapshotHash,
+              startedAt: row.startedAt,
+              ...(row.endedAt !== undefined ? { endedAt: row.endedAt } : {}),
+              ...(row.outputsJson !== undefined ? { outputs: JSON.parse(row.outputsJson) as JsonValue } : {}),
+              ...(row.failureJson !== undefined ? { failure: JSON.parse(row.failureJson) as JsonValue } : {}),
+            },
+          ],
     timeline,
   };
 }

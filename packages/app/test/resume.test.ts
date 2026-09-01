@@ -194,10 +194,8 @@ describe("resuming an interrupted task", () => {
 
     const project = openProject(dir, { baseDir: testHome() });
     try {
-      const runs = project.runtime.listRuns(taskId);
-      expect(runs.length).toBe(2);
-      expect(runs[0]!.outcome).toBe("interrupted");
-      expect(runs[1]!.outcome).toBe("success");
+      // One machine, one row: the resume continued the task and re-stamped how it ended.
+      expect(project.runtime.get(taskId)?.outcome).toBe("success");
     } finally {
       project.close();
     }

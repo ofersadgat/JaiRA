@@ -73,10 +73,8 @@ describe("jaira task lifecycle (e2e, temp project)", () => {
       expect(existsSync(join(dir, ".jaira", "system", "snapshots", runtime!.snapshotHash!, "feature", "plan.json"))).toBe(
         true,
       );
-      const runs = project.runtime.listRuns(taskId);
-      expect(runs).toHaveLength(1);
-      expect(runs[0]).toMatchObject({ outcome: "success", snapshotHash: runtime!.snapshotHash });
-      expect(JSON.parse(runs[0]!.outputsJson!)).toMatchObject({ outcome: "complete" });
+      expect(runtime).toMatchObject({ outcome: "success" });
+      expect(JSON.parse(runtime!.outputsJson!)).toMatchObject({ outcome: "complete" });
 
       const events = project.events.list(taskId);
       const types = new Set(events.map((e) => e.type));
@@ -84,7 +82,6 @@ describe("jaira task lifecycle (e2e, temp project)", () => {
       expect(types).toContain("operation.completed");
       expect(types).toContain("transition.taken");
       expect(types).toContain("instance.terminated");
-      expect(events.every((e) => e.runId === runs[0]!.id)).toBe(true);
     } finally {
       project.close();
     }
@@ -144,9 +141,10 @@ describe("jaira task lifecycle (e2e, temp project)", () => {
     const after = await cli(["task", "status", taskId]);
     const afterReport = after.json() as Record<string, unknown>;
     expect(afterReport["status"]).toBe("completed");
+    // One machine, one summary: the re-run re-stamped the same task.
     const afterRuns = afterReport["runs"] as Array<Record<string, unknown>>;
-    expect(afterRuns).toHaveLength(2);
-    expect(afterRuns.map((r) => r["outcome"])).toEqual(["interrupted", "success"]);
+    expect(afterRuns).toHaveLength(1);
+    expect(afterRuns.map((r) => r["outcome"])).toEqual([ "success"]);
   });
 
   it("reports the root cause of a failure, not just the parent's summary", async () => {

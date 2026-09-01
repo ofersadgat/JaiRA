@@ -66,7 +66,8 @@ import type { JairaDb } from "./db";
 export interface RecordRow {
   record_id: string;
   task_id: string | null;
-  run_id: number | null;
+  /** Legacy lines only — files written before the runs collapse stamped rows per run. */
+  run_id?: number | null;
   /** Legacy lines only — files written before the scoped id retired the attempt column. */
   attempt?: number;
   status: string;
@@ -251,15 +252,17 @@ function decodeLine(line: Record<string, unknown>): ConversationEntry | undefine
 // --- files ---------------------------------------------------------------------
 
 /**
- * One file per run, like the journal and for the same reason: two people running tasks on one branch
- * write different filenames, so their appends never conflict.
+ * One file per task, like the journal and for the same reason: two people running tasks on one
+ * branch write different filenames, so their appends never conflict. Files written before the runs
+ * collapse (migration 16) are named `<runId>.jsonl`; the replay reads every file in the task's
+ * directory, so they stay legible and nothing writes them any more.
  *
- * An unscoped store — no task, no run — writes nowhere, because it has nothing to write. It is a
- * read of one run that has already been narrowed (see `SessionScope`), and giving it a file would
- * invent a run id to name it by.
+ * An unscoped store — no task — writes nowhere, because it has nothing to write. It is a read
+ * that has already been narrowed (see `SessionScope`), and giving it a file would invent a task to
+ * name it by.
  */
-export function conversationFileFor(dir: string, taskId: string, runId: number): string {
-  return join(dir, sanitize(taskId), `${sanitize(String(runId))}.jsonl`);
+export function conversationFileFor(dir: string, taskId: string): string {
+  return join(dir, sanitize(taskId), "conversations.jsonl");
 }
 
 function sanitize(segment: string): string {
@@ -267,7 +270,7 @@ function sanitize(segment: string): string {
   return clean === "" || clean === "." || clean === ".." ? "_" : clean;
 }
 
-/** Appends one run's conversation state. Held by the session store for the life of its scope. */
+/** Appends one task's conversation state. Held by the session store for the life of its scope. */
 export class ConversationLog {
   private previous: string | undefined;
   private n = 0;
@@ -276,7 +279,6 @@ export class ConversationLog {
     private readonly dir: string,
     private readonly format: JairaSessionFormat,
     private readonly taskId: string,
-    private readonly runId: number,
   ) {}
 
   append(entry: ConversationEntry, at: number = Date.now()): void {
@@ -297,13 +299,13 @@ export class ConversationLog {
       }
       out.push(JSON.stringify(line));
     }
-    const file = conversationFileFor(this.dir, this.taskId, this.runId);
+    const file = conversationFileFor(this.dir, this.taskId);
     mkdirSync(join(this.dir, sanitize(this.taskId)), { recursive: true });
     appendFileSync(file, out.join("\n") + "\n", "utf8");
   }
 }
 
-/** Every run's conversation file, in a deterministic order. */
+/** Every conversation file — per-task, plus legacy per-run ones — in a deterministic order. */
 export function conversationFiles(dir: string): string[] {
   if (!existsSync(dir)) return [];
   const out: string[] = [];
@@ -388,14 +390,14 @@ export function replayConversations(db: JairaDb, dir: string): number | undefine
   // line name the same id its record line got. A current-format line has no attempt and passes
   // through untouched  its id is already unique.
   const newest = new Map();
-  const rankOf = (row: { run_id: number | null; attempt?: number }): [number, number] => [row.run_id ?? -1, row.attempt ?? 1];
+  const rankOf = (row: { run_id?: number | null; attempt?: number }): [number, number] => [row.run_id ?? -1, row.attempt ?? 1];
   for (const row of records.values()) {
     if (row.attempt === undefined) continue;
     const rank = rankOf(row);
     const seen = newest.get(row.record_id) as [number, number] | undefined;
     if (seen === undefined || rank[0] > seen[0] || (rank[0] === seen[0] && rank[1] > seen[1])) newest.set(row.record_id, rank);
   }
-  const idOf = (row: { record_id: string; run_id: number | null; attempt?: number }): string => {
+  const idOf = (row: { record_id: string; run_id?: number | null; attempt?: number }): string => {
     if (row.attempt === undefined) return row.record_id;
     const [run, attempt] = rankOf(row);
     const top = newest.get(row.record_id) as [number, number] | undefined;
@@ -441,16 +443,15 @@ export function replayConversations(db: JairaDb, dir: string): number | undefine
     }
     const record = db.prepare(
       `INSERT INTO operation_records
-         (id, task_id, run_id, status, request_json, result_json, error_json,
+         (id, task_id, status, request_json, result_json, error_json,
           metrics_json, provider_session_id, landed_session_id, landed_seq, started_at, ended_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const row of records.values()) {
       const id = idOf(row);
       record.run(
         id,
         row.task_id,
-        row.run_id,
         row.status,
         requestOf(row, id),
         resultOf(row),
@@ -484,11 +485,6 @@ function parsedObject(json: string | null): unknown {
   } catch {
     return undefined;
   }
-}
-
-/** Delete one run's conversations — what pruning a run does now that the file is the truth. */
-export function removeConversations(dir: string, taskId: string, runId: number): void {
-  rmSync(conversationFileFor(dir, taskId, runId), { force: true });
 }
 
 /** Delete a task's whole conversation directory, for the same reason. */

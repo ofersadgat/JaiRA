@@ -52,12 +52,12 @@ const dropDb = (): void => {
 };
 
 describe("tasks as files", () => {
-  it("survives the database being thrown away, run ids included", () => {
+  it("survives the database being thrown away, the machine's outcome included", () => {
     const first = project({ tasks: "file" });
     createTask(first, { id: "t-1", title: "the task", workflow: "w" });
-    const runId = first.runtime.beginRun("t-1", "hash-1", 1_000);
+    first.runtime.beginTask("t-1", "hash-1", 1_000);
     first.runtime.setStatus("t-1", "running", 1_001);
-    first.runtime.endRun(runId, "success", 1_002);
+    first.runtime.endTask("t-1", "success", 1_002);
     // Settled before closing, or recovery would mark it `interrupted` on the next open — which is
     // correct behaviour and a different test (below).
     first.runtime.setStatus("t-1", "completed", 1_003);
@@ -66,10 +66,12 @@ describe("tasks as files", () => {
     dropDb();
 
     const second = project({ tasks: "file" });
-    expect(second.runtime.get("t-1")).toMatchObject({ status: "completed", branch: undefined });
-    // THE point of writing `runs.id` down: everything else in the schema references it, so a replay
-    // that re-minted it would leave the journal, the command log and every position on the wrong run.
-    expect(second.runtime.listRuns("t-1")).toMatchObject([{ id: runId, outcome: "success", snapshotHash: "hash-1" }]);
+    expect(second.runtime.get("t-1")).toMatchObject({
+      status: "completed",
+      branch: undefined,
+      outcome: "success",
+      snapshotHash: "hash-1",
+    });
   });
 
   it("keeps the LAST state of a row, not the first", () => {
@@ -92,7 +94,7 @@ describe("tasks as files", () => {
     // interruption was never appended would come back `running` on every open, forever.
     const p = project({ tasks: "file" });
     createTask(p, { id: "t-1", title: "one", workflow: "w" });
-    p.runtime.beginRun("t-1", "h", 1);
+    p.runtime.beginTask("t-1", "h", 1);
     p.runtime.setStatus("t-1", "running", 2);
     p.close();
     open.pop();
@@ -125,7 +127,7 @@ describe("artifacts as files", () => {
 describe("`both` — the index that survives a close", () => {
   const write = (p: Project): void => {
     createTask(p, { id: "t-1", title: "one", workflow: "w" });
-    p.runtime.beginRun("t-1", "h", 1);
+    p.runtime.beginTask("t-1", "h", 1);
   };
 
   it("reuses the persisted index when the files have not moved", () => {

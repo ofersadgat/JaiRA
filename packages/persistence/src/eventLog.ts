@@ -18,7 +18,6 @@ import { appendJournal } from "./journalFile";
 export interface StoredEvent {
   seq: number;
   taskId: string;
-  runId: number;
   instanceId?: string;
   type: EngineEvent["type"];
   event: EngineEvent;
@@ -30,7 +29,6 @@ export interface StoredEvent {
 interface RawEvent {
   seq: number;
   task_id: string;
-  run_id: number;
   /** `number` only on rows journaled before instance ids became durable strings. */
   instance_id: string | number | null;
   type: string;
@@ -71,11 +69,11 @@ export class SqliteEventLog {
     private readonly journalDir?: string,
   ) {}
 
-  /** A `Persistence` implementation scoped to one task run. */
-  recorder(taskId: string, runId: number): Persistence {
+  /** A `Persistence` implementation scoped to one task. */
+  recorder(taskId: string): Persistence {
     const insert = this.db.prepare(
-      `INSERT INTO state_machine_events (task_id, run_id, instance_id, type, payload_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO state_machine_events (task_id, instance_id, type, payload_json, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
     );
     const journalDir = this.journalDir;
     return {
@@ -89,23 +87,18 @@ export class SqliteEventLog {
             type: event.type,
             timestamp: new Date(atMs).toISOString(),
             taskId,
-            runId,
             ...(instanceId !== undefined ? { instanceId } : {}),
             event,
           });
         }
-        insert.run(taskId, runId, instanceId ?? null, event.type, JSON.stringify(event), atMs);
+        insert.run(taskId, instanceId ?? null, event.type, JSON.stringify(event), atMs);
       },
     };
   }
 
-  list(taskId: string, opts?: { runId?: number; afterSeq?: number; limit?: number }): StoredEvent[] {
+  list(taskId: string, opts?: { afterSeq?: number; limit?: number }): StoredEvent[] {
     const clauses = ["task_id = ?"];
     const params: unknown[] = [taskId];
-    if (opts?.runId !== undefined) {
-      clauses.push("run_id = ?");
-      params.push(opts.runId);
-    }
     if (opts?.afterSeq !== undefined) {
       clauses.push("seq > ?");
       params.push(opts.afterSeq);
@@ -122,7 +115,6 @@ export class SqliteEventLog {
       return {
         seq: row.seq,
         taskId: row.task_id,
-        runId: row.run_id,
         // `String(...)` for rows journaled before ids were strings — a legacy `5` and a UUID read
         // back through one type. `-1` was only ever a sentinel meaning absence, so it reads as one.
         instanceId: row.instance_id === null || row.instance_id === -1 ? undefined : String(row.instance_id),

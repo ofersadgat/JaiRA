@@ -25,7 +25,6 @@ interface RawJob {
   id: number;
   kind: string;
   task_id: string | null;
-  run_id: number | null;
   parent_job_id: number | null;
   owner_token: string;
   pid: number | null;
@@ -42,7 +41,6 @@ function toJob(row: RawJob): JobRow {
     id: row.id,
     kind: row.kind as JobKind,
     ...(row.task_id !== null ? { taskId: row.task_id } : {}),
-    ...(row.run_id !== null ? { runId: row.run_id } : {}),
     ...(row.parent_job_id !== null ? { parentJobId: row.parent_job_id } : {}),
     ownerToken: row.owner_token,
     ...(row.pid !== null ? { pid: row.pid } : {}),
@@ -77,14 +75,14 @@ export class JobStore {
     private readonly staleMs: number = DEFAULT_STALE_MS,
   ) {}
 
-  /** Claim a run for this process. Returns the job id to heartbeat and end. */
-  claimRun(input: { taskId: string; runId: number; ownerToken: string; pid?: number; nowMs: number }): number {
+  /** Claim a task's run for this process. Returns the job id to heartbeat and end. */
+  claimRun(input: { taskId: string; ownerToken: string; pid?: number; nowMs: number }): number {
     const res = this.db
       .prepare(
-        `INSERT INTO jobs (kind, task_id, run_id, owner_token, pid, started_at, heartbeat_at)
-         VALUES ('run', ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO jobs (kind, task_id, owner_token, pid, started_at, heartbeat_at)
+         VALUES ('run', ?, ?, ?, ?, ?)`,
       )
-      .run(input.taskId, input.runId, input.ownerToken, input.pid ?? null, input.nowMs, input.nowMs);
+      .run(input.taskId, input.ownerToken, input.pid ?? null, input.nowMs, input.nowMs);
     return Number(res.lastInsertRowid);
   }
 
@@ -93,7 +91,6 @@ export class JobStore {
     ownerToken: string;
     parentJobId?: number;
     taskId?: string;
-    runId?: number;
     command: string;
     pid?: number;
     /** Where it ran. Received from the observer and, until there was a column, dropped. */
@@ -102,12 +99,11 @@ export class JobStore {
   }): number {
     const res = this.db
       .prepare(
-        `INSERT INTO jobs (kind, task_id, run_id, parent_job_id, owner_token, pid, command, cwd, started_at, heartbeat_at)
-         VALUES ('process', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO jobs (kind, task_id, parent_job_id, owner_token, pid, command, cwd, started_at, heartbeat_at)
+         VALUES ('process', ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.taskId ?? null,
-        input.runId ?? null,
         input.parentJobId ?? null,
         input.ownerToken,
         input.pid ?? null,

@@ -12,39 +12,22 @@ import type { SessionView } from "@jaira/shared/browser";
 import { sessionKey, withoutSession } from "../src/renderer/sessionCache";
 
 const view = (instanceId: number): SessionView =>
-  ({ taskId: "t", runId: 7, instanceId: String(instanceId), stateId: "plan/draft", sessionId: `#i`, seq: 0, turns: [] }) as SessionView;
+  ({ taskId: "t", instanceId: String(instanceId), stateId: "plan/draft", sessionId: `#i`, seq: 0, turns: [] }) as SessionView;
 
 describe("sessionKey", () => {
-  it("pairs the run with the instance, because ids are minted per run", () => {
-    expect(sessionKey({ runId: 7, instanceId: "2" })).toBe("7:2");
-    expect(sessionKey({ runId: 7, instanceId: "2" })).not.toBe(sessionKey({ runId: 8, instanceId: "2" }));
-  });
-
-  it("uses the instance alone where a projection stamps no run", () => {
+  it("is the durable instance id — unique for the task's whole life", () => {
     expect(sessionKey({ instanceId: "2" })).toBe("2");
   });
 });
 
 describe("withoutSession", () => {
-  it("drops the entry a task-level projection filed under run and instance", () => {
-    // The case that was broken. The transcript panel reads a FOLDED tree, so every node carries its
-    // run and every cached transcript is keyed `runId:instanceId` — and the invalidation used to
-    // spell the bare id, which matched nothing here and dropped nothing.
-    const rest = withoutSession({ "7:2": view(2) }, { runId: 7, instanceId: "2" });
+  it("drops the entry filed under the instance", () => {
+    const rest = withoutSession({ "2": view(2) }, { instanceId: "2" });
     expect(rest).toEqual({});
   });
 
-  it("drops the entry a single-run projection filed under the instance alone", () => {
-    expect(withoutSession({ "2": view(2) }, { runId: 7, instanceId: "2" })).toEqual({});
-  });
-
-  it("leaves another run's instance of the same id alone", () => {
-    const sessions = { "8:2": view(2) };
-    expect(withoutSession(sessions, { runId: 7, instanceId: "2" })).toBe(sessions);
-  });
-
   it("returns the same object when it held nothing, so nothing re-renders", () => {
-    const sessions = { "7:3": view(3) };
-    expect(withoutSession(sessions, { runId: 7, instanceId: "2" })).toBe(sessions);
+    const sessions = { "3": view(3) };
+    expect(withoutSession(sessions, { instanceId: "2" })).toBe(sessions);
   });
 });

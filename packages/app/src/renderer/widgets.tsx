@@ -208,12 +208,11 @@ export function History({
   size: HistorySize | null;
   report: PruneReport | null;
   busy: boolean;
-  onPreview: (days: number, keep: number) => void;
-  onApply: (days: number, keep: number) => void;
+  onPreview: (days: number) => void;
+  onApply: (days: number) => void;
   onDismiss: () => void;
 }): JSX.Element {
   const [days, setDays] = useState(30);
-  const [keep, setKeep] = useState(1);
   if (!size) return <p className="empty">Open a project to see its history.</p>;
   const planned = report?.dryRun === true ? report : null;
   return (
@@ -221,7 +220,7 @@ export function History({
       <div>
         <div className="pane-title">Stored history</div>
         <div className="sub">
-          {size.runs} runs · {size.events} events · {size.commands} commands
+          {size.tasks} tasks · {size.events} events · {size.commands} commands
         </div>
       </div>
 
@@ -230,12 +229,7 @@ export function History({
           older than
           <input type="number" min={0} value={days} onChange={(e) => setDays(Math.max(0, Number(e.target.value)))} />d
         </label>
-        <label>
-          keep
-          <input type="number" min={0} value={keep} onChange={(e) => setKeep(Math.max(0, Number(e.target.value)))} />
-          runs
-        </label>
-        <button className="ghost" onClick={() => onPreview(days, keep)} disabled={busy}>
+        <button className="ghost" onClick={() => onPreview(days)} disabled={busy}>
           Preview
         </button>
       </div>
@@ -243,21 +237,21 @@ export function History({
       {report ? (
         <div className="prune-report">
           {planned ? (
-            planned.runs.length > 0 ? (
+            planned.tasks.length > 0 ? (
               <>
                 <div className="sub">
-                  would delete {planned.runs.length} run(s), {planned.events} events, {planned.commands} commands
+                  would delete the history of {planned.tasks.length} task(s): {planned.events} events, {planned.commands} commands
                 </div>
-                <button className="danger" onClick={() => onApply(days, keep)} disabled={busy}>
+                <button className="danger" onClick={() => onApply(days)} disabled={busy}>
                   Delete permanently
                 </button>
               </>
             ) : (
-              <div className="sub">nothing matches — no run history is old enough</div>
+              <div className="sub">nothing matches — no task history is old enough</div>
             )
           ) : (
             <div className="sub">
-              deleted {report.runs.length} run(s); {report.remaining.events} events remain
+              deleted the history of {report.tasks.length} task(s); {report.remaining.events} events remain
             </div>
           )}
           {report.skippedTasks.length > 0 ? (

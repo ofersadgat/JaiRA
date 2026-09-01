@@ -15,7 +15,6 @@ import { DEFAULT_HEARTBEAT_MS, newOwnerToken, type JobStore } from "./jobs";
 export interface RunOwnerOptions {
   jobs: JobStore;
   taskId: string;
-  runId: number;
   /** Beat interval; the stale window is the store's. */
   heartbeatMs?: number;
   now?: () => number;
@@ -47,7 +46,6 @@ export class RunOwner {
     this.now = options.now ?? Date.now;
     this.jobId = options.jobs.claimRun({
       taskId: options.taskId,
-      runId: options.runId,
       ownerToken: this.ownerToken,
       pid: process.pid,
       nowMs: this.now(),
@@ -78,7 +76,6 @@ export class RunOwner {
           ownerToken: this.ownerToken,
           parentJobId: this.jobId,
           taskId: this.options.taskId,
-          runId: this.options.runId,
           command: [event.command, ...event.argv].join(" "),
           ...(event.pid !== undefined ? { pid: event.pid } : {}),
           ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),

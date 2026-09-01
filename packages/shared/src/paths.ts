@@ -48,7 +48,7 @@ export interface JairaPaths {
   tasksDir: string;
   logsDir: string;
   /**
-   * One JSONL per run, under `<system>/journal/<taskId>/<runId>.jsonl` (DESIGN §4.4).
+   * One JSONL per task, under `<system>/journal/<taskId>/journal.jsonl` (DESIGN §4.4).
    *
    * Per RUN rather than per table, which is what makes "clean merges" and "shared history" stop
    * being a trade: two people running tasks on one branch write different filenames, so appends
