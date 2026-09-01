@@ -102,8 +102,8 @@ describe("what a shadow stands in front of", () => {
     const claim = (seq: number): void =>
       void db
         .prepare(
-          `INSERT INTO session_positions (session_id, seq, task_id, run_id, record_id, attempt)
-           VALUES ('conv', ?, 't1', 1, 'r:0', 1)`,
+          `INSERT INTO session_positions (session_id, seq, task_id, run_id, record_id)
+           VALUES ('conv', ?, 't1', 1, 'r:0')`,
         )
         .run(seq);
     claim(0);

@@ -88,7 +88,7 @@ describe("a call that reports a remote it was not given", () => {
 
     // The call settled — without this the rest asserts nothing, which is how the stub probes fooled me.
     const records = db
-      .prepare(`SELECT record_id, status, provider_session_id FROM operation_records ORDER BY id`)
+      .prepare(`SELECT id AS record_id, status, provider_session_id FROM operation_records ORDER BY rowid`)
       .all() as Array<{ record_id: string; status: string; provider_session_id: string | null }>;
     expect(records.map((r) => r.status)).toEqual(["completed", "completed"]);
     expect(records[1]!.provider_session_id).toBe("P2");

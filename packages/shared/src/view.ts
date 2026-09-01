@@ -28,6 +28,12 @@ export interface OperationView {
   status: "running" | "completed" | "failed";
   /** Failure reason when `status === "failed"`. */
   reason?: string;
+  /**
+   * The failure's classification, when it failed — `"interrupted"` is the one readers act on: the
+   * call was CUT (a stop, or the process dying under it) rather than answered with an error, which
+   * is what separates "continue this" from "retry this" at the frontier.
+   */
+  classification?: string;
   costUsd?: number;
 }
 

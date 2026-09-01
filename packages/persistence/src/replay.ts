@@ -16,7 +16,8 @@
  * The obvious key for "which operation is this" is the instance id, and it is wrong: ids are minted
  * fresh (UUIDv7) as the engine walks, so a re-walk mints its own and the two runs never agree.
  * The content hash is wrong for a different reason — a loop dispatching the identical operation
- * twice hashes identically, which is exactly why `operation_records.attempt` exists.
+ * twice hashes identically — the collision the SCOPED id (Identity and Resume step 2) now folds
+ * away, and which legacy rows carry an `~~` suffix from.
  *
  * So an instance is addressed by its POSITION IN THE TREE: the chain of child keys from the root,
  * each with an occurrence index, because a loop re-enters the same key. That is stable across runs
@@ -47,7 +48,7 @@ import type { AddressStep as ViewAddressStep, InstanceNode } from "@jaira/shared
 import { SqliteEventLog } from "./eventLog";
 import { eventsOf, foldRuns, isLive, projectRun, type ProjectedRun } from "./projection";
 import { hydrate } from "./blobStore";
-import { ON_RECORD, scopedSessionId } from "./sessionStore";
+import { ON_RECORD, baseRecordId, scopedSessionId } from "./sessionStore";
 import { parseSessionRef } from "./views";
 import type { JairaDb } from "./db";
 import type { Project } from "./project";
@@ -385,13 +386,19 @@ function addressesOf(roots: readonly InstanceNode[]): Map<string, InstanceAddres
  * offering `retry` — the word for a state that FAILED — about a state that did nothing wrong.
  *
  * The signature is exact and it is not "status is canceled". It is an operation that STARTED and
- * never settled: `completed` has its answer in the replay index and is walked past, `failed` is a
- * genuine retry and keeps that word, and a composite has no operation of its own, so an ancestor
- * the same abort terminated cannot match. What is left is the one instance the process was actually
- * inside — which is what a frontier is.
+ * never honestly settled: `completed` has its answer in the replay index and is walked past,
+ * `failed` is a genuine retry and keeps that word, and a composite has no operation of its own, so
+ * an ancestor the same abort terminated cannot match. What is left is the one instance the process
+ * was actually inside — which is what a frontier is.
+ *
+ * An `interrupted`-classified failure is the second spelling of the same fact (Identity and Resume
+ * §03): the settle path now journals a cut call instead of ending its trail at `operation.started`,
+ * and the classification is precisely "this was stopped, not answered" — a frontier entry, never a
+ * retry.
  */
 function stoppedInside(node: InstanceNode): boolean {
-  return !node.superseded && node.status === "canceled" && node.operation?.status === "running";
+  if (node.superseded || node.status !== "canceled") return false;
+  return node.operation?.status === "running" || node.operation?.classification === "interrupted";
 }
 
 /** Live leaves — a live instance with no live child under it, plus whatever a stop caught mid-operation. */
@@ -442,31 +449,31 @@ function frontierOf(roots: readonly InstanceNode[]): FrontierEntry[] {
 }
 
 /**
- * Every settled record of the run, queued by content id in the order it was written.
+ * Every settled record of the run, queued by id in the order it was written.
  *
- * The content hash is NOT unique per call, and that is the trap this exists for: a loop dispatching
- * the identical operation three times writes three rows under one `record_id`, told apart only by
- * `attempt` — which is exactly what migration 8's unique index says. Reading "the record for this
- * `operationId`" therefore has to mean "the next one", not "the latest one", or every iteration of a
- * loop is handed the last iteration's answer.
- *
- * Ordered by `id` rather than by `attempt`, because insertion order is the thing actually being
- * paired against and `attempt` is derived from it. An executor-level retry does not add a row — the
- * open row is reused (`SqliteSessionStore.close`) — so a row here is one engine dispatch.
+ * A SCOPED id (Identity and Resume step 2) is unique per dispatch, so a queue under one is a queue
+ * of one and the lookup is direct. The queue-and-shift shape survives for LEGACY runs, where the id
+ * was a bare content hash: a loop dispatching the identical operation three times wrote three rows
+ * under one hash, told apart only by the retired `attempt` — and reading "the record for this
+ * `operationId`" there has to mean "the next one", not "the latest one", or every iteration of a
+ * loop is handed the last iteration's answer. Those rows carry migration 13's `~~` suffix now, so
+ * they are grouped back under their BASE id, in rowid order — which is insertion order, the thing
+ * the pairing actually walks.
  */
 function recordQueues(project: Project, taskId: string, runId: number): Map<string, RecordRow[]> {
   const rows = project.db
     .prepare(
-      `SELECT record_id, status, result_json FROM operation_records
+      `SELECT id AS record_id, status, result_json FROM operation_records
         WHERE task_id IS ? AND run_id IS ? AND status != 'open'
-        ORDER BY id`,
+        ORDER BY rowid`,
     )
     .all(taskId, runId) as Array<RecordRow & { record_id: string }>;
   const out = new Map<string, RecordRow[]>();
   for (const row of rows) {
-    const queue = out.get(row.record_id);
+    const base = baseRecordId(row.record_id);
+    const queue = out.get(base);
     if (queue) queue.push(row);
-    else out.set(row.record_id, [row]);
+    else out.set(base, [row]);
   }
   return out;
 }

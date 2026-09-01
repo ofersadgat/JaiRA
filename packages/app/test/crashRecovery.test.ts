@@ -47,7 +47,7 @@ function crashedRun(over: { handle?: string | null } = {}): void {
     const runId = project.runtime.beginRun("t-crash", "h", 1000);
     project.db
       .prepare(
-        `INSERT INTO operation_records (record_id, task_id, run_id, status, provider_session_id, result_json, started_at)
+        `INSERT INTO operation_records (id, task_id, run_id, status, provider_session_id, result_json, started_at)
          VALUES ('s:0', 't-crash', ?, 'open', ?, ?, 1000)`,
       )
       .run(
@@ -106,11 +106,13 @@ describe("a crashed run's conversation is recovered at the next open", () => {
     expect(value.messages).toEqual([{ role: "assistant", content: "as far as it got" }]);
     expect(value.entries).toMatchObject([{ kind: "event", event: { type: "attachment" } }]);
     expect(value.capturedAt).toEqual(expect.any(String));
-    // …and the row is settled: 'open' must mean "a live process is streaming into this".
+    // …and the row is settled: 'open' must mean "a live process is streaming into this". Settled as
+    // `interrupted` — the word for a call the process died under, which a load treats as an active
+    // leaf, where `failed` (the call itself answered with an error) it would not re-enter.
     const project = openProject(dir, { baseDir: testHome() });
     try {
       expect(project.db.prepare(`SELECT status FROM operation_records WHERE task_id = 't-crash'`).get()).toEqual({
-        status: "failed",
+        status: "interrupted",
       });
     } finally {
       project.close();

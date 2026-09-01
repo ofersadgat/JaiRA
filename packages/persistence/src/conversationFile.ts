@@ -62,12 +62,13 @@ import { join } from "node:path";
 import type { JairaSessionFormat } from "@jaira/shared";
 import type { JairaDb } from "./db";
 
-/** An `operation_records` row, without the rowid the database assigns. */
+/** An `operation_records` row. `record_id` is the row's id (the scoped hash, migration 13). */
 export interface RecordRow {
   record_id: string;
   task_id: string | null;
   run_id: number | null;
-  attempt: number;
+  /** Legacy lines only — files written before the scoped id retired the attempt column. */
+  attempt?: number;
   status: string;
   request_json: string | null;
   result_json: string | null;
@@ -86,7 +87,8 @@ export interface PositionRow {
   task_id: string | null;
   run_id: number | null;
   record_id: string;
-  attempt: number;
+  /** Legacy lines only — see {@link RecordRow.attempt}. */
+  attempt?: number;
 }
 
 /** A `sessions` row — the lineage a fork's prefix hangs off. */
@@ -349,7 +351,7 @@ export function replayConversations(db: JairaDb, dir: string): number | undefine
   for (const file of files) {
     for (const entry of readConversationFile(file)) {
       if (entry.kind === "record") {
-        records.set(`${entry.row.task_id ?? ""} ${entry.row.run_id ?? ""} ${entry.row.record_id} ${entry.row.attempt}`, entry.row);
+        records.set(`${entry.row.task_id ?? ""} ${entry.row.run_id ?? ""} ${entry.row.record_id} ${entry.row.attempt ?? 1}`, entry.row);
       } else if (entry.kind === "position") {
         positions.set(`${entry.row.session_id} ${entry.row.seq}`, entry.row);
       } else {
@@ -357,6 +359,27 @@ export function replayConversations(db: JairaDb, dir: string): number | undefine
       }
     }
   }
+
+  // LEGACY lines carry an attempt, and a legacy content-hash id repeats across attempts and runs 
+  // the same collision migration 13 resolves in the table, resolved here the same way: per content
+  // id, the newest (greatest run, then attempt) keeps the bare id, and every other row moves to
+  // '<id>~~<run>.<attempt>'. Computable from either table's columns, which is what lets a position
+  // line name the same id its record line got. A current-format line has no attempt and passes
+  // through untouched  its id is already unique.
+  const newest = new Map();
+  const rankOf = (row: { run_id: number | null; attempt?: number }): [number, number] => [row.run_id ?? -1, row.attempt ?? 1];
+  for (const row of records.values()) {
+    if (row.attempt === undefined) continue;
+    const rank = rankOf(row);
+    const seen = newest.get(row.record_id) as [number, number] | undefined;
+    if (seen === undefined || rank[0] > seen[0] || (rank[0] === seen[0] && rank[1] > seen[1])) newest.set(row.record_id, rank);
+  }
+  const idOf = (row: { record_id: string; run_id: number | null; attempt?: number }): string => {
+    if (row.attempt === undefined) return row.record_id;
+    const [run, attempt] = rankOf(row);
+    const top = newest.get(row.record_id) as [number, number] | undefined;
+    return top !== undefined && (top[0] !== run || top[1] !== attempt) ? `${row.record_id}~~${run}.${attempt}` : row.record_id;
+  };
 
   let rows = 0;
   db.transaction(() => {
@@ -370,21 +393,33 @@ export function replayConversations(db: JairaDb, dir: string): number | undefine
     }
     const record = db.prepare(
       `INSERT INTO operation_records
-         (record_id, task_id, run_id, attempt, status, request_json, result_json, error_json,
+         (id, task_id, run_id, status, request_json, result_json, error_json,
           metrics_json, session_outcome_json, provider_session_id, started_at, ended_at)
-       VALUES (@record_id, @task_id, @run_id, @attempt, @status, @request_json, @result_json, @error_json,
-               @metrics_json, @session_outcome_json, @provider_session_id, @started_at, @ended_at)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const row of records.values()) {
-      record.run(row);
+      record.run(
+        idOf(row),
+        row.task_id,
+        row.run_id,
+        row.status,
+        row.request_json,
+        row.result_json,
+        row.error_json,
+        row.metrics_json,
+        row.session_outcome_json,
+        row.provider_session_id,
+        row.started_at,
+        row.ended_at,
+      );
       rows++;
     }
     const position = db.prepare(
-      `INSERT OR REPLACE INTO session_positions (session_id, seq, task_id, run_id, record_id, attempt)
-       VALUES (@session_id, @seq, @task_id, @run_id, @record_id, @attempt)`,
+      `INSERT OR REPLACE INTO session_positions (session_id, seq, task_id, run_id, record_id)
+       VALUES (?, ?, ?, ?, ?)`,
     );
     for (const row of positions.values()) {
-      position.run(row);
+      position.run(row.session_id, row.seq, row.task_id, row.run_id, idOf(row));
       rows++;
     }
   })();

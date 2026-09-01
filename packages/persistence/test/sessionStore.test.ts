@@ -328,18 +328,19 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
    * The pair of claims worth pinning: a list is one row per record (the LATEST attempt, so a retried
    * call is one call), and the read is scoped to the run that wrote it.
    */
-  it("lists a run's calls once each, latest attempt, oldest first", () => {
-    const at = (recordId: string, attempt: number, started: number, status: string, result: unknown): void => {
+  it("lists a run's calls once each — a legacy id's attempts fold to their base, latest kept", () => {
+    const at = (id: string, started: number, status: string, result: unknown): void => {
       db.prepare(
-        `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, request_json, result_json, started_at)
-         VALUES (?, 'tr', 9, ?, ?, ?, ?, ?)`,
-      ).run(recordId, attempt, status, JSON.stringify({ functionRef: recordId }), JSON.stringify(result), started);
+        `INSERT INTO operation_records (id, task_id, run_id, status, request_json, result_json, started_at)
+         VALUES (?, 'tr', 9, ?, ?, ?, ?)`,
+      ).run(id, status, JSON.stringify({ functionRef: id }), JSON.stringify(result), started);
     };
-    at("a", 1, 10, "failed", { error: { reason: "first try" } });
-    // A retry writes a SECOND row with the same content id — the call is the same call, so a list
-    // that returned both would show one call twice with different answers, which reads as two.
-    at("a", 2, 30, "completed", { value: "second try" });
-    at("b", 1, 20, "completed", { value: 1 });
+    // Migration 13's legacy shape: a retried content-hash id kept its history under `~~` suffixes,
+    // the newest row holding the bare id. The call is the same call, so a list that returned both
+    // rows would show one call twice with different answers, which reads as two.
+    at("a~~1", 10, "failed", { error: { reason: "first try" } });
+    at("a", 30, "completed", { value: "second try" });
+    at("b", 20, "completed", { value: 1 });
 
     const store = new SqliteSessionStore(db, { taskId: "tr", runId: 9 });
     const calls = store.records();
@@ -349,8 +350,8 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
 
   it("keeps a run's calls out of another run's list", () => {
     db.prepare(
-      `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, started_at)
-       VALUES ('x', 'tr2', 1, 1, 'completed', 1)`,
+      `INSERT INTO operation_records (id, task_id, run_id, status, started_at)
+       VALUES ('x', 'tr2', 1, 'completed', 1)`,
     ).run();
     expect(new SqliteSessionStore(db, { taskId: "tr2", runId: 1 }).records().map((c) => c.recordId)).toEqual(["x"]);
     expect(new SqliteSessionStore(db, { taskId: "tr2", runId: 2 }).records()).toEqual([]);
@@ -360,8 +361,8 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
     // A run killed mid-flight leaves `failed` with no payload. A reader that inferred failure from a
     // missing result would report a call still in flight as one that went wrong.
     db.prepare(
-      `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, started_at)
-       VALUES ('k', 'tr3', 1, 1, 'failed', 5)`,
+      `INSERT INTO operation_records (id, task_id, run_id, status, started_at)
+       VALUES ('k', 'tr3', 1, 'failed', 5)`,
     ).run();
     const [call] = new SqliteSessionStore(db, { taskId: "tr3", runId: 1 }).records();
     expect(call).toMatchObject({ status: "failed" });
@@ -373,44 +374,35 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
     const store = new SqliteSessionStore(db, { taskId: "t9", runId: 2 }) as unknown as Store;
     await store.append({ id: "s1", source: undefined as never, session: { id: "scoped", seq: 0 }, startMs: 0 });
 
-    const row = db.prepare(`SELECT task_id, run_id FROM operation_records WHERE record_id = 's1'`).get() as {
+    const row = db.prepare(`SELECT task_id, run_id FROM operation_records WHERE id = 's1'`).get() as {
       task_id: string;
       run_id: number;
     };
     expect(row).toEqual({ task_id: "t9", run_id: 2 });
   });
   /**
-   * Two records sharing an id and OPEN at once — which `close` cannot tell apart.
-   *
-   * A record with no position is keyed by `contentIdOf(op)`, so two identical operations dispatched in
-   * one run share an id. `close` resolves that id to "the newest open row", which is right for a RETRY
-   * — the previous attempt has settled, so only one row is open — and wrong here: both are open, so
-   * the first settle lands on the second call's row and the second lands on the first's. The results
-   * come back SWAPPED, silently, and every reader after them believes it.
-   *
-   * The id is not the problem; `close` taking one is. The database already enforces the key that would
-   * disambiguate — `UNIQUE (task_id, run_id, record_id, attempt)` — and `open` is the only thing that
-   * knows which attempt it just wrote, which is why it has to hand one back.
+   * A record's id names ONE ask now — the hash of the scoped request — so re-dispatching it is not
+   * a second call. The store answers the three cases the identity model defines (Identity and
+   * Resume §08): a row that never honestly settled is REOPENED in place, keeping its partial; a
+   * COMPLETED row refuses re-dispatch outright, because an identity that settled cannot be asked
+   * again; and the whole "two open rows sharing an id, settles swapped" failure the attempt column
+   * existed to patch cannot be constructed at all.
    */
-  it("settles the record that closed, not merely the newest one sharing its id", () => {
+  it("reopens a re-dispatched id in place, and refuses one that already completed", () => {
     const store = new SqliteSessionStore(db, { taskId: "t-dup", runId: 1 });
-    const stub = { id: "same-content", source: undefined as never, startMs: 1 };
-    const first = store.append(stub); // attempt 1
-    const second = store.append(stub); // attempt 2 — a second dispatch of an identical operation, still open
-    expect([first.attempt, second.attempt]).toEqual([1, 2]);
+    const stub = { id: "same-scoped-ask", source: undefined as never, startMs: 1 };
+    const first = store.append(stub);
+    expect(first).toEqual({ id: "same-scoped-ask" });
 
-    store.finish(first, { sessionOutcome: { messages: [turn("first")] } });
-    store.finish(second, { sessionOutcome: { messages: [turn("second")] } });
+    // Still open — a crash-retry's shape. The re-dispatch continues into its own record: one row,
+    // not two, and the streamed partial it may carry stays.
+    const again = store.append(stub);
+    expect(again).toEqual({ id: "same-scoped-ask" });
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM operation_records WHERE id = 'same-scoped-ask'`).get()).toEqual({ n: 1 });
 
-    const settled = db
-      .prepare(
-        `SELECT attempt, session_outcome_json FROM operation_records
-          WHERE record_id = 'same-content' ORDER BY attempt`,
-      )
-      .all() as Array<{ attempt: number; session_outcome_json: string | null }>;
-    expect(settled.map((r) => r.attempt)).toEqual([1, 2]);
-    expect(settled[0]!.session_outcome_json).toContain("first");
-    expect(settled[1]!.session_outcome_json).toContain("second");
+    store.finish(again, { sessionOutcome: { messages: [turn("answered")] } });
+    // Settled means settled: the identity cannot be dispatched a third time.
+    expect(() => store.append(stub)).toThrow(/already settled/);
   });
 
 });
@@ -433,7 +425,7 @@ describe("what a derived conversation records about itself", () => {
     expect(await store.messages(compacted)).toEqual([turn("the summary")]);
     // …and the record behind it says what made it.
     const row = db
-      .prepare(`SELECT request_json FROM operation_records WHERE record_id LIKE '%~compact%' ORDER BY id DESC LIMIT 1`)
+      .prepare(`SELECT request_json FROM operation_records WHERE id LIKE '%~compact%' ORDER BY rowid DESC LIMIT 1`)
       .get() as { request_json: string | null } | undefined;
     expect(JSON.parse(row!.request_json!)).toEqual({ kind: "derive", word: "compact", from: "origin" });
   });
@@ -565,7 +557,7 @@ describe("the migration runner", () => {
       // The turn row became a record plus a position pointing at it.
       expect(migrated.prepare(`SELECT COUNT(*) AS n FROM session_positions`).get()).toEqual({ n: 1 });
       expect(
-        migrated.prepare(`SELECT status, provider_session_id FROM operation_records WHERE record_id = 'r0'`).get(),
+        migrated.prepare(`SELECT status, provider_session_id FROM operation_records WHERE id = 'r0'`).get(),
       ).toEqual({ status: "completed", provider_session_id: "prov-9" });
     } finally {
       migrated.close();
@@ -586,6 +578,12 @@ it("moves a position onto the record's own key, and renumbers attempts so that k
     before.exec(`
       DROP INDEX IF EXISTS operation_records_natural;
       DROP TABLE session_positions;
+      DROP TABLE operation_records;
+      CREATE TABLE operation_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL, task_id TEXT, run_id INTEGER,
+        attempt INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'open', request_json TEXT,
+        result_json TEXT, error_json TEXT, metrics_json TEXT, session_outcome_json TEXT,
+        provider_session_id TEXT, started_at INTEGER NOT NULL, ended_at INTEGER);
       CREATE TABLE session_positions (
         session_id TEXT NOT NULL, seq INTEGER NOT NULL,
         operation_record_id INTEGER NOT NULL REFERENCES operation_records(id),
@@ -603,18 +601,18 @@ it("moves a position onto the record's own key, and renumbers attempts so that k
 
     const after = openDb(file);
     try {
-      // The duplicate is gone, in insertion order — which is attempt order, and what `insertRecord`
-      // would have computed had `derive` asked it.
-      expect(after.prepare(`SELECT attempt FROM operation_records ORDER BY id`).all()).toEqual([
-        { attempt: 1 },
-        { attempt: 2 },
+      // Migration 8 renumbered the attempts; migration 13 then retired the column, keeping the
+      // NEWEST row of each content id under the bare id and moving the rest to `~~<old rowid>`.
+      expect(after.prepare(`SELECT id FROM operation_records ORDER BY rowid`).all()).toEqual([
+        { id: "conv:0~~1" },
+        { id: "conv:0" },
       ]);
-      // The position carries the record's own key now, scope included.
+      // The position carries the record's own key now, scope included — and it pointed at the FIRST
+      // row, which is the suffixed one.
       expect(after.prepare(`SELECT * FROM session_positions`).all()).toEqual([
-        { session_id: "t1/1/conv", seq: 0, task_id: "t1", run_id: 1, record_id: "conv:0", attempt: 1 },
+        { session_id: "t1/1/conv", seq: 0, task_id: "t1", run_id: 1, record_id: "conv:0~~1" },
       ]);
-      // And it still finds its record — the assertion the rowid used to carry, now carried by the
-      // four columns and made unambiguous by `operation_records_natural`.
+      // And it still finds its record — the assertion the rowid used to carry, carried by the id.
       const reader = new SqliteSessionStore(after, { taskId: "t1", runId: 1 }) as unknown as Store;
       expect(await reader.messages("conv")).toEqual([turn("first")]);
     } finally {
@@ -622,20 +620,20 @@ it("moves a position onto the record's own key, and renumbers attempts so that k
     }
   });
 
-  it("refuses a second record claiming an attempt another already holds", () => {
-    // The invariant the join rests on. Nothing wrote a duplicate before — `insertRecord` counts — but
-    // nothing stopped one either, and a position row matching two records fans out into a transcript
-    // with a turn in it twice.
-    const insert = (attempt: number): void =>
+  it("refuses a second record claiming an id another already holds", () => {
+    // The invariant every join rests on, enforced by the primary key itself now: an id names one
+    // dispatch, and a position row matching two records would fan out into a transcript with a turn
+    // in it twice. (The store never hits this — `insertRecord` reopens or refuses — so this pins
+    // the constraint that catches a writer that bypasses it.)
+    const insert = (): void =>
       void db
         .prepare(
-          `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, started_at)
-           VALUES ('dup:0', 't9', 1, ?, 'open', 1)`,
+          `INSERT INTO operation_records (id, task_id, run_id, status, started_at)
+           VALUES ('dup:0', 't9', 1, 'open', 1)`,
         )
-        .run(attempt);
-    insert(1);
-    expect(() => insert(1)).toThrow(/UNIQUE/);
-    insert(2); // a genuine retry is not a duplicate
+        .run();
+    insert();
+    expect(insert).toThrow(/UNIQUE/);
   });
 
 });
@@ -736,10 +734,10 @@ describe("stateSessions — a run the process died inside", () => {
       `INSERT INTO state_machine_events (task_id, run_id, type, payload_json, created_at) VALUES ('t3', ?, 'operation.started', ?, ?)`,
     ).run(runId, JSON.stringify({ instanceId, stateId, op: "prompt" }), at);
   };
-  const record = (runId: number, recordId: string, status = "failed"): void => {
+  const record = (runId: number, recordId: string, status = "interrupted"): void => {
     db.prepare(
-      `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, started_at)
-       VALUES (?, 't3', ?, 1, ?, 5)`,
+      `INSERT INTO operation_records (id, task_id, run_id, status, started_at)
+       VALUES (?, 't3', ?, ?, 5)`,
     ).run(recordId, runId, status);
     // The position points at the record's own KEY, not at a rowid — migration 8. Written out here
     // rather than through the store because these rows stand in for a process that died mid-run.
@@ -749,8 +747,8 @@ describe("stateSessions — a run the process died inside", () => {
     // out of the record id instead of out of this table.
     const cut = recordId.lastIndexOf(":");
     db.prepare(
-      `INSERT INTO session_positions (session_id, seq, task_id, run_id, record_id, attempt)
-       VALUES (?, ?, 't3', ?, ?, 1)`,
+      `INSERT INTO session_positions (session_id, seq, task_id, run_id, record_id)
+       VALUES (?, ?, 't3', ?, ?)`,
     ).run(`t3/${runId}/${recordId.slice(0, cut)}`, Number(recordId.slice(cut + 1)), runId, recordId);
   };
 
@@ -921,7 +919,7 @@ describe("streamed partials on open records", () => {
     const r2 = await s.append({ id: "r2", source: undefined as never, session: at.at, startMs: 1 });
     s.update(r2, { value: partial(["half", "written"]), providerSessionId: "prov-3" });
     // The provider handle lands EARLY — what makes an interrupted call resumable at all.
-    expect(db.prepare(`SELECT provider_session_id FROM operation_records WHERE record_id = 'r2'`).get()).toEqual({
+    expect(db.prepare(`SELECT provider_session_id FROM operation_records WHERE id = 'r2'`).get()).toEqual({
       provider_session_id: "prov-3",
     });
 
@@ -976,7 +974,7 @@ describe("streamed partials on open records", () => {
 
   it("writes nothing where no open row claims the position", () => {
     const s = store();
-    expect(() => s.update({ id: "nowhere", attempt: 1 }, { value: partial(["x"]) })).not.toThrow();
+    expect(() => s.update({ id: "nowhere" }, { value: partial(["x"]) })).not.toThrow();
     expect(s.transcript("nowhere")).toEqual([]);
   });
 
@@ -1118,25 +1116,21 @@ describe("streamed partials on open records", () => {
 describe("recovering an interrupted call's own transcript", () => {
   const scoped = () => new SqliteSessionStore(db, { taskId: "t1", runId: 1 });
 
-  const crashed = (over: { status?: string; handle?: string | null; result?: string | null } = {}): number => {
-    // Each call is a distinct ATTEMPT of the same record id, and says so — the natural key
-    // (`operation_records_natural`, migration 8) is what makes a position row's join unambiguous, so
-    // three rows all claiming attempt 1 is now the contradiction it always was.
-    const { n } = db
-      .prepare(`SELECT COUNT(*) AS n FROM operation_records WHERE record_id = 's:0' AND task_id = 't1' AND run_id = 1`)
-      .get() as { n: number };
-    const info = db
-      .prepare(
-        `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, provider_session_id, result_json, started_at)
-         VALUES ('s:0', 't1', 1, ?, ?, ?, ?, 900)`,
-      )
-      .run(n + 1, over.status ?? "failed", over.handle === undefined ? "prov-1" : over.handle, over.result ?? null);
-    return Number(info.lastInsertRowid);
+  let minted = 0;
+  const crashed = (over: { status?: string; handle?: string | null; result?: string | null } = {}): string => {
+    // Each call is its own scoped id now — two dispatches cannot share one, which is what retired
+    // the attempt column this fixture used to count.
+    const id = `s:0#${++minted}`;
+    db.prepare(
+      `INSERT INTO operation_records (id, task_id, run_id, status, provider_session_id, result_json, started_at)
+       VALUES (?, 't1', 1, ?, ?, ?, 900)`,
+    ).run(id, over.status ?? "interrupted", over.handle === undefined ? "prov-1" : over.handle, over.result ?? null);
+    return id;
   };
 
   it("offers the handle and the start time — the cut that keeps a resumed session's earlier lines out", () => {
     crashed();
-    expect(scoped().recoverable("t1")).toEqual([{ id: expect.any(Number), providerSessionId: "prov-1", startedAt: 900 }]);
+    expect(scoped().recoverable("t1")).toEqual([{ id: expect.any(String), providerSessionId: "prov-1", startedAt: 900 }]);
   });
 
   it("passes over a row with no handle, a live row, and one already captured", () => {

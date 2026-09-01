@@ -101,7 +101,7 @@ describe("what a stopped run can be read back from", () => {
         if (event.type !== "operation.completed" || event.operation_id === null) continue;
         const stateId = (JSON.parse(event.payload_json) as { stateId: string }).stateId;
         const row = project.db
-          .prepare(`SELECT status, result_json FROM operation_records WHERE task_id = ? AND record_id = ?`)
+          .prepare(`SELECT status, result_json FROM operation_records WHERE task_id = ? AND id = ?`)
           .get(taskId, event.operation_id) as { status: string; result_json: string } | undefined;
         expect(row, `no record for ${stateId}'s operation`).toBeDefined();
         expect(row!.status).toBe("completed");

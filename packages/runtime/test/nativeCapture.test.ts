@@ -16,7 +16,7 @@ type Settled = Parameters<RecordStore["finish"]>[1];
 function recorder(withBySession = false): { store: RecordStore; closes: Array<{ id: string; settled: Settled }> } {
   const closes: Array<{ id: string; settled: Settled }> = [];
   const store: RecordStore = {
-    append: (stub) => ({ id: stub.id, attempt: 1 }),
+    append: (stub) => ({ id: stub.id }),
     finish: (ref, settled) => {
       closes.push({ id: ref.id, settled });
     },
@@ -38,7 +38,7 @@ describe("withNativeCapture", () => {
     const { store, closes } = recorder();
     const read = vi.fn(async () => FILE);
     const wrapped = withNativeCapture(store, { cwd: "C:\\work\\proj", read });
-    await wrapped.finish({ id: "r1", attempt: 1 }, {
+    await wrapped.finish({ id: "r1" }, {
       result: {
         value: {
           entries: [{ kind: "message", role: "assistant", provider: "anthropic", timestamp: "t", content: "hi" }],
@@ -69,7 +69,7 @@ describe("withNativeCapture", () => {
     const { store, closes } = recorder();
     const wrapped = withNativeCapture(store, { cwd: "C:\\w", read: async () => FILE });
     const messages = [{ role: "assistant", content: "report" }];
-    await wrapped.finish({ id: "r1", attempt: 1 }, {
+    await wrapped.finish({ id: "r1" }, {
       result: { value: "report" as never },
       sessionOutcome: { providerSessionId: SID, messages },
     });
@@ -88,7 +88,7 @@ describe("withNativeCapture", () => {
   it("cuts the file at the record's own start — a resumed session's earlier lines belong to earlier records", async () => {
     const { store, closes } = recorder();
     const wrapped = withNativeCapture(store, { cwd: "C:\\w", read: async () => FILE });
-    await wrapped.finish({ id: "r1", attempt: 1 }, {
+    await wrapped.finish({ id: "r1" }, {
       result: {
         value: {
           entries: [{ kind: "message", role: "assistant", provider: "anthropic", timestamp: "t", content: "hi" }],
@@ -110,7 +110,7 @@ describe("withNativeCapture", () => {
     const read = vi.fn(async () => FILE);
     const wrapped = withNativeCapture(store, { cwd: "C:\\w", read });
     const settled: Settled = { result: { value: "plain" as never } };
-    await wrapped.finish({ id: "r1", attempt: 1 }, settled);
+    await wrapped.finish({ id: "r1" }, settled);
     expect(read).not.toHaveBeenCalled();
     expect(closes[0]!.settled).toBe(settled);
   });
@@ -118,7 +118,7 @@ describe("withNativeCapture", () => {
   it("stores an empty capture as NOTHING — a transport with no native file must not stamp records with an empty claim", async () => {
     const { store, closes } = recorder();
     const wrapped = withNativeCapture(store, { cwd: "C:\\w", read: async () => [] });
-    await wrapped.finish({ id: "r1", attempt: 1 }, {
+    await wrapped.finish({ id: "r1" }, {
       result: { value: { messages: [], finishReason: "stop" } as never },
       sessionOutcome: { providerSessionId: "codex-conv-id" },
     });
@@ -140,7 +140,7 @@ describe("withNativeCapture", () => {
       result: { value: { messages: [], finishReason: "stop" } as never },
       sessionOutcome: { providerSessionId: SID },
     };
-    await wrapped.finish({ id: "r1", attempt: 1 }, settled);
+    await wrapped.finish({ id: "r1" }, settled);
     expect(onError).toHaveBeenCalledOnce();
     expect(closes[0]!.settled).toBe(settled);
   });
@@ -165,7 +165,7 @@ describe("withNativeCapture", () => {
         { agentId: "old", toolUseId: "toolu_00", lines: [{ type: "user", isSidechain: true, timestamp: new Date(100).toISOString(), message: {} }] },
       ],
     });
-    await wrapped.finish({ id: "r1", attempt: 1 }, {
+    await wrapped.finish({ id: "r1" }, {
       result: {
         value: {
           entries: [
@@ -239,7 +239,7 @@ describe("folding a tool result into the entry that asked for it", () => {
   async function fold(rendered: string) {
     const { store, closes } = recorder();
     const wrapped = withNativeCapture(store, { cwd: "C:/w", read: async () => fileRead(rendered) as never });
-    await wrapped.finish({ id: "r1", attempt: 1 }, {
+    await wrapped.finish({ id: "r1" }, {
       result: { value: { entries: entriesWith(rendered), finishReason: "stop" } as never },
       metrics: { startMs: 500, durationMs: 10 },
       sessionOutcome: { providerSessionId: SID },

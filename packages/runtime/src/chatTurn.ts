@@ -192,7 +192,12 @@ export async function runChatTurn(ports: ChatTurnPorts, request: ChatTurnRequest
    */
   let result;
   try {
-    result = await ports.executor.start(request.operation, { ...ports.services, session: resolved }).result;
+    // The DISPATCH SCOPE, same contract as the engine's (`ExecServices.scope`): the chat child is
+    // the instance, and the message index is the site — so the record id is the hash of the scoped
+    // request and two identical messages in one thread cannot collide, which under bare content
+    // hashes they silently did.
+    const scope = { instanceId: instance.instanceId, sequence: instance.index };
+    result = await ports.executor.start(request.operation, { ...ports.services, session: resolved, scope }).result;
   } catch (e) {
     const failure = { classification: "permanent" as const, reason: (e as Error).message };
     const sessionRef = ports.sessions.refAt({ id: resolved.at.id, seq: resolved.at.seq + 1 });

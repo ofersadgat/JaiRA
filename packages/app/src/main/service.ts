@@ -6614,7 +6614,7 @@ function turnsOf(value: JsonValue | undefined): SessionTurn[] {
  * to "what did this record say", and the whole point of showing it is that it is the same kind of
  * thing as what it sits beside.
  */
-function turnsSaidBy(row: { value?: JsonValue; status: "open" | "completed" | "failed" }): SessionTurn[] {
+function turnsSaidBy(row: { value?: JsonValue; status: "open" | "completed" | "failed" | "interrupted" }): SessionTurn[] {
   // Everything this record said, INCLUDING the turn that was still being written when it stopped —
   // that is an entry of its own, marked `partial`, sitting where it happened. It used to live in a
   // field beside the conversation and be appended back on at display time, which is why a stopped

@@ -254,11 +254,16 @@ export class RuntimeStore {
         // The task's operation records left 'open' by the crash settle with it. 'open' means "a live
         // process is streaming into this row" — the state signal every record reader now keys on —
         // and no such process exists. The streamed partial in result_json is deliberately KEPT: those
-        // turns really were exchanged before the process died, and a settled-failed row is exactly
-        // how an errored call's surviving turns are already represented.
+        // turns really were exchanged before the process died.
+        //
+        // `interrupted`, at last its own word (Identity and Resume §03): the sweep used to write
+        // `failed` over calls that were never answered, which erased the one distinction that
+        // matters to a resume — `failed` means the call itself answered with an error and is not
+        // re-entered; `interrupted` means we stopped it or the process died under it, its turns may
+        // already exist remotely, and a load treats it as an active leaf.
         this.db
           .prepare(
-            `UPDATE operation_records SET status = 'failed', ended_at = ?,
+            `UPDATE operation_records SET status = 'interrupted', ended_at = ?,
                     error_json = COALESCE(error_json, ?)
               WHERE task_id = ? AND status = 'open'`,
           )

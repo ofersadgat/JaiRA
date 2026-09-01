@@ -1,6 +1,6 @@
 /**
  * Conversations that outlive the process (SESSIONS.md §9) — and, since CHANGESETS.md §5.1, the
- * per-attempt operation record store those conversations are a PROJECTION of.
+ * operation record store those conversations are a PROJECTION of.
  *
  * Every run already built one of these — `sessionServicesFor` constructs a `MapSessionStore` and the
  * engine writes every model call into it, complete: the messages, the thinking, the tool calls and
@@ -13,10 +13,13 @@
  * The system has an irreducible pair — the journal records *that* operations ran, this store records
  * *what they returned* — and the payload half is normalised into:
  *
- *  - **`operation_records`** — one row per operation attempt: `request_json` (the operation as
- *    asked), `result_json` / `error_json` (what came back), metrics, the provider's session handle,
- *    status and attempt. EVERY call this store sees lands here, placed in a conversation or not.
- *  - **`session_positions`** — conversation membership: `(session_id, seq, operation_record_id)`.
+ *  - **`operation_records`** — one row per DISPATCH, keyed by the hash of the scoped request
+ *    (Identity and Resume step 2 — the scope `(instance_id, sequence)` never repeats, so the id is
+ *    the primary key and the old `attempt` column had nothing left to say): `request_json` (the
+ *    operation as asked), `result_json` / `error_json` (what came back), metrics, the provider's
+ *    session handle, and status (`open | completed | failed | interrupted`). EVERY call this store
+ *    sees lands here, placed in a conversation or not.
+ *  - **`session_positions`** — conversation membership: `(session_id, seq, record_id)`.
  *    The primary key IS the position claim, so a duplicate insert is `PositionTaken` → fork rather
  *    than a check with a race in it. An unplaced record simply has no row here, which is what keeps
  *    the transcripts clean now that the dispatcher records unconditionally (§5.2).
@@ -74,16 +77,25 @@ const join = (id: string, seq: number): string => `${id}@${seq}`;
 /**
  * How a position finds its record: the record's OWN key, never the rowid the database assigned.
  *
- * `IS` rather than `=` on the two scope columns, because both are nullable — an unscoped store keys
- * by the bare id — and `= NULL` is never true. Written once because it appears in every read that
- * crosses the two tables, and four columns silently mistyped in one of them is a join that quietly
- * returns nothing.
- *
- * Uniqueness of the tuple is enforced by `operation_records_natural` (migration 8), which is what
- * makes this a lookup rather than a fan-out.
+ * The id alone is the join now — it is the hash of the SCOPED request (migration 13), unique by
+ * construction, so the `attempt` half this used to need has nothing left to disambiguate. `IS`
+ * rather than `=` on the two scope columns, because both are nullable — an unscoped store keys by
+ * the bare id — and `= NULL` is never true. Written once because it appears in every read that
+ * crosses the two tables.
  */
-export const ON_RECORD = `r.record_id = p.record_id AND r.attempt = p.attempt
+export const ON_RECORD = `r.id = p.record_id
                    AND r.task_id IS p.task_id AND r.run_id IS p.run_id`;
+
+/**
+ * A migration-13 legacy id's CONTENT half — `<hash>~~<n>` names a superseded attempt of `<hash>`.
+ *
+ * `~~` and not `~`, because a single tilde legitimately appears inside derived session ids
+ * (`planning~compact1:0`); the doubled form exists nowhere else. A scoped id never carries it.
+ */
+export function baseRecordId(id: string): string {
+  const at = id.indexOf("~~");
+  return at === -1 ? id : id.slice(0, at);
+}
 
 /** Split on the LAST `@`: a compaction mints `planning~compact1`, and a ref into it carries two. */
 function split(ref: string): [string, number | undefined] {
@@ -109,7 +121,7 @@ interface Row {
    * `result_json` stayed NULL until the settle; streamed partials (see {@link SqliteSessionStore.update})
    * end that, so every reader that cares whether a turn HAPPENED must ask this field, never the value.
    */
-  status: "open" | "completed" | "failed";
+  status: "open" | "completed" | "failed" | "interrupted";
   value?: JsonValue;
   externalId?: string;
   /**
@@ -249,22 +261,22 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   // the table by a field somebody forgot to mirror — which, with thirteen columns and five writers,
   // is not a hypothetical.
 
-  private logRecordRow(rowid: number | bigint): void {
+  private logRecordRow(recordId: string): void {
     if (this.log === undefined) return;
     const row = this.db
       .prepare(
-        `SELECT record_id, task_id, run_id, attempt, status, request_json, result_json, error_json,
+        `SELECT id AS record_id, task_id, run_id, status, request_json, result_json, error_json,
                 metrics_json, session_outcome_json, provider_session_id, started_at, ended_at
            FROM operation_records WHERE id = ?`,
       )
-      .get(rowid) as RecordRow | undefined;
+      .get(recordId) as RecordRow | undefined;
     if (row !== undefined) this.log.append({ kind: "record", row });
   }
 
   private logPosition(sessionKey: string, seq: number): void {
     if (this.log === undefined) return;
     const row = this.db
-      .prepare(`SELECT session_id, seq, task_id, run_id, record_id, attempt FROM session_positions WHERE session_id = ? AND seq = ?`)
+      .prepare(`SELECT session_id, seq, task_id, run_id, record_id FROM session_positions WHERE session_id = ? AND seq = ?`)
       .get(sessionKey, seq) as PositionRow | undefined;
     if (row !== undefined) this.log.append({ kind: "position", row });
   }
@@ -350,34 +362,41 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // holds transcripts is session_positions, and an unplaced call never touches it.
     const at = stub.session;
     if (at === undefined) {
-      const unplaced = this.insertRecord(stub);
-      this.logRecordRow(unplaced.rowid);
-      return { id: unplaced.recordId, attempt: unplaced.attempt };
+      this.insertRecord(stub);
+      this.logRecordRow(stub.id);
+      return { id: stub.id };
     }
     this.branch(at.id, { cursor: this.cursorOf(at.id) });
     try {
       // One transaction: the record and its position claim land together, so a lost race leaves no
       // orphaned record behind the PositionTaken it reports.
-      let placed!: { recordId: string; attempt: number; rowid: number | bigint };
       this.db
         .transaction(() => {
-          placed = this.insertRecord(stub);
+          const reopened = this.insertRecord(stub);
+          // A REOPENED record already holds its seat — the re-dispatch continues into its own row
+          // (the interrupted-retry case), and re-inserting the claim would refuse it its own chair.
+          const holder = this.db
+            .prepare(`SELECT record_id FROM session_positions WHERE session_id = ? AND seq = ?`)
+            .get(this.k(at.id), at.seq) as { record_id: string } | undefined;
+          if (holder?.record_id === stub.id) return;
+          if (holder !== undefined && !reopened) throw new PositionTaken(at.id, at.seq);
           this.db
             .prepare(
-              `INSERT INTO session_positions (session_id, seq, task_id, run_id, record_id, attempt)
-               VALUES (?, ?, ?, ?, ?, ?)`,
+              `INSERT INTO session_positions (session_id, seq, task_id, run_id, record_id)
+               VALUES (?, ?, ?, ?, ?)`,
             )
-            .run(this.k(at.id), at.seq, this.scope.taskId ?? null, this.scope.runId ?? null, placed.recordId, placed.attempt);
+            .run(this.k(at.id), at.seq, this.scope.taskId ?? null, this.scope.runId ?? null, stub.id);
         })
         .immediate();
       // AFTER the transaction, and only once it committed: the claim is what decides whether this
       // call owns the position at all, so appending before it would put a turn in the file for a
       // call that went on to fork instead.
       this.logSession(this.k(at.id));
-      this.logRecordRow(placed.rowid);
+      this.logRecordRow(stub.id);
       this.logPosition(this.k(at.id), at.seq);
-      return { id: placed.recordId, attempt: placed.attempt };
+      return { id: stub.id };
     } catch (e) {
+      if (e instanceof PositionTaken) throw e;
       // The primary key IS the claim, so a duplicate is the position being held rather than a fault.
       // Reported as the class the session layer forks on, never as a database error.
       if (String((e as Error).message).includes("UNIQUE")) throw new PositionTaken(at.id, at.seq);
@@ -389,23 +408,16 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // Before the row is settled, so the comparison reads the lineage as it stood when this call was
     // claimed. A run with no live view never calls `update`, so this is the only correction it gets.
     this.correctLineage(ref, settled.sessionOutcome?.providerSessionId);
-    // The NATURAL KEY, whole. Scoped, because a record id is unique only within a run — `#i2:0` names
-    // the first call of the second instance of EVERY run of a workflow — and by `attempt`, because an
-    // id is not unique within one either: a content-keyed record repeats whenever the same operation
-    // is dispatched twice, which is exactly why `attempt` exists.
-    //
-    // This used to select `(status = 'open') DESC, id DESC LIMIT 1` — "the newest open row". That is
-    // right for a RETRY, where the earlier attempt has settled and only one row is open, and wrong
-    // when two dispatches of one operation are open at once: the first settle landed on the second
-    // call's row and the second on the first's, so both rows were written and their results swapped.
-    // No ordering can fix it, because an id alone does not say which call is closing — the ref does.
+    // By ID, scoped. The id is the hash of the scoped request (migration 13) — unique by
+    // construction — so the `attempt` half this lookup used to need, and the "which of two open
+    // rows is closing" guessing before that, have nothing left to answer.
     const row = this.db
       .prepare(
         `SELECT id, result_json, request_json FROM operation_records
-          WHERE record_id = ? AND attempt = ? AND task_id IS ? AND run_id IS ?`,
+          WHERE id = ? AND task_id IS ? AND run_id IS ?`,
       )
-      .get(ref.id, ref.attempt, this.scope.taskId ?? null, this.scope.runId ?? null) as
-      | { id: number; result_json: string | null; request_json: string | null }
+      .get(ref.id, this.scope.taskId ?? null, this.scope.runId ?? null) as
+      | { id: string; result_json: string | null; request_json: string | null }
       | undefined;
     if (row === undefined) return;
     // Stored VERBATIM — the result as it settled, the session outcome as reported. What a record
@@ -445,7 +457,10 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
         settled.metrics === undefined ? null : JSON.stringify(settled.metrics),
         settled.sessionOutcome === undefined ? null : JSON.stringify(withoutDuplicateTurns(settled.sessionOutcome, result)),
         settled.sessionOutcome?.providerSessionId ?? null,
-        error === undefined ? "completed" : "failed",
+        // `interrupted` is its own word (Identity and Resume §03): the call was cut — by a stop, or
+        // by the process dying under it — and its partial may already exist in the remote stream,
+        // which is the promise `failed` does not make. The executor classifies; this maps.
+        error === undefined ? "completed" : (error as { classification?: string }).classification === "interrupted" ? "interrupted" : "failed",
         Date.now(),
         row.id,
       );
@@ -477,8 +492,8 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    */
   positionOf(ref: RecordRef): { id: string; seq: number } | undefined {
     const row = this.db
-      .prepare(`SELECT session_id, seq FROM session_positions WHERE record_id = ? AND attempt = ? AND task_id IS ? AND run_id IS ?`)
-      .get(ref.id, ref.attempt, this.scope.taskId ?? null, this.scope.runId ?? null) as
+      .prepare(`SELECT session_id, seq FROM session_positions WHERE record_id = ? AND task_id IS ? AND run_id IS ?`)
+      .get(ref.id, this.scope.taskId ?? null, this.scope.runId ?? null) as
       | { session_id: string; seq: number }
       | undefined;
     return row === undefined ? undefined : { id: bareSessionId(this.scope, row.session_id), seq: row.seq };
@@ -505,8 +520,8 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   private correctLineage(ref: RecordRef, reported: string | undefined): void {
     if (reported === undefined) return; // nothing said; nothing to check against
     const pos = this.db
-      .prepare(`SELECT session_id, seq FROM session_positions WHERE record_id = ? AND attempt = ? AND task_id IS ? AND run_id IS ?`)
-      .get(ref.id, ref.attempt, this.scope.taskId ?? null, this.scope.runId ?? null) as
+      .prepare(`SELECT session_id, seq FROM session_positions WHERE record_id = ? AND task_id IS ? AND run_id IS ?`)
+      .get(ref.id, this.scope.taskId ?? null, this.scope.runId ?? null) as
       | { session_id: string; seq: number }
       | undefined;
     if (pos === undefined) return; // unplaced: no lineage to be wrong about
@@ -540,9 +555,9 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    */
   recordAt(at: { id: string; seq: number }): RecordRef | undefined {
     const row = this.db
-      .prepare(`SELECT record_id, attempt FROM session_positions WHERE session_id = ? AND seq = ?`)
-      .get(this.k(at.id), at.seq) as { record_id: string; attempt: number } | undefined;
-    return row === undefined ? undefined : { id: row.record_id, attempt: row.attempt };
+      .prepare(`SELECT record_id FROM session_positions WHERE session_id = ? AND seq = ?`)
+      .get(this.k(at.id), at.seq) as { record_id: string } | undefined;
+    return row === undefined ? undefined : { id: row.record_id };
   }
 
   update(ref: RecordRef, partial: RecordPartial): void {
@@ -556,10 +571,10 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     const row = this.db
       .prepare(
         `SELECT id, request_json FROM operation_records
-          WHERE record_id = ? AND attempt = ? AND task_id IS ? AND run_id IS ? AND status = 'open'`,
+          WHERE id = ? AND task_id IS ? AND run_id IS ? AND status = 'open'`,
       )
-      .get(ref.id, ref.attempt, this.scope.taskId ?? null, this.scope.runId ?? null) as
-      | { id: number; request_json: string | null }
+      .get(ref.id, this.scope.taskId ?? null, this.scope.runId ?? null) as
+      | { id: string; request_json: string | null }
       | undefined;
     if (row === undefined) return;
     // The provider handle is stamped EARLY when the stream carried one — it rides nearly every
@@ -684,22 +699,32 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   }
 
   /**
-   * The latest attempt of a record by its CONTENT id — how the positionless `db://` form resolves
-   * (CHANGESETS.md §10.6, settled): settled `operation.*` events carry this id, and an unplaced
-   * record is keyed by it, so a journal row leads here whether or not the call ever sat in a
-   * conversation. Returns the request too: §5.3 puts a gate's changeset in `request_json`, and
-   * addressing the record without it would hide the half that design points at.
+   * A record by its id — how the positionless `db://` form resolves (CHANGESETS.md §10.6, settled):
+   * settled `operation.*` events carry this id, and every record is keyed by it, so a journal row
+   * leads here whether or not the call ever sat in a conversation. Returns the request too: §5.3
+   * puts a gate's changeset in `request_json`, and addressing the record without it would hide the
+   * half that design points at.
    */
   record(recordId: string): RecordedCall | undefined {
     const row = this.db
       .prepare(
-        `SELECT record_id, status, request_json, result_json, error_json, started_at, ended_at
+        `SELECT id AS record_id, status, request_json, result_json, error_json, started_at, ended_at
            FROM operation_records
-          WHERE record_id = ? AND task_id IS ? AND run_id IS ?
-          ORDER BY attempt DESC, id DESC LIMIT 1`,
+          WHERE id = ? AND task_id IS ? AND run_id IS ?`,
       )
       .get(recordId, this.scope.taskId ?? null, this.scope.runId ?? null) as CallRow | undefined;
-    return row === undefined ? undefined : recordedCallOf(this.db, row);
+    if (row !== undefined) return recordedCallOf(this.db, row);
+    // A legacy row this scope owns may sit under a migration-13 suffix (`<id>~~<n>`) when another
+    // run's row kept the bare id. The newest such row is the old ORDER BY attempt DESC answer.
+    const legacy = this.db
+      .prepare(
+        `SELECT id AS record_id, status, request_json, result_json, error_json, started_at, ended_at
+           FROM operation_records
+          WHERE id LIKE ? || '~~%' AND task_id IS ? AND run_id IS ?
+          ORDER BY rowid DESC LIMIT 1`,
+      )
+      .get(recordId, this.scope.taskId ?? null, this.scope.runId ?? null) as CallRow | undefined;
+    return legacy === undefined ? undefined : recordedCallOf(this.db, legacy);
   }
 
   /**
@@ -709,24 +734,24 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * Scoped by the store's own `(taskId, runId)`, which is the index `operation_records_scope`
    * already covers, so this is a range scan rather than a table walk.
    *
-   * ⚠️ ONE ROW PER RECORD, the latest attempt. A retried call writes a second row with the same
-   * `record_id` and a higher `attempt` (see the note on {@link record}), and a list that returned
-   * both would show the same call twice with different answers — which is precisely the shape a
-   * reader would mistake for two calls. The earlier attempts are still in the table for anyone who
-   * wants the history; this is the answer to "what happened", which is the last one.
+   * One row per record, by construction now: the id is a primary key, and a retried call reopens
+   * its own row instead of writing a second one. Legacy attempts migration 13 suffixed (`~~<n>`)
+   * fold to their base id here, latest kept — the old "one row per record, the last attempt".
    */
   records(): RecordedCall[] {
     const rows = this.db
       .prepare(
-        `SELECT record_id, status, request_json, result_json, error_json, started_at, ended_at
-           FROM operation_records r
+        `SELECT id AS record_id, status, request_json, result_json, error_json, started_at, ended_at, rowid AS rowid
+           FROM operation_records
           WHERE task_id IS ? AND run_id IS ?
-            AND attempt = (SELECT MAX(attempt) FROM operation_records a
-                            WHERE a.record_id = r.record_id AND a.task_id IS r.task_id AND a.run_id IS r.run_id)
-          ORDER BY started_at, id`,
+          ORDER BY started_at, rowid`,
       )
-      .all(this.scope.taskId ?? null, this.scope.runId ?? null) as CallRow[];
-    return rows.map((row) => recordedCallOf(this.db, row));
+      .all(this.scope.taskId ?? null, this.scope.runId ?? null) as Array<CallRow & { rowid: number }>;
+    const byBase = new Map<string, CallRow & { rowid: number }>();
+    for (const row of rows) byBase.set(baseRecordId(row.record_id), row); // later wins — the last attempt
+    return [...byBase.values()]
+      .sort((a, b) => (a.started_at ?? 0) - (b.started_at ?? 0) || a.rowid - b.rowid)
+      .map((row) => recordedCallOf(this.db, row));
   }
 
   /**
@@ -742,16 +767,18 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * field of its own any more — the captured lines ARE the entries now — so the record states when
    * it happened rather than being recognized by a leftover.
    */
-  recoverable(taskId: string): Array<{ id: number; providerSessionId: string; startedAt: number }> {
+  recoverable(taskId: string): Array<{ id: string; providerSessionId: string; startedAt: number }> {
+    // `interrupted` is what the sweep writes now; `failed` stays in the filter for rows an older
+    // sweep marked before the word existed.
     return this.db
       .prepare(
         `SELECT id, provider_session_id, started_at FROM operation_records
-          WHERE task_id = ? AND status = 'failed' AND provider_session_id IS NOT NULL
+          WHERE task_id = ? AND status IN ('interrupted', 'failed') AND provider_session_id IS NOT NULL
             AND (result_json IS NULL OR result_json NOT LIKE '%"capturedAt"%')`,
       )
       .all(taskId)
       .map((row) => {
-        const r = row as { id: number; provider_session_id: string; started_at: number };
+        const r = row as { id: string; provider_session_id: string; started_at: number };
         return { id: r.id, providerSessionId: r.provider_session_id, startedAt: r.started_at };
       });
   }
@@ -766,7 +793,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * record-shaped (a scripted value, a bare string) is left alone rather than wrapped in a shape
    * nothing reads.
    */
-  foldNativeCapture(recordRowId: number, fold: (value: Record<string, JsonValue>) => Record<string, JsonValue>): void {
+  foldNativeCapture(recordRowId: string, fold: (value: Record<string, JsonValue>) => Record<string, JsonValue>): void {
     const row = this.db.prepare(`SELECT result_json FROM operation_records WHERE id = ?`).get(recordRowId) as
       | { result_json: string | null }
       | undefined;
@@ -786,55 +813,56 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   // --- Internals ---------------------------------------------------------------
 
   /**
-   * Stamp the per-attempt row. The request is pinned here — nothing recomputes it (§5.3).
+   * Stamp the row. The request is pinned here — nothing recomputes it (§5.3).
    *
    * The row is BORN holding the message the call was made with, so a record is the delta it will
    * finally be from its first instant and only ever grows: the question, then the turns as they
    * stream, then the provider's authoritative version of both. That is what lets every reader treat
    * a record the same way whatever state it is in — and the alternative was found the hard way, since
    * a process killed between `open` and the first flush leaves a row that no later write ever reaches.
+   *
+   * The id is the hash of the SCOPED request, so an insert that conflicts is not a second call — it
+   * is THIS call being re-dispatched. A row that never honestly settled (open when the process died,
+   * or cut and marked `interrupted`) is REOPENED in place, keeping its streamed partial: the re-run
+   * continues into its own record rather than inserting a second ask the remote would see twice
+   * (Identity and Resume §08). A row that COMPLETED is refused outright — an identity that settled
+   * cannot be asked again, and hitting this is a caller bug, not a race.
+   *
+   * Returns whether the row was reopened, because `append` needs to know: a reopened record already
+   * holds its seat, and re-claiming it would refuse the record its own chair.
    */
-  private insertRecord(stub: RecordStub): { recordId: string; attempt: number; rowid: number | bigint } {
-    const attempt = this.attemptFor(stub.id);
+  private insertRecord(stub: RecordStub): boolean {
     const request = stub.source === undefined ? null : JSON.stringify(stub.source);
     const opening = openingMessage(request, []);
     // Through `withOpening`, so the splice is spelled out in ONE place and a record is born in the
     // same shape it will settle in — one conversation array, whatever writes it next.
     const born = opening.length === 0 ? null : JSON.stringify(withOpening({} as JsonValue, request));
-    const info = this.db
-      .prepare(
-        `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, request_json, result_json, started_at)
-         VALUES (?, ?, ?, ?, 'open', ?, ?, ?)`,
-      )
-      .run(
-        stub.id,
-        this.scope.taskId ?? null,
-        this.scope.runId ?? null,
-        attempt,
-        request,
-        born,
-        stub.startMs ?? Date.now(),
-      );
-    // The KEY, not the rowid. A caller that needs to point at this record — a position claim — must
-    // point at something a replay reproduces, and `lastInsertRowid` is precisely what it does not
-    // (migration 8). The rowid rides along anyway, for the one caller that only needs to re-read
-    // the row it just wrote in THIS connection — which is a different question from identity.
-    return { recordId: stub.id, attempt, rowid: info.lastInsertRowid };
-  }
-
-  /**
-   * Which attempt this record id is up to, within the scope.
-   *
-   * Counted rather than tracked: a retry reuses the id, and the row already on disk is the only
-   * thing that knows how many came before — including ones written by a previous process. It is
-   * also the half of the natural key that makes it a key, since a content id repeats whenever the
-   * same operation is dispatched twice.
-   */
-  private attemptFor(recordId: string): number {
-    const row = this.db
-      .prepare(`SELECT COUNT(*) AS n FROM operation_records WHERE record_id = ? AND task_id IS ? AND run_id IS ?`)
-      .get(recordId, this.scope.taskId ?? null, this.scope.runId ?? null) as { n: number };
-    return row.n + 1;
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO operation_records (id, task_id, run_id, status, request_json, result_json, started_at)
+           VALUES (?, ?, ?, 'open', ?, ?, ?)`,
+        )
+        .run(stub.id, this.scope.taskId ?? null, this.scope.runId ?? null, request, born, stub.startMs ?? Date.now());
+      return false;
+    } catch (e) {
+      if (!String((e as Error).message).includes("UNIQUE")) throw e;
+      const existing = this.db
+        .prepare(`SELECT status FROM operation_records WHERE id = ?`)
+        .get(stub.id) as { status: string } | undefined;
+      if (existing === undefined || existing.status === "completed") {
+        throw new Error(
+          `record '${stub.id}' has already settled — an identical scoped request cannot be dispatched twice`,
+        );
+      }
+      // Reopened, not re-inserted: the partial stays (it may be the only witness to turns already in
+      // the remote stream), the error is cleared, and the original started_at keeps naming when this
+      // ask was first made.
+      this.db
+        .prepare(`UPDATE operation_records SET status = 'open', ended_at = NULL, error_json = NULL WHERE id = ?`)
+        .run(stub.id);
+      return true;
+    }
   }
 
   /** Walk the lineage, taking each ancestor's records below the cursor its child took. */
@@ -954,23 +982,20 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     const derived = `${id}~${word}${++this.minted}`;
     this.branch(derived, { cursor: 0 });
     const recordId = `${derived}:0`;
-    let rowid!: number | bigint;
     this.db
       .transaction(() => {
-        // The attempt is COUNTED here as it is everywhere else. It used to be left to default to 1,
-        // which was invisible until the natural key became a key: `minted` restarts with the store,
-        // so two derivations of one session id inside a run both claimed the first attempt.
-        const attempt = this.attemptFor(recordId);
-        const info = this.db
+        // OR REPLACE, because `minted` restarts with the store: a second process deriving from the
+        // same origin can mint the same name, and the later derivation was always the one the
+        // position pointed at — the replace states that instead of leaving an unreachable twin.
+        this.db
           .prepare(
-            `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, request_json, result_json, started_at, ended_at)
-             VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?)`,
+            `INSERT OR REPLACE INTO operation_records (id, task_id, run_id, status, request_json, result_json, started_at, ended_at)
+             VALUES (?, ?, ?, 'completed', ?, ?, ?, ?)`,
           )
           .run(
             recordId,
             this.scope.taskId ?? null,
             this.scope.runId ?? null,
-            attempt,
             // WHAT PRODUCED THIS SEED. Every other record carries the operation it ran; this was the
             // one row in the store with a null request, so a conversation that opened with a summary
             // or a re-read said nothing about where it came from — and a reader looking at a lineage
@@ -991,15 +1016,14 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
           );
         this.db
           .prepare(
-            `INSERT OR REPLACE INTO session_positions (session_id, seq, task_id, run_id, record_id, attempt)
-             VALUES (?, 0, ?, ?, ?, ?)`,
+            `INSERT OR REPLACE INTO session_positions (session_id, seq, task_id, run_id, record_id)
+             VALUES (?, 0, ?, ?, ?)`,
           )
-          .run(this.k(derived), this.scope.taskId ?? null, this.scope.runId ?? null, recordId, attempt);
-        rowid = info.lastInsertRowid;
+          .run(this.k(derived), this.scope.taskId ?? null, this.scope.runId ?? null, recordId);
       })
       .immediate();
     this.logSession(this.k(derived));
-    this.logRecordRow(rowid);
+    this.logRecordRow(recordId);
     this.logPosition(this.k(derived), 0);
     return join(derived, 1);
   }
@@ -1047,7 +1071,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   private rowsOf(session: string, upTo?: number): Row[] {
     const rows = this.db
       .prepare(
-        `SELECT p.seq AS seq, r.record_id AS record_id, r.status AS status, r.result_json AS result_json,
+        `SELECT p.seq AS seq, r.id AS record_id, r.status AS status, r.result_json AS result_json,
                 r.session_outcome_json AS session_outcome_json, r.provider_session_id AS provider_session_id,
                 r.request_json AS request_json
            FROM session_positions p JOIN operation_records r ON ${ON_RECORD}
@@ -1056,7 +1080,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       .all(...(upTo === undefined ? [this.k(session)] : [this.k(session), upTo])) as Array<{
       seq: number;
       record_id: string;
-      status: "open" | "completed" | "failed";
+      status: "open" | "completed" | "failed" | "interrupted";
       result_json: string | null;
       session_outcome_json: string | null;
       provider_session_id: string | null;

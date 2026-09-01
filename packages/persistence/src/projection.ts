@@ -167,7 +167,12 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
       case "operation.failed": {
         const node = byId.get(event.instanceId);
         if (!node) break;
-        node.operation = { kind: event.op, status: "failed", reason: event.failure.reason };
+        node.operation = {
+          kind: event.op,
+          status: "failed",
+          reason: event.failure.reason,
+          ...(event.failure.classification !== undefined ? { classification: event.failure.classification } : {}),
+        };
         if (node.status === "waiting_for_user") node.status = "running";
         break;
       }

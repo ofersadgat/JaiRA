@@ -56,8 +56,8 @@ function completed(runId: number, instanceId: number, stateId: string, operation
 function record(runId: number, operationId: string, value?: unknown): void {
   project.db
     .prepare(
-      `INSERT INTO operation_records (record_id, task_id, run_id, attempt, status, result_json, started_at, ended_at)
-       VALUES (?, 't', ?, 1, 'completed', ?, 1000, 1000)`,
+      `INSERT INTO operation_records (id, task_id, run_id, status, result_json, started_at, ended_at)
+       VALUES (?, 't', ?, 'completed', ?, 1000, 1000)`,
     )
     .run(operationId, runId, value === undefined ? null : JSON.stringify({ value }));
 }

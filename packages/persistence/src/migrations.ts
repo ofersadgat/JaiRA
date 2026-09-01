@@ -348,6 +348,22 @@ export const MIGRATIONS: Migration[] = [
     // indexes, orders by, or compares either in SQL, so affinity is enough and the read path coerces.
     run: retypeInstanceIds,
   },
+  {
+    version: 13,
+    note: "a record's id became the hash of the scoped request, so the attempt column has nothing left to disambiguate",
+    // Identity-and-Resume step 2: every dispatch carries a scope `(instance_id, sequence)` — the
+    // site the request is written at — and the record id is the hash of the scoped request. The
+    // scope never repeats (a loop's next iteration is a new instance; a guard's third round is the
+    // same site and MEANS the same record), so the id is a primary key on its own and the four-column
+    // natural key `(task_id, run_id, record_id, attempt)` retires. `interrupted` joins the status
+    // vocabulary in the same step: the recovery sweep stops writing `failed` over a call that was
+    // never answered, and a cut call settles under the word for what happened to it.
+    //
+    // Legacy rows whose content-hash ids collided keep their history: attempt 1 keeps the bare id,
+    // and later attempts move to `<id>~~<attempt>` — `~~` because a single `~` legitimately appears
+    // inside derived session ids (`planning~compact1:0`) and this suffix must be unmistakable.
+    run: keyRecordsByScopedId,
+  },
 ];
 
 /**
@@ -459,6 +475,82 @@ function retypeInstanceIds(db: JairaDb): void {
     CREATE INDEX IF NOT EXISTS state_machine_events_run ON state_machine_events(run_id, seq);
     CREATE INDEX IF NOT EXISTS state_machine_events_session ON state_machine_events(session_ref);
     CREATE INDEX IF NOT EXISTS state_machine_events_operation ON state_machine_events(operation_id);
+  `);
+}
+
+/**
+ * Migration 13's rebuild — see the note there.
+ *
+ * Guarded by the table's own shape (does `operation_records` still have an `attempt` column?)
+ * rather than the version marker, for the reason `keyPositionsByRecord` gives: the session-store
+ * tests rewind `user_version` to stand in for an older database, and the table is the only honest
+ * witness of which shape it is in.
+ */
+function keyRecordsByScopedId(db: JairaDb): void {
+  const columns = db.prepare(`SELECT name FROM pragma_table_info('operation_records')`).all() as Array<{ name: string }>;
+  if (!columns.some((c) => c.name === "attempt")) return; // already this shape
+
+  db.exec(`
+    ALTER TABLE operation_records RENAME TO operation_records_by_attempt;
+    DROP INDEX IF EXISTS operation_records_natural;
+    DROP INDEX IF EXISTS operation_records_scope;
+    DROP INDEX IF EXISTS operation_records_run;
+
+    CREATE TABLE operation_records (
+      id                   TEXT PRIMARY KEY,              -- hash of the SCOPED request
+      task_id              TEXT,
+      run_id               INTEGER,
+      status               TEXT NOT NULL DEFAULT 'open',  -- open | completed | failed | interrupted
+      request_json         TEXT,
+      result_json          TEXT,
+      error_json           TEXT,
+      metrics_json         TEXT,
+      session_outcome_json TEXT,
+      provider_session_id  TEXT,
+      started_at           INTEGER NOT NULL,
+      ended_at             INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS operation_records_scope ON operation_records(task_id, run_id, id);
+    CREATE INDEX IF NOT EXISTS operation_records_run ON operation_records(run_id, started_at);
+
+    -- A legacy content-hash id repeats WITHIN a run (attempts) and ACROSS runs (each run's attempt
+    -- 1), and the new primary key is global — so per content id, exactly one row keeps the bare id:
+    -- the globally newest (max old rowid), which is what the old ORDER BY attempt DESC reads called
+    -- "what happened". Every other row moves to '<id>~~<old rowid>' — unique by construction, and
+    -- readable back to dispatch order, which is what a legacy journal pairing walks.
+    INSERT INTO operation_records
+      (id, task_id, run_id, status, request_json, result_json, error_json, metrics_json,
+       session_outcome_json, provider_session_id, started_at, ended_at)
+      SELECT CASE WHEN o.id = (SELECT MAX(m.id) FROM operation_records_by_attempt m WHERE m.record_id = o.record_id)
+                  THEN o.record_id ELSE o.record_id || '~~' || o.id END,
+             o.task_id, o.run_id, o.status, o.request_json, o.result_json, o.error_json, o.metrics_json,
+             o.session_outcome_json, o.provider_session_id, o.started_at, o.ended_at
+        FROM operation_records_by_attempt o ORDER BY o.id;
+
+    ALTER TABLE session_positions RENAME TO session_positions_by_attempt;
+    DROP INDEX IF EXISTS session_positions_record;
+
+    CREATE TABLE session_positions (
+      session_id  TEXT NOT NULL,
+      seq         INTEGER NOT NULL,
+      task_id     TEXT,
+      run_id      INTEGER,
+      record_id   TEXT NOT NULL,
+      PRIMARY KEY (session_id, seq)
+    );
+    CREATE INDEX IF NOT EXISTS session_positions_record ON session_positions(task_id, run_id, record_id);
+
+    -- An INNER join, the same choice migration 8 made: a position whose record is gone is dropped
+    -- rather than carried forward naming nothing.
+    INSERT INTO session_positions (session_id, seq, task_id, run_id, record_id)
+      SELECT p.session_id, p.seq, p.task_id, p.run_id,
+             CASE WHEN r.id = (SELECT MAX(m.id) FROM operation_records_by_attempt m WHERE m.record_id = r.record_id)
+                  THEN r.record_id ELSE r.record_id || '~~' || r.id END
+        FROM session_positions_by_attempt p
+        JOIN operation_records_by_attempt r
+          ON r.record_id = p.record_id AND r.attempt = p.attempt AND r.task_id IS p.task_id AND r.run_id IS p.run_id;
+    DROP TABLE session_positions_by_attempt;
+    DROP TABLE operation_records_by_attempt;
   `);
 }
 
