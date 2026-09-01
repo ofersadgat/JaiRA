@@ -29,8 +29,9 @@ import {
   InMemoryPersistence,
   loadBundle,
   moduleHash as moduleHashOf,
+  type CallResult,
+  type LoadedInstance,
   type LoadedState,
-  type ReplaySource,
   type WorkflowBundle,
 } from "@declarative-ai/hw";
 import type { ExecServices, MemoCache, RecordRef } from "@declarative-ai/exec";
@@ -41,8 +42,9 @@ import {
   baseSource,
   baseStateView,
   beginTaskRun,
-  buildTaskReplay,
-  replaySourceOf,
+  buildTaskLoad,
+  releaseUnconsumedFailures,
+  loadSnapshot,
   userModules,
   canonicalModulePath,
   prepareUserModules,
@@ -2499,14 +2501,16 @@ export class AppService {
       interactions?: StartRunRequest["interactions"];
       fake?: JsonValue | FakeRule[];
       /**
-       * What this task's earlier runs already answered — supplied ⇒ this run is a RESUME.
+       * The stopped machine's description — supplied ⇒ this run is a RESUME, and the engine LOADS
+       * the machine instead of walking a fresh one (Identity and Resume §04).
        *
-       * It changes nothing else about starting: the same snapshot is loaded, the same worktree is
-       * ensured, a new run row is opened. What differs is that the engine takes recorded answers
-       * instead of dispatching, so it walks back to where the task stopped without paying for or
-       * re-doing anything it already did.
+       * It changes nothing else about starting: the same snapshot is pinned, the same worktree is
+       * ensured, a new run row is opened. What differs is that nothing already answered runs again —
+       * history becomes the records its parents read, and only the active leaves dispatch.
        */
-      replay?: ReplaySource;
+      loaded?: LoadedInstance;
+      /** Recorded call answers by scoped id — the durable store behind hw's `answers` seam. */
+      answers?: (scopedId: string) => CallResult | undefined;
       /** Where this run's own work begins, recorded on its row — see `RunRow.forkedAt`. */
       forkedAt?: InstanceAddress;
     },
@@ -2864,7 +2868,8 @@ export class AppService {
           inputs: started.meta.inputs ?? {},
           registry,
           prompt: streaming,
-          ...(opts.replay !== undefined ? { replay: opts.replay } : {}),
+          ...(opts.loaded !== undefined ? { loaded: opts.loaded } : {}),
+          ...(opts.answers !== undefined ? { answers: opts.answers } : {}),
           // Tee the journal: persist, then push the same event to the renderer so
           // the detail view streams live without polling the database.
           persistence: {
@@ -3996,24 +4001,24 @@ export class AppService {
   /**
    * Pick a stopped task up where it left off, rather than starting it over ("task:resume").
    *
-   * The difference from {@link rerunTask} is what the run does on the way back, not where it begins:
-   * both start at the root of the same pinned snapshot, but this one carries the task's replay index,
-   * so every operation an earlier run already completed is TAKEN rather than dispatched. The engine
-   * walks to where the task stopped without spending anything and without re-doing a single thing
-   * with side effects, and the first real call is at the frontier.
+   * The machine is LOADED, not re-walked (Identity and Resume §04): the journal joined to the
+   * record store describes the stopped run — the tree, the inputs, everything each operation
+   * returned — and the engine constructs its instances from that description, keeping every
+   * recorded id. Nothing already answered runs again or is journaled again; only the active leaves
+   * dispatch, and a cut call's re-dispatch computes the same scoped record id and REOPENS its own
+   * record rather than asking twice.
    *
    * Two shapes reach this, and the strip names them differently because what they mean differs:
    *
-   *  - `interrupted` — the process died with instances still live. There is a frontier, and resuming
-   *    re-enters it. The calls that were in flight are re-made; nothing behind them is.
-   *  - `failed` — a state failed and the run ended, so nothing is live and the frontier is EMPTY.
-   *    The re-walk still replays everything that completed and then re-runs the state that failed,
-   *    which is a retry of that state with all its history intact. Its conversation position was
-   *    claimed by the failed attempt, so the re-entry forks automatically (SESSIONS.md §4).
+   *  - `interrupted` — the process died, or a stop unwound the tree, with work still to do. The
+   *    frontier's calls are re-made into their own records; nothing behind them is.
+   *  - `failed` — a state failed and nothing handled it. The fold presents that state live again,
+   *    which is a retry of it with all its history intact — and per §05 the failed call's record,
+   *    having consumed nothing remotely, was deleted so the identity and the seat are simply free.
    *
-   * Refused when the index could not be read in full: an operation missing an answer is one the
-   * engine would DISPATCH, and for a state that already wrote a file that is a double-apply nobody
-   * asked for. Better to say so and let the caller start over deliberately.
+   * Refused when the description could not be read in full: an operation missing its answer is one
+   * the engine would DISPATCH, and for a state that already wrote a file that is a double-apply
+   * nobody asked for. Better to say so and let the caller start over deliberately.
    */
   async resumeTask(request: StartRunRequest): Promise<{ taskId: string; runId: number }> {
     const open = this.session(request.project);
@@ -4025,18 +4030,30 @@ export class AppService {
     if (!isStartableStatus(row.status)) {
       throw this.refusal("run", `task '${taskId}' is ${row.status} and cannot be resumed — run it again instead`, at);
     }
-    const replay = buildTaskReplay(open.project, taskId);
-    if (replay.unreadable.length > 0) {
-      const first = replay.unreadable[0]!;
+    if (row.snapshotHash === undefined) {
+      throw this.refusal("run", `task '${taskId}' has no pinned snapshot to resume against — run it instead`, at);
+    }
+    // §05, before the fold reads the store: a failed call that consumed no provider sequence never
+    // happened remotely, so its record is deleted and the identity and seat are free again. A cut
+    // call's record is deliberately NOT touched — it may be the only witness to turns already in
+    // the remote stream, and the re-dispatch continues into it.
+    releaseUnconsumedFailures(open.project, taskId);
+    const bundle = loadSnapshot(open.project.paths.snapshotsDir, row.snapshotHash);
+    const load = buildTaskLoad(open.project, taskId, bundle.states);
+    if (load.blocked !== undefined || load.loaded === undefined) {
+      throw this.refusal("run", `task '${taskId}' cannot be resumed: ${load.blocked ?? "nothing was recorded"}`, at);
+    }
+    if (load.unreadable.length > 0) {
+      const first = load.unreadable[0]!;
       throw this.refusal(
         "run",
-        `task '${taskId}' cannot be resumed: ${replay.unreadable.length} operation(s) have no readable record ` +
+        `task '${taskId}' cannot be resumed: ${load.unreadable.length} operation(s) have no readable record ` +
           `(first: ${first.stateId} — ${first.reason}). Running it again would repeat them.`,
         {
           ...at,
           // The whole list, because one example names the symptom and the set is what someone would
           // need to work out whether the history is holed in one place or everywhere.
-          detail: replay.unreadable.map((entry) => ({ stateId: entry.stateId, reason: entry.reason })),
+          detail: load.unreadable.map((entry) => ({ stateId: entry.stateId, reason: entry.reason })),
         },
       );
     }
@@ -4044,12 +4061,12 @@ export class AppService {
     // record and where the spending starts again. Without this a resumed run is indistinguishable in
     // the log from an ordinary one, and the interesting number — what it did NOT re-run — is the one
     // nothing else reports.
-    const frontier = replay.frontier.map((entry) => entry.stateId);
+    const frontier = load.frontier.map((entry) => entry.stateId);
     this.log({
       level: "info",
       source: "run",
-      message: `resuming ${taskId}: ${replay.answers.size} operation(s) replayed, ${
-        frontier.length > 0 ? `re-entering ${frontier.join(", ")}` : "re-running the state that failed"
+      message: `resuming ${taskId}: ${load.loadedOps} operation(s) loaded, ${
+        frontier.length > 0 ? `re-entering ${frontier.join(", ")}` : "nothing left in flight"
       }`,
       project: open.key,
       taskId,
@@ -4057,12 +4074,12 @@ export class AppService {
     return this.startRun(open, taskId, {
       config: open.project.config,
       secrets: this.secretResolver(open),
-      replay: replaySourceOf(replay),
-      // Where this run's own work begins, written on its row before it starts. Known now and not
-      // afterwards: a replayed operation leaves no record, and the one trace it does leave — a
-      // completion carrying no session ref — is indistinguishable from a function op, which runs no
-      // model call either. See `forkPointOf`.
-      ...(replay.forkPoint !== undefined ? { forkedAt: replay.forkPoint } : {}),
+      loaded: load.loaded,
+      answers: load.answers,
+      // Where this run's own work begins, written on its row before it starts: the first live leaf.
+      // Known now and not afterwards — a loaded operation leaves no new record or event to infer it
+      // from later.
+      ...(load.forkedAt !== undefined ? { forkedAt: load.forkedAt } : {}),
       ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
       ...(request.fake !== undefined ? { fake: request.fake } : {}),
     });
@@ -4081,18 +4098,22 @@ export class AppService {
     if (row === undefined || !isStartableStatus(row.status) || row.snapshotHash === undefined) {
       return { taskId, kind: "none", replayed: 0, frontier: [] };
     }
-    const replay = buildTaskReplay(open.project, taskId);
-    if (replay.unreadable.length > 0) {
-      return { taskId, kind: "none", replayed: 0, frontier: [], blocked: replay.unreadable[0]!.reason };
+    const bundle = loadSnapshot(open.project.paths.snapshotsDir, row.snapshotHash);
+    const load = buildTaskLoad(open.project, taskId, bundle.states);
+    if (load.blocked !== undefined || load.loaded === undefined) {
+      return { taskId, kind: "none", replayed: 0, frontier: [], ...(load.blocked !== undefined ? { blocked: load.blocked } : {}) };
+    }
+    if (load.unreadable.length > 0) {
+      return { taskId, kind: "none", replayed: 0, frontier: [], blocked: load.unreadable[0]!.reason };
     }
     return {
       taskId,
-      // A frontier is somewhere the run was IN — an instance a crash left live, or one a stop caught
-      // mid-operation (`stoppedInside`). None of either means the run ran out on its own terms, and
-      // what is left to do is the state that ended it.
-      kind: replay.frontier.length > 0 ? "continue" : "retry",
-      replayed: replay.answers.size,
-      frontier: replay.frontier.map((entry) => ({ stateId: entry.stateId, stopped: entry.stopped })),
+      // The fold says WHY each leaf is still to do: an `interrupted` one — a crash or a stop caught
+      // it — is somewhere to CONTINUE, and a task whose every live leaf is a revived failure has
+      // nothing in flight at all; what is left is the state that ended it, which is a retry.
+      kind: load.frontier.some((entry) => entry.cause === "interrupted") ? "continue" : "retry",
+      replayed: load.loadedOps,
+      frontier: load.frontier.map((entry) => ({ stateId: entry.stateId, stopped: entry.stopped })),
     };
   }
 

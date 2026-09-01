@@ -316,7 +316,7 @@ export interface ResumePlan {
   kind: "continue" | "retry" | "none";
   /** How many operations would be taken from the record rather than run again. */
   replayed: number;
-  /** Where it would pick up. Empty for `retry`, and for `none`. */
+  /** Where it would pick up — for `retry`, the state that gets another go. Empty for `none`. */
   frontier: Array<{ stateId: string; stopped: "mid-operation" | "between-children" }>;
   /**
    * Why resuming is refused, when it is.

@@ -206,8 +206,10 @@ describe("resuming an interrupted task", () => {
 
 describe("what the strip is told", () => {
   it("calls a failed task a RETRY — nothing is live to continue", async () => {
-    // The failure terminates every instance on the way out, so a failed run has no frontier at all.
-    // That is the fact behind the second verb: there is nowhere to pick up, only a state to re-run.
+    // The failure terminated the chain that failed, and nothing handled it — so the load fold
+    // presents the failed state live again, and every frontier entry it reports is a revived
+    // FAILURE rather than something a crash or a stop cut. That is the fact behind the second
+    // verb: nothing was in flight; there is only a state to re-run.
     const bad = files();
     (bad[`${ROOT}/b`] as Record<string, JsonValue>)["outputs"] = {
       confirmed: { schema: { type: "boolean" } },
@@ -224,7 +226,9 @@ describe("what the strip is told", () => {
 
     const plan = service.resumable(taskId);
     expect(plan.kind).toBe("retry");
-    expect(plan.frontier).toEqual([]);
+    // The plan names the state that gets another go — the retry hint does not read it, but the
+    // description knows it, and hiding it would make the plan say less than the fold does.
+    expect(plan.frontier).toEqual([{ stateId: `${ROOT}/b`, stopped: "between-children" }]);
     // `a` completed and is kept; `b`'s record settled failed, so it is not an answer and will run.
     expect(plan.replayed).toBe(1);
   }, 30000);
@@ -279,7 +283,7 @@ describe("what the strip is told", () => {
     // rather than run again. Without it a resumed run reads in the log exactly like an ordinary one.
     const line = service.listLogs({ source: "run" }).find((e) => e.taskId === taskId && e.message.startsWith("resuming"));
     expect(line).toMatchObject({ level: "info", source: "run" });
-    expect(line?.message).toContain("1 operation(s) replayed");
+    expect(line?.message).toContain("1 operation(s) loaded");
     expect(line?.message).toContain(`re-entering ${ROOT}/b`);
   }, 30000);
 });

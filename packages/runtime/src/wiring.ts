@@ -28,10 +28,10 @@ import {
 } from "@declarative-ai/exec";
 import {
   createWorkflowExecutor,
+  type CallResult,
   type EngineEvent,
+  type LoadedInstance,
   type Persistence,
-  type ReplaySource,
-  type CallCache,
   type WorkflowBundle,
   type WorkflowMetrics,
 } from "@declarative-ai/hw";
@@ -247,24 +247,28 @@ export interface WorkflowRunConfig {
   prompt: Executor<ExecServices, WorkflowMetrics>;
   persistence?: Persistence;
   /**
-   * Where the results of CALLS made from expressions are remembered (EXPRESSIONS.md §3).
+   * Recorded CALL answers by scoped operation id — hw's `EngineConfig.answers` (Identity and
+   * Resume §04, "a repeat is answered by identity").
    *
-   * The question a memo answers is "would someone else making the identical call reuse this answer?"
-   * — so the key is content-addressed and the STORE decides how far the answer travels. Absent ⇒ hw's
-   * in-run default, which answers it only within one run: the same call in a later run pays again.
+   * A guard's site keeps its identity across the loop's rounds, so one execution answers however
+   * many evaluations — and a LOADED run's instances keep their recorded ids and sites, so the same
+   * scoped id recomputes there and this seam serves what the stopped run already paid for. A fresh
+   * run mints fresh ids and can never hit history, which is deliberate.
    */
-  callCache?: CallCache;
+  answers?: (scopedId: string) => CallResult | undefined;
   /** Mints instance ids — hw's `EngineConfig.newInstanceId`. UUIDv7 by default; a test that asserts
    *  on ids or on the `#i<id>` fresh-session keys they produce injects a counter here. */
   newInstanceId?: () => string;
   /**
-   * What a stopped run already answered — supplying it makes this run a RESUME (hw's `ReplaySource`).
+   * A stopped run's description — supplying it makes this run a LOAD, not a start (Identity and
+   * Resume §04).
    *
-   * The run still starts at the root: every operation this source can answer is taken instead of
-   * dispatched, so the engine walks back to where the run stopped without re-executing anything it
-   * already did, and the frontier is simply where the answers run out.
+   * The machine is CONSTRUCTED from it rather than re-walked into: every instance keeps its
+   * recorded id, terminated history becomes the child records its parents read, and only the
+   * active leaves dispatch again — into their own reopened records, where a cut call left one.
+   * `inputs` is ignored on a load; the description carries what every instance was called with.
    */
-  replay?: ReplaySource;
+  loaded?: LoadedInstance;
   abortSignal?: AbortSignal;
   /**
    * The filesystem the run acts within — a task's git worktree, or the project
@@ -394,9 +398,8 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     // it used to be published on every child's services and looked up by a layer below. Nothing below
     // needs the store: what reaches an executor is the position it resolved to.
     ...(cfg.session !== undefined ? { sessions: cfg.session.sessions } : {}),
-    ...(cfg.callCache !== undefined ? { callCache: cfg.callCache } : {}),
+    ...(cfg.answers !== undefined ? { answers: cfg.answers } : {}),
     ...(cfg.newInstanceId !== undefined ? { newInstanceId: cfg.newInstanceId } : {}),
-    ...(cfg.replay !== undefined ? { replay: cfg.replay } : {}),
     ...(cfg.persistence !== undefined ? { persistence: cfg.persistence } : {}),
   });
   const ctx: ExecServices = {
@@ -407,7 +410,10 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     ...(cfg.approve !== undefined ? { approve: cfg.approve } : {}),
     ...(cfg.askUser !== undefined ? { askUser: cfg.askUser } : {}),
   };
-  return executor.start(workflowStartOp(cfg.inputs), ctx).result;
+  // A LOAD constructs the machine from the description; a START walks in from the op. Same handle,
+  // same result contract — the difference is whether history is re-entered or minted.
+  return (cfg.loaded !== undefined ? executor.load(cfg.loaded, ctx) : executor.start(workflowStartOp(cfg.inputs), ctx))
+    .result;
 }
 
 /**
