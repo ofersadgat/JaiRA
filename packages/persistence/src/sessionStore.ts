@@ -75,16 +75,27 @@ import type { ConversationLog, PositionRow, RecordRow, SessionRow } from "./conv
 const join = (id: string, seq: number): string => `${id}@${seq}`;
 
 /**
- * How a position finds its record: the record's OWN key, never the rowid the database assigned.
+ * A record's EFFECTIVE position — landed when present, asked otherwise (Identity and Resume §03).
  *
- * The id alone is the join now — it is the hash of the SCOPED request (migration 13), unique by
- * construction, so the `attempt` half this used to need has nothing left to disambiguate. `IS`
- * rather than `=` on the two scope columns, because both are nullable — an unscoped store keys by
- * the bare id — and `= NULL` is never true. Written once because it appears in every read that
- * crosses the two tables.
+ * The one rule every reader of a conversation applies: the ask is immutable in `request_json`, and
+ * the landed columns carry the single thing the outcome can change — where the call demonstrably
+ * ran. Written once because it appears in every session read, and two spellings of a COALESCE pair
+ * is how a branch's transcript and its trunk's come to disagree about the same row.
  */
-export const ON_RECORD = `r.id = p.record_id
-                   AND r.task_id IS p.task_id AND r.run_id IS p.run_id`;
+export const EFFECTIVE_SESSION = `COALESCE(landed_session_id, session_id)`;
+export const EFFECTIVE_SEQ = `COALESCE(landed_seq, session_seq)`;
+
+/**
+ * Whether a thrown UNIQUE violation is the `op_position` claim index refusing a seat.
+ *
+ * SQLite names the COLUMNS in the message, not the index, so this is the spelling the claim
+ * actually produces — distinct from the primary key's `operation_records.id`, which is the
+ * same-identity re-dispatch `insertRecord` answers by reopening.
+ */
+function isSeatConflict(e: unknown): boolean {
+  const message = String((e as Error).message);
+  return message.includes("UNIQUE") && message.includes("operation_records.session_id");
+}
 
 /**
  * A migration-13 legacy id's CONTENT half — `<hash>~~<n>` names a superseded attempt of `<hash>`.
@@ -266,26 +277,18 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     const row = this.db
       .prepare(
         `SELECT id AS record_id, task_id, run_id, status, request_json, result_json, error_json,
-                metrics_json, session_outcome_json, provider_session_id, started_at, ended_at
+                metrics_json, provider_session_id, landed_session_id, landed_seq, started_at, ended_at
            FROM operation_records WHERE id = ?`,
       )
       .get(recordId) as RecordRow | undefined;
     if (row !== undefined) this.log.append({ kind: "record", row });
   }
 
-  private logPosition(sessionKey: string, seq: number): void {
-    if (this.log === undefined) return;
-    const row = this.db
-      .prepare(`SELECT session_id, seq, task_id, run_id, record_id FROM session_positions WHERE session_id = ? AND seq = ?`)
-      .get(sessionKey, seq) as PositionRow | undefined;
-    if (row !== undefined) this.log.append({ kind: "position", row });
-  }
-
   private logSession(sessionKey: string): void {
     if (this.log === undefined) return;
-    const row = this.db.prepare(`SELECT id, parent, cursor, created_at FROM sessions WHERE id = ?`).get(sessionKey) as
-      | SessionRow
-      | undefined;
+    const row = this.db
+      .prepare(`SELECT id, parent, cursor, provider, provider_session_id, created_at FROM sessions WHERE id = ?`)
+      .get(sessionKey) as SessionRow | undefined;
     if (row !== undefined) this.log.append({ kind: "session", row });
   }
 
@@ -309,7 +312,11 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // remote's tip — a turn this caller never saw, in front of its prompt. A fork inherits none for
     // the same reason from the other side: two branches sharing one remote session would be two
     // conversations writing into the same place.
-    const handle = mode === "append" && seq === this.head(id) ? this.handleAt(id, seq) : undefined;
+    //
+    // The SESSION'S OWN column first (Identity and Resume §03: the handle lives on the session,
+    // because it is only ever used at the head); the per-record walk stays as the answer for
+    // conversations recorded before the column existed.
+    const handle = mode === "append" && seq === this.head(id) ? (this.sessionHandle(id) ?? this.handleAt(id, seq)) : undefined;
     // Nothing of our own to resume, but an ancestor has a remote: that is a branch POINT, not an
     // append target. Offered as `forkFrom` so only an adapter that can copy a session server-side
     // acts on it — see `ResolvedSession.forkFrom`.
@@ -344,7 +351,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
 
   messages(ref: string): JsonValue[] {
     const [id, seq] = split(ref);
-    return this.materialize(id, seq ?? this.head(id));
+    return this.materialize(id, seq ?? this.readHead(id));
   }
 
   compact(ref: string, messages: readonly JsonValue[]): string {
@@ -358,50 +365,24 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   // --- RecordStore -------------------------------------------------------------
 
   append(stub: RecordStub): RecordRef {
-    // EVERY record lands in operation_records — placed or not (CHANGESETS.md §5.2). The store that
-    // holds transcripts is session_positions, and an unplaced call never touches it.
+    // EVERY record lands in operation_records — placed or not (CHANGESETS.md §5.2). A position is an
+    // INPUT now: "append at seq N of conversation X" sits in `request_json.session` beside the rest
+    // of the ask, and the claim is the `op_position` partial unique index over the generated columns
+    // — one insert, one refusal, no second table.
     const at = stub.session;
-    if (at === undefined) {
-      this.insertRecord(stub);
-      this.logRecordRow(stub.id);
-      return { id: stub.id };
-    }
-    this.branch(at.id, { cursor: this.cursorOf(at.id) });
+    if (at !== undefined) this.branch(at.id, { cursor: this.cursorOf(at.id) });
     try {
-      // One transaction: the record and its position claim land together, so a lost race leaves no
-      // orphaned record behind the PositionTaken it reports.
-      this.db
-        .transaction(() => {
-          const reopened = this.insertRecord(stub);
-          // A REOPENED record already holds its seat — the re-dispatch continues into its own row
-          // (the interrupted-retry case), and re-inserting the claim would refuse it its own chair.
-          const holder = this.db
-            .prepare(`SELECT record_id FROM session_positions WHERE session_id = ? AND seq = ?`)
-            .get(this.k(at.id), at.seq) as { record_id: string } | undefined;
-          if (holder?.record_id === stub.id) return;
-          if (holder !== undefined && !reopened) throw new PositionTaken(at.id, at.seq);
-          this.db
-            .prepare(
-              `INSERT INTO session_positions (session_id, seq, task_id, run_id, record_id)
-               VALUES (?, ?, ?, ?, ?)`,
-            )
-            .run(this.k(at.id), at.seq, this.scope.taskId ?? null, this.scope.runId ?? null, stub.id);
-        })
-        .immediate();
-      // AFTER the transaction, and only once it committed: the claim is what decides whether this
-      // call owns the position at all, so appending before it would put a turn in the file for a
-      // call that went on to fork instead.
-      this.logSession(this.k(at.id));
-      this.logRecordRow(stub.id);
-      this.logPosition(this.k(at.id), at.seq);
-      return { id: stub.id };
+      this.insertRecord(stub);
     } catch (e) {
-      if (e instanceof PositionTaken) throw e;
-      // The primary key IS the claim, so a duplicate is the position being held rather than a fault.
-      // Reported as the class the session layer forks on, never as a database error.
-      if (String((e as Error).message).includes("UNIQUE")) throw new PositionTaken(at.id, at.seq);
+      // The claim index refusing is the FORK SIGNAL: a seat is held only by a record that is alive
+      // and still there, so a conflict always means a genuinely live competing claim. The store's
+      // own reopen path throws this too, when a re-dispatch finds its seat taken while it was dead.
+      if (at !== undefined && isSeatConflict(e)) throw new PositionTaken(at.id, at.seq);
       throw e;
     }
+    if (at !== undefined) this.logSession(this.k(at.id));
+    this.logRecordRow(stub.id);
+    return { id: stub.id };
   }
 
   finish(ref: RecordRef, settled: Pick<StoredRecord, "result" | "metrics" | "sessionOutcome">): void {
@@ -439,14 +420,25 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // times exist exactly once, in the stream that measured them, and dropping them at the settle is
     // why a finished run's thinking rows had no "thought for 12 s" while a live one did. Times only:
     // the messages themselves still come from the authoritative result.
-    const result =
+    const folded =
       error !== undefined
         ? preservePartial(settled.result as JsonValue, settled.sessionOutcome, row.result_json, row.request_json)
         : carryTurnTiming(settled.result as JsonValue, row.result_json);
+    // The outcome's one earned case — a payload that is NOT a conversation — normalises into the
+    // result at the WRITE now (Identity and Resume §03 deleted `session_outcome_json`): the turns
+    // land as a SIBLING of the value (`$.messages`), never over it, because `$.value` is the op's
+    // output — what a replay answers with — and the conversation is a second fact about the same
+    // call. `projectValue` turns the sibling into entries at read, exactly as it did the old column.
+    const reported = (settled.sessionOutcome as { messages?: unknown } | undefined)?.messages;
+    const carriesConversation = (folded as { value?: { entries?: unknown } } | undefined)?.value?.entries !== undefined;
+    const result =
+      reported !== undefined && !carriesConversation
+        ? ({ ...((folded ?? {}) as object), messages: reported } as JsonValue)
+        : folded;
     this.db
       .prepare(
         `UPDATE operation_records
-            SET result_json = ?, error_json = ?, metrics_json = ?, session_outcome_json = ?,
+            SET result_json = ?, error_json = ?, metrics_json = ?,
                 provider_session_id = COALESCE(?, provider_session_id),
                 status = ?, ended_at = ?
           WHERE id = ?`,
@@ -455,7 +447,6 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
         result === undefined ? null : JSON.stringify(dehydrate(this.db, result)),
         error === undefined ? null : JSON.stringify(error),
         settled.metrics === undefined ? null : JSON.stringify(settled.metrics),
-        settled.sessionOutcome === undefined ? null : JSON.stringify(withoutDuplicateTurns(settled.sessionOutcome, result)),
         settled.sessionOutcome?.providerSessionId ?? null,
         // `interrupted` is its own word (Identity and Resume §03): the call was cut — by a stop, or
         // by the process dying under it — and its partial may already exist in the remote stream,
@@ -464,9 +455,35 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
         Date.now(),
         row.id,
       );
+    // The conversation's remote identity, kept on the SESSION — the handle is only ever passed when
+    // appending at the head, so the newest reported pair is the right value everywhere a handle is
+    // used. With its provider, because a bare handle is meaningless.
+    this.stampSessionHandle(ref, settled.sessionOutcome?.providerSessionId, settled.sessionOutcome?.provider);
     // The settled state, appended whole. Last line wins on replay, so the `open` line this
     // supersedes needs no rewriting — which is the property that lets the format stay append-only.
     this.logRecordRow(row.id);
+  }
+
+  /**
+   * Write the handle a call reported onto the conversation it actually ran in — at the head only.
+   *
+   * A handle names a conversation at the point it has reached, so a record that is not the newest
+   * thing in its session must not move the session's handle: the value there already describes a
+   * later turn. A fork starts with NULL and earns its own (`branchFrom` writes no handle), which is
+   * the invariant that keeps two branches out of one remote stream.
+   */
+  private stampSessionHandle(ref: RecordRef, handle: string | undefined, provider: string | undefined): void {
+    if (handle === undefined) return;
+    const pos = this.positionOf(ref);
+    if (pos === undefined) return;
+    // "Nothing LIVE beyond it" rather than "exactly the head": an interrupted settle releases its
+    // own seat, and its handle is still the conversation's newest remote fact — the very thing a
+    // resume continues from.
+    if (pos.seq + 1 < this.head(pos.id)) return;
+    this.db
+      .prepare(`UPDATE sessions SET provider_session_id = ?, provider = COALESCE(?, provider) WHERE id = ?`)
+      .run(handle, provider ?? null, this.k(pos.id));
+    this.logSession(this.k(pos.id));
   }
 
   /**
@@ -491,12 +508,19 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * downstream continues from.
    */
   positionOf(ref: RecordRef): { id: string; seq: number } | undefined {
+    // LANDED when present, ASKED otherwise — the reader's rule everywhere now. The ask is immutable
+    // (it sits in the request); the landed columns carry the one thing the outcome can change.
     const row = this.db
-      .prepare(`SELECT session_id, seq FROM session_positions WHERE record_id = ? AND task_id IS ? AND run_id IS ?`)
+      .prepare(
+        `SELECT COALESCE(landed_session_id, session_id) AS session_id,
+                COALESCE(landed_seq, session_seq) AS seq
+           FROM operation_records WHERE id = ? AND task_id IS ? AND run_id IS ?`,
+      )
       .get(ref.id, this.scope.taskId ?? null, this.scope.runId ?? null) as
-      | { session_id: string; seq: number }
+      | { session_id: string | null; seq: number | null }
       | undefined;
-    return row === undefined ? undefined : { id: bareSessionId(this.scope, row.session_id), seq: row.seq };
+    if (row === undefined || row.session_id === null || row.seq === null) return undefined;
+    return { id: bareSessionId(this.scope, row.session_id), seq: row.seq };
   }
 
   /**
@@ -520,29 +544,37 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   private correctLineage(ref: RecordRef, reported: string | undefined): void {
     if (reported === undefined) return; // nothing said; nothing to check against
     const pos = this.db
-      .prepare(`SELECT session_id, seq FROM session_positions WHERE record_id = ? AND task_id IS ? AND run_id IS ?`)
+      .prepare(
+        `SELECT COALESCE(landed_session_id, session_id) AS session_id, COALESCE(landed_seq, session_seq) AS seq
+           FROM operation_records WHERE id = ? AND task_id IS ? AND run_id IS ?`,
+      )
       .get(ref.id, this.scope.taskId ?? null, this.scope.runId ?? null) as
-      | { session_id: string; seq: number }
+      | { session_id: string | null; seq: number | null }
       | undefined;
-    if (pos === undefined) return; // unplaced: no lineage to be wrong about
+    if (pos === undefined || pos.session_id === null || pos.seq === null) return; // unplaced: no lineage to be wrong about
     const trunk = bareSessionId(this.scope, pos.session_id);
     const expected = this.handleAt(trunk, pos.seq);
     if (expected === undefined || expected === reported) return;
 
-    // SAID, as well as done. The branch and its position land in the journal below, which is the
-    // durable account — but a provider that quietly moves a conversation out from under a run reads
-    // as ordinary operation unless something says otherwise, and by the time anyone looks at the
-    // lineage they are already debugging.
+    // SAID, as well as done. The landed columns and the branch land in the journal below, which is
+    // the durable account — but a provider that quietly moves a conversation out from under a run
+    // reads as ordinary operation unless something says otherwise, and by the time anyone looks at
+    // the lineage they are already debugging.
     log.warn(
       `session '${trunk}' diverged at ${pos.seq}: resumed provider session ${expected}, but the call ran in ${reported} — ` +
-        `the record moves to a branch, so the trunk keeps meaning what every ref into it meant`,
+        `the record points at a branch, so the trunk keeps meaning what every ref into it meant`,
     );
+    // DIVERGENCE AS A FACT, not surgery (Identity and Resume §03): the ask stays immutable in the
+    // request, the store mints the branch in the sessions tree, and the record POINTS at where the
+    // call demonstrably ran — written once. Because a landed row releases its asked seat (the claim
+    // index reads `landed_session_id IS NULL`), the trunk's next append claims the position the
+    // diverged turn never really occupied, and the trunk's remote stream matches its transcript.
     const branch = this.branchFrom(trunk, pos.seq, "diverged");
     this.db
-      .prepare(`UPDATE session_positions SET session_id = ? WHERE session_id = ? AND seq = ?`)
-      .run(this.k(branch), this.k(trunk), pos.seq);
+      .prepare(`UPDATE operation_records SET landed_session_id = ?, landed_seq = ? WHERE id = ?`)
+      .run(this.k(branch), pos.seq, ref.id);
     this.logSession(this.k(branch));
-    this.logPosition(this.k(branch), pos.seq);
+    this.logRecordRow(ref.id);
   }
 
   /**
@@ -554,10 +586,16 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * the record moves to a branch mid-stream.
    */
   recordAt(at: { id: string; seq: number }): RecordRef | undefined {
+    // The LIVE claimant first — a released seat can hold dead history under a reclaimed one, and a
+    // flush addressed by position must land in the record that is actually speaking there.
     const row = this.db
-      .prepare(`SELECT record_id FROM session_positions WHERE session_id = ? AND seq = ?`)
-      .get(this.k(at.id), at.seq) as { record_id: string } | undefined;
-    return row === undefined ? undefined : { id: row.record_id };
+      .prepare(
+        `SELECT id FROM operation_records
+          WHERE COALESCE(landed_session_id, session_id) = ? AND COALESCE(landed_seq, session_seq) = ?
+          ORDER BY (status IN ('open', 'completed')) DESC, rowid DESC LIMIT 1`,
+      )
+      .get(this.k(at.id), at.seq) as { id: string } | undefined;
+    return row === undefined ? undefined : { id: row.id };
   }
 
   update(ref: RecordRef, partial: RecordPartial): void {
@@ -590,6 +628,10 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
           WHERE id = ? AND status = 'open'`,
       )
       .run(JSON.stringify(withOpening(value, row.request_json)), providerSessionId ?? null, row.id);
+    // The session's own handle moves as early as the stream carries one, for the same reason the
+    // record's does: a crashed call's conversation must still know its remote. Provider unknown
+    // mid-stream; the settle's report fills it.
+    this.stampSessionHandle(ref, providerSessionId, undefined);
     // A partial is a real state of the record, so it is appended like any other. A run that streams
     // ten flushes writes ten lines and replays as the tenth: the file grows, and it never has to be
     // rewritten in place — which is the trade the append-only format is making.
@@ -615,7 +657,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   transcript(ref: string): Row[] {
     const [id, seq] = split(ref);
     const out: Row[] = [];
-    for (const [branch, bound] of this.chain(id, seq ?? this.head(id))) {
+    for (const [branch, bound] of this.chain(id, seq ?? this.readHead(id))) {
       const start = this.cursorOf(branch);
       for (const row of this.rowsOf(branch)) {
         if (row.seq >= start && row.seq < bound) out.push(row);
@@ -643,7 +685,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    */
   forks(ref: string): Array<{ at: { sessionId: string; seq: number }; taken: string; left: Array<{ sessionId: string; rows: Row[] }> }> {
     const [id, seq] = split(ref);
-    const chain = this.chain(id, seq ?? this.head(id));
+    const chain = this.chain(id, seq ?? this.readHead(id));
     const out: Array<{ at: { sessionId: string; seq: number }; taken: string; left: Array<{ sessionId: string; rows: Row[] }> }> = [];
     for (const [i, entry] of chain.entries()) {
       const child = chain[i + 1];
@@ -832,7 +874,23 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * holds its seat, and re-claiming it would refuse the record its own chair.
    */
   private insertRecord(stub: RecordStub): boolean {
-    const request = stub.source === undefined ? null : JSON.stringify(stub.source);
+    // The WHOLE ask: the operation, the site it was dispatched from, and the seat it claims — with
+    // the handle it was handed to resume. Spliced as sibling keys of the op's own fields (no op has
+    // a `scope` or `session` key of its own), so every reader of `request.user` keeps working and
+    // the generated columns read `$.scope.*` / `$.session.*` straight off the row. The session id
+    // is stored SCOPED, as the position table's rows were — it is the store's key, not the
+    // engine's spelling.
+    const at = stub.session;
+    const ask: Record<string, unknown> = { ...((stub.source ?? {}) as object) };
+    if (stub.scope !== undefined) ask["scope"] = stub.scope;
+    if (at !== undefined) {
+      ask["session"] = {
+        id: this.k(at.id),
+        seq: at.seq,
+        ...(at.providerSessionId !== undefined ? { providerSessionId: at.providerSessionId } : {}),
+      };
+    }
+    const request = stub.source === undefined && stub.scope === undefined && at === undefined ? null : JSON.stringify(ask);
     const opening = openingMessage(request, []);
     // Through `withOpening`, so the splice is spelled out in ONE place and a record is born in the
     // same shape it will settle in — one conversation array, whatever writes it next.
@@ -846,7 +904,8 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
         .run(stub.id, this.scope.taskId ?? null, this.scope.runId ?? null, request, born, stub.startMs ?? Date.now());
       return false;
     } catch (e) {
-      if (!String((e as Error).message).includes("UNIQUE")) throw e;
+      const message = String((e as Error).message);
+      if (!message.includes("UNIQUE") || isSeatConflict(e)) throw e;
       const existing = this.db
         .prepare(`SELECT status FROM operation_records WHERE id = ?`)
         .get(stub.id) as { status: string } | undefined;
@@ -857,7 +916,9 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       }
       // Reopened, not re-inserted: the partial stays (it may be the only witness to turns already in
       // the remote stream), the error is cleared, and the original started_at keeps naming when this
-      // ask was first made.
+      // ask was first made. The UPDATE re-enters the claim index — a seat another live record took
+      // while this one was dead refuses here, and `append` reads that refusal as the fork signal,
+      // which is §08's degradation: the re-dispatch forks instead of needing a path of its own.
       this.db
         .prepare(`UPDATE operation_records SET status = 'open', ended_at = NULL, error_json = NULL WHERE id = ?`)
         .run(stub.id);
@@ -891,6 +952,14 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       at = branch.parent;
     }
     return chain;
+  }
+
+  /** The conversation's current remote identity, off its own row — NULL for a fork until it earns one. */
+  private sessionHandle(id: string): string | undefined {
+    const row = this.db.prepare(`SELECT provider_session_id FROM sessions WHERE id = ?`).get(this.k(id)) as
+      | { provider_session_id: string | null }
+      | undefined;
+    return row?.provider_session_id ?? undefined;
   }
 
   /**
@@ -929,7 +998,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
         // naming the cut is the store's job, since only it knows which message the branch ends at.
         // A conversation whose entries carry no provider ids cannot be cut, so it offers no source
         // and the caller replays: correct, and the only honest answer.
-        if (bound === this.head(at)) return { handle: found };
+        if (bound === this.readHead(at)) return { handle: found };
         const cut = this.messageIdAt(at, bound);
         return cut === undefined ? undefined : { handle: found, at: cut };
       }
@@ -961,10 +1030,33 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     return undefined;
   }
 
-  /** The next position an append would occupy. A branch's own records begin at its cursor. */
+  /**
+   * The next position an append would occupy. A branch's own records begin at its cursor.
+   *
+   * Over LIVE seats only — the claim index's own predicate. A released seat (failed, interrupted,
+   * or landed elsewhere) above the last live one is claimable again, which is what lets a retry
+   * re-take the position its dead attempt let go of instead of stacking on top of it.
+   */
   private head(id: string): number {
     const max = this.db
-      .prepare(`SELECT MAX(seq) AS m FROM session_positions WHERE session_id = ?`)
+      .prepare(
+        `SELECT MAX(${EFFECTIVE_SEQ}) AS m FROM operation_records
+          WHERE ${EFFECTIVE_SESSION} = ? AND status IN ('open', 'completed')`,
+      )
+      .get(this.k(id)) as { m: number | null } | undefined;
+    return max?.m === null || max?.m === undefined ? this.cursorOf(id) : max.m + 1;
+  }
+
+  /**
+   * Where READING ends — past the last row of any status, where {@link head} is where APPENDING
+   * begins, past the last LIVE one. The two part company exactly at a dead tail: a failed or
+   * interrupted call released its seat (an append may take it again), but its turns are history a
+   * transcript shows and — because they may exist in the remote stream — history a provider replay
+   * must carry too.
+   */
+  private readHead(id: string): number {
+    const max = this.db
+      .prepare(`SELECT MAX(${EFFECTIVE_SEQ}) AS m FROM operation_records WHERE ${EFFECTIVE_SESSION} = ?`)
       .get(this.k(id)) as { m: number | null } | undefined;
     return max?.m === null || max?.m === undefined ? this.cursorOf(id) : max.m + 1;
   }
@@ -1004,7 +1096,8 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
             // Not an operation: no model call is being described, so it does not pretend to be one.
             // `openingMessage` reads `user` off a request and finds none here, which is why this adds
             // provenance without adding a phantom turn.
-            JSON.stringify({ kind: "derive", word, from: ref }),
+            // …and its SEAT, inline like every other record's: seat 0 of the conversation it opens.
+            JSON.stringify({ kind: "derive", word, from: ref, session: { id: this.k(derived), seq: 0 } }),
             // A compaction or a resync is a record like any other, so it holds its turns the one way
             // a record holds turns: as entries. The caller hands over messages because that is what a
             // summary IS at the point it is written; the shape it is stored in is not the caller's.
@@ -1014,17 +1107,10 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
             Date.now(),
             Date.now(),
           );
-        this.db
-          .prepare(
-            `INSERT OR REPLACE INTO session_positions (session_id, seq, task_id, run_id, record_id)
-             VALUES (?, 0, ?, ?, ?)`,
-          )
-          .run(this.k(derived), this.scope.taskId ?? null, this.scope.runId ?? null, recordId);
       })
       .immediate();
     this.logSession(this.k(derived));
     this.logRecordRow(recordId);
-    this.logPosition(this.k(derived), 0);
     return join(derived, 1);
   }
 
@@ -1069,38 +1155,50 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   }
 
   private rowsOf(session: string, upTo?: number): Row[] {
+    // By EFFECTIVE position — landed when present, asked otherwise — so a branch's transcript
+    // contains the very turn that caused it, and a trunk no longer shows a turn that ran elsewhere.
+    // A released seat can hold dead history under a live reclaim, so rows are grouped per seat with
+    // the LIVE claimant preferred and the newest dead attempt standing in where nothing is live —
+    // which is what keeps a stopped task's interrupted turn on screen.
     const rows = this.db
       .prepare(
-        `SELECT p.seq AS seq, r.id AS record_id, r.status AS status, r.result_json AS result_json,
-                r.session_outcome_json AS session_outcome_json, r.provider_session_id AS provider_session_id,
-                r.request_json AS request_json
-           FROM session_positions p JOIN operation_records r ON ${ON_RECORD}
-          WHERE p.session_id = ? ${upTo === undefined ? "" : "AND p.seq < ?"} ORDER BY p.seq`,
+        `SELECT COALESCE(landed_seq, session_seq) AS seq, id AS record_id, status, result_json,
+                provider_session_id, request_json
+           FROM operation_records
+          WHERE COALESCE(landed_session_id, session_id) = ? ${upTo === undefined ? "" : "AND COALESCE(landed_seq, session_seq) < ?"}
+          ORDER BY COALESCE(landed_seq, session_seq), rowid`,
       )
       .all(...(upTo === undefined ? [this.k(session)] : [this.k(session), upTo])) as Array<{
       seq: number;
       record_id: string;
       status: "open" | "completed" | "failed" | "interrupted";
       result_json: string | null;
-      session_outcome_json: string | null;
       provider_session_id: string | null;
       request_json: string | null;
     }>;
-    return rows.map((row) => {
-      const value = projectValue(
-        row.result_json === null ? undefined : (hydrate(this.db, JSON.parse(row.result_json) as JsonValue) as JsonValue),
-        row.session_outcome_json === null ? undefined : (JSON.parse(row.session_outcome_json) as JsonValue),
-      );
-      return {
-        seq: row.seq,
-        sessionId: session,
-        recordId: row.record_id,
-        status: row.status,
-        ...(value !== undefined ? { value } : {}),
-        ...(row.provider_session_id !== null ? { externalId: row.provider_session_id } : {}),
-        ...(row.request_json !== null ? { request: JSON.parse(row.request_json) as JsonValue } : {}),
-      };
-    });
+    const seat = new Map<number, (typeof rows)[number]>();
+    for (const row of rows) {
+      const holder = seat.get(row.seq);
+      const live = row.status === "open" || row.status === "completed";
+      const holderLive = holder !== undefined && (holder.status === "open" || holder.status === "completed");
+      if (holder === undefined || live || !holderLive) seat.set(row.seq, row);
+    }
+    return [...seat.values()]
+      .sort((a, b) => a.seq - b.seq)
+      .map((row) => {
+        const value = projectValue(
+          row.result_json === null ? undefined : (hydrate(this.db, JSON.parse(row.result_json) as JsonValue) as JsonValue),
+        );
+        return {
+          seq: row.seq,
+          sessionId: session,
+          recordId: row.record_id,
+          status: row.status,
+          ...(value !== undefined ? { value } : {}),
+          ...(row.provider_session_id !== null ? { externalId: row.provider_session_id } : {}),
+          ...(row.request_json !== null ? { request: JSON.parse(row.request_json) as JsonValue } : {}),
+        };
+      });
   }
 }
 
@@ -1114,13 +1212,15 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
  * answering with text, a value-mode prompt core whose payload was projected away inside the call, a
  * scripted fake.
  */
-function projectValue(result: JsonValue | undefined, sessionOutcome: JsonValue | undefined): JsonValue | undefined {
-  const payload = result as { value?: { entries?: unknown } } | undefined;
+function projectValue(result: JsonValue | undefined): JsonValue | undefined {
+  const payload = result as { value?: { entries?: unknown }; messages?: JsonValue[] } | undefined;
   if (payload?.value?.entries !== undefined) return result;
-  const reported = (sessionOutcome as { messages?: JsonValue[] } | undefined)?.messages;
+  // The reported turns ride as a sibling of the value since migration 14 folded the outcome column
+  // away — the value is the op's OUTPUT and stays untouched; this is the conversation half.
+  const reported = payload?.messages;
   // Turned into entries HERE rather than stored as a second conversation shape: an executor whose
   // payload is not a conversation still reports one, and `entries` is the only encoding this store
-  // hands out. `provider: "unknown"` because the outcome does not say, and the timestamp is the
+  // hands out. `provider: "unknown"` because the report does not say, and the timestamp is the
   // projection's, not a fact about when anything was said.
   if (reported !== undefined) {
     const entries = entriesOfMessages(reported as never, { provider: "unknown", at: new Date(0).toISOString() });

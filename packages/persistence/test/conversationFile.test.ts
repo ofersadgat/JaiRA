@@ -237,7 +237,7 @@ describe("switching the concern on", () => {
     open.pop();
 
     const flipped = project("file");
-    expect(flipped.storage.seeded).toMatchObject({ operation_records: 1, session_positions: 1, sessions: 1 });
+    expect(flipped.storage.seeded).toMatchObject({ operation_records: 1, sessions: 1 });
     const reader = sessionStoreFor(flipped, { taskId: "t-1", runId: 1 }) as unknown as Store;
     expect(await reader.messages("conv")).toEqual([turn("already recorded")]);
     flipped.close();

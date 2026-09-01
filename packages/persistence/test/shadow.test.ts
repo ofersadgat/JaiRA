@@ -97,18 +97,19 @@ describe("what a shadow stands in front of", () => {
 
   it("keeps every constraint that is about one row", () => {
     // Primary keys, uniqueness, NOT NULL and defaults all survive — they remain enforceable, and
-    // `session_positions`'s primary key IS the position claim.
-    shadowTable(db, "session_positions");
-    const claim = (seq: number): void =>
+    // the `op_position` partial index over `operation_records` IS the position claim now
+    // (migration 14 folded positions into the request).
+    shadowTable(db, "operation_records");
+    const claim = (id: string, seq: number): void =>
       void db
         .prepare(
-          `INSERT INTO session_positions (session_id, seq, task_id, run_id, record_id)
-           VALUES ('conv', ?, 't1', 1, 'r:0')`,
+          `INSERT INTO operation_records (id, task_id, run_id, status, request_json, started_at)
+           VALUES (?, 't1', 1, 'open', ?, 1)`,
         )
-        .run(seq);
-    claim(0);
-    expect(() => claim(0)).toThrow(/UNIQUE/);
-    claim(1);
+        .run(id, JSON.stringify({ session: { id: "conv", seq } }));
+    claim("r:0", 0);
+    expect(() => claim("r:0b", 0)).toThrow(/UNIQUE/);
+    claim("r:1", 1);
   });
 
   it("is idempotent, so a caller may ask twice without checking", () => {

@@ -116,11 +116,10 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
       );
       const dropJobs = project.db.prepare(`DELETE FROM jobs WHERE run_id = ?`);
       // A conversation belongs to the run that held it (see `SessionScope`), so pruning the run
-      // prunes its transcripts — and the lineage rows they hang off with them. Positions first:
-      // they reference the records, and a position whose record is gone is a claim on nothing.
-      // This also covers the UNPLACED records §5.2's unconditional recording writes (the retention
-      // question of CHANGESETS.md §10.5 lands here, in the surface that already prunes).
-      const dropPositions = project.db.prepare(`DELETE FROM session_positions WHERE run_id = ?`);
+      // prunes its transcripts — and the lineage rows they hang off with them. A record carries its
+      // own position inside its request now (migration 14), so deleting the record IS releasing the
+      // seat. This also covers the UNPLACED records §5.2's unconditional recording writes (the
+      // retention question of CHANGESETS.md §10.5 lands here, in the surface that already prunes).
       const dropRecords = project.db.prepare(`DELETE FROM operation_records WHERE run_id = ?`);
       const readRecords = project.db.prepare(`SELECT result_json, request_json FROM operation_records WHERE run_id = ?`);
       // A branch with no records left AND no descendant pointing at it. Both conditions matter, and
@@ -138,7 +137,8 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
       const dropSessions = project.db.prepare(
         `DELETE FROM sessions
           WHERE created_at < ?
-            AND id NOT IN (SELECT DISTINCT session_id FROM session_positions)
+            AND id NOT IN (SELECT DISTINCT COALESCE(landed_session_id, session_id) FROM operation_records
+                            WHERE session_id IS NOT NULL)
             AND id NOT IN (SELECT parent FROM sessions WHERE parent IS NOT NULL)`,
       );
       const dropRun = project.db.prepare(`DELETE FROM runs WHERE id = ?`);
@@ -149,7 +149,6 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
         dropCommands.run(run.runId);
         dropJobOutput.run(run.runId);
         dropJobs.run(run.runId);
-        dropPositions.run(run.runId);
         // The bytes a record REFERENCED are let go before the row goes, while there is still
         // something to read the references off. A blob two records share survives the first delete
         // and dies with the second, which is what the reference COUNT is for (RECORDS.md §8).

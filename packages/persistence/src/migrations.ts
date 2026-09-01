@@ -364,6 +364,30 @@ export const MIGRATIONS: Migration[] = [
     // inside derived session ids (`planning~compact1:0`) and this suffix must be unmistakable.
     run: keyRecordsByScopedId,
   },
+  {
+    version: 14,
+    note: "a position is an input, so it moved into the request — and the claim learned to let go of the dead",
+    // Identity-and-Resume step 3 (first half). "Append at seq 14 of conversation X, resuming handle
+    // H" is part of what the call was ASKED to do, exactly as its inputs are — so it lives in
+    // `request_json` beside them (`$.session`, next to the `$.scope` the id is folded over), and
+    // `session_positions` retires for generated columns over the request. The claim becomes the
+    // PARTIAL unique index `op_position`: a seat is held only by a record that is alive and still
+    // there — the call failed, was cut, or landed somewhere else, and the seat is free again — so a
+    // conflict always means a genuinely live competing claim, which is what makes it safe to read
+    // as the fork signal. `landed_session_id`/`landed_seq` replace the old row move: divergence
+    // becomes a fact written once on the record, not surgery on a position table.
+    //
+    // The handle moves onto the SESSION with its provider — it is only ever passed when appending at
+    // the head, so "the conversation's current handle" is the right value everywhere a handle is
+    // used; a fork starts with NULL rather than inheriting (two branches writing into one remote
+    // stream is the failure that prevents). The per-record handle stays: divergence detection
+    // compares what we asked to resume against what the call reports it ran in.
+    //
+    // `session_outcome_json` does not survive inspection (artifact §03): in the ordinary case it
+    // held one field that is already a column, and its one earned case — a payload that is NOT a
+    // conversation — normalises into `result_json` before the column drops.
+    run: foldPositionsIntoRequests,
+  },
 ];
 
 /**
@@ -551,6 +575,74 @@ function keyRecordsByScopedId(db: JairaDb): void {
           ON r.record_id = p.record_id AND r.attempt = p.attempt AND r.task_id IS p.task_id AND r.run_id IS p.run_id;
     DROP TABLE session_positions_by_attempt;
     DROP TABLE operation_records_by_attempt;
+  `);
+}
+
+/**
+ * Migration 14's fold — see the note there. Guarded by the table's own shape, per the house rule.
+ */
+function foldPositionsIntoRequests(db: JairaDb): void {
+  const columns = db.prepare(`SELECT name FROM pragma_table_info('operation_records')`).all() as Array<{ name: string }>;
+  if (columns.some((c) => c.name === "session_id")) return; // already this shape
+
+  // The conversation's remote identity, on the conversation — guarded per column, because the
+  // session-store tests rewind `user_version` against a database whose sessions table already has
+  // them (this file's own second rule, restated for a table another guard does not cover).
+  addColumn(db, "sessions", "provider", "TEXT");
+  addColumn(db, "sessions", "provider_session_id", "TEXT");
+
+  db.exec(`
+    -- Settle-time divergence: NULL unless the call demonstrably ran somewhere other than it claimed.
+    ALTER TABLE operation_records ADD COLUMN landed_session_id TEXT;
+    ALTER TABLE operation_records ADD COLUMN landed_seq INTEGER;
+
+    -- The ask's own context, surfaced from the request — VIRTUAL, per this file's third rule.
+    ALTER TABLE operation_records ADD COLUMN instance_id TEXT
+      GENERATED ALWAYS AS (json_extract(request_json, '$.scope.instanceId')) VIRTUAL;
+    ALTER TABLE operation_records ADD COLUMN sequence INTEGER
+      GENERATED ALWAYS AS (json_extract(request_json, '$.scope.sequence')) VIRTUAL;
+    ALTER TABLE operation_records ADD COLUMN session_id TEXT
+      GENERATED ALWAYS AS (json_extract(request_json, '$.session.id')) VIRTUAL;
+    ALTER TABLE operation_records ADD COLUMN session_seq INTEGER
+      GENERATED ALWAYS AS (json_extract(request_json, '$.session.seq')) VIRTUAL;
+
+    -- Every position a record ever claimed, folded into its own request. The old table's PRIMARY
+    -- KEY guaranteed one row per seat, so this cannot fan out.
+    UPDATE operation_records
+       SET request_json = json_set(COALESCE(request_json, '{}'),
+                                   '$.session', json_object('id', p.session_id, 'seq', p.seq))
+      FROM session_positions p
+     WHERE operation_records.id = p.record_id
+       AND operation_records.task_id IS p.task_id AND operation_records.run_id IS p.run_id;
+    DROP TABLE session_positions;
+
+    -- THE CLAIM. Unique over live seats only: a failed, interrupted or landed row keeps its row —
+    -- evidence, and ordered history at that seat — and stops holding the position. A partial index
+    -- only serves a query whose WHERE implies its own, so the READ index beside it is deliberate:
+    -- conversation reads want every row at a seat (the dead ones are history a viewer still sees),
+    -- and repeating the claim predicate in every read is the trap the second index removes.
+    CREATE UNIQUE INDEX IF NOT EXISTS op_position
+      ON operation_records(session_id, session_seq)
+      WHERE status IN ('open', 'completed') AND landed_session_id IS NULL;
+    CREATE INDEX IF NOT EXISTS operation_records_session ON operation_records(session_id, session_seq);
+
+    UPDATE sessions
+       SET provider_session_id = (SELECT r.provider_session_id FROM operation_records r
+                                   WHERE r.session_id = sessions.id AND r.provider_session_id IS NOT NULL
+                                   ORDER BY r.session_seq DESC LIMIT 1);
+
+    -- The one case session_outcome_json earned — a payload that is not a conversation — normalises
+    -- into the result before the column goes: the reported turns land as a SIBLING of the value
+    -- ('$.messages'), never over it, because '$.value' is the op's OUTPUT — what a replay answers
+    -- with — and the conversation is a second fact about the same call. projectValue turns the
+    -- sibling into entries at read, exactly as it did the old column.
+    UPDATE operation_records
+       SET result_json = json_set(COALESCE(result_json, '{}'),
+                                  '$.messages', json_extract(session_outcome_json, '$.messages'))
+     WHERE session_outcome_json IS NOT NULL
+       AND json_extract(session_outcome_json, '$.messages') IS NOT NULL
+       AND json_extract(result_json, '$.value.entries') IS NULL;
+    ALTER TABLE operation_records DROP COLUMN session_outcome_json;
   `);
 }
 

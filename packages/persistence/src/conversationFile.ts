@@ -74,8 +74,12 @@ export interface RecordRow {
   result_json: string | null;
   error_json: string | null;
   metrics_json: string | null;
-  session_outcome_json: string | null;
+  /** Legacy lines only — the column migration 14 folded into `result_json` and dropped. */
+  session_outcome_json?: string | null;
   provider_session_id: string | null;
+  /** Where the call demonstrably ran, when that is not where it was asked to (migration 14). */
+  landed_session_id?: string | null;
+  landed_seq?: number | null;
   started_at: number;
   ended_at: number | null;
 }
@@ -91,11 +95,15 @@ export interface PositionRow {
   attempt?: number;
 }
 
-/** A `sessions` row — the lineage a fork's prefix hangs off. */
+/** A `sessions` row — the lineage a fork's prefix hangs off, and its remote identity (migration 14). */
 export interface SessionRow {
   id: string;
   parent: string | null;
   cursor: number;
+  /** Who owns the handle below — absent on legacy lines. */
+  provider?: string | null;
+  /** The conversation's current handle; NULL on a fork until it earns one. Absent on legacy lines. */
+  provider_session_id?: string | null;
   created_at: number;
 }
 
@@ -381,49 +389,81 @@ export function replayConversations(db: JairaDb, dir: string): number | undefine
     return top !== undefined && (top[0] !== run || top[1] !== attempt) ? `${row.record_id}~~${run}.${attempt}` : row.record_id;
   };
 
+  // LEGACY position lines fold into their record's request — where a position lives now (migration
+  // 14). Keyed the way the old table joined, so each record collects the one seat it claimed.
+  const seatOf = new Map<string, { id: string; seq: number }>();
+  for (const row of positions.values()) {
+    const key = `${row.task_id ?? ""} ${row.run_id ?? ""} ${idOf(row)}`;
+    seatOf.set(key, { id: row.session_id, seq: row.seq });
+  }
+
+  /** A legacy record's request with its seat spliced in; a current line already carries its own. */
+  const requestOf = (row: RecordRow, id: string): string | null => {
+    const seat = seatOf.get(`${row.task_id ?? ""} ${row.run_id ?? ""} ${id}`);
+    if (seat === undefined) return row.request_json;
+    const request = (parsedObject(row.request_json) ?? {}) as Record<string, unknown>;
+    if (request["session"] !== undefined) return row.request_json;
+    return JSON.stringify({ ...request, session: seat });
+  };
+
+  /** Migration 14's fold, restated for legacy lines: the outcome's one earned case joins the result. */
+  const resultOf = (row: RecordRow): string | null => {
+    const outcome = parsedObject(row.session_outcome_json ?? null) as { messages?: unknown } | undefined;
+    if (outcome?.messages === undefined) return row.result_json;
+    const result = (parsedObject(row.result_json) ?? {}) as { value?: { entries?: unknown } };
+    if (result.value?.entries !== undefined) return row.result_json;
+    return JSON.stringify({ ...result, messages: outcome.messages });
+  };
+
   let rows = 0;
   db.transaction(() => {
     // Lineage first: a position's session must exist before anything reads the chain it is on.
     const session = db.prepare(
-      `INSERT OR REPLACE INTO sessions (id, parent, cursor, created_at) VALUES (@id, @parent, @cursor, @created_at)`,
+      `INSERT OR REPLACE INTO sessions (id, parent, cursor, provider, provider_session_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     );
     for (const row of sessions.values()) {
-      session.run(row);
+      session.run(row.id, row.parent, row.cursor, row.provider ?? null, row.provider_session_id ?? null, row.created_at);
       rows++;
     }
     const record = db.prepare(
       `INSERT INTO operation_records
          (id, task_id, run_id, status, request_json, result_json, error_json,
-          metrics_json, session_outcome_json, provider_session_id, started_at, ended_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          metrics_json, provider_session_id, landed_session_id, landed_seq, started_at, ended_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const row of records.values()) {
+      const id = idOf(row);
       record.run(
-        idOf(row),
+        id,
         row.task_id,
         row.run_id,
         row.status,
-        row.request_json,
-        row.result_json,
+        requestOf(row, id),
+        resultOf(row),
         row.error_json,
         row.metrics_json,
-        row.session_outcome_json,
         row.provider_session_id,
+        row.landed_session_id ?? null,
+        row.landed_seq ?? null,
         row.started_at,
         row.ended_at,
       );
       rows++;
     }
-    const position = db.prepare(
-      `INSERT OR REPLACE INTO session_positions (session_id, seq, task_id, run_id, record_id)
-       VALUES (?, ?, ?, ?, ?)`,
-    );
-    for (const row of positions.values()) {
-      position.run(row.session_id, row.seq, row.task_id, row.run_id, idOf(row));
-      rows++;
-    }
   })();
   return rows;
+}
+
+/** JSON that should be an object, or nothing — a helper the legacy folds above share. */
+function parsedObject(json: string | null): unknown {
+  if (json === null) return undefined;
+  try {
+    const value = JSON.parse(json) as unknown;
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Delete one run's conversations — what pruning a run does now that the file is the truth. */

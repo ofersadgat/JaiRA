@@ -101,11 +101,12 @@ describe("a call that reports a remote it was not given", () => {
     }>;
     expect(derived).toHaveLength(1);
 
-    // …and the record is IN it.
+    // …and the record POINTS at it — divergence is a fact on the record (`landed_session_id`) now,
+    // not a moved position row, and readers take landed-when-present.
     const where = db
-      .prepare(`SELECT session_id FROM session_positions WHERE record_id = ?`)
-      .get(records[1]!.record_id) as { session_id: string } | undefined;
-    expect(where?.session_id).toBe(derived[0]!.id);
+      .prepare(`SELECT landed_session_id FROM operation_records WHERE id = ?`)
+      .get(records[1]!.record_id) as { landed_session_id: string | null } | undefined;
+    expect(where?.landed_session_id).toBe(derived[0]!.id);
 
     // …and what the call reports as its ending position names that same lineage, so whatever continues
     // from here continues where the turn actually is.

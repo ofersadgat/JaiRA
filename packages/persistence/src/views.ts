@@ -24,7 +24,7 @@ import {
   type WorkflowShape,
 } from "./projection";
 import { loadSnapshot, readWorkflowFiles } from "./snapshots";
-import { bareSessionId, ON_RECORD, scopedSessionId } from "./sessionStore";
+import { EFFECTIVE_SEQ, EFFECTIVE_SESSION, bareSessionId, scopedSessionId } from "./sessionStore";
 import { workflowShape } from "./shape";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
@@ -349,10 +349,9 @@ function interruptedSessions(project: Project, taskId: string, runId?: number): 
     const records = (
       project.db
         .prepare(
-          `SELECT p.session_id AS session_id, p.seq AS seq, r.status AS status FROM operation_records r
-           JOIN session_positions p ON ${ON_RECORD}
-          WHERE r.task_id = ? AND r.run_id = ?
-          ORDER BY r.id`,
+          `SELECT ${EFFECTIVE_SESSION} AS session_id, ${EFFECTIVE_SEQ} AS seq, status FROM operation_records
+          WHERE task_id = ? AND run_id = ? AND session_id IS NOT NULL
+          ORDER BY rowid`,
         )
         .all(taskId, run.id) as Array<{ session_id: string; seq: number; status: string }>
     ).filter((record) => !listed.has(`${record.session_id}@${record.seq}`));

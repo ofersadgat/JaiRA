@@ -27,9 +27,10 @@
  * once half the rows live in a text file that git may have merged.
  *
  * **Nothing else.** Primary keys, uniqueness, defaults and `NOT NULL` all come across, because those
- * are statements about a single row and remain enforceable. `session_positions`'s primary key is the
- * position claim (SESSIONS.md), and it keeps working — per connection rather than across processes,
- * which is exactly the trade §4.4 records and the reason `jobs` may never be file-backed.
+ * are statements about a single row and remain enforceable. The `op_position` claim index — the
+ * position claim, since migration 14 folded positions into the request — keeps working the same
+ * way: per connection rather than across processes, which is exactly the trade §4.4 records and
+ * the reason `jobs` may never be file-backed.
  */
 import type { JairaDb } from "./db";
 import type { JairaStorageConcern, JairaStorageConfig } from "@jaira/shared";
@@ -48,7 +49,7 @@ import type { JairaStorageConcern, JairaStorageConfig } from "@jaira/shared";
  */
 export const CONCERN_TABLES: Record<JairaStorageConcern, readonly string[]> = {
   journal: ["state_machine_events"],
-  conversations: ["operation_records", "session_positions", "sessions"],
+  conversations: ["operation_records", "sessions"],
   tasks: ["task_runtime", "runs"],
   artifacts: ["artifacts"],
 };

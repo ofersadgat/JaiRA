@@ -427,7 +427,9 @@ describe("what a derived conversation records about itself", () => {
     const row = db
       .prepare(`SELECT request_json FROM operation_records WHERE id LIKE '%~compact%' ORDER BY rowid DESC LIMIT 1`)
       .get() as { request_json: string | null } | undefined;
-    expect(JSON.parse(row!.request_json!)).toEqual({ kind: "derive", word: "compact", from: "origin" });
+    // …seat included, inline like every other record's (migration 14): a position is an input.
+    expect(JSON.parse(row!.request_json!)).toMatchObject({ kind: "derive", word: "compact", from: "origin" });
+    expect((JSON.parse(row!.request_json!) as { session: { seq: number } }).session).toMatchObject({ seq: 0 });
   });
 });
 
@@ -554,11 +556,13 @@ describe("the migration runner", () => {
       // The provider handle rode `external_id`; the migration carries it into its own column, which
       // is what `handleAt` resumes from.
       expect((await reader.resolve({ ref: "old" })).providerSessionId).toBe("prov-9");
-      // The turn row became a record plus a position pointing at it.
-      expect(migrated.prepare(`SELECT COUNT(*) AS n FROM session_positions`).get()).toEqual({ n: 1 });
+      // The turn row became a record whose request carries its seat (migration 14 folded the
+      // position table it first landed in).
       expect(
-        migrated.prepare(`SELECT status, provider_session_id FROM operation_records WHERE id = 'r0'`).get(),
-      ).toEqual({ status: "completed", provider_session_id: "prov-9" });
+        migrated
+          .prepare(`SELECT status, provider_session_id, session_id, session_seq FROM operation_records WHERE id = 'r0'`)
+          .get(),
+      ).toEqual({ status: "completed", provider_session_id: "prov-9", session_id: "t1/3/old", session_seq: 0 });
     } finally {
       migrated.close();
     }
@@ -577,7 +581,7 @@ it("moves a position onto the record's own key, and renumbers attempts so that k
     const row = (text: string): string => JSON.stringify({ value: { entries: [said(text)] } }).replace(/'/g, "''");
     before.exec(`
       DROP INDEX IF EXISTS operation_records_natural;
-      DROP TABLE session_positions;
+      DROP TABLE IF EXISTS session_positions;
       DROP TABLE operation_records;
       CREATE TABLE operation_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT, record_id TEXT NOT NULL, task_id TEXT, run_id INTEGER,
@@ -607,10 +611,10 @@ it("moves a position onto the record's own key, and renumbers attempts so that k
         { id: "conv:0~~1" },
         { id: "conv:0" },
       ]);
-      // The position carries the record's own key now, scope included — and it pointed at the FIRST
-      // row, which is the suffixed one.
-      expect(after.prepare(`SELECT * FROM session_positions`).all()).toEqual([
-        { session_id: "t1/1/conv", seq: 0, task_id: "t1", run_id: 1, record_id: "conv:0~~1" },
+      // The position lives inside the record's own request now (migration 14) — and it pointed at
+      // the FIRST row, which is the suffixed one.
+      expect(after.prepare(`SELECT id, session_id, session_seq FROM operation_records WHERE session_id IS NOT NULL`).all()).toEqual([
+        { id: "conv:0~~1", session_id: "t1/1/conv", session_seq: 0 },
       ]);
       // And it still finds its record — the assertion the rowid used to carry, carried by the id.
       const reader = new SqliteSessionStore(after, { taskId: "t1", runId: 1 }) as unknown as Store;
@@ -735,21 +739,15 @@ describe("stateSessions — a run the process died inside", () => {
     ).run(runId, JSON.stringify({ instanceId, stateId, op: "prompt" }), at);
   };
   const record = (runId: number, recordId: string, status = "interrupted"): void => {
-    db.prepare(
-      `INSERT INTO operation_records (id, task_id, run_id, status, started_at)
-       VALUES (?, 't3', ?, ?, 5)`,
-    ).run(recordId, runId, status);
-    // The position points at the record's own KEY, not at a rowid — migration 8. Written out here
-    // rather than through the store because these rows stand in for a process that died mid-run.
-    //
-    // SCOPED, as `SqliteSessionStore` writes it. This fixture used to store the bare id, which no
-    // store ever does, and the difference stayed invisible while the recovery view read the position
-    // out of the record id instead of out of this table.
+    // The position rides INSIDE the request now (migration 14), scoped as `SqliteSessionStore`
+    // writes it. Written out here rather than through the store because these rows stand in for a
+    // process that died mid-run.
     const cut = recordId.lastIndexOf(":");
+    const session = { id: `t3/${runId}/${recordId.slice(0, cut)}`, seq: Number(recordId.slice(cut + 1)) };
     db.prepare(
-      `INSERT INTO session_positions (session_id, seq, task_id, run_id, record_id)
-       VALUES (?, ?, 't3', ?, ?)`,
-    ).run(`t3/${runId}/${recordId.slice(0, cut)}`, Number(recordId.slice(cut + 1)), runId, recordId);
+      `INSERT INTO operation_records (id, task_id, run_id, status, request_json, started_at)
+       VALUES (?, 't3', ?, ?, ?, 5)`,
+    ).run(recordId, runId, status, JSON.stringify({ session }));
   };
 
   it("recovers the in-flight call from its own record, and says it was interrupted", () => {
@@ -1177,7 +1175,7 @@ describe("pruning conversations", () => {
     const drop = db.prepare(
       `DELETE FROM sessions
         WHERE created_at < ?
-          AND id NOT IN (SELECT DISTINCT session_id FROM session_positions)
+          AND id NOT IN (SELECT DISTINCT COALESCE(landed_session_id, session_id) FROM operation_records WHERE session_id IS NOT NULL)
           AND id NOT IN (SELECT parent FROM sessions WHERE parent IS NOT NULL)`,
     );
     // The parent is spared because a child points at it; without that clause this throws
@@ -1191,7 +1189,7 @@ describe("pruning conversations", () => {
     const drop = db.prepare(
       `DELETE FROM sessions
         WHERE created_at < ?
-          AND id NOT IN (SELECT DISTINCT session_id FROM session_positions)
+          AND id NOT IN (SELECT DISTINCT COALESCE(landed_session_id, session_id) FROM operation_records WHERE session_id IS NOT NULL)
           AND id NOT IN (SELECT parent FROM sessions WHERE parent IS NOT NULL)`,
     );
     drop.run(100);

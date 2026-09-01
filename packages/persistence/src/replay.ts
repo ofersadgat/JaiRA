@@ -48,7 +48,7 @@ import type { AddressStep as ViewAddressStep, InstanceNode } from "@jaira/shared
 import { SqliteEventLog } from "./eventLog";
 import { eventsOf, foldRuns, isLive, projectRun, type ProjectedRun } from "./projection";
 import { hydrate } from "./blobStore";
-import { ON_RECORD, baseRecordId, scopedSessionId } from "./sessionStore";
+import { EFFECTIVE_SEQ, EFFECTIVE_SESSION, baseRecordId, scopedSessionId } from "./sessionStore";
 import { parseSessionRef } from "./views";
 import type { JairaDb } from "./db";
 import type { Project } from "./project";
@@ -511,14 +511,15 @@ function takeRecord(
     return (
       project.db
         .prepare(
-          `SELECT r.status, r.result_json FROM session_positions p
-             JOIN operation_records r ON ${ON_RECORD}
-            WHERE p.session_id = ? AND p.seq = ?`,
+          `SELECT status, result_json FROM operation_records
+            WHERE ${EFFECTIVE_SESSION} = ? AND ${EFFECTIVE_SEQ} = ?
+            ORDER BY (status IN ('open', 'completed')) DESC, rowid DESC LIMIT 1`,
         )
         // Two adjustments, both easy to omit and each fatal on its own. The id is SCOPED — a session
-        // name is instance-scoped and instance ids restart every run, so the store namespaces every
-        // row by the run that made it. And the seq is one BACK from where the call ended, which is
-        // `sessionRef`'s documented contract and the same arithmetic `stateSessions` does.
+        // name is instance-scoped and the store namespaces every row by the run that made it. And
+        // the seq is one BACK from where the call ended, which is `sessionRef`'s documented contract
+        // and the same arithmetic `stateSessions` does. The live claimant wins where a released seat
+        // holds dead history under a reclaim.
         .get(scopedSessionId({ taskId, runId }, position.id), position.seq - 1) as RecordRow | undefined
     );
   }
