@@ -266,17 +266,21 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
 
     const second = openDb(file);
     try {
-      // Read under the SAME scope. A session id is instance-scoped (`#i2`) and instance ids restart on
-      // every run, so the run is part of the key — otherwise a second run of one workflow would
-      // continue the first run's conversation and read its whole transcript back as a preamble.
+      // Read under the SAME task. A name is a task-scoped alias to an assigned session id
+      // (migration 15) — run-free, which is the whole point: a resumed run's `kept` IS the
+      // conversation an earlier run created, the continuation the old run-scoping made impossible.
       const reader = new SqliteSessionStore(second, { taskId: "t1", runId: 3 }) as unknown as Store;
       // The claim the whole phase rests on: every transcript JaiRA ever produced used to be computed
       // and dropped, and `conversation.ts` said "there is no separate transcript to show" because of it.
       expect(await reader.messages("kept")).toEqual([turn("still here")]);
 
-      // …and another run's store, asking for the same id, sees nothing of it.
-      const other = new SqliteSessionStore(second, { taskId: "t1", runId: 4 }) as unknown as Store;
-      expect(await other.messages("kept")).toEqual([]);
+      // A LATER RUN of the same task continues it — the artifact's §01 defect, closed.
+      const laterRun = new SqliteSessionStore(second, { taskId: "t1", runId: 4 }) as unknown as Store;
+      expect(await laterRun.messages("kept")).toEqual([turn("still here")]);
+
+      // …and another TASK, asking with the same name, sees nothing of it.
+      const otherTask = new SqliteSessionStore(second, { taskId: "t2", runId: 1 }) as unknown as Store;
+      expect(await otherTask.messages("kept")).toEqual([]);
     } finally {
       second.close();
     }
@@ -313,8 +317,10 @@ describe("SqliteSessionStore — what only a durable one can promise", () => {
 
     // `forks` answers "walking down to here, what did the path not take" — a thread's question. A
     // RUN holds the branches themselves, each drawn as its own panel, and asks the reverse: whose
-    // continuation is this one, and from where.
-    expect(durable.lineageOf(branch)).toEqual({ parent: "base", at: 1 });
+    // continuation is this one, and from where. The parent comes back as the session's ASSIGNED id
+    // (the name is an alias to it, migration 15) — the same id every other read speaks.
+    const baseId = durable.at("base", 1)!.sessionId;
+    expect(durable.lineageOf(branch)).toEqual({ parent: baseId, at: 1 });
     // The position is the one both sides SHARE, which is what pairs a branch back up with the record
     // it left behind: `base`'s own row at seq 1 is the other side of this fork.
     expect(durable.at("base", 1)).toBeDefined();

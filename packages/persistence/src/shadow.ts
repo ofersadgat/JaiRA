@@ -49,7 +49,7 @@ import type { JairaStorageConcern, JairaStorageConfig } from "@jaira/shared";
  */
 export const CONCERN_TABLES: Record<JairaStorageConcern, readonly string[]> = {
   journal: ["state_machine_events"],
-  conversations: ["operation_records", "sessions"],
+  conversations: ["operation_records", "sessions", "session_names"],
   tasks: ["task_runtime", "runs"],
   artifacts: ["artifacts"],
 };

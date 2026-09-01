@@ -388,6 +388,29 @@ export const MIGRATIONS: Migration[] = [
     // conversation — normalises into `result_json` before the column drops.
     run: foldPositionsIntoRequests,
   },
+  {
+    version: 15,
+    note: "a conversation is named once, and what an author writes is an alias to it",
+    // Identity-and-Resume step 3 (second half). Session ids used to be DERIVED — the authored name,
+    // or the engine's fresh key, prefixed `task/run/` at the SQL boundary. The prefix stopped two
+    // runs' conversations colliding, and stopped the intended continuation with it: a resumed run
+    // could not name, extend or branch from a conversation an earlier run created, because the name
+    // it would use resolved somewhere else. The session id is ASSIGNED now (minted once, opaque,
+    // never parsed), and an authored name reaches it through this table — TASK-scoped, run-free,
+    // which is precisely what lets run 3's `planning` be run 1's. task_id is '' for an unscoped
+    // store rather than NULL, because a NULL primary-key column would let one name alias twice.
+    //
+    // No foreign key on session_id, the same soft-reference stance the record tables take: pruning
+    // sweeps orphaned aliases rather than being refused by them.
+    sql: `
+      CREATE TABLE IF NOT EXISTS session_names (
+        task_id    TEXT NOT NULL DEFAULT '',
+        name       TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        PRIMARY KEY (task_id, name)
+      );
+    `,
+  },
 ];
 
 /**

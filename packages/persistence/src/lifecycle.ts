@@ -330,6 +330,7 @@ export function deleteTask(project: Project, taskId: string): void {
     // Straight off the position row since migration 8: it carries the scope its record does, so the
     // subquery that used to reach through `operation_record_id` has nothing left to do.
     project.db.prepare(`DELETE FROM operation_records WHERE task_id = ?`).run(taskId);
+    project.db.prepare(`DELETE FROM session_names WHERE task_id = ?`).run(taskId);
     project.db.prepare(`DELETE FROM artifacts WHERE task_id = ?`).run(taskId);
     // A gate outlives the process that parked it, so it also has to leave with its task — otherwise
     // the strip goes on offering a question about a task that is no longer there to answer it.

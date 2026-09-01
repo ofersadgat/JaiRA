@@ -508,19 +508,19 @@ function takeRecord(
   const ref = event.metrics?.sessionRef;
   const position = ref === undefined ? undefined : parseSessionRef(ref);
   if (position !== undefined) {
+    const at = project.db.prepare(
+      `SELECT status, result_json FROM operation_records
+        WHERE ${EFFECTIVE_SESSION} = ? AND ${EFFECTIVE_SEQ} = ?
+        ORDER BY (status IN ('open', 'completed')) DESC, rowid DESC LIMIT 1`,
+    );
+    // The ref's own id first — a new run's `sessionRef` carries the session's assigned id, which is
+    // the row's key (migration 15) — then the legacy run-scoped spelling a pre-15 store wrote. The
+    // seq is one BACK from where the call ended, `sessionRef`'s documented contract and the same
+    // arithmetic `stateSessions` does; the live claimant wins where a released seat holds dead
+    // history under a reclaim.
     return (
-      project.db
-        .prepare(
-          `SELECT status, result_json FROM operation_records
-            WHERE ${EFFECTIVE_SESSION} = ? AND ${EFFECTIVE_SEQ} = ?
-            ORDER BY (status IN ('open', 'completed')) DESC, rowid DESC LIMIT 1`,
-        )
-        // Two adjustments, both easy to omit and each fatal on its own. The id is SCOPED — a session
-        // name is instance-scoped and the store namespaces every row by the run that made it. And
-        // the seq is one BACK from where the call ended, which is `sessionRef`'s documented contract
-        // and the same arithmetic `stateSessions` does. The live claimant wins where a released seat
-        // holds dead history under a reclaim.
-        .get(scopedSessionId({ taskId, runId }, position.id), position.seq - 1) as RecordRow | undefined
+      (at.get(position.id, position.seq - 1) as RecordRow | undefined) ??
+      (at.get(scopedSessionId({ taskId, runId }, position.id), position.seq - 1) as RecordRow | undefined)
     );
   }
   if (event.operationId !== undefined) return queues.get(event.operationId)?.shift();

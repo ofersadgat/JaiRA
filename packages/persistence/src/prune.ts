@@ -166,6 +166,8 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
       do {
         removed = dropSessions.run(before).changes;
       } while (removed > 0);
+      // Aliases are soft references (migration 15): a name whose session is gone names nothing.
+      project.db.prepare(`DELETE FROM session_names WHERE session_id NOT IN (SELECT id FROM sessions)`).run();
       // And the bytes nothing names any more. Swept here rather than inside each delete: a prune
       // removes thousands of rows and a blob released by one may be re-referenced by none, so the
       // question is asked once, at the end, when the answer has stopped changing.

@@ -107,10 +107,18 @@ export interface SessionRow {
   created_at: number;
 }
 
+/** A `session_names` row — what an author wrote, and the session it is an alias to (migration 15). */
+export interface NameRow {
+  task_id: string;
+  name: string;
+  session_id: string;
+}
+
 export type ConversationEntry =
   | { kind: "record"; row: RecordRow }
   | { kind: "position"; row: PositionRow }
-  | { kind: "session"; row: SessionRow };
+  | { kind: "session"; row: SessionRow }
+  | { kind: "name"; row: NameRow };
 
 // --- dialects ------------------------------------------------------------------
 
@@ -149,11 +157,13 @@ const TYPE_OF: Record<ConversationEntry["kind"], string> = {
   record: "jaira.record",
   position: "jaira.position",
   session: "jaira.session",
+  name: "jaira.name",
 };
 const KIND_OF: Record<string, ConversationEntry["kind"]> = {
   "jaira.record": "record",
   "jaira.position": "position",
   "jaira.session": "session",
+  "jaira.name": "name",
 };
 
 /** A line id that does not need a random source — the file's own position is already unique. */
@@ -356,12 +366,15 @@ export function replayConversations(db: JairaDb, dir: string): number | undefine
   const records = new Map<string, RecordRow>();
   const positions = new Map<string, PositionRow>();
   const sessions = new Map<string, SessionRow>();
+  const names = new Map<string, NameRow>();
   for (const file of files) {
     for (const entry of readConversationFile(file)) {
       if (entry.kind === "record") {
         records.set(`${entry.row.task_id ?? ""} ${entry.row.run_id ?? ""} ${entry.row.record_id} ${entry.row.attempt ?? 1}`, entry.row);
       } else if (entry.kind === "position") {
         positions.set(`${entry.row.session_id} ${entry.row.seq}`, entry.row);
+      } else if (entry.kind === "name") {
+        names.set(entry.row.task_id + " " + entry.row.name, entry.row);
       } else {
         sessions.set(entry.row.id, entry.row);
       }
@@ -449,6 +462,13 @@ export function replayConversations(db: JairaDb, dir: string): number | undefine
         row.started_at,
         row.ended_at,
       );
+      rows++;
+    }
+    const alias = db.prepare(
+      `INSERT OR REPLACE INTO session_names (task_id, name, session_id) VALUES (?, ?, ?)`,
+    );
+    for (const row of names.values()) {
+      alias.run(row.task_id, row.name, row.session_id);
       rows++;
     }
   })();

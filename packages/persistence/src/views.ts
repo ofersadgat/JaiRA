@@ -336,9 +336,13 @@ function interruptedSessions(project: Project, taskId: string, runId?: number): 
       } else {
         started.delete(event.instanceId);
         const end = row.session_ref === null ? undefined : parseSessionRef(row.session_ref);
-        // SCOPED to match what the store wrote: a journal ref names a session the way the workflow
-        // file does, and `session_positions.session_id` carries the run namespace in front of it.
-        if (end !== undefined) listed.add(`${scopedSessionId(scope, end.id)}@${end.seq - 1}`);
+        // BOTH spellings: a new run's ref carries the session's own id — the row's key since ids
+        // became assigned (migration 15) — while a legacy journal named the bare authored name and
+        // the row carried the run namespace in front of it.
+        if (end !== undefined) {
+          listed.add(`${end.id}@${end.seq - 1}`);
+          listed.add(`${scopedSessionId(scope, end.id)}@${end.seq - 1}`);
+        }
       }
     }
     if (started.size === 0) continue;

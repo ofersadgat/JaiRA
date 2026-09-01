@@ -65,6 +65,7 @@ import {
   type StoredRecord,
 } from "@declarative-ai/exec";
 import { entriesOfMessages } from "@declarative-ai/llm";
+import { uuidv7 } from "@declarative-ai/hw";
 import type { JairaDb } from "./db";
 import { dehydrate, hydrate, release } from "./blobStore";
 import { messagesOfRecord } from "./recordMessages";
@@ -149,49 +150,42 @@ interface Row {
 /**
  * Which RUN a store's conversations belong to.
  *
- * Not merely a tag for finding them later — it namespaces them, and historically it had to: session
- * ids were instance-scoped (`#i2`) over counter ids that restarted at 1 on every run, so two runs of
- * one workflow named their conversations identically. That cost nothing while the store died with
- * the run; a durable one made run 2 continue run 1's conversation, read its whole transcript back as
- * a preamble, and store the result as its own — which compounds, and took the test suite out of
- * memory.
+ * What the scope does NOW (migration 15): it stamps the RECORDS (`task_id`/`run_id` on every row,
+ * which is what pruning and per-run reads key on), and its task half scopes the NAME ALIASES — an
+ * authored `session: "planning"` resolves through `session_names(task_id, name)` to an assigned
+ * session id, run-free, so a resumed run's `planning` IS the conversation an earlier run created.
  *
- * Instance ids are durable UUIDs now, so the collision the prefix guards against cannot recur for
- * new runs — but AUTHORED names (`session: "planning"`) still repeat across runs, legacy rows still
- * hold counter-derived ids, and the prefix is the on-disk key of every existing row. It stays until
- * sessions get assigned ids of their own (Identity and Resume §07 step 3), which is also what will
- * let a resumed run continue a conversation an earlier run created.
- *
- * The scope is part of the key. Ids stay opaque and unprefixed to everything outside this class;
- * the mapping happens at the SQL boundary.
+ * What it no longer does is namespace session ids. Historically it had to: ids were derived from
+ * names and instance counters, two runs named their conversations identically, and the `task/run/`
+ * prefix that stopped the collision also made the intended continuation impossible (Identity and
+ * Resume §01). Ids are assigned now — minted once, opaque, never parsed — and the prefix survives
+ * only as {@link k}'s legacy twin lookup over conversations recorded before the change.
  */
 export interface SessionScope {
   taskId?: string;
   runId?: number;
 }
 
-/**
- * A session name as it is actually STORED — namespaced by the run that made it.
- *
- * Exported because two readers need it and a second copy of the rule is a join that silently returns
- * nothing: the store keys every row this way, and the replay index has to resolve a journal's
- * `sessionRef` (which carries the bare authored name) to the same string. A fork carries its lineage
- * in the name (`main[0:14]/b`), so prefixing is all there is to it either way.
- */
 const log = createLogger("jaira.persistence.sessions");
 
+/**
+ * LEGACY: the run-namespaced spelling a pre-migration-15 store keyed every session by.
+ *
+ * Nothing writes this any more — session ids are assigned, and an authored name is a task-scoped
+ * alias. It survives because history was written this way: {@link k}'s twin lookup, the replay
+ * index's fallback for old journals, and `interruptedSessions`' second set key all use it to find
+ * rows recorded before the change.
+ */
 export function scopedSessionId(scope: SessionScope, id: string): string {
   const { taskId, runId } = scope;
   return taskId === undefined && runId === undefined ? id : `${taskId ?? ""}/${runId ?? ""}/${id}`;
 }
 
 /**
- * The inverse — the id as an AUTHOR wrote it, with the run namespace taken back off.
+ * LEGACY, the inverse — a pre-migration-15 stored id with the run namespace taken back off.
  *
- * A stored `session_id` carries the scope so two runs of one workflow do not share a conversation
- * (`SessionScope`). Everything outside the store names a session the way the workflow file does, so a
- * reader that surfaces one has to undo it. An id that does not carry this scope's prefix is returned
- * unchanged: an unscoped store stores bare ids, and so did every row written before scoping existed.
+ * An assigned id carries no prefix and passes through unchanged, which is every id written since
+ * the change; only rows recorded under the old spelling are affected.
  */
 export function bareSessionId(scope: SessionScope, id: string): string {
   const { taskId, runId } = scope;
@@ -296,7 +290,11 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
 
   resolve(request: SessionRequest): ResolvedSession<JsonValue> {
     const asked = request.ref !== undefined ? split(request.ref) : undefined;
-    let id = asked?.[0] ?? this.mint(request.seed);
+    // What the caller WROTE resolves to the session's own id here — an authored name or the
+    // engine's fresh key is an ALIAS, task-scoped and run-free, which is what lets a resumed run's
+    // `planning` be the conversation an earlier run created (Identity and Resume §01/§07 step 3).
+    // Everything below this line speaks real session ids.
+    let id = asked !== undefined ? this.sessionIdOf(asked[0]) : this.mint(request.seed);
     if (asked === undefined) this.branch(id, { cursor: 0 });
     let seq = asked?.[1] ?? this.head(id);
     let mode: "append" | "fork" = "append";
@@ -333,7 +331,8 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   }
 
   fork(ref: string, seed?: string): string {
-    const [id, seq] = split(ref);
+    const [name, seq] = split(ref);
+    const id = this.existingSessionOf(name) ?? name;
     const forked = this.branchFrom(id, seq ?? this.head(id), seed);
     return join(forked, this.head(forked));
   }
@@ -350,7 +349,8 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   }
 
   messages(ref: string): JsonValue[] {
-    const [id, seq] = split(ref);
+    const [name, seq] = split(ref);
+    const id = this.existingSessionOf(name) ?? name;
     return this.materialize(id, seq ?? this.readHead(id));
   }
 
@@ -639,7 +639,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   }
 
   bySession(session: string, upTo?: number): StoredRecord[] {
-    return this.rowsOf(session, upTo).map((row) => ({
+    return this.rowsOf(this.existingSessionOf(session) ?? session, upTo).map((row) => ({
       id: row.recordId,
       source: undefined as never,
       startMs: 0,
@@ -655,7 +655,8 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    *  Rows carry `status`: an `open` row's value is a streamed PARTIAL, and a caller that treats it
    *  as a settled turn is making the mistake the field exists to prevent. */
   transcript(ref: string): Row[] {
-    const [id, seq] = split(ref);
+    const [name, seq] = split(ref);
+    const id = this.existingSessionOf(name) ?? name;
     const out: Row[] = [];
     for (const [branch, bound] of this.chain(id, seq ?? this.readHead(id))) {
       const start = this.cursorOf(branch);
@@ -684,7 +685,8 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * answered for these by exactly the same code that answers it for the path itself.
    */
   forks(ref: string): Array<{ at: { sessionId: string; seq: number }; taken: string; left: Array<{ sessionId: string; rows: Row[] }> }> {
-    const [id, seq] = split(ref);
+    const [name, seq] = split(ref);
+    const id = this.existingSessionOf(name) ?? name;
     const chain = this.chain(id, seq ?? this.readHead(id));
     const out: Array<{ at: { sessionId: string; seq: number }; taken: string; left: Array<{ sessionId: string; rows: Row[] }> }> = [];
     for (const [i, entry] of chain.entries()) {
@@ -721,7 +723,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * is paid for until one branches.
    */
   lineageOf(id: string): { parent: string; at: number } | undefined {
-    const branch = this.branchOf(id);
+    const branch = this.branchOf(this.existingSessionOf(id) ?? id);
     return branch?.parent === undefined ? undefined : { parent: branch.parent, at: branch.cursor };
   }
 
@@ -737,7 +739,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
 
   /** One record, by the position it claimed. What a state's `sessionRef` resolves to. */
   at(sessionId: string, seq: number): Row | undefined {
-    return this.rowsOf(sessionId).find((row) => row.seq === seq);
+    return this.rowsOf(this.existingSessionOf(sessionId) ?? sessionId).find((row) => row.seq === seq);
   }
 
   /**
@@ -1069,7 +1071,8 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   }
 
   private derive(ref: string, word: string, messages: readonly JsonValue[]): string {
-    const [id] = split(ref);
+    const [name] = split(ref);
+    const id = this.existingSessionOf(name) ?? name;
     // A distinct conversation, so the origin keeps meaning exactly what every ref into it meant.
     const derived = `${id}~${word}${++this.minted}`;
     this.branch(derived, { cursor: 0 });
@@ -1114,19 +1117,81 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     return join(derived, 1);
   }
 
-  private mint(seed: string | undefined): string {
-    return seed !== undefined ? `s_${seed}` : `s_${++this.minted}`;
+  /**
+   * The session a REF-part names — the alias resolution every `resolve` goes through.
+   *
+   * Three answers, in order of authority. A string that already IS a session id (a ref carried
+   * through data flow, a position read back off a record) resolves to itself. A name with an alias
+   * — task-scoped, run-free — resolves to the session it was first given, which is what makes a
+   * resumed run's `planning` the same conversation across runs. A name with neither is NEW: a
+   * session is minted (UUIDv7 — assigned, opaque, never parsed) and the name becomes its alias.
+   *
+   * The one legacy case: a conversation recorded before ids were assigned sits under the run-scoped
+   * spelling (`task/run/name`). It resolves through {@link k}'s legacy twin lookup on the reads that
+   * carry old refs, not here — a NEW resolve of an old name starts a new conversation, exactly as
+   * the run-scoping always forced it to.
+   */
+  private sessionIdOf(ref: string): string {
+    const existing = this.existingSessionOf(ref);
+    if (existing !== undefined) return existing;
+    const id = uuidv7(Date.now());
+    this.db
+      .transaction(() => {
+        this.db.prepare(`INSERT INTO sessions (id, parent, cursor, created_at) VALUES (?, NULL, 0, ?)`).run(id, Date.now());
+        this.db
+          .prepare(`INSERT INTO session_names (task_id, name, session_id) VALUES (?, ?, ?)`)
+          .run(this.scope.taskId ?? "", ref, id);
+      })
+      .immediate();
+    this.logSession(id);
+    this.log?.append({ kind: "name", row: { task_id: this.scope.taskId ?? "", name: ref, session_id: id } });
+    return id;
   }
 
   /**
-   * A session id as this store keys it — namespaced by the run that owns it.
+   * The session a ref-part names, when one exists — {@link sessionIdOf} without the mint, which is
+   * what every READ wants: a transcript asked for by an authored name must find the conversation
+   * the alias points at, and an unknown name reads as the empty conversation it is rather than
+   * minting one as a side effect of looking.
+   */
+  private existingSessionOf(ref: string): string | undefined {
+    if (this.hasSession(ref)) return ref;
+    const alias = this.db
+      .prepare(`SELECT session_id FROM session_names WHERE task_id = ? AND name = ?`)
+      .get(this.scope.taskId ?? "", ref) as { session_id: string } | undefined;
+    if (alias !== undefined) return alias.session_id;
+    // The legacy spelling last: a conversation recorded before ids were assigned sits under the
+    // run-scoped id, and this scope's own rows keep resolving — run-scoped, exactly as they were
+    // written, which is also why a LATER run of a legacy task starts fresh rather than continuing.
+    const scoped = scopedSessionId(this.scope, ref);
+    if (scoped !== ref && this.hasSession(scoped)) return scoped;
+    return undefined;
+  }
+
+  private hasSession(id: string): boolean {
+    return this.db.prepare(`SELECT 1 FROM sessions WHERE id = ?`).get(id) !== undefined;
+  }
+
+  private mint(seed: string | undefined): string {
+    // SEEDED mints stay deterministic — a fork's seed embeds its parent's id, which is unique now,
+    // so determinism costs no collisions and keeps "two forks sharing a seed share an id", the
+    // property retries lean on. An UNSEEDED mint is assigned: the old counter restarted with the
+    // store, which two processes could race.
+    return seed !== undefined ? `s_${seed}` : uuidv7(Date.now());
+  }
+
+  /**
+   * A session id as this store KEYS it — the id itself, since ids became assigned.
    *
-   * Applied at the SQL boundary and nowhere else, so every id this class hands back is the plain one
-   * the engine stated. A store with no scope keys by the bare id, which is what a read of a single
-   * run's conversations wants once it has narrowed to that run.
+   * The one exception is history: a conversation recorded before migration 15 sits under the
+   * run-scoped spelling (`task/run/name`), and a read arriving with the bare name still has to find
+   * it. The twin lookup answers per id, at the SQL boundary and nowhere else — a new id's scoped
+   * spelling never exists as a row, so everything minted from now on keys by itself.
    */
   private k(id: string): string {
-    return scopedSessionId(this.scope, id);
+    const scoped = scopedSessionId(this.scope, id);
+    if (scoped !== id && this.hasSession(scoped)) return scoped;
+    return id;
   }
 
   private branch(id: string, branch: Branch): void {
