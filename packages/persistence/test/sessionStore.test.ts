@@ -138,13 +138,28 @@ describe.each(BUILDERS)("%s — the shared session semantics", (_name, build) =>
     const store = build();
     const at = await store.resolve({ ref: "handled" });
     const p1 = await store.append({ id: "p1", source: undefined as never, session: at.at, startMs: 0 });
-    await store.finish(p1, { sessionOutcome: { messages: [turn("hi")], providerSessionId: "prov-1" } });
+    await store.finish(p1, { sessionOutcome: { messages: [turn("hi")], providerSessionId: "prov-1", provider: "test" } });
 
     // An append resumes the handle the conversation currently sits on…
     expect((await store.resolve({ ref: "handled" })).providerSessionId).toBe("prov-1");
     // …and a resolve that BRANCHES gets none, because two branches sharing one remote session would
     // be two conversations writing into the same place.
     expect((await store.resolve({ ref: "handled", fork: true })).providerSessionId).toBeUndefined();
+  });
+
+  it("replays legacy records whose handles have no owning provider", async () => {
+    const store = build();
+    const at = await store.resolve({ ref: "legacy" });
+    const record = await store.append({ id: "legacy-1", source: undefined as never, session: at.at, startMs: 0 });
+
+    // A record written before session ownership was tracked may still carry an opaque handle. Its
+    // transcript remains useful, but the handle cannot establish a provider-bound native resume.
+    await store.finish(record, { sessionOutcome: { messages: [turn("one")], providerSessionId: "old-handle" } });
+
+    const resumed = await store.resolve({ ref: "legacy" });
+    expect(resumed.providerSessionId).toBeUndefined();
+    expect(resumed.provider).toBeUndefined();
+    expect(await resumed.messages()).toEqual([turn("one")]);
   });
 
   /**
@@ -159,10 +174,10 @@ describe.each(BUILDERS)("%s — the shared session semantics", (_name, build) =>
     const store = build();
     const first = await store.resolve({ ref: "moved" });
     const r1 = await store.append({ id: "m1", source: undefined as never, session: first.at, startMs: 0 });
-    await store.finish(r1, { sessionOutcome: { messages: [turn("one")], providerSessionId: "prov-1" } });
+    await store.finish(r1, { sessionOutcome: { messages: [turn("one")], providerSessionId: "prov-1", provider: "test" } });
     const second = await store.resolve({ ref: "moved" });
     const r2 = await store.append({ id: "m2", source: undefined as never, session: second.at, startMs: 0 });
-    await store.finish(r2, { sessionOutcome: { messages: [turn("two")], providerSessionId: "prov-1" } });
+    await store.finish(r2, { sessionOutcome: { messages: [turn("two")], providerSessionId: "prov-1", provider: "test" } });
 
     // At the head, resuming is legal.
     expect((await store.resolve({ ref: "moved" })).providerSessionId).toBe("prov-1");
@@ -183,7 +198,7 @@ describe.each(BUILDERS)("%s — the shared session semantics", (_name, build) =>
     const store = build();
     const at = await store.resolve({ ref: "branched" });
     const r1 = await store.append({ id: "b1", source: undefined as never, session: at.at, startMs: 0 });
-    await store.finish(r1, { sessionOutcome: { messages: [turn("one")], providerSessionId: "prov-1" } });
+    await store.finish(r1, { sessionOutcome: { messages: [turn("one")], providerSessionId: "prov-1", provider: "test" } });
 
     const forked = await store.fork("branched");
     const branch = await store.resolve({ ref: forked });
@@ -191,7 +206,7 @@ describe.each(BUILDERS)("%s — the shared session semantics", (_name, build) =>
     expect(branch.providerSessionId).toBeUndefined();
     // …but the parent's handle is offered as what to branch FROM, on its own field, so an adapter that
     // can copy a session server-side gets the free move and one that cannot never sees it.
-    expect(branch.forkFrom).toEqual({ handle: "prov-1" });
+    expect(branch.forkFrom).toEqual({ handle: "prov-1", provider: "test" });
     // The prefix still reads through — a branch is its parent's records up to the cursor.
     expect(await store.messages(forked)).toEqual([turn("one")]);
   });
@@ -214,29 +229,29 @@ describe.each(BUILDERS)("%s — the shared session semantics", (_name, build) =>
     const withIds = (uuid: string) => ({ value: { entries: [{ kind: "message", role: "assistant", content: "x", provider: "test", uuid }] } }) as never;
     const first = await store.resolve({ ref: "cut" });
     const r1 = await store.append({ id: "k1", source: undefined as never, session: first.at, startMs: 0 });
-    await store.finish(r1, { result: withIds("msg-1"), sessionOutcome: { providerSessionId: "prov-1" } });
+    await store.finish(r1, { result: withIds("msg-1"), sessionOutcome: { providerSessionId: "prov-1", provider: "test" } });
     const second = await store.resolve({ ref: "cut" });
     const r2 = await store.append({ id: "k2", source: undefined as never, session: second.at, startMs: 0 });
-    await store.finish(r2, { result: withIds("msg-2"), sessionOutcome: { providerSessionId: "prov-1" } });
+    await store.finish(r2, { result: withIds("msg-2"), sessionOutcome: { providerSessionId: "prov-1", provider: "test" } });
 
     // At the tip: a plain copy reproduces the branch, so there is nothing to cut.
-    expect(await store.resolve({ ref: await store.fork("cut") })).toMatchObject({ forkFrom: { handle: "prov-1" } });
+    expect(await store.resolve({ ref: await store.fork("cut") })).toMatchObject({ forkFrom: { handle: "prov-1", provider: "test" } });
     // Behind it: the copy has to stop at the last message the branch inherits.
-    expect(await store.resolve({ ref: await store.fork("cut@1") })).toMatchObject({ forkFrom: { handle: "prov-1", at: "msg-1" } });
+    expect(await store.resolve({ ref: await store.fork("cut@1") })).toMatchObject({ forkFrom: { handle: "prov-1", provider: "test", at: "msg-1" } });
   });
 
   it("offers no fork source behind the tip when nothing can name the cut", async () => {
     const store = build();
     const first = await store.resolve({ ref: "raced" });
     const r1 = await store.append({ id: "x1", source: undefined as never, session: first.at, startMs: 0 });
-    await store.finish(r1, { sessionOutcome: { messages: [turn("one")], providerSessionId: "prov-1" } });
+    await store.finish(r1, { sessionOutcome: { messages: [turn("one")], providerSessionId: "prov-1", provider: "test" } });
     const second = await store.resolve({ ref: "raced" });
     const r2 = await store.append({ id: "x2", source: undefined as never, session: second.at, startMs: 0 });
-    await store.finish(r2, { sessionOutcome: { messages: [turn("two")], providerSessionId: "prov-1" } });
+    await store.finish(r2, { sessionOutcome: { messages: [turn("two")], providerSessionId: "prov-1", provider: "test" } });
 
     // Branching at the TIP: copying the remote gives exactly this branch's prefix, uncut.
     const atTip = await store.resolve({ ref: await store.fork("raced") });
-    expect(atTip.forkFrom).toEqual({ handle: "prov-1" });
+    expect(atTip.forkFrom).toEqual({ handle: "prov-1", provider: "test" });
 
     // Branching one back: the remote holds a turn this branch does not, so there is nothing to copy.
     const behind = await store.resolve({ ref: await store.fork("raced@1") });
@@ -456,14 +471,18 @@ describe("assume the append, correct from what comes back", () => {
   it("moves a record to a branch when the call reports a remote it was not given", () => {
     const s = new SqliteSessionStore(db, { taskId: "t-div" });
     const first = s.resolve({ ref: "chat" });
+    // WITH its provider, here and in every settle below: a handle whose owner is unnamed is not a
+    // resume identity and the store keeps none (Identity and Resume §03). The dispatch seam fills
+    // this in for an executor that reports only a handle; a test calling `finish` directly is the
+    // executor, and says the pair itself.
     s.finish(s.append({ id: "c1", source: undefined as never, session: first.at, startMs: 1 }), {
-      sessionOutcome: { messages: [turn("one")] as never, providerSessionId: "P1" },
+      sessionOutcome: { messages: [turn("one")] as never, providerSessionId: "P1", provider: "test" },
     });
 
     const second = s.resolve({ ref: "chat" });
     expect(second.providerSessionId).toBe("P1"); // the assumption the store hands over
     s.finish(s.append({ id: "c2", source: undefined as never, session: second.at, startMs: 2 }), {
-      sessionOutcome: { messages: [turn("two")] as never, providerSessionId: "P2" },
+      sessionOutcome: { messages: [turn("two")] as never, providerSessionId: "P2", provider: "test" },
     });
 
     // The trunk keeps only the turn that really happened in P1…
@@ -479,11 +498,11 @@ describe("assume the append, correct from what comes back", () => {
     const s = new SqliteSessionStore(db, { taskId: "t-same" });
     const first = s.resolve({ ref: "steady" });
     s.finish(s.append({ id: "s1", source: undefined as never, session: first.at, startMs: 1 }), {
-      sessionOutcome: { messages: [turn("one")] as never, providerSessionId: "P1" },
+      sessionOutcome: { messages: [turn("one")] as never, providerSessionId: "P1", provider: "test" },
     });
     const second = s.resolve({ ref: "steady" });
     s.finish(s.append({ id: "s2", source: undefined as never, session: second.at, startMs: 2 }), {
-      sessionOutcome: { messages: [turn("two")] as never, providerSessionId: "P1" },
+      sessionOutcome: { messages: [turn("two")] as never, providerSessionId: "P1", provider: "test" },
     });
 
     expect(s.messages("steady")).toEqual([turn("one"), turn("two")]);
@@ -557,9 +576,12 @@ describe("the migration runner", () => {
     try {
       const reader = new SqliteSessionStore(migrated, { taskId: "t1" }) as unknown as Store;
       expect(await reader.messages("old")).toEqual([turn("kept")]);
-      // The provider handle rode `external_id`; the migration carries it into its own column, which
-      // is what `handleAt` resumes from.
-      expect((await reader.resolve({ ref: "old" })).providerSessionId).toBe("prov-9");
+      // The provider handle rode `external_id` and the migration carries it into its own column —
+      // as EVIDENCE. It is not offered as a resume identity: the old shape recorded no provider, and
+      // half a pair names nothing a consumer may act on (Identity and Resume §03). The conversation
+      // still reads; the next call replays its prefix rather than resuming a handle it cannot
+      // attribute.
+      expect((await reader.resolve({ ref: "old" })).providerSessionId).toBeUndefined();
       // The turn row became a record whose request carries its seat (migration 14 folded the
       // position table it first landed in).
       expect(

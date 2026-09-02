@@ -174,6 +174,11 @@ function likeEscape(text: string): string {
   return text.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
+/** Regex source text from a literal — the twin lookup's other half, and {@link bareSessionId}'s. */
+function regexpEscape(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
  * LEGACY, read-only — a pre-migration-15 stored id (`task/run/name`) with the namespace taken off.
  *
@@ -305,18 +310,18 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // the same reason from the other side: two branches sharing one remote session would be two
     // conversations writing into the same place.
     //
-    // The SESSION'S OWN column first (Identity and Resume §03: the handle lives on the session,
-    // because it is only ever used at the head); the per-record walk stays as the answer for
-    // conversations recorded before the column existed.
-    const handle = mode === "append" && seq === this.head(id) ? (this.sessionHandle(id) ?? this.handleAt(id, seq)) : undefined;
+    // The SESSION'S OWN column holds the complete resume identity: the opaque provider handle and
+    // its owning provider. A row carrying only one of the two is not one — see `sessionHandle`.
+    const atHead = mode === "append" && seq === this.head(id);
+    const own = atHead ? this.sessionHandle(id) : undefined;
     // Nothing of our own to resume, but an ancestor has a remote: that is a branch POINT, not an
     // append target. Offered as `forkFrom` so only an adapter that can copy a session server-side
     // acts on it — see `ResolvedSession.forkFrom`.
-    const forkFrom = handle === undefined ? this.ancestorHandle(id) : undefined;
+    const forkFrom = own === undefined ? this.ancestorHandle(id) : undefined;
     return resolveSessionRef<JsonValue>(join(id, seq), {
       mode,
       at: { id, seq },
-      ...(handle !== undefined ? { providerSessionId: handle } : {}),
+      ...(own !== undefined ? { providerSessionId: own.handle, provider: own.provider } : {}),
       ...(forkFrom !== undefined ? { forkFrom } : {}),
       // Carried so a FORK does not need the original request back — see `ResolvedSession.seed`.
       ...(request.seed !== undefined ? { seed: request.seed } : {}),
@@ -467,7 +472,12 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * the invariant that keeps two branches out of one remote stream.
    */
   private stampSessionHandle(ref: RecordRef, handle: string | undefined, provider: string | undefined): void {
-    if (handle === undefined) return;
+    // The PAIR or nothing (Identity and Resume §03). A handle whose owner is unnamed cannot be
+    // resumed against — the same string on two providers names two different conversations, so a
+    // consumer offered one has no way to tell whether it may use it — and stamping it anyway wrote a
+    // resume target that reads as usable and is not. The call's transcript is still recorded; only
+    // the remote identity is withheld, and the next call replays the prefix instead.
+    if (handle === undefined || provider === undefined) return;
     const pos = this.positionOf(ref);
     if (pos === undefined) return;
     // "Nothing LIVE beyond it" rather than "exactly the head": an interrupted settle releases its
@@ -475,8 +485,8 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // resume continues from.
     if (pos.seq + 1 < this.head(pos.id)) return;
     this.db
-      .prepare(`UPDATE sessions SET provider_session_id = ?, provider = COALESCE(?, provider) WHERE id = ?`)
-      .run(handle, provider ?? null, this.k(pos.id));
+      .prepare(`UPDATE sessions SET provider_session_id = ?, provider = ? WHERE id = ?`)
+      .run(handle, provider, this.k(pos.id));
     this.logSession(this.k(pos.id));
   }
 
@@ -912,12 +922,17 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       }
       // Reopened, not re-inserted: the partial stays (it may be the only witness to turns already in
       // the remote stream), the error is cleared, and the original started_at keeps naming when this
-      // ask was first made. The UPDATE re-enters the claim index — a seat another live record took
-      // while this one was dead refuses here, and `append` reads that refusal as the fork signal,
-      // which is §08's degradation: the re-dispatch forks instead of needing a path of its own.
+      // ask was first made. The REQUEST is re-stated as this re-dispatch asked it — the identity
+      // cannot have changed (the id hashes the op and the scope, and it matched), but the SEAT can:
+      // a forked re-dispatch names a new one, and the claim index reads the seat off `request_json`,
+      // so keeping the dead ask would re-enter the OLD seat forever and spend the fork's one retry
+      // on the very conflict it was escaping. The UPDATE re-enters the claim index — a seat another
+      // live record took while this one was dead refuses here, and `append` reads that refusal as
+      // the fork signal, which is §08's degradation: the re-dispatch forks instead of needing a
+      // path of its own.
       this.db
-        .prepare(`UPDATE operation_records SET status = 'open', ended_at = NULL, error_json = NULL WHERE id = ?`)
-        .run(stub.id);
+        .prepare(`UPDATE operation_records SET status = 'open', ended_at = NULL, error_json = NULL, request_json = ? WHERE id = ?`)
+        .run(request, stub.id);
       return true;
     }
   }
@@ -950,12 +965,16 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     return chain;
   }
 
-  /** The conversation's current remote identity, off its own row — NULL for a fork until it earns one. */
-  private sessionHandle(id: string): string | undefined {
-    const row = this.db.prepare(`SELECT provider_session_id FROM sessions WHERE id = ?`).get(this.k(id)) as
-      | { provider_session_id: string | null }
+  /** The conversation's current remote identity, off its own row — NULL for a fork until it earns
+   *  one. The PAIR, because a bare handle is meaningless (Identity and Resume §03): the same string
+   *  on two providers names two different conversations, and the consumer refuses a foreign one.
+   *  Half a pair is therefore no identity at all, and reads as none. */
+  private sessionHandle(id: string): { handle: string; provider: string } | undefined {
+    const row = this.db.prepare(`SELECT provider_session_id, provider FROM sessions WHERE id = ?`).get(this.k(id)) as
+      | { provider_session_id: string | null; provider: string | null }
       | undefined;
-    return row?.provider_session_id ?? undefined;
+    if (row?.provider_session_id == null || row.provider === null) return undefined;
+    return { handle: row.provider_session_id, provider: row.provider };
   }
 
   /**
@@ -989,14 +1008,17 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     let bound = branch?.cursor ?? 0;
     while (at !== undefined) {
       const found = this.handleAt(at, bound);
-      if (found !== undefined) {
+      const provider = this.sessionHandle(at)?.provider;
+      // Both halves, for the same reason a resume needs both: an adapter may only copy a session it
+      // owns, so a source it cannot attribute is one it must not be offered.
+      if (found !== undefined && provider !== undefined) {
         // AT THE TIP, a plain copy reproduces this branch. Behind it, the copy has to be cut — and
         // naming the cut is the store's job, since only it knows which message the branch ends at.
         // A conversation whose entries carry no provider ids cannot be cut, so it offers no source
         // and the caller replays: correct, and the only honest answer.
-        if (bound === this.readHead(at)) return { handle: found };
+        if (bound === this.readHead(at)) return { handle: found, provider };
         const cut = this.messageIdAt(at, bound);
-        return cut === undefined ? undefined : { handle: found, at: cut };
+        return cut === undefined ? undefined : { handle: found, provider, at: cut };
       }
       branch = this.branchOf(at);
       if (branch?.parent === undefined) return undefined;
@@ -1179,22 +1201,30 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
    * spelling never exists as a row, so everything minted from now on keys by itself.
    */
   private k(id: string): string {
-    return this.legacyTwin(id) ?? id;
+    // An exactly-matching row IS the session — everything assigned since migration 15 keys by
+    // itself, and the PK probe spares those the twin scan the legacy fallback costs.
+    return this.hasSession(id) ? id : (this.legacyTwin(id) ?? id);
   }
 
   /**
-   * The run-scoped row a bare id was recorded under, when one exists — matched with the run segment
-   * as a wildcard (`task/%/id`), NEWEST first, because the runs table is gone and nothing knows the
-   * number any more. A new id's scoped spelling never exists as a row, so everything minted since
-   * migration 15 keys by itself and this answers nothing.
+   * The run-scoped row a bare id was recorded under, when one exists — NEWEST first, because the
+   * runs table is gone and nothing knows the number any more. A new id's scoped spelling never
+   * exists as a row, so everything minted since migration 15 keys by itself and this answers
+   * nothing.
+   *
+   * The run segment must be BARE DIGITS, which LIKE cannot say — its `%` crosses `/`, and a legacy
+   * FORK carries its lineage in the name (`main[0:14]/b`), so the pattern alone would resolve a
+   * new session named `b` into an unrelated fork's transcript. The LIKE narrows; the regex
+   * decides, stating the same digits-only run rule {@link bareSessionId}'s inverse does.
    */
   private legacyTwin(id: string): string | undefined {
     const taskId = this.scope.taskId;
     if (taskId === undefined) return undefined;
-    const row = this.db
-      .prepare(`SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\\' ORDER BY rowid DESC LIMIT 1`)
-      .get(`${likeEscape(taskId)}/%/${likeEscape(id)}`) as { id: string } | undefined;
-    return row?.id;
+    const rows = this.db
+      .prepare(`SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\\' ORDER BY rowid DESC`)
+      .all(`${likeEscape(taskId)}/%/${likeEscape(id)}`) as Array<{ id: string }>;
+    const twin = new RegExp(`^${regexpEscape(taskId)}/[0-9]+/${regexpEscape(id)}$`);
+    return rows.find((row) => twin.test(row.id))?.id;
   }
 
   private branch(id: string, branch: Branch): void {

@@ -136,8 +136,9 @@ describe("AppService.startTask (scripted)", () => {
     await until(() => finished(taskId), "the failing run to finish");
     expect(service.taskDetail(taskId).status).toBe("failed");
 
-    // A retry is a fresh run against the pinned snapshot.
-    await service.startTask({ taskId, fake: happyRules(), interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" }] } });
+    // A retry RESUMES the machine against the pinned snapshot — the failed state gets another go.
+    // A bare start of a previously-run task is the restart-in-place the lifecycle guard now refuses.
+    await service.resumeTask({ taskId, fake: happyRules(), interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" }] } });
     await until(() => pushes.filter((m) => m.type === "run:finished").length === 2, "the retry to finish");
     const detail = service.taskDetail(taskId);
     expect(detail.status).toBe("completed");

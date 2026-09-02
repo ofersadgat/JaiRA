@@ -150,7 +150,6 @@ describe("the load description", () => {
     expect(root.live).toBe(false);
     expect(root.outcome).toBe("success");
     expect(load.frontier).toEqual([]);
-    expect(load.forkedAt).toBeUndefined();
 
     // Occurrence and depth, both: the first two ticks were superseded by the re-entry, so only the
     // third is loaded — under its own occurrence, because the cleared entries still happened.
@@ -199,7 +198,6 @@ describe("the load description", () => {
     const ticks = flat(load.loaded).filter((n) => n.childKey === "tick");
     expect(ticks.map((n) => [n.occurrence, n.live])).toEqual([[1, true]]);
     expect(load.frontier.map((f) => addressKey(f.address))).toEqual(["loop#0/tick#1"]);
-    expect(load.forkedAt).toEqual(load.frontier[0]!.address);
   }, 30000);
 
   it("addresses the root as the empty address", async () => {

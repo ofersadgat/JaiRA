@@ -291,10 +291,22 @@ export interface TaskDetail {
  */
 export interface ResumePlan {
   taskId: string;
-  kind: "continue" | "retry" | "none";
+  /**
+   * What starting this task again would DO — the one answer every surface asks for.
+   *
+   *  - `continue` / `retry` — the machine is loaded and picked up where it stopped, under the same
+   *    task id. The two differ only in what is left: something in flight, or the state that failed.
+   *  - `fresh` — nothing is recorded, so the task simply STARTS, in place. It is what a queued task
+   *    is, and what a start that died before the engine journaled anything leaves behind: no tree,
+   *    no conversations, nothing a fresh walk could contaminate.
+   *  - `none` — it cannot be picked up and it cannot safely be walked again either (there is history,
+   *    and it is unreadable or unloadable), so the only honest offer is a COPY: a new task with the
+   *    same inputs. See `service.rerunTask`.
+   */
+  kind: "continue" | "retry" | "fresh" | "none";
   /** How many operations would be taken from the record rather than run again. */
   replayed: number;
-  /** Where it would pick up — for `retry`, the state that gets another go. Empty for `none`. */
+  /** Where it would pick up — for `retry`, the state that gets another go. Empty otherwise. */
   frontier: Array<{ stateId: string; stopped: "mid-operation" | "between-children" }>;
   /**
    * Why resuming is refused, when it is.

@@ -1735,13 +1735,12 @@ export function useApp() {
    * selection would file one task's words under another's instance ids.
    */
   const loadSessions = useCallback(
-    async (at: ReadonlyArray<{ runId?: number; instanceId: string }>) => {
+    async (at: ReadonlyArray<{ instanceId: string }>) => {
       const taskId = ref.current.selected;
       if (taskId === null) return;
       const scope = ref.current.selectedProject ?? undefined;
-      // Asked for BY RUN as well as by instance. An unscoped read resolves the id against the whole
-      // history and takes the last match, so a resumed task's panel came back holding whichever run
-      // wrote that id most recently — the right conversation under the wrong heading, silently.
+      // Asked for by INSTANCE, which is the whole address: a task is one machine and its instance
+      // ids are durable, so one id names one conversation for the task's whole life.
       const key = sessionKey;
       const wanted = at.filter((one) => ref.current.sessions[key(one)] === undefined);
       if (wanted.length === 0) return;
@@ -1751,7 +1750,6 @@ export function useApp() {
             const view = await invoke("session:view", {
               taskId,
               instanceId: one.instanceId,
-              ...(one.runId !== undefined ? { runId: one.runId } : {}),
               ...(scope !== undefined ? { project: scope } : {}),
             });
             return [key(one), view] as const;
@@ -2590,7 +2588,7 @@ export function useApp() {
       loadSession: (instanceId: string) => void loadSession(instanceId),
 
       /** Fetch every transcript a session-panelled conversation is about to draw. */
-      loadSessions: (at: ReadonlyArray<{ runId?: number; instanceId: string }>) => void loadSessions(at),
+      loadSessions: (at: ReadonlyArray<{ instanceId: string }>) => void loadSessions(at),
 
       /** Look at another state's conversation — clicking a row of the task's history. */
       showSession: (instanceId: string | null) => {

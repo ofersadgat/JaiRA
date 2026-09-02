@@ -282,11 +282,10 @@ function sideOf(
 /**
  * What a piece is remembered as when it is folded.
  *
- * Three parts, and each one is load-bearing. The RUN, because a legacy journal's counter ids repeat
- * across runs — `#i2` named a different state in every one of them. The SEQUENCE, because a state that called
- * twice is two pieces. And the SCOPE — the task — because the other two are not enough: a folded
- * tree stamps `runId` on every node, but a single-run projection leaves it absent, and two tasks
- * would then both remember a state as `:2:0` and fold each other's.
+ * Three parts, and each one is load-bearing. The INSTANCE, which names one execution of one state
+ * for the task's whole life. The SEQUENCE, because a state that called twice is two pieces. And the
+ * SCOPE — the task — because the other two are not enough on their own: this map outlives the
+ * selection, and two tasks would otherwise fold each other's pieces under one key.
  *
  * The alternative was a bucket per task, which is what `SHUT` ids are for. It loses to this by one
  * property: a task pruned from the database leaves its keys behind either way, and a single bucket

@@ -85,6 +85,7 @@ import { initialRunValues, runFieldsOf, runTargetOf, runValuesOf } from "./runFo
 import type { RunSurface } from "./runPanel";
 import { RunModeToggle, RunView, TaskContext } from "./runViews";
 import { Sidebar, type SidebarAct, type SidebarProject, type SidebarView } from "./sidebar";
+import { primaryAct } from "./taskAction";
 import { Splitter } from "./splitter";
 import { TaskAddressBar } from "./taskBar";
 import { nodeAt } from "./trail";
@@ -1169,6 +1170,26 @@ export default function App(): JSX.Element {
   };
 
   /**
+   * Running a task AGAIN — the one place that decides what "again" MEANS for it.
+   *
+   * Three different acts wear one button: a stopped machine is resumed under its own id, a task that
+   * recorded nothing simply starts, and one whose history cannot be picked up is copied into a fresh
+   * task. Which it is comes from the main process on `ResumePlan` (see {@link primaryAct}), because
+   * only it can see the journal — the status alone cannot tell a crash that journaled nothing from
+   * one that journaled a whole run, and choosing on status made the button offer a copy where a
+   * plain start was both legal and what the person meant.
+   *
+   * A task that is not the selected one has no plan here, and copying is what is legal for any task.
+   */
+  const startAgain = (taskId: string): void => {
+    const project = state.selectedProject ?? undefined;
+    const act = detail !== null && detail.taskId === taskId ? primaryAct(detail) : "rerun";
+    if (act === "resume") void actions.resumeTask(taskId, project);
+    else if (act === "start") void actions.startTask(taskId, undefined, project);
+    else void actions.rerunTask(taskId, project);
+  };
+
+  /**
    * Everything a file surface may need beyond the file itself.
    *
    * Assembled here, once, rather than threaded through {@link FilePanel}: the panel decides geometry
@@ -1221,8 +1242,10 @@ export default function App(): JSX.Element {
     onRunMode: setRunMode,
     onAnswer: waiting ? () => actions.select(waiting.taskId) : undefined,
     // The action, not the channel — re-running a finished task answers with a DIFFERENT task, and
-    // this is what moves the selection onto it. See `FileSurfaceContext.onRerun`.
-    onRerun: (taskId: string) => void actions.rerunTask(taskId, state.selectedProject ?? undefined),
+    // this is what moves the selection onto it. See `FileSurfaceContext.onRerun`. Routed through
+    // {@link primaryAct} so the strip's fallback button starts a task that recorded nothing in
+    // place, rather than copying one that has nothing to copy.
+    onRerun: (taskId: string) => void startAgain(taskId),
     onResume: (taskId: string) => void actions.resumeTask(taskId, state.selectedProject ?? undefined),
     onSaveConfig: actions.saveConfig,
     validateSchema: actions.validateSchema,
@@ -1692,9 +1715,7 @@ export default function App(): JSX.Element {
                     // In the project that HOLDS it. Clicking a shared workflow's run in the history
                     // section selects a task in JaiRA's own project, and starting or cancelling it
                     // against the open checkout would answer "unknown task".
-                    onStart={() =>
-                      detail ? actions.startTask(detail.taskId, undefined, state.selectedProject ?? undefined) : undefined
-                    }
+                    onStart={() => (detail ? startAgain(detail.taskId) : undefined)}
                     onCancel={() =>
                       detail ? actions.cancelTask(detail.taskId, state.selectedProject ?? undefined) : undefined
                     }
@@ -1709,9 +1730,7 @@ export default function App(): JSX.Element {
                     depth={state.trail.length}
                     onBack={() => actions.walkBackTo(state.trail.length - 2)}
                     onShowTask={actions.inspectTask}
-                    onStart={() =>
-                      detail ? actions.startTask(detail.taskId, undefined, state.selectedProject ?? undefined) : undefined
-                    }
+                    onStart={() => (detail ? startAgain(detail.taskId) : undefined)}
                     onCancel={() =>
                       detail ? actions.cancelTask(detail.taskId, state.selectedProject ?? undefined) : undefined
                     }
@@ -1910,7 +1929,7 @@ export default function App(): JSX.Element {
                     detail={detail}
                     stream={state.stream}
                     context={surfaces}
-                    onStart={() => actions.startTask(detail.taskId, undefined, state.selectedProject ?? undefined)}
+                    onStart={() => startAgain(detail.taskId)}
                     onCancel={() => actions.cancelTask(detail.taskId, state.selectedProject ?? undefined)}
                     onReviewChanges={() => actions.reviewChanges(detail.taskId, state.selectedProject ?? undefined)}
                     onOpenState={(stateId) => {

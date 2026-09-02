@@ -47,6 +47,7 @@
 import type { JsonValue } from "@declarative-ai/json";
 import { hashOperation, scopedOperationId, type Failure, type ResolvedValue } from "@declarative-ai/exec";
 import type { CallResult, LoadedInstance, WorkflowMetrics } from "@declarative-ai/hw";
+import { CHAT_INSTANCE_PREFIX } from "@jaira/runtime";
 import type { InstanceAddress } from "@jaira/shared";
 import { SqliteEventLog } from "./eventLog";
 import { hydrate } from "./blobStore";
@@ -89,8 +90,6 @@ export interface TaskLoad {
    * double-apply nobody asked for. Non-empty means resume is unsafe and the caller should say so.
    */
   unreadable: readonly { stateId: string; reason: string }[];
-  /** Where the continuing run's own work begins — the first frontier leaf, in tree order. */
-  forkedAt?: InstanceAddress;
   /** Why the task cannot be loaded at all, when it cannot — legacy history, or nothing recorded. */
   blocked?: string;
 }
@@ -184,6 +183,13 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
     const at = row.seq;
     switch (event.type) {
       case "instance.entered": {
+        // A hand-continued conversation journals a SYNTHETIC child (`chat:<host>`, key "ask") into
+        // the same stream — a person talking beside the machine, not the machine acting. It is not
+        // part of the loaded tree: folded in, a completed chat turn (whose event names no operation
+        // record) blocks resume as unreadable, and a stopped one revives into an uninvited dispatch
+        // of the host's own op. Skipping the entry here drops the whole chat quietly — its other
+        // events find no node — and deliberately does NOT advance the host.
+        if (event.instanceId.startsWith(CHAT_INSTANCE_PREFIX)) break;
         // Durable ids are UUIDs; a counter id ("5") predates them, collides across runs, and keys
         // nothing in the record store. Such history cannot be loaded — only re-run.
         if (!event.instanceId.includes("-")) legacy = true;
@@ -309,7 +315,6 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
     // Every dispatched sequence is BURNED whether or not its site is loaded — a fresh mint must
     // land above it, or two asks would compute one identity.
     nextSiteByInstance.set(row.instance_id, Math.max(nextSiteByInstance.get(row.instance_id) ?? 1, row.sequence + 1));
-    if (deferredOps.has(row.id)) continue;
     if (row.request_json === null) continue;
     let request: unknown;
     try {
@@ -324,6 +329,10 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
     // is a cost and never a collision.
     const { scope: _scope, session: _session, ...op } = request as Record<string, unknown>;
     const key = hashOperation(op as never);
+    // The deferred exclusion compares CONTENT keys: `call.waiting` stamps the bare hash (an event
+    // fires before any scope is claimed), while `row.id` is the scoped id — comparing those two
+    // spellings matched nothing, and recorded human answers loaded as memo hits.
+    if (deferredOps.has(key)) continue;
     const sites = sitesByInstance.get(row.instance_id);
     const site = [key, row.sequence] as const;
     if (sites === undefined) sitesByInstance.set(row.instance_id, [site]);
@@ -444,7 +453,6 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
 
   const rootLive = root.terminated === undefined || root.terminated.outcome !== "success";
   const loaded = emit(root, rootLive, 0, []);
-  const first = frontier[0];
   return {
     taskId,
     loaded,
@@ -452,7 +460,6 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
     loadedOps,
     frontier,
     unreadable,
-    ...(first !== undefined ? { forkedAt: first.address } : {}),
   };
 }
 

@@ -72,8 +72,11 @@ describe("a call that reports a remote it was not given", () => {
 
     // The trunk, sitting on P1.
     const first = store.resolve({ ref: "chat" });
+    // The PAIR: a handle whose owner is unnamed is not a resume identity and the store keeps none
+    // (Identity and Resume §03). `test` is what `providerOf("test/model")` reads off the op below,
+    // so the seeded trunk sits on the same provider the call about to run does.
     store.finish(store.append({ id: "seed", source: undefined as never, session: first.at, startMs: 1 }), {
-      sessionOutcome: { messages: [{ role: "assistant", content: "one" }] as never, providerSessionId: "P1" },
+      sessionOutcome: { messages: [{ role: "assistant", content: "one" }] as never, providerSessionId: "P1", provider: "test" },
     });
 
     // A call handed P1 that comes back saying it ran in P2.

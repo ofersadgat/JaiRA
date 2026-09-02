@@ -108,8 +108,8 @@ describe("the load description of a half-done run", () => {
     expect(b).toMatchObject({ id: "i-b", live: true });
     expect(b!.operation).toBeUndefined();
     expect(load.frontier.map((f) => [f.stateId, f.cause])).toEqual([["root/b", "interrupted"]]);
-    // Where the continuing run's own work begins — known now, not reconstructed afterwards.
-    expect(load.forkedAt).toEqual([{ childKey: "b", occurrence: 0 }]);
+    // Where the continuing run's own work begins, in tree order — the address a reader walks to it by.
+    expect(load.frontier.map((f) => f.address)).toEqual([[{ childKey: "b", occurrence: 0 }]]);
     expect(load.loadedOps).toBe(1);
   });
 
@@ -286,7 +286,9 @@ describe("recorded call sites and answers", () => {
     const key = hashOperation(callOp as never);
     const sid = scopedOperationId(key, { instanceId: "i-root", sequence: 1 });
     record(sid, { moved: true }, { ...callOp, scope: { instanceId: "i-root", sequence: 1 } });
-    journal("i-root", { type: "call.waiting", instanceId: "i-root", stateId: "root", call: "on_user_event", operationId: sid });
+    // The event stamps the CONTENT hash, not the scoped record id — it fires before any scope is
+    // claimed, which is exactly what the fold's exclusion has to match against.
+    journal("i-root", { type: "call.waiting", instanceId: "i-root", stateId: "root", call: "on_user_event", operationId: key });
 
     const load = buildTaskLoad(project, "t", SHAPE);
     // Serving "did the user drag this card" into a resumed run would replay a person's decision.

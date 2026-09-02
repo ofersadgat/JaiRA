@@ -15,9 +15,12 @@ import {
   beginTaskRun,
   boardView,
   browseWorkflows,
+  buildTaskLoad,
   cancelTask,
   createTask,
   finishTaskRun,
+  loadSnapshot,
+  releaseUnconsumedFailures,
   initProject,
   lintErrors,
   openProject,
@@ -31,9 +34,11 @@ import {
   removeWorktree,
   runCauses,
   RunOwner,
+  sessionStoreFor,
   standaloneLoadOptions,
   workflowDigest,
   type Project,
+  type TaskLoad,
   type WorkflowBrowser,
 } from "@jaira/persistence";
 import {
@@ -890,7 +895,44 @@ async function runTaskNow(
     if (project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
       throw new Error(`task '${taskId}' is already running in another process`);
     }
-    const started = await beginTaskRunAsking(project, taskId, { functions: probe.functions }, gate, io);
+    // A previously-run task is CONTINUED, not restarted in place (Identity and Resume §04/§05):
+    // session resolution is task-scoped and run-free, so a fresh walk over history would read the
+    // last stretch's conversations back as preamble and continue its remote sessions. `task start`
+    // on one therefore LOADS the recorded machine — this is the CLI's resume — and `beginTaskRun`
+    // refuses the bare restart outright.
+    let resume: { loaded: NonNullable<TaskLoad["loaded"]>; answers: TaskLoad["answers"] } | undefined;
+    const runtime = project.runtime.get(taskId);
+    if (runtime !== undefined && runtime.status !== "queued" && runtime.snapshotHash !== undefined) {
+      // §05, before the fold reads the store: a failed call that consumed no provider sequence
+      // never happened remotely — deleting its record frees the identity and the seat, and the
+      // continuing run makes the call fresh. A cut call's record is kept and reopened.
+      releaseUnconsumedFailures(project, taskId);
+      const pinned = loadSnapshot(project.paths.snapshotsDir, runtime.snapshotHash);
+      const load = buildTaskLoad(project, taskId, pinned.states);
+      if (load.blocked !== undefined) {
+        throw new Error(`task '${taskId}' cannot be resumed: ${load.blocked}`);
+      }
+      // Nothing recorded means the start died before the engine journaled anything — nothing to
+      // load, and nothing a fresh walk could contaminate, so it falls through to an ordinary start.
+      if (load.loaded !== undefined) {
+        if (load.unreadable.length > 0) {
+          const first = load.unreadable[0]!;
+          throw new Error(
+            `task '${taskId}' cannot be resumed: ${load.unreadable.length} operation(s) have no readable record ` +
+              `(first: ${first.stateId} — ${first.reason}). Running it again would repeat them.`,
+          );
+        }
+        io.stderr(`resuming ${taskId}: ${load.loadedOps} operation(s) loaded\n`);
+        resume = { loaded: load.loaded, answers: load.answers };
+      }
+    }
+    const started = await beginTaskRunAsking(
+      project,
+      taskId,
+      { functions: probe.functions, ...(resume !== undefined ? { continues: true } : {}) },
+      gate,
+      io,
+    );
     // Artifact placement (DESIGN §7.6), assembled once and shared by the file tools
     // and the post-run sink so both put files in the same place.
     const artifacts = artifactWiring({
@@ -919,13 +961,17 @@ async function runTaskNow(
       onCancelRequested: () => stop.abort(),
     });
 
-    const { registry, prompt, session } = buildRunEnvironment(
+    const { registry, prompt } = buildRunEnvironment(
       started.bundle,
       project.config,
       wiring,
       { artifacts, store: project.artifacts, observer: owner.observer() },
       project.paths.projectDir,
     );
+    // The DURABLE conversation store, scoped to this task — the same wiring the app's runs get. A
+    // task run that wrote its records into a `MapSessionStore` dropped every conversation at exit,
+    // and left the journal's operation ids pointing at records a resume could never read back.
+    const session = sessionServicesFor({ inner: sessionStoreFor(project, { taskId }) });
     try {
       assertCapabilities(registry, started.bundle, project.config);
     } catch (e) {
@@ -950,6 +996,8 @@ async function runTaskNow(
       workspace: { root: workspace.root, ...(workspace.treeHash !== undefined ? { treeHash: workspace.treeHash } : {}) },
       // Merged: SIGINT here, or a cancel another process requested through the job.
       abortSignal: stop.signal,
+      // The loaded machine and its recorded answers, when this start continues a stopped task.
+      ...(resume !== undefined ? resume : {}),
     });
     const status = statusOfResult(result);
     // A state that RETURNS blob content (a prompt writing a plan) never touched the

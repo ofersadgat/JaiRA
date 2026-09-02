@@ -207,10 +207,11 @@ describe("a gate parked when the app closes", () => {
     await quitAndReopen();
     expect(service.pendingInteractions()).toHaveLength(1);
 
-    // A fresh run parks its OWN request for the same state. The row from the dead process would sit
-    // beside it as a second copy of one question, answerable only by resuming a task that is
-    // already running — so starting clears what it is about to re-ask.
-    await service.startTask({ taskId });
+    // The continuing run parks its OWN request for the same state. The row from the dead process
+    // would sit beside it as a second copy of one question, answerable only by resuming a task that
+    // is already running — so starting clears what it is about to re-ask. Resumed rather than
+    // started: a task with history no longer restarts in place (the conversation-preamble guard).
+    await service.resumeTask({ taskId });
     const fresh = await nextGate();
     expect(service.pendingInteractions()).toHaveLength(1);
     expect(fresh.resumes).toBeUndefined();

@@ -268,9 +268,17 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
  * Normalise the "your own default" placeholder for one agent route.
  *
  * All that survives of the old per-agent model block, and it is not configuration — it is a fix.
- * `<agent>/default` is a NAMED model id, so the transport's own placeholder branch never fires and it
- * dutifully forwards the word: `claude` is asked for `--model default`, which no CLI knows. That is
- * the zero-configuration path a fresh machine produces, so it has to work.
+ * `<agent>/default` is a named route default, not a provider-native model: the transport maps it to
+ * no `--model` flag, which is the zero-configuration path a fresh machine produces and so has to
+ * work. The ROUTE is kept in front of it — rather than handing over the transport's own generic
+ * placeholder — because a conversation's remote identity is a handle PAIRED with the provider that
+ * minted it, and that provider is read off this id: collapsing every agent to one name would let a
+ * codex call be offered a claude handle.
+ *
+ * It is a request, not a record. What a settled call carries is the model the agent reports it
+ * actually used (`AgentExecutor.resolvedModel` substitutes it), because a persisted model id is read
+ * back as a fact — by a price table, by a session's provider half, by a person reading the record —
+ * and `default` answers all three wrong.
  *
  * The limits that used to live here moved to the executor tree's route node, which is what they are
  * about: a limit on a route, not on the binary underneath it.
@@ -290,9 +298,7 @@ export function normaliseAgentModel(name: string, inner: PromptRoute): PromptRou
       const asked = typeof config["model"] === "string" ? config["model"] : "";
       const bare = asked.startsWith(prefix) ? asked.slice(prefix.length) : asked;
       if (bare !== "" && bare !== "default") return executor.start(op, ctx);
-      // `agent/default` rather than `<name>/default`: the transport maps its own placeholder to "no
-      // model", where a named `default` reaches the binary as a model called `default`.
-      return executor.start({ ...op, config: { ...config, model: AGENT_DEFAULT_MODEL } as JsonValue }, ctx);
+      return executor.start({ ...op, config: { ...config, model: `${name}/default` } as JsonValue }, ctx);
     },
   };
 }

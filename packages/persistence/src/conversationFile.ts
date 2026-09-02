@@ -389,19 +389,32 @@ export function replayConversations(db: JairaDb, dir: string): number | undefine
   // '<id>~~<run>.<attempt>'. Computable from either table's columns, which is what lets a position
   // line name the same id its record line got. A current-format line has no attempt and passes
   // through untouched  its id is already unique.
+  // The rank carries the TASK too, as tiebreak and as suffix: a content hash collides across tasks
+  // exactly as it does across runs (two tasks running one workflow hash identical requests), the
+  // rebuilt table's id is a primary key, and the DB migration's disambiguator — the old rowid,
+  // "unique by construction" — has no counterpart in a file. (task, run, attempt) is the file's own
+  // unique key, so folding all three in restores the same construction.
   const newest = new Map();
-  const rankOf = (row: { run_id?: number | null; attempt?: number }): [number, number] => [row.run_id ?? -1, row.attempt ?? 1];
+  const rankOf = (row: { task_id?: string | null; run_id?: number | null; attempt?: number }): [number, number, string] => [
+    row.run_id ?? -1,
+    row.attempt ?? 1,
+    row.task_id ?? "",
+  ];
+  const outranks = (rank: [number, number, string], seen: [number, number, string]): boolean =>
+    rank[0] !== seen[0] ? rank[0] > seen[0] : rank[1] !== seen[1] ? rank[1] > seen[1] : rank[2] > seen[2];
   for (const row of records.values()) {
     if (row.attempt === undefined) continue;
     const rank = rankOf(row);
-    const seen = newest.get(row.record_id) as [number, number] | undefined;
-    if (seen === undefined || rank[0] > seen[0] || (rank[0] === seen[0] && rank[1] > seen[1])) newest.set(row.record_id, rank);
+    const seen = newest.get(row.record_id) as [number, number, string] | undefined;
+    if (seen === undefined || outranks(rank, seen)) newest.set(row.record_id, rank);
   }
-  const idOf = (row: { record_id: string; run_id?: number | null; attempt?: number }): string => {
+  const idOf = (row: { record_id: string; task_id?: string | null; run_id?: number | null; attempt?: number }): string => {
     if (row.attempt === undefined) return row.record_id;
-    const [run, attempt] = rankOf(row);
-    const top = newest.get(row.record_id) as [number, number] | undefined;
-    return top !== undefined && (top[0] !== run || top[1] !== attempt) ? `${row.record_id}~~${run}.${attempt}` : row.record_id;
+    const [run, attempt, task] = rankOf(row);
+    const top = newest.get(row.record_id) as [number, number, string] | undefined;
+    return top !== undefined && (top[0] !== run || top[1] !== attempt || top[2] !== task)
+      ? `${row.record_id}~~${task}.${run}.${attempt}`
+      : row.record_id;
   };
 
   // LEGACY position lines fold into their record's request — where a position lives now (migration

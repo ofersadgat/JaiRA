@@ -9,6 +9,7 @@ import type { JSX, ReactNode } from "react";
 import type { ConversationView, InstanceNode, TaskDetail } from "@jaira/shared/browser";
 import { Badge } from "./board";
 import { RunIndex } from "./runIndex";
+import { stoppedAction } from "./taskAction";
 
 /**
  * What a task IS: its name, where it came from, and the two buttons that operate it.
@@ -36,6 +37,7 @@ export function TaskHead({
   children?: ReactNode;
 }): JSX.Element {
   const deepest = detail.activePath[detail.activePath.length - 1];
+  const action = stoppedAction(detail);
   return (
     <header>
       <h2>
@@ -53,7 +55,13 @@ export function TaskHead({
         </div>
       ) : null}
       <div className="actions">
-        <button onClick={onStart}>{detail.runs.length > 0 ? "Re-run" : "Start"}</button>
+        {/* The verb the STRIP would use for this task, so the two buttons cannot promise different
+            things about one task — `stoppedAction` reads the main process's plan, which is also what
+            decides what the click does (see `App.startAgain`). It says nothing about a task that
+            finished or is still going, and a finished one is copied, which is what "Re-run" means. */}
+        <button onClick={onStart} title={action?.hint ?? ""}>
+          {action?.verb ?? (detail.runs.length > 0 ? "Re-run" : "Start")}
+        </button>
         <button onClick={onCancel} className="ghost">
           Cancel
         </button>

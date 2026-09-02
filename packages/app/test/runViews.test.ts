@@ -6,7 +6,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { IPC_CHANNELS, type InstanceNode, type ResumePlan } from "@jaira/shared/browser";
-import { instanceOf, runsByChild, stoppedAction } from "../src/renderer/runViews";
+import { instanceOf, runsByChild } from "../src/renderer/runViews";
+import { stoppedAction } from "../src/renderer/taskAction";
 
 const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
   status: "completed",
@@ -111,7 +112,7 @@ describe("stoppedAction", () => {
       resume: plan({ kind: "continue", replayed: 4, frontier: [{ stateId: "feature/build", stopped: "mid-operation" }] }),
     })!;
     expect(action.verb).toBe("Resume");
-    expect(action.resume).toBe(true);
+    expect(action.act).toBe("resume");
     // The hint names WHERE and HOW MUCH, because "resumes the run" is a claim anyone would believe
     // and neither number is one they could work out.
     expect(action.hint).toContain("build");
@@ -127,12 +128,26 @@ describe("stoppedAction", () => {
   });
 
   it("falls back to the restart verbs when there is nothing to resume", () => {
-    expect(stoppedAction({ status: "failed" })).toMatchObject({ verb: "Try again", resume: false });
-    expect(stoppedAction({ status: "interrupted" })).toMatchObject({ verb: "Start again", resume: false });
+    // No plan at all — a surface that did not ask. The conservative act is the copy, which is legal
+    // for any task; only a plan can license starting one in place.
+    expect(stoppedAction({ status: "failed" })).toMatchObject({ verb: "Try again", act: "rerun" });
+    expect(stoppedAction({ status: "interrupted" })).toMatchObject({ verb: "Start again", act: "rerun" });
     // A stopped task falls back like any other: this is the no-record case, not a statement that a
     // stop cannot be resumed. Given a plan it says Resume or Retry, same as the rest.
-    expect(stoppedAction({ status: "canceled" })).toMatchObject({ verb: "Start again", resume: false });
-    expect(stoppedAction({ status: "queued" })).toMatchObject({ verb: "Start", resume: false });
+    expect(stoppedAction({ status: "canceled" })).toMatchObject({ verb: "Start again", act: "rerun" });
+    expect(stoppedAction({ status: "queued" })).toMatchObject({ verb: "Start", act: "rerun" });
+  });
+
+  it("STARTS a task that recorded nothing, rather than copying one with nothing to copy", () => {
+    // The case the status alone cannot see: a start that died before the engine journaled anything
+    // leaves the task `interrupted` with an empty journal, and `beginTaskRun` deliberately lets that
+    // one begin in place. Deciding on status made the button mint a duplicate and strand the empty
+    // original; the plan is what tells them apart.
+    const action = stoppedAction({ status: "interrupted", resume: plan({ kind: "fresh" }) })!;
+    expect(action.act).toBe("start");
+    expect(action.verb).toBe("Start again");
+    // And a queued task is the same answer by the same route — it, too, has said nothing yet.
+    expect(stoppedAction({ status: "queued", resume: plan({ kind: "fresh" }) })).toMatchObject({ act: "start" });
   });
 
   it("says nothing at all for a run that finished or is still going", () => {
@@ -145,6 +160,7 @@ describe("stoppedAction", () => {
     // can still be started over, and that is a different decision from "resume is just missing".
     const action = stoppedAction({ status: "failed", resume: plan({ blocked: "no record for design's operation" }) })!;
     expect(action.verb).toBe("Try again");
+    expect(action.act).toBe("rerun");
     expect(action.hint).toContain("resuming is unavailable: no record for design's operation");
   });
 });

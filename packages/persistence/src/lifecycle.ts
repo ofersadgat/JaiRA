@@ -93,6 +93,15 @@ export interface BeginRunOptions {
    * "re-run after interruption" branch below, and a reader would never find it there.
    */
   bundle?: WorkflowBundle;
+  /**
+   * This start CONTINUES the recorded machine — the caller is loading it (Identity and Resume §04)
+   * rather than walking a fresh one. Required for a task that has run before: session resolution is
+   * task-scoped and run-free now, so a fresh walk over history would resolve its authored names
+   * straight into the last stretch's conversations — the whole transcript as preamble, continuing
+   * the old remote session — and grow a second parentless tree in one journal. Exactly the two
+   * shapes the runs collapse retired.
+   */
+  continues?: boolean;
   nowMs?: number;
 }
 
@@ -109,12 +118,42 @@ export interface BeginRunOptions {
  * the result in — cannot work: which modules a workflow reaches is only known once the bundle has
  * loaded, and the bundle loads here.
  */
+/**
+ * Has this task's machine said anything yet?
+ *
+ * The one question that decides whether a start is a RESTART. A task with no journal entered no
+ * instance and held no conversation, so walking it fresh contaminates nothing; one with a journal
+ * would resolve its authored session names into what it already said and continue those remote
+ * conversations with the whole transcript in front of the prompt.
+ *
+ * Exported because two callers must agree: `beginTaskRun` refuses the restart, and the app's
+ * `resumable` tells a person which button they are looking at. Asking it two ways is how the button
+ * comes to promise what the lifecycle then refuses.
+ */
+export function hasJournalHistory(project: Project, taskId: string): boolean {
+  return project.db.prepare(`SELECT 1 FROM state_machine_events WHERE task_id = ? LIMIT 1`).get(taskId) !== undefined;
+}
+
 export async function beginTaskRun(project: Project, taskId: string, options: BeginRunOptions = {}): Promise<StartedRun> {
   const nowMs = options.nowMs ?? Date.now();
   const runtime = project.runtime.get(taskId);
   if (!runtime) throw refusal(log, `unknown task '${taskId}'`, { taskId });
   if (!isStartableStatus(runtime.status)) {
     throw refusal(log, `task '${taskId}' is ${runtime.status}; only queued/interrupted/failed tasks can start`, { taskId });
+  }
+  // A task that ran before is not restarted in place — see {@link BeginRunOptions.continues}. The
+  // journal probe is what spares the one safe case: a start that died before the engine journaled
+  // anything left no tree and no conversations, and walking it fresh contaminates nothing.
+  if (runtime.status !== "queued" && options.continues !== true) {
+    if (hasJournalHistory(project, taskId)) {
+      throw refusal(
+        log,
+        `task '${taskId}' is ${runtime.status} and already has history — restarting it in place would ` +
+          `continue its old conversations with their whole transcript as preamble. Resume it to continue, ` +
+          `or re-run it as a new task.`,
+        { taskId },
+      );
+    }
   }
   const meta = project.tasks.read(taskId);
 

@@ -442,10 +442,15 @@ describe("normaliseAgentModel", () => {
     };
   }
 
-  it("turns the placeholder into the transport's own, not a model called default", () => {
+  it("keeps the ROUTE on the placeholder, so the session stays bound to the transport that ran", () => {
+    // `<route>/default` rather than the transport's generic `agent/default`: the provider half of a
+    // conversation's remote identity is read off this id, and every agent claiming `agent` would let
+    // one adapter be offered another's handle. It is a REQUEST, and never what gets recorded — the
+    // transport asks for no `--model` and the settle substitutes the model that actually answered
+    // (`AgentExecutor.resolvedModel`), so nothing downstream ever reads `default` as a fact.
     const { seen, executor } = spy();
     normaliseAgentModel("claude-cli", executor).start(promptOp("claude-cli/default") as never, {} as never);
-    expect(seen[0]?.["model"]).toBe("agent/default");
+    expect(seen[0]?.["model"]).toBe("claude-cli/default");
   });
 
   it("leaves a real model alone", () => {

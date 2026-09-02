@@ -14,7 +14,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { initProject, openProject } from "@jaira/persistence";
+import { beginTaskRun, initProject, openProject } from "@jaira/persistence";
 import { writeWorkflowFiles } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
 import type { PushMessage } from "@jaira/shared";
@@ -249,10 +249,35 @@ describe("what the strip is told", () => {
     expect(plan.replayed).toBe(2);
   }, 30000);
 
-  it("says there is nothing to resume for a task that never ran", async () => {
+  it("says a task that never ran simply STARTS — there is nothing to resume and nothing to copy", async () => {
+    // `fresh`, not `none`: both mean "no resume", and the difference is what the button then does.
+    // A task with no journal has said nothing, so beginning it in place is legal (`beginTaskRun`
+    // refuses only where there IS history) — where `none` sends the caller off to mint a copy.
     const { taskId } = service.createTask({ title: "Fresh", workflow: ROOT });
-    expect(service.resumable(taskId)).toMatchObject({ kind: "none", replayed: 0, frontier: [] });
+    expect(service.resumable(taskId)).toMatchObject({ kind: "fresh", replayed: 0, frontier: [] });
   });
+
+  it("says a task whose start died before it journaled anything starts IN PLACE", async () => {
+    // The narrow case `beginTaskRun`'s guard is careful to keep startable, and the one the status
+    // alone cannot see: `interrupted` with an empty journal. Nothing was entered and nothing was
+    // said, so there is no conversation for a fresh walk to continue and no reason to mint a copy —
+    // which is what a button choosing on status offered, stranding the empty original.
+    const { taskId } = service.createTask({ title: "Died early", workflow: ROOT });
+    const project = openProject(dir, { baseDir: testHome() });
+    try {
+      // Exactly what a process killed between the two calls leaves: the row open, the journal empty.
+      await beginTaskRun(project, taskId);
+      expect(project.events.list(taskId)).toEqual([]);
+      project.db.prepare(`UPDATE task_runtime SET status = 'interrupted' WHERE task_id = ?`).run(taskId);
+    } finally {
+      project.close();
+    }
+    expect(service.resumable(taskId)).toMatchObject({ kind: "fresh" });
+    // And the lifecycle agrees, which is the half a plan alone could get wrong: the button promises
+    // a plain start, so a plain start has to be accepted.
+    await service.startTask({ taskId, interactions: { confirm_action: [{ confirmed: true }] } });
+    expect(service.taskDetail(taskId).status).not.toBe("failed");
+  }, 30000);
 
   it("refuses to resume a completed task, and says so in the log as a WARNING", async () => {
     const taskId = await start();

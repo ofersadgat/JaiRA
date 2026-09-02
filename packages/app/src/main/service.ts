@@ -71,6 +71,7 @@ import {
   deleteTask,
   removeWorktree,
   finishTaskRun,
+  hasJournalHistory,
   historySize,
   initProject,
   isProject,
@@ -328,7 +329,6 @@ import type {
   WriteConfigRequest,
   WriteFileRequest,
   WriteWorkflowRequest,
-  InstanceAddress,
   InstanceNode,
   ChatBranch,
   ChatEditPoint,
@@ -2488,8 +2488,6 @@ export class AppService {
       loaded?: LoadedInstance;
       /** Recorded call answers by scoped id — the durable store behind hw's `answers` seam. */
       answers?: (scopedId: string) => CallResult | undefined;
-      /** Where this run's own work begins, recorded on its row — see `RunRow.forkedAt`. */
-      forkedAt?: InstanceAddress;
     },
   ): Promise<{ taskId: string }> {
     const project = open.project;
@@ -2594,7 +2592,9 @@ export class AppService {
     const started = await beginTaskRun(project, taskId, {
       functions: registry.functions,
       ...(opts.bundle !== undefined ? { bundle: opts.bundle } : {}),
-      ...(opts.forkedAt !== undefined ? { forkedAt: opts.forkedAt } : {}),
+      // A start carrying a loaded machine is the continuation `beginTaskRun` otherwise refuses to
+      // let a previously-run task make — restarting in place is the conversation-preamble hazard.
+      ...(opts.loaded !== undefined ? { continues: true } : {}),
     });
 
     // Artifact placement (DESIGN §7.6): one wiring shared by the file tools and the
@@ -3931,31 +3931,6 @@ export class AppService {
   }
 
   /**
-   * Run a task again ("task:rerun").
-   *
-   * A startable task simply starts — for `interrupted` and `failed` that is the pinned-snapshot
-   * re-run `beginTaskRun` already defines. A FINISHED task cannot re-enter its own lifecycle
-   * (`isStartableStatus` is the engine's rule, not a UI nicety: its journal is a complete record of
-   * a run that ended), so rerunning one means a fresh task with the same title, workflow, inputs and
-   * branch. The copy is what starts, and the response names it.
-   *
-   * ## A task somebody has TALKED TO is copied as well, whatever its status
-   *
-   * A conversation is read from the task's LATEST run, and a second run in the same task starts a
-   * second conversation beside the first — so re-running in place does not add to what was said, it
-   * makes it unreachable. Every hand-typed turn is still in the database and nothing in any view
-   * leads back to it.
-   *
-   * That is reachable rather than theoretical: a conversation whose opening message was stopped
-   * leaves the task `interrupted`, which IS startable, and you can go on chatting to it for another
-   * twenty messages — every one of them recorded under a run the next rerun would supersede.
-   *
-   * Detected by asking whether any hand-typed turn exists (`isChatInstance`), not by asking what
-   * workflow this is. The Chat view's tasks are the common case and not the only one: typing into a
-   * run's transcript in the Tasks view puts the same turns in the same place, and they deserve the
-   * same treatment. A task nobody has talked to has nothing to lose and re-runs in place as before.
-   */
-  /**
    * Pick a stopped task up where it left off, rather than starting it over ("task:resume").
    *
    * The machine is LOADED, not re-walked (Identity and Resume §04): the journal joined to the
@@ -4033,10 +4008,6 @@ export class AppService {
       secrets: this.secretResolver(open),
       loaded: load.loaded,
       answers: load.answers,
-      // Where this run's own work begins, written on its row before it starts: the first live leaf.
-      // Known now and not afterwards — a loaded operation leaves no new record or event to infer it
-      // from later.
-      ...(load.forkedAt !== undefined ? { forkedAt: load.forkedAt } : {}),
       ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
       ...(request.fake !== undefined ? { fake: request.fake } : {}),
     });
@@ -4052,8 +4023,16 @@ export class AppService {
   resumable(taskId: string, project?: string): ResumePlan {
     const open = this.session(project);
     const row = open.project.runtime.get(taskId);
-    if (row === undefined || !isStartableStatus(row.status) || row.snapshotHash === undefined) {
+    if (row === undefined || !isStartableStatus(row.status)) {
+      // Nothing to offer: a finished task cannot re-enter its own lifecycle at all, so what it gets
+      // is a copy. Deliberately not `fresh` — `fresh` is a promise that a plain start will work.
       return { taskId, kind: "none", replayed: 0, frontier: [] };
+    }
+    // A task that has said nothing simply STARTS — no snapshot pinned yet, or a start that died
+    // before the engine journaled anything. Asked with `hasJournalHistory`, which is the predicate
+    // `beginTaskRun`'s own guard refuses on, so the button and the lifecycle cannot disagree.
+    if (row.snapshotHash === undefined || !hasJournalHistory(open.project, taskId)) {
+      return { taskId, kind: "fresh", replayed: 0, frontier: [] };
     }
     const bundle = loadSnapshot(open.project.paths.snapshotsDir, row.snapshotHash);
     const load = buildTaskLoad(open.project, taskId, bundle.states);

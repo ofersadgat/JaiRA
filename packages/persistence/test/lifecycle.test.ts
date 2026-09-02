@@ -141,7 +141,9 @@ describe("task lifecycle", () => {
     expect(p.runtime.get(meta.id)?.status).toBe("interrupted");
     expect(p.runtime.get(meta.id)?.outcome).toBe("interrupted");
 
-    const rerun = await beginTaskRun(p, meta.id);
+    // `continues` because the task ran before: a bare start would be the restart-in-place the
+    // conversation-preamble guard refuses, and a caller picking work back up says so.
+    const rerun = await beginTaskRun(p, meta.id, { continues: true });
     expect(rerun.pinned).toBe(true);
     expect(rerun.snapshotHash).toBe(firstHash);
     expect(rerun.bundle.states["wf"]?.label).toBe("Wf"); // pinned content, not the edit
@@ -164,8 +166,9 @@ describe("task lifecycle", () => {
     // between it and a crash is who caused it, which says nothing about whether there is work left
     // to pick up — so the task begins again against the snapshot its first run pinned. It used to
     // refuse here, which is what made a stopped task offer a fresh copy of itself instead of a
-    // resume, discarding every operation it had already finished.
-    const again = await beginTaskRun(p, meta.id);
+    // resume, discarding every operation it had already finished. The continuation says it IS one:
+    // a bare start of a previously-run task is the restart-in-place the guard refuses.
+    const again = await beginTaskRun(p, meta.id, { continues: true });
     expect(again.pinned).toBe(true);
     expect(p.runtime.get(meta.id)?.status).toBe("running");
   });
