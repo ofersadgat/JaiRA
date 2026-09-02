@@ -302,7 +302,30 @@ const BODY_PSEUDO_PATH = "<body>/";
  * inside the snapshot hash (SPEC §7.5.1).
  */
 export function moduleEntriesOf(bundle: WorkflowBundle): string[] {
-  const files = new Set<string>();
+  return [...new Set(userFunctionRefsOf(bundle).map((ref) => ref.file))].sort();
+}
+
+/** One `user:` reference a bundle makes, split back into the file and the symbol inside it. */
+export interface UserFunctionRef {
+  /** The registry key exactly as the lowered operation spells it — `user:<file>#<a.b>`. */
+  ref: string;
+  /** The module file, absolute and forward-slashed. */
+  file: string;
+  /** The dotted property path as segments — `confidence.score` is `["confidence", "score"]`. */
+  property: string[];
+}
+
+/**
+ * Every module FUNCTION this bundle calls, by reference, each once, in the order first met.
+ *
+ * The walk {@link moduleEntriesOf} always did, keeping the symbol instead of dropping it. Read off the
+ * resolved states for the reason that function gives — the facade accumulates for the life of the
+ * process, and this is about ONE bundle. Embedded bodies are skipped here as they are there: a body
+ * is compiled from text the document carries, and re-resolving it takes that text, which a
+ * reference does not hold.
+ */
+export function userFunctionRefsOf(bundle: WorkflowBundle): UserFunctionRef[] {
+  const out = new Map<string, UserFunctionRef>();
   const walk = (node: unknown): void => {
     if (node === null || typeof node !== "object") return;
     if (Array.isArray(node)) {
@@ -311,15 +334,39 @@ export function moduleEntriesOf(bundle: WorkflowBundle): string[] {
     }
     const record = node as Record<string, unknown>;
     const ref = record.functionRef;
-    if (typeof ref === "string" && ref.startsWith(USER_REF)) {
+    if (typeof ref === "string" && ref.startsWith(USER_REF) && !out.has(ref)) {
       const withoutPrefix = ref.slice(USER_REF.length);
-      const file = withoutPrefix.split("#")[0] ?? "";
-      if (file.length > 0 && !file.startsWith(BODY_PSEUDO_PATH)) files.add(file);
+      const hash = withoutPrefix.indexOf("#");
+      const file = hash < 0 ? withoutPrefix : withoutPrefix.slice(0, hash);
+      const property = hash < 0 ? [] : withoutPrefix.slice(hash + 1).split(".").filter((part) => part.length > 0);
+      if (file.length > 0 && !file.startsWith(BODY_PSEUDO_PATH)) out.set(ref, { ref, file, property });
     }
     for (const value of Object.values(record)) walk(value);
   };
   walk(bundle.states);
-  return [...files].sort();
+  return [...out.values()];
+}
+
+/**
+ * Make the facade hold an entry for every module function this bundle names.
+ *
+ * `UserFunctions.entries` is filled by RESOLUTION — the loader asking for `confidence.score` while it
+ * lowers a binding — and a run does not always load. A task pinned to a snapshot reads the resolved
+ * definition back and resolves nothing, and a pair rebuilt after an approval starts with nothing in
+ * it; either way a host that merges `entries` into its registry merges an empty map, and the run fails
+ * at the first call with "no function is registered" about a function that is approved, frozen and
+ * sitting in the snapshot. Seen live on a re-run of an already-pinned task. So a host asks for each
+ * reference by name before it merges, which is the same resolution the loader would have done —
+ * type-checked, cached per reference, executing nothing (SPEC §7.5.4) — and idempotent where a load
+ * already did it.
+ *
+ * Returns how many references were resolved. Throws where the loader would have: a module that no
+ * longer reads or types is a run that cannot start, and the message names the file.
+ */
+export function resolveUserFunctions(modules: UserModules, bundle: WorkflowBundle): number {
+  const refs = userFunctionRefsOf(bundle);
+  for (const { file, property } of refs) modules.userFunctions.operationFor(file, property);
+  return refs.length;
 }
 
 // --- Approval and the freeze --------------------------------------------------

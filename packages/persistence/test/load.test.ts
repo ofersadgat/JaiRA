@@ -13,7 +13,16 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { hashOperation, scopedOperationId } from "@declarative-ai/exec";
 import { testHome } from "@jaira/testing";
-import { buildTaskLoad, initProject, openProject, releaseUnconsumedFailures, type Project } from "../src/index";
+import {
+  artifactContentOf,
+  buildTaskLoad,
+  initProject,
+  openProject,
+  rehydrateArtifactInputs,
+  releaseRevivedFailures,
+  releaseUnconsumedFailures,
+  type Project,
+} from "../src/index";
 
 let dir: string;
 let project: Project;
@@ -330,5 +339,108 @@ describe("freeing what never happened remotely (§05)", () => {
     expect(releaseUnconsumedFailures(project, "t")).toBe(1);
     const left = project.db.prepare(`SELECT id FROM operation_records ORDER BY id`).all() as Array<{ id: string }>;
     expect(left.map((row) => row.id)).toEqual(["r-cut", "r-done", "r-witness"]);
+  });
+});
+
+describe("deleting the failure the retry revives (§05)", () => {
+  const types = (): string[] =>
+    (project.db.prepare(`SELECT type, payload_json FROM state_machine_events WHERE task_id = 't' ORDER BY seq`).all() as Array<{ type: string; payload_json: string }>)
+      .map((row) => `${row.type}:${(JSON.parse(row.payload_json) as { instanceId?: string; outcome?: string }).instanceId ?? ""}:${(JSON.parse(row.payload_json) as { outcome?: string }).outcome ?? ""}`);
+
+  it("removes the terminations of the revived chain and the failed call, and keeps handled history", () => {
+    begin();
+    entered("i-root", "root");
+    // `a` failed once, a transition HANDLED it, and `b` ran after: history, and it stays.
+    entered("i-a", "root/a", "a", "i-root");
+    started("i-a", "root/a");
+    opFailed("i-a", "root/a");
+    terminated("i-a", "root/a", "error");
+    transition("i-root", "root", "b", 1);
+    entered("i-b", "root/b", "b", "i-root");
+    started("i-b", "root/b");
+    completed("i-b", "root/b", "op-3");
+    record("op-3", { ok: true });
+    terminated("i-b", "root/b", "success");
+    // `c` failed and nothing handled it: the root fell with it, and a wait the stop withdrew went too.
+    entered("i-c", "root/c", "c", "i-root");
+    started("i-c", "root/c");
+    opFailed("i-c", "root/c");
+    terminated("i-c", "root/c", "error");
+    journal("i-root", { type: "call.waiting", instanceId: "i-root", stateId: "root", call: "on_user_event", operationId: "w-1" });
+    journal("i-root", { type: "call.settled", instanceId: "i-root", stateId: "root", call: "on_user_event", operationId: "w-1", outcome: "error" });
+    terminated("i-root", "root", "canceled");
+
+    const load = buildTaskLoad(project, "t", SHAPE);
+    expect(load.frontier.map((f) => [f.instanceId, f.cause])).toEqual([["i-c", "failed"]]);
+    expect(releaseRevivedFailures(project, load)).toBe(5);
+    expect(types()).toEqual([
+      "instance.entered:i-root:",
+      "instance.entered:i-a:",
+      "operation.started:i-a:",
+      "operation.failed:i-a:",
+      "instance.terminated:i-a:error",
+      "transition.taken:i-root:",
+      "instance.entered:i-b:",
+      "operation.started:i-b:",
+      "operation.completed:i-b:",
+      "instance.terminated:i-b:success",
+      "instance.entered:i-c:",
+      "operation.started:i-c:",
+    ]);
+    // The description built afterwards still revives the same frontier: nothing about liveness
+    // depended on the rows that went.
+    const after = buildTaskLoad(project, "t", SHAPE);
+    expect(after.frontier.map((f) => f.instanceId)).toEqual(["i-c"]);
+    expect(after.loaded?.live).toBe(true);
+  });
+
+  it("touches nothing when nothing is live", () => {
+    begin();
+    entered("i-root", "root");
+    entered("i-a", "root/a", "a", "i-root");
+    terminated("i-a", "root/a", "success");
+    terminated("i-root", "root", "success");
+    const load = buildTaskLoad(project, "t", SHAPE);
+    expect(releaseRevivedFailures(project, load)).toBe(0);
+    expect(types()).toHaveLength(4);
+  });
+});
+
+describe("the content behind an engine artifact ref", () => {
+  const recordFor = (instanceId: string, value: unknown): void => {
+    project.db
+      .prepare(
+        `INSERT INTO operation_records (id, task_id, status, request_json, result_json, started_at, ended_at)
+         VALUES (?, 't', 'completed', ?, ?, 1000, 1000)`,
+      )
+      .run(`op-${instanceId}`, JSON.stringify({ kind: "function", scope: { instanceId, sequence: 0 } }), JSON.stringify({ value }));
+  };
+
+  it("reads the slot's string out of the instance's completed record", () => {
+    recordFor("i-draft", { feature_docs: "# the docs", features: [] });
+    expect(artifactContentOf(project, "t", "feature.product.draft#i-draft.feature_docs")).toBe("# the docs");
+  });
+
+  it("answers nothing for a name that does not parse, an unknown instance, or a non-string slot", () => {
+    recordFor("i-draft", { feature_docs: ["not", "a", "string"] });
+    expect(artifactContentOf(project, "t", "no-hash-here")).toBeUndefined();
+    expect(artifactContentOf(project, "t", "x#i-missing.slot")).toBeUndefined();
+    expect(artifactContentOf(project, "t", "x#i-draft.feature_docs")).toBeUndefined();
+  });
+
+  it("fills in a content-less ref among a gate's inputs and leaves everything else alone", () => {
+    recordFor("i-draft", { feature_docs: "# the docs" });
+    const inputs = {
+      docs: { artifact: true, name: "feature.product.draft#i-draft.feature_docs", format: "text/markdown" },
+      whole: { artifact: true, name: "x#i-draft.feature_docs", content: "already here" },
+      score: 0.6,
+    };
+    const out = rehydrateArtifactInputs(project, "t", inputs);
+    expect(out["docs"]).toEqual({ artifact: true, name: "feature.product.draft#i-draft.feature_docs", format: "text/markdown", content: "# the docs" });
+    expect(out["whole"]).toEqual(inputs.whole);
+    expect(out["score"]).toBe(0.6);
+    // Identity is kept when there is nothing to do.
+    const untouched = { score: 1 };
+    expect(rehydrateArtifactInputs(project, "t", untouched)).toBe(untouched);
   });
 });

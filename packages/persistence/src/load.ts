@@ -149,6 +149,114 @@ export function releaseUnconsumedFailures(project: Project, taskId: string): num
 }
 
 /**
+ * Delete the failure the revived instances carry, so the journal says what the retry says (§05).
+ *
+ * A retry revives the failed chain — the fold presents every instance that ended without success,
+ * and nothing advanced past, as LIVE again — and the failed call's record is already freed by
+ * {@link releaseUnconsumedFailures}. What stayed behind was the journal's account of the failure:
+ * the `instance.terminated` rows for the leaf and every ancestor that fell with it, the
+ * `operation.failed` row for the call, and the `call.waiting`/`call.settled` pair of a wait the stop
+ * withdrew. Every reader of the journal then drew the failure beside the retry — the conversation's
+ * grey notes, the run causes, a resume of the resume — as an error the run still had. The state
+ * info was deleted; the error info was not. This deletes it.
+ *
+ * ONLY for instances the load holds live: a failure a transition handled is history, stays history,
+ * and is not touched. Nor is the entry, the transitions, the completed operations or anything under
+ * a terminated instance — the retry continues those, it does not re-do them. Liveness is read off
+ * the description the caller has already built, and deleting these rows does not change it: an
+ * instance with no termination is live by the fold's first rule, and one whose failure this removes
+ * was live by its second.
+ */
+export function releaseRevivedFailures(project: Project, load: TaskLoad): number {
+  const live: string[] = [];
+  const walk = (node: LoadedInstance | undefined): void => {
+    if (node === undefined) return;
+    if (node.live) live.push(node.id);
+    for (const child of node.children ?? []) walk(child);
+  };
+  walk(load.loaded);
+  if (live.length === 0) return 0;
+  const marks = live.map(() => "?").join(", ");
+  const result = project.db
+    .prepare(
+      `DELETE FROM state_machine_events
+       WHERE task_id = ? AND instance_id IN (${marks})
+         AND (
+           (type = 'instance.terminated' AND json_extract(payload_json, '$.outcome') <> 'success')
+           OR type = 'operation.failed'
+           OR type = 'call.waiting'
+           OR type = 'call.settled'
+         )`,
+    )
+    .run(load.taskId, ...live);
+  return result.changes;
+}
+
+/**
+ * The content behind an engine artifact ref, read back from the record store by NAME.
+ *
+ * An engine ref is `user-facing state id # instance id . slot` (`registerArtifact`): the slot is a
+ * blob output of that instance, and the instance's completed operation record holds the value the
+ * output was bound from. A ref that reaches a reader without its content — the journal elides it,
+ * and a gate row written by a run before the engine learned to put it back carries that elision —
+ * can be filled in from here. Undefined where the name does not parse, the instance has no
+ * completed record, or the slot is not a string there; the caller keeps the ref it had.
+ */
+export function artifactContentOf(project: Project, taskId: string, name: string): string | undefined {
+  const hash = name.indexOf("#");
+  const dot = name.lastIndexOf(".");
+  if (hash < 0 || dot < hash + 2) return undefined;
+  const instanceId = name.slice(hash + 1, dot);
+  const slot = name.slice(dot + 1);
+  const row = project.db
+    .prepare(
+      `SELECT request_json, result_json FROM operation_records
+       WHERE task_id = ? AND instance_id = ? AND status = 'completed' ORDER BY started_at DESC LIMIT 1`,
+    )
+    .get(taskId, instanceId) as { request_json: string | null; result_json: string | null } | undefined;
+  if (row === undefined) return undefined;
+  let op: "prompt" | "function" = "function";
+  try {
+    const request = JSON.parse(row.request_json ?? "{}") as { kind?: unknown };
+    if (request.kind === "prompt") op = "prompt";
+  } catch {
+    // An unreadable request still has a readable value; the kind only decides one unwrapping.
+  }
+  const value = recordValue(project.db, row.result_json, op);
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const found = (value as Record<string, JsonValue>)[slot];
+  return typeof found === "string" ? found : undefined;
+}
+
+/**
+ * The same inputs, with every content-less artifact ref filled in from the record store.
+ *
+ * For a gate row read back off disk (`pending_interactions`): the row is what a run parked, and a
+ * run parked before the engine rehydrated loaded inputs wrote the reference alone. The component
+ * on the other end exists to show the document, so it gets the document. Returns the input map it
+ * was given when nothing changed, so a caller can keep an identity check.
+ */
+export function rehydrateArtifactInputs(project: Project, taskId: string, inputs: Record<string, JsonValue>): Record<string, JsonValue> {
+  let changed = false;
+  const out: Record<string, JsonValue> = {};
+  for (const [key, value] of Object.entries(inputs)) {
+    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+      const ref = value as { artifact?: unknown; name?: unknown; content?: unknown };
+      if (ref.artifact === true && typeof ref.name === "string" && ref.content === undefined) {
+        const content = artifactContentOf(project, taskId, ref.name);
+        if (content !== undefined) {
+          out[key] = { ...(value as Record<string, JsonValue>), content };
+          changed = true;
+          continue;
+        }
+      }
+    }
+    out[key] = value;
+  }
+  return changed ? out : inputs;
+}
+
+/**
  * Build the load description for one task — the journal joined to the record store.
  *
  * `shape` is the PINNED snapshot's states: the sequence cursor is an index into each state's

@@ -228,6 +228,40 @@ describe("projectBoard", () => {
     expect(board.columns.every((c) => c.cards.length === 0)).toBe(true);
   });
 
+  it("files a task parked between children under the column it came to rest in", () => {
+    // `goals` ran and ended; the level is now waiting on a person (`call.waiting` — a transition's
+    // guard asked for a drag). The live path stops at the level, but the run RESTS in `goals`, and
+    // that is the column a drag has to start from.
+    const parked = task("t-1", {
+      run: runningAt([
+        entered("1", "feature/plan"),
+        entered("2", "feature/plan/goals", "1", "goals"),
+        terminated("2", "feature/plan/goals", "error"),
+        { type: "call.waiting", instanceId: "1", stateId: "feature/plan", call: "on_user_event", operationId: "op-1" },
+      ]),
+    });
+    const board = projectBoard(SHAPE, "feature/plan", [parked]);
+    expect(board.columns[0]!.cards.map((c) => c.taskId)).toEqual(["t-1"]);
+    expect(board.columns[0]!.cards[0]!.activeStatus).toBe("waiting_for_user");
+    expect(board.atLevel).toEqual([]);
+  });
+
+  it("rests on the LATEST child when a loop ran one twice", () => {
+    const parked = task("t-1", {
+      run: runningAt([
+        entered("1", "feature/plan"),
+        entered("2", "feature/plan/goals", "1", "goals"),
+        terminated("2", "feature/plan/goals", "success"),
+        entered("3", "feature/plan/critique", "1", "critique"),
+        terminated("3", "feature/plan/critique", "success"),
+        { type: "call.waiting", instanceId: "1", stateId: "feature/plan", call: "on_user_event", operationId: "op-1" },
+      ]),
+    });
+    const board = projectBoard(SHAPE, "feature/plan", [parked]);
+    expect(board.columns[2]!.cards.map((c) => c.taskId)).toEqual(["t-1"]);
+    expect(board.columns[0]!.cards).toEqual([]);
+  });
+
   it("flags a card that drills down and reports the deepest active state", () => {
     const deep = task("t-1", {
       run: runningAt([

@@ -443,6 +443,12 @@ export default function App(): JSX.Element {
    */
   const [runMode, setRunMode] = useState<"board" | "conversation">("board");
   /**
+   * Where the Instances index last sent the middle column's conversation — see
+   * `FileSurfaceContext.runFocus`. Held here, beside the mode, because the two are one fact about
+   * that column: the mode says it is the conversation, the focus says where in it.
+   */
+  const [runFocus, setRunFocus] = useState<{ instance: string; at: number } | undefined>(undefined);
+  /**
    * Which of the sidebar drawers is currently showing its FIND field (SHELL.md §5.1).
    *
    * Session-scoped, and deliberately not in the remembered layout beside the folds: a fold is how
@@ -1240,6 +1246,23 @@ export default function App(): JSX.Element {
     onOpenProject: () => actions.chooseProject("open"),
     runMode,
     onRunMode: setRunMode,
+    ...(runFocus !== undefined ? { runFocus } : {}),
+    onRunFocus: setRunFocus,
+    // The same gate, channel and services the task panel hosts — see `FileSurfaceContext.runGate`.
+    ...(inlineGate !== null
+      ? {
+          runGate: inlineGate,
+          onRunGate: (value: unknown) => actions.answer(inlineGate.requestId, value),
+          runGateServices: reviewerServices,
+          runGateEditor: {
+            drafts: state.drafts,
+            onDraft: actions.setDraft,
+            validateSchema: actions.validateSchema,
+            wrapJson: state.settings.wrapJson,
+            onWrapJson: (wrap: boolean) => void actions.setWrapJson(wrap),
+          },
+        }
+      : {}),
     onAnswer: waiting ? () => actions.select(waiting.taskId) : undefined,
     // The action, not the channel — re-running a finished task answers with a DIFFERENT task, and
     // this is what moves the selection onto it. See `FileSurfaceContext.onRerun`. Routed through

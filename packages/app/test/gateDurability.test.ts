@@ -21,12 +21,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { initProject, openProject } from "@jaira/persistence";
+import { buildTaskLoad, initProject, loadSnapshot, openProject } from "@jaira/persistence";
 import { writeWorkflowFiles } from "@jaira/runtime";
 import type { JsonValue } from "@declarative-ai/json";
 import type { PushMessage } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
+import { SUSPENDED_WAITING } from "../src/main/session";
 
 const ROOT = "gates";
 
@@ -122,6 +123,10 @@ async function quitAndReopen(): Promise<void> {
   service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   await service.open(dir);
   seen.clear();
+  // The open RESUMES a task the close left waiting on a person (`Service.resumeSuspended`), and the
+  // resumed run re-parks the question as its own live request. Wait for that: until it lands the
+  // only row is the dead process's durable one, which is a different thing to be looking at.
+  await until(() => service.pendingInteractions().some((p) => p.resumes === undefined), "the suspended run to re-park its gate");
 }
 
 async function start(): Promise<string> {
@@ -140,7 +145,7 @@ function statusOf(taskId: string): string {
 }
 
 describe("a gate parked when the app closes", () => {
-  it("is still being asked when the app opens again, and says answering it continues the task", async () => {
+  it("is being asked again when the app opens, by a run that is running again", async () => {
     const taskId = await start();
     const before = await nextGate();
     expect(before.component).toBe("choose_option");
@@ -148,6 +153,9 @@ describe("a gate parked when the app closes", () => {
 
     await quitAndReopen();
 
+    // Closing the app was not an answer, so the task is not left canceled with a Resume button to
+    // work out: the open resumed it, and the same question is parked again by the live run.
+    expect(statusOf(taskId)).toBe("running");
     const after = service.pendingInteractions();
     expect(after).toHaveLength(1);
     expect(after[0]!.taskId).toBe(taskId);
@@ -155,26 +163,44 @@ describe("a gate parked when the app closes", () => {
     // The contract is re-parsed from the stored inputs, not stored alongside them — so the question
     // and its options survive as the renderer needs them, not as a blob it has to re-derive.
     expect(after[0]!.config?.prompt).toBe("which way?");
-    // The one thing that differs from a live park, and the only thing the renderer needs to know.
-    expect(after[0]!.resumes).toBe(true);
+    // Live again, which is the whole point — not a recovered row that answering would resume.
+    expect(after[0]!.resumes).toBeUndefined();
   });
 
-  it("continues the task when the recovered gate is answered, without asking it again", async () => {
+  it("records WHY the close ended the run, so the open knows to resume it", async () => {
+    const taskId = await start();
+    await nextGate();
+    await service.close();
+
+    const project = openProject(dir, { baseDir: testHome() });
+    try {
+      const row = project.runtime.get(taskId)!;
+      // Unwound — every reader of the status is right — with the reason spelled the one way the
+      // next open resumes on. `interrupted` is what a crash gets, and a crash mid-call is not resumed
+      // unasked.
+      expect(row.status).toBe("canceled");
+      expect(JSON.parse(row.failureJson!)).toMatchObject({ reason: SUSPENDED_WAITING });
+    } finally {
+      project.close();
+    }
+    // Reopened for the afterEach, and so the resume this row promises can be seen to happen.
+    service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
+    await service.open(dir);
+    await until(() => statusOf(taskId) === "running", "the suspended task to be running again");
+  });
+
+  it("continues the task when the re-parked gate is answered", async () => {
     const taskId = await start();
     await nextGate(); // the first gate, left unanswered
     await quitAndReopen();
-    expect(offered).toBe(1);
 
-    const recovered = service.pendingInteractions()[0]!;
-    service.submitInteraction(recovered.requestId, { decision: "left" });
+    const reparked = service.pendingInteractions()[0]!;
+    service.submitInteraction(reparked.requestId, { decision: "left" });
 
-    // The resumed run walks back to the state it stopped in, takes the seeded answer without
-    // putting the question again, and carries it into the second gate — which is the one that is
-    // offered next. Two puts in total for a two-gate workflow: the whole point.
+    // The resumed run carries the answer into the second gate, which is the one offered next.
     const second = await nextGate();
     expect(second.config?.prompt).toBe("and then?");
     expect(second.inputs["previous"]).toBe("left");
-    expect(offered).toBe(2);
 
     // Cleared, because the close in the middle of this test already pushed a `run:finished` for the
     // run it aborted — waiting on the whole log would be waiting on something that already happened.
@@ -186,53 +212,57 @@ describe("a gate parked when the app closes", () => {
     expect(service.pendingInteractions()).toHaveLength(0);
   });
 
-  it("holds a recovered gate to the same contract a live one is held to", async () => {
+  it("holds a re-parked gate to the same contract a live one is held to", async () => {
     await start();
     await nextGate();
     await quitAndReopen();
-    const recovered = service.pendingInteractions()[0]!;
+    const reparked = service.pendingInteractions()[0]!;
 
-    // Main re-validates every submission (DESIGN §7.1), and a gate whose engine is not waiting yet
-    // is no exception — otherwise "quit first" would be a way past the check.
-    expect(() => service.submitInteraction(recovered.requestId, { decision: "sideways" })).toThrow(
+    // Main re-validates every submission (DESIGN §7.1) — otherwise "quit first" would be a way
+    // past the check.
+    expect(() => service.submitInteraction(reparked.requestId, { decision: "sideways" })).toThrow(
       /invalid choose_option response/,
     );
     // Refused, not consumed: the question is still there to answer properly.
     expect(service.pendingInteractions()).toHaveLength(1);
   });
 
-  it("forgets a recovered gate when the task is started again from the top", async () => {
-    const taskId = await start();
+  it("re-parks ONE question, not the dead process's row beside the live one", async () => {
+    await start();
     await nextGate();
     await quitAndReopen();
+    // The continuing run parks its OWN request for the same state, and starting cleared the row
+    // from the dead process — which would otherwise sit beside it as a second copy of one question,
+    // answerable only by resuming a task that is already running.
     expect(service.pendingInteractions()).toHaveLength(1);
-
-    // The continuing run parks its OWN request for the same state. The row from the dead process
-    // would sit beside it as a second copy of one question, answerable only by resuming a task that
-    // is already running — so starting clears what it is about to re-ask. Resumed rather than
-    // started: a task with history no longer restarts in place (the conversation-preamble guard).
-    await service.resumeTask({ taskId });
-    const fresh = await nextGate();
-    expect(service.pendingInteractions()).toHaveLength(1);
-    expect(fresh.resumes).toBeUndefined();
+    expect(service.pendingInteractions()[0]!.resumes).toBeUndefined();
   });
 
-  it("calls the stop a continuation, not a retry — nothing failed and nothing forks", async () => {
+  it("calls the close a continuation, not a retry — nothing failed and nothing forks", async () => {
     const taskId = await start();
     await nextGate();
-    await quitAndReopen();
+    await service.close();
 
     // A cancel unwinds the tree on the way out, so every instance is terminated by the time the run
     // settles and NOTHING is live — which used to make the frontier empty for every stopped run and
     // the strip offer "Retry", the word for a state that failed. This one did not fail: it asked a
     // question and the window closed. See `stoppedInside`.
-    const plan = service.resumable(taskId);
-    expect(plan.kind).toBe("continue");
-    expect(plan.frontier).toEqual([{ stateId: `${ROOT}/a`, stopped: "mid-operation" }]);
+    const project = openProject(dir, { baseDir: testHome() });
+    try {
+      const row = project.runtime.get(taskId)!;
+      const load = buildTaskLoad(project, taskId, loadSnapshot(project.paths.snapshotsDir, row.snapshotHash!).states);
+      expect(load.frontier.map((f) => [f.stateId, f.cause, f.stopped])).toEqual([[`${ROOT}/a`, "interrupted", "mid-operation"]]);
+    } finally {
+      project.close();
+    }
 
     // And the state it picks up in is a `function` op, which places no call and therefore claims no
     // conversation position — so re-entering it forks nothing. The run that follows writes one run
     // row, on the same task, and the only session in the record stays the one it started with.
+    service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
+    await service.open(dir);
+    seen.clear();
+    await until(() => service.pendingInteractions().some((p) => p.resumes === undefined), "the suspended run to re-park its gate");
     pushes = [];
     service.submitInteraction(service.pendingInteractions()[0]!.requestId, { decision: "left" });
     const second = await nextGate();
@@ -241,15 +271,15 @@ describe("a gate parked when the app closes", () => {
     expect(statusOf(taskId)).toBe("completed");
   });
 
-  it("forgets a recovered gate when the task is stopped", async () => {
+  it("forgets the re-parked gate when the task is stopped", async () => {
     const taskId = await start();
     await nextGate();
     await quitAndReopen();
     expect(service.pendingInteractions()).toHaveLength(1);
 
-    // Nothing is running, so there is no park to reject — but saying "stop" is a decision about the
-    // question, which is the one thing that ends it. See `InteractionStore.close`.
+    // Saying "stop" is a decision about the question, which is the one thing that ends it.
     service.cancelTask(taskId);
+    await until(() => service.pendingInteractions().length === 0, "the stop to withdraw the gate");
     expect(service.pendingInteractions()).toHaveLength(0);
   });
 });

@@ -95,6 +95,17 @@ export interface ProjectSessionOptions {
   userEvents: UserEventHub;
 }
 
+/**
+ * The reason a run's row carries when the app closed on it while it was waiting on a person.
+ *
+ * A sentinel rather than a status: the row's status stays `canceled` — the run WAS unwound, and
+ * every reader of that status is right about it — and the reason says why in the one spelling the
+ * next open looks for. Not "interrupted", which recovery uses for a process that died with work in
+ * flight and which nothing should resume unasked: a re-issued model call spends money on nobody's
+ * decision, while re-parking a question spends nothing.
+ */
+export const SUSPENDED_WAITING = "suspended while waiting on you: the app closed";
+
 export class ProjectSession {
   readonly key: string;
   readonly kind: SessionKind;
@@ -102,6 +113,20 @@ export class ProjectSession {
 
   /** Runs in flight, by task id. */
   readonly live = new Map<string, LiveRun>();
+  /**
+   * The tasks that were WAITING ON A PERSON when this session began closing.
+   *
+   * Read by the run-end handler while the aborted runs settle, so their rows can say "suspended"
+   * rather than "canceled" — see {@link SUSPENDED_WAITING}. Filled once, at the top of {@link close},
+   * from the two hubs BEFORE either is emptied: the hub's rows survive the close (`abandoned`), the
+   * user-event waits do not, and both are the fact this set records.
+   */
+  readonly suspendedAtClose = new Set<string>();
+  /**
+   * The resumes the open of this session started — see `Service.resumeSuspended`. Awaited by the
+   * close, so a resume in flight is either running (and aborted with the rest) or never started.
+   */
+  resuming: Promise<void> = Promise.resolve();
   /**
    * Model CALLS in flight, by session id — a finer grain than {@link live}, and a different question.
    *
@@ -240,6 +265,12 @@ export class ProjectSession {
     this.watchTimer = undefined;
     for (const watcher of this.watchers) watcher.close();
     this.watchers = [];
+    // Which live runs are parked on a person, noted before the hubs below let go of the question.
+    // Closing the app is not an answer to a gate or a drag, and the next open resumes these so the
+    // person finds the same question where they left it — see `Service.resumeSuspended`.
+    for (const request of [...this.hub.list(), ...this.userEvents.list()]) {
+      if (request.taskId !== undefined && this.live.has(request.taskId)) this.suspendedAtClose.add(request.taskId);
+    }
     // ABANDONED, not settled — the default, and stated here because it is the whole of what makes a
     // gate durable. The promise has to settle or the engine never unwinds and the database never
     // closes; that is a fact about this process and not an answer to the question, so the row stays

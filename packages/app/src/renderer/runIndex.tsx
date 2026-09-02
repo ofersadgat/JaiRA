@@ -28,13 +28,43 @@
  * said are gone, each because the drawing already says it: the step number is the row's position,
  * the nesting is the lanes, and the operation kind is one landing away.
  */
-import { useCallback, useMemo, useState, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import type { InstanceNode } from "@jaira/shared/browser";
 import { paletteOf, type RailLane, type RailStep } from "./rail";
 import { RailedRows } from "./railView";
 import { headerToneOf, surfaceKindOf, type HeaderTone } from "./stateSurface";
-import { metaOf } from "./sessionPanels";
+import { isLiveNode, metaOf } from "./sessionPanels";
 import { Icon } from "./icons";
+
+/** How often a live row's elapsed time is redrawn. A second, because that is the unit it shows. */
+const ELAPSED_TICK_MS = 1000;
+
+/** Whether anything in the run is still going — the reason to keep a clock at all. */
+function anyLive(nodes: readonly InstanceNode[]): boolean {
+  return nodes.some((node) => isLiveNode(node) || anyLive(node.children));
+}
+
+/**
+ * The present moment, ticking while the run is live and frozen once it is not.
+ *
+ * A live row says how long its state has been going, and that number is wrong the moment after it
+ * is drawn unless something redraws it. The index keeps ONE clock for every row rather than a timer
+ * per row, and stops it when nothing is running — a finished run is history, and history does not
+ * tick. `undefined` while nothing is live, so `metaOf` draws the finished reading and nothing else.
+ */
+function useNow(live: boolean): number | undefined {
+  const [now, setNow] = useState<number | undefined>(() => (live ? Date.now() : undefined));
+  useEffect(() => {
+    if (!live) {
+      setNow(undefined);
+      return;
+    }
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), ELAPSED_TICK_MS);
+    return () => clearInterval(timer);
+  }, [live]);
+  return live ? now : undefined;
+}
 
 /**
  * A node's identity across the whole task.
@@ -274,6 +304,14 @@ export function RunIndex({
 }): JSX.Element {
   const [shutLanes, setShutLanes] = useState<ReadonlySet<string>>(() => new Set());
   const [shutLoops, setShutLoops] = useState<ReadonlySet<string>>(() => new Set());
+  /**
+   * The clock the live rows read. Every state on the active path is live — the leaf that is running
+   * AND the composites above it, which entered earlier and are still open — so a lane's parent shows
+   * how long the whole phase has been going while its child shows the current step. That is the
+   * reading a person waiting on a run wants: not when the state started, but how long they have been
+   * waiting on it.
+   */
+  const now = useNow(anyLive(instances));
 
   const { steps, rows } = useMemo(() => indexOf(instances, shutLoops), [instances, shutLoops]);
   /**
@@ -373,7 +411,7 @@ export function RunIndex({
             {held} state{held === 1 ? "" : "s"}
           </span>
         ) : null}
-        {metaOf(node) !== "" ? <span className="rail-mark-meta">{metaOf(node)}</span> : null}
+        {metaOf(node, now) !== "" ? <span className="rail-mark-meta">{metaOf(node, now)}</span> : null}
       </>
     );
     return (

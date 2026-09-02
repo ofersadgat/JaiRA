@@ -3704,6 +3704,10 @@ button.crumb-sep.open {
   padding: 7px 9px 6px;
   margin-bottom: 4px;
   cursor: pointer;
+  /* One unit. A card is picked up, opened and moved as a whole; a press that lands on its title must
+     not start selecting words, and a drag must not become a text drag. Copying a title is what the
+     panel beside it is for. */
+  user-select: none;
 }
 .card:last-child {
   margin-bottom: 0;
@@ -10621,6 +10625,11 @@ fieldset.reading {
   /* The measure plus the gutter. The gutter is bounded by construction under 152px however deep the
      run goes — see `rail.ts` — so the content column never narrows past what prose reads at. */
   max-width: 1052px;
+  /* Centred as ONE column — gutter and content together — so a wide window puts the measure in the
+     middle rather than pinning the whole drawing to the left edge. The wide variant below already
+     did this; the plain rail had the cap and not the margin, and in a flex column a capped item
+     with no margin sits at the start. */
+  margin: 0 auto;
 }
 /* Concurrency needs the room. A band holding two conversations at the measure of one would set both
    at half of it, which is narrower than either deserves and narrower than prose reads at. The whole

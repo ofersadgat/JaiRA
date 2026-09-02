@@ -339,6 +339,18 @@ export function boardPathOf(run: ProjectedRun): PathStep[] {
   return run.activePath.length > 0 ? run.activePath : restingPathOf(run.instances);
 }
 
+/**
+ * The child a level's instance rests on: its last non-superseded child, live or not.
+ *
+ * The same reading {@link restingPathOf} takes one level down, asked of ONE instance — the level a
+ * board is drawing — rather than walked from the roots, so a card can be filed under the column its
+ * run stopped in when the live path ends above it. Undefined for an instance that entered no child.
+ */
+export function restingChildOf(roots: readonly InstanceNode[], instanceId: string): InstanceNode | undefined {
+  const node = flattenInstances(roots).find((n) => n.instanceId === instanceId);
+  return node === undefined ? undefined : [...node.children].reverse().find((n) => !n.superseded);
+}
+
 /** Flatten a forest depth-first (roots first) — handy for tests and list views. */
 export function flattenInstances(nodes: readonly InstanceNode[]): InstanceNode[] {
   const out: InstanceNode[] = [];
@@ -467,7 +479,24 @@ export function projectBoard(
       const next = path[at + 1];
       const column = next?.childKey !== undefined ? byKey.get(next.childKey) : undefined;
       if (column) column.cards.push(card);
-      else atLevel.push(card);
+      else {
+        /**
+         * The path stops AT the level while a child under it has already run: the level is live and
+         * nothing beneath it is. That is a run parked BETWEEN children — a transition waiting on a
+         * person after one child finished, or a child that failed on its way out with the parent
+         * still deciding — and the card belongs in the column it came to rest in, with the lane
+         * inside that column saying it is paused. Filed at the level instead, a task waiting to be
+         * dragged out of `product` sat in a tray under the board while every column stayed empty,
+         * which is the one arrangement that cannot be dragged from.
+         *
+         * The level's own operation running before any child has entered still lands here, because
+         * there is no resting child yet — which is what `atLevel` is for.
+         */
+        const rest = restingChildOf(task.run.instances, path[at]!.instanceId);
+        const resting = rest?.childKey !== undefined ? byKey.get(rest.childKey) : undefined;
+        if (resting) resting.cards.push(card);
+        else atLevel.push(card);
+      }
     }
 
     /**

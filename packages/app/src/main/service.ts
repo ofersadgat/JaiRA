@@ -43,11 +43,14 @@ import {
   baseStateView,
   beginTaskRun,
   buildTaskLoad,
+  rehydrateArtifactInputs,
+  releaseRevivedFailures,
   releaseUnconsumedFailures,
   loadSnapshot,
   userModules,
   canonicalModulePath,
   prepareUserModules,
+  resolveUserFunctions,
   gitFor,
   boardForState,
   boardView,
@@ -248,7 +251,7 @@ import { errorToJson, resetLogSink, setLogSink, type LogRecord, type LogSink } f
  */
 let installed: LogSink | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
-import { ProjectSession, type SyncHolder } from "./session";
+import { ProjectSession, type SyncHolder, SUSPENDED_WAITING } from "./session";
 import type {
   Scope,
   ApprovalScope,
@@ -1065,6 +1068,11 @@ export class AppService {
       // opening behind this call is. It publishes its own invalidate when it finds something.
       void this.recoverNativeSessions(session);
     }
+    // Not awaited either: a resume loads the machine and re-parks the question, and the window
+    // should not wait on that. Each one logs its own failure. The promise is kept on the session so
+    // a close that arrives while this is still going waits for it — a resume that started after
+    // the close began would be a run with no session and a database on its way out.
+    session.resuming = this.resumeSuspended(session);
     // A project brings its own config layer, so what was available a moment ago is not what is
     // available now: it can name different routes, different credentials, and different executors.
     if (this.options.probeOnStart === true) this.kickAvailability();
@@ -1364,6 +1372,8 @@ export class AppService {
     if (session === undefined) return;
     this.sessions.delete(key);
     for (const [requestId, owner] of [...this.requestOwner]) if (owner === key) this.requestOwner.delete(requestId);
+    // The resumes the open started, settled before the close unwinds what they started.
+    await session.resuming;
     await session.close();
   }
 
@@ -1674,12 +1684,18 @@ export class AppService {
    * right now, and giving one starts the task again from its record.
    */
   private pendingOfStored(key: string, row: StoredInteraction): PendingInteraction {
+    // A stored row is what a run parked, and a run parked before the engine rehydrated loaded
+    // inputs wrote a document as `{artifact: true, name}` alone — the reference a review component
+    // then drew where the document belonged. The record store still holds the document by that
+    // name, so the row is filled in on the way out rather than left to say less than is known.
+    const session = this.sessions.get(key);
+    const inputs = session === undefined ? row.inputs : rehydrateArtifactInputs(session.project, row.taskId, row.inputs);
     return withContract({
       requestId: row.requestId,
       taskId: row.taskId,
       project: this.refOf(key),
       component: row.component,
-      inputs: row.inputs,
+      inputs,
       resumes: true,
       ...(row.about !== undefined ? { about: row.about } : {}),
       ...(row.subjectProject !== undefined ? { subjectProject: row.subjectProject } : {}),
@@ -2577,10 +2593,10 @@ export class AppService {
       // hub, like every other component — which is the §4.1 guarantee.
       registerChangesetFunctions(registry);
     }
-    // The workflow's OWN TypeScript functions (SPEC §7.5), merged rather than wrapped: a resolved
-    // symbol is already a registry entry carrying its capabilities, signature and error contract.
+    // The workflow's OWN TypeScript functions (SPEC §7.5) are merged BELOW, once the run's bundle is
+    // known — see the note beside `resolveUserFunctions`. Read here so the prepare step at the end of
+    // this method and the merge agree on which pair they are talking about.
     const userFns = userModules();
-    if (userFns !== undefined) registerUserFunctions(registry, userFns.userFunctions);
 
     // Gates this task was holding from an earlier process go now, not when this run reaches them.
     // A run walking the same workflow parks its OWN request with its own id, and a row from the
@@ -2596,6 +2612,21 @@ export class AppService {
       // let a previously-run task make — restarting in place is the conversation-preamble hazard.
       ...(opts.loaded !== undefined ? { continues: true } : {}),
     });
+
+    // The workflow's OWN TypeScript functions (SPEC §7.5), merged rather than wrapped: a resolved
+    // symbol is already a registry entry carrying its capabilities, signature and error contract.
+    //
+    // AFTER the start, and resolved from the bundle the run will actually execute. The merge used to
+    // sit above `beginTaskRun` and copy whatever the facade had resolved so far — which is nothing
+    // for a task pinned to a snapshot (the resolved definition loads without resolving a symbol) and
+    // nothing in a process whose pair was rebuilt after an approval. Every such run failed at its
+    // first call with "no function 'user:…#confidence.score' is registered", about a function that
+    // was approved, frozen and inside the snapshot. Asking for each reference by name first is the
+    // same resolution the loader would have done, and idempotent where a load already did.
+    if (userFns !== undefined) {
+      resolveUserFunctions(userFns, started.bundle);
+      registerUserFunctions(registry, userFns.userFunctions);
+    }
 
     // Artifact placement (DESIGN §7.6): one wiring shared by the file tools and the
     // post-run sink, so an agent's writes and a prompt state's returned content land
@@ -2900,9 +2931,16 @@ export class AppService {
           taskId,
           ...("error" in result && result.error !== undefined ? { detail: { reason: result.error.reason } } : {}),
         });
+        // A run unwound by the app closing while its task was waiting on a person is SUSPENDED, and
+        // its row says so in the spelling the next open resumes on — see `SUSPENDED_WAITING`.
+        const suspended = status === "canceled" && open.suspendedAtClose.has(taskId);
         finishTaskRun(project, taskId, status, {
           outputs: result.value,
-          ...("error" in result && result.error !== undefined ? { failure: result.error } : {}),
+          ...(suspended
+            ? { failure: { classification: "canceled", reason: SUSPENDED_WAITING } }
+            : "error" in result && result.error !== undefined
+              ? { failure: result.error }
+              : {}),
         });
         this.publishFor(open, { type: "run:finished", taskId, status });
       } catch (e) {
@@ -3931,6 +3969,46 @@ export class AppService {
   }
 
   /**
+   * Resume the tasks the last close left waiting on a person, so they are waiting on them again.
+   *
+   * Closing the app is not an answer. A run parked on a gate or a drag was unwound by the close —
+   * the process ends, so it had to be — but the question it was asking is still the question, and
+   * the person opening the app again expects to find it where they left it, not a canceled task
+   * and a Resume button to work out. Only the row the close itself marked qualifies — `canceled`
+   * with {@link SUSPENDED_WAITING} as its reason, which the run-end handler writes for a run whose
+   * task was on either hub when the session closed.
+   *
+   * A CRASH is deliberately not this. Recovery marks a dead process's tasks `interrupted`, and even
+   * one with a gate still parked in `pending_interactions` is left for the strip's Resume: nobody
+   * decided to stop it, so nobody has said what its record is worth, and the row is offered rather
+   * than re-run. A resume that cannot be made (unreadable records, a legacy journal) is logged and
+   * left for the strip the same way.
+   */
+  private async resumeSuspended(session: ProjectSession): Promise<void> {
+    const project = session.project;
+    const candidates = project.runtime
+      .list()
+      .filter((row) => row.status === "canceled" && reasonOf(row.failureJson) === SUSPENDED_WAITING);
+    for (const row of candidates) {
+      // A session already on its way out — `closeSession` deletes it before awaiting this — must
+      // not have a run started under it.
+      if (this.closed || this.sessions.get(session.key) !== session) return;
+      try {
+        await this.resumeTask({ taskId: row.taskId, project: project.paths.projectDir });
+        this.log({ level: "info", source: "run", message: `resumed ${row.taskId}: it was waiting on you when the app closed`, project: session.key, taskId: row.taskId });
+      } catch (e) {
+        this.log({
+          level: "warn",
+          source: "run",
+          message: `could not resume ${row.taskId}, which was waiting on you when the app closed: ${(e as Error).message}`,
+          project: session.key,
+          taskId: row.taskId,
+        });
+      }
+    }
+  }
+
+  /**
    * Pick a stopped task up where it left off, rather than starting it over ("task:resume").
    *
    * The machine is LOADED, not re-walked (Identity and Resume §04): the journal joined to the
@@ -3989,6 +4067,10 @@ export class AppService {
         },
       );
     }
+    // The failure the retry revives is deleted with the record it already freed (§05): the journal
+    // said the chain ended in error, the retry says it is live again, and every reader of the journal
+    // — the conversation's notes, the run causes — was drawing the old ending beside the new run.
+    releaseRevivedFailures(open.project, load);
     // What a resume actually IS, written down before it happens: how much is being taken from the
     // record and where the spending starts again. Without this a resumed run is indistinguishable in
     // the log from an ordinary one, and the interesting number — what it did NOT re-run — is the one
@@ -6851,4 +6933,15 @@ function scopeFloorOf(config: JairaConfigOf): readonly Scope[] | undefined {
     if (Array.isArray(scopes) && scopes.length > 0) return scopes;
   }
   return undefined;
+}
+
+/** The `reason` inside a run row's stored failure, or undefined where there is none or it will not parse. */
+function reasonOf(failureJson: string | undefined): string | undefined {
+  if (failureJson === undefined) return undefined;
+  try {
+    const parsed = JSON.parse(failureJson) as { reason?: unknown };
+    return typeof parsed.reason === "string" ? parsed.reason : undefined;
+  } catch {
+    return undefined;
+  }
 }

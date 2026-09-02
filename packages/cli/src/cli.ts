@@ -20,11 +20,13 @@ import {
   createTask,
   finishTaskRun,
   loadSnapshot,
+  releaseRevivedFailures,
   releaseUnconsumedFailures,
   initProject,
   lintErrors,
   openProject,
   prepareUserModules,
+  resolveUserFunctions,
   userModules,
   ensureWorkspace,
   gitFor,
@@ -475,8 +477,14 @@ function buildRunEnvironment(
   // symbol is already a registry entry carrying its capabilities, its signature and the
   // errors-as-data contract. Only what this bundle resolved is here, and a workflow that names no
   // module merges nothing.
+  // Resolved from THIS bundle first: a task pinned to a snapshot loads the resolved definition and
+  // resolves no symbol on the way, so the facade's `entries` can be empty when the run is about to
+  // call one — the app's re-run failed exactly so. See `resolveUserFunctions`.
   const modules = userModules();
-  if (modules !== undefined) registerUserFunctions(registry, modules.userFunctions);
+  if (modules !== undefined) {
+    resolveUserFunctions(modules, bundle);
+    registerUserFunctions(registry, modules.userFunctions);
+  }
   // The terminal reviewer (§8.4): the same registered function, answered at a CLI prompt — the hub
   // is process-local, so this needs no new channel. Only when nothing scripted it and a person is
   // actually attached; headless, an unanswerable gate should fail the state, not hang the run.
@@ -922,6 +930,9 @@ async function runTaskNow(
               `(first: ${first.stateId} — ${first.reason}). Running it again would repeat them.`,
           );
         }
+        // The failure the retry revives goes with the record it already freed (§05) — see the app's
+        // `resumeTask`. The journal must say what the retry says.
+        releaseRevivedFailures(project, load);
         io.stderr(`resuming ${taskId}: ${load.loadedOps} operation(s) loaded\n`);
         resume = { loaded: load.loaded, answers: load.answers };
       }

@@ -367,9 +367,23 @@ function Piece({
  * Formatted here rather than in the header because it is arithmetic over a node, and a header should
  * be handed words. A run still going has no duration to state, and says nothing rather than zero.
  */
-export function metaOf(node: InstanceNode): string {
-  const took = node.endedAt !== undefined ? durationOf(node.endedAt - node.startedAt) : undefined;
+export function metaOf(node: InstanceNode, now?: number): string {
+  // How long it TOOK, or — for a state still going, when the caller is keeping time — how long it has
+  // been going. The second reading is what a live run wants from its rail: the moment a state was
+  // entered is a fact about the past, and "twenty minutes so far" is the fact about the present. A
+  // caller that passes no clock gets the finished reading only, exactly as before.
+  const took =
+    node.endedAt !== undefined
+      ? durationOf(node.endedAt - node.startedAt)
+      : now !== undefined && isLiveNode(node)
+        ? `${durationOf(Math.max(0, now - node.startedAt))} so far`
+        : undefined;
   return [clockOf(node.startedAt), took].filter((part) => part !== undefined && part.length > 0).join(" · ");
+}
+
+/** A state that is still going — the same reading the projection's `isLive` makes, minus `superseded`. */
+export function isLiveNode(node: InstanceNode): boolean {
+  return !node.superseded && (node.status === "running" || node.status === "waiting_for_user" || node.status === "blocked");
 }
 
 /**
@@ -785,7 +799,14 @@ function NoteRow({ note, root }: { note: BandNote; root: string }): JSX.Element 
   const moved = note.kind === "entered" || note.kind === "transition";
   const where = pathFrom(note.path, root);
   return (
-    <div className={moved ? "sb-note step" : "sb-note"} role="note">
+    // `data-entered` is what a bookmark lands on: the row where the run went INTO the state, which
+    // is where a person following the run wants to start reading — not the letterhead below it,
+    // which is where the state started talking. See the focus effect in `SessionBandsView`.
+    <div
+      className={moved ? "sb-note step" : "sb-note"}
+      role="note"
+      {...(note.kind === "entered" && note.instanceId !== undefined ? { "data-entered": note.instanceId } : {})}
+    >
       <Icon name={moved ? "choice" : "alert"} className="sb-note-icon" />
       {/* What HAPPENED, then where. A block is the negative of entering and says so in the same
           words — "could not enter product → explore" — rather than leaving a reason to stand on its
@@ -903,7 +924,7 @@ export function SessionBandsView({
   const goTo = useCallback((place: string): void => {
     const found = sheets.current?.querySelector(`[data-fork-place="${place}"]`);
     if (!(found instanceof HTMLElement)) return;
-    found.scrollIntoView({ block: "center", behavior: "smooth" });
+    found.scrollIntoView({ block: "start", behavior: "smooth" });
     // Lit briefly, because the sides of a fork look alike by construction: they are the same state,
     // usually saying nearly the same thing, and arriving at one with no confirmation of which is
     // indistinguishable from not having moved.
@@ -936,10 +957,15 @@ export function SessionBandsView({
     if (focus === undefined || served.current === focus.at) return;
     // No `CSS.escape`: the value is an instance id inside a quoted attribute selector, where the
     // only characters that would need it are a quote and a backslash, and an id holds neither.
-    const found = sheets.current?.querySelector(`[data-instance="${focus.instance}"]`);
+    // The ROW WHERE THE STATE WAS ENTERED first — the grey step that says the run went into it —
+    // and the letterhead only where there is no such row (the root, which nothing enters). The
+    // entered row is where reading the state starts, and it sits just above the letterhead.
+    const found =
+      sheets.current?.querySelector(`[data-entered="${focus.instance}"]`) ??
+      sheets.current?.querySelector(`[data-instance="${focus.instance}"]`);
     if (!(found instanceof HTMLElement)) return;
     served.current = focus.at;
-    found.scrollIntoView({ block: "center", behavior: "smooth" });
+    found.scrollIntoView({ block: "start", behavior: "smooth" });
     found.classList.add("sb-panel-lit");
     const clear = window.setTimeout(() => found.classList.remove("sb-panel-lit"), 1200);
     return () => {

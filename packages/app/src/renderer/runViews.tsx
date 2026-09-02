@@ -12,7 +12,7 @@
  * one card per EXECUTION, because a state that ran three times is three things that happened and a
  * single card cannot be clicked into three different transcripts.
  */
-import { useEffect, useLayoutEffect, useMemo, useState, type JSX, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState, type DragEvent as ReactDragEvent, type JSX, type ReactNode } from "react";
 import type {
   ChatPlanView,
   ChatSettings,
@@ -34,6 +34,7 @@ import { STOPPED, stoppedAction } from "./taskAction";
 import { instanceOf as instanceOfState, nodeAt, prunedTrail, type TrailStep } from "./trail";
 import { Paper, Pulse, Transcript, clockOf, durationOf, useElapsed } from "./transcriptView";
 import { advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
+import { TASK_DRAG } from "@jaira/shared/browser";
 import { Icon } from "./icons";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type SessionPiece } from "./sessionBands";
 import { SessionBandsView } from "./sessionPanels";
@@ -81,6 +82,8 @@ function RunTile({
   selected,
   onSelect,
   onOpen,
+  onDragStart,
+  onDragEnd,
 }: {
   node: InstanceNode;
   index: number;
@@ -88,6 +91,9 @@ function RunTile({
   selected: boolean;
   onSelect: () => void;
   onOpen: () => void;
+  /** Present only when a waiting transition has offered this execution's run a move — see {@link RunBoard}. */
+  onDragStart?: ((e: ReactDragEvent) => void) | undefined;
+  onDragEnd?: (() => void) | undefined;
 }): JSX.Element {
   const sig = signatureOf(node);
   const took = node.endedAt !== undefined ? durationOf(node.endedAt - node.startedAt) : undefined;
@@ -113,6 +119,8 @@ function RunTile({
       // click that navigated meant you could not point at a card without leaving the page it was on.
       onSelect={onSelect}
       onDrill={onOpen}
+      {...(onDragStart !== undefined ? { onDragStart } : {})}
+      {...(onDragEnd !== undefined ? { onDragEnd } : {})}
     >
       {sig.params.length > 0 ? (
         <div className="card-args">
@@ -142,6 +150,8 @@ export function RunBoard({
   openInstance,
   onSelect,
   onOpen,
+  offers = NO_RUN_OFFERS,
+  onDrop,
 }: {
   /** The state's declared children, in run order — the columns, whether or not anything ran. */
   declared: readonly StateChild[];
@@ -151,12 +161,33 @@ export function RunBoard({
   onSelect: (node: InstanceNode) => void;
   /** Two: walk into it. */
   onOpen: (node: InstanceNode) => void;
+  /**
+   * The moves a waiting transition of THIS run is offering — column key → the wait a drop there
+   * answers (`on_user_event`, WORKFLOWS.md §7.4). See {@link runDragOffersOf}.
+   *
+   * Empty by default, which is the honest answer for a board that is not looking at live work: no
+   * card is draggable unless something is actually waiting for it to be. The Tasks board has had
+   * this since the gesture existed; this board — the one a double-click on a run lands on, whose
+   * columns are the very phases the rule names — offered nothing, so a card that could be dragged
+   * one level up could not be dragged here.
+   */
+  offers?: ReadonlyMap<string, string>;
+  /** A card was dropped on a column that was offering it a place. The caller answers the wait. */
+  onDrop?: ((requestId: string) => void) | undefined;
 }): JSX.Element {
   const byChild = useMemo(() => runsByChild(parent), [parent]);
   // What actually ran, when nothing says what was declared — a state view still in flight, or one
   // that would not load. Fewer columns than the truth (a child nothing reached cannot appear) but
   // never wrong about the ones it draws, which beats an empty board while a fetch lands.
   const columns = declared.length > 0 ? declared : [...byChild.keys()].map((key) => ({ key }) as StateChild);
+  /**
+   * The card a drag picks up: the execution the run RESTS on — the parent's latest child that was
+   * not superseded. A wait belongs to the run, not to a pass, and the pass it is about is the one
+   * the parent stopped after; every other card in the column is history.
+   */
+  const resting = useMemo(() => [...(parent?.children ?? [])].reverse().find((n) => !n.superseded), [parent]);
+  const [dragging, setDragging] = useState(false);
+  const draggable = onDrop !== undefined && offers.size > 0;
   return (
     // The same board the Tasks view draws, down to the class names: one column per declared child,
     // numbered in run order, cards inside. What differs is that a card here is one EXECUTION.
@@ -164,8 +195,32 @@ export function RunBoard({
       <div className="columns">
         {columns.map((child, index) => {
           const runs = byChild.get(child.key) ?? [];
+          const latest = runs[runs.length - 1];
+          const requestId = offers.get(child.key);
           return (
-            <Column key={child.key} name={child.label ?? child.key} seq={index + 1} count={runs.length} empty="not reached">
+            <Column
+              key={child.key}
+              name={child.label ?? child.key}
+              seq={index + 1}
+              count={runs.length}
+              empty="not reached"
+              // Double-clicking a COLUMN walks into the newest execution in it — the same descent a
+              // card's double-click makes, reached from the heading. A column nothing reached has
+              // nowhere to go, and says so by not being openable.
+              tip={latest !== undefined ? `double-click to walk into ${child.key}` : `${child.key} was not reached`}
+              {...(latest !== undefined ? { onOpen: () => onOpen(latest) } : {})}
+              {...(dragging && onDrop !== undefined
+                ? {
+                    drop: {
+                      accepts: requestId !== undefined,
+                      onDrop: () => {
+                        setDragging(false);
+                        if (requestId !== undefined) onDrop(requestId);
+                      },
+                    },
+                  }
+                : {})}
+            >
               {runs.map((node, i) => (
                 <RunTile
                   key={node.instanceId}
@@ -175,6 +230,17 @@ export function RunBoard({
                   selected={node.instanceId === openInstance}
                   onSelect={() => onSelect(node)}
                   onOpen={() => onOpen(node)}
+                  {...(draggable && node === resting
+                    ? {
+                        onDragStart: (e: ReactDragEvent) => {
+                          // Something has to be on the transfer or Firefox refuses the drag outright.
+                          e.dataTransfer.setData("text/plain", node.instanceId);
+                          e.dataTransfer.effectAllowed = "move";
+                          setDragging(true);
+                        },
+                        onDragEnd: () => setDragging(false),
+                      }
+                    : {})}
                 />
               ))}
             </Column>
@@ -183,6 +249,34 @@ export function RunBoard({
       </div>
     </div>
   );
+}
+
+const NO_RUN_OFFERS: ReadonlyMap<string, string> = new Map();
+
+/**
+ * The drags this run's board can offer: column key → the wait a drop there would answer.
+ *
+ * The same reading `dragOffersOf` makes for the Tasks board, one level down. A wait names the task
+ * it parked in and the child key its rule moves to (`to_state`, filled in by the hub), and this
+ * board's columns ARE those keys — so a wait of this task whose target is a column here is an
+ * offer, and one aimed anywhere else is not. FIRST wins where two rules offer the same move, which
+ * is the engine's own order.
+ */
+export function runDragOffersOf(
+  taskId: string | undefined,
+  columns: readonly { key: string }[],
+  requests: readonly PendingUserEvent[],
+): ReadonlyMap<string, string> {
+  if (taskId === undefined) return NO_RUN_OFFERS;
+  const keys = new Set(columns.map((c) => c.key));
+  const offers = new Map<string, string>();
+  for (const request of requests) {
+    if (request.event !== TASK_DRAG || request.taskId !== taskId) continue;
+    const to = advanceTargetOf(request);
+    if (to === undefined || !keys.has(to) || offers.has(to)) continue;
+    offers.set(to, request.requestId);
+  }
+  return offers;
 }
 
 // The key convention now lives in `sessionCache.ts`, with the invalidation that has to agree with
@@ -984,6 +1078,7 @@ export function RunView({ context }: { context: FileSurfaceProps["context"] }): 
   }
 
   if (node === undefined) return <p className="empty">This task has not run here yet.</p>;
+  const columns = declared.length > 0 ? declared : [...runsByChild(node).keys()].map((key) => ({ key }));
   return (
     <div className="composite">
       {board ? (
@@ -991,11 +1086,37 @@ export function RunView({ context }: { context: FileSurfaceProps["context"] }): 
           declared={declared}
           parent={node}
           openInstance={open.size === 1 ? [...open][0]! : null}
-          onSelect={(child) => setOpen(new Set([child.instanceId]))}
+          // One click marks the execution AND puts it in the context panel: the inspector, scoped to
+          // this pass — the inputs it was called with, its run history. A click that only drew a
+          // highlight left the panel describing the task while the person was pointing at one of
+          // its executions, which is the pair of things this board exists to tell apart.
+          onSelect={(child) => {
+            setOpen(new Set([child.instanceId]));
+            context.onOpenWorkflow?.(child.stateId, child.instanceId);
+          }}
           onOpen={openRun}
+          // What this run is waiting for somebody to do, where a column here is the place to do it.
+          offers={runDragOffersOf(detail?.taskId, columns, context.userEvents)}
+          onDrop={context.onDeliverUserEvent}
         />
       ) : (
-        <RunConversation parent={node} detail={detail} context={context} />
+        // The bookmark the task panel's Instances index sends — see `TaskContext.goTo`. This column
+        // is the document when the toggle says Conversation, so it is the column that scrolls.
+        <RunConversation
+          parent={node}
+          detail={detail}
+          context={context}
+          {...(context.runFocus !== undefined ? { focus: context.runFocus } : {})}
+          {...(context.runGate !== undefined && context.onRunGate !== undefined
+            ? {
+                asking: true,
+                gate: context.runGate,
+                onGate: context.onRunGate,
+                ...(context.runGateServices !== undefined ? { gateServices: context.runGateServices } : {}),
+                ...(context.runGateEditor !== undefined ? { gateEditor: context.runGateEditor } : {}),
+              }
+            : {})}
+        />
       )}
     </div>
   );
@@ -1061,8 +1182,23 @@ export function TaskContext({
    * makes every label in this panel inert, since the two readings share one column.
    */
   const [focus, setFocus] = useState<{ instance: string; at: number } | undefined>(undefined);
+  /**
+   * WHICH conversation the bookmark is for.
+   *
+   * When the middle column is showing this task's conversation — the Tasks view's toggle says
+   * Conversation — that column is the document, and a label pressed in this panel's Details reading
+   * has to scroll IT: this panel keeping its own conversation beside the real one, and scrolling
+   * that, was a bookmark that visibly did nothing. The ask goes up to the shell (`onRunFocus`), and
+   * this panel stays on Details, which is where the person was reading. Otherwise — a board in the
+   * middle, or no shell at all — the conversation this panel can show is the only one, as before.
+   */
   const goTo = (node: InstanceNode): void => {
-    setFocus({ instance: node.instanceId, at: Date.now() });
+    const bookmark = { instance: node.instanceId, at: Date.now() };
+    if (context.runMode === "conversation" && context.onRunFocus !== undefined) {
+      context.onRunFocus(bookmark);
+      return;
+    }
+    setFocus(bookmark);
     setMode("conversation");
   };
   // The task's own root run. A task that has never run has none, and the conversation says so.
@@ -1342,6 +1478,8 @@ export function CompositeView(props: FileSurfaceProps & { state: StateView }): J
             openInstance={open.size === 1 ? [...open][0]! : null}
             onSelect={(node) => setOpen(new Set([node.instanceId]))}
             onOpen={openRun}
+            offers={runDragOffersOf(detail?.taskId, at.declared, context.userEvents)}
+            onDrop={context.onDeliverUserEvent}
           />
         )
       ) : (

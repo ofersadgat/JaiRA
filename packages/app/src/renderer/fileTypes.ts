@@ -46,8 +46,11 @@ import type {
   WorkflowSyncResult,
   WorkflowSyncStatus,
   WritingTool,
+  PendingInteraction,
 } from "@jaira/shared/browser";
 import { mimeFallbacks } from "@jaira/shared/browser";
+import type { ComponentServices } from "./changesetReview";
+import type { EditorServices } from "./components";
 import type { Drafts, SetDraft } from "./drafts";
 import type { EditorTab } from "./editorChrome";
 import type { TrailStep } from "./trail";
@@ -291,6 +294,29 @@ export interface FileSurfaceContext {
    */
   runMode?: "board" | "conversation" | undefined;
   onRunMode?: ((mode: "board" | "conversation") => void) | undefined;
+  /**
+   * A bookmark for the conversation in the middle column: scroll to this instance's letterhead.
+   *
+   * Set by the task panel's Instances index when the middle column IS the conversation (`runMode`
+   * says so), because that column is the document and the panel's own conversation is not on
+   * screen. `at` is a stamp rather than a flag — pressing the same label twice is two asks, and the
+   * conversation serves each once (see `SessionBandsView`'s focus effect).
+   */
+  runFocus?: { instance: string; at: number } | undefined;
+  onRunFocus?: ((focus: { instance: string; at: number }) => void) | undefined;
+  /**
+   * The gate parked on the selected task, for the middle column's conversation to host.
+   *
+   * The task panel has hosted it since gates moved out of the modal; the middle column, which draws
+   * the same conversation when the toggle says Conversation, drew the asking state's INPUTS instead
+   * — a value dump of `docs`, `score` and `reasons` where the panel beside it showed the question.
+   * Same gate, same answer channel, same services, so the two columns cannot disagree about what is
+   * being asked.
+   */
+  runGate?: PendingInteraction | undefined;
+  onRunGate?: ((value: unknown) => void) | undefined;
+  runGateServices?: Partial<ComponentServices> | undefined;
+  runGateEditor?: EditorServices | undefined;
   onAnswer?: (() => void) | undefined;
   /**
    * Set this run going again — `task:rerun`, and the shell's own action rather than a raw call.
