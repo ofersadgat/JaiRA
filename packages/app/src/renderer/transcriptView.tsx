@@ -54,7 +54,7 @@ import {
   type ViewId,
 } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { Markdown, type FenceRenderer } from "./markdown";
+import { Markdown } from "./markdown";
 import { ValueView } from "./valueView";
 import { familyIcon, Icon } from "./icons";
 import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
@@ -179,49 +179,6 @@ export function thoughtTime(ms: number): string {
 }
 
 /**
- * A fenced block, drawn rather than quoted — the answer's half of the artifact story.
- *
- * A model that wants to hand over a page has two routes: `show_artifact`, which produces a real
- * artifact with a real viewer, and pasting the page into its answer. The second used to arrive as a
- * grey box of source with no way to look at it, which is what a transcript full of `<!DOCTYPE html>`
- * looks like — 29,000 characters nobody can see. This closes that: the SAME {@link ValueView} the
- * artifacts pane and the payload blocks use, so one page looks identical wherever it turns up, and
- * the Rendered / Code / Text toggle comes with it rather than being built a second time here.
- *
- * ## It holds no map of its own
- *
- * It used to, and the map was the bug. A table here from ` ```html ` to a viewer is a third opinion
- * about what a type is worth showing as — beside `mimeOfPath`, which answers it for files, and
- * `viewsFor`, which answers it for values — and a third opinion is a thing that can disagree. It
- * did: `markdown` was missing, so a model quoting a document had the whole subject of the message
- * rendered as a grey wall of `#` and `---`, one level below an answer that was being rendered.
- *
- * So the only new thing is the one piece neither existing map had — {@link mimeOfFenceLang}, a
- * NAME to a type — and everything after it is the machinery that was already there. A language
- * nothing recognises returns `undefined` and the fold shows the source, which is the same answer
- * this gave before for everything that was not a page.
- *
- * Static, and that is the difference from an artifact rather than an oversight. `Html` is a `srcdoc`
- * frame with an empty `sandbox`, so scripts do not run — the interactive path needs a served
- * `jaira-artifact:` URL, and a fence has no artifact behind it to serve. A model that wants its
- * mockup to MOVE has a tool for that, and this is the fallback, not a second way in.
- *
- * Module-level so the reference is stable: `Markdown` memoises on it.
- */
-const drawFence: FenceRenderer = ({ lang, code }) => {
-  const mime = mimeOfFenceLang(lang);
-  if (mime === undefined) return undefined;
-  // RECURSIVE, and passed rather than defaulted for the two reasons the prop exists. A document
-  // quoted inside a document is still a document, so a fence inside the quoted one gets the same
-  // dispatch — and handing `fence` down is also what asks `ValueView` for the reading renderers
-  // rather than the editors, which a transcript must never mount per block.
-  //
-  // It terminates on the nesting of the text: each level renders the CONTENTS of a fence, which is
-  // strictly shorter than the document holding it.
-  return <ValueView value={code} hint={{ mime }} fence={drawFence} />;
-};
-
-/**
  * The type a tool call's OWN arguments say its payload is.
  *
  * A `Read` of `main.cpp` produces a string, and nothing downstream knew what kind of string — so
@@ -279,7 +236,6 @@ function Payload({
       <ValueView
         value={value}
         label={label}
-        fence={drawFence}
         {...(hint !== undefined ? { hint: { mime: hint } } : {})}
         {...(artifacts !== undefined ? { serve: artifacts.serve } : {})}
         {...(artifacts?.onPrompt !== undefined ? { onPrompt: artifacts.onPrompt } : {})}
@@ -1127,7 +1083,7 @@ function Message({
    * a way back to the source.
    */
   const body = (
-    <ValueView value={value} hint={hint} view={view} chrome={false} fence={drawFence} />
+    <ValueView value={value} hint={hint} view={view} chrome={false} />
   );
 
   const day = dayLabelOf(entry.at);
@@ -1170,6 +1126,9 @@ const READING: Record<ViewId, { label: string; hint: string }> = {
   code: { label: "Code", hint: "Highlighted, in an editor" },
   text: { label: "Source", hint: "The text exactly as it was written" },
   json: { label: "JSON", hint: "Highlighted, with what each key means" },
+  data: { label: "Data", hint: "Parsed — the value this document denotes" },
+  patch: { label: "Diff", hint: "The change this patch describes" },
+  table: { label: "Table", hint: "As rows and columns" },
   form: { label: "Form", hint: "As the fields its schema declares" },
 };
 

@@ -22,7 +22,12 @@
  * path is known, and therefore the moment its hint can be looked up.
  */
 
-export type TokenKind = "key" | "string" | "number" | "literal" | "punct" | "plain";
+/**
+ * `comment` is never emitted by {@link highlightJson} — JSON has none — and is here because
+ * `yamlHighlight.ts` shares this vocabulary and the CSS that colours it. One set of token classes
+ * rather than two that have to agree.
+ */
+export type TokenKind = "key" | "string" | "number" | "literal" | "punct" | "plain" | "comment";
 
 export interface Token {
   text: string;

@@ -71,6 +71,8 @@
      what remains is telling a string from a number, and marking the schema hints as not-content. */
   --tok-string: #0f7a45;
   --tok-number: #8a4a00;
+  --tok-keyword: #8b2fa0;
+  --tok-type: #0a5f9e;
   --tok-hint: #949cad;
   /* Controls. A hover surface one step past --panel-2, an accent dark enough to carry white text
      (--accent itself is tuned for TEXT on a panel and fails as a fill), and the highlight that makes
@@ -112,6 +114,8 @@
   --lift: 0 18px 50px rgba(0, 0, 0, 0.5);
   --tok-string: #7ad39c;
   --tok-number: #e0b070;
+  --tok-keyword: #d79bf0;
+  --tok-type: #7fc4f0;
   /* Dimmer than --dim: a hint sits ON a line of code and must lose to it at a glance. */
   --tok-hint: #5a6274;
   --panel-3: #232833;
@@ -1834,6 +1838,20 @@ button.side-twist:hover:not(:disabled) {
   min-height: 120px;
   resize: none;
 }
+/* The coloured editor takes the same band the plain box did. `.monaco-host` carries no height of its
+   own — Monaco measures its container — so a parent that only said `flex: 1` would collapse it to
+   nothing and show an empty pane with a working editor invisibly inside it. The border and radius
+   are the box's, because which editor you got should not change what the panel looks like. */
+/* `.vv-source` is the Suspense fallback while Monaco loads — same band, so the panel does not jump
+   when it arrives. `Suspense` adds no DOM node, so both are direct children here. */
+.file-edit > .monaco-host,
+.file-edit > .vv-source {
+  flex: 1 1 auto;
+  min-height: 200px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
 .file-edit > .pane-actions {
   flex: none;
 }
@@ -2013,6 +2031,28 @@ button.side-twist:hover:not(:disabled) {
 }
 .tok-punct {
   color: var(--dim);
+}
+/* The three a general-purpose grammar needs and a data format does not. Named here rather than in
+   the markdown editor because the palette is one thing: the same `tok-*` classes are painted by the
+   JSON scanner, the YAML scanner and CodeMirror's nested grammars, so a fenced TypeScript block in a
+   document and the same code in a transcript are the same colours. */
+.tok-keyword {
+  color: var(--tok-keyword);
+}
+.tok-type {
+  color: var(--tok-type);
+}
+/* A called name. Weight rather than hue: a third colour on a line that already has a keyword and a
+   string is where highlighting stops helping and starts being decoration. */
+.tok-fn {
+  font-weight: 600;
+}
+/* YAML's own — a comment is the thing JSON has no word for, and the reason the parsed reading is
+   never the only one. Italic and dim: it is beside the data rather than part of it. */
+.tok-comment {
+  color: var(--dim);
+  font-style: italic;
+  opacity: 0.85;
 }
 
 /* The schema's own words for a key, at the end of its line. Dimmed and italic so it reads as
@@ -2317,6 +2357,26 @@ button.side-twist:hover:not(:disabled) {
 }
 .markdown .md-front > pre {
   margin: 6px 0 0;
+}
+/* The header is drawn by the value viewer now — same component, same toggle, same parse a ```yaml
+   fence gets. Held in from the summary so the two read as label and content rather than as two
+   stacked blocks, and bounded because a header is metadata: it must not push the first heading off
+   the screen however long somebody's `description:` is. */
+.markdown .md-front > .vv {
+  margin: 6px 0 0 2px;
+}
+.markdown .md-front > .vv .vv-body {
+  max-height: 260px;
+  overflow: auto;
+}
+/* Coloured rather than grey — see `YamlLines`. `pre-wrap` because a description in front matter is
+   a sentence, and a header that scrolls sideways to read one is a header nobody opens twice. */
+.markdown .md-front-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.markdown .md-front-body .code-line {
+  display: inline;
 }
 .markdown blockquote {
   border-left: 3px solid var(--line);
@@ -10306,6 +10366,190 @@ fieldset.reading {
 }
 .vv-body > .markdown {
   font-size: calc(var(--size-app) * 12.5 / 12.5);
+}
+
+/* --- a patch, as the change it describes --- */
+
+/* Borrows the changeset viewer's vocabulary (`vv-changes-head`, `vv-add`, `vv-del`) without
+   borrowing its model — see `PatchView`. A patch has no file content behind it, so there is no
+   Monaco here and nothing to open: what you see is every line the patch carries. */
+.vv-patch {
+  max-height: 460px;
+  overflow: auto;
+}
+.vv-patch-file + .vv-patch-file {
+  margin-top: 8px;
+}
+.vv-patch-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.vv-patch-head:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+}
+.vv-patch-chev {
+  flex: none;
+  transform: rotate(-90deg);
+  transition: transform 0.12s ease;
+  color: var(--dim);
+}
+.vv-patch-chev.open {
+  transform: none;
+}
+/* The verb, not a colour-coded badge: `create` and `delete` differ in what they say, and a reader
+   scanning ten files reads the words faster than they decode a palette. */
+.vv-patch-act {
+  flex: none;
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+}
+.vv-patch-act.act-create {
+  color: var(--tok-string);
+}
+.vv-patch-act.act-delete {
+  color: var(--bad);
+}
+.vv-patch-path {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11.5 / 12);
+  overflow-wrap: anywhere;
+}
+.vv-patch-binary,
+.vv-patch-body > .empty {
+  margin: 6px 0 0 8px;
+}
+.vv-patch-body {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11.5 / 12);
+  line-height: 1.5;
+  /* The whole point of the horizontal scroll living HERE: a long line scrolls inside the patch
+     rather than widening the message that holds it. */
+  overflow-x: auto;
+}
+/* The break between hunks. It is drawn rather than closed up because lines 130 and 400 are not
+   neighbours, and a viewer that ran them together would be claiming they were. */
+.vv-patch-hunk + .vv-patch-hunk {
+  border-top: 1px dashed var(--line);
+}
+.vv-patch-at {
+  display: flex;
+  gap: 10px;
+  padding: 3px 6px;
+  color: var(--dim);
+  background: color-mix(in srgb, var(--dim) 8%, transparent);
+}
+.vv-patch-at-sec {
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vv-patch-line {
+  display: flex;
+  white-space: pre;
+}
+/* Both gutters, always — an absent number is a blank cell, so the columns stay straight down the
+   whole hunk. `tabular-nums` keeps them straight across the 9→10 boundary too. */
+.vv-patch-no {
+  flex: none;
+  width: 4.2em;
+  padding-right: 8px;
+  text-align: right;
+  color: var(--dim);
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+.vv-patch-sign {
+  flex: none;
+  width: 1.4em;
+  text-align: center;
+  user-select: none;
+}
+.vv-patch-text {
+  overflow-wrap: normal;
+}
+.vv-patch-line.ln-add {
+  background: color-mix(in srgb, var(--tok-string) 14%, transparent);
+}
+.vv-patch-line.ln-add .vv-patch-sign {
+  color: var(--tok-string);
+}
+.vv-patch-line.ln-del {
+  background: color-mix(in srgb, var(--bad) 13%, transparent);
+}
+.vv-patch-line.ln-del .vv-patch-sign {
+  color: var(--bad);
+}
+
+/* --- a delimited file, as rows and columns --- */
+
+/* The scroll container is the WRAPPER rather than the table, so a wide table scrolls sideways inside
+   the value and never inside the transcript that holds it — the same containment argument `.vv-json`
+   makes about its hint slot. Bounded in height for the same reason `.vv-source` is. */
+.vv-table-wrap {
+  max-height: 340px;
+  overflow: auto;
+}
+.vv-table {
+  border-collapse: collapse;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11.5 / 12);
+  line-height: 1.5;
+}
+.vv-table th,
+.vv-table td {
+  border: 1px solid var(--line);
+  padding: 2px 7px;
+  text-align: left;
+  /* Cells hold values, not prose: one line each, and the full text on hover via the browser's own
+     overflow behaviour. A cell that wrapped would make every row a different height and the grid
+     unreadable as a grid. */
+  white-space: pre;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Sticky, so the column names survive scrolling — the one thing a table of 500 rows needs most. */
+.vv-table th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  color: var(--dim);
+  font-weight: 500;
+}
+.vv-table-cut {
+  margin: 6px 0 0;
+}
+
+/* Why a document could not be read as data — see `ParseProblem`. Stated rather than styled as an
+   alarm: a half-typed file failing to parse is normal, and a red box would make it an incident. */
+.vv-parse-error {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--warn);
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11.5 / 12);
+}
+.vv-parse-icon {
+  flex: none;
+  align-self: center;
 }
 /* Rendered HTML runs in a sandboxed frame — see `Html` on why. Fixed height: the frame cannot be
    measured from outside without same-origin access, which is exactly what the sandbox withholds. */

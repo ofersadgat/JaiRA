@@ -40,8 +40,6 @@ import { invoke } from "./store";
 import { Icon } from "./icons";
 import { docKey, useDraftBox, type DraftBox, type Drafts, type SetDraft } from "./drafts";
 import { EditorActions } from "./editorChrome";
-import { Markdown } from "./markdown";
-import { MarkdownEditor } from "./markdownEditor";
 import { SchemaJsonEditor } from "./schemaEditor";
 import { answerOf, ChoiceList, ChoiceSteps, EMPTY_ANSWER, submitsOnClick, type Answer } from "./choices";
 import { mountChangesetReview, rendererServices, type ComponentServices } from "./changesetReview";

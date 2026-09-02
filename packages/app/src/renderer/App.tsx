@@ -70,9 +70,17 @@ import {
   StateInspector,
   TaskInspector,
 } from "./files";
-// Imported for its registrations: this is what puts markdown, JSON, YAML, states and config into the
-// surface registry. Nothing else in the shell references the built-in surfaces by name.
+// Imported for their registrations, which is the whole reason these two lines exist: `fileSurfaces`
+// puts markdown, JSON, YAML, states and config into the surface registry, and `fenceRender` installs
+// the renderer every `<Markdown>` in the app draws its fenced blocks with. Nothing else in the shell
+// references either by name.
+//
+// `fenceRender` is named here rather than left to arrive through some other module's import graph.
+// It did arrive that way — `fileSurfaces` pulls it in for `MarkdownView` — and that is exactly the
+// kind of dependency that holds until somebody tidies an import and every fenced block in the app
+// silently goes grey with no test failing.
 import "./fileSurfaces";
+import "./fenceRender";
 import type { FileSurfaceContext } from "./fileTypes";
 import { LogsPanel } from "./logs";
 import { LayerPicker, SettingsPane } from "./panes";

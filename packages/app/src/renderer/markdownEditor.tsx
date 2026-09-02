@@ -29,10 +29,85 @@
 import { useEffect, useMemo, useRef, type JSX } from "react";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { HighlightStyle, syntaxHighlighting, syntaxTree } from "@codemirror/language";
+import { javascript } from "@codemirror/lang-javascript";
+import { html } from "@codemirror/lang-html";
+import { css } from "@codemirror/lang-css";
+import { HighlightStyle, LanguageDescription, syntaxHighlighting, syntaxTree, type LanguageSupport } from "@codemirror/language";
+import { codeMirrorGrammarOf, mimeOfFenceLang } from "@jaira/shared/browser";
 import { Compartment, EditorState, type Extension, type Range } from "@codemirror/state";
 import { Decoration, EditorView, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+
+/**
+ * The CodeMirror parser behind each grammar this app names — the loaders, and nothing else.
+ *
+ * The DECISION of which grammar a fence wants is not made here: it is `shared/grammars.ts`, keyed by MIME
+ * type, and reached through `mimeOfFenceLang` like every other question about a format. This table
+ * only says how to obtain the parser once that route has named one, which is why it is keyed by the
+ * engine's own grammar name rather than by anything a document says.
+ *
+ * The split is about bundling as much as tidiness. Naming a grammar is a fact and costs nothing;
+ * importing one drags a package into the chunk, and the table is read by every surface in the app,
+ * most of which have no use for CodeMirror's parsers.
+ *
+ * YAML and JSON are the two that genuinely split into chunks of their own. The rest are already in
+ * this module's bundle whether asked for or not — `lang-markdown` statically imports `lang-html`,
+ * which statically imports `lang-css` and `lang-javascript` — so writing them as `import()` bought
+ * nothing but four bundler warnings per build, and a build that always warns is one where a real
+ * warning goes unread.
+ */
+const PARSERS: Record<string, () => Promise<LanguageSupport>> = {
+  yaml: () => import("@codemirror/lang-yaml").then((m) => m.yaml()),
+  json: () => import("@codemirror/lang-json").then((m) => m.json()),
+  javascript: async () => javascript(),
+  typescript: async () => javascript({ typescript: true }),
+  html: async () => html(),
+  css: async () => css(),
+};
+
+/**
+ * Which grammar to colour a fenced block with — `markdown()`'s own hook, routed the long way round.
+ *
+ * A FUNCTION rather than a list, which is what makes the single route possible: `codeLanguages` hands
+ * over the fence's info string, and the answer comes back through exactly the pipeline a file path
+ * takes — name → MIME → grammar. So ` ```yml `, `notes.yaml` and a tool result declared
+ * `application/yaml` cannot disagree, and adding a format is one row in `shared/mime.ts` plus one in
+ * `shared/grammars.ts`, with no surface to remember.
+ *
+ * `null` is the honest answer for a language nothing here has a parser for: the fence keeps its
+ * background and its text, which is what an uncoloured block should look like.
+ */
+export function fenceLanguage(info: string): LanguageDescription | null {
+  const name = info.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+  if (name === "") return null;
+  const mime = mimeOfFenceLang(name);
+  const grammar = mime === undefined ? null : codeMirrorGrammarOf(mime);
+  return grammar === null ? null : describe(grammar);
+}
+
+/**
+ * One {@link LanguageDescription} per grammar, for the life of the module.
+ *
+ * MEMOISED, and the memo is load-bearing rather than a saving. A `LanguageDescription` caches its
+ * parser on itself once `load()` resolves, and that is how `parseCode` knows on the next parse that
+ * the nested grammar is ready to use. Minting a fresh description per call — which is what this did
+ * — hands the parser an object that has never been loaded, every single time: the fence is left
+ * unparsed, another load is started, and the result is thrown away. The block stays plain text
+ * forever, and nothing anywhere reports a problem.
+ *
+ * That is why colouring a fenced block needs THREE things and looks broken with any two: the grammar
+ * (`shared/grammars.ts`), a style that paints its tags ({@link LOOK}), and a description stable
+ * enough to finish loading.
+ */
+const DESCRIPTIONS = new Map<string, LanguageDescription>();
+
+function describe(grammar: string): LanguageDescription | null {
+  const load = PARSERS[grammar];
+  if (load === undefined) return null;
+  const found = DESCRIPTIONS.get(grammar) ?? LanguageDescription.of({ name: grammar, load });
+  DESCRIPTIONS.set(grammar, found);
+  return found;
+}
 
 /**
  * How each markdown construct is drawn.
@@ -40,7 +115,7 @@ import { tags } from "@lezer/highlight";
  * Classes rather than inline styles, so the palette lives in `styles.css` with every other colour
  * and follows the theme without this file knowing there is one.
  */
-const LOOK = HighlightStyle.define([
+export const LOOK = HighlightStyle.define([
   { tag: tags.heading1, class: "cm-h1" },
   { tag: tags.heading2, class: "cm-h2" },
   { tag: tags.heading3, class: "cm-h3" },
@@ -53,6 +128,38 @@ const LOOK = HighlightStyle.define([
   { tag: tags.quote, class: "cm-quote" },
   { tag: tags.list, class: "cm-list" },
   { tag: tags.contentSeparator, class: "cm-rule" },
+
+  /**
+   * …and the languages INSIDE the document, in the app's own palette.
+   *
+   * A `HighlightStyle` paints only the tags it lists, and this listed markdown's and nothing else —
+   * so handing `markdown()` the nested grammars made a ```yaml block PARSE as YAML and left every
+   * token of it unpainted. Two halves of one feature, and the first half on its own looks exactly
+   * like no feature at all.
+   *
+   * The classes are `tok-*`, which is the same palette `jsonHighlight.ts` and `yamlHighlight.ts`
+   * paint with. That is the point rather than a convenience: the same YAML shown in a transcript, in
+   * a file's front matter and inside a fenced block in a document is now the same colours, because
+   * all three name the same handful of CSS rules instead of each bringing a theme.
+   */
+  { tag: [tags.propertyName, tags.attributeName, tags.tagName], class: "tok-key" },
+  { tag: [tags.string, tags.special(tags.string), tags.attributeValue], class: "tok-string" },
+  { tag: [tags.number, tags.integer, tags.float], class: "tok-number" },
+  { tag: [tags.bool, tags.null, tags.atom], class: "tok-literal" },
+  { tag: [tags.comment, tags.lineComment, tags.blockComment], class: "tok-comment" },
+  { tag: [tags.punctuation, tags.separator, tags.bracket, tags.operator], class: "tok-punct" },
+  {
+    tag: [tags.keyword, tags.controlKeyword, tags.definitionKeyword, tags.operatorKeyword, tags.moduleKeyword],
+    class: "tok-keyword",
+  },
+  { tag: [tags.typeName, tags.className, tags.namespace], class: "tok-type" },
+  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], class: "tok-fn" },
+  // Anchors and aliases — the parts of YAML that JSON has no word for, which `yamlHighlight` also
+  // singles out. Same reasoning, same colour.
+  //
+  // `tags.meta` is deliberately NOT here, though it looks like it belongs: markdown's own syntax
+  // marks carry it, so listing it painted every `#` and every ``` in the document as a literal.
+  { tag: tags.labelName, class: "tok-literal" },
 ]);
 
 /** Collapse a range to nothing. The marks are still in the document; they are just not drawn. */
@@ -353,7 +460,7 @@ export function MarkdownEditor({
     const extensions: Extension[] = [
       history(),
       keymap.of([...defaultKeymap, ...historyKeymap]),
-      markdown({ base: markdownLanguage }),
+      markdown({ base: markdownLanguage, codeLanguages: fenceLanguage }),
       syntaxHighlighting(LOOK),
       livePreview,
       EditorView.lineWrapping,

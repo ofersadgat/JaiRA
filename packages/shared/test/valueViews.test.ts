@@ -69,6 +69,59 @@ describe("which views apply", () => {
     expect(viewsFor("<p>hi</p>", { mime: "text/html" })).toEqual(["html", "code", "text"]);
   });
 
+  it("reads a structured DOCUMENT as data too, under the source rather than in front of it", () => {
+    // The gap this closed: a YAML or JSON document had colours and nothing else, so a file whose
+    // whole content is data could not be read as data. See `structured.ts` on why the parsed form
+    // goes underneath — it drops comments, block scalars and anchors, and a lossy rendering does not
+    // get to be the default.
+    expect(viewsFor("a: 1\n", { mime: "application/yaml" })).toEqual(["code", "data", "text"]);
+    expect(viewsFor('{"a": 1}', { mime: "application/json" })).toEqual(["code", "data", "text"]);
+    // A vendor type inherits it, which is the whole reason resolution walks the fallback chain.
+    expect(viewsFor("id: plan\n", { mime: "application/vnd.jaira.workflow+yaml" })).toEqual(["code", "data", "text"]);
+    // …and a schema makes the fields readable as fields, on the same terms as a value that arrived
+    // already parsed.
+    const schema = { type: "object", properties: { a: { type: "number" } } };
+    expect(viewsFor("a: 1\n", { mime: "application/yaml", schema })).toEqual(["code", "data", "form", "text"]);
+  });
+
+  it("leads with the table for a delimited file, because its source is a transport", () => {
+    // The asymmetry with YAML above is the one judgement in that branch: a wall of commas is to a
+    // table what unrendered markdown is to a document, and nobody opens a CSV to admire the commas.
+    // No `code` between them, and that is the other half of the fix: nothing can colour a CSV, so
+    // the button that claimed to would have shown text identical to `text`. See `isCodeMime`.
+    expect(viewsFor("a,b\n1,2\n", { mime: "text/csv" })).toEqual(["table", "text"]);
+    expect(viewsFor("a\tb\n", { mime: "text/tab-separated-values" })).toEqual(["table", "text"]);
+  });
+
+  it("offers the data reading on the declared type alone, broken document included", () => {
+    // Deliberate, and the opposite of how `media` is offered. A document that will not parse is
+    // exactly when the reading earns its place — the view names the line it broke on — and a button
+    // that disappeared at the first syntax error would hide the one answer it has.
+    expect(viewsFor("a:\n\t- 1\n", { mime: "application/yaml" })).toContain("data");
+    // Nothing is SNIFFED into it, though: every plain text file is also a valid YAML document, so a
+    // sniffer would offer this everywhere and mean nothing by it.
+    expect(viewsFor("a: 1\n")).toEqual(["text"]);
+    expect(viewsFor("a: 1\n", { mime: "text/plain" })).toEqual(["text"]);
+  });
+
+  it("leads with the patch reading for a diff, and stops it reading as a bullet list", () => {
+    const patch = ["--- a/x.ts", "+++ b/x.ts", "@@ -1,3 +1,3 @@", " a", "-b", "+c", ""].join("\n");
+    // No `code` either — Monaco ships no diff grammar, so the reading and the source are all
+    // there is. See `isCodeMime`, which now asks the grammar table instead of guessing.
+    expect(viewsFor(patch, { mime: "text/x-diff" })).toEqual(["patch", "text"]);
+    // The bug the suppression exists for: a removed line begins `-` at the start of a line, which is
+    // markdown's bullet mark exactly, so a patch scored two marks and led with the markdown view.
+    expect(viewsFor(patch)).toEqual(["patch", "text"]);
+    expect(viewsFor(patch)).not.toContain("markdown");
+  });
+
+  it("sniffs a patch only on the hunk mark, and never over a declared plain type", () => {
+    // The mark is what earns the exception — see `viewsFor`. Prose that merely talks about diffs is
+    // not one, and "this really is just text" has to keep meaning that.
+    expect(viewsFor("we rewrote it, +3 −1, see the diff")).toEqual(["text"]);
+    expect(viewsFor(["@@ -1 +1 @@", "-a", "+b", ""].join("\n"), { mime: "text/plain" })).toEqual(["text"]);
+  });
+
   it("renders a drawing first and keeps its source underneath", () => {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>`;
     // The rendering leads because "what does this look like" is what you ask of a drawing; `code`
@@ -323,5 +376,19 @@ describe("code is not a document, whatever its comments look like", () => {
     // The robust half: a declared type beats the sniffer, so a `.cpp` payload never depends on
     // what its comments happen to look like.
     expect(viewsFor(cpp, { mime: "text/x-c++src" })).toEqual(["code", "text"]);
+  });
+});
+
+describe("asserting a type is a correction that has to land", () => {
+  it("gives a declared diff its reading even when the text does not announce itself", () => {
+    // `text/x-diff` is in OFFERED_TYPES, so "no, this IS a diff" is something a person says about a
+    // value the sniffer read as prose. Gating the reading on the sniffer made that control do
+    // nothing — caught by `typeNames.test.ts`, which holds every offered type to producing a reading.
+    expect(viewsFor("some text", { mime: "text/x-diff" })).toEqual(["patch", "text"]);
+    // The view itself still declines gracefully: a parse that finds no patch falls back to Source.
+    expect(viewsFor("some text", { schema: { type: "string", contentMediaType: "diff" } })).toEqual([
+      "patch",
+      "text",
+    ]);
   });
 });

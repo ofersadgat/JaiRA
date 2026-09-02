@@ -21,6 +21,7 @@
  * the decision.
  */
 import { useEffect, useRef, useState, type JSX } from "react";
+import { monacoGrammarOf } from "@jaira/shared/browser";
 import * as monaco from "monaco-editor";
 // Monaco ≥0.53 maps subpaths through its exports table (`./*` → `./esm/vs/*.js`), so the worker
 // specifiers are spelled WITHOUT the `esm/vs` prefix the older guides show.
@@ -61,81 +62,6 @@ if (window.MonacoEnvironment === undefined) {
       }
     },
   };
-}
-
-/** The Monaco language id for a MIME type — display only, so unknown safely means plain text. */
-export function monacoLanguageOf(mime: string): string {
-  if (mime.endsWith("+json") || mime === "application/json") return "json";
-  if (mime.endsWith("+yaml") || mime === "application/yaml") return "yaml";
-  if (mime.endsWith("+markdown") || mime === "text/markdown") return "markdown";
-  switch (mime) {
-    case "text/x-typescript":
-      return "typescript";
-    case "text/javascript":
-      return "javascript";
-    case "text/x-python":
-      return "python";
-    case "text/html":
-      return "html";
-    case "text/css":
-      return "css";
-    case "application/x-sh":
-      return "shell";
-    case "application/xml":
-    case "image/svg+xml":
-      return "xml";
-    // The rest of `shared/mime.ts`'s TEXT table. Monaco's own language ids, which mostly are not
-    // the subtype: `text/x-c++src` is `cpp`, `text/x-csharp` is `csharp`. A type with no entry is
-    // plain text and shows uncoloured, which is the correct failure — never a wrong grammar.
-    case "text/x-c":
-      return "c";
-    case "text/x-c++src":
-      return "cpp";
-    case "text/x-csharp":
-      return "csharp";
-    case "text/x-java":
-      return "java";
-    case "text/x-go":
-      return "go";
-    case "text/x-rust":
-      return "rust";
-    case "text/x-ruby":
-      return "ruby";
-    case "text/x-php":
-      return "php";
-    case "text/x-swift":
-      return "swift";
-    case "text/x-kotlin":
-      return "kotlin";
-    case "text/x-scala":
-      return "scala";
-    case "text/x-lua":
-      return "lua";
-    case "text/x-r":
-      return "r";
-    case "text/x-perl":
-      return "perl";
-    case "text/x-dart":
-      return "dart";
-    case "text/x-sql":
-      return "sql";
-    case "application/graphql":
-      return "graphql";
-    case "text/x-scss":
-      return "scss";
-    case "text/x-less":
-      return "less";
-    case "text/x-ini":
-      return "ini";
-    case "text/x-dockerfile":
-      return "dockerfile";
-    case "application/x-powershell":
-      return "powershell";
-    case "application/x-bat":
-      return "bat";
-    default:
-      return "plaintext";
-  }
 }
 
 /** The Monaco theme for the app's `data-theme` attribute. */
@@ -194,7 +120,7 @@ const MAX_DIFF_HEIGHT = 620;
 export interface MonacoDiffProps {
   original: string;
   modified: string;
-  /** A MIME type — mapped through {@link monacoLanguageOf}. */
+  /** A MIME type — mapped through {@link monacoGrammarOf}. */
   mime: string;
   /** Called with the modified side's full text on every edit — §4.1's `merged.content` feed. */
   onModified?: (text: string) => void;
@@ -242,7 +168,7 @@ export function MonacoDiffPane({
   useEffect(() => {
     const node = host.current;
     if (node === null) return undefined;
-    const language = monacoLanguageOf(mime);
+    const language = monacoGrammarOf(mime);
     const originalModel = monaco.editor.createModel(original, language);
     const modifiedModel = monaco.editor.createModel(modified, language);
     const editor = monaco.editor.createDiffEditor(node, {
@@ -445,34 +371,53 @@ export function MonacoDiffPane({
 }
 
 /**
- * One text, coloured — the read-only sibling of the diff pane.
+ * One text, coloured — the single-document sibling of the diff pane.
  *
- * Same worker wiring, same theme following, same MIME→language map; what differs is that there is
+ * Same worker wiring, same theme following, same MIME→grammar map; what differs is that there is
  * nothing to compare against. It exists because "show me the source" and "show me the source I can
  * read" are different requests, and a two-hundred-line state file in a `<pre>` is the second one
- * refused. Read-only throughout: this is a VIEW, and every surface that edits text in this app has
- * an editor of its own.
+ * refused.
+ *
+ * It used to be read-only throughout, on the reasoning that every surface editing text had an editor
+ * of its own. Those editors turned out to be one `<textarea>`, so a `.ts` file — a type Monaco has a
+ * grammar for, in an app that already colours it in three other places — was edited with no
+ * highlighting at all. Supplying `onChange` makes this the editor for anything with a grammar; see
+ * `documents.tsx`, which is what decides between this and the tokenizer.
  */
-export function MonacoCodePane({ text, mime }: { text: string; mime: string }): JSX.Element {
+export function MonacoCodePane({
+  text,
+  mime,
+  onChange,
+}: {
+  text: string;
+  mime: string;
+  /** Somewhere for a change to go. ABSENT means read-only — see `documents.tsx` on why it is absence. */
+  onChange?: ((text: string) => void) | undefined;
+}): JSX.Element {
   const host = useRef<HTMLDivElement>(null);
+  /** The latest props, read through refs so the editor is created once — see the effect below. */
+  const report = useRef(onChange);
+  report.current = onChange;
+  const seed = useRef({ text, mime });
+  seed.current = { text, mime };
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const writable = onChange !== undefined;
 
   useEffect(() => {
     const node = host.current;
     if (node === null) return undefined;
-    const model = monaco.editor.createModel(text, monacoLanguageOf(mime));
+    const model = monaco.editor.createModel(seed.current.text, monacoGrammarOf(seed.current.mime));
     const editor = monaco.editor.create(node, {
       model,
       automaticLayout: true,
-      readOnly: true,
-      // No cursor and no current-line highlight: those say "you are editing here", and nobody is.
-      renderLineHighlight: "none",
-      domReadOnly: true,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       overviewRulerLanes: 0,
       theme: themeOf(),
       ...editorFont(),
     });
+    editorRef.current = editor;
+    const typed = model.onDidChangeContent(() => report.current?.(model.getValue()));
     // Theme AND typography: both are written onto the root — one as a data attribute, the other as
     // inline custom properties — so one observer covers both, and the editor follows a size slider
     // as it moves rather than at the next reopen.
@@ -482,11 +427,47 @@ export function MonacoCodePane({ text, mime }: { text: string; mime: string }): 
     });
     themes.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "style"] });
     return () => {
+      typed.dispose();
       themes.disconnect();
       editor.dispose();
       model.dispose();
+      editorRef.current = null;
     };
-  }, [text, mime]);
+    // Created ONCE, which is what editing requires: this used to key on `[text, mime]`, so every
+    // keystroke tore the editor down and built a new one — fine while nothing could be typed, fatal
+    // the moment something could, because the caret goes with it. Everything that moves afterwards
+    // is followed by the effects below, the same arrangement `markdownEditor.tsx` uses.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Follow `text` when it moves for a reason that is not this editor — a reload, a revert. */
+  useEffect(() => {
+    const model = editorRef.current?.getModel();
+    if (model === undefined || model === null || model.getValue() === text) return;
+    // `pushEditOperations` rather than `setValue`: it keeps the undo stack, so an outside revert is
+    // one more step the person can undo rather than a wall their history stops at.
+    model.pushEditOperations([], [{ range: model.getFullModelRange(), text }], () => null);
+  }, [text]);
+
+  /** Follow the type — a file whose name changed under it is coloured as what it now is. */
+  useEffect(() => {
+    const model = editorRef.current?.getModel();
+    if (model !== undefined && model !== null) monaco.editor.setModelLanguage(model, monacoGrammarOf(mime));
+  }, [mime]);
+
+  /**
+   * Follow writability, rather than re-creating for it.
+   *
+   * `renderLineHighlight` and the cursor go with it: a current-line highlight says "you are editing
+   * here", and saying that over something nobody can change is the reading claiming to be an editor.
+   */
+  useEffect(() => {
+    editorRef.current?.updateOptions({
+      readOnly: !writable,
+      domReadOnly: !writable,
+      renderLineHighlight: writable ? "line" : "none",
+    });
+  }, [writable]);
 
   return <div className="monaco-host" ref={host} />;
 }
@@ -528,7 +509,7 @@ export function CodeText({ text, mime }: { text: string; mime: string }): JSX.El
     let live = true;
     monaco.editor.setTheme(theme);
     void monaco.editor
-      .colorize(text, monacoLanguageOf(mime), { tabSize: 2 })
+      .colorize(text, monacoGrammarOf(mime), { tabSize: 2 })
       .then((out) => {
         if (live) setHtml(out);
       })

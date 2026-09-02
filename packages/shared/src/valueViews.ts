@@ -23,6 +23,9 @@
 import type { Change, ChangeAction, Changeset } from "./changeset";
 import { CHANGE_ACTIONS } from "./changeset";
 import { isTextMime, mimeFallbacks } from "./mime";
+import { hasGrammar } from "./grammars";
+import { structuredFormatOf } from "./structured";
+import { looksLikeUnifiedDiff } from "./unifiedDiff";
 
 /**
  * The ways a value can be read.
@@ -31,7 +34,18 @@ import { isTextMime, mimeFallbacks } from "./mime";
  * is how two panels come to disagree about what markdown looks like — the point of this module is
  * that a model's answer renders the same way in the transcript, in the sync report and in a file.
  */
-export type ViewId = "text" | "json" | "form" | "markdown" | "html" | "code" | "media" | "changes";
+export type ViewId =
+  | "text"
+  | "json"
+  | "data"
+  | "table"
+  | "patch"
+  | "form"
+  | "markdown"
+  | "html"
+  | "code"
+  | "media"
+  | "changes";
 
 /** What a caller already knows about the value, when it knows anything. */
 export interface ViewHint {
@@ -65,20 +79,23 @@ export function mediaKindOf(mime: string | undefined): MediaKind | undefined {
 }
 
 /**
- * Whether a type is text with a GRAMMAR — the ones an editor can colour.
+ * Whether a type is text with a GRAMMAR — the ones an editor can actually colour.
  *
- * Not the same question as `isTextMime`, which asks whether a thing can be decoded at all. Plain
- * text has no grammar and markdown has a renderer that beats highlighting it, so neither earns a
- * code view; everything else that is text does, because for those the structure IS the reading.
+ * ASKED of `grammars.ts` rather than reasoned out here, and that is the fix for a whole class of
+ * bug. This used to be a heuristic — is it text, is it not plain, is it not markdown — which is a
+ * second, independent answer to a question the grammar table already answers definitively. The two
+ * disagreed about four types: TOML, CSV, TSV and diff each offered a `code` view that produced text
+ * identical to `text`, because no grammar was ever found to colour it with. A button that can only
+ * be pressed to no effect is precisely what the view toggle is not allowed to grow.
+ *
+ * MARKDOWN is the one exception, and it is a statement rather than an oversight. It has a grammar —
+ * the diff editor colours a `.md` file with it — and still must not offer `code` as a READING,
+ * because the rendered document beats a coloured copy of its source. In any spelling: the bare word
+ * a slot declares, the registered type, a vendor type that resolves to it.
  */
 export function isCodeMime(mime: string | undefined): boolean {
-  if (mime === undefined || !isTextMime(mime)) return false;
-  // The type ITSELF, not its chain: `mimeFallbacks` ends every text type at `text/plain`, so asking
-  // the chain whether plain text is in it is asking whether the value is text at all.
-  if (mime === "text/plain") return false;
-  // Markdown in any spelling — the bare word a slot declares, the registered type, a vendor type
-  // that resolves to it. Rendering beats colouring for all three.
-  if (mime === "markdown") return false;
+  if (mime === undefined || !hasGrammar(mime)) return false;
+  if (mime === "markdown" || mime === "md") return false;
   for (const candidate of mimeFallbacks(mime)) if (candidate === "text/markdown") return false;
   return true;
 }
@@ -253,6 +270,7 @@ function viewOfMime(mime: string | undefined): ViewId | undefined {
     if (candidate === "markdown" || candidate === "text/markdown" || candidate.endsWith("+markdown")) return "markdown";
     if (candidate === "html" || candidate === "text/html" || candidate.endsWith("+html")) return "html";
     if (candidate === "json" || candidate === "application/json" || candidate.endsWith("+json")) return "json";
+    if (candidate === "diff" || candidate === "patch" || candidate === "text/x-diff") return "patch";
   }
   return undefined;
 }
@@ -327,12 +345,69 @@ export function viewsFor(value: unknown, hint: ViewHint = {}): ViewId[] {
     // `looksLikeHtml` recognises it, and a toggle whose first two buttons show the same drawing is a
     // toggle where one of them can only be pressed to no effect. A DECLARED type still wins — an
     // author who says `text/html` gets the HTML view whatever else applies.
-    if (declared === "markdown" || (declared === undefined && !rendered && looksLikeMarkdown(text))) views.push("markdown");
-    if (declared === "html" || (declared === undefined && !rendered && looksLikeHtml(text))) views.push("html");
+    /**
+     * A PATCH, read as the change it describes — see `unifiedDiff.ts`.
+     *
+     * FIRST, on the same argument the table makes below: a diff's source is a transport, and what
+     * somebody wants from one is which lines moved rather than which column the `+` sits in.
+     *
+     * The one place in this branch that SNIFFS, and the exception is earned by the mark rather than
+     * granted. `@@ -12,4 +12,5 @@` occurs in nothing but a patch — unlike the two hashes that make
+     * markdown's sniffer timid, and unlike YAML, where every text file in existence is a candidate.
+     * A model pasting a diff into an answer declares nothing, so refusing to look would leave the
+     * reading unreachable exactly where it is most wanted.
+     *
+     * A DECLARED `text/x-diff` skips the sniff outright, on the rule the rest of this branch follows:
+     * a declaration is a statement and the sniffer only ever offers. That matters because the
+     * declaration is something a person makes — `text/x-diff` is in `OFFERED_TYPES`, so "no, this IS
+     * a diff" is a correction somebody can apply to a value the sniffer read as prose, and a
+     * correction that produced no new reading would be a control that does nothing.
+     *
+     * It also SUPPRESSES the two sniffers below, which is a fix rather than a precaution: a removed
+     * line begins `-` at the start of a line, which is markdown's bullet mark exactly, so a patch of
+     * any size scored two marks and led with the markdown view. A diff rendered as a bullet list was
+     * what a pasted patch actually looked like until this line existed.
+     */
+    const patch = declared === "patch" || (declared === undefined && looksLikeUnifiedDiff(text));
+    if (patch) views.push("patch");
+    if (declared === "markdown" || (declared === undefined && !rendered && !patch && looksLikeMarkdown(text))) {
+      views.push("markdown");
+    }
+    if (declared === "html" || (declared === undefined && !rendered && !patch && looksLikeHtml(text))) {
+      views.push("html");
+    }
+    /**
+     * A document written in a grammar this app can PARSE has a second honest reading — see
+     * `structured.ts`. Which side of the source it goes on is the one judgement in this branch.
+     *
+     * Rows and columns LEAD, because a CSV's source is a transport rather than a reading: a wall of
+     * commas is to a table what unrendered markdown is to a document, and nobody opens one to admire
+     * the delimiters. YAML and JSON go UNDER the source, because for those the source is the reading
+     * — being legible to a person is the entire reason those formats exist — and the parsed form
+     * loses comments, block scalars and anchors on the way. A rendering that drops information does
+     * not get to be the default; it gets to be one click away, which is where a cross-check belongs.
+     *
+     * Offered on the DECLARED type alone, with nothing parsed here. Partly because this function is
+     * called on every render of every value in a transcript and a megabyte of YAML is not something
+     * to parse for the sake of deciding which buttons to draw — but mostly because a document that
+     * fails to parse is exactly when the reading is worth having: the view reports where it broke,
+     * and a button that vanished at the first syntax error would hide the one answer it has.
+     *
+     * Nothing is SNIFFED, and that asymmetry with markdown above is deliberate. Every plain text
+     * file in existence is also a valid YAML document, so a sniffer would offer this everywhere and
+     * mean nothing by it.
+     */
+    const format = structuredFormatOf(mime);
+    if (format === "delimited") views.push("table");
     // Highlighted, for text that has a grammar. Below the rendered views and above the raw one: for
     // HTML or JSON the rendering answers "what does this look like" and this answers "what does it
     // say", and the plain source answers neither better than a coloured copy of itself.
     if (isCodeMime(mime)) views.push("code");
+    if (format === "json" || format === "jsonl" || format === "yaml") {
+      views.push("data");
+      // …and as the thing the schema describes, on the same terms as a value that arrived parsed.
+      if (isObjectSchema(hint.schema)) views.push("form");
+    }
     views.push("text");
     return views;
   }

@@ -34,19 +34,24 @@
  * transcript beside the call that produced them, in the sync report, in a structured output.
  */
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
-import type { Change, ServedArtifact, ViewHint, ViewId } from "@jaira/shared/browser";
+import type { Change, ParsedStructure, ParseSpot, PatchFile, ServedArtifact, ViewHint, ViewId } from "@jaira/shared/browser";
 import {
   artifactOf,
   changeStats,
   changesOf,
+  delimiterOf,
   extensionForMime,
   mediaKindOf,
   mediaSrcOf,
   mimeOfPath,
+  parseStructured,
+  parseUnifiedDiff,
+  patchStats,
+  structuredFormatOf,
   totalStats,
   viewsFor,
 } from "@jaira/shared/browser";
-import { Markdown, type FenceRenderer } from "./markdown";
+import { CodeDocument, MarkdownDocument } from "./documents";
 import { highlightJson } from "./jsonHighlight";
 /**
  * Loaded on first sight of a value with a schema, never with the view.
@@ -55,14 +60,6 @@ import { highlightJson } from "./jsonHighlight";
  * result should not pay for either — the same rule the markdown editor and Monaco follow here.
  */
 const SchemaForm = lazy(() => import("./schemaForm/SchemaForm").then((m) => ({ default: m.SchemaForm })));
-/**
- * Loaded on first sight of a markdown value, never with the view.
- *
- * CodeMirror plus the markdown grammar is a few hundred kilobytes, and a transcript that shows one
- * tool result should not pay for an editor it will never draw. The fallback is the plain renderer,
- * so the words are on screen while the editor arrives.
- */
-const MarkdownEditor = lazy(() => import("./markdownEditor").then((m) => ({ default: m.MarkdownEditor })));
 type MarkdownDiff = import("./markdownEditor").MarkdownDiff;
 import { Icon } from "./icons";
 import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
@@ -78,8 +75,6 @@ import { invoke } from "./store";
  * editor arrives when somebody asks to see a diff.
  */
 const MonacoDiffPane = lazy(() => import("./monacoDiff").then((m) => ({ default: m.MonacoDiffPane })));
-const MonacoCodePane = lazy(() => import("./monacoDiff").then((m) => ({ default: m.MonacoCodePane })));
-const CodeText = lazy(() => import("./monacoDiff").then((m) => ({ default: m.CodeText })));
 
 /** What each view is called on its button, and what the button's tooltip says it does. */
 const VIEW_META: Record<ViewId, { label: string; hint: string }> = {
@@ -90,6 +85,9 @@ const VIEW_META: Record<ViewId, { label: string; hint: string }> = {
   code: { label: "Code", hint: "Highlighted, in an editor" },
   text: { label: "Source", hint: "The text exactly as it was produced" },
   json: { label: "JSON", hint: "The value as JSON" },
+  data: { label: "Data", hint: "Parsed — the value this document denotes" },
+  patch: { label: "Diff", hint: "The change this patch describes" },
+  table: { label: "Table", hint: "As rows and columns" },
   form: { label: "Form", hint: "As the fields its schema declares" },
 };
 
@@ -297,6 +295,163 @@ function Source({ value }: { value: unknown }): JSX.Element {
 }
 
 /**
+ * A patch, read as the description of a change it is.
+ *
+ * Deliberately NOT the changeset viewer above, and the reason is in `shared/unifiedDiff.ts`: a
+ * `Change` carries both full texts and its `after` is what gets written to disk on merge, while a
+ * patch carries neither side. Feeding one through `ChangesView` would mean synthesizing content that
+ * the rest of the system is entitled to believe. What is reused is the VOCABULARY — the same `+n −m`
+ * counts, the same add and delete colours, the same collapsed-row-per-file shape — so a patch reads
+ * the way a changeset reads without pretending to be one.
+ *
+ * Two things this shows that a re-diff of synthesized text could not. The line numbers are the
+ * PATCH's own, so a hunk at line 412 says 412; and the space between hunks is drawn as a break
+ * rather than closed up, because lines 130 and 400 are not neighbours and a viewer that ran them
+ * together would be claiming they were.
+ */
+function PatchFileView({ file }: { file: PatchFile }): JSX.Element {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="vv-patch-file">
+      <button type="button" className="vv-patch-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Icon name="chevron" className={open ? "vv-patch-chev open" : "vv-patch-chev"} />
+        <span className={`vv-patch-act act-${file.action}`}>{file.action}</span>
+        <span className="vv-patch-path">
+          {file.fromPath !== undefined && file.fromPath !== file.path ? (
+            <>
+              <span className="sub">{file.fromPath}</span> →{" "}
+            </>
+          ) : null}
+          {file.path === "" ? <span className="sub">(no file named)</span> : file.path}
+        </span>
+        <span className="grow" />
+        <Stats added={file.added} removed={file.removed} />
+      </button>
+      {!open ? null : file.binary !== undefined ? (
+        <p className="empty vv-patch-binary">{file.binary}</p>
+      ) : (
+        <div className="vv-patch-body">
+          {file.hunks.map((hunk, h) => (
+            <div className="vv-patch-hunk" key={h}>
+              <div className="vv-patch-at">
+                <span className="vv-patch-at-range">{hunk.header}</span>
+                {hunk.section !== undefined ? <span className="vv-patch-at-sec">{hunk.section}</span> : null}
+              </div>
+              {hunk.lines.map((line, l) => (
+                <div className={`vv-patch-line ln-${line.kind}`} key={l}>
+                  {/* Both gutters always, so the columns line up down the whole hunk — an absent
+                      number is a blank cell rather than a missing one. */}
+                  <span className="vv-patch-no">{line.oldLine ?? ""}</span>
+                  <span className="vv-patch-no">{line.newLine ?? ""}</span>
+                  <span className="vv-patch-sign">{line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}</span>
+                  <span className="vv-patch-text">
+                    {line.text}
+                    {line.noNewline === true ? <span className="sub"> ⏎̸ no newline at end of file</span> : null}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))}
+          {file.hunks.length === 0 ? <p className="empty">No lines change — a rename or a mode change.</p> : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The whole patch: a heading with the totals, then one collapsible block per file. */
+export function PatchView({ files }: { files: readonly PatchFile[] }): JSX.Element {
+  if (files.length === 0) return <p className="empty">Nothing in this patch could be read.</p>;
+  const total = patchStats(files);
+  return (
+    <div className="vv-patch">
+      <div className="vv-changes-head">
+        <span className="sub">
+          {files.length} {files.length === 1 ? "file" : "files"}
+        </span>
+        <Stats {...total} />
+      </div>
+      {files.map((file, i) => (
+        <PatchFileView key={`${file.path}:${i}`} file={file} />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Why a document could not be read as the data it claims to be.
+ *
+ * A panel rather than a fallback to the source, and that is the point of having it at all. The source
+ * is one button away and always was; what a reader does not have is the parser's opinion, and a
+ * broken document is the only time that opinion is interesting. Naming the line is most of the value
+ * — "unexpected end of stream" is a shrug, "line 14, column 3" is somewhere to look.
+ */
+function ParseProblem({ message, spot }: { message: string; spot?: ParseSpot }): JSX.Element {
+  return (
+    <div className="vv-parse-error">
+      <Icon name="alert" className="vv-parse-icon" />
+      <span>
+        {message}
+        {spot !== undefined ? <span className="sub"> — line {spot.line}, column {spot.column}</span> : null}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * How many rows are drawn before the reading stops being a reading.
+ *
+ * A CSV is routinely tens of thousands of rows, and a table that puts all of them in the DOM is a
+ * pane that takes seconds to open and then scrolls badly — which is worse than the wall of commas it
+ * replaced. Nothing is hidden by this: the cut is stated on screen, and the `Source` view underneath
+ * still holds every byte.
+ */
+const TABLE_ROW_LIMIT = 500;
+
+/**
+ * Rows and columns.
+ *
+ * The FIRST row is drawn as the header, unconditionally, because there is no way to tell a header
+ * from a first record and guessing wrong in the other direction is worse: a mis-styled first row is
+ * still on screen and still readable, whereas a table that decided there was no header would put the
+ * column names in a cell and leave the columns unlabelled. Ragged rows stay ragged — `parseDelimited`
+ * does not pad them, and neither does this, so a row with a field too many is visible as exactly that.
+ */
+export function TableView({ rows }: { rows: readonly string[][] }): JSX.Element {
+  if (rows.length === 0) return <p className="empty">No rows.</p>;
+  const [head, ...body] = rows;
+  const shown = body.slice(0, TABLE_ROW_LIMIT);
+  return (
+    <div className="vv-table-wrap">
+      <table className="vv-table">
+        <thead>
+          <tr>
+            {head!.map((cell, i) => (
+              <th key={i}>{cell}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((row, i) => (
+            <tr key={i}>
+              {row.map((cell, j) => (
+                <td key={j}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {body.length > shown.length ? (
+        <p className="sub vv-table-cut">
+          {body.length - shown.length} more {body.length - shown.length === 1 ? "row" : "rows"} — the whole file is
+          under Source.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * The value as text, and NEVER `undefined`.
  *
  * `JSON.stringify` answers `undefined` rather than a string for everything JSON cannot express —
@@ -496,7 +651,6 @@ export function ValueView({
   diff,
   view: controlled,
   chrome,
-  fence,
 }: {
   value: unknown;
   hint?: ViewHint | undefined;
@@ -547,16 +701,6 @@ export function ValueView({
   view?: ViewId | undefined;
   /** `false` ⇒ draw no header at all. For a caller that has somewhere better to put the controls. */
   chrome?: boolean | undefined;
-  /**
-   * How a fenced code block draws — and, by supplying it, a request for the LIGHT markdown renderer.
-   *
-   * The markdown view is normally the live-preview editor, which is right for a document and wrong
-   * for a transcript: CodeMirror is a few hundred kilobytes and a thread is forty messages, so a
-   * conversation that mounted one per answer would pay for an editor nobody asked for forty times.
-   * A caller passing a fence renderer is one that wants the reading, not the editing — see
-   * `drawFence` in `transcriptView.tsx`, which is the whole reason the hook is shaped this way.
-   */
-  fence?: FenceRenderer | undefined;
 }): JSX.Element {
   const views = viewsFor(value, hint ?? {});
   const [picked, setPicked] = useState<ViewId | null>(null);
@@ -617,6 +761,43 @@ export function ValueView({
     };
   }, [framePath, serve]);
 
+  /**
+   * The value a structured DOCUMENT denotes — see `shared/structured.ts`.
+   *
+   * Done here, once, rather than inside the branches that need it, because three of them do: `data`
+   * shows it, `table` lays it out, and `form` fills its fields from it. Memoised on the text because
+   * this is drawn once per tool result down a whole transcript and re-parsing a document on every
+   * hover of a button beside it is the kind of cost nobody profiles until it is everywhere.
+   *
+   * Only for a view that will actually READ it, which is the other half of the same argument. A
+   * transcript full of YAML fences sitting on their `code` view would otherwise parse every one of
+   * them to draw a button nobody has pressed — the offer costs nothing (`viewsFor` decides it from
+   * the type alone) and the parse should not either until it is asked for.
+   *
+   * Null for anything that is not a structured document — a value that arrived parsed already has
+   * its readings, and this is only the bridge for the ones that arrive as text.
+   */
+  const wantsParse = view === "data" || view === "table" || view === "form";
+  const parsed = useMemo<ParsedStructure | null>(() => {
+    if (!wantsParse || typeof showing !== "string") return null;
+    const format = structuredFormatOf(mime);
+    if (format === undefined) return null;
+    return parseStructured(showing, format, delimiterOf(mime));
+  }, [wantsParse, showing, mime]);
+
+  /**
+   * The patch this text describes, when the patch view is the one showing.
+   *
+   * Its own memo rather than a case inside {@link parsed}: a patch is a different question with a
+   * different parser, and a value is in principle a candidate for both readings at once. Gated on
+   * the view for the same reason that one is — a transcript full of diffs would otherwise parse
+   * every one of them to draw a button nobody has pressed.
+   */
+  const patch = useMemo<PatchFile[]>(
+    () => (view === "patch" && typeof showing === "string" ? parseUnifiedDiff(showing) : []),
+    [view, showing],
+  );
+
   const body = ((): ReactNode => {
     // `value`, not `showing`: a set of changes is never an artifact's payload, and reading the
     // envelope for one would be asking a different question of a different value.
@@ -630,20 +811,14 @@ export function ValueView({
       return <Source value={showing} />;
     }
     if (view === "markdown") {
-      // The reading, for a surface that only ever reads — see {@link fence}. Nothing is given up by
-      // taking this path: it is the same parser, and the editor it skips could not have been typed
-      // into anyway, because `edit` is what would have made it writable.
-      if (edit === undefined && fence !== undefined) return <Markdown text={String(showing)} fence={fence} />;
-      // The live-preview editor IS the markdown renderer, read-only when nothing may change it —
-      // one surface with a flag rather than a viewer and an editor that drift apart.
+      // WHICH renderer is not decided here — see `markdownDocument.tsx`. This says what it has and
+      // what may be done with it, and that is the whole of a caller's business.
       return (
-        <Suspense fallback={<Markdown text={String(showing)} />}>
-          <MarkdownEditor
-            text={String(showing)}
-            {...(edit === undefined ? { readOnly: true } : { onChange: edit })}
-            {...(diff === undefined ? {} : { diff })}
-          />
-        </Suspense>
+        <MarkdownDocument
+          text={String(showing)}
+          {...(edit === undefined ? {} : { onChange: edit })}
+          {...(diff === undefined ? {} : { diff })}
+        />
       );
     }
     if (view === "html") {
@@ -652,24 +827,25 @@ export function ValueView({
       return <Html text={String(showing)} />;
     }
     if (view === "code") {
-      // The reading, for a surface that only ever reads — the same swap the markdown view makes
-      // just above, and for the same reason. `CodeText` is Monaco's tokenizer with no editor under
-      // it: a transcript's fenced blocks are read and copied, not typed into, and an editor apiece
-      // would cost dozens of instances and break a selection dragged across one.
-      if (edit === undefined && fence !== undefined) {
-        return (
-          <Suspense fallback={<Source value={showing} />}>
-            <CodeText text={String(showing)} mime={mime ?? "text/plain"} />
-          </Suspense>
-        );
-      }
+      // Read with the tokenizer, edited with the editor — `documents.tsx` decides which, and this
+      // says only what it has. It used to fall PAST this branch when the value was editable, because
+      // the code view had no renderer that could accept a keystroke; it has one now, so the value
+      // that said it could be changed is coloured and changeable in the same place.
       return (
-        <Suspense fallback={<div className="diff-pane-loading">loading the editor…</div>}>
-          <MonacoCodePane text={String(showing)} mime={mime ?? "text/plain"} />
-        </Suspense>
+        <CodeDocument
+          text={String(showing)}
+          mime={mime ?? "text/plain"}
+          {...(edit === undefined ? {} : { onChange: edit })}
+        />
       );
     }
     if (view === "form") {
+      // A structured DOCUMENT is filled in from its parse rather than from its text: handing a form
+      // the YAML source would put the whole file in the first field it found a string slot for.
+      if (parsed !== null && !parsed.ok) {
+        return <ParseProblem message={parsed.message} {...(parsed.spot !== undefined ? { spot: parsed.spot } : {})} />;
+      }
+      const filling = parsed?.ok === true ? parsed.value : showing;
       // Read-only, which the form already knows how to be (`SchemaFormContext.disabled`) — this is
       // a reading of a value, not an editor for it, and `edit` here is a text callback the form has
       // no way to honour. One surface with a flag rather than a viewer that drifts from the editor.
@@ -678,7 +854,7 @@ export function ValueView({
           <div className="vv-form">
             <SchemaForm
               schema={(hint?.schema ?? {}) as never}
-              value={showing}
+              value={filling}
               onChange={() => undefined}
               // `isSet` answers false for everything, which is not a lie by omission — it is the
               // only true answer here. The tag it drives means "this LAYER states this value", a

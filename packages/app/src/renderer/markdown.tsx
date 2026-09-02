@@ -30,7 +30,7 @@
  */
 import { createElement, useMemo, type CSSProperties, type JSX, type ReactNode } from "react";
 import MarkdownIt from "markdown-it";
-import type { FileSurfaceProps } from "./fileTypes";
+import { highlightYaml } from "./yamlHighlight";
 
 /**
  * One parser for the whole app.
@@ -71,6 +71,33 @@ export interface FenceBlock {
  * whereas a renderer that returned nothing at all would silently swallow the block.
  */
 export type FenceRenderer = (block: FenceBlock) => ReactNode | undefined;
+
+/**
+ * The renderer every markdown surface gets unless it says otherwise.
+ *
+ * A REGISTRATION rather than a required prop, and the reason is the cycle this module's header is
+ * about: the thing that knows how to draw a fenced block is `ValueView`, `ValueView` draws markdown
+ * and therefore imports this file, so the renderer cannot be imported from here. Injection is the
+ * only way round that — and injection through an optional prop is injection a caller can silently
+ * skip.
+ *
+ * Which is exactly what happened. Four surfaces rendered markdown, one passed the prop, and the
+ * other three showed a grey `<pre>` where the transcript showed a full reading. Nothing failed:
+ * {@link fold} has a legitimate fallback for "no renderer supplied", and it is byte-identical to
+ * "renderer supplied and declined this language", so the difference was invisible. A workflow
+ * description is prose wrapped around fenced YAML, which made the grey box most of the document.
+ *
+ * With a default there is nothing to forget. The same shape `fileTypes.ts` uses for surfaces:
+ * importing the module that owns the renderer is what installs it, and a module graph that never
+ * reaches `fenceRender.tsx` — the parser's own tests, say — gets the bare fold, which is the honest
+ * behaviour for a caller that has no value viewer in it.
+ */
+let DEFAULT_FENCE: FenceRenderer | undefined;
+
+/** Install the renderer fenced blocks are drawn with. Last call wins; see {@link DEFAULT_FENCE}. */
+export function registerFenceRenderer(render: FenceRenderer): void {
+  DEFAULT_FENCE = render;
+}
 
 // --- urls --------------------------------------------------------------------
 
@@ -311,16 +338,41 @@ function splitFrontMatter(text: string): { front: string | undefined; body: stri
 // --- the components ----------------------------------------------------------
 
 /**
- * The markdown preview.
+ * A YAML block, coloured — front matter, and nothing else so far.
  *
- * Rendered rather than syntax-highlighted, because the thing a prompt author checks is what the
- * model will be shown — heading structure, list nesting, whether a fenced block actually closed.
- * That is a question about the output, and only the output answers it.
+ * Front matter is YAML and was drawn as a grey `<pre>`, which made the header of every prompt, skill
+ * and workflow description in the shared root the least readable part of the document it opens. It
+ * is coloured HERE rather than through the value viewer for the reason `yamlHighlight.ts` opens
+ * with: this module renders once per message down a transcript, and the app's other YAML colourer
+ * is a lazily-loaded Monaco. Same token classes as the JSON one, so the two never drift apart.
  */
-export function MarkdownView({ doc }: FileSurfaceProps): JSX.Element {
-  if (doc.text.trim().length === 0) return <p className="empty">This file is empty.</p>;
-  return <Markdown text={doc.text} />;
+function YamlLines({ text }: { text: string }): JSX.Element {
+  const lines = useMemo(() => highlightYaml(text), [text]);
+  return (
+    <pre className="md-front-body">
+      <code>
+        {lines.map((line, i) => (
+          <span className="code-line" key={i}>
+            {line.tokens.map((token, j) => (
+              <span key={j} className={`tok tok-${token.kind}`}>
+                {token.text}
+              </span>
+            ))}
+            {"\n"}
+          </span>
+        ))}
+      </code>
+    </pre>
+  );
 }
+
+/**
+ * The markdown preview lives in `fenceRender.tsx`, not here.
+ *
+ * It has to: a preview worth having draws its fenced blocks as what they are, the thing that knows
+ * how to draw one is `ValueView`, and `ValueView` imports this module. The seam below is this
+ * module's whole contribution to that — see {@link FenceRenderer}.
+ */
 
 /**
  * The same rendering, for text that is not a file.
@@ -337,15 +389,24 @@ export function MarkdownView({ doc }: FileSurfaceProps): JSX.Element {
  */
 export function Markdown({ text, fence }: { text: string; fence?: FenceRenderer | undefined }): JSX.Element {
   const { front, body } = useMemo(() => splitFrontMatter(text), [text]);
-  const nodes = useMemo(() => fold(MARKDOWN.parse(body, {}), fence), [body, fence]);
+  // The registered renderer unless this caller brought its own — see {@link registerFenceRenderer}.
+  // Both are module-level references, so the memo below is still stable across renders.
+  const drawn = fence ?? DEFAULT_FENCE;
+  const nodes = useMemo(() => fold(MARKDOWN.parse(body, {}), drawn), [body, drawn]);
   return (
     <div className="markdown">
       {front === undefined ? null : (
         <details className="md-front">
           <summary>front matter</summary>
-          <pre>
-            <code>{front}</code>
-          </pre>
+          {/* Front matter IS a YAML document, so it gets exactly what a ```yaml fence gets — the
+              value viewer, with its Code / Data / Source toggle and its parse. It reaches it by
+              being handed to the same renderer under the same name, rather than by this module
+              learning a second way to draw YAML: a header and a fence are the same content in the
+              same file, and two paths to draw them is two things to keep in agreement.
+
+              {@link YamlLines} stays as the fallback for a graph with no renderer registered — the
+              parser's own tests — which is the same honest degradation the fenced blocks get. */}
+          {drawn?.({ info: "yaml", lang: "yaml", code: front }) ?? <YamlLines text={front} />}
         </details>
       )}
       {nodes}

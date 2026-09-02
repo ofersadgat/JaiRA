@@ -27,7 +27,7 @@ import { useEffect, useMemo, useState, type JSX } from "react";
 import type { Change, SyncDirection, WorkflowSyncEdit, WorkflowSyncResult } from "@jaira/shared/browser";
 import { docKey } from "./drafts";
 import type { FileSurfaceProps } from "./fileTypes";
-import { MarkdownView } from "./markdown";
+import { MarkdownView } from "./fenceRender";
 import { agoOf, driftOf, plural, syncSentence, SYNC_HINT, SYNC_LABEL } from "./syncState";
 import { ChangesView, type ChangeOutcome } from "./valueView";
 

@@ -130,20 +130,29 @@ const TEXT: Record<string, string> = {
   markdown: "text/markdown",
   json: "application/json",
   jsonc: "application/json",
+  // One JSON value per line. Named because the reading is genuinely different from JSON's —
+  // the file as a whole does not parse, and the list of records is what somebody wants to see.
+  jsonl: "application/jsonl",
+  ndjson: "application/jsonl",
   yaml: "application/yaml",
   yml: "application/yaml",
   txt: "text/plain",
   log: "text/plain",
   csv: "text/csv",
+  tsv: "text/tab-separated-values",
   html: "text/html",
   htm: "text/html",
   css: "text/css",
   js: "text/javascript",
   mjs: "text/javascript",
   cjs: "text/javascript",
+  jsx: "text/javascript",
   ts: "text/x-typescript",
   tsx: "text/x-typescript",
+  mts: "text/x-typescript",
+  cts: "text/x-typescript",
   py: "text/x-python",
+  pyi: "text/x-python",
   sh: "application/x-sh",
   toml: "application/toml",
   xml: "application/xml",
@@ -173,6 +182,7 @@ const TEXT: Record<string, string> = {
   dart: "text/x-dart",
   sql: "text/x-sql",
   graphql: "application/graphql",
+  gql: "application/graphql",
   scss: "text/x-scss",
   less: "text/x-less",
   ini: "text/x-ini",
@@ -180,7 +190,38 @@ const TEXT: Record<string, string> = {
   patch: "text/x-diff",
   ps1: "application/x-powershell",
   bat: "application/x-bat",
+  cmd: "application/x-bat",
   dockerfile: "text/x-dockerfile",
+  // The rest of what Monaco ships a grammar for and somebody in this repo might open. The bar for
+  // this block is the one `monacoLanguageOf` states: a name here promises a COLOURER, so a language
+  // Monaco does not have (Zig, Nix, Haskell, Vue, Svelte) is deliberately absent — it would resolve
+  // to plain text either way, and naming it would claim otherwise. `.m` is absent for the opposite
+  // reason: it is Objective-C and MATLAB in equal measure, and a wrong grammar is worse than none.
+  ex: "text/x-elixir",
+  exs: "text/x-elixir",
+  clj: "text/x-clojure",
+  cljs: "text/x-clojure",
+  edn: "text/x-clojure",
+  hcl: "text/x-hcl",
+  tf: "text/x-hcl",
+  tfvars: "text/x-hcl",
+  proto: "text/x-protobuf",
+  jl: "text/x-julia",
+  fs: "text/x-fsharp",
+  fsx: "text/x-fsharp",
+  vb: "text/x-vb",
+  sol: "text/x-solidity",
+  tcl: "text/x-tcl",
+  coffee: "text/x-coffeescript",
+  pas: "text/x-pascal",
+  scm: "text/x-scheme",
+  mm: "text/x-objectivec",
+  sv: "text/x-systemverilog",
+  svh: "text/x-systemverilog",
+  wgsl: "text/x-wgsl",
+  hbs: "text/x-handlebars",
+  pug: "text/x-pug",
+  rst: "text/x-rst",
 };
 
 /**
@@ -289,6 +330,31 @@ export function extensionForMime(mime: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Every type {@link TEXT} names, as a set — what makes "is this text?" answerable from one place.
+ *
+ * This used to be a second, hand-written list inside {@link isTextMime}, and the two drifted exactly
+ * as duplicated lists do. `application/graphql`, `application/x-powershell` and `application/x-bat`
+ * were all named by the table above and missing from the list below, so a `.graphql`, `.ps1` or
+ * `.bat` file was classified as text by `mimeOfPath` and then judged NOT text by the function that
+ * decides whether it can be opened: greyed out in the tree, refused by `file:read` with "which is
+ * not text", and offered no code view even though Monaco has a grammar for all three.
+ *
+ * Derived rather than repeated, so naming a type in the table is now the whole of adding it.
+ */
+const TEXT_TYPES: ReadonlySet<string> = new Set(Object.values(TEXT));
+
+/**
+ * Every text type this app names, once each.
+ *
+ * Exported for the test that holds the renderer to the table's promise: naming a type here says a
+ * colourer exists for it, and nothing about the app FAILS when one does not — the file simply opens
+ * grey. See `monacoLanguage.test.ts`, which is the only way that stays true as either side grows.
+ */
+export function registeredTextMimes(): string[] {
+  return [...TEXT_TYPES].sort();
+}
+
 /** True when a type is one this app is willing to read as a UTF-8 string. */
 export function isTextMime(mime: string): boolean {
   if (mime === DIRECTORY) return false;
@@ -297,9 +363,7 @@ export function isTextMime(mime: string): boolean {
   // convention (RFC 6839) — both say "this is text with a schema on top of it".
   if (mime === "image/svg+xml") return true;
   if (mime.endsWith("+json") || mime.endsWith("+yaml") || mime.endsWith("+xml")) return true;
-  return ["application/json", "application/yaml", "application/xml", "application/toml", "application/x-sh"].includes(
-    mime,
-  );
+  return TEXT_TYPES.has(mime);
 }
 
 /**

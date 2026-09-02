@@ -147,12 +147,16 @@ describe("front matter", () => {
     expect(html).toContain("<h1>Real title</h1>");
   });
 
-  it("keeps the header rather than deleting it", () => {
+  it("keeps the header rather than deleting it, and colours it", () => {
     // Collapsed, not dropped. A renderer that silently loses lines is one you cannot trust about
-    // the lines it kept.
+    // the lines it kept — so the assertion is on the TEXT, with the markup stripped: the header is
+    // now a run of coloured token spans (see `YamlLines`) rather than a grey `<pre>`, and asserting
+    // on the raw substring would be asserting that it never gets coloured.
     const html = render("---\nid: product/x\n---\n\n# Title\n");
     expect(html).toContain("front matter");
-    expect(html).toContain("id: product/x");
+    expect(html.replace(/<[^>]*>/g, "")).toContain("id: product/x");
+    // Coloured, and by the YAML scanner rather than by markdown-it — `id` is a key, not a word.
+    expect(html).toContain('class="tok tok-key">id<');
   });
 
   it("leaves two thematic breaks alone, because an empty header is not one", () => {

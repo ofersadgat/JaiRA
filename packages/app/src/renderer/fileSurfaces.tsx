@@ -10,14 +10,19 @@
  * `text/x-typescript` gets nothing, and therefore gets the plain editor with no viewer above it,
  * which is the correct surface for a file whose source *is* its presentation.
  */
-import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from "react";
-import { parse as parseYaml } from "yaml";
+import { useEffect, useMemo, useState, type JSX } from "react";
 import {
   CONFIG_JSON,
   WORKFLOW_DESCRIPTION,
   WORKFLOW_JSON,
   WORKFLOW_YAML,
+  delimiterOf,
+  hasGrammar,
   mimeOfPath,
+  parseDelimited,
+  parseStructured,
+  parseUnifiedDiff,
+  type StructuredFormat,
   type WorkflowSource,
 } from "@jaira/shared/browser";
 import { Badge } from "./board";
@@ -29,11 +34,10 @@ import { Paper, Transcript } from "./transcriptView";
 import { docKey, useDraftBox } from "./drafts";
 import { EditorActions, type EditorTab } from "./editorChrome";
 import { registerFileSurface, type FileSurfaceProps } from "./fileTypes";
-import { MarkdownView } from "./markdown";
+import { MarkdownView } from "./fenceRender";
+import { CodeDocument, MarkdownDocument } from "./documents";
 
-/** Loaded on first sight of a markdown file — see `valueView.tsx` for why it is not bundled in. */
-const LazyMarkdownEditor = lazy(() => import("./markdownEditor").then((m) => ({ default: m.MarkdownEditor })));
-import { ValueView } from "./valueView";
+import { PatchView, TableView, ValueView } from "./valueView";
 import { SchemaJsonEditor, schemaReferenceProps } from "./schemaEditor";
 import { WorkflowEditor } from "./stateEditor";
 import { WorkflowSyncPanel } from "./syncPanel";
@@ -62,9 +66,9 @@ function MarkdownFileEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX
   const draft = useDraftBox(context.drafts, context.onDraft, docKey(doc.layer, doc.path), doc.text);
   return (
     <div className="file-edit">
-      <Suspense fallback={<MarkdownView doc={doc} busy={busy} onSave={onSave} context={context} />}>
-        <LazyMarkdownEditor text={draft.text} onChange={draft.set} />
-      </Suspense>
+      {/* Editable, said by supplying somewhere for the change to go. The `Suspense` and the choice
+          of renderer are `markdownDocument.tsx`'s business rather than this surface's. */}
+      <MarkdownDocument text={draft.text} onChange={draft.set} />
       <EditorActions
         dirty={draft.dirty || !doc.exists}
         busy={busy}
@@ -79,15 +83,33 @@ function MarkdownFileEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX
 
 export function TextEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.Element {
   const draft = useDraftBox(context.drafts, context.onDraft, docKey(doc.layer, doc.path), doc.text);
+  /**
+   * Coloured when there is a grammar for it, a plain box when there is not.
+   *
+   * This is the floor of the registry, so it is what a `.ts`, a `.py`, a `.rs` and a `.yaml` all
+   * reach — and it was a bare `<textarea>` for every one of them. An app that colours TypeScript in
+   * the transcript, in a fenced block and in a diff was editing a TypeScript FILE with no
+   * highlighting at all, which is the one place a person spends real time with it.
+   *
+   * Asked of `hasGrammar` rather than listed here, so this follows `shared/grammars.ts` the way
+   * every other question about a type does: name a grammar there and the editor colours it, with
+   * nothing to add on this side. A type with none still gets the box, which is the honest surface
+   * for text that has no structure to show.
+   */
+  const coloured = hasGrammar(doc.mime);
 
   return (
     <div className="file-edit">
-      <textarea
-        className="code-editor"
-        spellCheck={false}
-        value={draft.text}
-        onChange={(e) => draft.set(e.target.value)}
-      />
+      {coloured ? (
+        <CodeDocument text={draft.text} mime={doc.mime} onChange={draft.set} />
+      ) : (
+        <textarea
+          className="code-editor"
+          spellCheck={false}
+          value={draft.text}
+          onChange={(e) => draft.set(e.target.value)}
+        />
+      )}
       <EditorActions
         // `|| !doc.exists`: creating the file IS the pending change, so the note beside the button
         // describes something the button can actually do.
@@ -141,26 +163,35 @@ function Node({ name, value }: { name: string | null; value: unknown }): JSX.Ele
  * A structured document, read rather than edited.
  *
  * The value of a viewer over a text editor for JSON is small but real: nesting you can follow, and
- * a parse error stated once at the top instead of discovered on save. `parse` is passed in because
- * JSON and YAML differ in exactly one function and in nothing else about how they should be read.
+ * a parse error stated once at the top instead of discovered on save.
+ *
+ * A FORMAT rather than a parse function, which is the change that matters here. This used to hold
+ * its own pair — `JSON.parse` and `yaml`'s `parse` — and so the Files view disagreed with the rest
+ * of the app about what these documents said: a `.jsonc` file with a comment in it "did not parse",
+ * a stream of `---` documents threw, and a merge key came back as a key called `<<`. One parse now
+ * (`shared/structured.ts`), so a file read here and the same file read as a tool result say the same
+ * thing, and a failure names the line instead of gesturing at the file.
  */
-function StructuredView({ text, parse }: { text: string; parse: (text: string) => unknown }): JSX.Element {
+function StructuredView({ text, format }: { text: string; format: StructuredFormat }): JSX.Element {
   if (text.trim().length === 0) return <p className="empty">This file is empty.</p>;
-  let parsed: unknown;
-  try {
-    parsed = parse(text);
-  } catch (e) {
-    return <div className="notice bad">does not parse: {(e as Error).message}</div>;
+  const parsed = parseStructured(text, format);
+  if (!parsed.ok) {
+    return (
+      <div className="notice bad">
+        does not parse: {parsed.message}
+        {parsed.spot !== undefined ? ` (line ${parsed.spot.line}, column ${parsed.spot.column})` : ""}
+      </div>
+    );
   }
   return (
     <ul className="doc-tree doc-root">
-      <Node name={null} value={parsed} />
+      <Node name={null} value={parsed.value} />
     </ul>
   );
 }
 
 export function JsonView({ doc }: FileSurfaceProps): JSX.Element {
-  return <StructuredView text={doc.text} parse={(text) => JSON.parse(text) as unknown} />;
+  return <StructuredView text={doc.text} format="json" />;
 }
 
 /**
@@ -217,7 +248,37 @@ export function JsonEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.
 }
 
 export function YamlView({ doc }: FileSurfaceProps): JSX.Element {
-  return <StructuredView text={doc.text} parse={(text) => parseYaml(text) as unknown} />;
+  return <StructuredView text={doc.text} format="yaml" />;
+}
+
+/**
+ * A delimited file, as the grid it is.
+ *
+ * `text/csv` had no viewer at all, so a CSV opened as a plain text editor and nothing else — the
+ * one file type in the tree whose source is genuinely unreadable and whose rendering is trivial. The
+ * table is the same component the transcript draws, for the reason the registry exists: a CSV should
+ * not look like two different things depending on whether it arrived as a file or as a tool result.
+ */
+/**
+ * A `.patch` or `.diff`, as the change it describes.
+ *
+ * The one type Monaco has no grammar for, so before this it opened entirely grey — and it is also
+ * the type whose rendering is least like its source. Same component the transcript draws, for the
+ * reason the registry exists: a patch should not look like two different things depending on whether
+ * it arrived as a file or in a model's answer.
+ */
+export function PatchFileSurface({ doc }: FileSurfaceProps): JSX.Element {
+  const files = useMemo(() => parseUnifiedDiff(doc.text), [doc.text]);
+  if (doc.text.trim().length === 0) return <p className="empty">This file is empty.</p>;
+  if (files.length === 0) return <div className="notice bad">not a unified diff — the editor below has the text</div>;
+  return <PatchView files={files} />;
+}
+
+export function DelimitedView({ doc }: FileSurfaceProps): JSX.Element {
+  const mime = mimeOfPath(doc.path);
+  const rows = useMemo(() => parseDelimited(doc.text, delimiterOf(mime)), [doc.text, mime]);
+  if (doc.text.trim().length === 0) return <p className="empty">This file is empty.</p>;
+  return <TableView rows={rows} />;
 }
 
 // --- workflows ---------------------------------------------------------------
@@ -515,10 +576,20 @@ export function ConfigEdit({ doc, busy, context }: FileSurfaceProps): JSX.Elemen
 
 registerFileSurface("text/plain", "edit", TextEdit);
 
-// Markdown gets the live-preview editor in BOTH halves — the rendering IS the editor, so a viewer
-// and an editor would be two renderings of one document that can disagree. Registered here rather
-// than special-cased in one caller, which is what "register it to be used everywhere" means: the
-// Files view, the gate components and the value viewer all reach the same component.
+// Markdown, read above and edited below — the arrangement every other type here gets.
+//
+// It used to have no viewer at all, on the argument that the live-preview editor IS the rendering,
+// so a second one would be two renderings of one document that could disagree. That was true while
+// both were the same thing: markdown turned into styled text. It stopped being true when a fenced
+// block became a READING rather than a coloured quotation. The viewer draws a ```yaml block as the
+// value viewer — with its Code / Data / Source toggle, its table for a CSV, its diff for a patch —
+// and an editor structurally cannot: those are interactive components, and CodeMirror's document is
+// text with decorations over it, not a place to mount one.
+//
+// So they are not two answers to one question any more. The top half answers "what does this
+// document say", the bottom half is where you change it, and the fold that was already there is
+// what collapses whichever one you are not using.
+registerFileSurface("text/markdown", "view", MarkdownView);
 registerFileSurface("text/markdown", "edit", MarkdownFileEdit);
 
 // Any markdown under `workflows/` — each describes the workflow it is named for, and `workflow.md`
@@ -540,6 +611,9 @@ registerFileSurface("application/json", "edit", JsonEdit);
 
 registerFileSurface("application/yaml", "view", YamlView);
 registerFileSurface("application/yaml", "edit", TextEdit);
+registerFileSurface("text/csv", "view", DelimitedView);
+registerFileSurface("text/tab-separated-values", "view", DelimitedView);
+registerFileSurface("text/x-diff", "view", PatchFileSurface);
 
 registerFileSurface(WORKFLOW_JSON, "view", WorkflowRunView);
 registerFileSurface(WORKFLOW_JSON, "edit", WorkflowEdit);
