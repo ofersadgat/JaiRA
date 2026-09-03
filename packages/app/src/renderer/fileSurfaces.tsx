@@ -37,7 +37,7 @@ import { registerFileSurface, type FileSurfaceProps } from "./fileTypes";
 import { MarkdownView } from "./fenceRender";
 import { CodeDocument, MarkdownDocument } from "./documents";
 
-import { PatchView, TableView, ValueView } from "./valueView";
+import { DataView, PatchView, TableView, ValueView } from "./valueView";
 import { SchemaJsonEditor, schemaReferenceProps } from "./schemaEditor";
 import { WorkflowEditor } from "./stateEditor";
 import { WorkflowSyncPanel } from "./syncPanel";
@@ -126,39 +126,6 @@ export function TextEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.
 
 // --- structured data ---------------------------------------------------------
 
-/** One node of a parsed document. Objects and arrays nest; everything else is a leaf. */
-function Node({ name, value }: { name: string | null; value: unknown }): JSX.Element {
-  const label = name === null ? null : <span className="doc-key">{name}</span>;
-
-  if (value !== null && typeof value === "object") {
-    const entries: Array<[string, unknown]> = Array.isArray(value)
-      ? value.map((entry, i) => [String(i), entry])
-      : Object.entries(value as Record<string, unknown>);
-    return (
-      <li>
-        {label}
-        <span className="sub">
-          {Array.isArray(value) ? `[${entries.length}]` : `{${entries.length}}`}
-        </span>
-        {entries.length > 0 ? (
-          <ul className="doc-tree">
-            {entries.map(([key, entry]) => (
-              <Node key={key} name={key} value={entry} />
-            ))}
-          </ul>
-        ) : null}
-      </li>
-    );
-  }
-
-  return (
-    <li>
-      {label}
-      <code className={`doc-value doc-${value === null ? "null" : typeof value}`}>{JSON.stringify(value)}</code>
-    </li>
-  );
-}
-
 /**
  * A structured document, read rather than edited.
  *
@@ -183,11 +150,10 @@ function StructuredView({ text, format }: { text: string; format: StructuredForm
       </div>
     );
   }
-  return (
-    <ul className="doc-tree doc-root">
-      <Node name={null} value={parsed.value} />
-    </ul>
-  );
+  // The SAME tree the `data` view draws — see {@link DataView}. It used to be a private copy here,
+  // which is how a `.yaml` file in the tree and a ```yaml block in an answer came to be two
+  // different readings of one question.
+  return <DataView value={parsed.value} />;
 }
 
 export function JsonView({ doc }: FileSurfaceProps): JSX.Element {
@@ -499,9 +465,7 @@ export function ConfigEffectiveView({ context }: FileSurfaceProps): JSX.Element 
   return (
     <div className="config-effective">
       <div className="sub">shared config with this project&apos;s laid over it</div>
-      <ul className="doc-tree doc-root">
-        <Node name={null} value={context.config.effective} />
-      </ul>
+      <DataView value={context.config.effective} />
     </div>
   );
 }

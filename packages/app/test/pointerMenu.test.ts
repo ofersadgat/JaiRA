@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { FrameContextMenu } from "@jaira/shared";
-import { itemsForFrame } from "../src/renderer/pointerMenu";
+import { itemsForFrame, selectionForMenu } from "../src/renderer/pointerMenu";
 
 /** A right-click on ordinary content, which every case here varies one thing from. */
 function clicked(over: Partial<FrameContextMenu> = {}): FrameContextMenu {
@@ -92,5 +92,38 @@ describe("a right-click inside an artifact frame", () => {
 
   it("does not draw a rule above the first item", () => {
     expect(itemsForFrame(clicked({ linkURL: "https://example.test/" }))[0]?.separator).toBe(false);
+  });
+});
+
+/**
+ * Which selection the window's own right-click menu is about — see {@link selectionForMenu}.
+ *
+ * The case it exists for: a comment composer opens over a passage somebody just dragged over, its
+ * textarea takes the focus, and the document's selection collapses. The words stay marked on screen
+ * because the artifact paints them, and `window.getSelection()` reports nothing — so right-clicking
+ * visibly-selected text offered no menu at all.
+ */
+describe("the selection a right-click menu is about", () => {
+  it("takes the live selection whenever there is one", () => {
+    // A fresh drag inside a surface holding an older passage is about the words under the pointer.
+    expect(selectionForMenu("the new words", "an older passage")).toEqual({
+      text: "the new words",
+      fromField: "the new words",
+    });
+  });
+
+  it("falls back to a passage the surface is holding", () => {
+    expect(selectionForMenu("", "the held passage").text).toBe("the held passage");
+  });
+
+  it("never lends a held passage to a FIELD, which does not contain it", () => {
+    // The composer's textarea sits inside the pane holding the quote, so without this a right-click
+    // in an empty comment box would offer to cut a passage that is not in it.
+    expect(selectionForMenu("", "the held passage").fromField).toBe("");
+  });
+
+  it("says nothing is selected when nothing is", () => {
+    expect(selectionForMenu("", null)).toEqual({ text: "", fromField: "" });
+    expect(selectionForMenu("   ", "  ")).toEqual({ text: "", fromField: "" });
   });
 });

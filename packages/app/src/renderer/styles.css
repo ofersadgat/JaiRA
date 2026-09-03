@@ -5393,6 +5393,12 @@ button.layer-on:hover:not(:disabled) {
   text-decoration-style: dotted;
   text-underline-offset: 3px;
 }
+/* The passage a note is being WRITTEN about. Focusing the composer's textarea collapses the
+   document's own selection, so this stands in for it — drawn in the selection's own colours rather
+   than the note palette, because it is still a selection until the note exists. See `DRAFTING`. */
+::highlight(jaira-note-drafting) {
+  background-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
 
 /* Fixed, not absolute: the artifact scrolls inside its own well, and a popover in that flow would
    ride away from the words it is about. `position: fixed` pins it to the rect the selection
@@ -8544,6 +8550,11 @@ fieldset.reading {
 /* A SOLO panel's gutter is its letterhead. With one state inside, the gutter already names the
    session, names the state that opened it, and times it — so the letterhead has nothing left to add
    and the whole line becomes the control instead. See `Sheet`. */
+/* A SURFACE's gutter carries the workflow link and nothing else — see `Sheet`. No session to name
+   and no span to state, so the row is one control and the space around it is the sheet's. */
+.sb-gutter.bare {
+  padding-bottom: 2px;
+}
 .sb-gutter.solo {
   cursor: pointer;
 }
@@ -9069,6 +9080,55 @@ fieldset.reading {
 .ss-none {
   color: var(--dim);
   margin: 0;
+}
+
+/* --- what a state actually RAN ---
+   See `CallBlock` in `runViews.tsx`. A state whose outputs are bound to function expressions has no
+   conversation and no operation of its own, so its whole account of itself is this: the function,
+   the arguments it resolved to, and what came back. Stacked rather than boxed — a state routinely
+   makes three of these, and three panels inside one sheet is chrome inside chrome. The rule above
+   each after the first is what separates them, on the same argument the letterhead makes. */
+.ss-call {
+  min-width: 0;
+}
+.ss-call + .ss-call {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.ss-call-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin-bottom: 8px;
+}
+.ss-call-ico {
+  flex: none;
+  color: var(--dim);
+}
+/* The short name, in the data voice — it is an identifier somebody wrote in a workflow file, and the
+   whole `functionRef` is on the hover because where a function lives is not what it is called. */
+.ss-call-name {
+  min-width: 0;
+  font-weight: 600;
+  font-size: calc(var(--size-data) * 12 / 12);
+  color: var(--text);
+}
+/* Only when it is not `completed` — a call that answered says so by having an answer. */
+.ss-call-status {
+  flex: none;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 10 / 12);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--warn);
+}
+/* The arguments sit tighter than a state's input list: they are a call's signature rather than a
+   sheet's contents, and the value under each is one line by construction. */
+.ss-call .ss-slots {
+  gap: 4px;
+  margin-bottom: 10px;
 }
 
 /* --- the fork mark ---

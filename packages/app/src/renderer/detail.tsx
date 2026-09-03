@@ -128,10 +128,13 @@ export function TaskDetailSections({
   detail,
   stream,
   here,
+  asking,
   onGoTo,
 }: {
   detail: TaskDetail;
   stream: string[];
+  /** The instance holding a question that is on offer right now — passed through to {@link RunIndex}. */
+  asking?: string | undefined;
   /** The state the reader is on, by `keyOfNode` — see {@link RunIndex}. */
   here?: string | undefined;
   /** Take the conversation to a state. Absent ⇒ this host has no conversation beside it. */
@@ -156,7 +159,12 @@ export function TaskDetailSections({
         </section>
       ) : null}
 
-      <RunIndex instances={detail.instances} {...(here !== undefined ? { here } : {})} {...(onGoTo !== undefined ? { onGoTo } : {})} />
+      <RunIndex
+        instances={detail.instances}
+        {...(here !== undefined ? { here } : {})}
+        {...(asking !== undefined ? { asking } : {})}
+        {...(onGoTo !== undefined ? { onGoTo } : {})}
+      />
 
       <section>
         <h3>Live events</h3>

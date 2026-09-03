@@ -30,6 +30,7 @@ import type {
   ConversationView,
   InstanceNode,
   PendingUserEvent,
+  OperationRecordView,
   SessionRef,
   SessionView,
   ExecutorInfo,
@@ -177,6 +178,13 @@ export interface FileSurfaceContext {
   onLoadSessions: (at: ReadonlyArray<{ instanceId: string }>) => void;
   /** Every state that task went through, and the transcript of the one being looked at. */
   sessionHistory: SessionRef[];
+  /**
+   * What each call the task made actually ran, by operation id — the store's `records`.
+   *
+   * Joined against `InstanceNode.calls`, which is how a state that computed its outputs by calling
+   * functions gets to say WHICH functions, with what, and what they answered.
+   */
+  records: Record<string, OperationRecordView>;
   session: SessionView | null;
   sessionInstance: string | null;
   /** The answer being written right now, when there is one — text and thinking tails, every stream item. */

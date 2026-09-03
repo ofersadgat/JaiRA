@@ -176,6 +176,52 @@ describe("projectRun", () => {
   });
 });
 
+/**
+ * The join that made a computed state legible — see `OperationCall`.
+ *
+ * A state whose outputs are bound to function expressions dispatches one call per output and emits
+ * NO `operation.started`, so it has no `operation` and reads as `computed`. The journal is the only
+ * thing that says which instance those calls belong to, and `operation.dispatched` is the only event
+ * carrying the id `run:records` keys on — so without this, three function names, their arguments and
+ * their answers sat in the store with nothing able to reach them from the state that ran them.
+ */
+describe("the calls an instance dispatched", () => {
+  const dispatched = (id: string, stateId: string, op: "prompt" | "function", operationId: string): EngineEvent => ({
+    type: "operation.dispatched",
+    instanceId: id,
+    stateId,
+    op,
+    operationId,
+  });
+
+  it("keeps every call, in dispatch order, on a state that has no operation of its own", () => {
+    const events: EngineEvent[] = [
+      entered("1", "feature/plan"),
+      entered("9", "feature/plan/confidence", "1", "confidence"),
+      dispatched("9", "feature/plan/confidence", "function", "score"),
+      dispatched("9", "feature/plan/confidence", "function", "reasons"),
+      dispatched("9", "feature/plan/confidence", "function", "mustAsk"),
+      terminated("9", "feature/plan/confidence", "success"),
+    ];
+    const node = projectRun(events, SHAPE).instances[0]!.children[0]!;
+    // Still `computed` by the kind rule: `operation` is set on `operation.started` and nothing else.
+    expect(node.operation).toBeUndefined();
+    expect(node.calls?.map((call) => call.operationId)).toEqual(["score", "reasons", "mustAsk"]);
+    expect(node.calls?.every((call) => call.kind === "function")).toBe(true);
+  });
+
+  it("does not double a call a resumed run re-dispatched", () => {
+    // A continuation re-states the spine, so the same dispatch can arrive twice — and two rows for
+    // one call would show the reader the same function twice with the same answer.
+    const events: EngineEvent[] = [
+      entered("1", "feature/plan"),
+      dispatched("1", "feature/plan", "function", "same"),
+      dispatched("1", "feature/plan", "function", "same"),
+    ];
+    expect(projectRun(events, SHAPE).instances[0]!.calls).toHaveLength(1);
+  });
+});
+
 describe("activePathOf", () => {
   it("prefers the most recently entered live sibling", () => {
     const run = projectRun([

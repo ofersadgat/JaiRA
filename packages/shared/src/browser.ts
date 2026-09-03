@@ -15,6 +15,7 @@ export * from "./mime";
 export * from "./operationVocabulary";
 export * from "./schemas";
 export * from "./view";
+export * from "./operationRecords";
 export * from "./ipc";
 export * from "./components";
 export * from "./reviewNotes";

@@ -17,6 +17,7 @@ import type {
   ChatPlanView,
   ChatSettings,
   InstanceNode,
+  OperationRecordView,
   PendingInteraction,
   PendingUserEvent,
   StateChild,
@@ -28,13 +29,14 @@ import { GateSurface, type EditorServices } from "./components";
 import type { ComponentServices } from "./changesetReview";
 import { TaskDetailSections, TaskHead } from "./detail";
 import { entriesOf, journalFor, previewOf, sidechainEntriesOf, signatureOf } from "./transcript";
+import { ValueView } from "./valueView";
 import { useStickToBottom } from "./stickToBottom";
 import { sessionKey } from "./sessionCache";
 import { STOPPED, stoppedAction } from "./taskAction";
 import { instanceOf as instanceOfState, nodeAt, prunedTrail, type TrailStep } from "./trail";
 import { Paper, Pulse, Transcript, clockOf, durationOf, useElapsed } from "./transcriptView";
 import { advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
-import { TASK_DRAG } from "@jaira/shared/browser";
+import { readCall, TASK_DRAG, type ReadCall } from "@jaira/shared/browser";
 import { Icon } from "./icons";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type SessionPiece } from "./sessionBands";
 import { SessionBandsView } from "./sessionPanels";
@@ -51,6 +53,30 @@ export { instanceOf } from "./trail";
 /** Whether this subtree holds a state that is asking right now — see {@link isAsking}. */
 function hasAsking(node: InstanceNode): boolean {
   return isAsking(node) || node.children.some(hasAsking);
+}
+
+/**
+ * WHICH instance is asking — the same walk, returning the state rather than a yes.
+ *
+ * Every surface that draws a parked gate needs this and each of them was deriving it separately or
+ * not at all. The letterhead's tint needs it (a canceled instance still holding a live question is
+ * not a settled state — see `headerToneOf`), the run index needs it for the same reason, and the
+ * conversation already needed it to decide which panel the question goes in.
+ *
+ * A pairing, not a lookup: `pending_interactions` records the component and the task, never the
+ * instance, so nothing in the store says which state a surviving question belongs to. What says it
+ * is the tree — exactly one instance has a function operation that dispatched and never settled —
+ * which is why this is only ever asked when the hub is actually holding a request. The FIRST such
+ * instance, since SPEC §7.1 gives an instance one operation and one task's tree cannot hold two
+ * parked calls on one state.
+ */
+function askingInstanceOf(nodes: readonly InstanceNode[]): string | undefined {
+  for (const node of nodes) {
+    if (isAsking(node)) return node.instanceId;
+    const inside = askingInstanceOf(node.children);
+    if (inside !== undefined) return inside;
+  }
+  return undefined;
 }
 
 /** Every execution of each declared child, keyed by the child key the parent mounted it under. */
@@ -378,13 +404,91 @@ function WaitingOn({ request, onDeliver }: { request: PendingUserEvent; onDelive
  * arguments, the value it produced — and that needs the binding tree and the operation records
  * joined, which is a projection change rather than a rendering one.
  */
-function SilentState({ node }: { node: InstanceNode }): JSX.Element {
+/**
+ * ONE CALL a state made, as the derivation it is: what was run, on what, and what came back.
+ *
+ * This is the panel a `function` state never had. A state whose outputs are bound to function
+ * expressions dispatches one call per output and emits no `operation.started`, so the projection
+ * gave it no operation, the letterhead called it `computed`, and the body listed its INPUTS and
+ * stopped — which is how a state that ran `confidence.score`, `confidence.reasons` and
+ * `confidence.mustAsk` came to be drawn as a state that had done nothing, with all three names,
+ * their arguments and their answers sitting in `operation_records`.
+ *
+ * The three lines are the three questions in the order somebody asks them. WHAT ran — the short
+ * name, with the whole `functionRef` on the hover, because where a function lives is not what it is
+ * called. WHAT WITH — the resolved arguments, so an answer that looks wrong can be checked against
+ * what the call was actually handed rather than against the expression meant to produce it. WHAT
+ * CAME BACK — through {@link ValueView} like every other value in the app, so a function returning a
+ * document gets the document's readings and not a line of JSON.
+ */
+function CallBlock({ call }: { call: ReadCall }): JSX.Element {
+  const args = Object.entries(call.args);
+  return (
+    <div className="ss-call">
+      <div className="ss-call-head">
+        <Icon name="sigma" className="ss-call-ico" />
+        <span className="ss-call-name mono" title={call.ref ?? call.name}>
+          {call.name ?? call.kind ?? "call"}
+        </span>
+        {call.status !== "completed" ? <span className="ss-call-status">{call.status}</span> : null}
+      </div>
+      {args.length > 0 ? (
+        <div className="ss-slots">
+          {args.map(([name, value]) => (
+            <div className="ss-slot" key={name}>
+              <span className="ss-slot-name">{name}</span>
+              <span className="ss-slot-value ellip" title={previewOf(value)}>
+                {previewOf(value)}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {call.error !== undefined ? (
+        <ValueView value={call.error} label="error" />
+      ) : call.result !== undefined ? (
+        <ValueView value={call.result} label="returned" />
+      ) : null}
+    </div>
+  );
+}
+
+/** Exported for the test that renders one — the same reason {@link TableView} is. */
+export function SilentState({ node, records }: { node: InstanceNode; records: Record<string, OperationRecordView> }): JSX.Element {
   const failure = node.operation?.status === "failed" ? node.operation.reason : undefined;
+  /**
+   * The calls this state dispatched, joined to what they ran — see `shared/operationRecords.ts`.
+   *
+   * Dropped where the record is missing rather than drawn as a placeholder: a call whose record has
+   * been pruned is a call nothing can say anything about, and a row reading "call (unknown)" is a
+   * gap dressed up as information.
+   */
+  const calls = useMemo(
+    () => (node.calls ?? []).map((call) => records[call.operationId]).filter((row) => row !== undefined).map(readCall),
+    [node.calls, records],
+  );
   if (failure !== undefined) {
     return (
-      <p className="ss-fail">
-        <span className="ss-fail-msg">{failure}</span>
-      </p>
+      <>
+        <p className="ss-fail">
+          <span className="ss-fail-msg">{failure}</span>
+        </p>
+        {/* The calls STAY under a failure, and that is the point of showing them at all: the state
+            that could not resolve `confidence.score` is the state whose other two calls succeeded,
+            and seeing which ones got through is most of the diagnosis. */}
+        {calls.map((call, i) => (
+          <CallBlock key={i} call={call} />
+        ))}
+      </>
+    );
+  }
+  if (calls.length > 0) {
+    return (
+      <>
+        {calls.map((call, i) => (
+          <CallBlock key={i} call={call} />
+        ))}
+      </>
     );
   }
   const slots = Object.entries(node.inputs ?? {});
@@ -470,7 +574,7 @@ export function RunConversation({
    */
   onOpenSidechain?: ((node: InstanceNode, call: string, name: string) => void) | undefined;
 }): JSX.Element {
-  const { conversation, liveTurn, sessions, sessionHistory, onLoadSessions, onOpenWorkflow, userEvents, onDeliverUserEvent, shutStates, onToggleShutState, onSetShutStates } = context;
+  const { conversation, liveTurn, sessions, sessionHistory, records, onLoadSessions, onOpenWorkflow, userEvents, onDeliverUserEvent, shutStates, onToggleShutState, onSetShutStates } = context;
   const openSidechain = onOpenSidechain ?? context.onWalkIntoSidechain;
   /**
    * The TASK's conversation, not the newest run's.
@@ -559,6 +663,17 @@ export function RunConversation({
     () => (parent === undefined ? "" : mountPathOf(detail?.instances ?? [], parent.instanceId)),
     [detail, parent],
   );
+  /**
+   * The instance whose question is on the page — the same conjunction that decides where it is DRAWN.
+   *
+   * Gated on the gate existing, which is the whole point: without it, an instance that dispatched a
+   * gate and was then stopped with the run reads identically to one whose question survived the
+   * stop, and the letterhead would tint a dead question as a live one. See `askingInstanceOf`.
+   */
+  const askingHere = useMemo(
+    () => (gate === undefined || onGate === undefined ? undefined : askingInstanceOf(detail?.instances ?? [])),
+    [gate, onGate, detail?.instances],
+  );
 
   // Every panel is open, so every transcript in them is needed — fetched in one round rather than
   // on expand, which is what the folded card design paid for and this one does not.
@@ -608,7 +723,7 @@ export function RunConversation({
       );
     }
     const silent = piece.sessionId === undefined && surfaceKindOf(piece.node) !== "conversation";
-    if (silent || piece.node.operation?.status === "failed") return <SilentState node={piece.node} />;
+    if (silent || piece.node.operation?.status === "failed") return <SilentState node={piece.node} records={records} />;
     const view = sessions[sessionKey(recordAt(piece))];
     if (view === undefined) return <p className="empty">Loading…</p>;
     const matches =
@@ -644,6 +759,7 @@ export function RunConversation({
         <SessionBandsView
           bands={bands}
           render={render}
+          {...(askingHere !== undefined ? { asking: askingHere } : {})}
           notes={notes}
           {...(rootPath !== undefined ? { root: rootPath } : {})}
           {...(onOpenWorkflow !== undefined
@@ -1254,6 +1370,7 @@ export function TaskContext({
           detail={detail}
           stream={stream}
           onGoTo={goTo}
+          {...(hosted ? { asking: askingInstanceOf(detail.instances) } : {})}
           {...(focus !== undefined ? { here: focus.instance } : {})}
         />
       </div>

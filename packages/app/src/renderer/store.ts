@@ -18,6 +18,7 @@ import type {
   LogEntry,
   ProjectSummary,
   ProjectTask,
+  OperationRecordView,
   SessionRef,
   SessionView,
   AvailabilitySnapshot,
@@ -487,6 +488,14 @@ export interface AppState {
    * attempted, policy decisions. This is the transcript itself, which the journal never held.
    */
   sessionHistory: SessionRef[];
+  /**
+   * Every call the selected task made, by operation id — see `OperationCall`.
+   *
+   * Fetched with the history rather than per state: `run:records` is scoped to the task and a
+   * conversation forty states deep would otherwise be forty round trips to answer one question. The
+   * join is `InstanceNode.calls`, which the projection stamps from `operation.dispatched`.
+   */
+  records: Record<string, OperationRecordView>;
   /** The conversation of the state being looked at — one operation, whole. */
   session: SessionView | null;
   /** Which instance the viewer is showing. Null ⇒ the task's most recent. */
@@ -810,6 +819,7 @@ const EMPTY: AppState = {
   inspectFrom: null,
   conversation: null,
   sessionHistory: [],
+  records: {},
   session: null,
   sessionInstance: null,
   sessions: {},
@@ -1452,13 +1462,27 @@ export function useApp() {
       // would drop you back to the top of the walk on each engine event.
     ): Promise<string | null> => {
       if (taskId === null) {
-        patch({ sessionHistory: [], session: null, sessionInstance: null });
+        patch({ sessionHistory: [], records: {}, session: null, sessionInstance: null });
         return null;
       }
       const scope = project ?? ref.current.selectedProject ?? undefined;
       const at = scope !== undefined ? { project: scope } : {};
       try {
         const history = await invoke("session:history", { taskId, ...at });
+        /**
+         * What each of those calls actually RAN, keyed by the id the journal names it with.
+         *
+         * Tolerated rather than folded into the failure path: a task whose records cannot be read
+         * still has a conversation, and losing the whole panel because the derivation is unavailable
+         * would trade the thing that works for the thing that was missing.
+         */
+        let records: Record<string, OperationRecordView> = {};
+        try {
+          const rows = await invoke("run:records", { taskId, ...at });
+          records = Object.fromEntries(rows.map((row) => [row.recordId, row]));
+        } catch {
+          records = {};
+        }
         const wanted = instanceId ?? instanceAt(history, atState ?? null);
         const session = await invoke("session:view", {
           taskId,
@@ -1488,6 +1512,7 @@ export function useApp() {
           (current.n ?? -1) >= live.n;
         patch({
           sessionHistory: history,
+          records,
           session,
           sessionInstance: wanted,
           ...(keep
@@ -1513,7 +1538,7 @@ export function useApp() {
         });
         return wanted;
       } catch {
-        patch({ sessionHistory: [], session: null, sessionInstance: null });
+        patch({ sessionHistory: [], records: {}, session: null, sessionInstance: null });
         return null;
       }
     },
@@ -1614,6 +1639,45 @@ export function useApp() {
    * may belong to a project no list has been fetched for, and a watermark that cannot be dated is
    * one there is no honest value to move.
    */
+  /**
+   * WHICH project's database holds a task — recovered from whatever this window already knows.
+   *
+   * A task id is a rowid in ONE store, and every read about it names that store. What names it is
+   * `selectedProject`, which is set from whatever could be worked out at the moment of the click:
+   * `project ?? selectedProject ?? owningProject()`. The middle term is the trap. It is the project
+   * of the PREVIOUS selection, so a click that names none does not fall through to "unknown" — it
+   * inherits, confidently and silently, wherever the reader happened to be standing before.
+   *
+   * Observed: reading the shared root as a project and then opening a checkout's task from a surface
+   * that passes no project. `selectedProject` was still `"shared"`, every read about the task went
+   * to the base root, and main answered `unknown task 't-…' in ~/.jaira` — once per invalidate, for
+   * as long as the task stayed selected. The panel empties and nothing on screen says why: the
+   * refreshers swallow the refusal, which is right for a selection that HAS gone stale and wrong for
+   * this one, where the task is fine and the window is simply looking in the wrong database.
+   *
+   * So it asks the lists instead of guessing, and a task's project is a FACT in four of them: the
+   * cross-project conversation list stamps every row, and the three inbox lists each stamp the
+   * project their request parked in — "required, not optional, because the inbox is ALREADY
+   * cross-project". The per-project summaries answer for anything that has stopped. A task none of
+   * them holds returns null, which is honest: this recovers what is known and invents nothing.
+   *
+   * ⚠️ It outranks `selectedProject` at the one call site that uses it, and that is the point rather
+   * than an aggressive default. The previous selection is a guess about the next one; a row that
+   * says which database it came out of is the answer.
+   */
+  const projectOfTask = useCallback((taskId: string): string | undefined => {
+    const stamped =
+      ref.current.allConversations.find((t) => t.taskId === taskId)?.project ??
+      ref.current.pending.find((p) => p.taskId === taskId)?.project ??
+      ref.current.approvals.find((a) => a.taskId === taskId)?.project ??
+      ref.current.questions.find((q) => q.taskId === taskId)?.project;
+    if (stamped !== undefined && stamped !== "") return stamped;
+    for (const project of ref.current.projects) {
+      if (project.ended.some((t) => t.taskId === taskId)) return project.project;
+    }
+    return undefined;
+  }, []);
+
   const taskClock = useCallback((taskId: string): number | null => {
     const row =
       ref.current.tasks.find((t) => t.taskId === taskId) ??
@@ -1669,17 +1733,21 @@ export function useApp() {
       void refreshTasks();
       void refreshSharedTasks();
       if (view === null) {
-        patch({ selected: null, sessionHistory: [], session: null, sessionInstance: null, conversation: null, sessions: {}, trail: [], trailState: null });
+        patch({ selected: null, sessionHistory: [], records: {}, session: null, sessionInstance: null, conversation: null, sessions: {}, trail: [], trailState: null });
         return;
       }
       const newest = newestRunOf(view);
       if (newest === null) {
-        patch({ selected: null, sessionHistory: [], session: null, sessionInstance: null, conversation: null, trail: [], trailState: null });
+        patch({ selected: null, sessionHistory: [], records: {}, session: null, sessionInstance: null, conversation: null, trail: [], trailState: null });
         return;
       }
       // The project the STATE's runs live in, not the focused one — see `owningProject`. `view` is
       // authoritative about the layer here, and it is the value the reads below have to agree with.
-      const at = runTargetOf(view.layer, ref.current.at).project ?? ref.current.at ?? undefined;
+      // …and the task's OWN project as the last resort, for a layer that resolved to nothing and a
+      // window with no checkout focused — see `projectOfTask`. Last, because `view.layer` is
+      // authoritative here and a recovered answer must never overrule a stated one.
+      const at =
+        runTargetOf(view.layer, ref.current.at).project ?? ref.current.at ?? projectOfTask(newest.taskId) ?? undefined;
       patch({ selected: newest.taskId, selectedProject: at ?? null, stream: [], sessions: {}, trail: [], trailState: null });
       void refreshConversation(newest.taskId, at);
       void refreshSession(newest.taskId, null, at, view.stateId);
@@ -1690,7 +1758,7 @@ export function useApp() {
       // said no run, the panel showed one.
       void refreshDetail(newest.taskId, at).then((detail) => seedTrail(detail, view.stateId));
     },
-    [patch, refreshConversation, refreshDetail, refreshSession, refreshTasks, refreshSharedTasks, seedTrail],
+    [patch, projectOfTask, refreshConversation, refreshDetail, refreshSession, refreshTasks, refreshSharedTasks, seedTrail],
   );
 
   /**
@@ -2345,10 +2413,12 @@ export function useApp() {
        *    {@link refreshSession}.
        */
       select: (taskId: string | null, project?: string, atState?: string | null) => {
-        // Named, then whatever the last selection resolved to, then the owner of the open file — NOT
-        // the focused project, which with no checkout open is none and makes every read that follows
-        // throw. See `owningProject`.
-        const at = project ?? ref.current.selectedProject ?? owningProject();
+        // Named, then the task's OWN project where a list knows it, then whatever the last selection
+        // resolved to, then the owner of the open file — NOT the focused project, which with no
+        // checkout open is none and makes every read that follows throw. See `projectOfTask` for why
+        // a stamped row outranks the previous selection, and `owningProject` for the last step.
+        const at =
+          project ?? (taskId === null ? undefined : projectOfTask(taskId)) ?? ref.current.selectedProject ?? owningProject();
         // OPENING IS LOOKING (SHELL.md §4.3). A status pill counts what has stopped since you last
         // looked, so the gesture that clears it is the one that answers it — going and reading the
         // thing. Clicking the pills stays as the way to dismiss a row you are not going to open.
@@ -2832,6 +2902,7 @@ export function useApp() {
               stream: [],
               sessions: {},
               sessionHistory: [],
+              records: {},
               session: null,
               sessionInstance: null,
               conversation: null,
@@ -4252,6 +4323,7 @@ export function useApp() {
       loadSessions,
       locateState,
       owningProject,
+      projectOfTask,
       taskClock,
       refreshConversation,
       refreshSession,

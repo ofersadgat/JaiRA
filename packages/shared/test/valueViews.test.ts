@@ -11,6 +11,7 @@ import {
   artifactOf,
   changeStats,
   changesOf,
+  detectedMime,
   isCodeMime,
   looksLikeHtml,
   looksLikeMarkdown,
@@ -186,6 +187,43 @@ describe("media", () => {
       expect(looksLikeMarkdown("- a lone bullet")).toBe(false);
       expect(looksLikeMarkdown("# Heading\n\n- a bullet")).toBe(true);
       expect(looksLikeMarkdown("")).toBe(false);
+    });
+
+    /**
+     * The rule the block-comment guard was reaching for: a DECLARED type silences the sniffer, and
+     * every declared type does, not only the ones that name a rendering of their own.
+     *
+     * `application/yaml` names no view, so it used to arrive at the sniffer as "nobody said
+     * anything" — and YAML trips every mark the sniffer counts. `# a comment` is the heading mark
+     * exactly, `- item` is the bullet mark exactly, and two marks is the whole threshold. So a
+     * workflow file LED with the markdown reading: comments drawn as headings, list items as
+     * bullets, and the indentation carrying the document's structure reflowed away.
+     */
+    it("never sniffs over a type the caller stated, whether or not it names a view", () => {
+      const YAML = ["# what this does", "name: feature", "steps:", "  - draft", "  - critique"].join("\n");
+      // The text really does look like markdown — the fix is not a better sniffer.
+      expect(looksLikeMarkdown(YAML)).toBe(true);
+      expect(viewsFor(YAML, { mime: "application/yaml" })).toEqual(["code", "data", "text"]);
+      // …and it still leads with the reading, where nothing was declared.
+      expect(viewsFor(YAML, {})[0]).toBe("markdown");
+    });
+
+    it("stops a `#`-commenting language reading as prose, which is the same bug one family over", () => {
+      // The block-comment guard fixed C, Java and TypeScript by stripping block comments before
+      // counting, and left every language that comments with `#` where it was. Two comments did it.
+      const PY = ["# read the config", "import os", "", "# and print it", "print(os.getcwd())"].join("\n");
+      expect(viewsFor(PY, { mime: "text/x-python" })).toEqual(["code", "text"]);
+      const CSV = ["name,count", "- Ada,3", "# Grace,4"].join("\n");
+      expect(viewsFor(CSV, { mime: "text/csv" })).toEqual(["table", "text"]);
+    });
+
+    it("agrees with the type it would NAME, which is the invariant that was broken", () => {
+      // `detectedMime` already returned a declared type unread. So the chip said `application/yaml`
+      // while the toggle led with `Rendered`, and the two are documented as never being allowed to
+      // disagree about what they are looking at.
+      const YAML = ["# what this does", "name: feature", "steps:", "  - draft"].join("\n");
+      expect(detectedMime(YAML, { mime: "application/yaml" })).toBe("application/yaml");
+      expect(viewsFor(YAML, { mime: "application/yaml" })).not.toContain("markdown");
     });
 
     it("wants a real element before calling a string HTML", () => {

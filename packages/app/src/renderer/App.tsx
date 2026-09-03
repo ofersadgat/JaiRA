@@ -1230,6 +1230,7 @@ export default function App(): JSX.Element {
     userEvents: state.userEvents,
     onDeliverUserEvent: actions.deliverUserEvent,
     sessionHistory: state.sessionHistory,
+    records: state.records,
     session: state.session,
     sessionInstance: state.sessionInstance,
     liveTurn: state.liveTurn,
@@ -1271,7 +1272,10 @@ export default function App(): JSX.Element {
           },
         }
       : {}),
-    onAnswer: waiting ? () => actions.select(waiting.taskId) : undefined,
+    // The request's OWN project, not the ambient one. A parked request stamps the project it parked
+    // in precisely because the inbox spans projects, and dropping the stamp here left the selection
+    // to be reconstructed from whatever happened to be focused — see `projectOfTask` in `store.ts`.
+    onAnswer: waiting ? () => actions.select(waiting.taskId, waiting.project) : undefined,
     // The action, not the channel — re-running a finished task answers with a DIFFERENT task, and
     // this is what moves the selection onto it. See `FileSurfaceContext.onRerun`. Routed through
     // {@link primaryAct} so the strip's fallback button starts a task that recorded nothing in
@@ -2036,6 +2040,10 @@ export default function App(): JSX.Element {
                 onOpenTask={(taskId) => {
                   // Into the task, in the view that shows one — a link that only filtered this list
                   // would answer "where do I look next" with "here".
+                  //
+                  // No project to pass: a log line names a task and not the store holding it. The
+                  // selection recovers one from the lists that stamp their rows — see `projectOfTask`
+                  // — which is what keeps a link out of the logs from landing on the base root.
                   actions.setView("tasks");
                   actions.select(taskId);
                 }}

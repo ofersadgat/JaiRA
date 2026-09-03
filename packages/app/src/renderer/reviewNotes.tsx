@@ -96,6 +96,23 @@ function rangeAt(runs: ReadonlyArray<{ node: Text; start: number }>, start: numb
 export const KEEPS_SELECTION = "data-keeps-selection";
 
 /**
+ * The passage a surface is HOLDING, for the window's right-click menu to find.
+ *
+ * The sibling of {@link KEEPS_SELECTION} and the other half of the same problem. That one stops the
+ * composer's focus from being read as "the person clicked the words away"; this one stops the
+ * consequence of that focus — a collapsed document selection — from being read as "nothing is
+ * selected". Right-clicking the passage you had just dragged over offered no menu at all, because
+ * `itemsForEvent` asks `window.getSelection()` and the textarea had already taken it.
+ *
+ * An ATTRIBUTE rather than a shared variable, because that is how `pointerMenu.tsx` asks every other
+ * question it asks: it is handed an element and walks up from it (`closest("img")`, `closest("a")`,
+ * `closest("input, textarea")`). A module-level "current selection" would be a second source of
+ * truth about a thing the DOM can carry, readable from anywhere and stale the moment a second
+ * artifact mounts.
+ */
+export const HELD_QUOTE = "data-held-quote";
+
+/**
  * Report the current selection when it lies inside `ref`, in flattened-text offsets.
  *
  * Listens on `selectionchange` at the document, because a selection can be extended with the
@@ -131,6 +148,31 @@ export const KEEPS_SELECTION = "data-keeps-selection";
  * selection-preserving ({@link KEEPS_SELECTION}). Clicking back in the artifact still closes the
  * composer, because focus is then in the artifact rather than in the composer.
  */
+/**
+ * Whether an empty selection means the person is DONE with the passage.
+ *
+ * The one judgement in {@link useSelectionInside}, pulled out because it is the only part of it a
+ * test in this repo can reach — the suite runs on `environment: "node"`, so there is no document to
+ * put a caret in. Both arguments are facts about the gesture, and both are reasons to keep holding.
+ *
+ * `activeInKeeper` is the original: focusing the composer's textarea collapses the document's
+ * selection, which is indistinguishable from a click on empty space unless somebody says so.
+ *
+ * `secondary` is the one that was missing, and it is why the passage could be commented on but never
+ * copied. On Windows a right-click delivers `mousedown` first and `contextmenu` after it, so the
+ * mousedown moved focus out of the composer, `activeInKeeper` went false, a `selectionchange` fired
+ * for the moved caret, and the pane surrendered the passage — unmounting the composer and taking the
+ * held quote with it. The menu then opened a moment later, asked what was selected, and was told
+ * nothing. The gesture that exists to ask a question ABOUT a selection was being read as the gesture
+ * that throws one away.
+ *
+ * A right-click is never a dismissal. Clicking back into the artifact with the primary button still
+ * is one, which is the behaviour the composer is supposed to have.
+ */
+export function maySurrenderSelection(activeInKeeper: boolean, secondary: boolean): boolean {
+  return !activeInKeeper && !secondary;
+}
+
 export function useSelectionInside(ref: RefObject<HTMLElement | null>): [PendingSelection | null, () => void] {
   const [selection, setSelection] = useState<PendingSelection | null>(null);
   /** The last range seen, held until the gesture ends. See the module note. */
@@ -138,6 +180,24 @@ export function useSelectionInside(ref: RefObject<HTMLElement | null>): [Pending
   const clear = useCallback(() => {
     pending.current = null;
     setSelection(null);
+  }, []);
+  /**
+   * Whether the gesture in flight is a SECONDARY click — see {@link maySurrenderSelection}.
+   *
+   * A ref and not state: it is read inside a listener during a gesture and must not cost a render,
+   * and nothing on screen depends on it. Set on the way down, so it is already true by the time the
+   * focus change it causes has produced a `selectionchange`.
+   */
+  const secondary = useRef(false);
+
+  useEffect(() => {
+    // CAPTURE, so this runs before any handler that might move the focus — the point is to know
+    // which button started the gesture, and every consequence of the press comes after this.
+    const onDown = (event: MouseEvent): void => {
+      secondary.current = event.button === 2;
+    };
+    document.addEventListener("mousedown", onDown, true);
+    return () => document.removeEventListener("mousedown", onDown, true);
   }, []);
 
   useEffect(() => {
@@ -152,7 +212,10 @@ export function useSelectionInside(ref: RefObject<HTMLElement | null>): [Pending
        * unselectable: with the composer open, focus is in its textarea, so every drag in the
        * artifact was ignored and no second passage could ever be picked.
        */
-      const mayClear = document.activeElement?.closest(`[${KEEPS_SELECTION}]`) == null;
+      const mayClear = maySurrenderSelection(
+        document.activeElement?.closest(`[${KEEPS_SELECTION}]`) != null,
+        secondary.current,
+      );
       const nothing = (): void => {
         if (!mayClear) return;
         pending.current = null;
@@ -209,6 +272,21 @@ export function useSelectionInside(ref: RefObject<HTMLElement | null>): [Pending
 const HIGHLIGHT = "jaira-note";
 /** The one under the pointer, or the one whose thread is being hovered — see `styles.css`. */
 const HOT = "jaira-note-hot";
+/**
+ * The passage a note is being WRITTEN about, held on screen while the composer has the focus.
+ *
+ * A textarea owns its own selection, so focusing the composer collapses the document's — which is
+ * why the words you had just dragged over went plain in the same frame the popover appeared, with
+ * the quote in the popover's header the only remaining sign of what you had picked. Nothing was
+ * lost (`useSelectionInside` keeps the offsets, which is what the note is anchored by); what was
+ * lost was the reader's place, on the one surface whose whole job is pointing at a passage.
+ *
+ * It cannot be fixed by keeping the DOM selection: the composer has to be typeable, focusing it is
+ * what makes it typeable, and no element can hold the caret while another holds a selection. So the
+ * mark is PAINTED instead — the same `CSS.highlights` the resolved notes use, which touches no DOM
+ * and therefore works over rendered markdown, a table, an iframe's sibling, anything.
+ */
+const DRAFTING = "jaira-note-drafting";
 
 /** Paint every resolved note's range. A no-op where `CSS.highlights` is absent — see the module note. */
 export function useNoteHighlights(
@@ -216,6 +294,8 @@ export function useNoteHighlights(
   notes: readonly ReviewNote[],
   /** The note the pointer is over, drawn louder than the rest. */
   hot?: number | null,
+  /** The passage a note is being written about right now — see {@link DRAFTING}. */
+  drafting?: { start: number; end: number } | null,
 ): void {
   // Layout, not effect: the ranges are measured against DOM that has to be the DOM on screen, and
   // a paint between the two shows the previous review's marks over this one's text.
@@ -235,13 +315,21 @@ export function useNoteHighlights(
       if (range === undefined) return;
       (i === hot ? hotRanges : ranges).push(range);
     });
+    // The passage being commented on, in the offsets the selection reported. Resolved against the
+    // SAME runs as the notes, so a document that re-rendered under the composer (the view toggle
+    // moved, a stream landed) puts the mark where the words are now rather than where they were.
+    const draft =
+      drafting === undefined || drafting === null ? undefined : rangeAt(runs, drafting.start, drafting.end);
     if (ranges.length === 0) highlights.delete(HIGHLIGHT);
     else highlights.set(HIGHLIGHT, new Ctor(...ranges));
     if (hotRanges.length === 0) highlights.delete(HOT);
     else highlights.set(HOT, new Ctor(...hotRanges));
+    if (draft === undefined) highlights.delete(DRAFTING);
+    else highlights.set(DRAFTING, new Ctor(draft));
     return () => {
       highlights.delete(HIGHLIGHT);
       highlights.delete(HOT);
+      highlights.delete(DRAFTING);
     };
   });
 }

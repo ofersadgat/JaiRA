@@ -148,6 +148,39 @@ describe("how loudly a header speaks", () => {
     expect(headerToneOf(writing, "conversation")).toBe("accent");
   });
 
+  /**
+   * The close-and-reopen case — the one the two rules above swallow without an answer from the hub.
+   *
+   * Shutting the app stops the machine, so the gate's instance is terminated `canceled` with an
+   * `endedAt` on it, while the question survives in `pending_interactions` and is seeded back into
+   * the hub on the next start. The instance is then indistinguishable from run 11's — same status,
+   * same unsettled operation — which is why the caller has to say which of the two it is holding.
+   */
+  it("is amber when a QUESTION is on offer, whatever the instance around it says", () => {
+    const reopened = node({
+      instanceId: "1c1cd3",
+      stateId: "feature/product/gate",
+      status: "canceled",
+      endedAt: 27_200,
+      operation: { kind: "function", status: "running" },
+    });
+    expect(headerToneOf(reopened, "asked", true)).toBe("amber");
+    // The SAME node with nothing holding its question is run 11 again, and stays at rest.
+    expect(headerToneOf(reopened, "asked")).toBeUndefined();
+  });
+
+  it("does not tint a settled state just because the caller said something is asking", () => {
+    // `asking` is a fact about the hub, not a licence: the node still has to be one that could be
+    // answered. A finished conversation on a task whose gate is open elsewhere is not the gate.
+    const done = node({
+      instanceId: "3",
+      stateId: "product/draft",
+      endedAt: 10,
+      operation: { kind: "prompt", status: "completed" },
+    });
+    expect(headerToneOf(done, "conversation", true)).toBeUndefined();
+  });
+
   it("is quiet for a computation, however recently it ran", () => {
     // The one that makes the loud form mean something. A computation is a fact about the run, not a
     // demand on the reader — and a 5 ms state that shouted would make the tint noise.

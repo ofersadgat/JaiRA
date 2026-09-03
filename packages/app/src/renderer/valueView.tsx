@@ -469,6 +469,60 @@ function jsonTextOf(value: unknown): string {
 }
 
 /**
+ * One node of a parsed document. Objects and arrays nest; everything else is a leaf.
+ *
+ * Lives HERE rather than in `fileSurfaces.tsx`, which is where it started and where it could only
+ * be reached by opening a file. The `data` view is the same reading of the same thing — what does
+ * this document DENOTE — so a `.yaml` file in the tree and a ```yaml block in an answer have to draw
+ * it identically or one of them is lying about the other. `fileSurfaces` imports it back, which is
+ * the direction that already existed for {@link TableView} and {@link PatchView}.
+ */
+function DataNode({ name, value }: { name: string | null; value: unknown }): JSX.Element {
+  const label = name === null ? null : <span className="doc-key">{name}</span>;
+
+  if (value !== null && typeof value === "object") {
+    const entries: Array<[string, unknown]> = Array.isArray(value)
+      ? value.map((entry, i) => [String(i), entry])
+      : Object.entries(value as Record<string, unknown>);
+    return (
+      <li>
+        {label}
+        <span className="sub">{Array.isArray(value) ? `[${entries.length}]` : `{${entries.length}}`}</span>
+        {entries.length > 0 ? (
+          <ul className="doc-tree">
+            {entries.map(([key, entry]) => (
+              <DataNode key={key} name={key} value={entry} />
+            ))}
+          </ul>
+        ) : null}
+      </li>
+    );
+  }
+
+  return (
+    <li>
+      {label}
+      <code className={`doc-value doc-${value === null ? "null" : typeof value}`}>{JSON.stringify(value)}</code>
+    </li>
+  );
+}
+
+/**
+ * The value a structured document denotes, as a tree.
+ *
+ * The `data` view's renderer, and the missing half of the reading `structured.ts` was added for. The
+ * parse is done by the caller — three views need it and re-parsing per branch would parse the same
+ * megabyte twice — so this is handed the value and nothing else.
+ */
+export function DataView({ value }: { value: unknown }): JSX.Element {
+  return (
+    <ul className="doc-tree doc-root">
+      <DataNode name={null} value={value} />
+    </ul>
+  );
+}
+
+/**
  * A structured value, coloured — and told what its own keys MEAN where a schema says so.
  *
  * The `json` view used to be {@link Source} with a different name on it, which is why a value with
@@ -838,6 +892,40 @@ export function ValueView({
           {...(edit === undefined ? {} : { onChange: edit })}
         />
       );
+    }
+    /**
+     * A PATCH, as the change it describes — see {@link PatchView}.
+     *
+     * Its parse is `patch` above rather than {@link parsed}: a diff is a different grammar answering
+     * a different question, and `parseUnifiedDiff` returns an empty list rather than a complaint, so
+     * a text the sniffer offered this for and that turns out to hold no hunks says so plainly.
+     */
+    if (view === "patch") {
+      if (patch.length === 0) return <p className="empty">No hunks in this patch.</p>;
+      return <PatchView files={patch} />;
+    }
+    /**
+     * Rows and columns — the same table `fileSurfaces.tsx` draws a `.csv` with.
+     *
+     * A parse that failed is REPORTED rather than fallen back from, which is the whole reason
+     * `parseStructured` returns a complaint instead of throwing: the reader asked what this document
+     * denotes, and "line 14, column 3" is the answer. Falling back to the source would answer a
+     * question nobody asked and hide the one they did.
+     */
+    if (view === "table") {
+      if (parsed !== null && !parsed.ok) {
+        return <ParseProblem message={parsed.message} {...(parsed.spot !== undefined ? { spot: parsed.spot } : {})} />;
+      }
+      const rows = parsed?.ok === true && Array.isArray(parsed.value) ? (parsed.value as string[][]) : [];
+      return <TableView rows={rows} />;
+    }
+    /** The value the document DENOTES — the reading `shared/structured.ts` exists for. */
+    if (view === "data") {
+      if (parsed !== null && !parsed.ok) {
+        return <ParseProblem message={parsed.message} {...(parsed.spot !== undefined ? { spot: parsed.spot } : {})} />;
+      }
+      // A value that arrived parsed already (never a string) is its own denotation.
+      return <DataView value={parsed?.ok === true ? parsed.value : showing} />;
     }
     if (view === "form") {
       // A structured DOCUMENT is filled in from its parse rather than from its text: handing a form

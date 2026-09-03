@@ -51,6 +51,7 @@ import {
   useAuthor,
   useFlatText,
   useHoveredNote,
+  HELD_QUOTE,
   useNoteHighlights,
   useSelectionInside,
 } from "./reviewNotes";
@@ -329,7 +330,9 @@ export function ArtifactPane({
   /** Lit by the pointer being over the PASSAGE; `hotThread` by it being over the thread. */
   const hovered = useHoveredNote(well, notes);
   const [hotThread, setHotThread] = useState<number | null>(null);
-  useNoteHighlights(well, notes, hovered ?? hotThread);
+  // The pending passage travels in too: the composer takes the focus, which collapses the browser's
+  // own selection, and this is what keeps the words visibly picked while it is open. See `DRAFTING`.
+  useNoteHighlights(well, notes, hovered ?? hotThread, selection);
 
   /**
    * Which reading is on screen — DERIVED, not chosen.
@@ -362,7 +365,15 @@ export function ArtifactPane({
 
   return (
     <>
-      <div className="artifact-view" data-testid="artifact" ref={well}>
+      {/* The held passage, so the window's right-click menu can offer the ordinary verbs over words
+          the browser no longer thinks are selected — see {@link HELD_QUOTE}. Set only while the
+          composer is open, which is exactly while the selection is being held rather than shown. */}
+      <div
+        className="artifact-view"
+        data-testid="artifact"
+        ref={well}
+        {...(selection !== null ? { [HELD_QUOTE]: selection.quote } : {})}
+      >
         {/* ONE `ValueView`, whatever the state of the edit.
             It used to swap to a diff viewer the moment `dirty` went true, which re-mounted the
             editor on the first keystroke and took the caret with it — every second character

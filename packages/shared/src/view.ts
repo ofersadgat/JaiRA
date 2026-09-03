@@ -113,6 +113,13 @@ export interface InstanceNode {
    * Absent on a projection built before this existed.
    */
   address?: InstanceAddress;
+  /**
+   * Every call this instance dispatched, in dispatch order — see {@link OperationCall}.
+   *
+   * Absent on a projection built before this existed, and empty is a different answer from absent
+   * only in principle: a state that dispatched nothing simply has no entry.
+   */
+  calls?: OperationCall[];
   children: InstanceNode[];
 }
 
@@ -642,6 +649,27 @@ export interface StateView {
  * find its record without being attributed by time or by state — the address is the request itself,
  * so two instances running at once cannot be confused for one another.
  */
+/**
+ * ONE CALL an instance dispatched — the handle onto what it actually ran.
+ *
+ * `operation.dispatched` is the only event that carries an operation id, and the id it carries is
+ * the RECORD id: `run:records` returns rows keyed by exactly this string, holding the request (which
+ * function, bound to which arguments) and the result. The journal has the attribution and the store
+ * has the content, and until this neither side could be reached from the other — so a state that
+ * computed its outputs by calling three functions was drawn as a state that did nothing, with the
+ * three function names, their arguments and their answers all sitting in the database.
+ *
+ * Distinct from {@link InstanceNode.operation}, which is the state's OWN operation and is set only
+ * on `operation.started`. A state can have none of those and still have dispatched calls: an output
+ * bound to a function expression dispatches without the state itself being a function op, which is
+ * precisely the shape that read as silence.
+ */
+export interface OperationCall {
+  /** The record id — what `run:records` keys on. */
+  operationId: string;
+  kind: "prompt" | "function";
+}
+
 export interface OperationRecordView {
   recordId: string;
   status: string;

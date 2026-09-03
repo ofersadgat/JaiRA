@@ -40,6 +40,7 @@
 import { useCallback, useEffect, useState, type JSX } from "react";
 import type { FrameContextMenu, PushMessage } from "@jaira/shared/browser";
 import { ContextMenu, type MenuAnchor, type MenuItem } from "./menu";
+import { HELD_QUOTE } from "./reviewNotes";
 import { invoke, subscribe } from "./store";
 
 /** Put text on the clipboard, quietly. A refused clipboard is not worth a toast over a copy. */
@@ -203,10 +204,41 @@ function svgItems(svg: SVGSVGElement): MenuItem[] {
  * picture. An empty result means there is nothing worth showing — which is a real answer, and better
  * than a menu whose only entry is a greyed-out verb.
  */
+/**
+ * Which selection a menu is about: the live one, or the one a surface is HOLDING for it.
+ *
+ * Its own function because it is the only part of {@link itemsForEvent} a test in this repo can
+ * reach — the suite runs on `environment: "node"`, so there is no `Element` to hand the caller and
+ * no `window.getSelection()` to answer it. The same reason {@link itemsForFrame} is exported.
+ *
+ * `live` is the browser's answer and wins whenever it has one: a fresh drag inside a surface that
+ * happens to be holding an older passage is about the words under the pointer.
+ *
+ * `held` is the fallback, and it is not a nicety. A textarea owns its own selection, so the moment a
+ * comment composer takes the focus the document's selection collapses — while the passage stays
+ * marked on screen, because the artifact paints it. Right-clicking words that are visibly selected
+ * then produced no menu at all, which reads as the app being broken rather than as a subtlety about
+ * where the caret went.
+ *
+ * `fromField` is what keeps the two apart where it matters. The composer's textarea sits INSIDE the
+ * pane holding the quote, so a right-click in an empty comment box would otherwise offer to copy the
+ * passage the box is about, and to cut it out of a field it is not in.
+ */
+export function selectionForMenu(live: string, held: string | null): { text: string; fromField: string } {
+  const now = live.trim();
+  if (now !== "") return { text: now, fromField: now };
+  return { text: (held ?? "").trim(), fromField: "" };
+}
+
 function itemsForEvent(event: MouseEvent): MenuItem[] {
   const target = event.target;
   if (!(target instanceof Element)) return [];
-  const selection = (window.getSelection()?.toString() ?? "").trim();
+  // See {@link HELD_QUOTE} for why the held passage is an attribute rather than a shared variable:
+  // this function asks every other question it asks by walking up from the element it was given.
+  const { text: selection, fromField } = selectionForMenu(
+    window.getSelection()?.toString() ?? "",
+    target.closest(`[${HELD_QUOTE}]`)?.getAttribute(HELD_QUOTE) ?? null,
+  );
 
   const field = target.closest("input, textarea, [contenteditable='true']");
   if (field !== null) {
@@ -214,13 +246,22 @@ function itemsForEvent(event: MouseEvent): MenuItem[] {
     // disabled field can be copied from and not written to, and the flags should say so.
     const input = field as HTMLInputElement & HTMLTextAreaElement;
     const writable = input.readOnly !== true && input.disabled !== true;
+    /**
+     * A field's OWN selection, which is not the document's.
+     *
+     * `input` and `textarea` selections live outside the document tree, so
+     * `window.getSelection().toString()` answers `""` however much of a box is highlighted — which
+     * greyed out Cut and Copy in every text box in the app, on exactly the text somebody had just
+     * dragged over in order to copy it. `selectionStart`/`selectionEnd` is where the answer actually
+     * is. A `contenteditable` has no such pair and IS in the document, so it falls back to the
+     * document's own — see {@link selectionForMenu} for why a held quote is never lent to a field.
+     */
+    const inField =
+      typeof input.selectionStart === "number" && typeof input.selectionEnd === "number"
+        ? input.selectionEnd > input.selectionStart
+        : fromField !== "";
     return editItems(
-      {
-        canCut: writable && selection !== "",
-        canCopy: selection !== "",
-        canPaste: writable,
-        canSelectAll: true,
-      },
+      { canCut: writable && inField, canCopy: inField, canPaste: writable, canSelectAll: true },
       input,
     );
   }

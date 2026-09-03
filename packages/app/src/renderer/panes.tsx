@@ -192,6 +192,7 @@ const EMPTY_CONTEXT: FileSurfaceContext = {
   config: null,
   tree: null,
   executors: [],
+  records: {},
   selected: null,
   conversation: null,
   detail: null,

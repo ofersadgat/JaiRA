@@ -15,8 +15,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { InstanceNode, SessionRef } from "@jaira/shared/browser";
 import { bandsOf, piecesOf, type BandNote, type SessionPiece } from "../src/renderer/sessionBands";
-import { SessionBandsView, ZigDefs } from "../src/renderer/sessionPanels";
-import { keyOfNode } from "../src/renderer/runIndex";
+import { SessionBandsView, ZigDefs, stepOfNote } from "../src/renderer/sessionPanels";
+import { keyOfNode, paletteOfRun } from "../src/renderer/runIndex";
 
 const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
   status: "completed",
@@ -389,6 +389,62 @@ describe("the workflow behind a conversation", () => {
   it("offers no link where the host has no panel to describe one in", () => {
     const html = drawWith(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)], {});
     expect(html).not.toContain("sb-workflow");
+  });
+
+  it("keeps the link on a SURFACE, which has no gutter to carry it", () => {
+    /*
+     * A state that ran no conversation gets no gutter — its three facts (the session, the state that
+     * opened it, the span) are all about a conversation it does not have. The workflow link is a
+     * fourth fact, about the STATE, and the letterhead has no control for it: dropping the row to
+     * avoid saying "no conversation" took the only route from a computed state to the file that
+     * computed it with it. So the row comes back holding only that.
+     */
+    const parent = node({
+      instanceId: "1",
+      stateId: "plan",
+      children: [node({ instanceId: "9", stateId: "plan/confidence", childKey: "confidence", startedAt: 0, endedAt: 5 })],
+    });
+    const html = drawWith(parent, [], { onOpenWorkflow: () => undefined });
+    expect(html).toContain("sb-gutter bare");
+    expect(html).toContain("plan/confidence");
+    // …and none of the conversation facts it does not have.
+    expect(html).not.toContain("no conversation");
+    expect(html).not.toContain("sb-span");
+  });
+});
+
+/**
+ * The colour a lane is drawn in — the fact the index and the conversation are documented as sharing.
+ *
+ * `paletteOfRun` keys its hues by `childKey ?? stateId`, because that is the name a state has where
+ * it is mounted. The rail asks with `RailStep.stateId`, so the two only meet if the step carries the
+ * same name — and it carried the bare `stateId`, so every hue lookup in the conversation missed and
+ * every lane fell back to `var(--rule)`. The index looked right the whole time, which is what made
+ * the two disagree about a colour neither of them is allowed to decide alone.
+ */
+describe("the colour of a lane in the conversation", () => {
+  it("names a lane by the child key, which is the key the palette holds", () => {
+    // A lane in the conversation is opened by an `entered` note, so this step is what decides the
+    // hue of every row under it. It read `note.stateId` — the state DEFINITION's id — against a
+    // palette built from `childKey ?? stateId`, so `feature/product/draft` was looked up in a map
+    // holding `draft`, missed, and fell back to `var(--rule)`. Every lane in the gutter was grey.
+    const step = stepOfNote(
+      { seq: 1, at: 0, kind: "entered", stateId: "feature/product/draft", path: "product/draft", text: "" },
+      "",
+    );
+    expect(step.stateId).toBe("draft");
+
+    const palette = paletteOfRun([
+      node({ instanceId: "1", stateId: "feature/product", childKey: "product" }),
+      node({ instanceId: "2", stateId: "feature/product/draft", childKey: "draft" }),
+    ]);
+    // The point of the assertion: the name the rail asks with is a name the palette answers to.
+    expect(palette.get(step.stateId)).toBeDefined();
+  });
+
+  it("falls back to the state id's last segment for a root, which has no key", () => {
+    const step = stepOfNote({ seq: 1, at: 0, kind: "entered", stateId: "feature", path: "", text: "" }, "");
+    expect(step.stateId).toBe("feature");
   });
 });
 

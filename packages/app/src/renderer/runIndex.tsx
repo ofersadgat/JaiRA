@@ -124,8 +124,8 @@ export function paletteOfRun(instances: readonly InstanceNode[]): Map<string, st
  * cannot disagree about what a state is doing. It answers for LEAVES, which is all the letterhead
  * ever heads; the two statuses only a composite can be in are added under it.
  */
-function toneOf(node: InstanceNode): HeaderTone {
-  const tone = headerToneOf(node, surfaceKindOf(node));
+function toneOf(node: InstanceNode, asking: string | undefined): HeaderTone {
+  const tone = headerToneOf(node, surfaceKindOf(node), asking !== undefined && asking === node.instanceId);
   if (tone !== undefined) return tone;
   if (node.status === "waiting_for_user") return "amber";
   if (node.status === "running") return "accent";
@@ -295,11 +295,21 @@ function LoopTag({ times, onToggle }: { times: number; onToggle: () => void }): 
 export function RunIndex({
   instances,
   here,
+  asking,
   onGoTo,
 }: {
   instances: readonly InstanceNode[];
   /** The state the reader is on, by {@link keyOfNode}. */
   here?: string | undefined;
+  /**
+   * The instance whose QUESTION is on offer right now, when one is.
+   *
+   * The rail is where the close-and-reopen case showed up second: a task reopened with its gate
+   * drawn and answerable had every row in the index at rest, because the instance holding it was
+   * terminated `canceled` by the stop while the question itself was seeded back into the hub. It
+   * cannot be read off the tree — see `askingInstanceOf` in `runViews.tsx` — so it is handed in.
+   */
+  asking?: string | undefined;
   onGoTo?: ((node: InstanceNode) => void) | undefined;
 }): JSX.Element {
   const [shutLanes, setShutLanes] = useState<ReadonlySet<string>>(() => new Set());
@@ -395,7 +405,7 @@ export function RunIndex({
     }
 
     const node = what.node;
-    const tone = toneOf(node);
+    const tone = toneOf(node, asking);
     const held = countOf(node);
     const name = nameOf(node);
     const label = onGoTo === undefined ? undefined : `go to ${name} in the conversation`;

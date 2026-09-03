@@ -140,8 +140,31 @@ export function isAsking(node: InstanceNode): boolean {
  * A CANCELLATION is not a failure. Somebody pressed Stop; nothing went wrong, and a red bar over it
  * would be the run accusing the person who stopped it.
  */
-export function headerToneOf(node: InstanceNode, kind: SurfaceKind | undefined): HeaderTone {
+export function headerToneOf(node: InstanceNode, kind: SurfaceKind | undefined, asking = false): HeaderTone {
   if (node.status === "failed" || node.operation?.status === "failed") return "red";
+  /**
+   * A QUESTION STILL ON OFFER outranks how the instance around it ended.
+   *
+   * This is the close-and-reopen case, and the two lines below swallow it without this one. Shutting
+   * the app stops the machine, so the gate's instance is terminated `canceled` with an `endedAt` on
+   * it — while the question itself survives in `pending_interactions` and is seeded straight back
+   * into the hub on the next start (see `InteractionHub.seed`). The run reopened with the gate drawn
+   * and answerable under a letterhead in the resting grey of a state that had finished: the one
+   * header on the page actually waiting on somebody was the only one not saying so.
+   *
+   * ⚠️ `asking` is a fact the CALLER holds, and it cannot be re-derived here. {@link isAsking} says
+   * the operation never settled, which is true of a surviving question AND of run 11 — a gate that
+   * dispatched and was then canceled with the run, leaving nothing behind to answer. Those two draw
+   * differently and the node cannot tell them apart, because what separates them is whether the hub
+   * is holding a request. So the surface that has the hub's answer passes it, and the default is the
+   * conservative one: no question on offer, and the instance's own ending decides.
+   *
+   * AMBER rather than accent. Accent is the machine working; amber is the app waiting on a person,
+   * which is already what a parked transition's sheet (`WaitingOn`) and the board's
+   * `waiting_for_user` badge use. A gate is that same fact in a different place, and three
+   * vocabularies for one state is how a reader learns to ignore all of them.
+   */
+  if (asking && isAsking(node)) return "amber";
   if (node.status === "canceled") return undefined;
   if (node.endedAt !== undefined) return undefined;
   // Still open: asking is accent whether or not the projection sharpened it to `waiting_for_user`,

@@ -164,6 +164,29 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
         if (interactive) node.status = "waiting_for_user";
         break;
       }
+      /**
+       * The call itself, kept so a reader can find out what it RAN — see {@link OperationCall}.
+       *
+       * Separate from `operation.started` above and not folded into it, because the two are not the
+       * same event and a state can have either without the other. `started` announces the state's
+       * own operation and carries no id; `dispatched` carries the id and fires for every call the
+       * state makes, including the ones an output expression makes on its own. A state whose three
+       * outputs each call a function emits three of these and no `started` at all — which is exactly
+       * the state that used to draw as "this ran nothing".
+       *
+       * Appended in journal order and DEDUPED by id: a resumed run re-states the spine, so the same
+       * dispatch can arrive twice, and two rows for one call would show the reader the same function
+       * twice with the same answer.
+       */
+      case "operation.dispatched": {
+        const node = byId.get(event.instanceId);
+        if (!node) break;
+        const calls = (node.calls ??= []);
+        if (!calls.some((call) => call.operationId === event.operationId)) {
+          calls.push({ operationId: event.operationId, kind: event.op });
+        }
+        break;
+      }
       case "operation.completed": {
         const node = byId.get(event.instanceId);
         if (!node) break;

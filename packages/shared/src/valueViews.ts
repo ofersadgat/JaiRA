@@ -368,12 +368,39 @@ export function viewsFor(value: unknown, hint: ViewHint = {}): ViewId[] {
      * any size scored two marks and led with the markdown view. A diff rendered as a bullet list was
      * what a pasted patch actually looked like until this line existed.
      */
-    const patch = declared === "patch" || (declared === undefined && looksLikeUnifiedDiff(text));
+    /**
+     * ⚠️ A DECLARED TYPE SILENCES THE SNIFFER — every declared type, not just the ones with a view.
+     *
+     * `stated` and not `declared`: the two answer different questions and using the second here was
+     * the bug. `declared` is `viewOfMime`, which names a RENDERING and returns nothing for a type
+     * that has none — so `application/yaml` came through as "nobody said anything", the sniffer ran,
+     * and it found what it always finds in YAML. `# a comment` is the heading mark exactly and
+     * `- item` is the bullet mark exactly, which is two marks, which is the whole threshold. So a
+     * workflow file LED with the markdown reading: its comments drawn as headings, its list items as
+     * bullets, and its indentation — the only thing carrying the document's structure — reflowed
+     * away. Measured before the fix, the same two marks did it to a Python file with two `#`
+     * comments in it and to a CSV, both of which also opened rendered as prose.
+     *
+     * The rule the block-comment guard was reaching for is this one. That guard strips block
+     * comments before counting, which fixes C, Java and TypeScript and leaves every `#`-commenting language
+     * exactly where it was — because the problem was never which marks to count. It is that nothing
+     * should have been counting: the caller SAID what this is.
+     *
+     * It also settles a disagreement rather than trading one behaviour for another.
+     * {@link detectedMime} already returns the declared type unread — "a declaration is a statement
+     * and the sniffer only ever offers" — so the name on the type chip and the list of readings were
+     * answering the same question two ways, which the note on that function says they must never do.
+     *
+     * Nothing is lost where nothing was declared. A model's answer, a tool result, a pasted patch:
+     * `stated` is undefined for all of them, and every sniffer below runs exactly as it did.
+     */
+    const stated = mime;
+    const patch = declared === "patch" || (stated === undefined && looksLikeUnifiedDiff(text));
     if (patch) views.push("patch");
-    if (declared === "markdown" || (declared === undefined && !rendered && !patch && looksLikeMarkdown(text))) {
+    if (declared === "markdown" || (stated === undefined && !rendered && !patch && looksLikeMarkdown(text))) {
       views.push("markdown");
     }
-    if (declared === "html" || (declared === undefined && !rendered && !patch && looksLikeHtml(text))) {
+    if (declared === "html" || (stated === undefined && !rendered && !patch && looksLikeHtml(text))) {
       views.push("html");
     }
     /**

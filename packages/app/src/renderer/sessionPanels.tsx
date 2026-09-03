@@ -327,16 +327,27 @@ function Piece({
   open,
   onToggle,
   render,
+  asking,
 }: {
   piece: SessionPiece;
   open: boolean;
   onToggle: () => void;
   render: (piece: SessionPiece) => ReactNode;
+  /**
+   * The instance whose QUESTION is on offer right now, when one is.
+   *
+   * Handed down rather than read off the tree, because the tree cannot answer it: a gate that
+   * dispatched and never settled looks identical whether the hub is still holding its request or
+   * the run was stopped and the question died with it. Only the surface holding the hub's list
+   * knows, and it is the same fact that decides where the gate is DRAWN — so the tint and the
+   * question cannot come apart. See `headerToneOf`.
+   */
+  asking?: string | undefined;
 }): JSX.Element {
   const node = piece.node;
   const kind = surfaceKindOf(node);
   const sig = signatureOf(node);
-  const tone = headerToneOf(node, kind);
+  const tone = headerToneOf(node, kind, asking !== undefined && asking === node.instanceId);
   return (
     <StateBlock
       open={open}
@@ -435,6 +446,7 @@ function Sheet({
   named = true,
   bare = false,
   starter,
+  asking,
   forks,
   onGoTo,
   onOpenWorkflow,
@@ -464,6 +476,12 @@ function Sheet({
   onGoTo?: ((place: string) => void) | undefined;
   /** Describe that run's workflow beside this. Absent ⇒ no host with a panel to describe it in. */
   onOpenWorkflow?: ((piece: SessionPiece) => void) | undefined;
+  /**
+   * The instance whose QUESTION is on offer right now — passed through to the letterhead.
+   *
+   * See `Piece`: the tree cannot answer it, so the surface holding the hub's list says so.
+   */
+  asking?: string | undefined;
   render: (piece: SessionPiece) => ReactNode;
 }): JSX.Element {
   // At most one piece of a panel is a side of a fork: the sides of one division differ by session,
@@ -526,6 +544,29 @@ function Sheet({
       className="sb-panel"
       {...(side !== undefined ? { "data-fork-place": side.place } : {})}
     >
+      {/*
+        A SURFACE keeps the one fact the letterhead does not carry: which workflow state this is,
+        and the way into it.
+
+        The gutter above is suppressed for a surface on the argument that all three of its facts —
+        the session, the state that opened it, the span — are about a conversation a surface does
+        not have. Two of the three; the workflow link is not. It is the only route from a computed
+        state to the file that computed it, the letterhead has no such control, and dropping the
+        whole row to avoid saying "no conversation" took it with it. So the row comes back holding
+        only that: no session line, no span, nothing the letterhead repeats.
+      */}
+      {named && surface && starter !== undefined && onOpenWorkflow !== undefined ? (
+        <div className="sb-gutter bare">
+          <button
+            type="button"
+            className="link sb-workflow ellip"
+            title={`${starter.node.stateId} — describe this run of it`}
+            onClick={() => onOpenWorkflow(starter)}
+          >
+            {starter.node.stateId}
+          </button>
+        </div>
+      ) : null}
       {named && !surface ? (
         <div
           className={`sb-gutter${solo ? " solo" : ""}`}
@@ -625,6 +666,7 @@ function Sheet({
                     open={!shut.has(keyOfPiece(piece, scope))}
                     onToggle={() => onToggle(keyOfPiece(piece, scope))}
                     render={render}
+                    {...(asking !== undefined ? { asking } : {})}
                   />
                 )}
               </Fragment>
@@ -657,6 +699,7 @@ function Band({
   band,
   bare = false,
   starters,
+  asking,
   forks,
   onGoTo,
   onOpenWorkflow,
@@ -675,6 +718,13 @@ function Band({
   bare?: boolean;
   /** Who opened each session in the run, by segment key — see {@link startersOf}. */
   starters: Map<string, SessionPiece>;
+  /**
+   * The instance whose QUESTION is on offer right now — passed through to the letterhead.
+   *
+   * See `Piece`: the tree cannot answer it, so the surface holding the hub's list says so.
+   */
+  asking?: string | undefined;
+
   /** Every fork in the run, by position — see {@link forksOf}. */
   forks: Map<string, SessionPiece[]>;
   onGoTo: (place: string) => void;
@@ -696,6 +746,8 @@ function Band({
           forks={forks}
           onGoTo={onGoTo}
           {...(onOpenWorkflow !== undefined ? { onOpenWorkflow } : {})}
+        {...(asking !== undefined ? { asking } : {})}
+          {...(asking !== undefined ? { asking } : {})}
           shut={shut}
           onToggle={onToggle}
           onSetShut={onSetShut}
@@ -770,6 +822,9 @@ function Band({
               forks={forks}
               onGoTo={onGoTo}
               {...(onOpenWorkflow !== undefined ? { onOpenWorkflow } : {})}
+        {...(asking !== undefined ? { asking } : {})}
+              {...(asking !== undefined ? { asking } : {})}
+          {...(asking !== undefined ? { asking } : {})}
               shut={shut}
               onToggle={onToggle}
               onSetShut={onSetShut}
@@ -851,7 +906,11 @@ export function stepOfNote(note: BandNote, root: string): RailStep {
     // would fold the second pass into the first. A note that never became an instance cannot collide
     // with anything — nothing else in the run is at its seq.
     key: opens && note.instanceId !== undefined ? `i${note.instanceId}` : `n${note.seq}`,
-    stateId: note.stateId ?? at[at.length - 1] ?? "",
+    // The PATH's last segment first, for the reason the band step above says: a path is child keys
+    // (`conversation.ts` builds it from `childKey`), the palette is keyed by child key, and
+    // `note.stateId` is the state DEFINITION's id — `feature/product/draft` against a palette
+    // holding `draft`. The id is the fallback for a root, which has no key.
+    stateId: at[at.length - 1] ?? note.stateId?.split("/").pop() ?? "",
     at: inside,
     opens,
   };
@@ -864,6 +923,7 @@ export function SessionBandsView({
   notes = [],
   root = "",
   onOpenWorkflow,
+  asking,
   shut = EMPTY_SHUT,
   onToggle = () => undefined,
   onSetShut = () => undefined,
@@ -874,6 +934,13 @@ export function SessionBandsView({
 }: {
   bands: readonly SessionBand[];
   render: (piece: SessionPiece) => ReactNode;
+  /**
+   * The instance whose QUESTION is on offer right now — passed through to the letterhead.
+   *
+   * See `Piece`: the tree cannot answer it, so the surface holding the hub's list says so.
+   */
+  asking?: string | undefined;
+
   /**
    * Folded states, and the two ways to change that — see `SHUT.runStates`.
    *
@@ -1013,7 +1080,13 @@ export function SessionBandsView({
     add(
       {
         key: `b${i}`,
-        stateId: lead?.node.stateId ?? "",
+        // The CHILD KEY where there is one, which is what {@link paletteOfRun} keys its hues by.
+        // It was the bare `stateId`, and that is the whole of why the gutter drew grey: every
+        // mounted state is `feature/product/draft` under the key `draft`, the palette holds `draft`,
+        // and `palette.get("feature/product/draft")` misses and falls back to `var(--rule)`. The
+        // index beside it looked right because it asks with `nameOf`, so the two views disagreed
+        // about a colour they are documented as sharing. See `laneColour` in `railView.tsx`.
+        stateId: lead === undefined ? "" : (lead.node.childKey ?? lead.node.stateId),
         at: lead === undefined ? [] : atPiece(lead),
         opens: false,
       },
@@ -1024,6 +1097,7 @@ export function SessionBandsView({
         forks={forks}
         onGoTo={goTo}
         {...(onOpenWorkflow !== undefined ? { onOpenWorkflow } : {})}
+        {...(asking !== undefined ? { asking } : {})}
         shut={shut}
         onToggle={onToggle}
         onSetShut={onSetShut}
