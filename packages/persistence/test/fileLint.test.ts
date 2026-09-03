@@ -82,6 +82,9 @@ function find(nodes: FileNode[], path: string): FileNode | undefined {
   return undefined;
 }
 
+// This fixture's project directory IS its layer root (see `projectOf`), so its paths carry no
+// `.jaira/` prefix. A real checkout's would: the tree is rooted at the checkout and the layer sits
+// one directory down, which is what `prefixOf` measures rather than assumes.
 describe("lint on the tree", () => {
   it("marks the file an error was reported against", () => {
     writeState("plan", {});

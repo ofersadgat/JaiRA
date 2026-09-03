@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { happyRules, specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
-import type { PushMessage } from "@jaira/shared";
+import { SHARED_SESSION, type PushMessage } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService } from "../src/main/service";
 
@@ -41,14 +41,18 @@ async function until(predicate: () => boolean, label: string, budgetMs = 8000): 
 }
 
 describe("the Files view's surfaces", () => {
-  it("lists both layer roots, with the workflow files carrying their state ids", () => {
+  it("lists the project's own root, with the workflow files carrying their state ids", () => {
     const tree = service.filesTree();
 
-    expect(tree.roots.map((r) => r.layer)).toEqual(["project", "base"]);
+    // ONE root: the project's own folder. `~/.jaira` is a layer this project resolves against and
+    // is browsed by standing in it, not by appearing inside every checkout.
+    expect(tree.roots.map((r) => r.layer)).toEqual(["project"]);
 
-    // The tree nests the way the filesystem does — `workflows/feature/plan.json` is two levels down,
-    // not a flat id list — because that is what makes it navigable rather than just enumerable.
-    const workflows = tree.roots[0]!.nodes.find((n) => n.name === "workflows");
+    // The tree nests the way the filesystem does — and the filesystem puts the layer inside the
+    // checkout, so `.jaira/workflows/feature/plan.json` is three levels down rather than a flat id
+    // list. That is what makes it navigable rather than just enumerable.
+    const layer = tree.roots[0]!.nodes.find((n) => n.name === ".jaira");
+    const workflows = layer?.children?.find((n) => n.name === "workflows");
     expect(workflows?.kind).toBe("directory");
     const feature = workflows?.children?.find((n) => n.name === "feature");
     expect(feature?.children?.find((n) => n.name === "plan.json")?.stateId).toBe("feature/plan");
@@ -206,9 +210,12 @@ describe("authoring into the shared root", () => {
       expect(written.exists).toBe(true);
       expect(existsSync(written.file)).toBe(true);
       expect(written.file.startsWith(base)).toBe(true);
-      // And it is immediately browsable — the tree the Files view draws is the directory it created.
-      const tree = svc.filesTree();
+      // And it is immediately browsable — by STANDING in the shared root, which is a sidebar row of
+      // its own. Asking from a checkout gives that checkout, which is the whole point of the change:
+      // a shared workflow is reached by going to where it lives.
+      const tree = svc.filesTree({ project: SHARED_SESSION });
       expect(tree.roots.find((r) => r.layer === "base")?.exists).toBe(true);
+      expect(svc.filesTree({ project: other }).roots.map((r) => r.layer)).toEqual(["project"]);
     } finally {
       await svc.close();
       rmSync(home, { recursive: true, force: true });
@@ -336,29 +343,29 @@ describe("file operations", () => {
   });
 
   it("creates a plain file and a directory anywhere under a layer root", () => {
-    const created = service.createFile({ layer: "project", path: "prompts/critique.md", kind: "file", text: "# Critique\n" });
+    const created = service.createFile({ layer: "project", path: ".jaira/prompts/critique.md", kind: "file", text: "# Critique\n" });
 
     expect(existsSync(created.file)).toBe(true);
     expect(read(created.file)).toBe("# Critique\n");
     // A directory that did not exist on the way is created too — `prompts/` was not there.
-    expect(existsSync(service.createFile({ layer: "project", path: "skills/changelog", kind: "directory" }).file)).toBe(true);
+    expect(existsSync(service.createFile({ layer: "project", path: ".jaira/skills/changelog", kind: "directory" }).file)).toBe(true);
   });
 
   it("refuses to clobber, and refuses to escape the layer root", () => {
-    service.createFile({ layer: "project", path: "prompts/goals.md", kind: "file", text: "x" });
+    service.createFile({ layer: "project", path: ".jaira/prompts/goals.md", kind: "file", text: "x" });
 
     // "New file" that quietly emptied an existing one is the worst reading of the verb.
-    expect(() => service.createFile({ layer: "project", path: "prompts/goals.md", kind: "file" })).toThrow(/already exists/);
+    expect(() => service.createFile({ layer: "project", path: ".jaira/prompts/goals.md", kind: "file" })).toThrow(/already exists/);
     // Addressed by path, so it needs its own containment check — the state-id one does not apply.
     expect(() => service.createFile({ layer: "project", path: "../../escaped.md", kind: "file" })).toThrow(/not inside/);
   });
 
   it("renames a plain file, which no state can reference", () => {
-    const created = service.createFile({ layer: "project", path: "prompts/goals.md", kind: "file", text: "# Goals\n" });
+    const created = service.createFile({ layer: "project", path: ".jaira/prompts/goals.md", kind: "file", text: "# Goals\n" });
 
-    const result = service.renameFile({ layer: "project", path: "prompts/goals.md", to: "prompts/aims.md" });
+    const result = service.renameFile({ layer: "project", path: ".jaira/prompts/goals.md", to: ".jaira/prompts/aims.md" });
 
-    expect(result).toMatchObject({ applied: true, path: "prompts/aims.md", states: [] });
+    expect(result).toMatchObject({ applied: true, path: ".jaira/prompts/aims.md", states: [] });
     expect(existsSync(created.file)).toBe(false);
     expect(read(join(dir, ".jaira", "prompts", "aims.md"))).toBe("# Goals\n");
   });
@@ -366,7 +373,7 @@ describe("file operations", () => {
   it("moves a file into a directory that does not exist yet", () => {
     service.createFile({ layer: "project", path: "notes.md", kind: "file", text: "x" });
 
-    const result = service.renameFile({ layer: "project", path: "notes.md", to: "prompts/drafts/notes.md" });
+    const result = service.renameFile({ layer: "project", path: "notes.md", to: ".jaira/prompts/drafts/notes.md" });
 
     expect(result.applied).toBe(true);
     expect(existsSync(join(dir, ".jaira", "prompts", "drafts", "notes.md"))).toBe(true);
@@ -376,7 +383,7 @@ describe("file operations", () => {
     // A directory under `workflows/` IS an id prefix, so this renames every state inside at once.
     // Nothing is refused: the fixture declares children by KEY (WORKFLOWS.md §6), which resolves
     // against the declaring state, so the subtree stays consistent under its new prefix.
-    const result = service.renameFile({ layer: "project", path: "workflows/feature", to: "workflows/epic" });
+    const result = service.renameFile({ layer: "project", path: ".jaira/workflows/feature", to: ".jaira/workflows/epic" });
 
     expect(result).toMatchObject({ applied: true, referencedBy: [] });
     expect(result.states).toContain("feature/plan/goals");
@@ -391,7 +398,7 @@ describe("file operations", () => {
       text: JSON.stringify({ children: { plan: { state: "feature/plan" } } }),
     });
 
-    const result = service.renameFile({ layer: "project", path: "workflows/feature", to: "workflows/epic" });
+    const result = service.renameFile({ layer: "project", path: ".jaira/workflows/feature", to: ".jaira/workflows/epic" });
 
     expect(result.applied).toBe(false);
     expect(result.referencedBy).toEqual(["wrapper"]);
@@ -399,7 +406,7 @@ describe("file operations", () => {
 
     const forced = service.renameFile({
       layer: "project",
-      path: "workflows/feature",
+      path: ".jaira/workflows/feature",
       to: "workflows/epic",
       force: true,
     });
@@ -409,7 +416,7 @@ describe("file operations", () => {
   it("refuses to move a children directory out from under the state that declares it", () => {
     // `workflows/feature/plan/` holds the children of `feature/plan`, which stays where it is —
     // so this is the case a relative declaration does NOT survive.
-    const result = service.renameFile({ layer: "project", path: "workflows/feature/plan", to: "workflows/steps" });
+    const result = service.renameFile({ layer: "project", path: ".jaira/workflows/feature/plan", to: ".jaira/workflows/steps" });
 
     expect(result.applied).toBe(false);
     expect(result.states).toContain("feature/plan/goals");
@@ -417,19 +424,19 @@ describe("file operations", () => {
   });
 
   it("deletes a plain file, and a directory takes everything in it", () => {
-    const file = service.createFile({ layer: "project", path: "skills/changelog/prompt.md", kind: "file", text: "x" });
+    const file = service.createFile({ layer: "project", path: ".jaira/skills/changelog/prompt.md", kind: "file", text: "x" });
 
-    expect(service.deleteFile({ layer: "project", path: "skills/changelog/prompt.md" }).applied).toBe(true);
+    expect(service.deleteFile({ layer: "project", path: ".jaira/skills/changelog/prompt.md" }).applied).toBe(true);
     expect(existsSync(file.file)).toBe(false);
 
-    service.createFile({ layer: "project", path: "skills/changelog/notes.md", kind: "file", text: "x" });
-    expect(service.deleteFile({ layer: "project", path: "skills" }).applied).toBe(true);
+    service.createFile({ layer: "project", path: ".jaira/skills/changelog/notes.md", kind: "file", text: "x" });
+    expect(service.deleteFile({ layer: "project", path: ".jaira/skills" }).applied).toBe(true);
     expect(existsSync(join(dir, ".jaira", "skills"))).toBe(false);
   });
 
   it("deletes a self-contained workflow directory, because nothing is left pointing at it", () => {
     // Every state that named something in `workflows/feature/` was itself in `workflows/feature/`.
-    const result = service.deleteFile({ layer: "project", path: "workflows/feature" });
+    const result = service.deleteFile({ layer: "project", path: ".jaira/workflows/feature" });
 
     expect(result).toMatchObject({ applied: true, referencedBy: [] });
     expect(existsSync(join(dir, ".jaira", "workflows", "feature"))).toBe(false);
@@ -442,29 +449,29 @@ describe("file operations", () => {
       text: JSON.stringify({ children: { plan: { state: "feature/plan" } } }),
     });
 
-    const result = service.deleteFile({ layer: "project", path: "workflows/feature" });
+    const result = service.deleteFile({ layer: "project", path: ".jaira/workflows/feature" });
 
     expect(result.applied).toBe(false);
     expect(result.referencedBy).toEqual(["wrapper"]);
     expect(existsSync(join(dir, ".jaira", "workflows", "feature"))).toBe(true);
 
-    expect(service.deleteFile({ layer: "project", path: "workflows/feature", force: true }).applied).toBe(true);
+    expect(service.deleteFile({ layer: "project", path: ".jaira/workflows/feature", force: true }).applied).toBe(true);
     expect(existsSync(join(dir, ".jaira", "workflows", "feature"))).toBe(false);
   });
 
   it("keeps a path-addressed rename and delete inside the layer root", () => {
-    expect(() => service.renameFile({ layer: "project", path: "prompts", to: "../../escaped" })).toThrow(/not inside/);
+    expect(() => service.renameFile({ layer: "project", path: ".jaira/prompts", to: "../../escaped" })).toThrow(/not inside/);
     expect(() => service.deleteFile({ layer: "project", path: "../../" })).toThrow(/not inside/);
     // The root itself resolves to an empty relative path, which is the case that would delete `.jaira`.
     expect(() => service.deleteFile({ layer: "project", path: "" })).toThrow(/not inside/);
   });
 
   it("will not move a directory into itself, or over something that is already there", () => {
-    service.createFile({ layer: "project", path: "prompts/goals.md", kind: "file", text: "x" });
-    service.createFile({ layer: "project", path: "prompts/aims.md", kind: "file", text: "y" });
+    service.createFile({ layer: "project", path: ".jaira/prompts/goals.md", kind: "file", text: "x" });
+    service.createFile({ layer: "project", path: ".jaira/prompts/aims.md", kind: "file", text: "y" });
 
-    expect(() => service.renameFile({ layer: "project", path: "prompts", to: "prompts/inner" })).toThrow(/is inside/);
-    expect(() => service.renameFile({ layer: "project", path: "prompts/goals.md", to: "prompts/aims.md" })).toThrow(
+    expect(() => service.renameFile({ layer: "project", path: ".jaira/prompts", to: ".jaira/prompts/inner" })).toThrow(/is inside/);
+    expect(() => service.renameFile({ layer: "project", path: ".jaira/prompts/goals.md", to: ".jaira/prompts/aims.md" })).toThrow(
       /already exists/,
     );
     expect(() => service.renameFile({ layer: "project", path: "nope.md", to: "also-nope.md" })).toThrow(

@@ -17,6 +17,7 @@ import { createTask } from "../src/lifecycle";
 import { initProject, openProject, type Project } from "../src/project";
 import { baseFileTree, baseStateView, boardForState, fileTree, rootContaining, rootsBoard, stateView } from "../src/stateViews";
 import { browseWorkflows } from "../src/workflows";
+import { compileHidden, hiddenRules } from "@jaira/shared";
 
 let dir: string;
 let project: Project;
@@ -196,8 +197,10 @@ describe("fileTree", () => {
 
     expect(tree.roots.map((r) => r.layer)).toEqual(["project", "base"]);
     const projectRoot = tree.roots[0]!;
-    const workflows = projectRoot.nodes.find((n) => n.name === "workflows");
-    expect(workflows?.kind).toBe("directory");
+    // Rooted at the CHECKOUT, so the layer is a directory in it rather than the top of it.
+    const layer = projectRoot.nodes.find((n) => n.name === ".jaira");
+    expect(layer?.kind).toBe("directory");
+    expect(layer?.children?.find((n) => n.name === "workflows")?.kind).toBe("directory");
 
     // The state id is the path under `workflows/` minus the suffix — the same derivation the loader
     // uses, so the tree and a `--workflow` argument name the same thing.
@@ -330,13 +333,42 @@ describe("fileTree", () => {
   });
 
   it("keeps run state out of the authoring tree", () => {
+    mkdirSync(project.paths.snapshotsDir, { recursive: true });
+    mkdirSync(project.paths.tasksDir, { recursive: true });
+
     const tree = fileTree(project, browseWorkflows(project));
-    const names = tree.roots[0]!.nodes.map((n) => n.name);
-    expect(names).not.toContain("snapshots");
-    expect(names).not.toContain("tasks");
-    // The database and its write-ahead companions sit at the root rather than in a directory, so
-    // they need excluding by name — they were three rows of unopenable noise above `settings.json`.
-    expect(names.filter((n) => n.startsWith("jaira.db"))).toEqual([]);
-    expect(names).toContain("settings.json");
+    // The tree is rooted at the CHECKOUT, so the layer is one directory in it.
+    const top = tree.roots[0]!.nodes.map((n) => n.name);
+    expect(top).toContain(".jaira");
+    const inLayer = tree.roots[0]!.nodes.find((n) => n.name === ".jaira")?.children?.map((n) => n.name) ?? [];
+    // Everything generated lives under `system/` — the database, tasks, snapshots, logs — so hiding
+    // that one directory is the whole rule, and what is left is exactly what a person authors.
+    expect(inLayer).not.toContain("system");
+    expect(inLayer).toContain("workflows");
+    // `settings.json` is live but is not edited here — Settings → Configuration knows the shape of
+    // what is in it. It is hidden by DEFAULT rather than structurally, so anyone who would rather
+    // edit the document can put it back.
+    expect(inLayer).not.toContain("settings.json");
+  });
+
+  it("hides what the setting names, and nothing else", () => {
+    mkdirSync(join(project.paths.workflowsDir, "scratch"), { recursive: true });
+    writeFileSync(join(project.paths.workflowsDir, "scratch", "wip.json"), "{}", "utf8");
+
+    const rules = compileHidden(hiddenRules([".jaira/workflows/scratch"]));
+    const layer = fileTree(project, browseWorkflows(project), rules).roots[0]!.nodes.find((n) => n.name === ".jaira");
+    const workflows = layer?.children?.find((n) => n.name === "workflows");
+    expect(workflows?.children?.map((n) => n.name)).not.toContain("scratch");
+    // The setting REPLACES the defaults rather than adding to them, which is what makes a list a
+    // person can read the whole of. Nobody named `system`, so it is back.
+    expect(layer?.children?.map((n) => n.name)).toContain("system");
+  });
+
+  it("puts a hidden directory back when a later rule reveals it", () => {
+    // The personal half of the setting: `!` after the defaults, which is what the Files screen's
+    // switch writes. A run that has gone wrong is read out of this directory.
+    const rules = compileHidden(hiddenRules(undefined, ["!.jaira/system"]));
+    const layer = fileTree(project, browseWorkflows(project), rules).roots[0]!.nodes.find((n) => n.name === ".jaira");
+    expect(layer?.children?.map((n) => n.name)).toContain("system");
   });
 });

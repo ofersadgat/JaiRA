@@ -8,7 +8,7 @@
  */
 import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   baseAsProjectPaths,
@@ -123,9 +123,16 @@ ${SYS}/jaira.db-wal
 ${SYS}/jaira.db-shm
 ${SYS}/logs/
 
-# Machine-local: what this disk has agreed to RUN (SPEC §7.5.5). An approval is a
-# statement about a file on ONE disk, so syncing it would let one machine confer
-# trust on the rest.
+# The key that signs this machine's approvals (SPEC §7.5.5). Committing it would hand
+# every clone the ability to mint approvals for this disk, which is the one thing the
+# signature exists to prevent — so it is ignored for a stronger reason than derived
+# state: it is a secret.
+${SYS}/machine.key
+
+# Machine-local: what this disk has agreed to RUN. The approvals themselves live in
+# the database above now, and are ignored with it; this line is for the file older
+# roots still carry. An approval is a statement about a file on ONE disk, so syncing
+# it would let one machine confer trust on the rest.
 ${SYS}/approvals.local.json
 
 # Credentials. .env.local is machine-local by convention and is the first project link of the
@@ -133,6 +140,38 @@ ${SYS}/approvals.local.json
 # to commit a non-secret default has to be able to.
 .env.local
 `;
+
+/**
+ * Make sure an EXISTING `.gitignore` hides the machine key.
+ *
+ * The template is written only when there is no file, which is right for taste — somebody who edited
+ * their ignores should keep them — and wrong for exactly one line. Every root created before the key
+ * existed has an ignore file that does not mention it, and the consequence of that gap is a secret
+ * in a commit. So this one entry is appended when it is missing, and nothing else is ever touched.
+ *
+ * Idempotent, and generous about what counts as already handled: the name appearing anywhere, or the
+ * whole `system/` directory being ignored wholesale, both mean there is nothing to add.
+ */
+function ensureKeyIgnored(ignoreFile: string): void {
+  let text: string;
+  try {
+    text = readFileSync(ignoreFile, "utf8");
+  } catch {
+    return; // No file — the template is about to be written, and it carries the line.
+  }
+  if (text.includes("machine.key")) return;
+  if (text.split(/\r?\n/).some((line) => line.trim() === `${SYS}/` || line.trim() === SYS)) return;
+  const separator = text.length === 0 || text.endsWith("\n") ? "" : "\n";
+  writeFileSync(
+    ignoreFile,
+    `${text}${separator}
+# Added by JaiRA: the key that signs this machine's approvals (SPEC §7.5.5). Committing
+# it would hand every clone the ability to mint approvals for this disk.
+${SYS}/machine.key
+`,
+    "utf8",
+  );
+}
 
 /**
  * Create the `.jaira/` layout (DESIGN §3). Idempotent; keeps an existing config.
@@ -153,7 +192,8 @@ export function initProject(projectDir: string, baseDir?: string): JairaPaths {
     writeFileSync(paths.settingsFile, JSON.stringify(defaultConfig(), null, 2) + "\n", "utf8");
   }
   const ignoreFile = join(paths.jairaDir, ".gitignore");
-  if (!existsSync(ignoreFile)) writeFileSync(ignoreFile, JAIRA_GITIGNORE, "utf8");
+  if (existsSync(ignoreFile)) ensureKeyIgnored(ignoreFile);
+  else writeFileSync(ignoreFile, JAIRA_GITIGNORE, "utf8");
   return paths;
 }
 
@@ -191,7 +231,8 @@ export function initBase(baseDir?: string): JairaBasePaths {
   // home directory in a synced folder or a dotfiles repository, and a database that lands there is
   // one machine's run history replicated onto every other.
   const ignoreFile = join(base.baseDir, ".gitignore");
-  if (!existsSync(ignoreFile)) writeFileSync(ignoreFile, JAIRA_GITIGNORE, "utf8");
+  if (existsSync(ignoreFile)) ensureKeyIgnored(ignoreFile);
+  else writeFileSync(ignoreFile, JAIRA_GITIGNORE, "utf8");
   return base;
 }
 

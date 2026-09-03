@@ -115,6 +115,7 @@ import {
   forgetSeen,
   SHUT,
   toggleShut,
+  toggleUnfolded,
   withShut,
   withMode,
   withOpen,
@@ -761,7 +762,7 @@ export type View = "files" | "tasks" | "chat" | "logs" | "debug" | "settings";
  * `history` is a project's run journal and has no layer to pick — nor anything to show without a
  * project, which is why the shell hides it on an empty window rather than rendering it empty.
  */
-export type SettingsSection = "providers" | "executors" | "appearance" | "config" | "history";
+export type SettingsSection = "providers" | "executors" | "files" | "appearance" | "config" | "history";
 
 const EMPTY: AppState = {
   at: null,
@@ -786,7 +787,7 @@ const EMPTY: AppState = {
   // first paint and the loaded setting agree in the common case. The layout starts EMPTY rather than
   // at the defaults: an absent id means "whatever this control opens at", so the first paint is the
   // default layout without this having to restate what those numbers are.
-  settings: { theme: "light", wrapJson: false, ui: emptyUiState(), appearance: defaultAppearance(), projects: [] },
+  settings: { theme: "light", wrapJson: false, ui: emptyUiState(), appearance: defaultAppearance(), projects: [], filesHidden: [] },
   config: null,
   executors: [],
   probes: {},
@@ -1119,7 +1120,12 @@ export function useApp() {
 
   const refreshTree = useCallback(async () => {
     try {
-      patch({ tree: await invoke("files:tree", undefined) });
+      // WHERE THE SHELL IS STANDING, because that is what the tree draws now: one project's own
+      // folder, or `~/.jaira` when that is the row you are on. Read off the ref rather than taken as
+      // an argument so every existing caller — a save, a create, a push telling us the disk moved —
+      // keeps asking about the right place without knowing there is a place to ask about.
+      const at = ref.current.at;
+      patch({ tree: await invoke("files:tree", at === null ? {} : { project: at }) });
     } catch {
       patch({ tree: null });
     }
@@ -2543,6 +2549,9 @@ export function useApp() {
         // focused one, and a picker still listing the last project's roots would create tasks from
         // workflows this one may not even have.
         void refreshWorkflows();
+        // And the tree, which is now a view of ONE place: this moves `at`, so it moves which place.
+        // Narrowing the board and then opening Files used to show whatever the tree was left at.
+        void refreshTree();
       },
 
       /**
@@ -3255,6 +3264,8 @@ export function useApp() {
        * no longer matches anything is harmless.
        */
       toggleShut: (id: string, key: string) => setUi(toggleShut(ref.current.settings.ui, id, key)),
+      /** The same for a tree that defaults SHUT — see `unfolded` in the settings. */
+      toggleUnfolded: (id: string, key: string) => setUi(toggleUnfolded(ref.current.settings.ui, id, key)),
       /** Several at once — see `withShut` for why this is not a loop over the one above. */
       setShut: (id: string, keys: readonly string[], shut: boolean) =>
         setUi(withShut(ref.current.settings.ui, id, keys, shut)),
@@ -3565,6 +3576,34 @@ export function useApp() {
         // The write itself makes main re-check and push, so nothing is probed from here: a probe
         // fired beside the write would race it and report the configuration that was just replaced.
         await actions.saveConfig(layer, doc);
+      },
+
+      /**
+       * Write `config.files.hidden` into a named layer — what the Files tree leaves out.
+       *
+       * `null` REMOVES the key, which is the difference between "I have no opinion" and "show
+       * everything": an absent key means the defaults, and `[]` means a person has asked to see
+       * `system/` and the rest. A pane that could only write an array could never say the first
+       * thing again once it had said the second.
+       */
+      saveHiddenPaths: async (patterns: string[] | null, layer: ConfigLayer) => {
+        const current = ref.current.config;
+        if (!current) return;
+        const doc = (layer === "base" ? current.base : current.project) ?? {};
+        const base = typeof doc === "object" && doc !== null && !Array.isArray(doc) ? { ...doc } : {};
+        const files = base["files"];
+        const block = typeof files === "object" && files !== null && !Array.isArray(files) ? { ...files } : {};
+        if (patterns === null) delete block["hidden"];
+        else block["hidden"] = patterns;
+        // An empty `files` block is noise in a file people read, so it goes rather than being left
+        // behind as `"files": {}` by a person who removed their last pattern.
+        if (Object.keys(block).length === 0) delete base["files"];
+        else base["files"] = block;
+        await actions.saveConfig(layer, base);
+        // Main draws the tree from this, and `saveConfig` invalidates configuration alone — so
+        // without this the pattern you just added does nothing visible until something else happens
+        // to re-read the tree.
+        await refreshTree();
       },
 
       /**
@@ -3929,6 +3968,25 @@ export function useApp() {
         } catch (e) {
           fail(e);
         }
+      },
+
+      /**
+       * This person's own additions to what the tree hides.
+       *
+       * Written whole, like appearance and for the same reason — `writeSettings` merges one level
+       * deep, so a partial list would be the whole list. Patched locally first so a row disappears
+       * on the click rather than on the round-trip.
+       */
+      setFilesHidden: async (filesHidden: string[]) => {
+        patch({ settings: { ...ref.current.settings, filesHidden } });
+        try {
+          patch({ settings: keepingUi(await invoke("settings:write", { filesHidden })) });
+        } catch (e) {
+          fail(e);
+        }
+        // The tree is drawn in main from these rules, so it has to be re-read: nothing else in the
+        // settings file changes what `files:tree` answers, which is why no existing write does this.
+        await refreshTree();
       },
 
       // --- the Debug view's self-test (DESIGN §11.3) --------------------------

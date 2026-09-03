@@ -26,6 +26,7 @@ import {
   lintErrors,
   openProject,
   prepareUserModules,
+  resetUserModules,
   resolveUserFunctions,
   userModules,
   ensureWorkspace,
@@ -238,6 +239,11 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     return 1;
   } finally {
     restore?.();
+    // The module pair is built per PROCESS, not per project (see `openWithRecoveryNote`), so no
+    // `project.close()` releases it — and it holds an open connection to the base database. A real
+    // invocation exits here and the OS would reclaim it; a test that calls `runCli` in-process does
+    // not, and neither does anything else that drives the CLI as a library.
+    resetUserModules();
   }
 }
 

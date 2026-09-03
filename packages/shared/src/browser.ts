@@ -38,4 +38,5 @@ export * from "./grammars";
 export * from "./userEvents";
 export * from "./toolVocabulary";
 export * from "./scopes";
+export * from "./hiddenPaths";
 export * from "./refusal";

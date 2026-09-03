@@ -351,23 +351,44 @@ describe("sessions — one process, several projects", () => {
     }
   });
 
-  it("puts both projects in the files tree, with the shared root listed once beside them", async () => {
+  it("puts every project in the files tree at the root, and the shared root in none of them", async () => {
     const other = mkdtempSync(join(tmpdir(), "jaira-app-c-"));
     initProject(other, testHome());
     try {
       await service.open(other);
+      // No `project`: the ROOT, "all projects", which is a real place and not "nothing chosen".
       const tree = service.filesTree();
-      // The projects ARE the top level (SHELL.md §2.2) — one root each, stamped with the project
-      // every call about a file in it will have to name.
+      // The projects ARE the top level there (SHELL.md §2.2) — one root each, stamped with the
+      // project every call about a file in it will have to name.
       const projects = tree.roots.filter((r) => r.layer === "project");
       expect(projects.map((r) => r.project).sort()).toEqual([dir, other].sort());
-      // And `~/.jaira` exactly once, not once per project: repeating a machine-global directory
-      // invites somebody to wonder which copy they are editing.
-      expect(tree.roots.filter((r) => r.layer === "base")).toHaveLength(1);
+      // And `~/.jaira` nowhere. It is a layer these projects RESOLVE against, not a folder either of
+      // them is in — and listing it beside them put four directories from the home directory under
+      // a checkout that contains none of them.
+      expect(tree.roots.filter((r) => r.layer === "base")).toHaveLength(0);
     } finally {
       await service.close();
       rmSync(other, { recursive: true, force: true });
     }
+  });
+
+  it("narrows the tree to the project the shell is standing on", async () => {
+    const other = mkdtempSync(join(tmpdir(), "jaira-app-d-"));
+    initProject(other, testHome());
+    try {
+      await service.open(other);
+      const tree = service.filesTree({ project: other });
+      expect(tree.roots.map((r) => r.project)).toEqual([other]);
+    } finally {
+      await service.close();
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to every project when the address names one that is not open", async () => {
+    // A stale address is an address, not a fault: the panel shows the root rather than nothing.
+    const tree = service.filesTree({ project: join(tmpdir(), "never-opened") });
+    expect(tree.roots.map((r) => r.project)).toEqual([dir]);
   });
 
   it("lists every project's tasks as one recency-ordered list, each stamped with its project", async () => {

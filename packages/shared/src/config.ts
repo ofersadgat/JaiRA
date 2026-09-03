@@ -307,6 +307,29 @@ export interface JairaConfig {
   agents: JairaAgentConfig;
   /** Where workflow references are looked up (EXPRESSIONS.md §4). */
   workflows: JairaWorkflowConfig;
+  /** What the Files tree draws, and what it leaves out (`./hiddenPaths`). */
+  files: JairaFilesConfig;
+}
+
+/**
+ * The Files tree's own configuration.
+ *
+ * Here rather than in `user-settings.json` alone because a checkout can have an opinion worth
+ * sharing — a project whose `functions/` carries a build directory wants everyone to stop seeing
+ * it, and that is a fact about the project, not about whoever opened it. The PERSONAL half of the
+ * setting lives in `JairaSettings.filesHidden` and is applied after this one, so a preference never
+ * has to arrive through a pull request to be honoured.
+ */
+export interface JairaFilesConfig {
+  /**
+   * Glob patterns hidden from the tree, in order — see {@link DEFAULT_HIDDEN_PATHS}.
+   *
+   * Absent means the defaults, which is not the same as `[]`: an empty array is a project saying
+   * *show everything*, including `system/`. Like every other array in this document a project's
+   * list REPLACES the base's rather than extending it, so a project that sets one takes on naming
+   * everything it wants hidden — including, if it still wants it, `system`.
+   */
+  hidden?: string[];
 }
 
 export interface JairaWorkflowConfig {
@@ -490,6 +513,7 @@ export function defaultConfig(): JairaConfig {
     agents: {},
     executors: {},
     workflows: {},
+    files: {},
   };
 }
 
@@ -982,6 +1006,33 @@ export function parseConfig(raw: unknown): JairaConfig {
     agents: parseAgents(cfg["agents"]),
     executors: parseExecutorDefinitions(cfg["executors"]),
     workflows: parseWorkflows(cfg["workflows"]),
+    files: parseFiles(cfg["files"]),
+  };
+}
+
+/**
+ * Parse the Files-tree block.
+ *
+ * Strict, like every other block here: a mis-typed `hidden` is a folder that silently keeps showing,
+ * and the whole reason this setting exists is that a silent no-op went unnoticed for months. An
+ * entry is required to be a non-empty string, so `""` — which globs to "match nothing" and reads as
+ * "hide nothing" — is refused rather than quietly ignored.
+ */
+function parseFiles(raw: unknown): JairaFilesConfig {
+  if (raw === undefined) return {};
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("config.files must be an object");
+  }
+  const hidden = (raw as Record<string, unknown>)["hidden"];
+  if (hidden === undefined) return {};
+  if (!Array.isArray(hidden)) throw new Error("config.files.hidden must be an array of glob patterns");
+  return {
+    hidden: hidden.map((entry, i) => {
+      if (typeof entry !== "string" || entry.trim().length === 0) {
+        throw new Error(`config.files.hidden[${i}] must be a non-empty string`);
+      }
+      return entry.trim();
+    }),
   };
 }
 

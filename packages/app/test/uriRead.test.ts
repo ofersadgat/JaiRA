@@ -35,7 +35,7 @@ describe("anchored file reads", () => {
     writeFileSync(join(dir, "notes.md"), "hello\n", "utf8");
     expect((await service.readUri({ uri: "$PROJECT/notes.md" })).text).toBe("hello\n");
 
-    service.createFile({ layer: "project", path: "prompts/goals.md", kind: "file", text: "# Goals\n" });
+    service.createFile({ layer: "project", path: ".jaira/prompts/goals.md", kind: "file", text: "# Goals\n" });
     const jaira = await service.readUri({ uri: "$JAIRA/prompts/goals.md" });
     expect(jaira.text).toBe("# Goals\n");
     expect(jaira.mime).toBe("text/markdown");

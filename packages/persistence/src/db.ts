@@ -159,6 +159,26 @@ CREATE TABLE IF NOT EXISTS call_memo (
 -- One row wins per (task, logical path): a rewrite replaces, so a read resolves to
 -- the latest without every consumer sorting.
 CREATE UNIQUE INDEX IF NOT EXISTS artifacts_logical ON artifacts(task_id, logical_path);
+
+-- What a person has said may RUN: one row per js/ts module file, keyed by absolute path
+-- (SPEC §7.5.5). Only the BASE root's database is ever asked — an approval spans every project on
+-- the disk, so it cannot belong to one checkout's history — but the table is declared here like
+-- any other because there is one schema, and a table that existed in only some databases would be
+-- a second shape to reason about.
+--
+-- The mac column is what makes this a trust store rather than a list. It is an HMAC over the path
+-- and the hash together, keyed by a secret that is NOT in this file, so appending a row is not the
+-- same as being approved: a writer who has not also found the key produces a row that fails
+-- verification and is read as unapproved. See userModules.ts for the key, and for what this does
+-- and does not defend against.
+--
+-- No FK and no task: an approval outlives every run that relied on it, and is about the disk.
+CREATE TABLE IF NOT EXISTS module_approvals (
+  path        TEXT PRIMARY KEY,
+  hash        TEXT NOT NULL,
+  mac         TEXT NOT NULL,
+  approved_at INTEGER NOT NULL
+);
 `;
 
 /**

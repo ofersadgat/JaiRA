@@ -34,7 +34,8 @@
  * gated (an unapproved file contributes nothing, so it cannot capture a name), lint runs freely over
  * whatever is approved, and the hard refusal happens once, at task start, in {@link freezeForRun}.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createHmac } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve as resolvePath } from "node:path";
 
 import {
@@ -54,6 +55,8 @@ import {
 } from "@declarative-ai/hw";
 import { workflowSearchPath, type ModuleApproval, type JairaPaths } from "@jaira/shared";
 
+import { openDb } from "./db";
+import { machineKey } from "./machineKey";
 import { nodeVfs } from "./vfs";
 
 /** Absolute, forward-slashed — the one spelling a hash, an approval and a require path agree on. */
@@ -63,62 +66,149 @@ export function canonicalModulePath(file: string): string {
 
 // --- The approval store -------------------------------------------------------
 
-interface ApprovalFile {
-  /** Absolute path → the approved content hash of that file's SOURCE. */
-  approved: Record<string, string>;
+/**
+ * The tag that turns a stored pair into a claim somebody made.
+ *
+ * Over the path AND the hash, separated by a byte that occurs in neither: tagging the hash alone
+ * would let a valid row be moved to another path, which is exactly the substitution this exists to
+ * stop — approve a harmless `notes.ts`, then point that approval at the module a workflow calls.
+ *
+ * Not a whole-table MAC, and that limit is worth stating rather than hiding: a row kept from before
+ * a revoke still verifies if it is put back. Closing that needs a counter the store can trust, and
+ * somewhere to keep it that the same attacker cannot roll back.
+ */
+function macOf(key: Buffer, path: string, hash: string): string {
+  return createHmac("sha256", key).update(`${path}\u0000${hash}`).digest("hex");
 }
 
 /**
- * The machine-local record of what may run, backed by one JSON file.
+ * The machine-local record of what may run: the base database, one row per file, each signed.
  *
- * A plain file rather than a table in the database, and the reason is its own rather than shared
- * with `sync.json` as this used to claim: an approval is keyed by ABSOLUTE PATH and spans every
- * project on the disk, so there is no one project's database it could belong to. It is also read
- * before any project is open — the symbol index is built at process start, ahead of knowing which
- * project this is. Neither of those is true of `sync.json`, which is per-layer and read from an
- * open session like anything else.
+ * It was a JSON file, and the argument for that was real when it was written — an approval is keyed
+ * by ABSOLUTE PATH and spans every project on the disk, so there is no one project's database it
+ * could belong to. What changed is that the shared root became a project of its own: `~/.jaira` has
+ * a database, it is machine-global, and it opens without any checkout. That is exactly the store
+ * this needed, so the hand-rolled file — with its own read, its own atomic write and its own
+ * corruption story — is gone.
+ *
+ * The MAC is the other half, and the reason is on {@link JairaBasePaths.machineKeyFile}: a row is a
+ * claim about what a person agreed to, and a claim is worth only as much as what signs it. Writing
+ * into the table is not the same as being approved.
  */
 export interface Approvals extends ApprovalStore {
   /** Record this file's current bytes as approved. */
   approve(file: string, hash: string): void;
   /** Forget a file, so it is unknown again — and therefore unapproved. */
   revoke(file: string): void;
-  /** Everything approved, for a UI that lists it. */
+  /** Everything approved AND verified, for a UI that lists it. */
   all(): ReadonlyMap<string, string>;
+  /**
+   * Rows that are present but do not verify, for a caller that wants to say so.
+   *
+   * Separate from {@link all} rather than folded into it, because they are opposite facts: one is
+   * what may run, and this is what something put in the table without the key. Reporting them
+   * together would present an attempted forgery as an approval.
+   */
+  unverified(): readonly string[];
+  close(): void;
 }
 
-export function approvalsFor(file: string): Approvals {
-  let table: Record<string, string> = {};
-  if (existsSync(file)) {
+/** What {@link approvalsIn} needs off a base root — the three paths, so a test can pass a scratch. */
+export interface ApprovalPaths {
+  dbFile: string;
+  machineKeyFile: string;
+  /** The pre-move JSON store, read once if the table is empty. Nothing writes it. */
+  approvalsFile: string;
+}
+
+/**
+ * Open the store against a base root.
+ *
+ * Imports a pre-move `approvals.local.json` exactly once — on the first open that finds the table
+ * empty and the file present. Those entries are signed on the way in, and the file is left where it
+ * is: it WAS the trust store until this change, so importing it trusts nothing that was not already
+ * trusted, and deleting a file somebody may still want to read is not an import's decision.
+ */
+export function approvalsIn(base: ApprovalPaths): Approvals {
+  // The directory, before the database. Creating the key used to do this on the way past, and the
+  // key is lazy now — so without this a root that does not exist yet fails on `openDb` instead of
+  // being created, which is the ordinary first-run path.
+  mkdirSync(dirname(base.dbFile), { recursive: true });
+  const db = openDb(base.dbFile);
+  // LAZY, and memoized. Unwrapping costs a subprocess on Windows (see `machineKey`), and a root
+  // with no js/ts function modules never asks a single approval question — so paying it at
+  // construction would put a quarter-second on the start of every command for a feature most
+  // projects do not use. Every path below that needs it goes through here.
+  let cached: Buffer | undefined;
+  const key = (): Buffer => (cached ??= machineKey(base.machineKeyFile));
+  const rows = (): ApprovalRow[] => db.prepare(`SELECT path, hash, mac FROM module_approvals`).all() as ApprovalRow[];
+
+  const put = db.prepare(
+    `INSERT INTO module_approvals (path, hash, mac, approved_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(path) DO UPDATE SET hash = excluded.hash, mac = excluded.mac, approved_at = excluded.approved_at`,
+  );
+  const write = (path: string, hash: string): void => {
+    put.run(path, hash, macOf(key(), path, hash), Date.now());
+  };
+
+  if (existsSync(base.approvalsFile) && rows().length === 0) {
     try {
-      const parsed = JSON.parse(readFileSync(file, "utf8")) as ApprovalFile;
-      if (parsed && typeof parsed === "object" && parsed.approved && typeof parsed.approved === "object") {
-        table = { ...parsed.approved };
+      const parsed = JSON.parse(readFileSync(base.approvalsFile, "utf8")) as { approved?: Record<string, string> };
+      const table = parsed?.approved;
+      if (table !== undefined && table !== null && typeof table === "object") {
+        db.transaction(() => {
+          for (const [path, hash] of Object.entries(table)) {
+            if (typeof hash === "string") write(canonicalModulePath(path), hash);
+          }
+        })();
       }
     } catch {
       // A corrupt store is an EMPTY store, never a permissive one: the failure mode of guessing here
       // is running unapproved code, so the safe reading of "cannot tell" is "nothing is approved".
-      table = {};
     }
   }
-  const flush = (): void => {
-    mkdirSync(dirname(file), { recursive: true });
-    const staging = `${file}.${process.pid}.tmp`;
-    writeFileSync(staging, JSON.stringify({ approved: table } satisfies ApprovalFile, null, 2) + "\n", "utf8");
-    renameSync(staging, file);
+
+  /** The verified table, read fresh — another process may have approved something since. */
+  const verified = (): Map<string, string> => {
+    const out = new Map<string, string>();
+    const all = rows();
+    // The key is asked for only once there is something to verify. An empty table answers "nothing
+    // is approved" whatever the key says, so a root with no js/ts modules never pays for unwrapping
+    // one — and a machine whose key is unreadable still gets the correct answer here rather than an
+    // error about a secret it was not using. The moment there IS a row, or anything is approved, the
+    // key is required and an unreadable one is loud.
+    if (all.length === 0) return out;
+    const k = key();
+    for (const row of all) {
+      // A constant-time compare is not the property that matters here: the attacker writes the row
+      // rather than probing our answer, so there is no timing oracle to close. What matters is that
+      // a row failing this contributes NOTHING — it is not repaired, and it is not trusted.
+      if (row.mac === macOf(k, row.path, row.hash)) out.set(row.path, row.hash);
+    }
+    return out;
   };
+
   return {
-    approved: (f) => table[canonicalModulePath(f)],
-    approve: (f, hash) => {
-      table[canonicalModulePath(f)] = hash;
-      flush();
-    },
+    approved: (f) => verified().get(canonicalModulePath(f)),
+    approve: (f, hash) => write(canonicalModulePath(f), hash),
     revoke: (f) => {
-      delete table[canonicalModulePath(f)];
-      flush();
+      db.prepare(`DELETE FROM module_approvals WHERE path = ?`).run(canonicalModulePath(f));
     },
-    all: () => new Map(Object.entries(table)),
+    all: () => verified(),
+    unverified: () => {
+      const all = rows();
+      if (all.length === 0) return [];
+      const k = key();
+      return all.filter((row) => row.mac !== macOf(k, row.path, row.hash)).map((row) => row.path);
+    },
+    close: () => db.close(),
   };
+}
+
+interface ApprovalRow {
+  path: string;
+  hash: string;
+  mac: string;
 }
 
 // --- The process-wide pair ----------------------------------------------------
@@ -151,11 +241,15 @@ let current: UserModules | undefined;
  */
 export async function prepareUserModules(paths: JairaPaths, options: PrepareUserModulesOptions = {}): Promise<UserModules> {
   if (current !== undefined && options.rebuild !== true) return current;
+  // A rebuild REPLACES the pair, so the store it is replacing has to be closed here — otherwise
+  // every rebuild (an approval granted, a function file changed) leaves another open handle on the
+  // base database for the life of the process.
+  resetUserModules();
   // A FRESH vfs per build. `nodeVfs` caches listings for the life of one load, which is what makes a
   // single load self-consistent and what makes a process-wide one go stale — so a rebuild is the only
   // way a function file added after startup becomes visible, and it must not inherit the old cache.
   const vfs = nodeVfs();
-  const approvals = approvalsFor(paths.base.approvalsFile);
+  const approvals = approvalsIn(paths.base);
   const searchPath = (options.searchPath ?? workflowSearchPath(paths.roots)).map(canonicalModulePath);
   const requirePath = requirePathFor(searchPath);
   // ONE parse cache behind both indexes. Named off the option rather than off a `SymbolTable` import
@@ -205,8 +299,17 @@ export function userModules(): UserModules | undefined {
   return current;
 }
 
-/** Drop the pair — tests only, so one suite's approval store does not leak into the next. */
+/**
+ * Drop the pair, closing the approval store's database handle.
+ *
+ * Closing is the half that is not optional. The store used to be a JSON file, so dropping the
+ * reference was the whole of releasing it; it is a SQLite connection now, and an unclosed one keeps
+ * the file locked — which on Windows means the directory it lives in cannot be removed. That is a
+ * test's temp home failing to clean up, and it is also a long-running process holding the base
+ * database open for no reason.
+ */
 export function resetUserModules(): void {
+  current?.approvals.close();
   current = undefined;
 }
 

@@ -231,8 +231,11 @@ describe("system/ is committed now", () => {
       "system/jaira.db-wal",
       "system/jaira.db-shm",
       "system/logs/",
-      // Machine-local trust, and the one thing under `system/` that must never travel: syncing an
-      // approval would let one compromised disk confer trust on the rest (SPEC §7.5.5).
+      // The two machine-local trust entries, and the only things under `system/` that must never
+      // travel. The key SIGNS what this disk has agreed to run, so a committed one lets any clone
+      // mint approvals here; the approvals themselves live in the database above now, and this
+      // names the file older roots still carry (SPEC §7.5.5).
+      "system/machine.key",
       "system/approvals.local.json",
       ".env.local",
     ]);

@@ -1076,7 +1076,15 @@ export interface IpcContract {
    */
   "board:roots": { request: { project?: string } | void; response: BoardView };
   /** Every file under both roots, as a tree — the Files view's left panel. */
-  "files:tree": { request: void; response: FileTree };
+  /**
+   * The tree for ONE place — see {@link FileTree}.
+   *
+   * `project` is where the shell is standing (`AppState.at`), because main has no notion of a
+   * focused project: `sessionOf()` answers only when exactly one is open, and deliberately, so a
+   * call that had to name a project could never have one guessed for it. The tree is the one
+   * surface where "where am I" is the whole question, so it is asked.
+   */
+  "files:tree": { request: { project?: ProjectRef } | void; response: FileTree };
   /** Everything the Files view shows about one state: its board or its tasks, plus the inspector. */
   "state:view": { request: { stateId: string; project?: ProjectRef }; response: StateView };
   /**

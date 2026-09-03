@@ -124,7 +124,7 @@ function TreeNode({
   rootDir,
   selected,
   dirty,
-  collapsed,
+  expanded,
   onToggle,
   onSelect,
   onMenu,
@@ -135,17 +135,20 @@ function TreeNode({
   selected: FileSelection | null;
   /** Files with unsaved edits, by `layer:path`. A directory is marked when anything under it is. */
   dirty: ReadonlySet<string>;
-  collapsed: ReadonlySet<string>;
+  /** The directories that are OPEN. Everything else is shut — see `FileTreePanel`'s own note. */
+  expanded: ReadonlySet<string>;
   onToggle: (key: string) => void;
   onSelect: (node: FileNode) => void;
   onMenu: (node: FileNode, rootDir: string, at: MenuPoint) => void;
 }): JSX.Element {
-  // The FOLD key stays per layer, deliberately: `SHUT.folders` is keyed per layer and not per
+  // The FOLD key stays per layer, deliberately: `OPENED.folders` is keyed per layer and not per
   // checkout so it does not grow without bound as projects come and go, and two projects that both
-  // have a `workflows/review/` sharing its folded state is the trade that buys that.
+  // have a `.jaira/workflows/review/` sharing its folded state is the trade that buys that.
   const key = `${node.layer}:${node.path}`;
   const isDir = node.kind === "directory";
-  const open = isDir && !collapsed.has(key);
+  // POSITIVE: a directory is shut unless it has been opened. Which means a folder nested inside one
+  // you just opened is shut too — you get its name, not its contents and everything under them.
+  const open = isDir && expanded.has(key);
   // Every file opens now, whatever it is: the registry has a surface for anything that is text, and
   // for anything that is not the panel says so. Highlighting is by PROJECT, layer and path: the same
   // state id exists in both roots and in every open project, and only one of them is the file you
@@ -234,7 +237,7 @@ function TreeNode({
               rootDir={rootDir}
               selected={selected}
               dirty={dirty}
-              collapsed={collapsed}
+              expanded={expanded}
               onToggle={onToggle}
               onSelect={onSelect}
               onMenu={onMenu}
@@ -285,8 +288,8 @@ export function FileTreePanel({
   tree,
   selected,
   dirty = EMPTY_DIRTY,
-  collapsed: collapsedProp,
-  onToggleCollapsed,
+  expanded: expandedProp,
+  onToggleExpanded,
   busy,
   hasProject,
   onSelect,
@@ -307,18 +310,22 @@ export function FileTreePanel({
   /** Files with unsaved edits, by `layer:path`. Defaulted, so a host with no draft store shows none. */
   dirty?: ReadonlySet<string>;
   /**
-   * The folded branches, by the same `layer:path` key, and how to fold or unfold one.
+   * The OPEN branches, by the same `layer:path` key, and how to open or close one.
    *
    * Controlled when both are supplied — the shell keeps them in `user-settings.json`, so the shape you
    * left the tree in is the shape it opens in — and local otherwise, which keeps this panel usable
    * on its own. Same arrangement as the JSON editor's wrap preference, for the same reason: a
    * component that REQUIRED a store would be a component you could not render without one.
    *
-   * Negative — what is listed is SHUT — because a tree defaults to expanded, and a new folder must
-   * never appear collapsed on the strength of a file written before it existed.
+   * POSITIVE — what is listed is OPEN — which is the opposite of every other tree in the app and of
+   * what this prop used to be. The reason is what the tree is rooted at: a checkout. Expanded by
+   * default meant a first paint of every file in `packages/`, `docs/` and `test/`, and a shape you
+   * had to fold up before you could read it. Collapsed by default, opening a folder is a thing you
+   * did rather than a thing you undid — and it applies all the way down, so opening one folder shows
+   * the names inside it and not the whole subtree.
    */
-  collapsed?: ReadonlySet<string> | undefined;
-  onToggleCollapsed?: ((key: string) => void) | undefined;
+  expanded?: ReadonlySet<string> | undefined;
+  onToggleExpanded?: ((key: string) => void) | undefined;
   busy: boolean;
   /** Project-layer operations are impossible without one, so they are offered disabled, not hidden. */
   hasProject: boolean;
@@ -363,8 +370,8 @@ export function FileTreePanel({
   project?: string | null;
 }): JSX.Element {
   /** Used only when the host does not control the folding — see the prop's own note. */
-  const [ownCollapsed, setOwnCollapsed] = useState<ReadonlySet<string>>(new Set());
-  const collapsed = collapsedProp ?? ownCollapsed;
+  const [ownExpanded, setOwnExpanded] = useState<ReadonlySet<string>>(new Set());
+  const expanded = expandedProp ?? ownExpanded;
   const [filter, setFilter] = useState("");
   const [newId, setNewId] = useState("");
   const [newLayer, setNewLayer] = useState<WorkflowLayer>("project");
@@ -658,8 +665,8 @@ export function FileTreePanel({
     setMenu({ ...at, items: itemsFor(node, rootDir) });
 
   const toggle = (key: string): void => {
-    if (onToggleCollapsed !== undefined) return onToggleCollapsed(key);
-    setOwnCollapsed((current) => {
+    if (onToggleExpanded !== undefined) return onToggleExpanded(key);
+    setOwnExpanded((current) => {
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -758,7 +765,7 @@ export function FileTreePanel({
                   rootDir={root.dir}
                   selected={selected}
                   dirty={dirty}
-                  collapsed={collapsed}
+                  expanded={expanded}
                   onToggle={toggle}
                   onSelect={onSelect}
                   onMenu={openMenu}

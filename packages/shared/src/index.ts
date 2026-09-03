@@ -28,5 +28,6 @@ export * from "./unifiedDiff";
 export * from "./grammars";
 export * from "./toolVocabulary";
 export * from "./scopes";
+export * from "./hiddenPaths";
 export * from "./userEvents";
 export * from "./refusal";

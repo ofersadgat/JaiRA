@@ -14,6 +14,7 @@ import {
   HALVES,
   PANE,
   PANE_DEFAULTS,
+  OPENED,
   SHUT,
   emptyUiState,
   forgetSeen,
@@ -22,6 +23,8 @@ import {
   paneOf,
   seenOf,
   shutOf,
+  toggleUnfolded,
+  unfoldedOf,
   toggleShut,
   withMode,
   withOpen,
@@ -114,16 +117,32 @@ describe("remembered folds", () => {
 
 describe("collapsed branches", () => {
   it("lists what is SHUT, so a branch nobody has folded is open", () => {
-    const ui = toggleShut(emptyUiState(), SHUT.folders, "project:workflows/review");
-    expect(shutOf(ui, SHUT.folders).has("project:workflows/review")).toBe(true);
+    const ui = toggleShut(emptyUiState(), SHUT.runStates, "r1:i1:0");
+    expect(shutOf(ui, SHUT.runStates).has("r1:i1:0")).toBe(true);
     // The branch created after the file was written — it must not arrive collapsed.
-    expect(shutOf(ui, SHUT.folders).has("project:workflows/new")).toBe(false);
+    expect(shutOf(ui, SHUT.runStates).has("r1:i1:9")).toBe(false);
+  });
+
+  it("lists what is OPEN for the Files tree, so a folder nobody opened is shut", () => {
+    // The opposite default, and the one tree that has it: rooted at a checkout, expanded-by-default
+    // is a first paint of every file in the repository.
+    const ui = toggleUnfolded(emptyUiState(), OPENED.folders, "project:packages");
+    expect(unfoldedOf(ui, OPENED.folders).has("project:packages")).toBe(true);
+    // Everything else, including a folder inside the one just opened.
+    expect(unfoldedOf(ui, OPENED.folders).has("project:packages/app")).toBe(false);
+    expect(unfoldedOf(emptyUiState(), OPENED.folders).has("project:packages")).toBe(false);
+  });
+
+  it("opens and closes the same row", () => {
+    const open = toggleUnfolded(emptyUiState(), OPENED.folders, "base:prompts");
+    expect(unfoldedOf(open, OPENED.folders).has("base:prompts")).toBe(true);
+    expect(unfoldedOf(toggleUnfolded(open, OPENED.folders, "base:prompts"), OPENED.folders).has("base:prompts")).toBe(false);
   });
 
   it("folds and unfolds the same row", () => {
-    const shut = toggleShut(emptyUiState(), SHUT.folders, "base:prompts");
-    const open = toggleShut(shut, SHUT.folders, "base:prompts");
-    expect(shutOf(open, SHUT.folders).size).toBe(0);
+    const shut = toggleShut(emptyUiState(), SHUT.runStates, "base:prompts");
+    const open = toggleShut(shut, SHUT.runStates, "base:prompts");
+    expect(shutOf(open, SHUT.runStates).size).toBe(0);
   });
 
   it("keeps the trees apart", () => {
@@ -131,37 +150,46 @@ describe("collapsed branches", () => {
     // read the first one's rows however it is spelled.
     const ui = toggleShut(emptyUiState(), "some.other.tree", "/repo");
     expect(shutOf(ui, "some.other.tree").has("/repo")).toBe(true);
-    expect(shutOf(ui, SHUT.folders).size).toBe(0);
+    expect(shutOf(ui, SHUT.runStates).size).toBe(0);
   });
 
   it("stores a row once however many times it is toggled", () => {
     let ui = emptyUiState();
-    for (let i = 0; i < 5; i += 1) ui = toggleShut(ui, SHUT.folders, "project:workflows");
-    // Odd number of clicks ⇒ folded, and stored once. A list that grew a duplicate would make the
+    for (let i = 0; i < 5; i += 1) ui = toggleUnfolded(ui, OPENED.folders, "project:packages");
+    // Odd number of clicks ⇒ open, and stored once. A list that grew a duplicate would make the
     // next click appear to do nothing.
-    expect(ui.shut[SHUT.folders]).toEqual(["project:workflows"]);
+    expect(ui.unfolded[OPENED.folders]).toEqual(["project:packages"]);
   });
 });
 
 describe("what survives a trip through the settings file", () => {
   it("round-trips a layout the app actually produced", () => {
-    const ui = toggleShut(
-      withOpen(withPane(emptyUiState(), PANE.filesViewer, 260), FOLD.filesEditor, false),
-      SHUT.folders,
-      "project:workflows",
+    // Both row maps, because they are opposite claims and a round trip that kept one would look
+    // fine right up until the Files tree opened with every folder shut or every folder open.
+    const ui = toggleUnfolded(
+      toggleShut(
+        withOpen(withPane(emptyUiState(), PANE.filesViewer, 260), FOLD.filesEditor, false),
+        SHUT.runStates,
+        "r1:i1:0",
+      ),
+      OPENED.folders,
+      "project:.jaira/workflows",
     );
     const back = parseSettings(JSON.parse(JSON.stringify({ theme: "dark", ui })) as unknown).ui;
 
     expect(paneOf(back, PANE.filesViewer)).toBe(260);
     expect(openOf(back, FOLD.filesEditor)).toBe(false);
-    expect(shutOf(back, SHUT.folders).has("project:workflows")).toBe(true);
+    expect(shutOf(back, SHUT.runStates).has("r1:i1:0")).toBe(true);
+    expect(unfoldedOf(back, OPENED.folders).has("project:.jaira/workflows")).toBe(true);
   });
 
   it("opens at the defaults when the file has never heard of a layout", () => {
     const back = parseSettings({ theme: "light" }).ui;
     expect(paneOf(back, PANE.shellSidebar)).toBe(PANE_DEFAULTS[PANE.shellSidebar]);
     expect(openOf(back, FOLD.filesEditor)).toBe(true);
-    expect(shutOf(back, SHUT.folders).size).toBe(0);
+    expect(shutOf(back, SHUT.runStates).size).toBe(0);
+    // And the Files tree opens with nothing unfolded, which is now what "every folder shut" means.
+    expect(unfoldedOf(back, OPENED.folders).size).toBe(0);
   });
 });
 

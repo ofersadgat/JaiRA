@@ -32,8 +32,8 @@ afterEach(async () => {
 
 describe("file:read", () => {
   it("reads a prompt and reports what it is", () => {
-    service.createFile({ layer: "project", path: "prompts/goals.md", kind: "file", text: "# Goals\n" });
-    const doc = service.readFile({ layer: "project", path: "prompts/goals.md" });
+    service.createFile({ layer: "project", path: ".jaira/prompts/goals.md", kind: "file", text: "# Goals\n" });
+    const doc = service.readFile({ layer: "project", path: ".jaira/prompts/goals.md" });
     expect(doc.text).toBe("# Goals\n");
     expect(doc.mime).toBe("text/markdown");
     expect(doc.exists).toBe(true);
@@ -43,7 +43,7 @@ describe("file:read", () => {
 
   it("names the state a workflow file defines, so the panel can open its board", () => {
     service.writeWorkflow({ stateId: "plan", layer: "project", text: '{"label":"Plan"}' });
-    const doc = service.readFile({ layer: "project", path: "workflows/plan.json" });
+    const doc = service.readFile({ layer: "project", path: ".jaira/workflows/plan.json" });
     expect(doc.stateId).toBe("plan");
     expect(doc.mime).toBe(WORKFLOW_JSON);
   });
@@ -55,7 +55,7 @@ describe("file:read", () => {
   it("reports a file that does not exist yet rather than throwing", () => {
     // The tree can point at a path a moment after something else removed it, and "not created yet"
     // is also what a brand-new file looks like before its first save.
-    const doc = service.readFile({ layer: "project", path: "prompts/absent.md" });
+    const doc = service.readFile({ layer: "project", path: ".jaira/prompts/absent.md" });
     expect(doc.exists).toBe(false);
     expect(doc.text).toBe("");
   });
@@ -66,8 +66,8 @@ describe("file:read", () => {
   });
 
   it("refuses to read a directory", () => {
-    service.createFile({ layer: "project", path: "prompts", kind: "directory" });
-    expect(() => service.readFile({ layer: "project", path: "prompts" })).toThrow(/directory/);
+    service.createFile({ layer: "project", path: ".jaira/prompts", kind: "directory" });
+    expect(() => service.readFile({ layer: "project", path: ".jaira/prompts" })).toThrow(/directory/);
   });
 
   it("refuses a path that climbs out of the layer root", () => {
@@ -77,21 +77,21 @@ describe("file:read", () => {
 
 describe("file:write", () => {
   it("writes a prompt and reads back exactly what it was given", () => {
-    service.writeFile({ layer: "project", path: "prompts/goals.md", text: "one\ntwo" });
+    service.writeFile({ layer: "project", path: ".jaira/prompts/goals.md", text: "one\ntwo" });
     expect(readFileSync(join(dir, ".jaira", "prompts", "goals.md"), "utf8")).toBe("one\ntwo");
-    expect(service.readFile({ layer: "project", path: "prompts/goals.md" }).text).toBe("one\ntwo");
+    expect(service.readFile({ layer: "project", path: ".jaira/prompts/goals.md" }).text).toBe("one\ntwo");
   });
 
   it("creates the directories on the way, so a new path in the dialog just works", () => {
-    service.writeFile({ layer: "project", path: "skills/review/SKILL.md", text: "# Review\n" });
-    expect(service.readFile({ layer: "project", path: "skills/review/SKILL.md" }).exists).toBe(true);
+    service.writeFile({ layer: "project", path: ".jaira/skills/review/SKILL.md", text: "# Review\n" });
+    expect(service.readFile({ layer: "project", path: ".jaira/skills/review/SKILL.md" }).exists).toBe(true);
   });
 
   it("refuses a state file, which must go through workflow:write to be parsed", () => {
     // The check is here rather than only in the renderer: a bypass that depends on the untrusted
     // half of the boundary choosing the right channel is not a check at all.
     expect(() =>
-      service.writeFile({ layer: "project", path: "workflows/plan.json", text: "not json at all" }),
+      service.writeFile({ layer: "project", path: ".jaira/workflows/plan.json", text: "not json at all" }),
     ).toThrow(/workflow:write/);
   });
 
@@ -101,14 +101,14 @@ describe("file:write", () => {
 
   it("still refuses a state file when the text would have parsed", () => {
     expect(() =>
-      service.writeFile({ layer: "project", path: "workflows/plan.json", text: "{}" }),
+      service.writeFile({ layer: "project", path: ".jaira/workflows/plan.json", text: "{}" }),
     ).toThrow(/workflow:write/);
   });
 
   it("writes a YAML state as text, because the authoring form cannot save one", () => {
     // A YAML state keeps its board, but its editor is the plain one — see the surface table.
-    service.writeFile({ layer: "project", path: "workflows/legacy.yaml", text: "label: Legacy\n" });
-    const doc = service.readFile({ layer: "project", path: "workflows/legacy.yaml" });
+    service.writeFile({ layer: "project", path: ".jaira/workflows/legacy.yaml", text: "label: Legacy\n" });
+    const doc = service.readFile({ layer: "project", path: ".jaira/workflows/legacy.yaml" });
     expect(doc.stateId).toBe("legacy");
     expect(doc.text).toBe("label: Legacy\n");
   });

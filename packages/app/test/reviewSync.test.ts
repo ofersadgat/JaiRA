@@ -37,7 +37,7 @@ beforeEach(async () => {
   pushes = [];
   service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   await service.open(dir);
-  service.createFile({ layer: "project", path: "workflows/workflow.md", kind: "file", text: "# The flow\n" });
+  service.createFile({ layer: "project", path: ".jaira/workflows/workflow.md", kind: "file", text: "# The flow\n" });
 });
 
 afterEach(async () => {

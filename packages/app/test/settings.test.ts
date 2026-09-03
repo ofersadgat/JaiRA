@@ -64,7 +64,7 @@ afterEach(async () => {
 describe("user settings", () => {
   it("defaults to the light theme, with no project open", () => {
     // Preferences belong to the person, not the checkout — the theme must apply on an empty window.
-    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, seen: {} }, appearance: defaultAppearance(), projects: [] });
+    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), projects: [], filesHidden: [] });
   });
 
   it("persists a change and reads it back", () => {
@@ -77,7 +77,7 @@ describe("user settings", () => {
     writeFileSync(join(baseDir, "user-settings.json"), "{ not json", "utf8");
 
     // A broken preferences file must never stop the app opening.
-    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, seen: {} }, appearance: defaultAppearance(), projects: [] });
+    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), projects: [], filesHidden: [] });
   });
 
   it("keeps the JSON editor's wrap preference, and defaults it off", () => {
@@ -92,7 +92,7 @@ describe("user settings", () => {
 
   it("reads a settings file written before wrapJson existed", () => {
     writeFileSync(join(baseDir, "user-settings.json"), JSON.stringify({ theme: "dark" }), "utf8");
-    expect(service.readSettings()).toEqual({ theme: "dark", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, seen: {} }, appearance: defaultAppearance(), projects: [] });
+    expect(service.readSettings()).toEqual({ theme: "dark", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), projects: [], filesHidden: [] });
   });
 
   it("reads a hand-edited project list without throwing any of it away", () => {
@@ -120,7 +120,8 @@ describe("user settings", () => {
       panes: { "files.tree": 310 },
       open: { "files.editor": false },
       modes: { "files.editor": "full" },
-      shut: { "files.folders": ["project:workflows"] },
+      shut: { "run.states": ["r1:i1:0"] },
+      unfolded: { "files.folders": ["project:.jaira/workflows"] },
       seen: { "t-1": 1_700_000_000_000 },
     };
     expect(service.writeSettings({ ui })).toMatchObject({ ui });
@@ -128,13 +129,13 @@ describe("user settings", () => {
 
     // Replaced, not merged: the renderer holds the live copy and sends all of it, which is what
     // makes forgetting a pane possible at all — a deep merge would leave every id ever stored.
-    const later = { panes: { "tasks.panel": 420 }, open: {}, modes: {}, shut: {}, seen: {} };
+    const later = { panes: { "tasks.panel": 420 }, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} };
     service.writeSettings({ ui: later });
     expect(service.readSettings().ui).toEqual(later);
   });
 
   it("keeps the layout out of the way of the other preferences", () => {
-    service.writeSettings({ ui: { panes: { "files.tree": 310 }, open: {}, modes: {}, shut: {}, seen: {} } });
+    service.writeSettings({ ui: { panes: { "files.tree": 310 }, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} } });
     expect(service.writeSettings({ theme: "dark" }).ui.panes["files.tree"]).toBe(310);
     expect(service.readSettings().theme).toBe("dark");
   });
@@ -149,7 +150,9 @@ describe("user settings", () => {
           panes: { "files.tree": "wide", "files.inspector": 99999, "tasks.panel": 400 },
           open: { "files.editor": "yes", "settings.effective": true },
           // A list that is not one, and one that has grown a duplicate by hand.
-          shut: { "tasks.projects": "everything", "files.folders": ["a", "a", "b"] },
+          shut: { "tasks.projects": "everything", "run.states": ["a", "a", "b"] },
+          // The same two faults in the map with the opposite meaning — see `unfolded`.
+          unfolded: { "bad.tree": 7, "files.folders": ["x", "x"] },
           // A read mark that is not a time, one that is before the epoch, and one that is real.
           seen: { "t-bad": "yesterday", "t-negative": -5, "t-1": 1_700_000_000_000 },
         },
@@ -164,7 +167,8 @@ describe("user settings", () => {
       panes: { "files.inspector": 4000, "tasks.panel": 400 },
       open: { "settings.effective": true },
       modes: {},
-      shut: { "files.folders": ["a", "b"] },
+      shut: { "run.states": ["a", "b"] },
+      unfolded: { "files.folders": ["x"] },
       seen: { "t-1": 1_700_000_000_000 },
     });
   });
@@ -333,7 +337,7 @@ describe("remembering the projects that were open", () => {
   });
 
   it("leaves the rest of the preferences alone", async () => {
-    service.writeSettings({ theme: "dark", ui: { panes: { "files.tree": 310 }, open: {}, modes: {}, shut: {}, seen: {} } });
+    service.writeSettings({ theme: "dark", ui: { panes: { "files.tree": 310 }, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} } });
     await service.open(dir);
 
     // The list is written by main while the renderer owns the layout — a project open must not cost

@@ -24,6 +24,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { onTestFinished } from "vitest";
+import { resetUserModules } from "@jaira/persistence";
 
 /**
  * This test's base root — the same directory every time it is asked for, gone when the test ends.
@@ -58,6 +59,11 @@ export function testHome(): string {
   current = dir;
   onTestFinished(() => {
     current = undefined;
+    // Before the directory goes. The approval store holds an open connection to this home's
+    // database (see `approvalsIn`), and it is process-wide rather than per-test — so a file that
+    // built one leaves the NEXT test's `rmSync` failing with EBUSY on Windows, which reads as a
+    // broken test somewhere it has nothing to do with.
+    resetUserModules();
     rmSync(dir, { recursive: true, force: true });
   });
   return dir;

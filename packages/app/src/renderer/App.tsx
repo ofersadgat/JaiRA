@@ -44,6 +44,7 @@ import { isChatWorkflow } from "./chatWorkflow";
 import { ApprovalDialog, ModuleApprovalDialog, QuestionDialog } from "./components";
 import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem, type MenuPoint } from "./menu";
 import { AppearancePane } from "./appearancePane";
+import { FilesPane } from "./filesPane";
 import {
   addCounts,
   hueOf,
@@ -103,6 +104,7 @@ import {
   PANE,
   PANE_SURFACE,
   PANE_WIDE,
+  OPENED,
   SHUT,
   SIDEBAR_RAIL,
   modeOf,
@@ -110,6 +112,7 @@ import {
   paneDefault,
   paneOf,
   shutOf,
+  unfoldedOf,
 } from "./uiState";
 import { Icon } from "./icons";
 import { History, NewTask } from "./widgets";
@@ -318,6 +321,10 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; layered: boolean; ne
   { id: "providers", label: "Providers", layered: true },
   { id: "executors", label: "Executors", layered: true },
   { id: "config", label: "Configuration", layered: true },
+  // Layered, because a checkout can have an opinion about its own tree worth sharing — and NOT
+  // `needsProject`, because the shared root is a tree too and hiding something in it is exactly what
+  // somebody with nothing open is doing there.
+  { id: "files", label: "Files", layered: true },
   // Not layered and not project-scoped: typography belongs to a PERSON, not to a checkout, and a
   // window with nothing open is exactly where somebody sets it up.
   { id: "appearance", label: "Appearance", layered: false },
@@ -615,7 +622,9 @@ export default function App(): JSX.Element {
    * Built once per render rather than inside the map over rows: `shutOf` materialises a Set, and
    * asking it per row would build one per row on the screen to answer one question about each.
    */
-  const foldedFolders = useMemo(() => shutOf(ui, SHUT.folders), [ui]);
+  // POSITIVE now: the rows a person has OPENED. The Files tree is rooted at a checkout and defaults
+  // to shut — see `OPENED` for why it is the one tree that does.
+  const openFolders = useMemo(() => unfoldedOf(ui, OPENED.folders), [ui]);
   /** The folded states of every run — see `SHUT.runStates` for why one bucket is enough. */
   const foldedStates = useMemo(() => shutOf(ui, SHUT.runStates), [ui]);
 
@@ -1482,8 +1491,8 @@ export default function App(): JSX.Element {
               // Which branches are folded, and where a click on a twisty goes. Both come from the
               // saved layout rather than from the panel's own state, which is what makes the shape
               // of the tree the thing you left it as rather than a fresh full expansion.
-              collapsed={foldedFolders}
-              onToggleCollapsed={(key) => actions.toggleShut(SHUT.folders, key)}
+              expanded={openFolders}
+              onToggleExpanded={(key) => actions.toggleUnfolded(OPENED.folders, key)}
               busy={state.busy}
               hasProject={state.at !== null}
               onSelect={actions.selectFile}
@@ -2141,6 +2150,17 @@ export default function App(): JSX.Element {
                     onSaveModels={actions.saveModels}
                     onSaveExecutor={actions.setExecutorConfig}
                     onSaveDefinition={actions.saveDefinition}
+                  />
+                ) : null}
+                {state.section === "files" ? (
+                  <FilesPane
+                    config={state.config}
+                    layer={state.configLayer}
+                    personal={state.settings.filesHidden}
+                    busy={state.busy}
+                    editable={state.configLayer === "base" || state.at !== null}
+                    onSaveShared={actions.saveHiddenPaths}
+                    onSavePersonal={actions.setFilesHidden}
                   />
                 ) : null}
                 {state.section === "appearance" ? (

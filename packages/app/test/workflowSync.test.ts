@@ -85,7 +85,9 @@ async function syncDocument(text?: string) {
 
 describe("the description as a file", () => {
   it("opens as its own type, which is what puts the sync panel on it", () => {
-    const doc = service.readFile({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH });
+    // `readFile` is the Files-view space, so the description carries the `.jaira/` prefix the tree
+    // shows. `syncStatus` below is the layer's own space and does not — see `treeFile`.
+    const doc = service.readFile({ layer: "project", path: `.jaira/${WORKFLOW_DESCRIPTION_PATH}` });
     expect(doc.mime).toBe(WORKFLOW_DESCRIPTION);
     expect(doc.text).toBe(DESCRIPTION);
   });
@@ -140,7 +142,7 @@ describe("syncStatus", () => {
 
   it("says which side moved once there is a baseline", async () => {
     await syncDocument();
-    service.writeFile({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH, text: REWRITTEN });
+    service.writeFile({ layer: "project", path: `.jaira/${WORKFLOW_DESCRIPTION_PATH}`, text: REWRITTEN });
 
     expect(service.syncStatus({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH })).toMatchObject({
       synced: true,
@@ -156,7 +158,7 @@ describe("syncStatus", () => {
     expect(afterState.changedStates).toEqual([{ path: "feature/plan/goals.json", change: "edited" }]);
 
     // Edit the description too, and there is no longer a mechanical answer.
-    service.writeFile({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH, text: `${REWRITTEN}\nAnd a gate.\n` });
+    service.writeFile({ layer: "project", path: `.jaira/${WORKFLOW_DESCRIPTION_PATH}`, text: `${REWRITTEN}\nAnd a gate.\n` });
     expect(service.syncStatus({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH })).toMatchObject({
       documentChanged: true,
       statesChanged: true,
@@ -192,7 +194,7 @@ describe("runSync towards the document", () => {
   it("records the baseline only when the proposal is saved", async () => {
     await syncDocument();
     expect(existsSync(syncFile())).toBe(false);
-    service.writeFile({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH, text: REWRITTEN });
+    service.writeFile({ layer: "project", path: `.jaira/${WORKFLOW_DESCRIPTION_PATH}`, text: REWRITTEN });
     // Accepting it is what makes the two agree — producing it did not.
     expect(service.syncStatus({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH }).synced).toBe(true);
   });
@@ -429,7 +431,7 @@ describe("a description per workflow", () => {
       direction: "document",
       fake: fake({ document: { text: REWRITTEN, changes: [] } }) as never,
     });
-    service.writeFile({ layer: "project", path: planPath, text: REWRITTEN });
+    service.writeFile({ layer: "project", path: `.jaira/${planPath}`, text: REWRITTEN });
     expect(service.syncStatus({ layer: "project", path: planPath })).toMatchObject({ synced: true, statesChanged: false });
 
     service.writeWorkflow({ stateId: "release", layer: "project", text: '{"label":"Release, revised"}' });
@@ -448,7 +450,7 @@ describe("a description per workflow", () => {
 
   it("keeps a baseline per description, so settling one does not erase another's", async () => {
     await syncDocument();
-    service.writeFile({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH, text: REWRITTEN });
+    service.writeFile({ layer: "project", path: `.jaira/${WORKFLOW_DESCRIPTION_PATH}`, text: REWRITTEN });
     expect(service.syncStatus({ layer: "project", path: WORKFLOW_DESCRIPTION_PATH }).synced).toBe(true);
 
     await service.runSync({
@@ -457,7 +459,7 @@ describe("a description per workflow", () => {
       direction: "document",
       fake: fake({ document: { text: REWRITTEN, changes: [] } }) as never,
     });
-    service.writeFile({ layer: "project", path: planPath, text: REWRITTEN });
+    service.writeFile({ layer: "project", path: `.jaira/${planPath}`, text: REWRITTEN });
 
     // Both, at once. The old file held ONE record and rejected it when the document did not match,
     // so accepting the second sync silently dropped the first one's baseline.
@@ -517,7 +519,7 @@ describe("nested descriptions", () => {
       direction: "document",
       fake: fake({ document: { text: REWRITTEN, changes: [] } }) as never,
     });
-    service.writeFile({ layer: "project", path: planMd, text: REWRITTEN });
+    service.writeFile({ layer: "project", path: `.jaira/${planMd}`, text: REWRITTEN });
     expect(service.syncStatus({ layer: "project", path: planMd }).synced).toBe(true);
 
     // Inside `critique`, which `critique.md` owns.

@@ -79,6 +79,22 @@ export interface JairaUiState {
   /** Folded branches, by tree id, each the list of row keys that are SHUT. */
   shut: Record<string, string[]>;
   /**
+   * Unfolded branches, by tree id — the POSITIVE twin of {@link shut}, for a tree that defaults to
+   * collapsed.
+   *
+   * A second map rather than a flag on the first, because the two are not the same question and the
+   * reasoning behind `shut` is worth keeping intact. That reasoning — store what is folded, so a
+   * branch created after the file was written is not hidden by a preference nobody expressed —
+   * assumes a tree small enough that expanded is the sane default. The Files tree stopped being one
+   * when it was rooted at the checkout: expanding everything by default draws thousands of rows of
+   * `packages/`, and a folder appearing collapsed is then exactly right rather than a fault.
+   *
+   * So which map a tree uses is a statement about what its default IS, and reading the wrong one is
+   * impossible: the ids live in different tables (`uiState.ts`), and a settings file written before
+   * this existed has no entry here at all.
+   */
+  unfolded: Record<string, string[]>;
+  /**
    * How far each conversation has been READ, by task id: the `updatedAt` of the newest turn the
    * person has actually had on screen.
    *
@@ -150,6 +166,18 @@ export interface JairaSettings {
    * exist to avoid — a font stack is not "how big is this pane".
    */
   appearance: Appearance;
+  /**
+   * This person's additions to what the Files tree hides (`./hiddenPaths`).
+   *
+   * Applied AFTER `config.files.hidden`, and last match wins, so this list can do the two things a
+   * shared one cannot: hide something only you find noisy, and reveal something the project hid.
+   * `!system` is the second case and the reason the rule is ordered rather than a union — wanting to
+   * read a run's journal is not a reason to edit a file everybody shares.
+   *
+   * Empty for almost everybody, and that is the intended shape: the defaults are already right, and
+   * this is the escape hatch for when they are not.
+   */
+  filesHidden: string[];
 }
 
 /**
@@ -211,12 +239,12 @@ export function defaultAppearance(): Appearance {
 }
 
 export function defaultSettings(): JairaSettings {
-  return { theme: "light", wrapJson: false, ui: defaultUiState(), appearance: defaultAppearance(), projects: [] };
+  return { theme: "light", wrapJson: false, ui: defaultUiState(), appearance: defaultAppearance(), projects: [], filesHidden: [] };
 }
 
 /** No layout remembered yet — every control opens at its own default. */
 export function defaultUiState(): JairaUiState {
-  return { panes: {}, open: {}, modes: {}, shut: {}, seen: {} };
+  return { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} };
 }
 
 /**
@@ -246,6 +274,18 @@ export function parseSettings(raw: unknown): JairaSettings {
     ui: parseUiState(doc["ui"]),
     appearance: parseAppearance(doc["appearance"]),
     projects: parseProjects(doc["projects"]),
+    // Trimmed and de-duplicated, dropping anything that is not a usable pattern. Forgiving like the
+    // rest of this file: one unreadable entry is no reason to reset what a person can see.
+    filesHidden: Array.isArray(doc["filesHidden"])
+      ? [
+          ...new Set(
+            (doc["filesHidden"] as unknown[])
+              .filter((p): p is string => typeof p === "string")
+              .map((p) => p.trim())
+              .filter((p) => p.length > 0 && p !== "!"),
+          ),
+        ]
+      : [],
     ...(typeof baseDir === "string" && baseDir.length > 0 ? { baseDir } : {}),
   };
 }
@@ -309,6 +349,11 @@ function parseUiState(raw: unknown): JairaUiState {
     // De-duplicated on the way in: the renderer treats these as sets, and a file that grew a
     // duplicate by hand should not make one row take two clicks to unfold.
     if (Array.isArray(keys)) ui.shut[id] = [...new Set(keys.filter((key): key is string => typeof key === "string"))];
+  }
+  for (const [id, keys] of Object.entries(objectOf(doc["unfolded"]))) {
+    // De-duplicated on the way in: the renderer treats these as sets, and a file that grew a
+    // duplicate by hand should not make one row take two clicks to unfold.
+    if (Array.isArray(keys)) ui.unfolded[id] = [...new Set(keys.filter((key): key is string => typeof key === "string"))];
   }
   for (const [taskId, at] of Object.entries(objectOf(doc["seen"]))) {
     // Finite and positive, like a pane size: this is compared against a task's `updatedAt`, and a

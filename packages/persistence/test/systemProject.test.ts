@@ -17,7 +17,7 @@
  * layout is the base's own rather than a project's nested inside it, and that nothing generated
  * lands beside the things a person authors.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -82,6 +82,39 @@ describe("openSharedProject — the selected root, as a project", () => {
     expect(patterns).not.toContain("system/snapshots/");
     expect(patterns).not.toContain("system/artifacts/");
     expect(patterns).not.toContain("system/");
+  });
+
+  it("keeps the machine key out of every repository, however the root was created", () => {
+    // A stronger reason than the rest of this list: the key SIGNS what this disk has agreed to run,
+    // so a committed one hands every clone the ability to mint approvals here.
+    track(openSharedProject({ baseDir }));
+    expect(readFileSync(join(baseDir, ".gitignore"), "utf8")).toContain("system/machine.key");
+  });
+
+  it("adds the key to an ignore file written before the key existed", () => {
+    // The template is only written when there is NO file, which is right for every other line and
+    // wrong for this one: roots created before this release have an ignore file that predates the
+    // secret, and leaving them alone means leaving the secret committable.
+    const old = join(baseDir, ".gitignore");
+    mkdirSync(baseDir, { recursive: true });
+    writeFileSync(old, "system/jaira.db\n# a comment somebody added\n", "utf8");
+
+    track(openSharedProject({ baseDir }));
+
+    const ignore = readFileSync(old, "utf8");
+    expect(ignore).toContain("system/machine.key");
+    // Nothing else touched — the point is one line, not a rewrite of somebody's edits.
+    expect(ignore).toContain("# a comment somebody added");
+  });
+
+  it("leaves an ignore file alone when the key is already covered", () => {
+    const old = join(baseDir, ".gitignore");
+    mkdirSync(baseDir, { recursive: true });
+    // Ignoring the whole directory covers the key, so there is nothing to add and nothing to say.
+    const wholesale = "system/\n";
+    writeFileSync(old, wholesale, "utf8");
+    track(openSharedProject({ baseDir }));
+    expect(readFileSync(old, "utf8")).toBe(wholesale);
   });
 
   it("searches only itself — there is no layer behind the layer", () => {

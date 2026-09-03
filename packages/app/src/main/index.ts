@@ -336,7 +336,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "task:rename": ((request: Parameters<typeof service.renameTask>[0]) => service.renameTask(request)) as Handler,
   "board:view": ((request: { level?: string; project?: string } | undefined) => service.board(request ?? {})) as Handler,
   "board:roots": ((request: { project?: string } | undefined) => service.boardRoots(request ?? {})) as Handler,
-  "files:tree": (() => service.filesTree()) as Handler,
+  "files:tree": ((request: { project?: string } | undefined) => service.filesTree(request)) as Handler,
   "state:view": ((request: { stateId: string; project?: string }) =>
     service.stateView(request.stateId, request.project)) as Handler,
   "state:slots": ((request: { stateIds: string[]; project?: string }) =>

@@ -85,6 +85,37 @@ describe("the merged document is what gets validated", () => {
     expect(() => parseConfig({ workflows: { path: ["lib"] } })).toThrow(/\$BASE/);
   });
 
+  it("leaves the hidden-path list ABSENT, which means the defaults", () => {
+    // Same reading as the search path above, and the same reason: an absent key is "no opinion",
+    // and `[]` is a project saying *show everything*. A parser that defaulted one to the other
+    // would make the second statement impossible to write.
+    expect(parseConfig({}).files.hidden).toBeUndefined();
+    expect(parseConfig({ files: { hidden: [] } }).files.hidden).toEqual([]);
+  });
+
+  it("keeps the hidden patterns in the order they were written", () => {
+    // Order is the semantics — last match wins — so a parser that sorted or de-duplicated would
+    // silently change which rule decides.
+    const hidden = parseConfig({ files: { hidden: ["system", "!system", "drafts/**"] } }).files.hidden;
+    expect(hidden).toEqual(["system", "!system", "drafts/**"]);
+  });
+
+  it("refuses a hidden entry that is not a usable pattern, rather than dropping it", () => {
+    // Strict where `user-settings.json` is forgiving: this one is authored and reviewed, and a
+    // silently ignored entry is a folder that keeps showing with nothing to say why — which is the
+    // exact failure this setting exists because of.
+    expect(() => parseConfig({ files: { hidden: ["  "] } })).toThrow(/files\.hidden\[0\]/);
+    expect(() => parseConfig({ files: { hidden: "system" } })).toThrow(/array/);
+    expect(() => parseConfig({ files: [] })).toThrow(/config\.files/);
+  });
+
+  it("lets a project replace the base's hidden list rather than adding to it", () => {
+    // Arrays replace, as everywhere else in this document: a project that could only ADD could
+    // never stop hiding something the base hid.
+    const merged = mergeConfigDocuments({ files: { hidden: ["system"] } }, { files: { hidden: ["drafts"] } });
+    expect(parseConfig(merged).files.hidden).toEqual(["drafts"]);
+  });
+
   it("reads the executor fields off every kind of executor", () => {
     const config = parseConfig({
       agents: {

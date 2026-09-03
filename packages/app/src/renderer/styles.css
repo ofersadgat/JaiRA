@@ -11399,3 +11399,97 @@ fieldset.reading {
 .rail-tip.on {
   opacity: 1;
 }
+
+/* --- the Files screen's rule lists -----------------------------------------
+   A rule is a path pattern, so the patterns are set in the data voice — the voice of the tree they
+   filter. Chips in a row rather than a column of full-width rows, for the reason the font stack is:
+   these are ONE ordered instruction read left to right, and stacked rows read as separate settings
+   that happen to share a heading. */
+.rule-stack {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+  padding: 4px 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--panel);
+}
+.rule-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 4px 2px 6px;
+  border-radius: var(--control-radius-sm);
+  background: var(--fill-ghost-hover);
+}
+/* Hide or reveal, as a mark rather than a leading `!`: the two are opposite instructions, and one
+   punctuation character at the head of a path is not a difference the eye catches while scanning. */
+.rule-mark {
+  flex: none;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 0.85);
+  line-height: 1;
+}
+.rule-chip.reveal {
+  background: var(--tint-ok);
+}
+.rule-chip.reveal .rule-mark {
+  color: var(--accent);
+}
+.rule-pattern {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The defaults, drawn while nobody has taken the list over: a statement of what is happening rather
+   than a choice somebody made, so it is quieter and carries the word instead of a ✕. */
+.rule-chip.is-ours {
+  background: transparent;
+  border: 1px dashed var(--line);
+}
+.rule-origin {
+  flex: none;
+  padding-right: 2px;
+}
+.rule-drop {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  border-radius: 4px;
+  font-size: calc(var(--size-app) * 0.8);
+  line-height: 1;
+}
+.rule-drop:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--fill-ghost-selected);
+}
+/* Borderless and sized to what is typed, so the field reads as the end of the list rather than as a
+   second control beside it. */
+.rule-add {
+  flex: 1;
+  min-width: 120px;
+  padding: 2px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+}
+.rule-add:focus {
+  outline: none;
+}
+.rule-effect {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+}

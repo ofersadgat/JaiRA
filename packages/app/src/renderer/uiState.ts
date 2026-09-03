@@ -146,7 +146,6 @@ export const FOLD_DEFAULTS: Record<string, boolean> = {
  * that is not open.
  */
 export const SHUT = {
-  folders: "files.folders",
   /**
    * Folded STATES in a run's conversation — see `Sheet` in `sessionPanels.tsx`.
    *
@@ -156,6 +155,24 @@ export const SHUT = {
    * would key on an id the engine chose (`default` on most runs) and collide across tasks.
    */
   runStates: "run.states",
+} as const;
+
+/**
+ * Ids for the collapsible trees that default to COLLAPSED, whose entries are the rows a person has
+ * opened (see {@link JairaUiState.unfolded}).
+ *
+ * The Files tree is here and not in {@link SHUT} because of what it is rooted at now: a checkout,
+ * not a `.jaira/`. Expanded-by-default over `packages/` and `docs/` is a first paint of thousands of
+ * rows and a scrollbar the size of a hair — and, worse, it is a tree you have to fold up before you
+ * can see its shape. Collapsed by default makes opening a folder mean something.
+ *
+ * `folders` keeps the same `layer:path` key {@link SHUT} used, and for the same reason: per LAYER
+ * rather than per checkout, so the remembered set does not grow without bound as projects come and
+ * go. Two projects that both have a `.jaira/workflows/review/` share whether it is open, which is
+ * the trade that buys it.
+ */
+export const OPENED = {
+  folders: "files.folders",
 } as const;
 
 /**
@@ -291,6 +308,23 @@ export function toggleShut(ui: JairaUiState, id: string, key: string): JairaUiSt
   const current = ui.shut[id] ?? [];
   const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
   return { ...ui, shut: { ...ui.shut, [id]: next } };
+}
+
+/**
+ * The OPEN rows of one tree — the positive twin of {@link shutOf}, for a tree that defaults shut.
+ *
+ * A fresh Set per call, exactly as `shutOf` is, and with the same warning: hold it for a render and
+ * ask again on the next one rather than feeding it to a memo dependency.
+ */
+export function unfoldedOf(ui: JairaUiState, id: string): ReadonlySet<string> {
+  return new Set(ui.unfolded[id] ?? []);
+}
+
+/** Open a row, or close it. */
+export function toggleUnfolded(ui: JairaUiState, id: string, key: string): JairaUiState {
+  const current = ui.unfolded[id] ?? [];
+  const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
+  return { ...ui, unfolded: { ...ui.unfolded, [id]: next } };
 }
 
 

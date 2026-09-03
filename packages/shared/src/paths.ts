@@ -23,6 +23,13 @@ import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { SETTINGS_FILE_NAME, USER_SETTINGS_FILE_NAME } from "./settings";
+// Declared in `./hiddenPaths` rather than here, and re-exported so `@jaira/shared` is unchanged:
+// the Files screen needs the spelling too, and this module imports `node:fs`, which a renderer
+// bundle must not. A second constant with the same value was the alternative, and a spelling three
+// things have to agree on is exactly what must not be written twice.
+import { JAIRA_DIR_NAME, SYSTEM_DIR_NAME } from "./hiddenPaths";
+
+export { JAIRA_DIR_NAME, SYSTEM_DIR_NAME };
 
 export interface JairaPaths {
   projectDir: string;
@@ -137,19 +144,30 @@ export interface JairaBasePaths {
   envFile: string;
   envLocalFile: string;
   /**
-   * What the user has agreed to RUN — the approved content hash of every js/ts function module
-   * (SPEC §7.5.5).
-   *
-   * One store per machine rather than per project, because that is what an approval is a statement
-   * about: a file on one disk. A project's `functions/` and the base's are approved into the same
-   * table, keyed by absolute path, so approving `$BASE/functions/confidence.ts` once covers every
-   * project that resolves it.
-   *
-   * **Never synced, and gitignored for the same reason.** Propagating approvals would let one
-   * compromised machine confer trust on the rest — which is precisely the property the strong form
-   * of the rule ("an unknown file is an unapproved file") exists to hold.
+   * @deprecated The approvals moved into the base database's `module_approvals` table, where each
+   * row carries an HMAC (see {@link machineKeyFile}). This path is kept only so the store can find
+   * a pre-move file and import it once; nothing writes here any more.
    */
   approvalsFile: string;
+  /**
+   * The machine's integrity key — a secret generated at first use and never leaving this disk.
+   *
+   * It keys the HMAC on every approval row. The point is the SEPARATION: what a person has agreed
+   * to run lives in the database, and what proves they agreed lives in a file beside it, so writing
+   * a row into the table is not the same as being approved. A process that appends a hash without
+   * also having found and read this key produces a row that fails verification, and an approval
+   * that fails verification is read as no approval at all.
+   *
+   * **What this defends against, honestly.** It stops a writer that does not know about the scheme
+   * — another application, or an agent that finds the store and appends to it. It does NOT stop a
+   * process running as you that reads this file: same user, same secret, valid MACs. Raising that
+   * bar needs an OS keychain, and the keychain here is Electron's, while the CLI approves and runs
+   * modules too — one of the two would then be unable to verify what the other wrote.
+   *
+   * **Never synced, never committed, and not in the database it protects.** A key stored beside the
+   * rows it authenticates would authenticate whoever could write the rows.
+   */
+  machineKeyFile: string;
   /** Everything JaiRA generates for this root — see {@link JairaPaths.systemDir}. */
   systemDir: string;
   /** Run state for the base opened as a project — see the amendment above. */
@@ -164,19 +182,10 @@ export interface JairaBasePaths {
   syncFile: string;
 }
 
-export const JAIRA_DIR_NAME = ".jaira";
+
 export const WORKTREES_DIR_NAME = ".jaira-worktrees";
 
 
-/**
- * The one subdirectory of a root that a person does not own.
- *
- * Everything JaiRA generates goes in it — the database, tasks, snapshots, logs, artifacts — and
- * nothing a person authors does. That is the whole rule, and it is worth a constant because three
- * separate things have to agree on the spelling: the path builders here, the `.gitignore` the
- * layout writes, and the `$SYSTEM` an artifact destination resolves.
- */
-export const SYSTEM_DIR_NAME = "system";
 
 /**
  * The env var that relocates the shared root.
@@ -263,6 +272,7 @@ export function jairaBasePaths(baseDir: string = defaultBaseDir()): JairaBasePat
     // `system/` shares. The approvals store is the one that used to sit at the top of the root
     // anyway, where its `.local.json` suffix was doing the explaining this directory now does.
     approvalsFile: join(system, "approvals.local.json"),
+    machineKeyFile: join(system, "machine.key"),
     dbFile: join(system, "jaira.db"),
     snapshotsDir: join(system, "snapshots"),
     tasksDir: join(system, "tasks"),

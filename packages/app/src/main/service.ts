@@ -45,6 +45,7 @@ import {
   buildTaskLoad,
   rehydrateArtifactInputs,
   releaseRevivedFailures,
+  resetUserModules,
   releaseUnconsumedFailures,
   loadSnapshot,
   userModules,
@@ -52,6 +53,7 @@ import {
   prepareUserModules,
   resolveUserFunctions,
   gitFor,
+  type HiddenRules,
   boardForState,
   boardView,
   browseBaseWorkflows,
@@ -207,8 +209,10 @@ import {
 } from "@jaira/runtime";
 import {
   ARTIFACT_SCHEME,
+  compileHidden,
   defaultSettings,
   descriptionRootOf,
+  hiddenRules,
   isComponentName,
   isStartableStatus,
   isTextMime,
@@ -1354,6 +1358,11 @@ export class AppService {
     }
     await this.closeUserSessions();
     for (const session of [...this.sessions.values()]) await this.closeSession(session.key);
+    // The approval store is PROCESS-wide rather than per session — it is keyed by absolute path and
+    // spans every project (see `approvalsIn`) — so no session close releases it. It holds an open
+    // connection to the base database, and a service that shut down while still holding one leaves
+    // the root it was using locked.
+    resetUserModules();
   }
 
   /** Whether {@link close} has run. A closed service answers; it does not re-open anything. */
@@ -1802,41 +1811,60 @@ export class AppService {
   }
 
   /**
-   * The Files view's left panel: every open project, then the shared root ONCE beside them.
+   * The Files view's left panel: the ROOT the shell is standing on, and nothing else.
    *
-   * The projects are the tree's top level (SHELL.md §2.2). `~/.jaira` is their sibling rather than a
-   * branch under each, because it is machine-global — drawing it per project would show the same
-   * directory three times and invite somebody to wonder which copy they were editing.
+   * `request.project` is `AppState.at` — where you have navigated (SHELL.md §2.2). What it selects:
    *
-   * With no project open you still get the shared root, for the same reason it is listed at all:
-   * `~/.jaira` exists independently of any checkout, and its workflows are the ones every project
-   * can reach. Showing nothing until a project is open would hide the one place you can author
-   * something that outlives this checkout — exactly when a new user is looking for somewhere to
-   * start.
+   *  - **A checkout** — that project's own `.jaira/`, alone. Its files are the ones actually in that
+   *    project's folder, which is the whole rule this panel now follows.
+   *  - **The shared root** — `~/.jaira`, browsed as the place it is. It has a sidebar row of its
+   *    own, so it is reached by standing in it rather than by appearing inside every checkout.
+   *  - **The root, "all projects"** — every open checkout side by side, which is what that place
+   *    means. Still no `~/.jaira`: it is not in any project's folder either.
+   *
+   * The shared root used to be appended to all of these, as a sibling of the projects. That is what
+   * put `functions/`, `prompts/`, `skills/` and `workflows/` under a checkout that contains none of
+   * them — four folders from `C:\Users\<you>\.jaira` presented as if they were the project's, and
+   * for a project whose own `.jaira/` holds nothing but configuration, they were the ONLY thing in
+   * the tree. A layer you resolve against is not a folder you are in.
+   *
+   * With nothing open at all it is still `~/.jaira`, and that is not an exception to the rule: with
+   * no project to stand in, the shared root is the only place there is, and its workflows are the
+   * ones that outlive any checkout.
    */
-  filesTree(): FileTree {
+  filesTree(request?: { project?: ProjectRef }): FileTree {
     const open = this.userSessions();
-    if (open.length === 0) {
-      const baseDir = jairaBasePaths(this.baseDir).baseDir;
+    const at = request?.project;
+    const baseDir = jairaBasePaths(this.baseDir).baseDir;
+    const baseTree = (): FileTree => {
+      const hidden = this.hiddenRulesFor(this.effectiveConfig());
       // Linted against the shared project's own tasks when it is open, so a state a run is pinned to
       // reports drift here the same way it would in a checkout.
       const shared = this.sharedIfPresent();
-      if (shared !== undefined) return baseFileTree(baseDir, browseBaseWorkflows(baseDir, {}, shared.project));
+      if (shared !== undefined) return baseFileTree(baseDir, browseBaseWorkflows(baseDir, {}, shared.project), hidden);
       // Linted with no project open, exactly as a project's tree is. The shared root is where a
       // workflow meant to outlive one checkout gets authored, so leaving it unvalidated meant the one
       // mode people write shared workflows in was the one mode that never said anything was wrong.
-      return baseFileTree(baseDir, browseBaseWorkflows(baseDir));
-    }
+      return baseFileTree(baseDir, browseBaseWorkflows(baseDir), hidden);
+    };
+
+    if (open.length === 0) return baseTree();
+    // Standing IN the shared root: it is a project row like any other, and this is what selecting it
+    // shows. Asked before the session lookup because the alias never resolves to a user session.
+    if (at === SHARED_SESSION || (at !== undefined && sessionKey(at) === sessionKey(baseDir))) return baseTree();
+
     // One tree per project, each of which also produced its own view of the shared root — the two
-    // are linted TOGETHER, so a project's copy of a base state can be marked as shadowing it.
-    const trees = open.map((session) => fileTree(session.project, this.browseWorkflowsIn(session)));
-    const roots = trees.flatMap((tree) => tree.roots.filter((root) => root.layer === "project"));
-    // The shared root, from the FIRST project's tree, with its shadow marks reduced across all of
-    // them: a base file is only never-the-one-that-loads if EVERY open project overrides it. With one
-    // project open that is exactly what it meant before, which is the case this has to keep.
-    const base = trees[0]!.roots.find((root) => root.layer === "base");
-    if (base !== undefined) roots.push(trees.length === 1 ? base : { ...base, nodes: sharedShadows(trees) });
-    return { roots };
+    // are linted TOGETHER, so a project's copy of a base state can be marked as shadowing it. The
+    // base root is dropped from the OUTPUT rather than from the walk, because that shadow mark is
+    // exactly what a project's own rows need in order to say they override something.
+    const shown = at === undefined ? open : open.filter((session) => sessionKey(session.dir) === sessionKey(at));
+    // An `at` naming a project this window does not have open is a stale address, not an error worth
+    // an empty panel: fall back to every open project, which is what the root shows.
+    const sessions = shown.length > 0 ? shown : open;
+    const trees = sessions.map((session) =>
+      fileTree(session.project, this.browseWorkflowsIn(session), this.hiddenRulesFor(session.project.config)),
+    );
+    return { roots: trees.flatMap((tree) => tree.roots.filter((root) => root.layer === "project")) };
   }
 
   /**
@@ -4983,8 +5011,12 @@ export class AppService {
    * silent data loss.
    */
   readFile(request: ReadFileRequest): FileSource {
-    const file = this.layerFile(request.path, request.layer, request.project);
-    const mime = mimeOfPath(request.path);
+    const file = this.treeFile(request.path, request.layer, request.project);
+    // A file OUTSIDE the layer keeps its own path here, which is right: `mimeOfPath` falls through
+    // to the extension for anything it does not recognise by position, and a checkout's source file
+    // is exactly that.
+    const named = this.layerPathOf(request.path, request.layer, request.project) ?? request.path;
+    const mime = mimeOfPath(named);
     if (!isTextMime(mime)) throw this.refusal("file", `'${request.path}' is ${mime}, which is not text`);
     const exists = existsSync(file);
     if (exists && statSync(file).isDirectory()) throw this.refusal("file", `'${request.path}' is a directory`);
@@ -4998,7 +5030,7 @@ export class AppService {
       mime,
       text: exists ? readFileSync(file, "utf8") : "",
       exists,
-      ...(this.stateIdOf(request.path) ?? {}),
+      ...(this.stateIdOf(named) ?? {}),
     };
   }
 
@@ -5325,16 +5357,20 @@ export class AppService {
    * depends on the untrusted half of the boundary choosing correctly is not a check at all.
    */
   writeFile(request: WriteFileRequest): FileSource {
-    const mime = mimeOfPath(request.path);
+    // How the LAYER spells this file, which is what everything below keys on: the mime that decides
+    // whether it is a state, the state id echoed back, and the sync baseline. A file outside the
+    // layer keeps its own path — it is none of those things, and `mimeOfPath` reads it by extension.
+    const named = this.layerPathOf(request.path, request.layer, request.project) ?? request.path;
+    const mime = mimeOfPath(named);
     if (!isTextMime(mime)) throw this.refusal("file", `'${request.path}' is ${mime}, which is not text`);
     if (mime === WORKFLOW_JSON) throw this.refusal("file", `'${request.path}' is a state file — write it through workflow:write`);
-    const file = this.layerFile(request.path, request.layer, request.project);
+    const file = this.treeFile(request.path, request.layer, request.project);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, request.text, "utf8");
     this.publish({ type: "store:invalidate", scope: "workflows" });
     // Saving what a sync proposed is what accepts it — the description goes through here, and so
     // does a `.jsonc` state file.
-    this.noteSyncWrite(request.layer, request.path);
+    this.noteSyncWrite(request.layer, named);
     return {
       layer: request.layer,
       path: request.path,
@@ -5342,7 +5378,7 @@ export class AppService {
       mime,
       text: request.text,
       exists: true,
-      ...(this.stateIdOf(request.path) ?? {}),
+      ...(this.stateIdOf(named) ?? {}),
     };
   }
 
@@ -5368,7 +5404,7 @@ export class AppService {
    * file" that quietly emptied an existing one is the worst possible reading of the verb.
    */
   createFile(request: CreateFileRequest): { file: string } {
-    const file = this.layerFile(request.path, request.layer, request.project);
+    const file = this.treeFile(request.path, request.layer, request.project);
     if (existsSync(file)) throw this.refusal("file", `'${request.path}' already exists`);
     if (request.kind === "directory") {
       mkdirSync(file, { recursive: true });
@@ -5392,8 +5428,8 @@ export class AppService {
    * question a state rename asks, applied to the whole set: who outside it names something inside?
    */
   renameFile(request: RenameFileRequest): FileMutationResult {
-    const from = this.layerFile(request.path, request.layer, request.project);
-    const to = this.layerFile(request.to, request.layer, request.project);
+    const from = this.treeFile(request.path, request.layer, request.project);
+    const to = this.treeFile(request.to, request.layer, request.project);
     if (!existsSync(from)) throw this.refusal("file", `'${request.path}' does not exist in the ${request.layer} root`);
     if (from === to) throw this.refusal("file", "the source and destination are the same path");
     if (existsSync(to)) throw this.refusal("file", `'${request.to}' already exists`);
@@ -5421,7 +5457,7 @@ export class AppService {
    * that named them would only report it at load time.
    */
   deleteFile(request: DeleteFileRequest): FileMutationResult {
-    const file = this.layerFile(request.path, request.layer, request.project);
+    const file = this.treeFile(request.path, request.layer, request.project);
     if (!existsSync(file)) throw this.refusal("file", `'${request.path}' does not exist in the ${request.layer} root`);
 
     const states = this.statesUnder(file, request.layer, request.project);
@@ -6391,14 +6427,72 @@ export class AppService {
    * state id. One implementation for create, rename and delete: three copies of a containment check
    * is how two of them stay right and the third quietly does not.
    */
-  private layerFile(path: string, layer: WorkflowLayer, project?: string): string {
-    const root = layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject(project).paths.jairaDir;
+  /**
+   * One containment check, shared by both address spaces.
+   *
+   * A path that escapes its root is refused rather than clamped: `../../etc/passwd` is not a typo to
+   * be helpfully corrected, and the two resolvers must agree about that or the stricter one is the
+   * only one anybody tests.
+   */
+  private contained(root: string, path: string, layer: WorkflowLayer): string {
     const file = resolvePath(root, path);
     const rel = relative(root, file);
     if (rel.startsWith("..") || rel.length === 0 || resolvePath(root, rel) !== file) {
       throw this.refusal("file", `'${path}' is not inside the ${layer} root`);
     }
     return file;
+  }
+
+  /**
+   * A Files-view path, as the LAYER would spell it — or `undefined` for a file outside the layer.
+   *
+   * The bridge between the two address spaces {@link treeFile} describes. A project's paths are
+   * relative to the checkout, and three things still key on the layer's own shape: `mimeOfPath`
+   * knows a workflow by its `workflows/` prefix, `stateIdOf` derives an id the same way, and
+   * `settings.json` is recognised by being exactly that. Handing any of them `.jaira/workflows/x.json`
+   * gets a plain JSON file and no state — silently, which is the failure worth naming here.
+   *
+   * Measured rather than assumed to be `.jaira`, for the reason `prefixOf` is in the tree: a root
+   * whose layer sits directly under it has no prefix at all, and hard-coding one makes every file in
+   * it stop being a workflow.
+   */
+  private layerPathOf(path: string, layer: WorkflowLayer, project?: string): string | undefined {
+    if (layer === "base") return path;
+    const paths = this.requireProject(project).paths;
+    const prefix = relative(paths.projectDir, paths.jairaDir).split(sep).join("/");
+    if (prefix.length === 0) return path;
+    if (path === prefix) return "";
+    return path.startsWith(`${prefix}/`) ? path.slice(prefix.length + 1) : undefined;
+  }
+
+  /**
+   * The absolute file a `(path, layer)` pair names in the FILES VIEW's address space.
+   *
+   * There are two, and they differ for exactly one layer:
+   *
+   *  - **`project`** is rooted at the CHECKOUT here, and at `.jaira/` in {@link layerFile}. The tree
+   *    draws the checkout, so a row in it is addressed the way it is drawn — `README.md`, or
+   *    `.jaira/workflows/feature/plan.json` with the prefix it visibly has.
+   *  - **`base`** is `~/.jaira` in both, because the shared root IS its layer root. Nothing about
+   *    the base changes.
+   *
+   * Two spaces rather than one because two different things address files. The workflow SYNC writes
+   * `workflows/x.json` and `prompts/y.md` — paths it derives from a layer's own shape, with no
+   * checkout in the picture — and it must keep landing in `.jaira/`. Folding them together would
+   * either put a synced workflow at the top of somebody's repository or make every tree row carry a
+   * prefix the tree does not show. The containment check is the same in both, and is the reason
+   * either exists: one implementation for create, rename and delete, because three copies of a
+   * containment check is how two of them stay right and the third quietly does not.
+   */
+  private treeFile(path: string, layer: WorkflowLayer, project?: string): string {
+    const root =
+      layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject(project).paths.projectDir;
+    return this.contained(root, path, layer);
+  }
+
+  private layerFile(path: string, layer: WorkflowLayer, project?: string): string {
+    const root = layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject(project).paths.jairaDir;
+    return this.contained(root, path, layer);
   }
 
   /**
@@ -6467,6 +6561,17 @@ export class AppService {
       ...(Object.keys(config.executors).length > 0 ? { definitions: config.executors } : {}),
       ...(opts.memoCache !== undefined ? { memoCache: opts.memoCache } : {}),
     };
+  }
+
+  /**
+   * What this tree leaves out: the layered `config.files.hidden`, then the person's own list.
+   *
+   * Compiled per CALL rather than cached, because both halves can change under the app — a config
+   * write, a settings write, a project opened — and a stale filter is a folder that will not come
+   * back until a restart. A tree walk costs orders of magnitude more than compiling five globs.
+   */
+  private hiddenRulesFor(config: JairaConfigOf): HiddenRules {
+    return compileHidden(hiddenRules(config.files.hidden, this.readSettings().filesHidden));
   }
 
   /** The merged configuration, or plain defaults when no project is open. */

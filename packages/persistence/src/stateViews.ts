@@ -19,7 +19,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative, sep } from "node:path";
 import { parseReferencedFile, stateFilePath } from "@declarative-ai/hw";
-import { mimeOfPath, SETTINGS_FILE_NAME } from "@jaira/shared";
+import { compileHidden, hiddenRules, isHiddenPath, mimeOfPath, SETTINGS_FILE_NAME } from "@jaira/shared";
 import type {
   BoardCard,
   BoardView,
@@ -61,33 +61,76 @@ export interface StateViewOptions extends ViewOptions {
 
 // --- the file tree -----------------------------------------------------------
 
-/** Classify a path under a layer root by the directory it sits in. */
-function kindOf(relPath: string, name: string): FileKind {
-  const top = relPath.split("/")[0];
+/**
+ * Classify a path by the directory it sits in — asked of the path relative to the LAYER root.
+ *
+ * Which is not the path relative to the tree's root any more. A project's tree is rooted at the
+ * CHECKOUT, so `packages/app/src/index.ts` is an ordinary file with no layer at all and
+ * `.jaira/workflows/feature/plan.json` is a state — and the difference is exactly the `.jaira/`
+ * prefix, which {@link layerRelative} strips before asking.
+ */
+function kindOf(layerPath: string | undefined, name: string): FileKind {
+  if (layerPath === undefined) return "other";
+  const top = layerPath.split("/")[0];
   if (top === "workflows") return isStateFile(name) ? "workflow" : "other";
   if (top === "prompts") return "prompt";
   if (top === "skills") return "skill";
-  if (relPath === SETTINGS_FILE_NAME) return "config";
+  if (layerPath === SETTINGS_FILE_NAME) return "config";
   return "other";
 }
 
 /**
- * Directories that hold run state rather than authored source.
+ * The part of a tree path that is inside the layer root, or `undefined` for one that is not.
  *
- * They are excluded because the tree is an authoring surface: a snapshot directory with one folder
- * per pinned hash would bury `prompts/` under machine output, and nothing in it is editable.
+ * The tree's root and the LAYER's root are no longer the same directory. A project's tree is rooted
+ * at the checkout and its layer lives one directory down, so `.jaira/workflows/plan.json` declares a
+ * state and `README.md` is a file in the project and nothing else — asking what state that declares
+ * is a category error rather than a miss.
+ *
+ * `prefix` is MEASURED (`relative(treeRoot, layerRoot)`) rather than written as `.jaira`, because
+ * the two are not always different: a base root IS its own layer root, and so is any root whose
+ * layer sits directly under it. Hard-coding the directory name made every such root's files stop
+ * being states — silently, since a file with no layer path is simply an ordinary file.
  */
-const HIDDEN_DIRS: ReadonlySet<string> = new Set(["snapshots", "tasks", "worktrees", "artifacts", "node_modules"]);
+function layerRelative(treePath: string, prefix: string): string | undefined {
+  if (prefix.length === 0) return treePath;
+  if (treePath === prefix) return "";
+  return treePath.startsWith(`${prefix}/`) ? treePath.slice(prefix.length + 1) : undefined;
+}
+
+/** Where a layer root sits inside the tree root that contains it: `""` or `.jaira`, forward-slashed. */
+function prefixOf(treeRoot: string, layerRoot: string): string {
+  const rel = relative(treeRoot, layerRoot);
+  return rel.length === 0 ? "" : rel.split(sep).join("/");
+}
 
 /**
- * Run state that sits at the root rather than in a directory of its own.
+ * The compiled hidden-path rules a walk carries.
  *
- * The SQLite database and its write-ahead companions are not editable, not readable, and change on
- * every run — three rows of noise in a tree whose whole job is to show you what you can author.
+ * Passed down rather than read from a module constant because the rules are now a SETTING — layered
+ * config plus the person's own list (`hiddenPaths.ts`) — and two projects open in one window can
+ * disagree about them. Compiled by the CALLER, so the cost is per tree rather than a `RegExp` per
+ * pattern per directory entry.
+ *
+ * Both tree functions take it optionally and fall back to {@link defaultRules}, which is right for
+ * a test or a script and wrong for the app: a caller that means to honour the setting and forgets
+ * to pass it gets a plausible tree built from the wrong rules. `AppService.filesTree` is the one
+ * that must always pass it.
  */
-const isHiddenFile = (name: string): boolean => name === "jaira.db" || name.startsWith("jaira.db-");
+export type HiddenRules = ReturnType<typeof compileHidden>;
 
-function walkDir(root: string, dir: string, layer: WorkflowLayer, project?: string): FileNode[] {
+/** The rules a caller that has expressed no opinion gets: `system/` and dependencies. */
+const defaultRules = (): HiddenRules => compileHidden(hiddenRules(undefined));
+
+function walkDir(
+  root: string,
+  dir: string,
+  layer: WorkflowLayer,
+  hidden: HiddenRules,
+  /** Where this root's LAYER sits inside it — see {@link layerRelative}. */
+  prefix: string,
+  project?: string,
+): FileNode[] {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -96,11 +139,14 @@ function walkDir(root: string, dir: string, layer: WorkflowLayer, project?: stri
   }
   const nodes: FileNode[] = [];
   for (const entry of entries) {
-    if (entry.name.startsWith(".")) continue;
     const full = join(dir, entry.name);
     const rel = relative(root, full).split(sep).join("/");
+    // A leading dot is no longer a reason on its own. It used to be, and it could be while the tree
+    // showed only `.jaira/` — nothing in there starts with one except the `.gitignore` the layout
+    // writes. A tree rooted at the CHECKOUT has to draw `.jaira/` itself, so the rule cannot be
+    // "skip dot-entries"; it is the hidden list, which names `.git` and the rest and can be read.
+    if (isHiddenPath(rel, hidden)) continue;
     if (entry.isDirectory()) {
-      if (HIDDEN_DIRS.has(rel)) continue;
       nodes.push({
         path: rel,
         name: entry.name,
@@ -108,12 +154,13 @@ function walkDir(root: string, dir: string, layer: WorkflowLayer, project?: stri
         mime: mimeOfPath(rel, true),
         layer,
         ...(project !== undefined ? { project } : {}),
-        children: walkDir(root, full, layer, project),
+        children: walkDir(root, full, layer, hidden, prefix, project),
       });
       continue;
     }
-    if (!entry.isFile() || isHiddenFile(entry.name)) continue;
-    const kind = kindOf(rel, entry.name);
+    if (!entry.isFile()) continue;
+    const layerPath = layerRelative(rel, prefix);
+    const kind = kindOf(layerPath, entry.name);
     const node: FileNode = {
       path: rel,
       name: entry.name,
@@ -123,10 +170,12 @@ function walkDir(root: string, dir: string, layer: WorkflowLayer, project?: stri
       // Every node says which project it is in, so a file identifies itself — see `FileNode.project`.
       ...(project !== undefined ? { project } : {}),
     };
-    if (kind === "workflow") {
+    if (kind === "workflow" && layerPath !== undefined) {
       // The state id is the path under `workflows/`, minus the suffix — the same derivation the
-      // loader uses, so the tree and a `--workflow` argument name the same thing.
-      node.stateId = rel.replace(/^workflows\//, "").replace(/\.(json|ya?ml)$/i, "");
+      // loader uses, so the tree and a `--workflow` argument name the same thing. Taken from the
+      // LAYER path, so a project's `.jaira/workflows/feature/plan.json` is `feature/plan` and not
+      // `.jaira/feature/plan`.
+      node.stateId = layerPath.replace(/^workflows\//, "").replace(/\.(json|ya?ml)$/i, "");
     }
     nodes.push(node);
   }
@@ -150,7 +199,7 @@ function walkDir(root: string, dir: string, layer: WorkflowLayer, project?: stri
  * `existsSync` and yields an empty, still-usable branch: writing a state into it creates the
  * directory chain on the way.
  */
-export function fileTree(project: Project, browser?: WorkflowBrowser): FileTree {
+export function fileTree(project: Project, browser?: WorkflowBrowser, hidden?: HiddenRules): FileTree {
   const shadowed = new Set(
     (browser?.files ?? []).filter((f) => f.shadowed === true).map((f) => `${f.layer}:${f.stateId}`),
   );
@@ -158,9 +207,27 @@ export function fileTree(project: Project, browser?: WorkflowBrowser): FileTree 
     (browser?.files ?? []).filter((f) => f.error !== undefined).map((f) => [`${f.layer}:${f.stateId}`, f.error!]),
   );
   const lint = lintByStateId(browser);
-  const roots = project.paths.roots.map((dir, index) => {
-    const layer: WorkflowLayer = index === 0 ? "project" : "base";
-    const nodes = walkDir(dir, dir, layer, layer === "project" ? project.paths.projectDir : undefined);
+  const rules = hidden ?? defaultRules();
+  // The project layer is rooted at the CHECKOUT, not at `.jaira/`. A person's project is their
+  // files, and `.jaira/` is one directory in it — the tree said otherwise, and for a project that
+  // keeps its workflows in the shared root it therefore had nothing at all to draw. `paths.roots` is
+  // NOT what this iterates any more: that list is the workflow SEARCH PATH, and `<checkout>/workflows`
+  // is not where a state lives.
+  // `roots` is still what says whether there IS a layer behind this one — it is deduplicated when the
+  // base and the project resolve to the same directory — but its FIRST entry is `.jaira/`, and the
+  // tree wants the checkout that contains it. So the head is replaced and the tail is kept.
+  const layerRoots: Array<{ dir: string; layer: WorkflowLayer; prefix: string }> = [
+    {
+      dir: project.paths.projectDir,
+      layer: "project",
+      // Measured, not assumed: `.jaira` for an ordinary checkout, and empty for a root whose layer
+      // sits directly under it.
+      prefix: prefixOf(project.paths.projectDir, project.paths.roots[0] ?? project.paths.projectDir),
+    },
+    ...project.paths.roots.slice(1).map((dir) => ({ dir, layer: "base" as WorkflowLayer, prefix: "" })),
+  ];
+  const roots = layerRoots.map(({ dir, layer, prefix }) => {
+    const nodes = walkDir(dir, dir, layer, rules, prefix, layer === "project" ? project.paths.projectDir : undefined);
     const mark = (list: FileNode[]): void => {
       for (const node of list) {
         if (node.stateId !== undefined) {
@@ -378,8 +445,9 @@ export function baseStateView(
  * loaded. Shadowing cannot apply — there is no project layer to override anything — so nothing here
  * needs the browser.
  */
-export function baseFileTree(baseDir: string, browser?: WorkflowBrowser): FileTree {
-  const nodes = walkDir(baseDir, baseDir, "base");
+export function baseFileTree(baseDir: string, browser?: WorkflowBrowser, hidden?: HiddenRules): FileTree {
+  // A base root IS its layer root, so nothing is prefixed.
+  const nodes = walkDir(baseDir, baseDir, "base", hidden ?? defaultRules(), "");
   // Linted exactly as a project's tree is. Skipping it here was the whole of "validation is not
   // working": the shared root is browsable with nothing open, and that was the one surface in JaiRA
   // that listed state files and never said a word about them.
