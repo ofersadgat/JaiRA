@@ -1295,6 +1295,9 @@ button.side-twist:hover:not(:disabled) {
   font-size: calc(var(--size-app) * 12.5 / 12.5);
 }
 .tree-root {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   color: var(--dim);
   font-size: calc(var(--size-app) * 10.5 / 12.5);
   letter-spacing: 0.08em;
@@ -1515,11 +1518,68 @@ button.side-twist:hover:not(:disabled) {
   font-size: calc(var(--size-app) * 11 / 12.5);
   line-height: 1.45;
 }
-.new-state {
+/* The `+` a folder carries: the same three verbs the row's own `+` offers, for THIS folder.
+   Hidden until the row is hovered or the button is tabbed to — a column of plus signs down a tree
+   is a column of things to click by accident — but it still takes its width, so a row does not
+   reflow under the pointer. */
+.tree-add {
+  width: 16px;
+  height: 16px;
+  flex: none;
   display: grid;
-  gap: 5px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 12 / 12.5);
+  line-height: 1;
+  opacity: 0;
+}
+.tree-item:hover > .tree-add,
+.tree-root:hover > .tree-add,
+.tree-add:focus-visible {
+  opacity: 1;
+}
+.tree-add:hover {
+  color: var(--text);
+  background: var(--fill-ghost-selected);
+}
+
+/* The row that does not exist yet — a name being typed where the thing it names will be.
+   It wears the tree's own row: the same guides, the same glyph column, the same height. What is
+   different is that it is not a place you can click, so it takes neither the hover nor the pointer
+   that says a row can be opened. */
+.tree-draft {
+  cursor: default;
+}
+.tree-draft:hover {
+  background: transparent;
+}
+/* The folders on the path that do not exist yet — `workflows/` for a workflow in a project that has
+   never had one. Dim, and in the data face beside the field, because it is a piece of the path being
+   made and not a label about it. */
+.draft-lead {
+  flex: none;
+  color: var(--dim);
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11.5 / 12);
+}
+.draft-name {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--accent);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11.5 / 12);
+}
+.draft-name:focus {
+  outline: none;
 }
 
 /* --- the address bar, which is the top row of the window ---

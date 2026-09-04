@@ -421,6 +421,14 @@ that was in the built column:
   250px column, on screen whether or not anybody was searching or creating, and
   all of them one fold away from the row that names them. They are `+` and `⌕` on
   the row now, and what they reveal appears in the drawer only while it is on.
+- **`+` on Files asks WHICH, never where.** It drops a menu — new file, new
+  folder, new workflow — and the name is then typed into a row in the tree, at
+  the place the thing will be: the folder above it is the answer to "where", so
+  the form that used to ask it (a name, a layer picker and a Create button, at
+  the foot of the column) is gone. Every folder carries the same `+` on hover,
+  for itself; a workflow is offered only on `.jaira/` and what is inside it,
+  because a root state has one home and pressing it there unfolds
+  `.jaira/workflows/` to show the row being named.
 - **The row is a container, not a button.** Forced rather than chosen: a
   `<button>` inside a `<button>` is not markup a browser keeps.
 

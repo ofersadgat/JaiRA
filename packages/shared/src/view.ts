@@ -505,6 +505,19 @@ export interface FileRoot {
   /** What to call it: the project's basename, or `~/.jaira` for the shared root. */
   label: string;
   dir: string;
+  /**
+   * Where this root's LAYER sits inside it, root-relative and without a trailing slash.
+   *
+   * `.jaira` for an ordinary checkout — the tree is rooted at the checkout, so `workflows/` is at
+   * `.jaira/workflows` — and `""` for the shared root, which IS its own layer. Carried rather than
+   * re-derived because every question the tree asks about a path is asked through it: whether a
+   * directory is under `workflows/` (so it can offer a state), whether it is inside `.jaira/` at all
+   * (so it can offer a workflow), and what a new file's path is relative to. A renderer that guessed
+   * `.jaira` would be wrong for the shared root and for a checkout whose layer sits directly under
+   * it, and the guess is exactly what made "New state here…" unreachable in a project's own
+   * `workflows/` folder.
+   */
+  prefix: string;
   exists: boolean;
   nodes: FileNode[];
 }

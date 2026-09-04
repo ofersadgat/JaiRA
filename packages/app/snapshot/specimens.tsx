@@ -13,6 +13,8 @@ import { useMemo, useState, type JSX, type ReactNode } from "react";
 import type {
   BoardCard,
   BoardView,
+  FileNode,
+  FileRoot,
   FileTree,
   InstanceAddress,
   InstanceNode,
@@ -27,6 +29,7 @@ import { Board } from "../src/renderer/board";
 import { ComponentGallery } from "../src/renderer/componentGallery";
 import { Pill, Pills } from "../src/renderer/pill";
 import { Sidebar, type SidebarAct } from "../src/renderer/sidebar";
+import { FileTreePanel, stateDraft, type TreeDraft } from "../src/renderer/files";
 import { StateGraphView } from "../src/renderer/stateGraphView";
 import { StatePanel } from "../src/renderer/statePanel";
 import { ValuePanelContext, type PinnedValue } from "../src/renderer/valuePanel";
@@ -437,6 +440,95 @@ const PROMPT_FILE = [
   "- one line each",
   "- no solutions, only outcomes",
 ].join("\n");
+
+// --- the Files drawer, making something new ----------------------------------
+
+const dirNode = (path: string, children: FileNode[]): FileNode => ({
+  path,
+  name: path.slice(path.lastIndexOf("/") + 1),
+  kind: "directory",
+  mime: "inode/directory",
+  layer: "project",
+  project: "/w/atlas",
+  children,
+});
+
+const fileNode = (path: string, kind: FileNode["kind"], stateId?: string): FileNode => ({
+  path,
+  name: path.slice(path.lastIndexOf("/") + 1),
+  kind,
+  mime: kind === "workflow" ? "application/json" : "text/markdown",
+  layer: "project",
+  project: "/w/atlas",
+  ...(stateId !== undefined ? { stateId } : {}),
+});
+
+/** A checkout with a `.jaira/` in it — the layout every menu below is about. */
+const CHECKOUT: FileRoot = {
+  layer: "project",
+  project: "/w/atlas",
+  label: "atlas",
+  dir: "/w/atlas",
+  prefix: ".jaira",
+  exists: true,
+  nodes: [
+    // No `workflows/` — the reported case, and the one the row has to survive: a project that keeps
+    // its workflows in the shared root has no such folder for the new row to hang under.
+    dirNode(".jaira", [
+      dirNode(".jaira/prompts", [fileNode(".jaira/prompts/review.md", "prompt")]),
+      fileNode(".jaira/settings.json", "config"),
+    ]),
+    dirNode("src", []),
+    fileNode("README.md", "other"),
+  ],
+};
+
+/**
+ * The row being typed into, photographed mid-name.
+ *
+ * The whole point of the change is that this is a ROW and not a dialog: the folder above it is the
+ * answer to "where does this land", so the field only has to hold a name. What the picture has to
+ * show is that it sits in the tree at the depth its result will, wearing the glyph its result will
+ * wear.
+ */
+function FilesNewSpecimen(): JSX.Element {
+  const [draft, setDraft] = useState<TreeDraft | null>(() => stateDraft(CHECKOUT, ".jaira/workflows"));
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set(["project:.jaira"]));
+  return (
+    <div className="sidebar" style={{ width: 251 }}>
+      <div className="side-drawer">
+        <FileTreePanel
+          tree={{ roots: [CHECKOUT] }}
+          selected={null}
+          expanded={open}
+          onToggleExpanded={(key) =>
+            setOpen((current) => {
+              const next = new Set(current);
+              if (next.has(key)) next.delete(key);
+              else next.add(key);
+              return next;
+            })
+          }
+          onUnfold={(keys) => setOpen((current) => new Set([...current, ...keys]))}
+          draft={draft}
+          onDraft={setDraft}
+          busy={false}
+          hasProject
+          onSelect={() => {}}
+          onOpen={() => {}}
+          onCreate={() => {}}
+          onCreateFile={() => {}}
+          onMove={async () => null}
+          onDelete={async () => null}
+          onRenameFile={async () => null}
+          onDeleteFile={async () => null}
+          onReveal={() => {}}
+          project="/w/atlas"
+        />
+      </div>
+    </div>
+  );
+}
 
 /** Just enough tree for a reference to resolve: the prompt the state below links to. */
 const PROMPT_TREE: FileTree = {
@@ -1125,6 +1217,7 @@ export const SPECIMENS: readonly Specimen[] = [
   { id: "board-column", figure: "06 · Column", width: 276, height: 384, node: <BoardSpecimen board={ONE_COLUMN} /> },
   { id: "board-two", figure: "01 · Tasks", width: 560, height: 340, node: <BoardSpecimen board={TWO_COLUMNS} /> },
   { id: "sidebar", figure: "02 · The sidebar", width: 251, height: 470, node: <SidebarSpecimen /> },
+  { id: "files-new", figure: "— · A new workflow, named in the tree", width: 251, height: 300, node: <FilesNewSpecimen /> },
   { id: "pills", figure: "05 · The pills", width: 320, height: 120, node: <PillSpecimen /> },
   { id: "registers", figure: "04 · Ten registers", width: 360, height: 230, node: <RegisterSpecimen /> },
   { id: "appearance", figure: "07 · Appearance", width: 430, height: 620, node: <AppearanceSpecimen /> },

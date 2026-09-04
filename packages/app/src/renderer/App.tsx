@@ -42,7 +42,15 @@ import { dragOffersOf } from "./taskDrag";
 import { ChatListPanel, ChatView, chatProjectOf, conversationsOf, type ChatSurface } from "./chatPane";
 import { isChatWorkflow } from "./chatWorkflow";
 import { ApprovalDialog, ModuleApprovalDialog, QuestionDialog } from "./components";
-import { AskDialog, ContextMenu, type AskSpec, type MenuAnchor, type MenuItem, type MenuPoint } from "./menu";
+import {
+  AskDialog,
+  ContextMenu,
+  MENU_WIDTH,
+  type AskSpec,
+  type MenuAnchor,
+  type MenuItem,
+  type MenuPoint,
+} from "./menu";
 import { AppearancePane } from "./appearancePane";
 import { FilesPane } from "./filesPane";
 import {
@@ -70,6 +78,9 @@ import {
   RunInspector,
   StateInspector,
   TaskInspector,
+  newItems,
+  standingRoot,
+  type TreeDraft,
 } from "./files";
 // Imported for their registrations, which is the whole reason these two lines exist: `fileSurfaces`
 // puts markdown, JSON, YAML, states and config into the surface registry, and `fenceRender` installs
@@ -757,6 +768,16 @@ export default function App(): JSX.Element {
   const [taskMenu, setTaskMenu] = useState<MenuAnchor | null>(null);
   const [taskAsk, setTaskAsk] = useState<AskSpec | null>(null);
   /**
+   * The `+` on the Files row: the menu it drops, and the row in the tree it starts.
+   *
+   * Both live up here because the button does. The verb is "make something new HERE", the tree is
+   * where "here" is, and the two are in different components — so the shell holds the draft and the
+   * panel draws it (see `TreeDraft`). A draft started from a folder's own `+` lands in the same
+   * state, which is what keeps one field on screen at a time.
+   */
+  const [newMenu, setNewMenu] = useState<MenuAnchor | null>(null);
+  const [newDraft, setNewDraft] = useState<TreeDraft | null>(null);
+  /**
    * What somebody has asked to keep in the side panel — see {@link PinnedPane}.
    *
    * Shell state rather than store state, and deliberately not remembered across restarts. It is a
@@ -1416,9 +1437,9 @@ export default function App(): JSX.Element {
    */
   const newRootChat: SidebarAct = {
     ...newChat,
-    onAct: () => {
+    onAct: (from) => {
       actions.standOn(null);
-      newChat.onAct();
+      newChat.onAct(from);
     },
   };
   /** Every project's work, before it is split between the two rooms. */
@@ -1470,9 +1491,36 @@ export default function App(): JSX.Element {
             {
               id: "new",
               glyph: "+",
-              label: "new file or state here",
-              on: finding["files.new"] === true,
-              onAct: () => setFinding((f) => ({ ...f, "files.new": !(f["files.new"] ?? false) })),
+              label: "new file, folder or workflow",
+              /*
+               * A menu, not a toggle.
+               *
+               * It used to open a form at the foot of the tree with a name, a layer picker and a
+               * Create button — three controls answering a question the tree can answer by itself.
+               * Now it asks the one thing that is genuinely a choice (which of the three) and the
+               * name is typed into the row it will become, in the place it will be.
+               *
+               * "Here" is the root you are standing in, and for a workflow that means its
+               * `workflows/` — which the click also unfolds, or the field would be typed into a
+               * branch nobody can see.
+               */
+              onAct: (from) => {
+                const root = standingRoot(state.tree, state.at);
+                if (root === null) return;
+                const box = from.getBoundingClientRect();
+                setNewMenu({
+                  // Right-aligned under the button: a menu hanging off the far end of a 250px
+                  // column has nowhere to go but back over it.
+                  x: Math.max(4, box.right - MENU_WIDTH),
+                  y: box.bottom + 4,
+                  origin: from,
+                  items: newItems(root, "", (draft) => {
+                    actions.setView("files");
+                    if (draft.reveal.length > 0) actions.unfold(OPENED.folders, draft.reveal);
+                    setNewDraft(draft);
+                  }),
+                });
+              },
             },
             find("files"),
           ],
@@ -1508,7 +1556,10 @@ export default function App(): JSX.Element {
               // three-control form under it, on screen whether or not anybody was filtering or
               // creating. They are the row's verbs now, and this is the row saying which one is on.
               find={finding.files === true}
-              creating={finding["files.new"] === true}
+              // The row being typed into, wherever it was started from — see `newDraft`.
+              draft={newDraft}
+              onDraft={setNewDraft}
+              onUnfold={(keys) => actions.unfold(OPENED.folders, keys)}
               // Which root goes unnamed: the one the drawer is hanging under. See the prop.
               project={state.at}
             />
@@ -2230,6 +2281,7 @@ export default function App(): JSX.Element {
           that. It is a place its task is sitting, and it will still be sitting there tomorrow. */}
 
       {taskMenu !== null ? <ContextMenu anchor={taskMenu} onClose={() => setTaskMenu(null)} /> : null}
+      {newMenu !== null ? <ContextMenu anchor={newMenu} onClose={() => setNewMenu(null)} /> : null}
       {taskAsk !== null ? <AskDialog spec={taskAsk} onCancel={() => setTaskAsk(null)} /> : null}
 
       {/* A folder that is not a project YET. The same dialog every other "are you sure" uses, and

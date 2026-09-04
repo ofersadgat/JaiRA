@@ -117,6 +117,7 @@ import {
   toggleShut,
   toggleUnfolded,
   withShut,
+  withUnfolded,
   withMode,
   withOpen,
   withPane,
@@ -3266,6 +3267,8 @@ export function useApp() {
       toggleShut: (id: string, key: string) => setUi(toggleShut(ref.current.settings.ui, id, key)),
       /** The same for a tree that defaults SHUT — see `unfolded` in the settings. */
       toggleUnfolded: (id: string, key: string) => setUi(toggleUnfolded(ref.current.settings.ui, id, key)),
+      /** Open several at once — and see `withUnfolded` for why a loop over the one above loses. */
+      unfold: (id: string, keys: readonly string[]) => setUi(withUnfolded(ref.current.settings.ui, id, keys, true)),
       /** Several at once — see `withShut` for why this is not a loop over the one above. */
       setShut: (id: string, keys: readonly string[], shut: boolean) =>
         setUi(withShut(ref.current.settings.ui, id, keys, shut)),
@@ -3765,10 +3768,13 @@ export function useApp() {
        * cannot see in the tree is a state you will name again. The document starts empty and the
        * lint surface says what it still needs, which is the same thing it would say after a Save.
        */
-      createWorkflow: async (stateId: string, layer: WorkflowLayer) => {
+      createWorkflow: async (stateId: string, layer: WorkflowLayer, project?: string) => {
         patch({ busy: true, error: null, view: "files" });
         try {
-          await invoke("workflow:write", { stateId, layer, text: "{}", ...inLayer(layer) });
+          // WHICH project, when the tree holds several: the row the create was started from names
+          // it, and the standing one is only the fallback. Without it, a `+` pressed in another
+          // checkout's branch wrote into the project the shell happened to be on.
+          await invoke("workflow:write", { stateId, layer, text: "{}", ...inLayer(layer, project) });
           patch({ busy: false, stateId, inspect: "path" });
           await Promise.all([
             refreshTree(),
@@ -3781,10 +3787,11 @@ export function useApp() {
       },
 
       /** Create a plain file or a directory under a layer root. */
-      createFile: async (layer: WorkflowLayer, path: string, kind: "file" | "directory", text?: string) => {
+      createFile: async (layer: WorkflowLayer, path: string, kind: "file" | "directory", text?: string, project?: string) => {
         patch({ busy: true, error: null });
         try {
-          await invoke("file:create", { layer, path, kind, ...(text !== undefined ? { text } : {}), ...inLayer(layer) });
+          // Same as {@link createWorkflow}: the row that was clicked names the project, not the shell.
+          await invoke("file:create", { layer, path, kind, ...(text !== undefined ? { text } : {}), ...inLayer(layer, project) });
           patch({ busy: false });
           await refreshTree();
         } catch (e) {

@@ -327,6 +327,24 @@ export function toggleUnfolded(ui: JairaUiState, id: string, key: string): Jaira
   return { ...ui, unfolded: { ...ui.unfolded, [id]: next } };
 }
 
+/**
+ * Open SEVERAL rows of a positive tree at once — the twin of {@link withShut}, and for the same
+ * reason it is not a loop over {@link toggleUnfolded}.
+ *
+ * Not only the render cost. `toggleUnfolded` reads the state it is given, and the shell hands it
+ * the ref's current value — so two calls in one tick both read the value from before either of
+ * them, and the second one wins alone. Opening a branch means opening every ancestor of it, which
+ * is exactly that case: revealing `.jaira/workflows` so a new state can be typed into it has to
+ * open `.jaira` in the same breath.
+ */
+export function withUnfolded(ui: JairaUiState, id: string, keys: readonly string[], open: boolean): JairaUiState {
+  const current = new Set(ui.unfolded[id] ?? []);
+  for (const key of keys) {
+    if (open) current.add(key);
+    else current.delete(key);
+  }
+  return { ...ui, unfolded: { ...ui.unfolded, [id]: [...current] } };
+}
 
 /**
  * Fold or unfold SEVERAL rows of one tree at once — what a "collapse all" spends.

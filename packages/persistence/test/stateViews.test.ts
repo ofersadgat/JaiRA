@@ -364,6 +364,16 @@ describe("fileTree", () => {
     expect(layer?.children?.map((n) => n.name)).toContain("system");
   });
 
+  it("says where the LAYER sits inside each root, which is what the tree's menus ask", () => {
+    // The tree is rooted at the checkout, so `workflows/` is two levels down in a project and at
+    // the top of the shared root. A renderer that assumed `.jaira` would be wrong about one of
+    // them, and one that assumed `workflows` was wrong about every project — which is exactly what
+    // hid "New state here…" from a project's own workflows folder.
+    const roots = fileTree(project, browseWorkflows(project)).roots;
+    expect(roots.find((r) => r.layer === "project")?.prefix).toBe(".jaira");
+    expect(baseFileTree(testHome()).roots[0]?.prefix).toBe("");
+  });
+
   it("puts a hidden directory back when a later rule reveals it", () => {
     // The personal half of the setting: `!` after the defaults, which is what the Files screen's
     // switch writes. A run that has gone wrong is read out of this directory.

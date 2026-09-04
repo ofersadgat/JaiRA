@@ -255,6 +255,9 @@ export function fileTree(project: Project, browser?: WorkflowBrowser, hidden?: H
       ...(layer === "project" ? { project: project.paths.projectDir } : {}),
       label: layer === "project" ? basename(project.paths.projectDir) : "~/.jaira",
       dir,
+      // Measured on the way in and carried out — see `FileRoot.prefix`. The renderer asks a path
+      // three questions and all three are about where the layer sits inside this root.
+      prefix,
       exists: existsSync(dir),
       nodes,
     };
@@ -466,7 +469,8 @@ export function baseFileTree(baseDir: string, browser?: WorkflowBrowser, hidden?
   };
   mark(nodes);
   rollUpLint(nodes);
-  return { roots: [{ layer: "base", label: "~/.jaira", dir: baseDir, exists: existsSync(baseDir), nodes }] };
+  // The shared root IS its own layer, so `workflows/` is at the top of it and the prefix is empty.
+  return { roots: [{ layer: "base", label: "~/.jaira", dir: baseDir, prefix: "", exists: existsSync(baseDir), nodes }] };
 }
 
 // --- declared inputs ---------------------------------------------------------

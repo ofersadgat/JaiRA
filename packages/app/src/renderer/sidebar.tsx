@@ -67,7 +67,15 @@ export interface SidebarAct {
   label: string;
   /** Whether it is currently ON, for the ones that toggle something in the drawer (search). */
   on?: boolean;
-  onAct: () => void;
+  /**
+   * The button itself, for a verb that opens a MENU rather than doing one thing.
+   *
+   * `+` is that verb — a new file, a new folder or a new workflow — and a menu has to be positioned
+   * under the control that opened it. The element rather than a point, so the caller measures it
+   * with whatever it is about to draw: the row knows where its button is and nothing about how wide
+   * a menu is. Every other act ignores it.
+   */
+  onAct: (from: HTMLElement) => void;
 }
 
 /** One row of the view switcher, and whatever it opens onto. */
@@ -318,7 +326,7 @@ export function Sidebar({
               title={act.label}
               aria-label={act.label}
               aria-pressed={act.on}
-              onClick={act.onAct}
+              onClick={(e) => act.onAct(e.currentTarget)}
             >
               {act.glyph}
             </button>

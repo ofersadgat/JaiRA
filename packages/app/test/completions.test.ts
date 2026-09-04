@@ -39,8 +39,8 @@ const file = (stateId: string, layer: WorkflowLayer = "project"): FileNode => ({
 
 const treeOf = (project: FileNode[], base: FileNode[] = []): FileTree => ({
   roots: [
-    { layer: "project", project: "/p", label: "p", dir: "/p/.jaira/workflows", exists: true, nodes: project },
-    { layer: "base", label: "~/.jaira", dir: "/home/.jaira/workflows", exists: true, nodes: base },
+    { layer: "project", project: "/p", label: "p", dir: "/p/.jaira/workflows", prefix: "", exists: true, nodes: project },
+    { layer: "base", label: "~/.jaira", dir: "/home/.jaira/workflows", prefix: "", exists: true, nodes: base },
   ],
 });
 

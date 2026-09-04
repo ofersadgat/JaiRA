@@ -14,7 +14,15 @@
  * The tree shows BOTH layer roots, which is what removes the layer picker: which copy of a file you
  * are about to edit is its position on screen rather than a mode you have to remember being in.
  */
-import { Fragment, useMemo, useState, type CSSProperties, type JSX, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  Fragment,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type JSX,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import type {
   BoardCard,
   FileMutationResult,
@@ -121,17 +129,20 @@ function lintTitle(node: FileNode, isDir: boolean): string | undefined {
 function TreeNode({
   node,
   depth,
-  rootDir,
+  root,
   selected,
   dirty,
   expanded,
   onToggle,
   onSelect,
   onMenu,
+  onNew,
+  draftUnder,
 }: {
   node: FileNode;
   depth: number;
-  rootDir: string;
+  /** The root this row came under — carried whole now, because its `prefix` is what the menus ask. */
+  root: FileRoot;
   selected: FileSelection | null;
   /** Files with unsaved edits, by `layer:path`. A directory is marked when anything under it is. */
   dirty: ReadonlySet<string>;
@@ -139,7 +150,16 @@ function TreeNode({
   expanded: ReadonlySet<string>;
   onToggle: (key: string) => void;
   onSelect: (node: FileNode) => void;
-  onMenu: (node: FileNode, rootDir: string, at: MenuPoint) => void;
+  onMenu: (node: FileNode, root: FileRoot, at: MenuPoint) => void;
+  /** The `+` on a folder: the same three verbs, without the ones that act on the folder itself. */
+  onNew: (node: FileNode, at: MenuPoint) => void;
+  /**
+   * The row being typed into, when it is anchored directly under this one.
+   *
+   * A callback rather than the draft itself, so the panel keeps every decision about what a draft
+   * is and this stays what it has always been: a row, and the rows under it.
+   */
+  draftUnder: (key: string) => JSX.Element | null;
 }): JSX.Element {
   // The FOLD key stays per layer, deliberately: `OPENED.folders` is keyed per layer and not per
   // checkout so it does not grow without bound as projects come and go, and two projects that both
@@ -193,7 +213,7 @@ function TreeNode({
           // The ROW travels with the point: selecting a file swaps the surface beside the tree, and
           // a surface that follows a transcript scrolls itself — which used to close this menu
           // before it could be read. See `menu.tsx`.
-          onMenu(node, rootDir, pointOf(e));
+          onMenu(node, root, pointOf(e));
         }}
         title={node.error ?? lintTitle(node, isDir) ?? node.path}
       >
@@ -227,25 +247,60 @@ function TreeNode({
           <span className="chip chip-warn">{lint.warnings}</span>
         ) : null}
         {node.shadowed ? <span className="chip">shadowed</span> : null}
+        {/* The folder's own `+`. On hover and on focus only — a column of plus signs down a tree is
+            a column of things to click by accident — and it stops the click, because the row it
+            sits on opens the folder and a menu that opened under a folder that had just closed
+            would be a menu pointing at nothing. */}
+        {isDir ? (
+          <button
+            className="tree-add"
+            title={`new file, folder or workflow in ${node.name}`}
+            aria-label={`New in ${node.name}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onNew(node, pointOf(e));
+            }}
+          >
+            +
+          </button>
+        ) : null}
       </li>
+      {draftUnder(key)}
       {open
         ? (node.children ?? []).map((child) => (
             <TreeNode
               key={`${child.layer}:${child.path}`}
               node={child}
               depth={depth + 1}
-              rootDir={rootDir}
+              root={root}
               selected={selected}
               dirty={dirty}
               expanded={expanded}
               onToggle={onToggle}
               onSelect={onSelect}
               onMenu={onMenu}
+              onNew={onNew}
+              draftUnder={draftUnder}
             />
           ))
         : null}
     </>
   );
+}
+
+// --- making something new ----------------------------------------------------
+
+/**
+ * The `workflows/` directory of a root, root-relative.
+ *
+ * Every question below goes through the root's own `prefix` rather than through the string
+ * `.jaira`, and that is the fix as much as it is the shape: the tree is rooted at the CHECKOUT, so
+ * a project's states live at `.jaira/workflows/…` while the shared root's live at `workflows/…`.
+ * Asked with the literal, "New state here…" was unreachable in every project's own workflows folder
+ * and appeared only in `~/.jaira`.
+ */
+export function workflowsDirOf(prefix: string): string {
+  return prefix === "" ? "workflows" : `${prefix}/workflows`;
 }
 
 /**
@@ -254,10 +309,275 @@ function TreeNode({
  * `null` for anything outside `workflows/`, because a prompt is not a state and offering to create
  * one there would produce a file the loader never looks at.
  */
-function statePrefixOf(node: FileNode): string | null {
-  if (node.path === "workflows") return "";
-  if (node.path.startsWith("workflows/")) return `${node.path.slice("workflows/".length)}/`;
-  return null;
+export function statePrefixOf(path: string, prefix: string): string | null {
+  const dir = workflowsDirOf(prefix);
+  if (path === dir) return "";
+  return path.startsWith(`${dir}/`) ? `${path.slice(dir.length + 1)}/` : null;
+}
+
+/**
+ * Is this directory the layer root, or inside it? — what decides whether a folder offers
+ * "New workflow…".
+ *
+ * A workflow is a root state and root states live in one place, so the verb is only sensible where
+ * you are already looking at JaiRA's own directory. Offering it beside `src/` would be a menu entry
+ * that writes somewhere else in the tree than the folder it was opened on.
+ */
+export function inLayerOf(path: string, prefix: string): boolean {
+  return prefix === "" || path === prefix || path.startsWith(`${prefix}/`);
+}
+
+/**
+ * Every directory that has to be OPEN for a row inside `dir` to be on screen — itself included.
+ *
+ * "New workflow" from the Files row is the case: it names `.jaira/workflows`, which is usually two
+ * folded branches away from anything visible, and a name field nobody can see is a name field
+ * nobody types into.
+ */
+export function revealKeys(layer: WorkflowLayer, dir: string): string[] {
+  if (dir === "") return [];
+  const parts = dir.split("/");
+  return parts.map((_, i) => `${layer}:${parts.slice(0, i + 1).join("/")}`);
+}
+
+/** How far in a row inside `dir` is drawn. The tree draws every level, so the path counts them. */
+const depthIn = (dir: string): number => (dir === "" ? 0 : dir.split("/").length);
+
+/**
+ * A row that does not exist yet: a name being typed, and where what it names will land.
+ *
+ * The name is typed IN THE TREE rather than into a dialog asking for a path, because the place has
+ * already been chosen — you pressed `+` on a folder — and a dialog that then asks for the whole
+ * path makes you re-state it, correctly, from memory. What is actually missing is a name, and a row
+ * is the shape a name goes in.
+ *
+ * `target` is the only thing that differs between the three verbs, and a state is genuinely
+ * different from a file: it is created by ID (`onCreate` writes `workflows/<id>.json`), so no
+ * directory and no suffix appear in it.
+ */
+export interface TreeDraft {
+  /** Which root draws it — `FileRoot.dir`, since several roots share the layer `project`. */
+  rootDir: string;
+  layer: WorkflowLayer;
+  project?: string;
+  /**
+   * The directory what is typed lands in, root-relative — and it NEED NOT EXIST.
+   *
+   * That is the whole reason this is a directory rather than a row: `.jaira/workflows/` is where a
+   * workflow goes, and a project that keeps its workflows in the shared root has no such folder to
+   * hang a row under. Held as the destination and resolved to a row at draw time
+   * ({@link anchorIn}), so the field appears under the deepest folder that does exist and the
+   * create makes the rest.
+   */
+  dir: string;
+  /**
+   * Where the row is drawn, when that cannot be derived from `dir`: a state's first child, whose
+   * folder is precisely the thing being created and whose parent is a FILE.
+   */
+  anchor?: { key: string; depth: number };
+  target: { kind: "file" | "directory" } | { kind: "state"; prefix: string };
+  /** What {@link revealKeys} says has to be unfolded before it can be seen. */
+  reveal: readonly string[];
+}
+
+/**
+ * Where a draft's row is drawn, and what of its path is not there yet.
+ *
+ * The deepest directory on the way to `dir` that the tree actually has a row for. A draft whose
+ * folder does not exist drew nothing at all — "New workflow" in a project with no
+ * `.jaira/workflows/` was a menu entry that did, visibly, nothing — and the honest reading is not
+ * that the verb is unavailable but that the folder is part of what it will create. `missing` is
+ * that remainder, which the row prints ahead of the field so the path being made is legible before
+ * it exists.
+ */
+export function anchorIn(
+  root: FileRoot,
+  draft: Pick<TreeDraft, "dir" | "anchor">,
+): { under: string | null; depth: number; missing: string } {
+  if (draft.anchor !== undefined) return { under: draft.anchor.key, depth: draft.anchor.depth, missing: "" };
+  if (draft.dir === "") return { under: null, depth: 0, missing: "" };
+  const parts = draft.dir.split("/");
+  let nodes: readonly FileNode[] = root.nodes;
+  let found = 0;
+  for (const part of parts) {
+    const path = parts.slice(0, found + 1).join("/");
+    const node = nodes.find((n) => n.kind === "directory" && n.path === path);
+    if (node === undefined || node.name !== part) break;
+    nodes = node.children ?? [];
+    found += 1;
+  }
+  return {
+    under: found === 0 ? null : `${root.layer}:${parts.slice(0, found).join("/")}`,
+    depth: found,
+    missing: parts.slice(found).map((part) => `${part}/`).join(""),
+  };
+}
+
+/** The root half of a draft — the three fields that say which tree it belongs to. */
+const draftRoot = (root: FileRoot): Pick<TreeDraft, "rootDir" | "layer" | "project"> => ({
+  rootDir: root.dir,
+  layer: root.layer,
+  ...(root.project !== undefined ? { project: root.project } : {}),
+});
+
+/** A new file or folder, in a directory of this root. */
+export function fileDraft(root: FileRoot, dir: string, kind: "file" | "directory"): TreeDraft {
+  return { ...draftRoot(root), dir, target: { kind }, reveal: revealKeys(root.layer, dir) };
+}
+
+/**
+ * A new state, in a directory under `workflows/` — which is what "New workflow…" (that directory
+ * being `workflows/` itself) and "New state…" both are.
+ */
+export function stateDraft(root: FileRoot, dir: string): TreeDraft {
+  return {
+    ...draftRoot(root),
+    dir,
+    target: { kind: "state", prefix: statePrefixOf(dir, root.prefix) ?? "" },
+    reveal: revealKeys(root.layer, dir),
+  };
+}
+
+/**
+ * A new CHILD of a state: the folder a state's children live in, and the first one in it.
+ *
+ * Drawn under the state's own row rather than inside that folder, because the folder is usually not
+ * there yet — `feature.json` holds the state and `feature/` holds its children, so creating the
+ * first child is what creates the directory. One indent under the parent is where the row will be
+ * once it exists, which is why the draft appears where the result will.
+ */
+export function childStateDraft(root: FileRoot, node: FileNode, stateId: string): TreeDraft {
+  return {
+    ...draftRoot(root),
+    dir: `${workflowsDirOf(root.prefix)}/${stateId}`,
+    // The parent's own row, one indent in — where `feature/` will draw its rows once it is there.
+    anchor: { key: `${node.layer}:${node.path}`, depth: node.path.split("/").length },
+    target: { kind: "state", prefix: `${stateId}/` },
+    // Its anchor is a row that is already visible, so there is nothing to open.
+    reveal: [],
+  };
+}
+
+/**
+ * The root the Files row's own `+` acts on: the one you are standing in.
+ *
+ * `null` while there is no tree at all. At the address root there is no project layer to be in, so
+ * the shared root is what the verb means there — it is a perfectly ordinary place to create
+ * something with no project open, and the alternative is a `+` that does nothing.
+ */
+export function standingRoot(tree: FileTree | null, project: string | null): FileRoot | null {
+  if (tree === null || tree.roots.length === 0) return null;
+  if (project !== null) {
+    const here = tree.roots.find((root) => root.dir === project || root.project === project);
+    if (here !== undefined) return here;
+  }
+  return tree.roots.find((root) => root.layer === "base") ?? tree.roots[0] ?? null;
+}
+
+/**
+ * The three ways to make something, for one directory.
+ *
+ * Shared by every place that offers them — the Files row's `+`, a folder's `+`, a folder's
+ * right-click, a root's — so the list is the same wherever it is opened from and the only thing
+ * that varies is what "here" means.
+ *
+ * "New state…" and "New workflow…" are the same act at two addresses, which is why they never both
+ * appear: inside `workflows/` the directory you clicked IS the answer, and outside it — in
+ * `.jaira/`, or at the top of the checkout, where the row's own `+` acts — the only sensible answer
+ * is `workflows/` itself. Anywhere else in a checkout neither is offered: a workflow written into
+ * `src/` is a file the loader never looks at.
+ */
+export function newItems(root: FileRoot, dir: string, start: (draft: TreeDraft) => void): MenuItem[] {
+  const statePrefix = statePrefixOf(dir, root.prefix);
+  const items: MenuItem[] = [
+    { label: "New file…", onSelect: () => start(fileDraft(root, dir, "file")) },
+    { label: "New folder…", onSelect: () => start(fileDraft(root, dir, "directory")) },
+  ];
+  if (statePrefix !== null) {
+    items.push({
+      label: "New state…",
+      separator: true,
+      ...(statePrefix === "" ? {} : { note: statePrefix }),
+      onSelect: () => start(stateDraft(root, dir)),
+    });
+  } else if (dir === "" || inLayerOf(dir, root.prefix)) {
+    items.push({
+      label: "New workflow…",
+      separator: true,
+      note: workflowsDirOf(root.prefix),
+      onSelect: () => start(stateDraft(root, workflowsDirOf(root.prefix))),
+    });
+  }
+  return items;
+}
+
+/**
+ * The row being typed into.
+ *
+ * Its own component, so the name lives and dies with the row: a draft cancelled and restarted
+ * somewhere else is a new field rather than the old one's text following the caret around the tree.
+ *
+ * Committed on Enter and on the way out — the same bargain the hidden-rules field makes, for the
+ * same reason: a name typed and then clicked away from was typed on purpose. An empty one commits
+ * nothing, so leaving is also how you back out without reaching for Escape.
+ */
+function DraftRow({
+  draft,
+  depth,
+  missing,
+  onCommit,
+  onCancel,
+}: {
+  draft: TreeDraft;
+  /** Where {@link anchorIn} put it — the row it hangs under, plus one. */
+  depth: number;
+  /** The folders on its path that are not there yet, drawn ahead of the field. */
+  missing: string;
+  onCommit: (name: string) => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const [name, setName] = useState("");
+  // Enter commits and unmounts, and the unmount blurs: without this, the field would commit twice
+  // and the second create would refuse as "already exists".
+  const done = useRef(false);
+  const finish = (commit: boolean): void => {
+    if (done.current) return;
+    done.current = true;
+    const clean = name.trim().replace(/^\/+|\/+$/g, "");
+    if (commit && clean.length > 0) onCommit(clean);
+    else onCancel();
+  };
+  const kind = draft.target.kind;
+  return (
+    <li className="tree-item tree-draft">
+      {Array.from({ length: depth }, (_, i) => (
+        <i key={i} className="tree-guide" />
+      ))}
+      {/* The same column the row it will become uses, wearing that row's mark: a folder's twisty, a
+          state's glyph. What is being made is legible before it has a name. */}
+      <span className="glyph" aria-hidden="true">
+        {kind === "directory" ? "▸" : kind === "state" ? (KIND_GLYPH.workflow ?? "·") : "·"}
+      </span>
+      {/* `workflows/` for a workflow in a project that has never had one. Part of what the create
+          will make, so it is shown as path rather than as prose — and dimmed, because it is the one
+          part of this row nobody is being asked to type. */}
+      {missing.length > 0 ? <span className="draft-lead">{missing}</span> : null}
+      <input
+        className="draft-name"
+        autoFocus
+        spellCheck={false}
+        value={name}
+        placeholder={kind === "directory" ? "folder name" : kind === "state" ? "state id" : "file name"}
+        aria-label={kind === "state" ? "new state id" : `new ${kind} name`}
+        onChange={(e) => setName(e.target.value)}
+        onBlur={() => finish(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") finish(true);
+          if (e.key === "Escape") finish(false);
+        }}
+      />
+    </li>
+  );
 }
 
 const copyText = (text: string): void => void navigator.clipboard?.writeText(text);
@@ -302,7 +622,9 @@ export function FileTreePanel({
   onDeleteFile,
   onReveal,
   find = false,
-  creating = false,
+  draft: draftProp,
+  onDraft,
+  onUnfold,
   project = null,
 }: {
   tree: FileTree | null;
@@ -333,10 +655,21 @@ export function FileTreePanel({
   onSelect: (node: FileNode) => void;
   /** Open an existing state's file. */
   onOpen: (stateId: string, layer: WorkflowLayer) => void;
-  /** Create a state — writes the file straight away, then selects it. */
-  onCreate: (stateId: string, layer: WorkflowLayer) => void;
-  /** Create a plain file or a directory, addressed by path under a layer root. */
-  onCreateFile: (layer: WorkflowLayer, path: string, kind: "file" | "directory", text?: string) => void;
+  /**
+   * Create a state — writes the file straight away, then selects it.
+   *
+   * `project` names WHICH checkout, for a `project`-layer create: the tree holds several and the
+   * layer alone does not say which one the row that was clicked belongs to (SHELL.md §2.2).
+   */
+  onCreate: (stateId: string, layer: WorkflowLayer, project?: string) => void;
+  /** Create a plain file or a directory, addressed by path under a tree root. Same `project` rule. */
+  onCreateFile: (
+    layer: WorkflowLayer,
+    path: string,
+    kind: "file" | "directory",
+    text?: string,
+    project?: string,
+  ) => void;
   onMove: (request: MoveRequest) => Promise<WorkflowMutationResult | null>;
   onDelete: (stateId: string, layer: WorkflowLayer, force?: boolean) => Promise<WorkflowMutationResult | null>;
   /** Rename anything in the tree that is not a state — a prompt, a skill, a directory. */
@@ -350,15 +683,32 @@ export function FileTreePanel({
   onDeleteFile: (layer: WorkflowLayer, path: string, force?: boolean) => Promise<FileMutationResult | null>;
   onReveal: (file: string) => void;
   /**
-   * Whether the FIND field is showing, and whether the "new state" form is.
+   * Whether the FIND field is showing.
    *
-   * Both were permanent: a filter box over the tree and a three-control form under it, on screen in
-   * a 250px column whether or not anybody was filtering or creating. They are the Files row's own
-   * verbs now (`SidebarAct`), and these say which of them is currently on. Defaulted off, so a host
-   * that draws this panel without a row to press still gets a tree.
+   * It was permanent — a filter box over the tree, on screen in a 250px column whether or not
+   * anybody was filtering. It is the Files row's own verb now (`SidebarAct`), and this says whether
+   * it is on. Defaulted off, so a host that draws this panel without a row to press still gets a
+   * tree.
    */
   find?: boolean;
-  creating?: boolean;
+  /**
+   * The row being typed into, and how to start or drop one — controlled when both are supplied,
+   * local otherwise, exactly as the folding is.
+   *
+   * It is lifted for one reason: the `+` that starts the commonest draft is not in this panel. It
+   * is on the Files ROW, in the sidebar, next to the search verb — so the menu it opens is drawn by
+   * the shell, and the draft it starts has to arrive here.
+   */
+  draft?: TreeDraft | null;
+  onDraft?: ((draft: TreeDraft | null) => void) | undefined;
+  /**
+   * Open these branches — what a draft in a folded folder needs before it can be seen.
+   *
+   * Separate from `onToggleExpanded` because it is not a toggle and not one key: revealing
+   * `.jaira/workflows` means opening both, and two toggles in one tick both read the state from
+   * before either of them (see `withUnfolded`).
+   */
+  onUnfold?: ((keys: readonly string[]) => void) | undefined;
   /**
    * The project this tree is being browsed FROM — the row the drawer hangs under.
    *
@@ -373,10 +723,77 @@ export function FileTreePanel({
   const [ownExpanded, setOwnExpanded] = useState<ReadonlySet<string>>(new Set());
   const expanded = expandedProp ?? ownExpanded;
   const [filter, setFilter] = useState("");
-  const [newId, setNewId] = useState("");
-  const [newLayer, setNewLayer] = useState<WorkflowLayer>("project");
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
   const [ask, setAsk] = useState<AskSpec | null>(null);
+  /** Used only when the host does not hold the draft — see the prop. */
+  const [ownDraft, setOwnDraft] = useState<TreeDraft | null>(null);
+  const draft = draftProp ?? ownDraft;
+
+  /**
+   * Start typing a name, having first made the place it lands visible.
+   *
+   * The unfold is half the verb. "New workflow" names `.jaira/workflows` from a row that may have
+   * nothing at all open under it, and a field rendered inside two folded branches is a field that
+   * takes the keystrokes and shows none of them.
+   */
+  const startDraft = (next: TreeDraft): void => {
+    const missing = next.reveal.filter((key) => !expanded.has(key));
+    if (missing.length > 0) {
+      if (onUnfold !== undefined) onUnfold(missing);
+      else setOwnExpanded((current) => new Set([...current, ...missing]));
+    }
+    if (onDraft !== undefined) onDraft(next);
+    else setOwnDraft(next);
+  };
+
+  const dropDraft = (): void => {
+    if (onDraft !== undefined) onDraft(null);
+    else setOwnDraft(null);
+  };
+
+  /**
+   * What the typed name becomes.
+   *
+   * A state is created by ID and a file by path — the two calls the tree has always had, reached
+   * now by one field. The suffix is stripped from a state id because `feature.json` is the FILE and
+   * `feature` is the state: typing what you can see in the tree would otherwise produce
+   * `feature.json.json`, which the loader reads as a state called `feature.json`.
+   */
+  const commitDraft = (name: string): void => {
+    if (draft === null) return;
+    dropDraft();
+    if (draft.target.kind === "state") {
+      const id = `${draft.target.prefix}${name.replace(/\.(json|jsonc|ya?ml)$/i, "")}`;
+      onCreate(id, draft.layer, draft.project);
+      return;
+    }
+    onCreateFile(
+      draft.layer,
+      draft.dir === "" ? name : `${draft.dir}/${name}`,
+      draft.target.kind,
+      undefined,
+      draft.project,
+    );
+  };
+
+  /**
+   * The draft row, when it belongs directly under `key` in `root`.
+   *
+   * Resolved here rather than when the draft was made, because where it can be DRAWN is a fact
+   * about the tree and the draft is a fact about the destination — and the destination is allowed
+   * not to exist. See {@link anchorIn}.
+   */
+  const draftIn = (root: FileRoot, key: string | null): JSX.Element | null => {
+    if (draft === null || draft.rootDir !== root.dir) return null;
+    const at = anchorIn(root, draft);
+    return at.under === key ? (
+      <DraftRow key="draft" draft={draft} depth={at.depth} missing={at.missing} onCommit={commitDraft} onCancel={dropDraft} />
+    ) : null;
+  };
+
+  /** The `+` menu, for a directory in a root. Also what a folder's right-click starts with. */
+  const openNew = (root: FileRoot, dir: string, at: MenuPoint): void =>
+    setMenu({ ...at, items: newItems(root, dir, startDraft) });
 
   /**
    * Run a move, and if it was refused because other states point at this one, say who and offer to
@@ -499,50 +916,17 @@ export function FileTreePanel({
   };
 
   /**
-   * "New file…" and "New folder…", relative to a directory.
+   * The verbs a node offers, by what the node actually is.
+   *
+   * The creation half is {@link newItems}, which every other surface shares — a folder's `+`, the
+   * root's, the Files row's. Right-click adds what acts on the node itself: rename, delete, and the
+   * two ways out to the file system.
    *
    * Offered on files too, where "here" means the directory the file sits in — right-clicking the
    * thing next to where you want the new one is how people actually reach for this.
    */
-  const creationItems = (layer: WorkflowLayer, dirPath: string): MenuItem[] => {
-    const under = dirPath.length > 0 ? `${dirPath}/` : "";
-    return [
-      {
-        label: "New file…",
-        onSelect: () =>
-          setAsk({
-            title: "New file",
-            field: "Path",
-            initial: under,
-            note: `Relative to ${layer === "base" ? "~/.jaira/" : ".jaira/"}`,
-            confirmLabel: "Create",
-            onConfirm: (v) => {
-              setAsk(null);
-              onCreateFile(layer, v, "file", "");
-            },
-          }),
-      },
-      {
-        label: "New folder…",
-        onSelect: () =>
-          setAsk({
-            title: "New folder",
-            field: "Path",
-            initial: under,
-            note: `Relative to ${layer === "base" ? "~/.jaira/" : ".jaira/"}`,
-            confirmLabel: "Create",
-            onConfirm: (v) => {
-              setAsk(null);
-              onCreateFile(layer, v, "directory");
-            },
-          }),
-      },
-    ];
-  };
-
-  /** The verbs a node offers, by what the node actually is. */
-  const itemsFor = (node: FileNode, rootDir: string): MenuItem[] => {
-    const abs = `${rootDir}/${node.path}`;
+  const itemsFor = (node: FileNode, root: FileRoot): MenuItem[] => {
+    const abs = `${root.dir}/${node.path}`;
     const parentDir = node.path.includes("/") ? node.path.slice(0, node.path.lastIndexOf("/")) : "";
     const reveal: MenuItem[] = [
       { label: "Copy path", onSelect: () => copyText(abs), separator: true },
@@ -550,37 +934,14 @@ export function FileTreePanel({
     ];
 
     if (node.kind === "directory") {
-      const prefix = statePrefixOf(node);
-      return [
-        ...(prefix === null
-          ? []
-          : [
-              {
-                label: "New state here…",
-                onSelect: () =>
-                  setAsk({
-                    title: "New state",
-                    field: "State id",
-                    initial: prefix,
-                    confirmLabel: "Create",
-                    onConfirm: (v) => {
-                      setAsk(null);
-                      onCreate(v, node.layer);
-                    },
-                  }),
-              },
-            ]),
-        ...creationItems(node.layer, node.path).map((item, i) => (i === 0 && prefix !== null ? { ...item, separator: true } : item)),
-        ...pathItems(node, abs),
-        ...reveal,
-      ];
+      return [...newItems(root, node.path, startDraft), ...pathItems(node, abs), ...reveal];
     }
 
     if (node.stateId === undefined) {
       // A prompt, a skill, or config: real files, but not states. No state-id verbs — but the same
       // rename and delete, addressed by path, because "the tree cannot rename a prompt" is not a
       // distinction anyone holds in their head while looking at one.
-      return [...creationItems(node.layer, parentDir), ...pathItems(node, abs), ...reveal];
+      return [...newItems(root, parentDir, startDraft), ...pathItems(node, abs), ...reveal];
     }
 
     const id = node.stateId;
@@ -588,18 +949,12 @@ export function FileTreePanel({
     return [
       { label: "Open", onSelect: () => onOpen(id, node.layer) },
       {
+        // The folder as well as the state: `feature/` is where `feature.json`'s children live, and
+        // the first child is what creates it. Typed under the parent's own row — see
+        // {@link childStateDraft} — so the id you are extending is the line directly above.
         label: "New child state…",
-        onSelect: () =>
-          setAsk({
-            title: "New child state",
-            field: "State id",
-            initial: `${id}/`,
-            confirmLabel: "Create",
-            onConfirm: (v) => {
-              setAsk(null);
-              onCreate(v, node.layer);
-            },
-          }),
+        note: `${id}/`,
+        onSelect: () => startDraft(childStateDraft(root, node, id)),
       },
       {
         label: "Duplicate…",
@@ -661,8 +1016,8 @@ export function FileTreePanel({
     ];
   };
 
-  const openMenu = (node: FileNode, rootDir: string, at: MenuPoint): void =>
-    setMenu({ ...at, items: itemsFor(node, rootDir) });
+  const openMenu = (node: FileNode, root: FileRoot, at: MenuPoint): void =>
+    setMenu({ ...at, items: itemsFor(node, root) });
 
   const toggle = (key: string): void => {
     if (onToggleExpanded !== undefined) return onToggleExpanded(key);
@@ -699,7 +1054,13 @@ export function FileTreePanel({
           className="tree-find"
           autoFocus
           value={filter}
-          onChange={(e) => setFilter(e.target.value)}
+          // A filter FLATTENS the tree (see `matches`), so the folder a draft is anchored under
+          // stops being drawn and the field being typed into goes with it. Dropping it is the
+          // honest end: a half-typed name with nowhere to land is not a name.
+          onChange={(e) => {
+            setFilter(e.target.value);
+            if (draft !== null) dropDraft();
+          }}
           onKeyDown={(e) => (e.key === "Escape" ? setFilter("") : undefined)}
           placeholder="Filter…"
         />
@@ -717,20 +1078,7 @@ export function FileTreePanel({
               setMenu({
                 ...pointOf(e),
                 items: [
-                  {
-                    label: "New state…",
-                    onSelect: () =>
-                      setAsk({
-                        title: `New state in the ${LAYER_LABEL[root.layer]} root`,
-                        field: "State id",
-                        confirmLabel: "Create",
-                        onConfirm: (v) => {
-                          setAsk(null);
-                          onCreate(v, root.layer);
-                        },
-                      }),
-                  },
-                  ...creationItems(root.layer, ""),
+                  ...newItems(root, "", startDraft),
                   { label: "Copy path", separator: true, onSelect: () => copyText(root.dir) },
                   {
                     label: "Reveal in file explorer",
@@ -754,21 +1102,35 @@ export function FileTreePanel({
                 {/* The project's own name, in the data voice — a directory basename, and the same
                     string the crumb prints. `~/.jaira` is listed once beside the projects rather
                     than under each, so it names itself the same way. */}
-                <span className="data-secondary">{root.label}</span>
+                <span className="data-secondary grow ellip">{root.label}</span>
+                {/* The `+` every folder has, on the row that stands for the whole root. The one root
+                    without this line is the one you are standing in, and that root's `+` is the
+                    Files row's own — see `standingRoot`. */}
+                <button
+                  className="tree-add"
+                  title={`new file, folder or workflow in ${root.label}`}
+                  aria-label={`New in ${root.label}`}
+                  onClick={(e) => openNew(root, "", pointOf(e))}
+                >
+                  +
+                </button>
               </li>
               ) : null}
+              {draftIn(root, null)}
               {(filter.length > 0 ? matches(root.nodes) : root.nodes).map((node) => (
                 <TreeNode
                   key={`${node.project ?? node.layer}:${node.path}`}
                   node={node}
                   depth={0}
-                  rootDir={root.dir}
+                  root={root}
                   selected={selected}
                   dirty={dirty}
                   expanded={expanded}
                   onToggle={toggle}
                   onSelect={onSelect}
                   onMenu={openMenu}
+                  onNew={(folder, at) => openNew(root, folder.path, at)}
+                  draftUnder={(key) => draftIn(root, key)}
                 />
               ))}
               {root.nodes.length === 0 ? (
@@ -785,29 +1147,11 @@ export function FileTreePanel({
         )}
       </div>
 
-      {/* The one place a layer is still chosen, and the only question it can be: where does a NEW
-          thing land? Everything that already exists answers it by where it sits above. Shown when
-          the row's `+` asks for it — three controls to create something are worth their height while
-          you are creating something and not before. */}
-      {creating ? (
-      <form
-        className="new-state"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (newId.trim()) onCreate(newId.trim(), newLayer);
-          setNewId("");
-        }}
-      >
-        <input value={newId} onChange={(e) => setNewId(e.target.value)} placeholder="new state id" />
-        <select value={newLayer} onChange={(e) => setNewLayer(e.target.value as WorkflowLayer)}>
-          <option value="project">in this project</option>
-          <option value="base">in the shared root</option>
-        </select>
-        <button type="submit" className="primary" disabled={busy || !newId.trim()}>
-          Create
-        </button>
-      </form>
-      ) : null}
+      {/* The form that used to stand here is gone, and with it the last layer picker.
+          It asked the one question a form has to ask and a tree does not: where does this land? A
+          row typed INTO the tree has already answered it — the folder above it is the folder — and
+          "in this project / in the shared root" was a third control for a fact that was on screen.
+          See `TreeDraft`. */}
 
       {menu ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
       {ask ? <AskDialog spec={ask} onCancel={() => setAsk(null)} /> : null}
