@@ -61,6 +61,15 @@ export interface FenceBlock {
   lang: string;
   /** The contents, verbatim. */
   code: string;
+  /**
+   * Where a change to the block's contents goes, when the surface drawing it permits one.
+   *
+   * ABSENT means read-only, which is the same way every other document in this app says it — see
+   * `documents.tsx`. A reading surface never supplies it, so a fence in a transcript is exactly what
+   * it always was; the live-preview editor does, which is what lets a ```ts block inside a markdown
+   * file be edited by the same Monaco that would edit the `.ts` file itself.
+   */
+  edit?: ((next: string) => void) | undefined;
 }
 
 /**
@@ -97,6 +106,18 @@ let DEFAULT_FENCE: FenceRenderer | undefined;
 /** Install the renderer fenced blocks are drawn with. Last call wins; see {@link DEFAULT_FENCE}. */
 export function registerFenceRenderer(render: FenceRenderer): void {
   DEFAULT_FENCE = render;
+}
+
+/**
+ * The installed renderer, for a surface that draws fenced blocks WITHOUT drawing a document.
+ *
+ * The live-preview editor is that surface: it has its own parser and its own fold, so it never calls
+ * {@link Markdown}, but a fence inside it should reach the same viewer a fence anywhere else does.
+ * Reading the registration rather than importing the renderer is what keeps the cycle this module's
+ * header describes from closing — see {@link DEFAULT_FENCE}.
+ */
+export function fenceRenderer(): FenceRenderer | undefined {
+  return DEFAULT_FENCE;
 }
 
 // --- urls --------------------------------------------------------------------

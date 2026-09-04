@@ -14,7 +14,8 @@
  * icons. Both are optional and both are off everywhere else: a menu of verbs gains nothing from a
  * column of pictures.
  */
-import { useEffect, useRef, useState, type JSX } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type JSX } from "react";
+import { createPortal } from "react-dom";
 import { Icon, type PATHS } from "./icons";
 
 export interface MenuItem {
@@ -139,13 +140,47 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAnchor; onClose: 
   }, [onClose, origin]);
 
   const width = MENU_WIDTH;
-  // A noted item is two lines. Only the tallest case has to be right — this is a clamp against the
-  // window edge, not a layout.
-  const height = anchor.items.length * (anchor.items.some((i) => i.note !== undefined) ? 40 : 27) + 10;
-  const left = Math.min(anchor.x, Math.max(4, window.innerWidth - width - 4));
-  const top = Math.min(anchor.y, Math.max(4, window.innerHeight - height - 4));
+  /**
+   * Where it goes: guessed for the first paint, then MEASURED.
+   *
+   * The guess used to be the whole story — item count times a row height — and it was wrong the
+   * first time a menu with a title was opened near the bottom of the window, which hung the last
+   * item off the edge. Adding the title to the arithmetic moved the error rather than removing it:
+   * a row's height is type, padding and whatever the theme's font size currently is, and a number
+   * in this file cannot know any of those.
+   *
+   * So the guess only has to be CLOSE — it stops the first frame appearing somewhere absurd — and
+   * the layout effect below reads the real box and settles it before the browser paints. It runs on
+   * every render and returns the same object when nothing moved, so it converges instead of looping.
+   */
+  const guessed = anchor.items.length * (anchor.items.some((i) => i.note !== undefined) ? 40 : 27) + 10;
+  const [placed, setPlaced] = useState<{ left: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el === null) return;
+    const box = el.getBoundingClientRect();
+    const l = Math.min(anchor.x, Math.max(4, window.innerWidth - box.width - 4));
+    const t = Math.min(anchor.y, Math.max(4, window.innerHeight - box.height - 4));
+    setPlaced((was) =>
+      was !== null && Math.abs(was.left - l) < 0.5 && Math.abs(was.top - t) < 0.5 ? was : { left: l, top: t },
+    );
+  });
+  const left = placed?.left ?? Math.min(anchor.x, Math.max(4, window.innerWidth - width - 4));
+  const top = placed?.top ?? Math.min(anchor.y, Math.max(4, window.innerHeight - guessed - 4));
 
-  return (
+  /**
+   * Rendered into `document.body`, because `position: fixed` is not enough on its own.
+   *
+   * A fixed element still belongs to the nearest ancestor STACKING CONTEXT, and CodeMirror gives
+   * `.cm-scroller` a `z-index: 0` — so a menu opened on anything inside an editor had its
+   * `z-index: 80` measured against the editor's own layer, and painted underneath the splitter
+   * beside it. Nothing about the menu's own numbers could have fixed that; the only answer is not
+   * to be in there.
+   *
+   * A portal also settles clipping for good: `overflow: hidden` on an ancestor cannot reach it, so
+   * the pane, the scroller and the half no longer have an opinion about where a menu may go.
+   */
+  return createPortal(
     /*
      * The menu does not take focus, ever.
      *
@@ -176,7 +211,8 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAnchor; onClose: 
           {item.note !== undefined ? <span className="menu-note ellip">{item.note}</span> : null}
         </button>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

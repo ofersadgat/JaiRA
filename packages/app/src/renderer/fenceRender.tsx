@@ -50,7 +50,7 @@ import { ValueView } from "./valueView";
  *
  * Module-level so the reference is stable: `Markdown` memoises on it.
  */
-export const drawFence: FenceRenderer = ({ lang, code }) => {
+export const drawFence: FenceRenderer = ({ lang, code, edit }) => {
   const mime = mimeOfFenceLang(lang);
   if (mime === undefined) return undefined;
   // RECURSION needs nothing handed down any more. A document quoted inside a document is still a
@@ -60,7 +60,17 @@ export const drawFence: FenceRenderer = ({ lang, code }) => {
   //
   // It terminates on the nesting of the text: each level renders the CONTENTS of a fence, which is
   // strictly shorter than the document holding it.
-  return <ValueView value={code} hint={{ mime }} />;
+  //
+  // `edit` is passed straight through, which is the whole of the editing story here: `ValueView`
+  // already answers "may this be changed" by whether it was given somewhere to put the change, and
+  // already routes a writable block to the editor its type deserves. A fence in a transcript hands
+  // over nothing and stays a reading; the live-preview editor hands over a callback and the same
+  // block becomes a Monaco editor for its language.
+  //
+  // `inline` is what stops an editable block drawing one line of code in a screenful of grey: a
+  // fence is a document inside a document, so it takes its height from its text rather than from a
+  // container it does not have. See `ValueView`'s prop, and `MonacoCodePane`'s `autoHeight`.
+  return <ValueView value={code} hint={{ mime }} inline {...(edit === undefined ? {} : { edit })} />;
 };
 
 /**

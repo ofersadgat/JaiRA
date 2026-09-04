@@ -25,6 +25,11 @@ import type {
 import { defaultAppearance } from "@jaira/shared/browser";
 import { GALLERY_SURFACES } from "@jaira/shared/browser";
 import { AppearancePane } from "../src/renderer/appearancePane";
+import { MarkdownDocument } from "../src/renderer/documents";
+import { ValueView } from "../src/renderer/valueView";
+// A real file, imported whole: the point of this one is that it is longer than a first parse.
+import LOOPS_MD from "../../../LOOPS.md?raw";
+import "../src/renderer/fenceRender";
 import { Board } from "../src/renderer/board";
 import { ComponentGallery } from "../src/renderer/componentGallery";
 import { Pill, Pills } from "../src/renderer/pill";
@@ -37,7 +42,7 @@ import { Paper, Transcript } from "../src/renderer/transcriptView";
 import type { TranscriptEntry } from "../src/renderer/transcript";
 import { RunActivity } from "../src/renderer/runViews";
 import { ForkMark, SessionBandsView, ZigDefs } from "../src/renderer/sessionPanels";
-import { bandsOf, piecesOf, runForksOf, type BandNote } from "../src/renderer/sessionBands";
+import { bandsOf, piecesOf, type BandNote } from "../src/renderer/sessionBands";
 import { RunIndex, keyOfNode } from "../src/renderer/runIndex";
 
 /**
@@ -649,6 +654,134 @@ function EditorSpecimen(): JSX.Element {
   );
 }
 
+const README = "# JaiRA\n\nInteractive agent-orchestration app on top of [declarative-ai](https://github.com/ofersadgat/declarative-ai):\nhierarchical workflows (state machines over agents, LLM calls, and human\ninteraction) with durable tasks, a board UI (coming in phase 3), and humans in\nthe loop.\n\n- [SPEC.md](SPEC.md) - product spec (the hierarchical-workflow formalism is\n  normative in `declarative-ai/SPEC.md`).\n- [DESIGN.md](DESIGN.md) - implementation design; sections 1a/1b track status.\n\n## Packages\n\n| Package | Contents |\n| --- | --- |\n| `@jaira/shared` | Task model, project config, JSON helpers |\n| `@jaira/cli` | Headless CLI: project init, task lifecycle, board |\n\n> A quote, which should have a rule down its left margin\n> and no visible angle brackets.\n\n```text\na plain block, which has no MIME type at all\n```\n\n```ts\nexport const answer: number = 42;\n```\n\nTrailing prose after the blocks, to show where the document ends.";
+
+/**
+ * The markdown editing pane, on a document with every block in it.
+ *
+ * Photographed because none of what broke here was testable any other way. The decoration model has
+ * unit tests and they all passed while the pane showed a link's name twice, a hard-wrapped paragraph
+ * as a column of short lines, and a plain block with no outline. Those are pixels, and this is the
+ * only thing in the repository that looks at pixels.
+ *
+ * Wrapped in the same `.config-half > .file-edit` the Files view puts it in, because half the
+ * questions asked of it — does it fill the pane, does it scroll, is there dead space under it — are
+ * questions about that box rather than about the editor.
+ */
+function MarkdownPaneSpecimen(): JSX.Element {
+  return (
+    <div className="col mid" style={{ height: "100%" }}>
+      <div className="config-half whole">
+        <div className="file-edit">
+          <MarkdownDocument text={README} onChange={() => {}} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/**
+ * The renderer menu — the arrow on a view that can be drawn more than one way.
+ *
+ * Photographed open, because a menu at rest is a picture of a triangle. The one below it is the same
+ * value with the plain renderer chosen, which is the only way to see that the choice did anything:
+ * the two frames differ by whether the block is an editor or text a selection can be dragged out of.
+ */
+function RendererMenuSpecimen(): JSX.Element {
+  return (
+    <div className="col mid" style={{ padding: 14, gap: 18, display: "flex" }}>
+      <ValueView
+        value={"export const answer: number = 42;\nexport const other = answer + 1;\n"}
+        hint={{ mime: "text/x-typescript" }}
+        label="editable"
+        inline
+        edit={() => {}}
+      />
+    </div>
+  );
+}
+
+
+/**
+ * A LONG document, scrolled — the case every short specimen missed.
+ *
+ * `syntaxTree(state)` is the tree parsed SO FAR, not the tree of the document, and CodeMirror only
+ * parses a few thousand characters before the viewport asks for more. Every specimen here was short
+ * enough to be parsed whole on the first pass, so the fold always saw a complete tree and the live
+ * preview always looked right. The first document that did not fit showed raw markdown from about
+ * a third of the way down: asterisks, backticks and fences, all of it source.
+ *
+ * So this one is a real file off disk, imported whole, and the frame that matters is the one taken
+ * after it has been scrolled past where the initial parse stopped.
+ */
+function LongDocumentSpecimen(): JSX.Element {
+  return (
+    <div className="col mid" style={{ height: "100%" }}>
+      <div className="config-half whole">
+        <div className="file-edit">
+          <MarkdownDocument text={LOOPS_MD} onChange={() => {}} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const GAMUT_BLOCKS = "# H1\n## H2\n### H3\n#### H4\n##### H5\n###### H6\n\nSetext one\n==========\n\nSetext two\n----------\n\n* * *\n\n- one\n- two\n  - two point one\n  - two point two\n    - three deep, long enough to wrap onto a second line and show its indent\n- three\n\n1. first\n2. second\n   1. nested ordered\n   2. and another\n      - a bullet under an ordered item\n3. third\n\n5. starts at five\n6. and carries on\n\n- [ ] todo\n- [x] done\n  - [ ] a nested task\n\n- an item with two paragraphs.\n\n  The second paragraph, which must stay inside the item.\n\n- an item holding a block:\n\n  ```ts\n  const inside = true;\n  ```\n\n> A quote with a list in it:\n>\n> - one\n> - two\n>\n> > nested, wrapping onto a second line to show the inner rule\n\n| Key | A column with a great deal of text in it, enough to take the whole table | N |\n| :-- | :-- | --: |\n| `packages/app/src/renderer/markdownEditor.tsx` | Long prose that keeps going and going so the other columns have to fight for room | 42 |\n| `a` | short | 7 |\n\n| Left | Centre | Right | Default |\n| :--- | :----: | ----: | --- |\n| l | c | r | d |\n\nTrailing prose.";
+const GAMUT_INLINE = "**bold**, *italic*, ***both***, ~~struck~~, `code`, ``code with a ` tick``.\n\nEscapes: \\*not italic\\*, \\_not italic\\_, \\# not a heading.\n\nA [inline link](target.md), a [titled link](target.md \"the title\"),\na [reference link][ref], a bare <https://example.com/x>, and a raw\nhttps://example.com/linkified URL.\n\n[ref]: https://example.com/ref\n\nAn image: ![alt text](picture.png)\n\nRaw HTML should arrive as text: <b>not bold</b> and <script>alert(1)</script>\n\nA hard break at the end of this line  \nmeans this starts a new line inside the paragraph.\n\nA soft-wrapped line\njoins into one.";
+
+/**
+ * Every BLOCK construct, at a width narrow enough that things wrap.
+ *
+ * Split from the inline gamut because one page of both is a page nobody reads carefully, and the two
+ * fail in different ways: a block is wrong about layout, an inline mark is wrong about characters.
+ */
+function GamutBlocksSpecimen(): JSX.Element {
+  return (
+    <div className="col mid" style={{ height: "100%" }}>
+      <div className="config-half whole">
+        <div className="file-edit">
+          <MarkdownDocument text={GAMUT_BLOCKS} onChange={() => {}} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Every INLINE construct, including the ones whose failure is a character in the wrong place. */
+function GamutInlineSpecimen(): JSX.Element {
+  return (
+    <div className="col mid" style={{ height: "100%" }}>
+      <div className="config-half whole">
+        <div className="file-edit">
+          <MarkdownDocument text={GAMUT_INLINE} onChange={() => {}} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const TABLES = "A small table should be the width of what is in it:\n\n| Left | Centre | Right | Default |\n| :--- | :----: | ----: | --- |\n| l | c | r | d |\n\nA lopsided one should not let one column starve the others:\n\n| Key | A column with a great deal of text in it | N |\n| :-- | :-- | --: |\n| `packages/app/src/renderer/markdownEditor.tsx` | Long prose that keeps going and going so the other columns have to fight for room | 42 |\n| `a` | short | 7 |\n\nAnd an empty cell must still hold its column open:\n\n| One | Two | Three |\n| --- | --- | --- |\n| a |  | c |";
+
+/**
+ * Tables, at three shapes that size differently.
+ *
+ * Their own specimen because sizing is the whole question and it only shows up in a comparison: a
+ * small table must NOT stretch, a lopsided one must not let its longest column starve the rest, and
+ * an empty cell must still hold its column open. A single example answers none of those.
+ */
+function TablesSpecimen(): JSX.Element {
+  return (
+    <div className="col mid" style={{ height: "100%" }}>
+      <div className="config-half whole">
+        <div className="file-edit">
+          <MarkdownDocument text={TABLES} onChange={() => {}} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export interface Specimen {
   id: string;
   /**
@@ -927,7 +1060,6 @@ const RUN_REFS = [
 ];
 
 const RUN_BANDS = bandsOf(piecesOf(RUN_PARENT, RUN_REFS));
-const RUN_FORKS = runForksOf(RUN_BANDS.flatMap((band) => band.segments.flatMap((segment) => segment.pieces)));
 
 function ForkSpecimen(): JSX.Element {
   const parent: InstanceNode = {
@@ -985,35 +1117,6 @@ function ForkSpecimen(): JSX.Element {
   );
 }
 
-/**
- * The RUN scale: a task whose second run replayed `plan` and re-ran `implement`.
- *
- * Its own frame, because `.sb` is `min-height: 100%` and two conversations in one scroller put the
- * second a screen down.
- *
- * The states here SHARE one conversation (`environment.session`), which is the case that decides
- * where a run-scale mark can go: the shared work and the divided work are cards in one sheet, so the
- * gap above the sheet would put `plan` — which both runs replayed — below the line. The mark goes
- * between the cards instead, and the claim it makes stays true.
- */
-function RunForkSpecimen(): JSX.Element {
-  return (
-    <div className="ts-page" style={{ minHeight: 0 }}>
-      <ZigDefs />
-      <SessionBandsView
-        bands={RUN_BANDS}
-        runForks={RUN_FORKS}
-        render={(piece) => (
-          <div className="ts">
-            <div className="ts-msg ts-msg-assistant">
-              {piece.node.stateId === "plan" ? "Two fields and a line in the gutter." : "Re-reading the file first."}
-            </div>
-          </div>
-        )}
-      />
-    </div>
-  );
-}
 
 /**
  * A run's own SHAPE, drawn beside what it said — the rail.
@@ -1230,8 +1333,13 @@ export const SPECIMENS: readonly Specimen[] = [
   { id: "transcript", figure: "— · The message rail", width: 900, height: 1140, node: <TranscriptSpecimen /> },
   { id: "run-activity", figure: "— · What a run is doing", width: 900, height: 460, node: <RunActivitySpecimen /> },
   { id: "fork", figure: "— · The fork mark", width: 900, height: 700, node: <ForkSpecimen /> },
-  { id: "fork-runs", figure: "— · The fork mark, at run scale", width: 900, height: 460, node: <RunForkSpecimen /> },
   { id: "rail", figure: "— · The state rail", width: 1000, height: 1960, node: <RailSpecimen /> },
   { id: "run-index", figure: "— · The Instances index", width: 392, height: 560, node: <RunIndexSpecimen /> },
+  { id: "markdown-pane", figure: "— · The markdown editor", width: 900, height: 1000, node: <MarkdownPaneSpecimen /> },
+  { id: "renderer-menu", figure: "\u2014 \u00b7 The renderer menu", width: 620, height: 260, node: <RendererMenuSpecimen /> },
+  { id: "long-document", figure: "\u2014 \u00b7 A long document, scrolled", width: 900, height: 620, node: <LongDocumentSpecimen /> },
+  { id: "gamut-blocks", figure: "\u2014 \u00b7 Every block construct", width: 560, height: 1080, node: <GamutBlocksSpecimen /> },
+  { id: "gamut-inline", figure: "\u2014 \u00b7 Every inline construct", width: 560, height: 620, node: <GamutInlineSpecimen /> },
+  { id: "tables", figure: "\u2014 \u00b7 How a table sizes", width: 560, height: 620, node: <TablesSpecimen /> },
 
 ];

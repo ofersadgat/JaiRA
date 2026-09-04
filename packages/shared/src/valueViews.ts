@@ -47,6 +47,40 @@ export type ViewId =
   | "media"
   | "changes";
 
+/**
+ * Which renderer draws a view, where a view genuinely has more than one.
+ *
+ * A SECOND axis, and a narrow one. The view says what you are looking at; this says which of two
+ * real renderers is drawing it. It is not an editable/read-only switch wearing renderer clothes,
+ * which is what the first version of it was: `text` was offered "editor or plain", and those are the
+ * same renderer with typing turned off — a `<textarea>` and a `<pre>` showing identical characters.
+ * Nothing is a second way to RENDER raw text.
+ *
+ * Code is the one view where two renderers exist and disagree about what they draw:
+ *
+ *  - **Monaco** — a real editor. Typing, a caret, a gutter, its own selection.
+ *  - **The code view** — `monaco.editor.colorize`, the tokenizer with no editor behind it. The same
+ *    colours, as ordinary DOM: no instance per block, and a selection dragged from the prose above
+ *    runs straight through it, which an editor's cannot (see the note on `CodeText`).
+ *
+ * Both are proper renderings of code. That the second cannot be typed into is a property of what it
+ * IS, not a mode the first was put into.
+ */
+export type RendererId = "monaco" | "codeview";
+
+/**
+ * The renderers a view offers. Fewer than two means there is no control to draw.
+ *
+ * Two guards, and each removes a button that could only disappoint. `editable` — a value nobody may
+ * change is already drawn by the code view, so the choice would change nothing. `hasGrammar` — both
+ * renderers here colour with Monaco's grammars, so a type Monaco cannot colour has one rendering
+ * however it is drawn. See {@link viewsFor}, which is the same rule one level up.
+ */
+export function renderersFor(view: ViewId, mime: string | undefined, editable: boolean): readonly RendererId[] {
+  if (view !== "code" || !editable || !hasGrammar(mime)) return [];
+  return ["monaco", "codeview"];
+}
+
 /** What a caller already knows about the value, when it knows anything. */
 export interface ViewHint {
   /** A MIME type — a file's, or a slot's `contentMediaType`. Resolved along `mimeFallbacks`. */

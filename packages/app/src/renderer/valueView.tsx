@@ -34,7 +34,7 @@
  * transcript beside the call that produced them, in the sync report, in a structured output.
  */
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
-import type { Change, ParsedStructure, ParseSpot, PatchFile, ServedArtifact, ViewHint, ViewId } from "@jaira/shared/browser";
+import type { Change, ParsedStructure, ParseSpot, PatchFile, RendererId, ServedArtifact, ViewHint, ViewId } from "@jaira/shared/browser";
 import {
   artifactOf,
   changeStats,
@@ -48,6 +48,7 @@ import {
   parseUnifiedDiff,
   patchStats,
   structuredFormatOf,
+  renderersFor,
   totalStats,
   viewsFor,
 } from "@jaira/shared/browser";
@@ -89,6 +90,21 @@ const VIEW_META: Record<ViewId, { label: string; hint: string }> = {
   patch: { label: "Diff", hint: "The change this patch describes" },
   table: { label: "Table", hint: "As rows and columns" },
   form: { label: "Form", hint: "As the fields its schema declares" },
+};
+
+/**
+ * What each renderer is called on its menu, and what the item says it does.
+ *
+ * The hint names the CONSEQUENCE rather than the implementation, because that is what somebody
+ * opening this menu is choosing between. Nobody wants Monaco or a `<pre>`; they want to type, or
+ * they want to drag a selection through the block and copy it.
+ */
+const RENDERER_META: Record<RendererId, { label: string; hint: string }> = {
+  monaco: { label: "Monaco", hint: "A real editor — typing, a caret, its own selection" },
+  // NOT "CodeMirror": both of these are Monaco. The editor is Monaco's editor and this is
+  // `monaco.editor.colorize`, its tokenizer with no editor behind it — same grammars, same colours,
+  // ordinary DOM. CodeMirror is the markdown editor this block is sitting inside.
+  codeview: { label: "Code view", hint: "Coloured, but not an editor — so a selection can be dragged through it" },
 };
 
 /** How a diff is laid out. Two readings of one comparison — see {@link MonacoDiffProps.sideBySide}. */
@@ -705,6 +721,7 @@ export function ValueView({
   diff,
   view: controlled,
   chrome,
+  inline,
 }: {
   value: unknown;
   hint?: ViewHint | undefined;
@@ -755,9 +772,39 @@ export function ValueView({
   view?: ViewId | undefined;
   /** `false` ⇒ draw no header at all. For a caller that has somewhere better to put the controls. */
   chrome?: boolean | undefined;
+  /**
+   * This value is EMBEDDED in a document, so it must take its height from its own contents.
+   *
+   * A value in a panel fills the panel — the container is the answer, and asking the text would make
+   * the panel jump as it changed. A fenced block inside a markdown file has no container height to
+   * fill, and an editor waiting to be given one draws a single line of code in a screenful of empty
+   * grey. That was the whole of the defect; the flag is how a caller says which situation it is in.
+   */
+  inline?: boolean | undefined;
 }): JSX.Element {
   const views = viewsFor(value, hint ?? {});
   const [picked, setPicked] = useState<ViewId | null>(null);
+  /**
+   * Which renderer each view is drawn by, where the view has a choice — see {@link renderersFor}.
+   *
+   * Per VIEW rather than one setting for the value, because the choice does not travel: asking for
+   * the plain reading of the code says nothing about how you want the rendered markdown drawn. An
+   * absent entry is the editor, which is what every one of these did before the choice existed.
+   */
+  const [drawnBy, setDrawnBy] = useState<Partial<Record<ViewId, RendererId>>>({});
+  /**
+   * The renderer menu, as the point it was opened at.
+   *
+   * A {@link MenuAnchor}, drawn by the app's own {@link ContextMenu}, because the bespoke popover
+   * this replaced was `position: absolute` inside `.vv-head` — and a value view sits inside a fence
+   * widget, inside `.cm-scroller`, inside a `.config-half` that is `overflow: hidden` on purpose.
+   * A menu opened on a block near the bottom of the pane was cut off by every one of them.
+   *
+   * `ContextMenu` is `position: fixed` and clamps itself to the window, so none of those clip it. It
+   * also brings Escape, outside-click and scrolled-away dismissal, which the popover had grown its
+   * own half-versions of.
+   */
+  const [rendMenu, setRendMenu] = useState<MenuAnchor | null>(null);
   // The caller's answer first, then this component's own, then whatever leads. Each step only counts
   // if the view still applies: a value whose type just changed has a different list, and a pick that
   // is no longer on it is a pick at something that is not there.
@@ -767,6 +814,8 @@ export function ValueView({
       : picked !== null && views.includes(picked)
         ? picked
         : views[0]!;
+
+
   /** Where "open in the context panel" sends this, when there is a panel. See `valuePanel.ts`. */
   const panel = useValuePanel();
   const [more, setMore] = useState<MenuAnchor | null>(null);
@@ -783,6 +832,21 @@ export function ValueView({
   // The artifact's declared type wins over the caller's hint, because it is the more specific
   // statement: the hint describes the slot, the envelope describes the bytes in it.
   const mime = (view === "json" ? undefined : artifact?.mime) ?? hint?.mime;
+
+  /**
+   * Which renderer is drawing the view on screen, and what that does to editability.
+   *
+   * Choosing the plain renderer IS choosing not to edit — the two are the same fact, which is why
+   * there is no second switch. `writing` is the edit callback every view that has a choice reads
+   * instead of `edit`, so one line here decides it for all three rather than each branch deciding
+   * again and one of them forgetting.
+   *
+   * Views with no choice keep `edit` exactly as they had it.
+   */
+  const editable = edit !== undefined;
+  const renderer: RendererId = drawnBy[view] ?? "monaco";
+  const plainly = renderer === "codeview" && renderersFor(view, mime, editable).length > 1;
+  const writing = plainly ? undefined : edit;
 
   /**
    * The address an interactive artifact is framed from, once it has been granted one.
@@ -867,11 +931,13 @@ export function ValueView({
     if (view === "markdown") {
       // WHICH renderer is not decided here — see `markdownDocument.tsx`. This says what it has and
       // what may be done with it, and that is the whole of a caller's business.
+      // A change drawn over the document FORCES the editing renderer — see `documents.tsx` — so it
+      // goes with the editor. Asked for the plain reading, the plain reading is what this gives.
       return (
         <MarkdownDocument
           text={String(showing)}
-          {...(edit === undefined ? {} : { onChange: edit })}
-          {...(diff === undefined ? {} : { diff })}
+          {...(writing === undefined ? {} : { onChange: writing })}
+          {...(diff === undefined || plainly ? {} : { diff })}
         />
       );
     }
@@ -889,7 +955,8 @@ export function ValueView({
         <CodeDocument
           text={String(showing)}
           mime={mime ?? "text/plain"}
-          {...(edit === undefined ? {} : { onChange: edit })}
+          {...(writing === undefined ? {} : { onChange: writing })}
+          {...(inline === true ? { autoHeight: true } : {})}
         />
       );
     }
@@ -957,13 +1024,30 @@ export function ValueView({
     // The VIEWER, not the serialization — see {@link JsonView}. `text` falls through to `Source`
     // below, which is what keeps "what was actually written down" one click away from it.
     if (view === "json") return <JsonView value={showing} {...(hint?.schema !== undefined ? { schema: hint.schema } : {})} />;
-    if (edit !== undefined && typeof showing === "string") {
+    // `writing`, not `edit` — asked for the plain renderer, this view is the `<pre>` below, which is
+    // the difference that matters: a `<textarea>` is a replaced element, so a selection cannot be
+    // dragged into or through one any more than it can through Monaco.
+    if (writing !== undefined && typeof showing === "string") {
+      const change = writing;
+      /**
+       * Tall enough for what is in it, when it is EMBEDDED in a document.
+       *
+       * A textarea's height is its `rows`, and the default is two — which a stylesheet then stretched
+       * to a band. In a panel that is right: the box is a place to type and it should fill what it
+       * was given. Inside a fenced block it is a document inside a document, and a two-line block
+       * drew a screenful of empty box below the text.
+       *
+       * Capped, because a four-hundred-line block embedded in prose is not something to render
+       * whole — past the cap it scrolls, which is what a textarea does anyway.
+       */
+      const rows = inline === true ? Math.min(Math.max(showing.split("\n").length, 1), 24) : undefined;
       return (
         <textarea
-          className="code-editor vv-edit"
+          className={inline === true ? "code-editor vv-edit vv-edit-fit" : "code-editor vv-edit"}
           value={showing}
           spellCheck={false}
-          onChange={(e) => edit(e.target.value)}
+          {...(rows === undefined ? {} : { rows })}
+          onChange={(e) => change(e.target.value)}
         />
       );
     }
@@ -1029,7 +1113,20 @@ export function ValueView({
   };
 
   return (
-    <div className="vv">
+    /**
+     * Inline, the controls sit OVER the block rather than on a shelf above it.
+     *
+     * A value in a panel can afford a header row: it is the whole surface, and a strip along its top
+     * is where its controls belong. A fenced block is three lines inside a paragraph, and the same
+     * strip is a second box stacked on the first — most of a block's height spent on chrome, and a
+     * band of panel colour cutting the document in half wherever code appears.
+     *
+     * So the row is lifted into the block's top-right corner and the body starts at the top. It
+     * overlaps the first line, which is the trade: the corner of a code block is nearly always
+     * shorter than the pane, and buying the space back is worth more than the few characters it
+     * covers when it is not.
+     */
+    <div className={inline === true ? "vv vv-inline" : "vv"}>
       {chrome !== false && (label !== undefined || views.length > 1 || actions !== undefined) ? (
         <div className="vv-head">
           {label !== undefined ? <span className="vv-label">{label}</span> : null}
@@ -1039,18 +1136,59 @@ export function ValueView({
               than none. */}
           {views.length > 1 ? (
             <span className="vv-toggle" role="group" aria-label="How to show this">
-              {views.map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  className={id === view ? "on" : undefined}
-                  title={VIEW_META[id].hint}
-                  aria-pressed={id === view}
-                  onClick={() => setPicked(id)}
-                >
-                  {VIEW_META[id].label}
-                </button>
-              ))}
+              {views.flatMap((id) => {
+                const choices = renderersFor(id, mime, editable);
+                const label = (
+                  <button
+                    key={id}
+                    type="button"
+                    className={id === view ? "on" : undefined}
+                    title={VIEW_META[id].hint}
+                    aria-pressed={id === view}
+                    onClick={() => {
+                      setPicked(id);
+                      setRendMenu(null);
+                    }}
+                  >
+                    {VIEW_META[id].label}
+                  </button>
+                );
+                // Only where there is a second renderer to pick — the same rule as the toggle
+                // itself, one level down. See `renderersFor`.
+                if (choices.length < 2) return [label];
+                return [
+                  label,
+                  <button
+                    key={`${id}-arrow`}
+                    type="button"
+                    className={`vv-arrow${id === view ? " on" : ""}`}
+                    title="Which renderer draws this"
+                    aria-haspopup="menu"
+                    aria-expanded={rendMenu !== null && rendMenu.origin === undefined ? false : undefined}
+                    aria-label={`Renderer for ${VIEW_META[id].label}`}
+                    onClick={(e) => {
+                      // Opening the menu also SELECTS the view. A choice about how to draw
+                      // something you are not looking at is a choice you cannot see the result of.
+                      setPicked(id);
+                      const at = e.currentTarget.getBoundingClientRect();
+                      const chosen = drawnBy[id] ?? "monaco";
+                      setRendMenu({
+                        x: at.left,
+                        y: at.bottom + 3,
+                        origin: e.currentTarget,
+                        title: "Drawn by",
+                        items: choices.map((how) => ({
+                          label: RENDERER_META[how].label,
+                          checked: chosen === how,
+                          onSelect: () => setDrawnBy((was) => ({ ...was, [id]: how })),
+                        })),
+                      });
+                    }}
+                  >
+                    ▾
+                  </button>,
+                ];
+              })}
             </span>
           ) : null}
           <button
@@ -1067,6 +1205,7 @@ export function ValueView({
       ) : null}
       <div className="vv-body">{body}</div>
       {more !== null ? <ContextMenu anchor={more} onClose={() => setMore(null)} /> : null}
+      {rendMenu !== null ? <ContextMenu anchor={rendMenu} onClose={() => setRendMenu(null)} /> : null}
     </div>
   );
 }

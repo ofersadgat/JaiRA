@@ -91,6 +91,163 @@ const hover = (selector) =>
   ].join("\n");
 
 const OPENED = [
+  /**
+   * A Monaco with the caret actually IN it.
+   *
+   * The frame that matters for the current-line rule, and the one the resting specimens cannot take:
+   * limiting the highlight to a focused editor cleared it from every block nobody was in and left it
+   * exactly where this frame looks. First in the list, because the steps below switch this specimen
+   * to the code view and there is no editor left to click.
+   */
+  {
+    name: "monaco-focused",
+    click: `[data-shot="renderer-menu"] .monaco-editor .view-line`,
+    shot: `[data-shot="renderer-menu"]`,
+  },
+
+  /**
+   * Step one: put a fence at the very bottom of its pane.
+   *
+   * Separate from the click below because React commits a state change in a later task — a `run`
+   * that clicked and then looked for the menu in the same expression found nothing, every time.
+   */
+  {
+    name: "renderer-menu-at-edge-setup",
+    shot: `[data-shot="gamut-blocks"]`,
+    run: `(() => {
+      const sc = document.querySelector('[data-shot="gamut-blocks"] .cm-scroller');
+      const arrow = document.querySelector('[data-shot="gamut-blocks"] .cm-fence-block .vv-arrow');
+      if (!sc || !arrow) return "nothing to place";
+      const pane = sc.getBoundingClientRect();
+      sc.scrollTop += arrow.getBoundingClientRect().top - pane.bottom + 40;
+      return "placed";
+    })()`,
+  },
+  /**
+   * Step two: the menu, opened there.
+   *
+   * The frame the bespoke popover could never have passed. It was `position: absolute` inside the
+   * value's header, and a fence sits inside `.cm-scroller` inside a `.config-half` that is
+   * `overflow: hidden` on purpose — so a menu near the bottom edge was cut off by all three. The
+   * app's own `ContextMenu` is `position: fixed` and clamps itself to the window instead.
+   */
+  {
+    name: "renderer-menu-at-edge",
+    click: `[data-shot="gamut-blocks"] .cm-fence-block .vv-arrow`,
+    shot: `.context-menu`,
+  },
+  {
+    name: "renderer-menu-stacking",
+    shot: `.context-menu`,
+    run: `(() => {
+      const menu = document.querySelector(".context-menu");
+      if (!menu) return "no menu";
+      const traps = [];
+      for (let el = menu.parentElement; el; el = el.parentElement) {
+        const st = getComputedStyle(el);
+        const why = [];
+        if (st.zIndex !== "auto" && st.position !== "static") why.push("z-index " + st.zIndex);
+        if (st.transform !== "none") why.push("transform");
+        if (st.filter !== "none") why.push("filter");
+        if (st.contain !== "none") why.push("contain " + st.contain);
+        if (st.isolation === "isolate") why.push("isolate");
+        if (st.willChange !== "auto") why.push("will-change " + st.willChange);
+        if (why.length > 0) traps.push(el.className.slice(0, 40) + " => " + why.join(", "));
+      }
+      return traps.length === 0 ? "no stacking context above the menu" : traps.join(" | ");
+    })()`,
+  },
+
+
+  // The bottom of the block gamut: the quote with a list in it, and the two tables. A frame of the
+  // top of a 2000px specimen is a frame of the headings, and the headings were never the problem.
+  {
+    name: "gamut-blocks-scrolled",
+    shot: `[data-shot="gamut-blocks"]`,
+    run: `(() => {
+      const sc = document.querySelector('[data-shot="gamut-blocks"] .cm-scroller');
+      if (!sc) return "no scroller";
+      // ASYNC, with a frame between each jump. CodeMirror measures lazily: everything below the
+      // viewport is an estimate until it is drawn, so the scroll height grows only after a layout,
+      // and twenty assignments in one task all read the same stale number and land in the same
+      // place. NB no backticks in here — this whole run is itself a template literal, and one in a
+      // comment closes it and takes the harness down with a syntax error.
+      return (async () => {
+        for (let i = 0; i < 20; i++) {
+          sc.scrollTop = sc.scrollHeight;
+          await new Promise((r) => requestAnimationFrame(r));
+        }
+        return "at " + Math.round(sc.scrollTop) + " of " + Math.round(sc.scrollHeight);
+      })();
+    })()`,
+  },
+
+  /**
+   * The long document, scrolled well past where the initial parse stopped.
+   *
+   * The number in the log is the point: it says how far the tree had been built when the fold last
+   * ran. A frame of the top of this file proves nothing — the top always worked.
+   */
+  {
+    name: "long-document-scrolled",
+    shot: `[data-shot="long-document"]`,
+    run: `(() => {
+      const sc = document.querySelector('[data-shot="long-document"] .cm-scroller');
+      if (!sc) return "no scroller";
+      sc.scrollTop = 2600;
+      sc.dispatchEvent(new Event("scroll", { bubbles: true }));
+      return "scrolled to " + sc.scrollTop + " of " + sc.scrollHeight;
+    })()`,
+  },
+
+  /**
+   * FIRST RENDER, measured rather than photographed.
+   *
+   * `window.remount` throws the specimen away and builds it again — see `main.tsx` — and this reads
+   * the fence widgets' heights in the same task, before the browser has had a chance to paint. That
+   * is the only vantage point the defect is visible from: a widget whose DOM React fills
+   * asynchronously is zero pixels tall at the moment CodeMirror measures it, so the document below
+   * lays out against nothing and then jumps. A screenshot taken 120ms later shows the recovered
+   * page, which is why this reports a number instead.
+   */
+  {
+    name: "markdown-first-render",
+    shot: `[data-shot="markdown-pane"]`,
+    run: `(() => {
+      if (!window.remount("markdown-pane")) return "no remount hook";
+      const at = document.querySelectorAll('[data-shot="markdown-pane"] .cm-fence-block');
+      const heights = [...at].map((el) => Math.round(el.getBoundingClientRect().height));
+      const zero = heights.filter((h) => h === 0).length;
+      return "fences " + heights.length + " heights [" + heights.join(",") + "] zero-height " + zero;
+    })()`,
+  },
+
+  // The arrow, pressed. Everything about this control is in the frame after the click.
+  {
+    name: "renderer-menu-open",
+    click: `[data-shot="renderer-menu"] .vv-arrow`,
+    shot: `[data-shot="renderer-menu"]`,
+  },
+  // And the choice taken: the same value, drawn plainly, which is the state a selection can be
+  // dragged out of. A picture of the menu alone would not show that the item did anything.
+  {
+    name: "renderer-menu-plain",
+    shot: `[data-shot="renderer-menu"]`,
+    run: `(() => {
+      const arrow = document.querySelector('[data-shot="renderer-menu"] .vv-arrow');
+      if (!arrow) return "no arrow rendered";
+      arrow.click();
+      // The app's own ContextMenu, portalled into the document body — not a popover inside the
+      // value view. It went there because cm-scroller is a stacking context, which trapped the old
+      // one under the splitter; this selector followed it. (No backticks: see the note above.)
+      const items = [...document.querySelectorAll(".context-menu .menu-item")];
+      const plain = items.find((b) => b.textContent.trim().includes("Code view"));
+      if (!plain) return "menu items: " + items.map((b) => b.textContent.trim()).join(",");
+      plain.click();
+      return "picked the code view";
+    })()`,
+  },
+
   { name: "appearance-menu", click: `[data-shot="appearance"] .face-add`, shot: `[data-shot="appearance"]` },
   // The row you are ALREADY ON, clicked again. It must still be showing its tree afterwards: a row
   // is a place, nothing folds a drawer, and the only way to put one away is to go somewhere else.

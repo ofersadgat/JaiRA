@@ -17,7 +17,7 @@
  * and every specimen renders inside a boundary that draws its own failure into the frame, so the
  * one that broke is photographed as a red panel naming itself rather than deleting the whole page.
  */
-import { Component, useEffect, type ErrorInfo, type ReactNode } from "react";
+import { Component, Fragment, useEffect, useState, type ErrorInfo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { JSX } from "react";
 import "../src/renderer/styles.css";
@@ -82,6 +82,49 @@ function Ready(): null {
   return null;
 }
 
+/**
+ * Mount a specimen AGAIN, from nothing — what a first render actually is.
+ *
+ * Every frame this harness takes is taken after the page has settled: `data-ready` waits for fonts
+ * and a committed tree, and each shot waits another 120ms after scrolling. That is the right default
+ * — a photograph of a half-drawn page is a photograph of a race — but it means a defect that only
+ * exists on the FIRST render is one the harness structurally cannot see. It draws the recovered
+ * state and reports success.
+ *
+ * This is the way in. Bumping the key throws the subtree away and builds it again, so anything that
+ * happens once per mount happens again on demand: a widget whose DOM is filled asynchronously, an
+ * editor measuring a container that has no size yet, a lazily imported chunk arriving after the
+ * layout that needed it. A `run` step can then remount and measure in the same task, which is the
+ * only vantage point from which "wrong at first, right a frame later" is visible at all.
+ */
+const REMOUNTS = new Map<string, () => void>();
+
+declare global {
+  interface Window {
+    /** Remount one specimen by id. Returns false if nothing has that id. */
+    remount(id: string): boolean;
+  }
+}
+
+window.remount = (id: string): boolean => {
+  const again = REMOUNTS.get(id);
+  if (again === undefined) return false;
+  again();
+  return true;
+};
+
+/** One specimen's subtree, thrown away and rebuilt when the harness asks. */
+function Remountable({ id, children }: { id: string; children: ReactNode }): JSX.Element {
+  const [nonce, setNonce] = useState(0);
+  useEffect(() => {
+    REMOUNTS.set(id, () => setNonce((n) => n + 1));
+    return () => {
+      REMOUNTS.delete(id);
+    };
+  }, [id]);
+  return <Boundary id={id}>{<Fragment key={nonce}>{children}</Fragment>}</Boundary>;
+}
+
 /** One framed specimen. The frame is the only markup here the app does not own. */
 function Framed(): JSX.Element {
   return (
@@ -102,7 +145,7 @@ function Framed(): JSX.Element {
               flexDirection: "column",
             }}
           >
-            <Boundary id={s.id}>{s.node}</Boundary>
+            <Remountable id={s.id}>{s.node}</Remountable>
           </div>
         </figure>
       ))}

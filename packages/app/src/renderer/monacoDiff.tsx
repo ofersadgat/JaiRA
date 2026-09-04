@@ -388,11 +388,25 @@ export function MonacoCodePane({
   text,
   mime,
   onChange,
+  autoHeight,
 }: {
   text: string;
   mime: string;
   /** Somewhere for a change to go. ABSENT means read-only — see `documents.tsx` on why it is absence. */
   onChange?: ((text: string) => void) | undefined;
+  /**
+   * Take the height of the CONTENT rather than of the container.
+   *
+   * The note on {@link CodeText} lists "it cannot size itself to its content" as one of the three
+   * reasons an editor is the wrong tool inside a paragraph, and for a pane that fills a panel that
+   * is exactly right: the container is the answer, and asking the text would make the panel jump as
+   * you typed. It stops being right the moment the editor is a block INSIDE a document, where there
+   * is no container height to take and the pane drew a single line of code in seven hundred pixels
+   * of empty grey.
+   *
+   * So it is an option, not a change of behaviour. Off, this is what it always was.
+   */
+  autoHeight?: boolean | undefined;
 }): JSX.Element {
   const host = useRef<HTMLDivElement>(null);
   /** The latest props, read through refs so the editor is created once — see the effect below. */
@@ -402,6 +416,9 @@ export function MonacoCodePane({
   seed.current = { text, mime };
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const writable = onChange !== undefined;
+  /** Read through a ref for the same reason the rest is: the editor is created exactly once. */
+  const autoFit = useRef(autoHeight);
+  autoFit.current = autoHeight;
 
   useEffect(() => {
     const node = host.current;
@@ -413,11 +430,81 @@ export function MonacoCodePane({
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       overviewRulerLanes: 0,
+      /**
+       * No current-line rule, ever — not even while the caret is in it.
+       *
+       * In Monaco's light theme this is drawn as a BORDER above and below the line rather than as a
+       * tint, so what it produces is a grey outline round one row. That reads as a selection, and a
+       * caret is not a selection: the thing it marks is where typing would land, which the caret is
+       * already saying an inch to the left.
+       *
+       * It came off in two steps and the first was half a fix. Limiting it to a focused editor
+       * cleared the boxes round every unfocused fence in a document — a caret nobody had put there —
+       * and left the outline on the one you were actually in, where it was no more wanted.
+       */
+      renderLineHighlight: "none" as const,
+      // The gutter, trimmed to what this pane needs — the same trim {@link MonacoDiffPane} makes and
+      // for the same reason, which this one simply never got. Monaco's defaults reserve a glyph
+      // margin, a folding column and FIVE digits of line number, so a block holding one line drew a
+      // single `1` in an inch of empty space, right-aligned against a column sized for `10000`.
+      glyphMargin: false,
+      folding: false,
+      lineNumbersMinChars: 2,
+      // The gap between the number and the code. The diff pane can afford 2 because its two number
+      // columns already separate themselves; trimmed that far here it read as `1export const`.
+      lineDecorationsWidth: 10,
+      // Room above the first line and below the last, so the text is not flush against the frame.
+      // `getContentHeight` counts it, so the fitted height already allows for it.
+      padding: { top: 6, bottom: 6 },
+      /**
+       * A pane sized to its own text has nothing to scroll, so it must not offer to.
+       *
+       * Two separate bars were showing. The horizontal one because a long line overflowed, and it
+       * costs height that `getContentHeight` does not count — so the pane was a scrollbar taller
+       * than it had said it would be, which then made the vertical one appear as well. Wrapping is
+       * the honest fix rather than hiding the bar: a code block inside a document should break its
+       * lines the way the prose around it does instead of sliding sideways under a rule.
+       *
+       * Only in the fitted mode. A pane that fills a panel is a viewport onto a file and both bars
+       * are exactly right there.
+       */
+      ...(autoHeight === true
+        ? {
+            wordWrap: "on" as const,
+            scrollBeyondLastColumn: 0,
+            scrollbar: {
+              vertical: "hidden" as const,
+              horizontal: "hidden" as const,
+              // The page scrolls, not the block — otherwise a wheel over a fence eats the gesture
+              // and the document under the pointer refuses to move.
+              alwaysConsumeMouseWheel: false,
+            },
+          }
+        : {}),
       theme: themeOf(),
       ...editorFont(),
     });
     editorRef.current = editor;
     const typed = model.onDidChangeContent(() => report.current?.(model.getValue()));
+    /**
+     * The pane's height, taken from the text — see {@link MonacoCodePane}'s `autoHeight`.
+     *
+     * `getContentHeight` is Monaco's own measurement of the lines it has laid out, and the event
+     * fires whenever that changes: a line added, a line wrapped, the font size moved by the
+     * appearance slider. Setting the host and re-laying out in the same handler is what keeps the
+     * two from disagreeing by a frame, which would show as the block twitching as you type.
+     *
+     * The width is passed back unchanged. Only the height is ours to decide; the width belongs to
+     * whatever the block is sitting in.
+     */
+    const fit = (): void => {
+      if (autoFit.current !== true) return;
+      const height = editor.getContentHeight();
+      node.style.height = `${height}px`;
+      editor.layout({ width: node.clientWidth, height });
+    };
+    const sized = editor.onDidContentSizeChange(fit);
+    fit();
     // Theme AND typography: both are written onto the root — one as a data attribute, the other as
     // inline custom properties — so one observer covers both, and the editor follows a size slider
     // as it moves rather than at the next reopen.
@@ -428,6 +515,7 @@ export function MonacoCodePane({
     themes.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "style"] });
     return () => {
       typed.dispose();
+      sized.dispose();
       themes.disconnect();
       editor.dispose();
       model.dispose();
@@ -455,21 +543,12 @@ export function MonacoCodePane({
     if (model !== undefined && model !== null) monaco.editor.setModelLanguage(model, monacoGrammarOf(mime));
   }, [mime]);
 
-  /**
-   * Follow writability, rather than re-creating for it.
-   *
-   * `renderLineHighlight` and the cursor go with it: a current-line highlight says "you are editing
-   * here", and saying that over something nobody can change is the reading claiming to be an editor.
-   */
+  /** Follow writability, rather than re-creating for it. */
   useEffect(() => {
-    editorRef.current?.updateOptions({
-      readOnly: !writable,
-      domReadOnly: !writable,
-      renderLineHighlight: writable ? "line" : "none",
-    });
+    editorRef.current?.updateOptions({ readOnly: !writable, domReadOnly: !writable });
   }, [writable]);
 
-  return <div className="monaco-host" ref={host} />;
+  return <div className={autoHeight === true ? "monaco-host monaco-fit" : "monaco-host"} ref={host} />;
 }
 
 /**

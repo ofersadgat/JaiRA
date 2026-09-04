@@ -1912,6 +1912,33 @@ button.side-twist:hover:not(:disabled) {
   border-radius: 6px;
   overflow: hidden;
 }
+/* The live-preview editor is the third band this half can hold, and it was the one with no rule at
+   all — a flex item with no basis and no scroller, inside a `.config-half` that is `overflow: hidden`
+   on purpose because every editing surface is supposed to scroll INSIDE itself. CodeMirror's default
+   is an AUTO-HEIGHT instance: it grows to the document and `.cm-scroller` never scrolls, because
+   there is nothing to scroll past. So a markdown file longer than the pane was clipped at the bottom
+   with no bar to drag and no way to reach the end of it.
+
+   Bounding the host is what switches CodeMirror's own scroller back on, which is why `.cm-editor`
+   takes `height: 100%` — that is CodeMirror's recipe for a fixed-height instance, and it keeps the
+   viewport measuring and the caret-into-view scrolling the editor does for itself. Scoped to this
+   half rather than written on `.md-editor`, because the same editor in a transcript or a value is
+   meant to grow with its content and has a scroller above it already. */
+.file-edit > .md-editor {
+  flex: 1 1 auto;
+  min-height: 200px;
+}
+.file-edit > .md-editor .cm-editor {
+  height: 100%;
+}
+/* `.markdown` is the Suspense fallback while CodeMirror loads — same band, scrolling on its own, so
+   the pane neither clips nor jumps when the editor arrives. `Suspense` adds no DOM node, so this is
+   a direct child exactly as `.vv-source` is above. */
+.file-edit > .markdown {
+  flex: 1 1 auto;
+  min-height: 200px;
+  overflow: auto;
+}
 .file-edit > .pane-actions {
   flex: none;
 }
@@ -5241,12 +5268,209 @@ button.layer-on:hover:not(:disabled) {
   color: var(--dim);
   font-style: italic;
 }
+/* --- the bands ---
+   Three constructs are BLOCKS, and a character style cannot draw one. These rules are what the line
+   decorations in `markdownEditor.tsx` exist to hang on; without them the editor showed a quote as
+   dim italic text with a `>` still in front of it, an untyped fence as a row of ragged pills, and a
+   table as a paragraph full of pipes. */
+
+/* A quote is a rule down the margin. The `>` is hidden now that this replaces it — which is the
+   whole reason it may be hidden, and why a list bullet still may not. */
+.cm-quote-line {
+  border-left: 2px solid var(--rule);
+  /* Published as a variable as well as applied, because a list item inside a quote has to add its
+     own hanging indent to this rather than replace it — see the `ListItem` branch, whose inline
+     style reads `--md-inset`. The `!important` is what beats the editor theme's own `.cm-line`
+     padding; the item's inline style carries its own `!important` to beat this in turn. */
+  --md-inset: 10px;
+  padding-left: var(--md-inset) !important;
+  background: color-mix(in srgb, var(--panel-2) 45%, transparent);
+}
+
+/* One panel behind the whole fence rather than a pill per token. `@lezer/markdown` gives a fenced
+   block's text the SAME `tags.monospace` as inline code, so `.cm-code`'s rounded, padded background
+   was being applied inside it run by run; that is undone here rather than by splitting the tag,
+   because the tag genuinely cannot tell the two apart. */
+.cm-code-line {
+  background: var(--bg);
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  font-family: var(--font-data);
+  font-size: var(--size-data);
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+}
+.cm-code-line .cm-code {
+  background: none;
+  border-radius: 0;
+  padding: 0;
+}
+.cm-code-open {
+  border-top: 1px solid var(--line);
+  border-radius: 6px 6px 0 0;
+  position: relative;
+}
+.cm-code-close {
+  border-bottom: 1px solid var(--line);
+  border-radius: 0 0 6px 6px;
+}
+/* The language, put back as a label after the `CodeInfo` text itself was hidden with the backticks.
+   `::after` rather than content in the document: it cannot be typed into, selected into a copy, or
+   moved by an edit, which are the three things a real token in a code block must not do. */
+.cm-code-open[data-lang]::after {
+  content: attr(data-lang);
+  position: absolute;
+  top: 1px;
+  right: 8px;
+  font: calc(var(--size-data) * 0.84) / 1 var(--font-data);
+  color: var(--dim);
+  pointer-events: none;
+}
+
+/* --- a fence, drawn by the pipeline ---
+   The widget hosts whatever `ValueView` decides that MIME type deserves, so almost nothing is styled
+   here: the block inside brings its own chrome, its own toggle and its own editor. What is left is
+   the seat it sits in. */
+.cm-fence-block {
+  margin: 6px 0;
+  /* The frame belongs to the SEAT, not to what is sitting in it. A ```text block resolves to no MIME
+     type at all, so the pipeline declines it and the fallback is a bare `<pre>` — which meant a
+     plain block was the one kind with no outline, sitting flush against the prose while every typed
+     block beside it had a border. Framing here makes every fence look like a block whatever the
+     pipeline decided to put inside. */
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  padding: 6px 8px;
+  overflow: hidden;
+}
+/* The editor's own line padding would inset the block from the text around it by a couple of pixels
+   more than everything else, which reads as a misalignment rather than as a margin. */
+.cm-fence-block > .vv {
+  margin: 0;
+}
+/* No height here, and that is the point — see `.monaco-fit` below. A fence takes its height from
+   its text, so a floor in the stylesheet is exactly the second opinion that drew a one-line block
+   ninety-six pixels tall. */
+
+/* --- the drawn table ---
+   The widget's own DOM, which is a real `<table>` and can therefore do the one thing the banded
+   version could not: agree on a column width across rows. The banding below still exists, because it
+   is what a table looks like while the caret is inside it and it is source again. */
+.cm-table-block {
+  overflow-x: auto;
+  margin: 4px 0;
+}
+.cm-table-block table {
+  border-collapse: collapse;
+  font-size: calc(var(--size-app) * 0.96);
+  /* A CEILING, not a width. A two-column table of short values should be two columns wide; `width:
+     100%` stretched every table across the pane whether it had anything to put there or not. What
+     the sizing actually needed was the two rules below — a floor under each column so none collapses
+     to a letter per line, and permission to break a long token so it stops setting its column's
+     floor. Those work at any width; this only stops a wide table overflowing the pane. */
+  max-width: 100%;
+}
+.cm-table-block th,
+.cm-table-block td {
+  /* A column's floor. Min-content for a cell holding `42` is the width of `42`, which is a correct
+     answer to the wrong question once the column beside it is a paragraph. */
+  min-width: 3.5em;
+  /* A path or a long identifier is one unbreakable token, and its width becomes the column's floor —
+     which is how one cell came to own the table. Breaking it is what lets the rest have room. */
+  overflow-wrap: anywhere;
+}
+.cm-table-block th,
+.cm-table-block td {
+  border: 1px solid var(--line);
+  padding: 4px 9px;
+  text-align: left;
+  vertical-align: top;
+}
+.cm-table-block th {
+  background: var(--panel-2);
+  font-weight: 650;
+}
+.cm-table-block code {
+  font: var(--size-data) / 1.5 var(--font-data);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 3px;
+}
+/* Drawn as a link, not wired as one — see `cellContent`. */
+.cm-table-link {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* A table as SOURCE — what the lines look like while the caret is inside the table and the widget
+   has stepped aside. Monospace here is honest, because this IS the text. */
+.cm-table-line {
+  font-family: var(--font-data);
+  font-size: var(--size-data);
+  background: color-mix(in srgb, var(--panel-2) 40%, transparent);
+}
+.cm-table-head {
+  font-weight: 650;
+  border-top: 1px solid var(--line);
+  border-radius: 6px 6px 0 0;
+}
+.cm-table-rule {
+  color: var(--dim);
+  opacity: 0.55;
+}
+.cm-table-delim {
+  color: var(--dim);
+  opacity: 0.6;
+}
 .cm-list {
   color: var(--text);
+}
+/* The bullet a `-` is drawn as. Dimmer than the words, because it is punctuation for the list rather
+   than part of what the item says — the same weight the reading renderer gives it. */
+.cm-bullet {
+  color: var(--dim);
+}
+/* A task's box. Drawn rather than clickable — see the widget: the way to tick a box in a document is
+   to type an `x` in it. */
+.cm-task {
+  color: var(--dim);
+}
+.cm-task-done {
+  color: var(--accent);
+}
+/* An image's alt text. Deliberately NOT the link style — see the `IMAGE` note: an image is not a
+   destination, and there is no picture to draw in its place. */
+.cm-image {
+  color: var(--dim);
+  font-style: italic;
+  text-decoration: none;
+}
+/* A link definition: machinery, left as written. Dim enough to read past. */
+.cm-linkref-line {
+  opacity: 0.55;
 }
 .cm-rule {
   color: var(--rule);
 }
+/* A thematic break, drawn. The characters are hidden, so the row is empty and the rule is centred in
+   it — a border on the line itself would sit at the bottom of the row rather than through it. */
+.cm-hr-line {
+  position: relative;
+}
+.cm-hr-line::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px solid var(--rule);
+  pointer-events: none;
+}
+/* The hanging indent that keeps a wrapped list item under its own text is set PER ITEM in
+   `markdownEditor.tsx` — the width to hang by is the width of that item's drawn marker, which no
+   stylesheet can know. The class is here only so the lines can be found. */
 
 /* --- comparing two pictures --- */
 
@@ -5349,6 +5573,14 @@ button.layer-on:hover:not(:disabled) {
   width: 100%;
   min-height: 40vh;
   resize: vertical;
+}
+/* Sized by its `rows` rather than stretched to a band — see the `inline` note in `valueView.tsx`.
+   `min-height: 40vh` above is what put a screenful of empty box under a two-line block; two classes
+   rather than source order, so this cannot lose the next time the rules are moved around. */
+.vv-edit.vv-edit-fit {
+  height: auto;
+  min-height: 0;
+  resize: none;
 }
 
 /* Removals and additions inside the markdown editor's diff reading. */
@@ -10403,6 +10635,38 @@ fieldset.reading {
 .vv {
   min-width: 0;
 }
+/* --- a value INSIDE a document ---
+   The header row, floated into the block's corner. See the note in `valueView.tsx`: a fenced block
+   is a few lines inside a paragraph, and a full-width strip above it spends more of the block's
+   height on chrome than on content. */
+.vv-inline {
+  position: relative;
+}
+.vv-inline > .vv-head {
+  position: absolute;
+  z-index: 2;
+  top: 3px;
+  right: 3px;
+  margin: 0;
+  /* Only as wide as the controls. Left spanning the block, its `.grow` spacer would push the buttons
+     out over code they have no need to cover. */
+  width: auto;
+}
+/* The controls have to read over whatever is behind them. A translucent ground rather than the panel
+   colour, so the block still looks like one block, and a blur so a line of code under the edge of the
+   strip does not compete with the labels on it. */
+.vv-inline > .vv-head .vv-toggle,
+.vv-inline > .vv-head .vv-more {
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(3px);
+}
+.vv-inline > .vv-head .vv-more {
+  border-color: var(--line);
+}
+/* Nothing left to push apart once the row is only as wide as its buttons. */
+.vv-inline > .vv-head > .grow {
+  display: none;
+}
 .vv-head {
   display: flex;
   align-items: center;
@@ -10446,6 +10710,15 @@ fieldset.reading {
   color: var(--text);
   background: var(--fill-ghost-selected);
   font-weight: 600;
+}
+/* The arrow on a view that has more than one renderer. Attached to its own label rather than
+   separated from it — no left border — because it belongs to that button, not to the strip: it says
+   "this view can be drawn another way", and a hairline in front of it would read as a fourth view. */
+.vv-toggle button.vv-arrow {
+  border-left: 0;
+  padding: 1px 4px 1px 1px;
+  font-size: calc(var(--size-app) * 8 / 12.5);
+  line-height: 1;
 }
 /* The overflow beside the toggle: verbs, not views — see `valueView.tsx`'s header. Sized to match
    the toggle's height exactly so the two read as one strip, and quiet until hovered, because it is
@@ -10798,6 +11071,16 @@ fieldset.reading {
   border: 1px solid var(--line);
   border-radius: 6px;
   overflow: hidden;
+}
+/* Except when the pane is sizing itself to its text, which is what a fenced block inside a document
+   does — see `MonacoCodePane`'s `autoHeight`. The height then comes from `getContentHeight` as an
+   inline style, and BOTH of the stylesheet's numbers have to get out of the way: the 320px viewport
+   above, and any floor under it. Selector matched to the rule it is answering, because a bare
+   `.monaco-fit` loses to `.vv-body > .monaco-host` on specificity and the block stays 320px tall. */
+.vv-body > .monaco-host.monaco-fit,
+.monaco-host.monaco-fit {
+  height: auto;
+  min-height: 0;
 }
 .vv-media {
   display: block;

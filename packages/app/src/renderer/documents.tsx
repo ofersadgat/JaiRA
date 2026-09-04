@@ -107,6 +107,13 @@ export interface CodeDocumentProps {
   mime: string;
   /** How a change comes back. ABSENT means read-only, exactly as in {@link MarkdownDocumentProps}. */
   onChange?: ((text: string) => void) | undefined;
+  /**
+   * Take the height of the text rather than of the box — for a document drawn INSIDE another one.
+   *
+   * A fenced block in a markdown file is the case: there is no container height to fill, so an
+   * editor that waits to be told one draws a single line in a screenful of nothing.
+   */
+  autoHeight?: boolean | undefined;
 }
 
 /**
@@ -118,7 +125,7 @@ export interface CodeDocumentProps {
  * blocks in a conversation need and forty mounted editors would break. An editor buys scrolling,
  * folding, a caret, and the ability to type; nothing that is only being read wants any of it.
  */
-export function CodeDocument({ text, mime, onChange }: CodeDocumentProps): JSX.Element {
+export function CodeDocument({ text, mime, onChange, autoHeight }: CodeDocumentProps): JSX.Element {
   if (onChange === undefined) {
     return (
       <Suspense fallback={<pre className="vv-source">{text}</pre>}>
@@ -128,7 +135,7 @@ export function CodeDocument({ text, mime, onChange }: CodeDocumentProps): JSX.E
   }
   return (
     <Suspense fallback={<pre className="vv-source">{text}</pre>}>
-      <MonacoCodePane text={text} mime={mime} onChange={onChange} />
+      <MonacoCodePane text={text} mime={mime} onChange={onChange} {...(autoHeight === undefined ? {} : { autoHeight })} />
     </Suspense>
   );
 }
