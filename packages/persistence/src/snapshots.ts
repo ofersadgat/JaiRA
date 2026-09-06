@@ -186,9 +186,89 @@ export interface EnsureSnapshotOptions {
    * would store code the identity does not cover, which is the failure this exists to prevent.
    */
   modules?: ReadonlyMap<string, string>;
+  /**
+   * The rename {@link commitStaging} retries, for tests only.
+   *
+   * A seam rather than a mock because the failure it guards against cannot be provoked on the
+   * platform CI runs: the retry exists for a Windows rule about open handles, and a POSIX box will
+   * rename a staged directory on the first try every time. Injecting the call is the only way the
+   * loop is executed anywhere but the machine that reported the bug.
+   */
+  rename?: (from: string, to: string) => void;
 }
 
-export function ensureSnapshot(snapshotsDir: string, bundle: WorkflowBundle, options: EnsureSnapshotOptions = {}): SnapshotRef {
+/**
+ * Delay before each retry of the rename below, in ms — five attempts across roughly a third of a
+ * second, which is long enough to outlast a scanner holding a handful of small JSON files and short
+ * enough that a genuinely stuck rename still reports promptly.
+ */
+const COMMIT_BACKOFF_MS = [20, 40, 80, 160] as const;
+
+/**
+ * Throw away a staging directory, tolerating the same handles that make the rename fail.
+ *
+ * `force` alone suppresses a missing path, not a busy one: node only retries EBUSY/EPERM/ENOTEMPTY
+ * when asked, and without that this cleanup can throw over the error it is cleaning up after —
+ * replacing a diagnosis with a complaint about a temp directory.
+ */
+function discardStaging(staging: string): void {
+  rmSync(staging, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+}
+
+/**
+ * Publish a staged snapshot under its content-addressed name, retrying a rename that Windows
+ * refuses.
+ *
+ * Renaming a DIRECTORY on Windows fails with EPERM while any handle is open on a file inside it,
+ * and every file inside this one was written microseconds ago — which is exactly what a virus
+ * scanner or the search indexer opens. The failure is therefore specific to a snapshot being
+ * CREATED, not to a machine being busy: an existing snapshot takes the early return in
+ * {@link ensureSnapshot} and never renames at all, so a task that started fine yesterday can fail
+ * today on the first workflow it has not seen before. Nothing is wrong with what was written and
+ * nothing about the write needs to change — the handles close on their own, so the answer is to
+ * ask again.
+ *
+ * `existsSync(dir)` is re-checked BETWEEN attempts rather than only after the last one. That is the
+ * concurrent-writer case — a second process staging identical content, which is the whole reason
+ * this is content-addressed — and that writer's rename can land at any point during the backoff.
+ * Checking once at the end would still be correct, but would sit out the remaining delays waiting to
+ * discover work that is already done.
+ */
+async function commitStaging(staging: string, dir: string, rename: (from: string, to: string) => void): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      rename(staging, dir);
+      return;
+    } catch (e) {
+      // Lost a race with a concurrent writer of the same content — fine. Immutable and
+      // content-addressed means their directory and ours are the same directory.
+      if (existsSync(dir)) {
+        discardStaging(staging);
+        return;
+      }
+      const backoff = COMMIT_BACKOFF_MS[attempt];
+      if (backoff === undefined) {
+        discardStaging(staging);
+        throw e;
+      }
+      log.debug(`snapshot rename failed, retrying in ${backoff}ms: ${(e as Error).message}`);
+      await new Promise((resolve) => setTimeout(resolve, backoff));
+    }
+  }
+}
+
+/**
+ * Async only for the backoff in {@link commitStaging} — everything this does with the filesystem
+ * is still synchronous, and deliberately so: a snapshot is written in one uninterrupted stretch,
+ * which is what makes two starts in one process serialize rather than interleave over a staging path
+ * they share. The one `await` is on the retry path, where the process has nothing better to do than
+ * wait for somebody else to close a file.
+ */
+export async function ensureSnapshot(
+  snapshotsDir: string,
+  bundle: WorkflowBundle,
+  options: EnsureSnapshotOptions = {},
+): Promise<SnapshotRef> {
   const hash = snapshotHash(bundle);
   const dir = join(snapshotsDir, hash);
   if (existsSync(dir)) return { hash, dir, created: false };
@@ -196,7 +276,7 @@ export function ensureSnapshot(snapshotsDir: string, bundle: WorkflowBundle, opt
   // Stage then rename, so a crash mid-write never leaves a half snapshot
   // behind under its final content-addressed name.
   const staging = join(snapshotsDir, `.staging-${hash}-${process.pid}`);
-  rmSync(staging, { recursive: true, force: true });
+  discardStaging(staging);
   mkdirSync(staging, { recursive: true });
   const ids: Record<string, string> = {};
   for (const stateId of Object.keys(bundle.states)) {
@@ -228,13 +308,7 @@ export function ensureSnapshot(snapshotsDir: string, bundle: WorkflowBundle, opt
     ...(Object.keys(modules).length > 0 ? { modules } : {}),
   };
   writeFileSync(join(staging, META_FILE), JSON.stringify(meta, null, 2) + "\n", "utf8");
-  try {
-    renameSync(staging, dir);
-  } catch (e) {
-    // Lost a race with a concurrent writer of the same content — fine.
-    rmSync(staging, { recursive: true, force: true });
-    if (!existsSync(dir)) throw e;
-  }
+  await commitStaging(staging, dir, options.rename ?? renameSync);
   return { hash, dir, created: true };
 }
 

@@ -250,7 +250,7 @@ async function snapshotWithModules(
 ): Promise<{ hash: string; dir: string; bundle: WorkflowBundle }> {
   const entries = moduleEntriesOf(bundle);
   if (entries.length === 0) {
-    const snap = ensureSnapshot(project.paths.snapshotsDir, bundle);
+    const snap = await ensureSnapshot(project.paths.snapshotsDir, bundle);
     return { hash: snap.hash, dir: snap.dir, bundle };
   }
   const modules = userModules();
@@ -269,7 +269,7 @@ async function snapshotWithModules(
   await refuseIfUnapproved([], entries);
   const frozen = await freezeForRun(modules, entries);
   const withDigest: WorkflowBundle = { ...bundle, moduleDigest: frozen.digest };
-  const snap = ensureSnapshot(project.paths.snapshotsDir, withDigest, { modules: frozen.emitted });
+  const snap = await ensureSnapshot(project.paths.snapshotsDir, withDigest, { modules: frozen.emitted });
   return { hash: snap.hash, dir: snap.dir, bundle: withDigest };
 }
 

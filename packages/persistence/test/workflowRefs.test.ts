@@ -74,13 +74,13 @@ describe("reference spellings", () => {
     expect(Object.keys(bundle.states).sort()).toEqual([external, "feature/plan"].sort());
   });
 
-  it("round-trips an out-of-tree state through a snapshot", () => {
+  it("round-trips an out-of-tree state through a snapshot", async () => {
     const wf = project.paths.workflowsDir;
     write(wf, "feature/plan.json", { label: "Plan", children: { goals: { state: "$PROJECT/shared/goals" } } });
     write(project.paths.projectDir, "shared/goals.json", leaf);
 
     const bundle = load("feature/plan");
-    const snap = ensureSnapshot(project.paths.snapshotsDir, bundle);
+    const snap = await ensureSnapshot(project.paths.snapshotsDir, bundle);
     // Reloading verifies the content hash, so an id that failed to round-trip would fail here.
     const reloaded = loadSnapshot(project.paths.snapshotsDir, snap.hash);
     expect(Object.keys(reloaded.states).sort()).toEqual(Object.keys(bundle.states).sort());
@@ -147,10 +147,10 @@ describe("document references", () => {
    * body is already spliced into the stored operation, so there is no second file for a reload to
    * resolve — and nothing for an edit to reach.
    */
-  it("pins the referenced file, so editing it cannot change a started task", () => {
+  it("pins the referenced file, so editing it cannot change a started task", async () => {
     withPromptFile("Original.");
     const bundle = loadBundle(readWorkflowFiles(project.paths.workflowsDir), "plan", workflowLoadOptions(project.paths, { vfs: nodeVfs() }));
-    const snap = ensureSnapshot(project.paths.snapshotsDir, bundle);
+    const snap = await ensureSnapshot(project.paths.snapshotsDir, bundle);
 
     // Edit the prompt AFTER pinning — the snapshot must still carry the original.
     writeFileSync(join(project.paths.jairaDir, "prompts", "goals.md"), "Rewritten.", "utf8");
@@ -158,15 +158,15 @@ describe("document references", () => {
     expect((reloaded.states.plan!.operation as { user?: string }).user).toBe("Original.");
   });
 
-  it("gives a different hash when a referenced file differs", () => {
-    const hashFor = (body: string): string => {
+  it("gives a different hash when a referenced file differs", async () => {
+    const hashFor = async (body: string): Promise<string> => {
       withPromptFile(body);
       const bundle = loadBundle(readWorkflowFiles(project.paths.workflowsDir), "plan", workflowLoadOptions(project.paths, { vfs: nodeVfs() }));
-      return ensureSnapshot(project.paths.snapshotsDir, bundle).hash;
+      return (await ensureSnapshot(project.paths.snapshotsDir, bundle)).hash;
     };
     // The state files are byte-identical; only the fragment changed — and the fragment is part of
     // the resolved definition, so it is part of the identity without being tracked separately.
-    expect(hashFor("One.")).not.toBe(hashFor("Two."));
+    expect(await hashFor("One.")).not.toBe(await hashFor("Two."));
   });
 });
 
