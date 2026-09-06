@@ -23,6 +23,8 @@
  * Here rather than beside the rest of the `.jaira/` layout because the renderer needs it and
  * `paths.ts` is Node-only; it is re-exported from there, where the layout lives.
  */
+import type { LogLevel, LogOverride, LogPolicy } from "./view";
+
 export const SETTINGS_FILE_NAME = "settings.json";
 
 /** The file this module is about — see the note above on why the names are a pair. */
@@ -140,6 +142,16 @@ export interface JairaSettings {
    * longer name a project are dropped rather than raised (see `AppService.restore`).
    */
   projects: string[];
+  /**
+   * What the app keeps in its log, and what it drops before writing — see {@link LogPolicy}.
+   *
+   * A preference, because the right answer changes by the hour: the level that makes a run
+   * diagnosable is the level that makes the panel unreadable the rest of the time, and the only
+   * person who knows which of those today is, is the one looking at it. The Logs page edits this
+   * directly, which is why it is here rather than in a project's `settings.json` — how loudly your
+   * machine talks to you is not a property of a checkout.
+   */
+  logging: LogPolicy;
   /**
    * Where the shared base root lives, when it is not `~/.jaira`.
    *
@@ -533,6 +545,52 @@ export function defaultSettings(): JairaSettings {
     renderers: {},
     projects: [],
     filesHidden: [],
+    logging: defaultLogPolicy(),
+  };
+}
+
+/**
+ * `info` and no overrides — the app's account of itself, without the trace under it.
+ *
+ * `info` rather than `debug` because `debug` is where a run's state-by-state trace lives, and a
+ * default that buries every other entry under it is a default that makes the panel worth less than
+ * it was. Turning it up is one control away, and that is the right shape for a knob whose answer
+ * depends entirely on what you are doing right now.
+ */
+export function defaultLogPolicy(): LogPolicy {
+  return { minLevel: "info", overrides: [] };
+}
+
+const LOG_LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"];
+
+const isLogLevel = (value: unknown): value is LogLevel => LOG_LEVELS.includes(value as LogLevel);
+
+/**
+ * Read the policy back, forgivingly — like everything else in this file.
+ *
+ * An override naming a level that does not exist, or a sampling rate outside 0..1, is DROPPED rather
+ * than repaired: a rule nobody can satisfy is not a rule, and quietly rounding one into a rule that
+ * can be satisfied would mean the app silently disagreeing with what the file says it should do.
+ */
+export function parseLogPolicy(raw: unknown): LogPolicy {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return defaultLogPolicy();
+  const doc = raw as { minLevel?: unknown; overrides?: unknown };
+  const overrides = Array.isArray(doc.overrides)
+    ? doc.overrides.flatMap((entry): LogOverride[] => {
+        if (entry === null || typeof entry !== "object") return [];
+        const o = entry as { match?: unknown; key?: unknown; minLevel?: unknown; samplingRate?: unknown };
+        if (o.match !== "scope" && o.match !== "tag") return [];
+        if (typeof o.key !== "string" || o.key.trim() === "") return [];
+        if (!isLogLevel(o.minLevel)) return [];
+        const rate = typeof o.samplingRate === "number" && o.samplingRate >= 0 && o.samplingRate <= 1 ? o.samplingRate : undefined;
+        return [{ match: o.match, key: o.key.trim(), minLevel: o.minLevel, ...(rate === undefined || rate === 1 ? {} : { samplingRate: rate }) }];
+      })
+    : [];
+  return {
+    minLevel: isLogLevel(doc.minLevel) ? doc.minLevel : "info",
+    // One rule per key per kind. A file with two rules for `run` has no defined answer, and the last
+    // one written is the one the editor above would have shown.
+    overrides: [...new Map(overrides.map((o) => [`${o.match}:${o.key}`, o])).values()],
   };
 }
 
@@ -570,6 +628,7 @@ export function parseSettings(raw: unknown): JairaSettings {
     editors: parseEditors(doc["editors"], doc["wrapJson"] === true),
     renderers: parseRenderers(doc["renderers"]),
     projects: parseProjects(doc["projects"]),
+    logging: parseLogPolicy(doc["logging"]),
     // Trimmed and de-duplicated, dropping anything that is not a usable pattern. Forgiving like the
     // rest of this file: one unreadable entry is no reason to reset what a person can see.
     filesHidden: Array.isArray(doc["filesHidden"])

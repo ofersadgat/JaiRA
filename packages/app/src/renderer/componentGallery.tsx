@@ -349,6 +349,16 @@ function Stage({
         // The gallery reads no files. A failing read is already the silent case in the reviewer's
         // drift check (see `readCurrent`), so this produces no badge rather than a wrong one.
         readUri: () => Promise.reject(new Error("the gallery reads no files")),
+        // And it compiles none. `GALLERY_PROJECT` is a placeholder for a subtitle, not a project
+        // main can resolve, so the compiler channels would ask about a tree that does not exist and
+        // be refused once per side of every TypeScript change on screen.
+        //
+        // Stated as an explicit `undefined` rather than left out: these services are spread OVER the
+        // renderer defaults (see `ChangesetGate`), so an absent key keeps the default rather than
+        // dropping it. Undefined is the contract's own "no diagnostics here" — the same answer the
+        // CLI gets — which is the honest one for a fixture nothing can type-check.
+        checkFile: undefined,
+        releaseFile: undefined,
       }}
     />
   );

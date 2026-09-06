@@ -20,6 +20,7 @@ import {
   type PushMessage,
   type SaveFileRequest,
 } from "@jaira/shared";
+import { stackDetail } from "./diagnostics";
 import { AppService, type CrashKind, type KeychainPort } from "./service";
 
 // Source maps are enabled in `entry.cjs`, which loads this bundle — NOT here. The flag registers a
@@ -222,6 +223,34 @@ const service = new AppService({
 });
 
 /**
+ * What this launch IS, said once, before anything can go wrong in it.
+ *
+ * The Logs panel used to open on a list whose first line was whatever had already broken, with no
+ * way to tell which build was running, which base root it was pointed at, or whether the command
+ * line had asked for something other than the default — and every one of those is the first question
+ * asked of a report. It is `info`, and it is the boundary between launches now that the panel reads
+ * back the ones before it (see `Diagnostics.hydrate`): the entries above this line are history.
+ *
+ * `argv` WHOLE, minus the executable. It is the flags this run was given — the thing a person is
+ * asking about when they say "but I passed `--home`" — and it holds nothing a log may not have: the
+ * app's own flags are paths, and paths are already the substance of half the entries here.
+ */
+service.recordApp("info", `JaiRA ${app.getVersion()} started`, {
+  argv: process.argv.slice(1),
+  home: home ?? null,
+  baseDir: service.baseRoot(),
+  pid: process.pid,
+  platform: `${process.platform}-${process.arch}`,
+  electron: process.versions["electron"] ?? null,
+  chrome: process.versions["chrome"] ?? null,
+  node: process.versions["node"] ?? null,
+  // What the libraries will actually emit into this panel: `@declarative-ai/log` drops anything
+  // below its minimum BEFORE the sink sees it, so a panel with no `debug` in it is not necessarily
+  // a quiet app. Naming the level here is what makes that visible rather than mysterious.
+  logLevel: process.env["LOG_LEVEL"] ?? "info (default; set LOG_LEVEL=debug for more)",
+});
+
+/**
  * The three verbs that could not be service methods.
  *
  * Everything else in the table below forwards to {@link AppService}, which is Electron-free so that
@@ -356,7 +385,7 @@ const handlers: Record<IpcChannel, Handler> = {
   "chat:send": ((request: Parameters<typeof service.sendChatMessage>[0]) => service.sendChatMessage(request)) as Handler,
   "chat:cancel": ((request: Parameters<typeof service.cancelChatTurn>[0]) => service.cancelChatTurn(request)) as Handler,
   "chat:thread": ((request: Parameters<typeof service.chatThread>[0]) => service.chatThread(request)) as Handler,
-  "log:list": ((request: Parameters<typeof service.listLogs>[0]) => service.listLogs(request)) as Handler,
+  "log:list": ((request: Parameters<typeof service.readLogs>[0]) => service.readLogs(request)) as Handler,
   "job:list": ((request: Parameters<typeof service.listJobs>[0]) => service.listJobs(request)) as Handler,
   "job:output": ((request: Parameters<typeof service.jobOutput>[0]) => service.jobOutput(request)) as Handler,
   "interaction:pending": (() => service.pendingInteractions()) as Handler,
@@ -721,17 +750,24 @@ void app.whenReady().then(async () => {
   try {
     await service.restore();
   } catch (e) {
+    // To the log as well as the console, and with the STACK. This is the failure that leaves a
+    // window standing at nothing, and until it was recorded the only account of it was a line in a
+    // terminal that a packaged app does not have.
     console.error(`failed to re-open the remembered projects: ${(e as Error).message}`);
+    service.recordApp("error", `failed to re-open the remembered projects: ${(e as Error).message}`, stackDetail(e).detail);
   }
   const dir = startupProject();
   if (dir) {
+    service.recordApp("info", `opening ${dir} from the command line`);
     try {
       await service.open(dir);
     } catch (e) {
       console.error(`failed to open project ${dir}: ${(e as Error).message}`);
+      service.recordApp("error", `failed to open ${dir}: ${(e as Error).message}`, stackDetail(e).detail);
     }
   }
   window = await createWindow();
+  service.recordApp("info", "the window is up");
 
   const capture = process.env["JAIRA_CAPTURE"];
   if (capture) void captureAndExit(window, capture);
@@ -752,5 +788,8 @@ app.on("before-quit", (event) => {
   if (closing) return;
   event.preventDefault();
   closing = true;
+  // The other end of the launch line. A log that ends mid-sentence is a crash; a log that ends here
+  // is a quit, and telling those two apart in yesterday's file is most of reading it.
+  service.recordApp("info", "quitting: draining runs and closing the databases");
   void service.close().finally(() => app.quit());
 });

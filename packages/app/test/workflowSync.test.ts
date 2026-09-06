@@ -972,7 +972,7 @@ describe("what a sync with no project open leaves behind", () => {
   it("says it started, and says how it ended", async () => {
     await runIt();
 
-    const messages = bare.listLogs().map((e) => e.message);
+    const messages = bare.readLogs({ limit: 1000 }).entries.map((e) => e.message);
     // The button was pressed — before, nothing at all recorded that.
     expect(messages.some((m) => m.includes("proposing description changes for base:"))).toBe(true);
     expect(messages.some((m) => m.startsWith("started workflow/sync/document"))).toBe(true);

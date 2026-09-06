@@ -290,7 +290,8 @@ describe("what the strip is told", () => {
     // Logged where the decision was MADE, not generically at the boundary — which is the only place
     // that knows this is the service declining rather than the service breaking. `warn`, therefore:
     // something did not happen, and the reason is that the code checked and said no.
-    const entry = service.listLogs({ source: "run" }).filter((e) => e.taskId === taskId).at(-1);
+    // Newest first: the refusal is the most recent thing this task had to say.
+    const entry = service.readLogs({ source: "run" }).entries.filter((e) => e.taskId === taskId)[0];
     expect(entry).toMatchObject({ level: "warn", source: "run" });
     expect(entry?.message).toContain("cannot be resumed");
   }, 30000);
@@ -304,7 +305,7 @@ describe("what the strip is told", () => {
 
     // The number that matters is the one nothing else reports: how much was taken from the record
     // rather than run again. Without it a resumed run reads in the log exactly like an ordinary one.
-    const line = service.listLogs({ source: "run" }).find((e) => e.taskId === taskId && e.message.startsWith("resuming"));
+    const line = service.readLogs({ source: "run" }).entries.find((e) => e.taskId === taskId && e.message.startsWith("resuming"));
     expect(line).toMatchObject({ level: "info", source: "run" });
     expect(line?.message).toContain("1 operation(s) loaded");
     expect(line?.message).toContain(`re-entering ${ROOT}/b`);

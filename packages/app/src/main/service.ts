@@ -30,6 +30,7 @@ import {
   loadBundle,
   moduleHash as moduleHashOf,
   type CallResult,
+  type EngineEvent,
   type LoadedInstance,
   type LoadedState,
   type WorkflowBundle,
@@ -244,10 +245,22 @@ import {
   Refusal,
   type ModuleApproval,
 } from "@jaira/shared";
-import { Diagnostics } from "./diagnostics";
+import { Diagnostics, stackDetail } from "./diagnostics";
 import { WorkerTypeCheck } from "./tsCheck";
 import type { BaselineOverlay, TypeCheckPort } from "./tsProject";
-import { errorToJson, resetLogSink, setLogSink, type LogRecord, type LogSink } from "@declarative-ai/log";
+import {
+  errorToJson,
+  resetLevelPolicy,
+  resetLogSink,
+  setLevelPolicy,
+  setLogSink,
+  setMinLevel,
+  type LevelMatchContext,
+  type LevelPolicy,
+  type LogRecord,
+  type LogSink,
+  type ResolvedLevel,
+} from "@declarative-ai/log";
 
 /**
  * The sink currently installed BY THIS MODULE, if any.
@@ -256,6 +269,16 @@ import { errorToJson, resetLogSink, setLogSink, type LogRecord, type LogSink } f
  * did not install — with two alive in a process (tests do this), the younger one owns the seam.
  */
 let installed: LogSink | undefined;
+
+/**
+ * The level policy currently installed BY THIS MODULE, if any.
+ *
+ * Tracked for the same reason the sink is, and the trap is the same one: `setLevelPolicy` is
+ * process-global, so a second service constructed after this one has already replaced it, and a
+ * service that reset it unconditionally on close would leave a service that is still running with
+ * no policy at all — recording at the library's default rather than at the setting a person chose.
+ */
+let installedPolicy: LevelPolicy | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
 import { ProjectSession, type SyncHolder, SUSPENDED_WAITING } from "./session";
 import type {
@@ -269,6 +292,10 @@ import type {
   JobRow,
   LogEntry,
   LogLevel,
+  LogOverride,
+  LogPage,
+  LogPolicy,
+  LogQuery,
   ProjectSummary,
   ProjectTask,
   RunMetrics,
@@ -771,6 +798,41 @@ function entryOfRecord(record: LogRecord): Omit<LogEntry, "id" | "at"> {
   };
 }
 
+/**
+ * The app's log policy, in the shape `@declarative-ai/log` asks a consumer for.
+ *
+ * The library resolves a record's level through this BEFORE formatting it, which is the only place a
+ * `debug` inside a hot loop costs nothing at all. `undefined` means "no opinion here" and the
+ * library falls back to its global minimum — which {@link AppService.applyLogPolicy} keeps in step
+ * with the policy's own floor, so the two can never disagree.
+ *
+ * Errors are not sampled: the library enforces that itself, and {@link Diagnostics} enforces it
+ * again on the app's own entries, because a policy that can lose an error makes every absence in the
+ * file ambiguous.
+ */
+function resolveLogLevel(policy: LogPolicy, scope: string, tag: string | undefined): ResolvedLevel | undefined {
+  const rule = logOverrideFor(policy, scope, tag);
+  if (rule === undefined) return { minLevel: policy.minLevel, samplingRate: 1 };
+  return { minLevel: rule.minLevel, samplingRate: rule.samplingRate ?? 1 };
+}
+
+/** `a.b.c` is under `a.b` and under itself — the same rule the Logs panel's source filter uses. */
+const underLogScope = (scope: string, ancestor: string): boolean => scope === ancestor || scope.startsWith(`${ancestor}.`);
+
+/** A tag beats a scope, and the longest matching scope beats a shorter one. See {@link LogOverride}. */
+function logOverrideFor(policy: LogPolicy, scope: string, tag: string | undefined): LogOverride | undefined {
+  if (tag !== undefined) {
+    const hit = policy.overrides.find((o) => o.match === "tag" && o.key === tag);
+    if (hit !== undefined) return hit;
+  }
+  let best: LogOverride | undefined;
+  for (const o of policy.overrides) {
+    if (o.match !== "scope" || !underLogScope(scope, o.key)) continue;
+    if (best === undefined || o.key.length > best.key.length) best = o;
+  }
+  return best;
+}
+
 export interface StartRunRequest extends Omit<StartTaskRequest, "fake"> {
   fake?: JsonValue | FakeRule[];
 }
@@ -818,6 +880,9 @@ export class AppService {
       dir: jairaBasePaths(this.baseDir).logsDir,
       publish: (entry) => this.publish({ type: "log:entry", entry }),
     });
+    // What is worth keeping, from the setting that says so. BEFORE the sink is installed below, so
+    // the first record of the launch is already gated by the policy rather than by the default.
+    this.applyLogPolicy();
     // Every library's records, into the same panel. `@declarative-ai/log` has always had a swappable
     // sink and its own header said JaiRA installs one — and JaiRA never did, so everything the model
     // layer, the engine and JaiRA's own persistence and runtime had to say went to stderr and died
@@ -903,7 +968,15 @@ export class AppService {
       this.roleError[role] = message;
       // Reported here rather than only where a run refuses: this is the entry someone will look for,
       // and it has no project whose database could hold it — which is why the ring is in memory.
-      this.log({ level: "error", source: "app", message: `the ${role} project could not be opened: ${message}` });
+      this.log({
+        level: "error",
+        source: "app",
+        message: `the ${role} project could not be opened: ${message}`,
+        // WITH the stack. This one is the most expensive entry in the file to be given without one:
+        // the message is whatever the failing layer said ("no such file"), and which layer said it is
+        // the entire question.
+        ...stackDetail(e),
+      });
       return undefined;
     }
   }
@@ -1050,6 +1123,14 @@ export class AppService {
   private readonly baseDir: string;
 
   /**
+   * The same, for the shell — which reports it at launch and cannot otherwise say which root this
+   * window is standing on (the flag, the environment and the saved setting all resolve to it here).
+   */
+  baseRoot(): string {
+    return this.baseDir;
+  }
+
+  /**
    * The sync state of a description no open session owns.
    *
    * Used only when the system project could not be opened ({@link systemError}). The shared root is
@@ -1153,9 +1234,23 @@ export class AppService {
           source: "project",
           message: `could not re-open ${dir}: ${(e as Error).message}`,
           project: sessionKey(dir),
+          ...stackDetail(e),
         });
       }
     }
+    // One line for the whole restore, because the interesting outcome is the SHAPE of it: a window
+    // that came back with fewer projects than it had says so here, and the per-project warnings above
+    // say which. A restore that opened nothing because the list was empty is worth an entry too — it
+    // is the difference between "the app forgot" and "there was nothing to remember".
+    this.log({
+      level: "info",
+      source: "project",
+      message:
+        opened.length === 0 && forgotten.length === 0
+          ? "no projects were remembered from the last session"
+          : `restored ${opened.length} project${opened.length === 1 ? "" : "s"}`,
+      ...(opened.length > 0 || forgotten.length > 0 ? { detail: { opened, forgotten } } : {}),
+    });
     if (forgotten.length > 0) this.writeSettings({ projects: this.readSettings().projects.filter((dir) => !forgotten.includes(dir)) });
     return { opened, forgotten };
   }
@@ -1199,6 +1294,7 @@ export class AppService {
         source: "project",
         message: `could not remember ${dir} as open: ${(e as Error).message}`,
         project: sessionKey(dir),
+        ...stackDetail(e),
       });
     }
   }
@@ -1254,6 +1350,7 @@ export class AppService {
             message: `recovering a native session failed: ${(e as Error).message}`,
             project: session.key,
             taskId,
+            ...stackDetail(e),
           });
         }
       }
@@ -1378,6 +1475,13 @@ export class AppService {
       resetLogSink();
       installed = undefined;
     }
+    // Handed back on its OWN condition rather than the sink's: the two are installed at different
+    // moments (the policy in the constructor, the sink just after), so a service can own one and not
+    // the other, and resetting the pair together would silence whichever it did not own.
+    if (installedPolicy === this.levelPolicy) {
+      resetLevelPolicy();
+      installedPolicy = undefined;
+    }
     await this.closeUserSessions();
     for (const session of [...this.sessions.values()]) await this.closeSession(session.key);
     // The approval store is PROCESS-wide rather than per session — it is keyed by absolute path and
@@ -1406,6 +1510,9 @@ export class AppService {
   private async closeSession(key: string): Promise<void> {
     const session = this.sessions.get(key);
     if (session === undefined) return;
+    // The other half of `opened …`. A pair of entries is what turns "the board is empty" into a
+    // question with an answer — a project that was closed, or one that was never opened.
+    this.log({ level: "info", source: "project", message: `closing ${session.project.paths.projectDir}`, project: key });
     this.sessions.delete(key);
     for (const [requestId, owner] of [...this.requestOwner]) if (owner === key) this.requestOwner.delete(requestId);
     // The resumes the open started, settled before the close unwinds what they started.
@@ -1617,9 +1724,137 @@ export class AppService {
     }
   }
 
-  /** The tail of what the app has said — what the Logs panel reads on open. */
-  listLogs(request: { afterId?: number; level?: LogLevel; source?: string; project?: string; limit?: number } = {}): LogEntry[] {
-    return this.diagnostics.list(request);
+  /**
+   * A run, as it happens — from the journal it is already writing.
+   *
+   * "Started" and "completed" were the whole of what a run said here, which is a report with no
+   * middle: a run that took forty minutes and a run that was stuck in one state for thirty-nine of
+   * them produced the same two lines. The journal has always held the middle, and it goes past this
+   * point on its way to the database, so the trace costs a switch rather than a second stream.
+   *
+   * Levels do the filtering, and they say what a reader means by them:
+   *
+   *  - `debug` for the SHAPE of the run — a state entered, a call parked on a person. Ordinary
+   *    progress, off by default in the panel's own filter, and the thing you turn on to answer
+   *    "where did it get to".
+   *  - `warn` for a call that failed and a child that could not be entered. Neither necessarily
+   *    fails the RUN — a guard retries, a branch is not taken — which is exactly why they were
+   *    invisible: nothing above them treated them as failures, so nothing reported them, and the
+   *    only account of a state that failed three times before succeeding was in the journal.
+   *
+   * `instanceId` rather than only `taskId`, because it is a pointer: it names the state inside the
+   * task, which is the difference between opening a run and opening the place in it.
+   */
+  private traceRun(project: string, taskId: string, event: EngineEvent): void {
+    switch (event.type) {
+      case "instance.entered":
+        this.log({
+          level: "debug",
+          source: "run",
+          message: `entered ${event.stateId}${event.childKey === undefined ? "" : ` (${event.childKey})`}`,
+          project,
+          taskId,
+          instanceId: event.instanceId,
+        });
+        return;
+      case "instance.blocked":
+        this.log({
+          level: "warn",
+          source: "run",
+          // No `instanceId`: nothing became an instance, which IS the event. The mount is the only
+          // address it has, so the message carries it.
+          message: `could not enter ${event.stateId}${event.childKey === undefined ? "" : ` (${event.childKey})`}: ${event.reason}`,
+          project,
+          taskId,
+        });
+        return;
+      case "operation.failed":
+        this.log({
+          level: "warn",
+          source: "run",
+          message: `${event.op} failed in ${event.stateId}: ${event.failure.reason}`,
+          project,
+          taskId,
+          instanceId: event.instanceId,
+          detail: { classification: event.failure.classification },
+        });
+        return;
+      case "call.waiting":
+        this.log({
+          level: "debug",
+          source: "run",
+          // The one thing a stalled run looks exactly like from outside: a wait on a person is a
+          // journal that stops, and this is the line that says it stopped on purpose.
+          message: `waiting on someone in ${event.stateId}`,
+          project,
+          taskId,
+          instanceId: event.instanceId,
+        });
+        return;
+      default:
+        // Everything else is the journal's business. `operation.started` / `completed` would be two
+        // more lines per call saying what `entered` and the run's own outcome already say.
+        return;
+    }
+  }
+
+  /**
+   * Install the log policy — on both streams, from the one setting.
+   *
+   * Two seams, because there are two producers and they are gated in different places. The libraries
+   * are gated by `@declarative-ai/log` itself, BEFORE a record is formatted or a sink is called,
+   * which is the only place a `debug` in a hot loop costs nothing; the app's own entries are gated in
+   * {@link Diagnostics}, which is where they are recorded. One policy object answers both, so the
+   * control in the Logs page cannot mean two different things depending on who wrote the line.
+   *
+   * `setMinLevel` carries the floor because the library's own default is `info` and would otherwise
+   * silently overrule a policy that asked for `debug` — the setting would appear to do nothing, which
+   * is the worst way for a control to fail.
+   */
+  private applyLogPolicy(): void {
+    const policy = this.readSettings().logging;
+    this.diagnostics.setPolicy(policy);
+    setMinLevel(policy.minLevel);
+    installedPolicy = (scope: string, ctx?: LevelMatchContext) => resolveLogLevel(policy, scope, ctx?.tag);
+    setLevelPolicy(installedPolicy);
+    this.levelPolicy = installedPolicy;
+  }
+
+  /** This service's level policy, held so {@link close} can tell whether it is still the installed one. */
+  private levelPolicy: LevelPolicy | undefined;
+
+  /**
+   * Something the SHELL did that the service could not have seen.
+   *
+   * `main/index.ts` owns the things Electron owns — the command line, the versions, the window, the
+   * quit — and every one of them is an answer somebody looking at the Logs panel wants: which build
+   * is this, which root did it open, was it even asked to open that project. They were reported to a
+   * terminal nobody has, or to nothing at all, because the only public way into the log was a crash.
+   *
+   * Kept as one method rather than four named ones so the shell stays what its header says it is: a
+   * file that owns windows and forwards. The SOURCE is fixed at `app` for the same reason `crash` and
+   * `runtime` are fixed at theirs — a reader filtering by source is asking "which part of the machine
+   * said this", and the answer here is always "the shell around it".
+   *
+   * NEVER THROWS: several callers are the last frame before a failure is lost.
+   */
+  recordApp(level: LogLevel, message: string, detail?: JsonValue): void {
+    try {
+      this.log({ level, source: "app", message, ...(detail === undefined ? {} : { detail }) });
+    } catch {
+      // Same last-resort rule as the rest of this family.
+    }
+  }
+
+  /**
+   * A page of what the app has said — what the Logs panel reads, newest first.
+   *
+   * Read from the mirror rather than from memory, so the answer spans every launch on disk; paged
+   * rather than whole, so a panel that has been open through three runs is not the reason the main
+   * process is holding a hundred thousand strings.
+   */
+  readLogs(query: LogQuery = {}): LogPage {
+    return this.diagnostics.read(query);
   }
 
   /** The child processes one task's run started, newest last. */
@@ -2743,7 +2978,14 @@ export class AppService {
       taskId,
       output,
       onObserverError: (error, phase) =>
-        this.log({ level: "warn", source: "process", message: `recording a child process failed (${phase}): ${error.message}`, project: open.key, taskId }),
+        this.log({
+          level: "warn",
+          source: "process",
+          message: `recording a child process failed (${phase}): ${error.message}`,
+          project: open.key,
+          taskId,
+          ...stackDetail(error),
+        }),
       onCancelRequested: () => this.cancelTaskIn(open, taskId),
     });
     observe = owner.observer();
@@ -2864,7 +3106,14 @@ export class AppService {
     session.records = withNativeCapture(session.records, {
       cwd: workspace.root,
       onError: (e: Error) =>
-        this.log({ level: "warn", source: "engine", message: `native session capture failed: ${e.message}`, project: open.key, taskId }),
+        this.log({
+          level: "warn",
+          source: "engine",
+          message: `native session capture failed: ${e.message}`,
+          project: open.key,
+          taskId,
+          ...stackDetail(e),
+        }),
     });
 
     // Policy for this run: authored project rules compiled to an ExecPolicy, with
@@ -2933,6 +3182,7 @@ export class AppService {
           persistence: {
             record: (event, atMs) => {
               recorder.record(event, atMs);
+              this.traceRun(open.key, taskId, event);
               // The record lands when the operation settles — the stored view now holds everything
               // the live tail held, so the tail goes BEFORE the event that makes viewers refetch.
               // Kept in step with the renderer, which drops its own copy on the same two events.
@@ -3438,7 +3688,14 @@ export class AppService {
     stores.records = withNativeCapture(stores.records, {
       cwd: workspaceRoot,
       onError: (e: Error) =>
-        this.log({ level: "warn", source: "engine", message: `native session capture failed: ${e.message}`, project: open.key, taskId: request.taskId }),
+        this.log({
+          level: "warn",
+          source: "engine",
+          message: `native session capture failed: ${e.message}`,
+          project: open.key,
+          taskId: request.taskId,
+          ...stackDetail(e),
+        }),
     });
     /**
      * The live turn, for a message somebody typed — everything `startRun` wires, wired here too.
@@ -4058,6 +4315,7 @@ export class AppService {
           message: `could not resume ${row.taskId}, which was waiting on you when the app closed: ${(e as Error).message}`,
           project: session.key,
           taskId: row.taskId,
+          ...stackDetail(e),
         });
       }
     }
@@ -4499,6 +4757,7 @@ export class AppService {
         message: `answering ${row.component} could not continue ${row.taskId}: ${(e as Error).message}`,
         project: session.key,
         taskId: row.taskId,
+        ...stackDetail(e),
       });
     });
     return { requestId };
@@ -4536,6 +4795,10 @@ export class AppService {
     const file = jairaBasePaths(this.baseDir).userSettingsFile;
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+    // The one setting with an effect outside this file: what the app keeps in its log. Re-installed
+    // here rather than watched, so a change made in the Logs page governs the very next entry —
+    // which is the only behaviour that makes turning a scope down while it floods you useful.
+    if (patch.logging !== undefined) this.applyLogPolicy();
     return next;
   }
 

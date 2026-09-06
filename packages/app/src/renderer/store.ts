@@ -16,6 +16,8 @@ import type {
   ConversationView,
   JobOutputChunk,
   LogEntry,
+  LogPolicy,
+  LogQuery,
   ProjectSummary,
   ProjectTask,
   OperationRecordView,
@@ -71,6 +73,7 @@ import {
   CONFIG_JSON,
   defaultAppearance,
   defaultEditors,
+  defaultLogPolicy,
   defaultRendererChoice,
   foldWriting,
   isStreamBookkeeping,
@@ -524,12 +527,18 @@ export interface AppState {
    */
   sessions: Record<string, SessionView>;
   /**
-   * What the app has said about itself, newest last, and the process output a row opened.
+   * What the app has said about itself, NEWEST FIRST, and the process output a row opened.
    *
-   * Held rather than fetched per render because entries ARRIVE — the main process pushes each one, so
-   * the list is a live tail with a backfill, not a query.
+   * A window onto the mirror rather than the whole of it: `logs` holds the pages fetched so far,
+   * `logCursor` is where the next (older) page continues from, and `undefined` there means the log
+   * has been read to its beginning. Held rather than fetched per render because entries also ARRIVE
+   * — the main process pushes each one, and a push is a PREPEND now that the newest is at the top.
    */
   logs: LogEntry[];
+  /** Where older entries continue from, or absent when there are none. See {@link LogPage}. */
+  logCursor?: string;
+  /** A page is in flight — what stops the scroll handler asking for the same one four times. */
+  logsLoading: boolean;
   jobOutput: { jobId: number; chunks: JobOutputChunk[] } | null;
   /**
    * JaiRA's own runs, which belong to no checkout.
@@ -802,6 +811,7 @@ const EMPTY: AppState = {
     appearance: defaultAppearance(),
     editors: defaultEditors(),
     renderers: {},
+    logging: defaultLogPolicy(),
     projects: [],
     filesHidden: [],
   },
@@ -842,6 +852,7 @@ const EMPTY: AppState = {
   sessionInstance: null,
   sessions: {},
   logs: [],
+  logsLoading: false,
   jobOutput: null,
   liveTurn: null,
   projects: [],
@@ -860,8 +871,17 @@ const EMPTY: AppState = {
 const STREAM_LIMIT = 300;
 /** Live entries kept per position. An agent loop emits one per turn; the tail is what is read. */
 const LIVE_ENTRY_LIMIT = 500;
-/** How many diagnostics the renderer keeps. The main process holds more; this is the visible tail. */
-const LOG_LIMIT = 2000;
+/**
+ * How many diagnostics the renderer keeps.
+ *
+ * A bound on the WINDOW, not on the log: the whole of it is on disk and paged in as it is scrolled
+ * to, so this is the point past which scrolling back further starts costing the top of the list —
+ * which is exactly the trade a reader who has scrolled that far has already chosen.
+ */
+const LOG_LIMIT = 5000;
+
+/** One page. Enough to fill a tall window twice over, so scrolling asks rather than stutters. */
+const LOG_PAGE = 200;
 /** How many lines of a sync's own narration the panel keeps. Enough for a three-state run. */
 const SYNC_PROGRESS_LIMIT = 60;
 /**
@@ -1453,13 +1473,50 @@ export function useApp() {
     }
   }, [patch]);
 
-  const refreshLogs = useCallback(async () => {
-    try {
-      patch({ logs: await invoke("log:list", { limit: 1000 }) });
-    } catch {
-      patch({ logs: [] });
-    }
-  }, [patch]);
+  /**
+   * The newest page, from whatever the filters currently say.
+   *
+   * Replaces rather than merges: a filter change is a different question, and a list that kept the
+   * answers to the previous one would be a list nobody could trust. The cursor comes back with the
+   * page, so "is there more" is the reader's answer rather than this side's guess.
+   */
+  const refreshLogs = useCallback(
+    async (query: LogQuery = {}) => {
+      patch({ logsLoading: true });
+      try {
+        const page = await invoke("log:list", { ...query, limit: LOG_PAGE });
+        patch({ logs: page.entries, logCursor: page.cursor, logsLoading: false });
+      } catch {
+        patch({ logs: [], logCursor: undefined, logsLoading: false });
+      }
+    },
+    [patch],
+  );
+
+  /**
+   * The next page BACKWARDS — what the panel asks for as it is scrolled towards the past.
+   *
+   * Guarded on `logsLoading` and on there being a cursor at all, because a scroll handler fires many
+   * times for one gesture and each of those would otherwise be a separate read of the same bytes.
+   * The scan is bounded on the far side, so an empty page with a cursor is a legitimate answer —
+   * "nothing matched in the budget, ask again" — and appending nothing is the correct response.
+   */
+  const loadOlderLogs = useCallback(
+    async (query: LogQuery = {}) => {
+      const { logCursor, logsLoading } = ref.current;
+      if (logCursor === undefined || logsLoading) return;
+      patch({ logsLoading: true });
+      try {
+        const page = await invoke("log:list", { ...query, before: logCursor, limit: LOG_PAGE });
+        patch({ logs: [...ref.current.logs, ...page.entries], logCursor: page.cursor, logsLoading: false });
+      } catch {
+        // The page that could not be read is not a reason to lose the ones that could. The cursor is
+        // left where it was, so the next scroll tries again rather than declaring the log finished.
+        patch({ logsLoading: false });
+      }
+    },
+    [patch],
+  );
 
   /**
    * The transcript panel: every state the task went through, and the one being read.
@@ -2412,10 +2469,11 @@ export function useApp() {
           break;
         }
         case "log:entry": {
-          // Appended rather than re-fetched: entries arrive one at a time and the list is a tail.
-          // Capped, because a long agent run produces a great many and none is worth a leak.
-          const logs = [...ref.current.logs, message.entry];
-          patch({ logs: logs.length > LOG_LIMIT ? logs.slice(-LOG_LIMIT) : logs });
+          // PREPENDED rather than re-fetched: entries arrive one at a time, and the newest is at the
+          // top. Capped from the far end — the pages a reader scrolled back to are the ones they are
+          // least likely to want kept, and the mirror still holds them.
+          const logs = [message.entry, ...ref.current.logs];
+          patch({ logs: logs.length > LOG_LIMIT ? logs.slice(0, LOG_LIMIT) : logs });
           break;
         }
       }
@@ -2728,6 +2786,16 @@ export function useApp() {
         }
       },
       closeJobOutput: () => patch({ jobOutput: null }),
+      /**
+       * Ask the log a different question — a level, a source, a substring.
+       *
+       * The filters live in the PANEL and the reading happens in main, so they travel with the
+       * request rather than being applied to what arrived: a search that only sifted the page in
+       * hand would be a search of the last five minutes wearing the clothes of a search of the log.
+       */
+      searchLogs: (query: LogQuery) => void refreshLogs(query),
+      /** The next page towards the past — what scrolling to the end of the list asks for. */
+      loadOlderLogs: (query: LogQuery) => void loadOlderLogs(query),
       /**
        * Put the inspector back where it was before a task took it over.
        *
@@ -4072,6 +4140,22 @@ export function useApp() {
         patch({ settings: { ...ref.current.settings, appearance } });
         try {
           patch({ settings: keepingUi(await invoke("settings:write", { appearance })) });
+        } catch (e) {
+          fail(e);
+        }
+      },
+
+      /**
+       * What the app keeps in its log — the Configure panel in the Logs page.
+       *
+       * Patched locally first like every other preference, so a control moves on the click. Written
+       * WHOLE, because `writeSettings` merges one level deep and a partial policy would be a policy
+       * with no rules; main re-installs it on the write, so the next entry is already gated by it.
+       */
+      setLogPolicy: async (logging: LogPolicy) => {
+        patch({ settings: { ...ref.current.settings, logging } });
+        try {
+          patch({ settings: keepingUi(await invoke("settings:write", { logging })) });
         } catch (e) {
           fail(e);
         }

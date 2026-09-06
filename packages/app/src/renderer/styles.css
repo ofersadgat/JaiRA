@@ -7797,7 +7797,30 @@ textarea.cfg-input {
 
 /* --- the Logs panel (logs.tsx) ------------------------------------------------ */
 .logs-view { grid-template-columns: minmax(0, 1fr); }
-.logs { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.logs {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  /*
+   * The table, declared ONCE.
+   *
+   * The header and every row measure against this, so they cannot drift apart the way two grids
+   * that merely agreed today would. `ch` for the cells holding data because the data is drawn in the
+   * mono face: a column sized in characters holds the same number of characters at every text size,
+   * which a pixel width does not.
+   *
+   * The message is `minmax(0, 1fr)` — `0` is the load-bearing half. A grid item's automatic floor is
+   * its content, so `1fr` alone lets one long message widen the whole track and push the links off
+   * the end, which is the exact failure the fixed columns are here to prevent.
+   */
+  --log-cols: 11ch 5ch 22ch minmax(0, 1fr) 92px;
+  /* The message's left edge, for the block that unfolds under it. Derived from the tracks rather
+     than guessed at, so the two cannot drift apart. */
+  --log-indent: calc(10px + 11ch + 5ch + 22ch + 24px);
+}
+/* With a date column, once something on screen is from another day — see `dated` in `logs.tsx`. */
+.logs-dated { --log-cols: 10ch 11ch 5ch 22ch minmax(0, 1fr) 92px; --log-indent: calc(10px + 10ch + 11ch + 5ch + 22ch + 32px); }
 .logs-bar {
   display: flex;
   gap: 8px;
@@ -7806,23 +7829,111 @@ textarea.cfg-input {
   border-bottom: 1px solid var(--line);
 }
 .logs-bar input { flex: none; width: 220px; }
-.logs-list { flex: 1; overflow: auto; min-height: 0; padding: 4px 0; }
+
+/* The column names, and the only row that does not scroll away. */
+.logs-head {
+  display: grid;
+  grid-template-columns: var(--log-cols);
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 10 / 12.5);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+/* The date and time headings are right-aligned over their digits. `.log-day` is absent when nothing
+   on screen carries one, so this counts from the front and lands on whichever cells are there. */
+.logs-head > span:nth-child(-n + 1) { text-align: right; }
+.logs-head.logs-dated > span:nth-child(-n + 2) { text-align: right; }
+
+.logs-list { flex: 1; overflow: auto; min-height: 0; padding: 2px 0; }
 .log-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--log-cols);
   gap: 8px;
   align-items: baseline;
   padding: 2px 10px;
   font-size: calc(var(--size-data) * 11.5 / 12);
   font-family: var(--font-data);
+  /* ONE LINE, always. A list where the rows carrying a stack are nine lines tall and the rest are
+     one has no shape to scan; the whole of a long message is a click away, by unfolding the row. */
+  white-space: nowrap;
+  cursor: pointer;
 }
+/* Every cell clips rather than widening its column — which is what makes the columns columns. */
+.log-row > span { overflow: hidden; text-overflow: ellipsis; }
 .log-row:hover { background: var(--panel-2); }
-.log-at { color: var(--dim); flex: none; font-variant-numeric: tabular-nums; }
-.log-level { flex: none; width: 40px; text-transform: uppercase; font-size: calc(var(--size-app) * 10 / 12.5); }
+/* Open: THIS row unfolds. The cells keep their tracks — the grid is fixed — and the message takes
+   the lines it needs, so an open entry is the same row grown rather than a copy printed underneath. */
+.log-shown > .log-row { background: var(--panel-2); white-space: normal; align-items: start; }
+.log-shown > .log-row .log-message { overflow: visible; text-overflow: clip; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Right-aligned, and tabular so a column of times is a column of digits rather than a ragged edge. */
+.log-day, .log-at { color: var(--dim); text-align: right; font-variant-numeric: tabular-nums; }
+.log-level { text-transform: uppercase; font-size: calc(var(--size-app) * 10 / 12.5); }
 .log-level.log-warn { color: var(--warn, #b8860b); }
 .log-level.log-error { color: var(--bad, #c0392b); }
-.log-source { flex: none; width: 74px; color: var(--dim); }
-.log-message { overflow-wrap: anywhere; }
-.log-row .link { flex: none; background: none; border: none; padding: 0 2px; color: var(--accent, #3b7dd8); cursor: pointer; font-size: calc(var(--size-app) * 11 / 12.5); }
+.log-source { color: var(--dim); }
+.log-links { text-align: right; white-space: nowrap; }
+.log-row .link {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  color: var(--accent, #3b7dd8);
+  cursor: pointer;
+  font-size: calc(var(--size-app) * 11 / 12.5);
+}
+
+/* Under the message rather than under the row: an open entry's stack belongs to the sentence above
+   it, and starting it at the window's edge would file it under the timestamp instead. */
+.log-detail { padding: 2px 10px 8px var(--log-indent); }
+.log-detail pre {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow-x: auto;
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 11 / 12);
+}
+.log-stack, .log-fields { white-space: pre; color: var(--dim); }
+.log-detail .log-fields { margin-top: 4px; }
+
+/* What the app KEEPS — as distinct from what the bar above filters. See `logs.tsx`. */
+.log-config {
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.log-config-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.field-inline { display: flex; gap: 6px; align-items: center; }
+.log-rules { border-collapse: collapse; width: 100%; font-size: calc(var(--size-app) * 12 / 12.5); }
+.log-rules th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--dim);
+  font-size: calc(var(--size-app) * 10 / 12.5);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 2px 8px 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+.log-rules td { padding: 3px 8px 3px 0; vertical-align: middle; }
+.log-rules .log-rule-key { font-family: var(--font-data); }
+.log-rules input[type="number"] { width: 62px; }
+.log-config-add { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* Controls are `width: 100%` by default (they are usually the only thing on their row in a form),
+   which in a toolbar makes each one its own line. Sized to their job instead: a kind, a key, a
+   level, a button. */
+.log-config-add > select, .log-config-add > input { width: auto; flex: none; }
+.log-config-add > select:nth-of-type(2), .log-config-add > input { min-width: 240px; }
+.log-rules select { width: auto; }
+.logs-bar select { width: auto; flex: none; min-width: 150px; }
 
 /* The captured output of one process, opened from a row. Bounded above so the list it came from
    stays reachable — reading a log should not mean losing your place in it. */

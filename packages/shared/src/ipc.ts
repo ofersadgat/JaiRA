@@ -28,7 +28,8 @@ import type {
   JobOutputChunk,
   JobRow,
   LogEntry,
-  LogLevel,
+  LogPage,
+  LogQuery,
   ProjectSummary,
   ProjectTask,
   SessionRef,
@@ -1465,11 +1466,14 @@ export interface IpcContract {
    * to the task file and an invalidation, and it is refused for nothing.
    */
   "task:rename": { request: { taskId: string; title: string; project?: ProjectRef }; response: TaskSummary };
-  /** The tail of what the app has said about itself. */
-  "log:list": {
-    request: { afterId?: number; level?: LogLevel; source?: string; project?: string; limit?: number } | void;
-    response: LogEntry[];
-  };
+  /**
+   * A page of what the app has said about itself — newest first, oldest continued through the page's
+   * own `cursor` (see {@link LogPage}).
+   *
+   * Read from the NDJSON mirror rather than from memory, which is what makes the answer span every
+   * launch on disk instead of the one you are in.
+   */
+  "log:list": { request: LogQuery | void; response: LogPage };
   /** The child processes a run started. */
   "job:list": { request: { project?: string; taskId?: string } | void; response: JobRow[] };
   /**

@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { setMaxListeners } from "node:events";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { LogEntry } from "@jaira/shared";
 import { initProject } from "@jaira/persistence";
 import { blockedRules, happyRules, HUMAN_REVIEW_FUNCTION, specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
 import { jairaBasePaths, SHARED_SESSION, type PushMessage } from "@jaira/shared";
@@ -751,12 +752,19 @@ describe("sessions — the transcript a run produced", () => {
  * story at all.
  */
 describe("diagnostics", () => {
+  /**
+   * A page of the log, NEWEST FIRST — which is what `readLogs` answers now that the panel pages
+   * backwards through the mirror rather than holding it. `[0]` is therefore the most recent entry,
+   * where these assertions used to reach for `.at(-1)`.
+   */
+  const logged = (query: Parameters<typeof service.readLogs>[0] = {}): LogEntry[] => service.readLogs(query).entries;
+
   it("records a failed IPC call by channel, and still rejects to the renderer", () => {
     // RECORDED, then RETHROWN — the renderer's contract is unchanged. That pair is the whole design:
     // the caller still sees the error, and everyone else can now see it too.
     service.recordIpcFailure("task:detail", new Error("unknown task 't-1'"));
 
-    const entry = service.listLogs({ source: "ipc" }).at(-1);
+    const entry = logged({ source: "ipc" })[0];
     expect(entry).toMatchObject({ level: "error", source: "ipc" });
     expect(entry?.message).toBe("task:detail: unknown task 't-1'");
   });
@@ -766,7 +774,7 @@ describe("diagnostics", () => {
     // sweep is what makes the rule true generally, and this is the shape it holds in.
     expect(() => service.pruneHistory({ olderThanDays: -1 })).toThrow(Refusal);
 
-    const entry = service.listLogs({ source: "project" }).at(-1);
+    const entry = logged({ source: "project" })[0];
     // `warn`, because the service checked and declined — the code working, not the code breaking.
     expect(entry).toMatchObject({ level: "warn", source: "project" });
     expect(entry?.message).toBe("olderThanDays must be a non-negative number");
@@ -779,7 +787,7 @@ describe("diagnostics", () => {
     // reason went to whoever caught the throw — which, for a person reading the panel, was nowhere.
     expect(() => service.taskDetail("t-does-not-exist")).toThrow(Refusal);
 
-    const entry = service.listLogs({ source: "jaira.persistence.views" }).at(-1);
+    const entry = logged({ source: "jaira.persistence.views" })[0];
     // The SCOPE becomes the source verbatim: a library says where it is, and the panel shows it,
     // with no mapping table in between for the two to drift across.
     expect(entry).toMatchObject({ level: "warn", source: "jaira.persistence.views" });
@@ -788,9 +796,9 @@ describe("diagnostics", () => {
 
   it("carries the task pointer across, so a library's row is actionable", () => {
     // A message naming a task in prose is not a pointer: `LogEntry.taskId` is what makes the row
-    // click through and what `listLogs` can select on. The sweep is only half done without it.
+    // click through and what `readLogs` can select on. The sweep is only half done without it.
     expect(() => service.taskDetail("t-does-not-exist")).toThrow(Refusal);
-    expect(service.listLogs({ source: "jaira.persistence.views" }).at(-1)).toMatchObject({
+    expect(logged({ source: "jaira.persistence.views" })[0]).toMatchObject({
       taskId: "t-does-not-exist",
     });
   });
@@ -801,7 +809,7 @@ describe("diagnostics", () => {
     // its type declares. A wrong-shaped value stays in `detail`, visible and harmless.
     createLogger("test.pointers").warn("mistyped", { taskId: 42, jobId: 7 });
 
-    const entry = service.listLogs({ source: "test.pointers" }).at(-1);
+    const entry = logged({ source: "test.pointers" })[0];
     expect(entry?.taskId).toBeUndefined();
     expect(JSON.stringify(entry?.detail)).toContain("42");
     // The correctly-typed one beside it still gets through — this rejects values, not the feature.
@@ -816,20 +824,60 @@ describe("diagnostics", () => {
     // `other` was constructed second, so it owned the sink; closing it must hand the seam back
     // rather than leave a closed service holding it.
     createLogger("test.afterclose").warn("still routed");
-    expect(service.listLogs({ source: "test.afterclose" })).toEqual([]);
+    expect(logged({ source: "test.afterclose" })).toEqual([]);
   });
 
   it("leaves a REFUSAL alone — its own site already logged it, and knew what it was", () => {
     // The boundary sees a deliberate refusal and a genuine bug as the same shape, so it must not
     // classify either: `error` means the code is malfunctioning, and "the service declined" is the
     // code working. A site that has decided says so with `Refusal`, having written its own line.
-    const before = service.listLogs({ source: "ipc" }).length;
+    const before = logged({ source: "ipc" }).length;
     service.recordIpcFailure("task:resume", new Refusal("task 't-1' is completed and cannot be resumed"));
-    expect(service.listLogs({ source: "ipc" }).length).toBe(before);
+    expect(logged({ source: "ipc" }).length).toBe(before);
 
     // Anything else is exactly what a boundary CAN classify: an exception nobody expected.
     service.recordIpcFailure("task:resume", new TypeError("x is not a function"));
-    expect(service.listLogs({ source: "ipc" }).at(-1)).toMatchObject({ level: "error", source: "ipc" });
+    expect(logged({ source: "ipc" })[0]).toMatchObject({ level: "error", source: "ipc" });
+  });
+
+  it("records what the SHELL did, which the service could not have seen", () => {
+    // The launch, its argv, the window, the quit — all of it happens in `main/index.ts`, and until
+    // there was a public way in, the only thing that file could file was a crash. A packaged app has
+    // no terminal, so "which build, opened where, asked for what" had nowhere to be written down.
+    service.recordApp("info", "JaiRA 0.0.0 started", { argv: ["--home", "/tmp/x"] });
+
+    const entry = logged({ source: "app" })[0];
+    expect(entry).toMatchObject({ level: "info", source: "app", message: "JaiRA 0.0.0 started" });
+    expect(JSON.stringify(entry?.detail)).toContain("--home");
+  });
+
+  it("traces a run's MIDDLE, not just that it started and stopped", async () => {
+    // Two lines for forty minutes of work is a report with no middle: a run that moved through
+    // thirty states and one that was stuck in a single state produced exactly the same account. The
+    // journal has always held the difference and went past the log on its way to the database.
+    // `debug`, which the default policy does not keep — turning it on for the run is exactly what
+    // the control is for, and this is that control.
+    service.writeSettings({ logging: { minLevel: "debug", overrides: [] } });
+    const taskId = newTask();
+    await service.startTask({
+      taskId,
+      fake: happyRules(),
+      interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" }] },
+    });
+    await until(() => finished(taskId), "the run to finish");
+
+    // Newest first, so the run reads bottom-up: `started` is the last row and `completed` the first.
+    const trace = logged({ source: "run", limit: 1000 }).filter((e) => e.taskId === taskId);
+    expect(trace.at(-1)?.message).toMatch(/^started /);
+    expect(trace[0]?.message).toMatch(/^completed /);
+
+    const entered = trace.filter((e) => e.message.startsWith("entered "));
+    expect(entered.length).toBeGreaterThan(3);
+    // `debug`, so the shape of a run is there to be turned on rather than in everyone's way.
+    expect(entered.every((e) => e.level === "debug")).toBe(true);
+    // The pointer that makes a row open the STATE and not merely the task.
+    expect(entered.every((e) => e.instanceId !== undefined)).toBe(true);
+    expect(entered.some((e) => e.message.includes("feature/plan"))).toBe(true);
   });
 
   it("records a crash under its OWN source, with the stack", () => {
@@ -837,7 +885,7 @@ describe("diagnostics", () => {
     // because that source means "a child process this run started". A crash belongs to no task.
     service.recordCrash("unhandledRejection", new Error("NaN is not allowed"));
 
-    const entry = service.listLogs({ source: "crash" }).at(-1);
+    const entry = logged({ source: "crash" })[0];
     expect(entry).toMatchObject({ level: "error", source: "crash" });
     expect(entry?.message).toBe("unhandledRejection: NaN is not allowed");
     // The STACK is the point. A bare message is what made the original report unactionable.
@@ -868,7 +916,7 @@ describe("diagnostics", () => {
     expect(warning).toBeDefined();
     service.recordWarning(warning!);
 
-    const entry = service.listLogs({ source: "runtime" }).at(-1);
+    const entry = logged({ source: "runtime" })[0];
     // `warn`, and NOT `crash`: nothing failed and nothing escaped. See `recordWarning`.
     expect(entry).toMatchObject({ level: "warn", source: "runtime" });
     expect(entry?.message).toContain("MaxListenersExceededWarning");
@@ -882,11 +930,11 @@ describe("diagnostics", () => {
     // Reached from a process-level handler, where there is nothing above to catch a second failure.
     expect(() => service.recordCrash("uncaughtException", "a bare string")).not.toThrow();
     expect(() => service.recordCrash("push", undefined)).not.toThrow();
-    expect(service.listLogs({ source: "crash" }).at(-1)?.message).toBe("push: undefined");
+    expect(logged({ source: "crash" })[0]?.message).toBe("push: undefined");
   });
 
   it("records opening a project, which is where a recovery would be reported", async () => {
-    const entry = service.listLogs({ source: "project" }).at(-1);
+    const entry = logged({ source: "project" })[0];
     expect(entry?.message).toContain(dir);
   });
 
@@ -897,10 +945,10 @@ describe("diagnostics", () => {
 
     // A scripted run spawns nothing, so this asserts the SHAPE the panel links through rather than a
     // count: `taskId` opens the task and `jobId` opens what that process printed.
-    const rows = service.listLogs({ source: "process" });
+    const rows = logged({ source: "process" });
     for (const row of rows) expect(row.taskId).toBeDefined();
     // …and the run itself said something, which is the point of having a log at all.
-    expect(service.listLogs().length).toBeGreaterThan(0);
+    expect(logged().length).toBeGreaterThan(0);
   });
 
   it("returns no jobs and no output rather than throwing when nothing has run", () => {

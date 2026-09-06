@@ -20,7 +20,8 @@
     "start": "npm run build && npm run abi:electron && electron .",
     "abi:electron": "node ../../scripts/nativeAbi.mjs electron",
     "abi:node": "node ../../scripts/nativeAbi.mjs node",
-    "shots": "tsx shots/run.mts"
+    "shots": "tsx shots/run.mts",
+    "shots:logs": "tsx shots/logs.mts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.0",

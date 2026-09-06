@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
-import { defaultAppearance, defaultEditors, type PushMessage } from "@jaira/shared";
+import { defaultAppearance, defaultEditors, defaultLogPolicy, type PushMessage } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService, type KeychainPort } from "../src/main/service";
 
@@ -64,7 +64,7 @@ afterEach(async () => {
 describe("user settings", () => {
   it("defaults to the light theme, with no project open", () => {
     // Preferences belong to the person, not the checkout — the theme must apply on an empty window.
-    expect(service.readSettings()).toEqual({ theme: "light", ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), editors: defaultEditors(), renderers: {}, projects: [], filesHidden: [] });
+    expect(service.readSettings()).toEqual({ theme: "light", ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), editors: defaultEditors(), renderers: {}, projects: [], filesHidden: [], logging: defaultLogPolicy() });
   });
 
   it("persists a change and reads it back", () => {
@@ -77,7 +77,7 @@ describe("user settings", () => {
     writeFileSync(join(baseDir, "user-settings.json"), "{ not json", "utf8");
 
     // A broken preferences file must never stop the app opening.
-    expect(service.readSettings()).toEqual({ theme: "light", ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), editors: defaultEditors(), renderers: {}, projects: [], filesHidden: [] });
+    expect(service.readSettings()).toEqual({ theme: "light", ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), editors: defaultEditors(), renderers: {}, projects: [], filesHidden: [], logging: defaultLogPolicy() });
   });
 
   it("keeps the JSON editor's wrap preference, and defaults it off", () => {
@@ -110,7 +110,7 @@ describe("user settings", () => {
 
   it("reads a settings file written before wrapJson existed", () => {
     writeFileSync(join(baseDir, "user-settings.json"), JSON.stringify({ theme: "dark" }), "utf8");
-    expect(service.readSettings()).toEqual({ theme: "dark", ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), editors: defaultEditors(), renderers: {}, projects: [], filesHidden: [] });
+    expect(service.readSettings()).toEqual({ theme: "dark", ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), editors: defaultEditors(), renderers: {}, projects: [], filesHidden: [], logging: defaultLogPolicy() });
   });
 
   it("reads a hand-edited project list without throwing any of it away", () => {

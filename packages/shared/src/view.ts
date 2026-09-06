@@ -1197,6 +1197,15 @@ export type LogLevel = "debug" | "info" | "warn" | "error";
  * `jobId` opens that process's captured output.
  */
 export interface LogEntry {
+  /**
+   * Where this entry IS, not how many came before it.
+   *
+   * The byte it begins at in its day of the mirror, for an entry read back from disk; the writing
+   * counter for one that never reached a file. Either way it is an identity and not an order — the
+   * order is the array, and the position to continue from is the page's `cursor`. It was a per-launch
+   * counter when the panel was served from memory, which meant every launch wrote an entry called
+   * `7` and no reader spanning two of them could tell them apart.
+   */
   id: number;
   at: number;
   level: LogLevel;
@@ -1217,6 +1226,99 @@ export interface LogEntry {
   jobId?: number;
   /** A stack, an argv, an exit code — whatever the reader would want and the message cannot hold. */
   detail?: JsonValue;
+}
+
+/**
+ * A page of the log, NEWEST FIRST.
+ *
+ * Newest first because that is the order a log is read in: the question is almost always "what just
+ * happened", and a reader who has to scroll to the bottom to find it is reading the file backwards
+ * by hand. It also makes the paging honest — the page you have is the recent end, and `cursor` is
+ * how you ask for more of the past, rather than everything being held in memory so that the middle
+ * can be indexed.
+ *
+ * `cursor` absent ⇒ there is nothing older. It is opaque: today it names a file and a byte offset in
+ * the NDJSON mirror, and nothing outside the reader may assume that.
+ */
+export interface LogPage {
+  entries: LogEntry[];
+  cursor?: string;
+}
+
+/**
+ * What to show, and where to continue from.
+ *
+ * The filters are applied where the entries are READ rather than after they arrive, which is the
+ * difference between a search that spans every day on disk and one that spans whatever happened to
+ * be in memory.
+ */
+export interface LogQuery {
+  /** Continue from a previous page — its `cursor`. Absent ⇒ start at the newest entry. */
+  before?: string;
+  limit?: number;
+  /** "This and worse", as everywhere else. */
+  level?: LogLevel;
+  /** An exact source, or a dot-path prefix of one (`jaira.persistence` matches its children). */
+  source?: string;
+  project?: string;
+  /** A substring of the message, the source, or the detail — the box you type a file name into. */
+  text?: string;
+}
+
+/**
+ * The sources the app itself writes under, for a picker that is usable before any of them has said
+ * anything.
+ *
+ * A catalogue, not a closed set: library scopes (`jaira.persistence.views`, `llm.generate`) arrive
+ * as whatever the library calls itself, and the picker unions this list with what is actually in the
+ * log. Listing them is what lets somebody turn `run` down to `warn` before the run that would
+ * otherwise flood them has started.
+ */
+export const LOG_SOURCES: readonly string[] = [
+  "app",
+  "crash",
+  "engine",
+  "ipc",
+  "process",
+  "project",
+  "review",
+  "run",
+  "runtime",
+  "sync",
+];
+
+/**
+ * One rule about what is worth keeping — see {@link LogPolicy}.
+ *
+ * `scope` matches a source exactly or as a dot-path ancestor (`jaira.persistence` covers
+ * `jaira.persistence.views`), longest match winning. `tag` matches a record's classification tag,
+ * which only the libraries set, and beats a scope match: a tag is the more specific statement of the
+ * two — "this KIND of record", wherever it comes from.
+ */
+export interface LogOverride {
+  match: "scope" | "tag";
+  key: string;
+  minLevel: LogLevel;
+  /**
+   * Fraction of the matching non-error records to keep, 0..1. Errors are never sampled away — a
+   * dropped error is the one thing a log may not do, and a rate that could drop them would make
+   * every absence ambiguous.
+   */
+  samplingRate?: number;
+}
+
+/**
+ * What the app keeps and what it throws away, before anything is written.
+ *
+ * A logger with one fixed level is either too quiet to diagnose anything or too loud to read, and
+ * which of those it is changes by the hour — so this is a preference, and the Logs page edits it.
+ * It gates BOTH streams: the libraries, through `@declarative-ai/log`'s level policy, which drops a
+ * record before it is ever formatted; and the app's own entries, at the point they are recorded.
+ */
+export interface LogPolicy {
+  /** The floor, where no override matches. */
+  minLevel: LogLevel;
+  overrides: LogOverride[];
 }
 
 /** A process JaiRA claimed or started (DESIGN §4.2a). Named here so the renderer can read one. */

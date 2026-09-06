@@ -2123,6 +2123,15 @@ export default function App(): JSX.Element {
             <div className="view logs-view">
               <LogsPanel
                 entries={state.logs}
+                hasOlder={state.logCursor !== undefined}
+                loading={state.logsLoading}
+                onSearch={actions.searchLogs}
+                onOlder={actions.loadOlderLogs}
+                policy={state.settings.logging}
+                // Through the settings file, like every other preference: what the app keeps is a
+                // fact about this person on this machine, and main re-installs the policy on the
+                // write so the very next entry obeys it.
+                onPolicy={(logging) => void actions.setLogPolicy(logging)}
                 output={state.jobOutput}
                 onOpenJob={(jobId) => void actions.openJobOutput(jobId)}
                 onOpenTask={(taskId) => {

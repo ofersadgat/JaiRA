@@ -11,6 +11,6 @@ dist/
 # `npm --workspace @jaira/app run shots`. Evidence for a comparison, not an artifact of the build —
 # a committed PNG goes stale the first time a hairline moves, and the world is rebuilt every run.
 packages/app/shots/out/
-packages/app/shots/.world/
+packages/app/shots/.world*/
 # The same, for the scratch TypeScript project `verifyTypeCheck.mts` builds to check itself against.
 packages/app/shots/.verify/
