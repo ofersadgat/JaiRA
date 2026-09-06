@@ -13,6 +13,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import {
+  WORKFLOW_JSON,
   type ExecutorInfo,
   type FileTree,
   type LintIssue,
@@ -1405,6 +1406,9 @@ export function WorkflowEditor({
         <SchemaJsonEditor
           text={text}
           busy={busy}
+          // A state file is JSON and takes JSON's palette through the mime chain, unless somebody has
+          // said something about states in particular.
+          mime={WORKFLOW_JSON}
           onChange={setText}
           validate={validateSchema}
           schemaId={schemaId}

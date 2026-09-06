@@ -35,6 +35,7 @@ import { html } from "@codemirror/lang-html";
 import { css } from "@codemirror/lang-css";
 import { HighlightStyle, LanguageDescription, syntaxHighlighting, syntaxTree, type LanguageSupport } from "@codemirror/language";
 import { codeMirrorGrammarOf, mimeOfFenceLang } from "@jaira/shared/browser";
+import type { EditorPaint } from "./editorThemes";
 import { fenceRenderer } from "./markdown";
 import MarkdownIt from "markdown-it";
 import { Compartment, EditorState, Facet, StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
@@ -1472,10 +1473,20 @@ export function MarkdownEditor({
   onChange,
   readOnly,
   diff,
+  paint,
 }: {
   text: string;
   onChange?: ((next: string) => void) | undefined;
   readOnly?: boolean;
+  /**
+   * The palette this editor is drawn in, as the class and variables to carry — see `editorPaint`.
+   *
+   * On THIS element rather than on a container around it, and that is not a stylistic preference:
+   * `.file-edit > .md-editor` is what gives the editor its band and switches CodeMirror's own
+   * scroller on, and a wrapper — even one that generates no box — is enough to break the child
+   * combinator. A markdown file longer than the pane then clips at the bottom with no bar to drag.
+   */
+  paint?: EditorPaint | undefined;
   /**
    * Show a change ALONGSIDE the document, rather than instead of it.
    *
@@ -1577,5 +1588,6 @@ export function MarkdownEditor({
     view.current?.dispatch({ effects: look.current.reconfigure(lookExtensions()) });
   }), []);
 
-  return <div className={writable ? "md-editor" : "md-editor read-only"} ref={host} />;
+  const classes = ["md-editor", ...(writable ? [] : ["read-only"]), ...(paint === undefined ? [] : [paint.className])];
+  return <div className={classes.join(" ")} style={paint?.style} ref={host} />;
 }

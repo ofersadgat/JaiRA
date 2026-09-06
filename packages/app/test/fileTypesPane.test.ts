@@ -28,6 +28,7 @@ import {
   type RendererEdit,
 } from "@jaira/shared/browser";
 import "../src/renderer/fileSurfaces";
+import { EDITOR_THEME_APP } from "../src/renderer/editorThemes";
 import { familyKey, rendererKey, viewRenderer } from "../src/renderer/fileTypes";
 import {
   capableOf,
@@ -223,33 +224,46 @@ describe("the palette a view is drawn in", () => {
     expect(resolveTheme({ family: "data", mime: "application/json" }, "text", "read", {}, DEFAULT_EDITOR_THEME)).not.toBeNull();
   });
 
-  it("is per type AND per view, because the renderer was chosen per type and per view", () => {
-    const after = apply({}, editsForTheme({ family: "code", mime: "text/x-typescript" }, "text", "read", "one-dark"));
-    expect(resolveTheme({ family: "code", mime: "text/x-typescript" }, "text", "read", after, DEFAULT_EDITOR_THEME)).toEqual({
-      theme: "one-dark",
-    });
-    // The editor of the same file is a separate pick and keeps its own answer — which, with nothing
-    // said, is the Editors section's one value rather than the word "app". Answering `app` there was
-    // a screen stating a palette the app is not using: the section below reads Monokai Light and the
-    // editors are painted in it.
-    expect(resolveTheme({ family: "code", mime: "text/x-typescript" }, "text", "write", after, DEFAULT_EDITOR_THEME)).toEqual({
-      theme: DEFAULT_EDITOR_THEME,
-    });
-    // …and so does every other type.
+  it("is ONE palette where one renderer serves both views", () => {
+    // The bug this replaced: Monaco draws the reading of a `.js` file and its editor, and the two
+    // had separate palettes — so setting the reading's did nothing a person could see, because a
+    // file with no rendering apart from its own text is only ever shown by the editor. One renderer
+    // is one renderer.
+    const at = { family: "code", mime: "text/x-typescript" } as const;
+    const after = apply({}, editsForTheme(at, "text", "read", "one-dark", {}));
+    expect(resolveTheme(at, "text", "read", after, DEFAULT_EDITOR_THEME)).toEqual({ theme: "one-dark" });
+    expect(resolveTheme(at, "text", "write", after, DEFAULT_EDITOR_THEME)).toEqual({ theme: "one-dark" });
+    // …and it is still about THAT type: another one inheriting the same renderers is untouched.
     expect(resolveTheme({ family: "code", mime: "text/css" }, "text", "read", after, DEFAULT_EDITOR_THEME)).toEqual({
       theme: DEFAULT_EDITOR_THEME,
     });
   });
 
-  it("writes NOTHING for “follows the app”, so that preference keeps following it", () => {
-    const after = apply({}, editsForTheme({ family: "code", mime: "text/css" }, "text", "read", "app"));
-    expect(after[rendererKey("text/css", "text")]).toBeUndefined();
+  it("is two palettes once the two views are two renderers", () => {
+    // Which is the whole reason it is keyed per view. Choose the code view for the reading and the
+    // file is drawn by two different components; they are then two renderers and colouring one says
+    // nothing about the other.
+    const at = { family: "code", mime: "text/x-typescript" } as const;
+    const split = apply({}, editsForPick(at, "text", "read", "codeview"));
+    const after = apply(split, editsForTheme(at, "text", "read", "one-dark", split));
+    expect(resolveTheme(at, "text", "read", after, DEFAULT_EDITOR_THEME)).toEqual({ theme: "one-dark" });
+    expect(resolveTheme(at, "text", "write", after, DEFAULT_EDITOR_THEME)).toEqual({ theme: DEFAULT_EDITOR_THEME });
+  });
+
+  it("writes “follows the app”, because nothing is not the same answer as the window", () => {
+    // `null` here means "nothing said", and what nothing falls back to is the DEFAULT palette rather
+    // than the window — so storing null for this choice made it unselectable: the menu re-read the
+    // fallback and snapped back to Monokai Light the moment it was let go.
+    const at = { family: "code", mime: "text/css" } as const;
+    const after = apply({}, editsForTheme(at, "text", "read", EDITOR_THEME_APP, {}));
+    expect(after[rendererKey("text/css", "text")]?.theme.read).toBe(EDITOR_THEME_APP);
+    expect(resolveTheme(at, "text", "read", after, DEFAULT_EDITOR_THEME)).toEqual({ theme: EDITOR_THEME_APP });
   });
 
   it("agrees across a family, and says so when it does not", () => {
-    const one = apply({}, editsForTheme({ family: "code", mime: "text/css" }, "text", "read", "monokai"));
+    const one = apply({}, editsForTheme({ family: "code", mime: "text/css" }, "text", "read", "monokai", {}));
     expect(resolveTheme({ family: "code", mime: null }, "text", "read", one, DEFAULT_EDITOR_THEME)).toBe("mixed");
-    const all = apply(one, editsForTheme({ family: "code", mime: null }, "text", "read", "monokai"));
+    const all = apply(one, editsForTheme({ family: "code", mime: null }, "text", "read", "monokai", {}));
     expect(resolveTheme({ family: "code", mime: null }, "text", "read", all, DEFAULT_EDITOR_THEME)).toEqual({ theme: "monokai" });
   });
 });

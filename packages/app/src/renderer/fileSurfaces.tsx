@@ -36,7 +36,8 @@ import { nodeAt } from "./trail";
 import { Paper, Transcript } from "./transcriptView";
 import { docKey, useDraftBox } from "./drafts";
 import { EditorActions, type EditorTab } from "./editorChrome";
-import { registerFileSurface, type FileSurfaceContext, type FileSurfaceProps } from "./fileTypes";
+import { isReading, registerFileSurface, type FileSurfaceContext, type FileSurfaceProps } from "./fileTypes";
+import { ReadOnlyContext } from "./reading";
 import { MarkdownView } from "./fenceRender";
 import { CodeDocument, MarkdownDocument } from "./documents";
 import type { CodeIntel } from "./monacoDiff";
@@ -81,25 +82,55 @@ const SchemaForm = lazy(() => import("./schemaForm/SchemaForm").then((m) => ({ d
  */
 function MarkdownFileEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.Element {
   const draft = useDraftBox(context.drafts, context.onDraft, docKey(doc.layer, doc.path), doc.text);
+  // The reading of a type is not a place anybody types — see {@link isReading}. Still this surface:
+  // the live preview, its decorations and its fences, with the keyboard off.
+  const reading = isReading(context);
   return (
     <div className="file-edit">
       {/* Editable, said by supplying somewhere for the change to go. The `Suspense` and the choice
           of renderer are `markdownDocument.tsx`'s business rather than this surface's. */}
-      <MarkdownDocument text={draft.text} onChange={draft.set} />
-      <EditorActions
-        dirty={draft.dirty || !doc.exists}
-        busy={busy}
-        onSave={() => onSave(draft.text)}
-        onRevert={draft.revert}
-      >
-        {doc.exists ? null : <span className="sub">new file — saving creates it</span>}
-      </EditorActions>
+      <MarkdownDocument
+        // The document rather than the draft: a reading shows what the file says, and the half of the
+        // panel holding an hour of unsaved typing is the editor.
+        text={reading ? doc.text : draft.text}
+        mime={doc.mime}
+        {...(reading ? { readOnly: true } : { onChange: draft.set })}
+      />
+      {reading ? (
+        <ReadingNote />
+      ) : (
+        <EditorActions
+          dirty={draft.dirty || !doc.exists}
+          busy={busy}
+          onSave={() => onSave(draft.text)}
+          onRevert={draft.revert}
+        >
+          {doc.exists ? null : <span className="sub">new file — saving creates it</span>}
+        </EditorActions>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The row a Save button would have been in, saying why there is none.
+ *
+ * The same move {@link CodeSourceView} makes and for the same reason: a surface that quietly refuses
+ * typing reads as broken from the outside, while one that names what is holding it open — and the
+ * screen where that is taken back — is a choice somebody made.
+ */
+function ReadingNote(): JSX.Element {
+  return (
+    <div className="pane-actions pinned">
+      <span className="sub">The reading of this type — not a place to type. Appearance › File types.</span>
     </div>
   );
 }
 
 export function TextEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.Element {
   const draft = useDraftBox(context.drafts, context.onDraft, docKey(doc.layer, doc.path), doc.text);
+  // Mounted as the READING of a type — the same editor, refusing typing. See {@link isReading}.
+  const reading = isReading(context);
   /**
    * Coloured when there is a grammar for it, a plain box when there is not.
    *
@@ -212,8 +243,9 @@ export function TextEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.
     <div className="file-edit">
       {coloured ? (
         <CodeDocument
-          text={draft.text}
+          text={reading ? doc.text : draft.text}
           mime={doc.mime}
+          {...(reading ? { readOnly: true } : {})}
           onChange={draft.set}
           // Which half the panel mounted this as, so the editor asks for that view's palette. This
           // surface is the editor of most types and the READING of one whose editor is something
@@ -234,20 +266,25 @@ export function TextEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.
         <textarea
           className="code-editor"
           spellCheck={false}
-          value={draft.text}
+          readOnly={reading}
+          value={reading ? doc.text : draft.text}
           onChange={(e) => draft.set(e.target.value)}
         />
       )}
-      <EditorActions
-        // `|| !doc.exists`: creating the file IS the pending change, so the note beside the button
-        // describes something the button can actually do.
-        dirty={draft.dirty || !doc.exists}
-        busy={busy}
-        onSave={() => onSave(draft.text)}
-        onRevert={draft.revert}
-      >
-        {doc.exists ? null : <span className="sub">new file — saving creates it</span>}
-      </EditorActions>
+      {reading ? (
+        <ReadingNote />
+      ) : (
+        <EditorActions
+          // `|| !doc.exists`: creating the file IS the pending change, so the note beside the button
+          // describes something the button can actually do.
+          dirty={draft.dirty || !doc.exists}
+          busy={busy}
+          onSave={() => onSave(draft.text)}
+          onRevert={draft.revert}
+        >
+          {doc.exists ? null : <span className="sub">new file — saving creates it</span>}
+        </EditorActions>
+      )}
     </div>
   );
 }
@@ -396,15 +433,21 @@ export function JsonEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.
   const key = docKey(doc.layer, doc.path);
   const draft = useDraftBox(context.drafts, context.onDraft, key, doc.text);
   const chosen = useSchemaChoice(doc, context);
+  // A reading: the same two layers and the same schema picker, with the box closed and no Save row —
+  // `SchemaJsonEditor` draws that row only when it is given somewhere to save to.
+  const reading = isReading(context);
 
   return (
     <SchemaJsonEditor
-      text={draft.text}
+      text={reading ? doc.text : draft.text}
+      // The document's own type, so a palette chosen for a vendor JSON is read under the key it was
+      // written to rather than under plain JSON.
+      mime={doc.mime}
       busy={busy}
       dirty={draft.dirty}
+      readOnly={reading}
       onChange={draft.set}
-      onSave={() => onSave(draft.text)}
-      onRevert={draft.revert}
+      {...(reading ? {} : { onSave: () => onSave(draft.text), onRevert: draft.revert })}
       validate={context.validateSchema}
       schemaId={chosen === undefined || chosen === "" ? null : chosen}
       onSchema={(schemaId) => context.onSchemaChoice(key, schemaId)}
@@ -640,6 +683,10 @@ export function WorkflowRunView(props: FileSurfaceProps): JSX.Element {
  */
 export function WorkflowEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.Element {
   const key = docKey(doc.layer, doc.path);
+  // The one renderer here that is neither text nor a document: a page of controls. Read-only for a
+  // FORM is every control refused at once, which a disabled fieldset states in one place — see the
+  // wrapper at the end of this function.
+  const reading = isReading(context);
   if (doc.stateId === undefined) return <p className="empty">This file does not name a state.</p>;
   const source: WorkflowSource = {
     stateId: doc.stateId,
@@ -648,7 +695,7 @@ export function WorkflowEdit({ doc, busy, onSave, context }: FileSurfaceProps): 
     text: doc.text,
     exists: doc.exists,
   };
-  return (
+  const form = (
     <WorkflowEditor
       source={source}
       tree={context.tree}
@@ -689,6 +736,11 @@ export function WorkflowEdit({ doc, busy, onSave, context }: FileSurfaceProps): 
       onSave={(_stateId, _layer, text) => onSave(text)}
     />
   );
+  // The form already knows how to be a reading — it is what the panel beside a finished run shows —
+  // and it is told through a context rather than a prop because the flag has to reach a slot row
+  // inside a table inside a tab (see `reading.ts`). A provider adds no element, which matters here:
+  // the containers this lands in style their direct children.
+  return reading ? <ReadOnlyContext.Provider value={true}>{form}</ReadOnlyContext.Provider> : form;
 }
 
 // --- rendered documents ------------------------------------------------------
@@ -744,6 +796,7 @@ export function ConfigEffectiveView({ context }: FileSurfaceProps): JSX.Element 
  * it, so an unparsable draft is refused here rather than written and reported afterwards.
  */
 export function ConfigEdit({ doc, busy, context }: FileSurfaceProps): JSX.Element {
+  const reading = isReading(context);
   const authored = context.config === null ? null : doc.layer === "base" ? context.config.base : context.config.project;
   // The layer document as text. Preferred over the file's own contents because `config:read` has
   // already parsed it BOM-tolerantly and reprinted it; the raw bytes may differ in ways that would
@@ -778,22 +831,27 @@ export function ConfigEdit({ doc, busy, context }: FileSurfaceProps): JSX.Elemen
       <textarea
         className="code-editor"
         spellCheck={false}
-        value={draft.text}
+        readOnly={reading}
+        value={reading ? authoredText : draft.text}
         onChange={(e) => {
           draft.set(e.target.value);
           setParseError(null);
         }}
       />
       {parseError ? <div className="reason">not valid JSON: {parseError}</div> : null}
-      <EditorActions
-        dirty={draft.dirty}
-        busy={busy}
-        onSave={save}
-        onRevert={() => {
-          draft.revert();
-          setParseError(null);
-        }}
-      />
+      {reading ? (
+        <ReadingNote />
+      ) : (
+        <EditorActions
+          dirty={draft.dirty}
+          busy={busy}
+          onSave={save}
+          onRevert={() => {
+            draft.revert();
+            setParseError(null);
+          }}
+        />
+      )}
     </div>
   );
 }

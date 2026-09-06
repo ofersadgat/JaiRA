@@ -27,7 +27,7 @@ import { EDITOR_THEME_APP, editorThemeSpec, monacoTheme } from "./editorThemes";
 import { splitMonacoKeywords } from "./monacoTokens";
 import { colorize, ensureTextMate, onTextMate, textmateThemeFor, textmateThemeInUse, textmateThemeName } from "./textmate";
 import { onRenderChoice, renderChoicesNow, useRenderChoice } from "./renderChoice";
-import { editorFrontNow, onEditorFront, takeEditorFront } from "./editorFront";
+import { editorFrontNow, onEditorFront, takeEditorFront, type PaletteKey } from "./editorFront";
 import { viewTheme } from "./fileTypes";
 import type {
   FileCheck,
@@ -137,11 +137,25 @@ function tameMonacoTypeScript(): void {
     // Only those three. Everything else it offers is either answered from the parse alone (document
     // symbols, formatting) or is a nicety this has not replaced, and switching those off would take
     // away something that works to make a point.
+    // …and its OCCURRENCES with them, for a reason of timing rather than of truth.
+    //
+    // `getDocumentHighlights` is the one provider that fires on every movement of the caret, so it
+    // is the one with a request in flight whenever an editor goes away — a click in the text
+    // followed by a click in the file tree is enough. The worker is then asked about a model that
+    // has just been disposed and answers `Could not find source file: inmemory://model/6`, into the
+    // console, repeatedly. That is the same race the note above records for the validator, arriving
+    // through the last door left open to it.
+    //
+    // What it costs is small and worth stating: Monaco highlights the occurrences of the word under
+    // the caret with a textual pass when no provider answers, so the highlighting stays — what goes
+    // is its promotion from "the same word" to "the same symbol", which a program holding one file
+    // and none of its imports was only ever sure of within that file anyway.
     defaults.setModeConfiguration({
       ...defaults.modeConfiguration,
       definitions: false,
       references: false,
       hovers: false,
+      documentHighlights: false,
     });
   }
 }
@@ -611,8 +625,18 @@ function wantedThemeId(): string {
   // simple cause: the read-only view of a type is a separate pick with a separate palette, and an
   // editor serving it asked for the other one — so choosing a colour scheme for a reading changed
   // nothing at all.
+  const chosen = renderChoicesNow();
+  // The renderer's OWN key first, where it has one — see `EditorFront.palette` — and the type's text
+  // view behind it. Two keys rather than one because a diff pane is a renderer of its own drawing
+  // some other type: without the first, the palette chosen under Changes was never read; without the
+  // second, a diff of a `.ts` file would stop following the palette chosen for TypeScript.
   const perType =
-    inFront === undefined ? null : viewTheme(inFront.mime, "text", inFront.view, renderChoicesNow());
+    inFront === undefined
+      ? null
+      : (inFront.palette === undefined
+          ? null
+          : viewTheme(inFront.palette.mime, inFront.palette.kind, inFront.palette.view, chosen)) ??
+        viewTheme(inFront.mime, "text", inFront.view, chosen);
   // The Editors section's one value stands behind every type: it is the palette for anything nobody
   // has said anything about, which is almost everything.
   return perType ?? document.documentElement.dataset["editorTheme"] ?? EDITOR_THEME_APP;
@@ -698,9 +722,19 @@ onEditorFront(repaint);
  * palette visible at all. Two editors of different types on screen together still share one — the
  * one whose text you last clicked into.
  */
-function takeFront(mime: string, view: RenderView): void {
-  takeEditorFront({ mime, view });
+function takeFront(mime: string, view: RenderView, palette?: PaletteKey): void {
+  takeEditorFront({ mime, view, ...(palette === undefined ? {} : { palette }) });
 }
+
+/**
+ * Where a side-by-side pane's palette lives — the `Side by side` renderer's own key.
+ *
+ * Stated here rather than passed in by the three hosts that mount one, because it is true of all of
+ * them: a changeset review, a patch file opened in the panel and a value drawn as a diff are the
+ * same rendering of the same kind of thing, and a person who picks a colour scheme under Changes
+ * means it for diffs, not for the one of the three they happened to be looking at.
+ */
+const DIFF_PALETTE: PaletteKey = { mime: "text/x-diff", kind: "preview", view: "read" };
 
 // One subscription for the window: when a grammar or a theme lands, repaint in whatever is now safe.
 onTextMate(() => monaco.editor.setTheme(themeOf()));
@@ -924,7 +958,7 @@ export function MonacoDiffPane({
     // The grammar this pane is about to need, and the palette its type asks for — see `textmate.ts`
     // and {@link takeFront}. A pane that has just opened is the one in front. A diff is a reading of
     // two revisions whichever side can be typed in, so it takes the read view's palette.
-    takeFront(mime, "read");
+    takeFront(mime, "read", DIFF_PALETTE);
     const originalModel = monaco.editor.createModel(original, language, modelUriFor(file));
     const modifiedModel = monaco.editor.createModel(modified, language, modelUriFor(file));
     const editor = monaco.editor.createDiffEditor(node, {
@@ -1106,8 +1140,8 @@ export function MonacoDiffPane({
     // of different types can be on screen at once, and only one of them can have the window's
     // palette. Both sides of a diff, because either can be clicked into.
     const front = [
-      editor.getOriginalEditor().onDidFocusEditorText(() => takeFront(mime, "read")),
-      editor.getModifiedEditor().onDidFocusEditorText(() => takeFront(mime, "read")),
+      editor.getOriginalEditor().onDidFocusEditorText(() => takeFront(mime, "read", DIFF_PALETTE)),
+      editor.getModifiedEditor().onDidFocusEditorText(() => takeFront(mime, "read", DIFF_PALETTE)),
     ];
     themes.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-editor-theme", "style"] });
     // The looks are typed values rather than custom properties, so they arrive on their own channel
@@ -1186,6 +1220,7 @@ export function MonacoCodePane({
   text,
   mime,
   onChange,
+  readOnly,
   autoHeight,
   view,
   file,
@@ -1244,6 +1279,15 @@ export function MonacoCodePane({
    * not open a moment ago, and this pane is re-created per file (see `documents.tsx`'s `key`).
    */
   reveal?: { line: number; column: number } | undefined;
+  /**
+   * Mounted, coloured, and refusing every keystroke — see `CodeDocumentProps.readOnly`.
+   *
+   * Separate from having no `onChange`, because the caller may hold a draft box it still wants
+   * bound: what is being said is that THIS mount is a reading of the type, not that there is nowhere
+   * for a change to go. `domReadOnly` as well as `readOnly`, so the DOM itself refuses input rather
+   * than Monaco swallowing it — otherwise a paste or a drop still reaches the model.
+   */
+  readOnly?: boolean | undefined;
 }): JSX.Element {
   const host = useRef<HTMLDivElement>(null);
   /** The latest props, read through refs so the editor is created once — see the effect below. */
@@ -1267,7 +1311,10 @@ export function MonacoCodePane({
   /** Read at creation and never after — see the prop. */
   const startAt = useRef(reveal);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
-  const writable = onChange !== undefined;
+  const writable = onChange !== undefined && readOnly !== true;
+  /** The same fact at CREATION time — the effect below is what follows it afterwards. */
+  const writableNow = useRef(writable);
+  writableNow.current = writable;
   /** Read through a ref for the same reason the rest is: the editor is created exactly once. */
   const autoFit = useRef(autoHeight);
   autoFit.current = autoHeight;
@@ -1283,6 +1330,10 @@ export function MonacoCodePane({
     );
     const editor = monaco.editor.create(node, {
       model,
+      // Stated at creation as well as in the effect below, so a reading is never editable for the
+      // frame between the two — long enough to take a keystroke from somebody already typing.
+      readOnly: !writableNow.current,
+      domReadOnly: !writableNow.current,
       automaticLayout: true,
       scrollBeyondLastLine: false,
       overviewRulerLanes: 0,

@@ -42,7 +42,8 @@ import { isTextMime } from "@jaira/shared/browser";
 import { Badge } from "./board";
 import { CrumbBar, alternatives, runCrumbs, shortRunName, type Crumb } from "./crumbs";
 import { TaskPanel } from "./detail";
-import { editorFor, viewerFor, type FileSurfaceContext } from "./fileTypes";
+import { editorPaint } from "./editorThemes";
+import { editorPick, pickPalette, viewerPick, type FileSurfaceContext } from "./fileTypes";
 import { AskDialog, ContextMenu, pointOf, type AskSpec, type MenuAnchor, type MenuItem, type MenuPoint } from "./menu";
 import { RunPanel, type RunSurface } from "./runPanel";
 import { RunModeToggle } from "./runViews";
@@ -1672,9 +1673,25 @@ export function FilePanel({
    * `.json` file can have a data tree above and an editor below without either being described as
    * the other's alternative.
    */
-  const View = viewerFor(doc.mime, context.renderers);
-  const editor = editorFor(doc.mime, context.renderers);
+  const viewer = viewerPick(doc.mime, context.renderers);
+  const View = viewer?.renderer.surface ?? null;
+  const edits = editorPick(doc.mime, context.renderers);
+  const editor = edits?.renderer ?? null;
   const Edit = editor?.surface ?? null;
+  /**
+   * The palette each half is painted in — the one thing a surface cannot work out for itself.
+   *
+   * A theme is per type and per view (§6.4) and the root can hold ONE, which `applyAppearance`
+   * writes there as the default for everything nobody has said anything about. A DOM editor takes
+   * its colours from that mapping and from nothing else — so a palette chosen for Markdown reached
+   * the settings preview, which paints a container of its own, and reached no editor in the window
+   * at all. This is that container, around the real thing: the class switches the stylesheet's
+   * mapping on and the variables are the colours it maps, so everything under it is repainted and
+   * nothing outside it moves. Null where nothing was said, which leaves the window's own default
+   * standing rather than restating it one element down.
+   */
+  const viewPaint = editorPaint(pickPalette(viewer, doc.mime, context.renderers));
+  const editPaint = editorPaint(pickPalette(edits, doc.mime, context.renderers));
   const props = { doc, busy, onSave, context };
   // The same props, said to be the READING. Only this function knows which half it is mounting, and
   // the palette is keyed per view — so a viewer built from `props` would be drawn in the editor's
@@ -1692,7 +1709,7 @@ export function FilePanel({
     >
       {View !== null && at !== "full" ? (
         <>
-          <div className="run-half">
+          <div className={`run-half${viewPaint === null ? "" : ` ${viewPaint.className}`}`} style={viewPaint?.style}>
             <View {...viewProps} />
           </div>
           {/* The halves were 46/54 and immovable, which is a guess about what you are doing: a board
@@ -1717,7 +1734,12 @@ export function FilePanel({
         </>
       ) : null}
 
-      <div className={View === null || at === "full" ? "config-half whole" : `config-half${shut ? " shut" : ""}`}>
+      <div
+        className={`${View === null || at === "full" ? "config-half whole" : `config-half${shut ? " shut" : ""}`}${
+          editPaint === null ? "" : ` ${editPaint.className}`
+        }`}
+        style={editPaint?.style}
+      >
         {View ? (
           // The label became the control. Folded, this row IS the lower half — a bar across the
           // bottom of the column saying what is behind it and taking one click to bring back. It

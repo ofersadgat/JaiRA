@@ -25,15 +25,20 @@ import type { RendererChoices } from "@jaira/shared/browser";
 import {
   chosenRenderer,
   editorFor,
+  editorPick,
+  isReading,
+  pickPalette,
   fileRenderers,
   registerFileSurface,
   registeredMimes,
   rendererChoices,
   rendererKey,
   viewerFor,
+  viewerPick,
   type FileSurface,
   type RenderKind,
 } from "../src/renderer/fileTypes";
+import { editorPaint } from "../src/renderer/editorThemes";
 import { textRendererFor } from "../src/renderer/renderChoice";
 
 /** A surface identified by name — enough to assert WHICH one resolution picked. */
@@ -348,5 +353,90 @@ describe("a choice against a type that inherits its renderers", () => {
     // A specific choice naming a renderer that no longer exists does not swallow the vaguer one.
     const stale = { ...chose("text/plain", "text", "codeview"), ...chose("text/x-typescript", "text", "gone") };
     expect(nameOf(editorFor("text/x-typescript", stale)?.surface ?? null)).toBe("CodeSourceView");
+  });
+});
+
+/**
+ * The palette a half of the panel is painted in — the question a mounted surface cannot answer.
+ *
+ * A theme is stored per type, per kind and per view, and the panel resolves its two halves through
+ * pairs it never states: the upper half is a `preview` for markdown and a `data` reading for JSON,
+ * and the lower half is a `text` write for most types but a `data` write for a state file and a
+ * `text` READ for anyone who chose the code view. A palette looked up against a guessed pair is a
+ * preference read from the wrong key — which is a control that stores what you chose and changes
+ * nothing you can see, and is exactly the bug this pair of functions exists to prevent.
+ */
+describe("the palette a half carries", () => {
+  // Themed and unthemed, registered as such: the flag is what decides whether the control appears
+  // beside a renderer at all, and painting a surface that ignores colours would be a preference
+  // reaching something it was never about.
+  registerFileSurface("text/x-paint", "text", { id: "cm", label: "cm", writes: true, themed: true, surface: TEXT_EDIT });
+  registerFileSurface("text/x-paint", "preview", { id: "flat", label: "flat", surface: MARKDOWN_VIEW });
+
+  const themed = (view: "read" | "write", id: string | null): RendererChoices => ({
+    [rendererKey("text/x-paint", "text")]: { ...defaultRendererChoice(), theme: { read: null, write: null, [view]: id } },
+  });
+
+  it("asks against the pair the half actually resolved through", () => {
+    const mime = "text/x-paint";
+    // The editor is the `text` WRITE of this type, so that is the palette it takes…
+    expect(pickPalette(editorPick(mime, themed("write", "one-dark")), mime, themed("write", "one-dark"))).toBe("one-dark");
+    // …and the other view is a separate statement, which this half must not pick up.
+    expect(pickPalette(editorPick(mime, themed("read", "one-dark")), mime, themed("read", "one-dark"))).toBeNull();
+  });
+
+  it("says nothing for a renderer with no palette of its own", () => {
+    // The upper half here is a rendering drawn in the app's own tokens. Painting a container round
+    // it would be the preference reaching a surface that cannot express it.
+    const chosen = themed("read", "one-dark");
+    expect(pickPalette(viewerPick("text/x-paint", chosen), "text/x-paint", chosen)).toBeNull();
+  });
+
+  it("says nothing where nothing was chosen, so the window's default stands", () => {
+    expect(pickPalette(editorPick("text/x-paint"), "text/x-paint")).toBeNull();
+    expect(editorPaint(null)).toBeNull();
+  });
+
+  it("paints a named theme, and REFUSES the window's for one that follows the app", () => {
+    const painted = editorPaint("one-dark");
+    expect(painted?.className).toBe("ed-themed");
+    expect(painted?.style?.["--ed-bg"]).toBeTruthy();
+    // "Follows the app" is an answer rather than an absence: the app's own default is a theme, so
+    // the container has to be able to switch the root's mapping off. It carries no colours because
+    // there are none to carry — the editor inherits the app's tokens like anything else.
+    expect(editorPaint("app")).toEqual({ className: "ed-app" });
+  });
+});
+
+/**
+ * A reading stays a reading, whatever the renderer it landed on can do.
+ *
+ * The flag is one line, and what hangs off it is the whole rule: a renderer that writes is a
+ * legitimate answer to a type's READ view — Monaco is a fine way to look at a `.ts` file — and a
+ * mount that came in through that view must not accept a keystroke or offer a Save. The surfaces
+ * ask this rather than being handed a missing `onSave`, because absence of somewhere-to-save is a
+ * different statement and each of them answers it by drawing a different renderer entirely.
+ */
+describe("a mount that is a reading", () => {
+  it("is the read view, and nothing else is", () => {
+    expect(isReading({ view: "read" })).toBe(true);
+    expect(isReading({ view: "write" })).toBe(false);
+    // Absent is the editor, which is what almost every mount is and what everything was before a
+    // surface could be asked which half it is.
+    expect(isReading({})).toBe(false);
+  });
+});
+
+/**
+ * "Follows the app" is STORED, and that is what makes it choosable.
+ *
+ * `null` in this field means "nothing said", and what nothing falls back to is the default palette
+ * rather than the window — so writing null for this choice made it a no-op that the control then
+ * re-read as Monokai Light.
+ */
+describe("the palette that follows the window", () => {
+  it("survives a settings file", () => {
+    const back = parseSettings({ renderers: { "text/markdown:text": { theme: { write: "app" } } } });
+    expect(back.renderers["text/markdown:text"]?.theme.write).toBe("app");
   });
 });

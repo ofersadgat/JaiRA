@@ -39,7 +39,7 @@ import {
   type RenderView,
 } from "@jaira/shared/browser";
 import { SelectInput } from "./controls";
-import { EDITOR_THEMES, EDITOR_THEME_APP, editorThemeSpec, editorThemeVars } from "./editorThemes";
+import { EDITOR_THEMES, EDITOR_THEME_APP, editorPaint, editorThemeSpec } from "./editorThemes";
 import { takeEditorFront } from "./editorFront";
 import { EditorLookFields } from "./editorKnobs";
 import {
@@ -311,15 +311,52 @@ export function resolveTheme(
 }
 
 /**
- * Choosing one — and `app` writes NOTHING, which is what makes it the app's answer rather than a
- * copy of it. A person on "Follows the app" keeps following it when the app's idea of it changes.
+ * Choosing one — and `app` is WRITTEN, which is the whole of what makes it choosable.
+ *
+ * It used to store `null`, on the argument that the app's answer should not be copied into a
+ * setting. The argument was sound and the encoding was wrong, because `null` already means something
+ * else here: nothing said, fall back to the default — and the default is Monokai Light, not the
+ * window. So picking "Follows the app" stored nothing, the control re-read the fallback, and the
+ * menu snapped back to Monokai Light in front of the person who had just moved it. `resolveTheme`
+ * had already found the display half of this and fixed it there; this is the other half.
+ *
+ * `null` keeps its meaning and is still what the family rows write to the members they overrule.
  */
-export function editsForTheme(at: Subject, kind: RenderKind, view: RenderView, id: string): RendererEdit[] {
-  const value = id === EDITOR_THEME_APP ? null : id;
-  if (at.mime !== null) return [{ key: rendererKey(at.mime, kind), edit: { theme: { [view]: value } } }];
+/**
+ * Which views a palette set here reaches — every view the SAME renderer serves.
+ *
+ * One renderer, one palette. The theme belongs to the renderer, and a renderer serving both views is
+ * one renderer: Monaco drawing the reading of a JavaScript file and Monaco drawing its editor are
+ * the same component, the same grammar and the same colours, so giving them two palettes describes
+ * something that does not exist.
+ *
+ * It also produced a bug with no way to see it. A `.js` file has no rendering apart from its own
+ * text, so the panel gives the editor the whole column and the reading is never shown on its own —
+ * and the pane opens on the read-only view. Setting a palette there stored it against a view nobody
+ * would ever look at, while the file went on being drawn in whatever the editor's said. What that
+ * looks like from the outside is a control that does nothing.
+ */
+function viewsSharing(at: Subject, kind: RenderKind, view: RenderView, chosen: RendererChoices): RenderView[] {
+  const here = pickFor(at, kind, view, chosen);
+  const other: RenderView = view === "read" ? "write" : "read";
+  if (here === null) return [view];
+  return pickFor(at, kind, other, chosen)?.id === here.id ? [view, other] : [view];
+}
+
+export function editsForTheme(
+  at: Subject,
+  kind: RenderKind,
+  view: RenderView,
+  id: string,
+  chosen: RendererChoices,
+): RendererEdit[] {
+  const value = id;
+  const theme = Object.fromEntries(viewsSharing(at, kind, view, chosen).map((each) => [each, value]));
+  const cleared = Object.fromEntries(Object.keys(theme).map((each) => [each, null]));
+  if (at.mime !== null) return [{ key: rendererKey(at.mime, kind), edit: { theme } }];
   return [
-    { key: familyKey(at.family, kind), edit: { theme: { [view]: value } } },
-    ...contributors(at.family, kind).map((mime) => ({ key: rendererKey(mime, kind), edit: { theme: { [view]: null } } })),
+    { key: familyKey(at.family, kind), edit: { theme } },
+    ...contributors(at.family, kind).map((mime) => ({ key: rendererKey(mime, kind), edit: { theme: cleared } })),
   ];
 }
 
@@ -576,11 +613,11 @@ function RendererPreview({
    * colour scheme for Markdown or JSON changed the swatches and nothing else, because the only
    * mapping was on `:root` and the root can hold one palette.
    */
-  const painted = theme === null ? undefined : editorThemeSpec(theme);
+  const painted = editorPaint(theme);
   return (
     <div
-      className={`ft-preview-body ${view}${painted === undefined ? "" : " ed-themed"}`}
-      style={painted === undefined ? undefined : editorThemeVars(painted)}
+      className={`ft-preview-body ${view}${painted === null ? "" : ` ${painted.className}`}`}
+      style={painted?.style}
     >
       <PreviewBoundary label={renderer.label}>
         <Surface
@@ -690,8 +727,10 @@ export function FileTypesPane({
    * every change of subject or view. See `editorFront.ts`.
    */
   useEffect(() => {
-    takeEditorFront({ mime: subjectMime, view });
-  }, [subjectMime, view, renderers]);
+    // The KEY this row stores under, not just the type: a palette for the diff renderer is filed
+    // under its kind, and claiming the type alone previewed a value nothing would ever read.
+    takeEditorFront({ mime: subjectMime, view, palette: { mime: subjectMime, kind, view } });
+  }, [subjectMime, kind, view, renderers]);
 
   return (
     <div className="ft">
@@ -962,14 +1001,23 @@ export function FileTypesPane({
                         ["Follows the app", EDITOR_THEME_APP],
                         ...EDITOR_THEMES.map((one): [string, string] => [one.label, one.id]),
                       ]}
-                      onChange={(id) => (id === "" ? undefined : onRenderer(editsForTheme(at, kind, view, id)))}
+                      onChange={(id) => (id === "" ? undefined : onRenderer(editsForTheme(at, kind, view, id, renderers)))}
                     />
                     {/* The palette as the colours it IS. A menu of names is the one thing that cannot
                         show that, and the preview below draws only ONE of the two views. */}
                     <Swatches theme={palette === "mixed" ? null : palette.theme} />
                     <span className="grow" />
                     <span className="app-secondary ellip">
-                      {shown === null ? "" : `${shown.label} — the ${VIEWS[view].label} view of ${named}`}
+                      {/* Both views where one renderer serves both, because that is what setting it
+                          will do — and because a person who reads "the read-only view" while looking
+                          at a file drawn by the editor has been told the opposite of the truth. */}
+                      {shown === null
+                        ? ""
+                        : `${shown.label} — the ${
+                            viewsSharing(at, kind, view, renderers).length > 1
+                              ? "one view and the other"
+                              : `${VIEWS[view].label} view`
+                          } of ${named}`}
                       {view === "write" ? (
                         <span className="ft-caveat"> · editors share one, and the last one you were in wins</span>
                       ) : null}

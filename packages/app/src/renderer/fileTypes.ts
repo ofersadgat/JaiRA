@@ -842,6 +842,40 @@ export function chosenRenderer(
 }
 
 /**
+ * Is this mount a READING? — the question every renderer that writes has to ask.
+ *
+ * A type's two views are two separate picks, and most renderers that can write are legitimate
+ * answers to both: Monaco is a fine way to READ a `.ts` file, the live preview is a fine way to read
+ * markdown, the schema-aware editor is a fine way to read a `.json`. What must not follow from
+ * "this renderer can write" is that this particular mount may be typed into — a reading that takes a
+ * keystroke can lose somebody's file to a stray key, and the Save button under it is an offer
+ * nothing asked for.
+ *
+ * So the SURFACE asks, rather than the panel withholding `onSave`. Withholding it would say "there
+ * is nowhere for a change to go", and every renderer here answers that by drawing something else
+ * entirely — the tokenizer instead of Monaco, markdown-it instead of the live preview. The answer to
+ * "read this" is the renderer that was chosen, with the typing off.
+ *
+ * Absent is `write`, which is what almost every mount is — see `FileSurfaceContext.view`.
+ */
+export function isReading(context: Pick<FileSurfaceContext, "view">): boolean {
+  return context.view === "read";
+}
+
+/**
+ * A renderer AND the pair it was resolved through — what a panel needs in order to paint it.
+ *
+ * The renderer alone was enough while a palette was one value for the whole window. It is not now: a
+ * theme is stored per type, per kind and per view, and a half of the panel that knows only which
+ * component it is mounting has no key to ask with.
+ */
+export interface PanelPick {
+  renderer: FileRenderer;
+  kind: RenderKind;
+  view: RenderView;
+}
+
+/**
  * The panel's UPPER half: what this document is, rather than what it says.
  *
  * Preview first, then data, and that order is the claim the two kinds make. A rendering answers
@@ -855,10 +889,22 @@ export function chosenRenderer(
  * by choosing `Nothing` under preview.
  */
 export function viewerFor(mime: string, chosen?: RendererChoices | undefined): FileSurface | null {
+  return viewerPick(mime, chosen)?.renderer.surface ?? null;
+}
+
+/**
+ * The same resolution, WITH the pair it resolved through — see {@link PanelPick}.
+ *
+ * Split out rather than worked out twice, because only this walk knows which kind and which view a
+ * half landed on: the upper half is the preview of one type and the data reading of another, and a
+ * palette is stored against exactly that pair. Asked against a guess it is a preference read from
+ * the wrong key, which is a control that silently does nothing.
+ */
+export function viewerPick(mime: string, chosen?: RendererChoices | undefined): PanelPick | null {
   const preview = viewRenderer(mime, "preview", "read", chosen);
-  if (preview !== null) return preview.surface;
+  if (preview !== null) return { renderer: preview, kind: "preview", view: "read" };
   const data = viewRenderer(mime, "data", "read", chosen);
-  return data !== null && data.writes !== true ? data.surface : null;
+  return data !== null && data.writes !== true ? { renderer: data, kind: "data", view: "read" } : null;
 }
 
 /**
@@ -875,19 +921,43 @@ export function viewerFor(mime: string, chosen?: RendererChoices | undefined): F
  * surface that cannot be typed into would be a lie.
  */
 export function editorFor(mime: string, chosen?: RendererChoices | undefined): FileRenderer | null {
+  return editorPick(mime, chosen)?.renderer ?? null;
+}
+
+/** The lower half's resolution, with the pair it resolved through — see {@link viewerPick}. */
+export function editorPick(mime: string, chosen?: RendererChoices | undefined): PanelPick | null {
   const data = viewRenderer(mime, "data", "write", chosen);
   // A data editor that draws NOTHING is a refusal of the data editor, not of editing: the text
   // renderer takes it, which is what "give me the source of my state file instead of the form" has
   // always meant. Only a real surface stops the fall-through.
-  if (data !== null && data.surface !== null) return data;
+  if (data !== null && data.surface !== null) return { renderer: data, kind: "data", view: "write" };
   // The reading FIRST, where it is one that cannot be typed into — which is only ever because
   // somebody said so. Choosing the code view is choosing not to type, and the panel already knows
   // how to draw a surface with no Save; without this, a text reading that does not write would be a
   // preference the panel silently declined. Everything else falls through to the editor, which is
   // what "how do I edit a `.ts` file" has always meant.
   const read = viewRenderer(mime, "text", "read", chosen);
-  if (read !== null && read.writes !== true) return read;
-  return viewRenderer(mime, "text", "write", chosen);
+  if (read !== null && read.writes !== true) return { renderer: read, kind: "text", view: "read" };
+  const write = viewRenderer(mime, "text", "write", chosen);
+  return write === null ? null : { renderer: write, kind: "text", view: "write" };
+}
+
+/**
+ * The palette a mounted surface has to carry ITSELF, or null for "whatever the window is in".
+ *
+ * Two questions, and both have to be asked. A renderer with no palette of its own is drawn in the
+ * app's own tokens, and painting a container around it would be a preference reaching a surface it
+ * was never about — that is `themed`, the same flag that decides whether the control appears at
+ * all. And a view nobody has said anything about answers null, which leaves the window's default
+ * standing rather than restating it one element down.
+ */
+export function pickPalette(
+  pick: PanelPick | null,
+  mime: string,
+  chosen?: RendererChoices | undefined,
+): string | null {
+  if (pick === null || pick.renderer.themed !== true) return null;
+  return viewTheme(mime, pick.kind, pick.view, chosen);
 }
 
 /** Every type with at least one registered renderer. Exported for the tests that guard the table. */

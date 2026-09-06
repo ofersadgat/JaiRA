@@ -318,3 +318,32 @@ export function editorThemeVars(spec: EditorThemeSpec): Record<string, string> {
     "--ed-selection": spec.selection,
   };
 }
+
+/**
+ * A palette a CONTAINER carries, rather than the window — the class and the variables to put on it.
+ *
+ * `applyAppearance` writes one palette onto the root and the root can hold one, which is the whole
+ * of why this exists: a theme is per type and per view (§6.4), so a surface drawn in something other
+ * than the window's default has to state it where it is mounted. The stylesheet's mapping rule reads
+ * both forms — see the `[data-editor-theme]` block in `styles.css`.
+ *
+ * Three answers, and the third is the one that is easy to leave out. `null` means nothing was said
+ * here and the window's palette stands. A named theme is the twelve colours, published locally.
+ * `app` is a REFUSAL of the window's palette rather than an absence of an opinion — it is what
+ * "Follows the app" means once the app's default is itself a theme — and it says so with a class the
+ * mapping rule excludes, so the editor under it inherits the app's own tokens and is painted in
+ * nothing at all.
+ */
+export interface EditorPaint {
+  /** Goes on the editor's OWN element, beside its own classes — never on a wrapper. */
+  className: string;
+  /** The twelve `--ed-*` custom properties, as an inline style. */
+  style?: Record<string, string>;
+}
+
+export function editorPaint(theme: string | null): EditorPaint | null {
+  if (theme === null) return null;
+  const spec = editorThemeSpec(theme);
+  if (spec === undefined) return { className: "ed-app" };
+  return { className: "ed-themed", style: editorThemeVars(spec) };
+}

@@ -5596,18 +5596,28 @@ button.layer-on:hover:not(:disabled) {
  * editor belongs to the app and stays in the app's palette, the same way the file tree beside it
  * does — what somebody means by "a Monokai editor" is the code, not the furniture.
  */
-:root[data-editor-theme] .md-editor,
-:root[data-editor-theme] .editor-stack,
-:root[data-editor-theme] .code-editor,
-/* …and the same mapping again, one element in, for a surface drawn in a palette of its OWN.
-   A theme is per type and per view now (§6.4), and the root can only hold one — so a container that
-   carries the twelve variables locally gets them mapped here, and everything under it is painted in
-   that palette without anything else on the page moving. It is what makes a colour scheme chosen for
-   Markdown visible in a CodeMirror editor, which reads these tokens and knows nothing about Monaco's
-   global theme. */
-.ed-themed .md-editor,
-.ed-themed .editor-stack,
-.ed-themed .code-editor {
+/* …except where the surface has REFUSED it. "Follows the app" is a real answer to the palette
+   question and not the absence of one — the app's own default is itself a theme, so a type set to
+   follow the window has to be able to turn this mapping off. `.ed-app` is that, and it works by not
+   matching: no mapping, no `--ed-*`, and the editor inherits the app's tokens like anything else on
+   the page. See `editorPaint`. */
+:root[data-editor-theme] :is(.md-editor, .editor-stack, .code-editor):not(.ed-app, .ed-app *),
+/* …and the same mapping again for a surface drawn in a palette of its OWN.
+   A theme is per type and per view now (§6.4), and the root can only hold one — so a surface
+   carrying the twelve variables locally gets them mapped here, and it and everything under it are
+   painted in that palette without anything else on the page moving. It is what makes a colour scheme
+   chosen for Markdown visible in a CodeMirror editor, which reads these tokens and knows nothing
+   about Monaco's global theme.
+
+   ON the element as well as above it, which is the shape a hard-won bug left behind. A container
+   whose only job is to publish the variables is one element between `.file-edit` and `.md-editor`,
+   and that half of the stylesheet addresses its bands with a CHILD combinator — so the wrapper cost
+   the markdown editor its height, and with it CodeMirror's scroller: a long document clipped at the
+   bottom with no bar to drag. The editors carry their own palette now and add no element to anything,
+   and this selector is what lets them. */
+:is(.ed-themed .md-editor, .md-editor.ed-themed),
+:is(.ed-themed .editor-stack, .editor-stack.ed-themed),
+:is(.ed-themed .code-editor, .code-editor.ed-themed) {
   /* Which way round the scrollbars and the form controls inside the editor are drawn. */
   color-scheme: var(--ed-scheme);
   --bg: var(--ed-bg);

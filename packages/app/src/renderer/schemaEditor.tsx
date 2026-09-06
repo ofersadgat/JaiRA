@@ -58,6 +58,9 @@ import {
   type ValidateSchemaResult,
 } from "@jaira/shared/browser";
 import { EditorActions } from "./editorChrome";
+import { editorPaint } from "./editorThemes";
+import { viewTheme } from "./fileTypes";
+import { useRenderChoice } from "./renderChoice";
 import { cursorContext, siblingKeys } from "./jsonCursor";
 import { highlightJson, splitTokensAt, type HighlightLine, type Token } from "./jsonHighlight";
 import type { UiSurface } from "./fileTypes";
@@ -105,6 +108,28 @@ export interface SchemaJsonEditorProps {
    * against something — which reads as "no schema" and is worse than no picker.
    */
   lockedSchema?: boolean;
+  /**
+   * Mounted as a READING — the same two layers, refusing every keystroke.
+   *
+   * A type's reading and its editor are two picks and this surface is a legitimate answer to both.
+   * Asked for the reading it must still be itself — the colours, the hints, the schema picker, the
+   * field reference — and it must not be typed into. The host says so by ALSO withholding `onSave`,
+   * which is what takes the Save row away; this is what closes the box.
+   */
+  readOnly?: boolean;
+  /**
+   * Which type this text IS, for the palette — see `viewTheme`.
+   *
+   * Absent means JSON itself, which is what three of the four hosts are drawing. The one that must
+   * say is the state form's JSON tab: a state file is its own type and inherits JSON's palette
+   * through the mime chain, so asking under `application/json` would miss a choice made about
+   * states and asking under nothing would miss the choice made about JSON.
+   *
+   * Carried here rather than by each host because this component owns `.editor-stack`, which is the
+   * element the stylesheet's palette mapping is written against — the same argument that puts the
+   * markdown editor's palette in `documents.tsx`.
+   */
+  mime?: string;
   /**
    * Word wrap, and where the preference is kept.
    *
@@ -160,6 +185,8 @@ export function SchemaJsonEditor({
   schemaId,
   onSchema,
   lockedSchema = false,
+  readOnly = false,
+  mime,
   wrap,
   onWrap,
   reference,
@@ -188,6 +215,9 @@ export function SchemaJsonEditor({
   const [dismissed, setDismissed] = useState(false);
   /** Used only when the host does not control wrapping — see {@link SchemaJsonEditorProps.wrap}. */
   const [localWrap, setLocalWrap] = useState(false);
+
+  /** This person's palette per type, read as a value so a change repaints rather than waiting. */
+  const chosen = useRenderChoice();
 
   const wrapping = wrap ?? localWrap;
   const setWrapping = (next: boolean): void => (onWrap ? onWrap(next) : setLocalWrap(next));
@@ -538,8 +568,11 @@ export function SchemaJsonEditor({
     </span>
   ) : null;
 
+  // The palette this type asks for, published on the element the mapping rule reads — see
+  // `editorPaint`. Null where nothing was said, which leaves the window's own palette standing.
+  const paint = editorPaint(viewTheme(mime ?? "application/json", "text", readOnly ? "read" : "write", chosen));
   return (
-    <div className="file-edit schema-edit" ref={root}>
+    <div className={`file-edit schema-edit${paint === null ? "" : ` ${paint.className}`}`} style={paint?.style} ref={root}>
       {/* `edit-bar` is the row every editing surface opens with — see `editorChrome`. What is IN it
           differs (a schema picker here, a path and a tab switch on the state form); that it is one
           quiet line of chrome above the text, and never part of the document, does not. */}
@@ -623,6 +656,10 @@ export function SchemaJsonEditor({
           ref={area}
           className="code-layer code-input"
           spellCheck={false}
+          // A reading. `readOnly` rather than `disabled`: the caret, the selection and the scroll
+          // still work, which is the difference between a document you may read and one you may not
+          // reach into at all.
+          readOnly={readOnly}
           // The attribute AND the stylesheet: `wrap` decides what a submitted value contains and
           // whether the box scrolls sideways, `white-space` decides how the coloured layer behind it
           // breaks. Setting only one of them is how the two layers end up disagreeing.
@@ -633,7 +670,7 @@ export function SchemaJsonEditor({
             setCursor(e.target.selectionStart);
             setDismissed(false);
           }}
-          onKeyDown={onKeyDown}
+          {...(readOnly ? {} : { onKeyDown })}
           onKeyUp={track}
           onClick={track}
           onSelect={track}
