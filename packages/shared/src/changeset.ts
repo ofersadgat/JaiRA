@@ -92,6 +92,59 @@ export interface Changeset {
   changes: Change[];
 }
 
+// --- the before-side, as a compiler can be given it --------------------------
+
+/**
+ * One file as it was before a changeset — what `CheckFileRequest.baseline` is made of.
+ *
+ * `text: null` is not "empty": it means the file did not EXIST at the base revision, which is what a
+ * created file looks like from there. The distinction matters to a compiler — an empty module
+ * resolves and exports nothing, a missing one does not resolve at all — and getting it wrong would
+ * report a made-up error on the side of a diff that is supposed to be the innocent one.
+ */
+export interface BaselineFile {
+  /** Addressed like {@link Change.path}: relative to the tree the changeset is against. */
+  path: string;
+  text: string | null;
+}
+
+/**
+ * The changeset's before-side, as a program can be built from it.
+ *
+ * A base revision differs from the worktree in exactly these files, so this list IS the difference:
+ * put them back and everything else can be read off the disk it is already on.
+ *
+ * Three shapes, and each has to be right or the baseline invents an error of its own:
+ *
+ *  - **update / delete** — the file was there, holding `before`. A delete is the interesting one: it
+ *    is not on disk at all any more, so without this the before-side of everything that imported it
+ *    would fail to resolve.
+ *  - **create** — the file was NOT there. `null` rather than `""`, because an empty module resolves
+ *    and exports nothing while a missing one does not resolve, and those are different errors.
+ *  - **rename** — both: the old path held the content, the new one did not exist.
+ *
+ * A change nothing can read (a binary) is skipped rather than guessed at: `before` is absent for it
+ * for the same reason it is absent for a create, and treating the two alike would delete a file from
+ * the baseline that was never touched.
+ */
+export function baselineOf(changeset: Changeset): BaselineFile[] {
+  const files: BaselineFile[] = [];
+  for (const change of changeset.changes) {
+    if (change.unshowable !== undefined) continue;
+    if (change.action === "create") {
+      files.push({ path: change.path, text: null });
+      continue;
+    }
+    if (change.action === "rename") {
+      if (change.fromPath !== undefined) files.push({ path: change.fromPath, text: change.before ?? null });
+      files.push({ path: change.path, text: null });
+      continue;
+    }
+    files.push({ path: change.path, text: change.before ?? null });
+  }
+  return files;
+}
+
 // --- decisions (§4.1) --------------------------------------------------------
 
 /**

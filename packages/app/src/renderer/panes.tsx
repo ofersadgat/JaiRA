@@ -193,6 +193,9 @@ export function SettingsPane({
  * would rot the first time somebody added a field.
  */
 export const EMPTY_CONTEXT: FileSurfaceContext = {
+  // No shell behind this, so there is nowhere for a definition to be opened.
+  onOpenDefinition: undefined,
+  revealAt: null,
   state: null,
   config: null,
   tree: null,

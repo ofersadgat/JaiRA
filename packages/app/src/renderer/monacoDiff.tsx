@@ -21,7 +21,7 @@
  * the decision.
  */
 import { useEffect, useRef, useState, type JSX } from "react";
-import { monacoGrammarOf, type EditorKind } from "@jaira/shared/browser";
+import { mimeOfPath, monacoGrammarOf, type EditorKind } from "@jaira/shared/browser";
 import { editorLook, onEditorLook } from "./editorLook";
 import { EDITOR_THEME_APP, editorThemeSpec, monacoTheme } from "./editorThemes";
 import { splitMonacoKeywords } from "./monacoTokens";
@@ -29,7 +29,15 @@ import { colorize, ensureTextMate, onTextMate, textmateThemeFor, textmateThemeIn
 import { onRenderChoice, renderChoicesNow, useRenderChoice } from "./renderChoice";
 import { editorFrontNow, onEditorFront, takeEditorFront } from "./editorFront";
 import { viewTheme } from "./fileTypes";
-import type { RenderView } from "@jaira/shared/browser";
+import type {
+  FileCheck,
+  FileDefinitions,
+  FileDiagnostic,
+  FileHover,
+  FileLocation,
+  FileReferences,
+  RenderView,
+} from "@jaira/shared/browser";
 import * as monaco from "monaco-editor";
 // Monaco ≥0.53 maps subpaths through its exports table (`./*` → `./esm/vs/*.js`), so the worker
 // specifiers are spelled WITHOUT the `esm/vs` prefix the older guides show.
@@ -69,6 +77,498 @@ if (window.MonacoEnvironment === undefined) {
           return new EditorWorker();
       }
     },
+  };
+}
+
+/**
+ * Monaco's own TypeScript service, told what it is allowed to have an opinion about.
+ *
+ * It runs in a web worker, which has no disk, so its program is the single file on screen and every
+ * import in it resolves to nothing. Left alone it says so: `export * from "./main/service"` came back
+ * as "Cannot find module './main/service'. Did you mean to set the 'moduleResolution' option to
+ * 'nodenext'…" — advice about a file that compiles. Every semantic complaint it made rested on that
+ * same empty program, so none of them were worth reading.
+ *
+ * So its validation is off — ALL of it, and that is a change from the first attempt at this, which
+ * left syntax on because a parse needs no project. Two things were wrong with the split. Monaco
+ * re-validates every open model whenever these defaults change and its validator asks the worker
+ * about models that may already be disposed, which surfaced in the app's own crash reporter as an
+ * unhandled "Could not find source file: 'inmemory://model/1'". And a file can be parsed without a
+ * project by the thing that is already reading the disk, so the split bought nothing: `tsProject.ts`
+ * answers syntax as well as meaning, including for a file no `tsconfig.json` covers.
+ *
+ * Every red underline under TypeScript in this app therefore comes from one place, and that place is
+ * a real compiler. Where nothing is drawn, nothing is known.
+ *
+ * The compiler options are still set, and are the PARSE's rather than a build's: what a `target` and
+ * a `jsx` decide in the worker is which syntax is legal, which is what the hovers and completions it
+ * still serves are built on. `.tsx` is handled by the model's own URI (see {@link modelUriFor})
+ * rather than by an option, because Monaco reads the script kind off the file extension.
+ */
+function tameMonacoTypeScript(): void {
+  for (const defaults of [
+    monaco.typescript.typescriptDefaults,
+    monaco.typescript.javascriptDefaults,
+  ]) {
+    defaults.setDiagnosticsOptions({
+      noSemanticValidation: true,
+      noSyntaxValidation: true,
+      noSuggestionDiagnostics: true,
+    });
+    defaults.setCompilerOptions({
+      target: monaco.typescript.ScriptTarget.ESNext,
+      moduleResolution: monaco.typescript.ModuleResolutionKind.NodeJs,
+      jsx: monaco.typescript.JsxEmit.ReactJSX,
+      allowJs: true,
+    });
+    // Its DEFINITION provider goes for the same reason its validation did, and this is the one a
+    // person notices: "Go to Definition" on an imported name did nothing at all, because the symbol
+    // came from a module the in-browser program had never read. A symbol declared in the same file
+    // did work — which is what made the menu item read as broken rather than as absent.
+    //
+    // Only that one. Everything else it offers is either answered from the parse alone (document
+    // symbols, formatting) or is a nicety this has not replaced yet, and switching those off would
+    // take away something that works to make a point.
+    // Its definition, reference and hover providers all go, and all for one reason: each answers
+    // from a program holding a single file, so each is confidently wrong about anything that came
+    // from an import. The hover is the worst of the three — it said `any`, which is not "I don't
+    // know", it is a claim.
+    //
+    // Only those three. Everything else it offers is either answered from the parse alone (document
+    // symbols, formatting) or is a nicety this has not replaced, and switching those off would take
+    // away something that works to make a point.
+    defaults.setModeConfiguration({
+      ...defaults.modeConfiguration,
+      definitions: false,
+      references: false,
+      hovers: false,
+    });
+  }
+}
+tameMonacoTypeScript();
+
+/**
+ * What a pane can ask about the text in it, and what it can do with the answer.
+ *
+ * One object rather than three props because the three belong together: they are all "this text is a
+ * file in a project, and here is who to ask about it". A pane with none is a pane showing code that
+ * is not a file — a sample, a value drawn as source — and it gets no diagnostics and no navigation,
+ * which is the honest rendering of that.
+ */
+export interface CodeIntel {
+  /** Diagnostics for this text, from the real compiler — see `CheckFileRequest`. */
+  check?: (text: string) => Promise<FileCheck>;
+  /** Where the symbol at a position is defined — see `DefineFileRequest`. */
+  definitions?: (text: string, at: { line: number; column: number }) => Promise<FileDefinitions>;
+  /** Everywhere the symbol at a position is used — see `FileReferences`. */
+  references?: (text: string, at: { line: number; column: number }) => Promise<FileReferences>;
+  /** What the symbol at a position is — see `FileHover`. */
+  hover?: (text: string, at: { line: number; column: number }) => Promise<FileHover>;
+  /**
+   * The text of another file, for {@link shadowModels}.
+   *
+   * Peek needs it. Monaco can only preview a file it already holds a model for, so a result in a
+   * file nobody has opened has to be READ before it can be shown — which is not something the
+   * editor can do, and is why Peek Definition did nothing while Go to Definition worked.
+   */
+  read?: (to: FileLocation) => Promise<string | undefined>;
+  /**
+   * Take the window to a definition in ANOTHER file. `false` when it cannot go there.
+   *
+   * Needed because Monaco cannot do it. A standalone editor has one model, so following a definition
+   * out of it is not navigation the editor knows how to perform — it hands the request to whoever
+   * registered an opener, and that is the app.
+   */
+  open?: (to: FileLocation) => boolean | Promise<boolean>;
+}
+
+/**
+ * Which intel belongs to which model, by URI.
+ *
+ * A registry rather than a closure, because the two things that need it are registered ONCE for the
+ * whole page — a language's definition provider and the editor opener are global in Monaco — while
+ * the panes that can answer come and go. A pane puts its model in on creation and takes it out on
+ * disposal, and the global handlers look up whatever is there now.
+ */
+const intelOf = new Map<string, CodeIntel>();
+
+/**
+ * Every place a lookup has offered to go, by the URI it will be opened as.
+ *
+ * The opener is handed a `Uri` and nothing else, and a `Uri` is not enough to open a file with: the
+ * address the Files view uses came from main, which worked it out from the tree the question was
+ * asked in. So each answer is remembered on the way past.
+ *
+ * Kept across lookups rather than cleared by each, because a references widget stays open while you
+ * hover somewhere else — clearing would make its results stop working the moment anything else was
+ * looked up. Bounded instead, oldest first, since the entries are tiny.
+ */
+const targets = new Map<string, FileLocation>();
+const TARGET_LIMIT = 500;
+
+function remember(uri: string, to: FileLocation): void {
+  targets.delete(uri);
+  targets.set(uri, to);
+  while (targets.size > TARGET_LIMIT) {
+    const oldest = targets.keys().next();
+    if (oldest.done === true) break;
+    targets.delete(oldest.value);
+  }
+}
+
+/**
+ * Models for files nobody has opened — what makes Peek work.
+ *
+ * Monaco resolves a preview through `createModelReference`, which can only hand back a model that
+ * already exists; for anything else it rejects with "Model not found". Peek Definition and the
+ * references widget therefore showed nothing at all for a result in another file, which is most
+ * results. So the files an answer names are read and given models before the answer is returned.
+ *
+ * ## Why they are swept rather than cached
+ *
+ * A model is a text buffer that lives until it is disposed, so one per file anybody ever peeked at
+ * is a leak. They are swept at the start of each lookup — but a GENERATION behind, and never while
+ * attached to an editor. Both conditions earn their place: a peek widget opened by the previous
+ * lookup is still on screen while the next hover happens, and disposing the model under it would
+ * blank the preview a person is reading.
+ */
+const shadowModels = new Map<string, { model: monaco.editor.ITextModel; generation: number }>();
+let lookups = 0;
+
+/**
+ * How many shadows may be held before the oldest are let go.
+ *
+ * A CAP rather than a sweep per lookup, and the difference is a race that a ctrl-hover across a line
+ * of code makes easily: `startFindDefinition` fires per mouse move, so three lookups can be in
+ * flight at once, and a sweep that ran on each would dispose a model the first one is still about to
+ * resolve. Under a cap, a burst of hovers disposes nothing at all — eviction only happens once more
+ * files have been peeked at than anyone is looking at.
+ */
+const SHADOW_LIMIT = 50;
+
+/** Let go of the oldest shadows, never one a widget is showing and never one from a recent lookup. */
+function sweepShadows(): void {
+  if (shadowModels.size <= SHADOW_LIMIT) return;
+  // Insertion order, so this walks oldest first.
+  for (const [uri, shadow] of [...shadowModels]) {
+    if (shadowModels.size <= SHADOW_LIMIT) break;
+    if (shadow.model.isDisposed()) {
+      shadowModels.delete(uri);
+      continue;
+    }
+    // A model on screen in a peek, or one from a lookup that may still be resolving.
+    if (shadow.model.isAttachedToEditor() || shadow.generation >= lookups - 1) continue;
+    shadowModels.delete(uri);
+    shadow.model.dispose();
+  }
+}
+
+/**
+ * Give every file in an answer a model, so the widget that shows the answer can preview it.
+ *
+ * Reads are made once per FILE rather than once per result — a references answer names the same file
+ * many times — and a file that cannot be read is simply left without one, which costs that entry its
+ * preview and nothing else.
+ */
+async function shadow(found: readonly FileLocation[], read: CodeIntel["read"]): Promise<void> {
+  if (read === undefined) return;
+  lookups += 1;
+  sweepShadows();
+  const wanted = new Map<string, FileLocation>();
+  for (const to of found) {
+    const uri = monaco.Uri.file(to.file).toString();
+    if (monaco.editor.getModel(monaco.Uri.parse(uri)) === null) wanted.set(uri, to);
+  }
+  await Promise.all(
+    [...wanted].map(async ([uri, to]) => {
+      const text = await read(to).catch(() => undefined);
+      if (text === undefined) return;
+      const at = monaco.Uri.file(to.file);
+      // Checked AGAIN after the await: several reads land at once, and the first one to arrive for a
+      // file makes the model the rest would collide with.
+      if (monaco.editor.getModel(at) !== null) return;
+      shadowModels.set(uri, {
+        model: monaco.editor.createModel(text, monacoGrammarOf(mimeOfPath(to.file)), at),
+        generation: lookups,
+      });
+    }),
+  );
+}
+
+/**
+ * Go to Definition, answered by the compiler in main.
+ *
+ * Registered once per language for the whole page. The model is the question — which is why the
+ * intel is looked up by its URI rather than passed in — and a model nobody registered simply has no
+ * definitions, which is what a code sample in a settings preview should have.
+ *
+ * A definition in the SAME file is returned under the MODEL's own URI rather than a freshly built
+ * one. They are usually identical; they are not when a file is open twice and the second model took
+ * a disambiguating authority (see {@link modelUriFor}), and a mismatch there would send an in-file
+ * jump out through the opener as though it were a different document.
+ */
+/**
+ * An answer, as places Monaco can be handed — and ONLY the places it can survive being handed.
+ *
+ * A result is dropped when there is no model for it, and that is not tidiness. Monaco previews a
+ * result by resolving its model, and resolving one that does not exist rejects — unhandled, into the
+ * app's crash reporter, as `Error: Model not found`. Every gesture does it: the peek widget, the
+ * references widget, and `startFindDefinition`, which is a plain ctrl-hover and so the one a person
+ * triggers without meaning to.
+ *
+ * The results this loses are the ones that were already unreachable: a definition outside the tree
+ * that was searched has no address ({@link FileLocation.at}), so it cannot be read, cannot be given
+ * a model, and cannot be opened. This repository is full of them — `@declarative-ai/*` resolves
+ * through a workspace junction into a sibling checkout — so it is the common case rather than an
+ * exotic one. Dropping it means ctrl-clicking such a symbol does nothing, which is what it did
+ * before any of this existed and is honest; leaving it in meant an error report instead.
+ */
+function asLocations(model: monaco.editor.ITextModel, found: readonly FileLocation[]): monaco.languages.Location[] {
+  return found.flatMap((to) => {
+    const built = monaco.Uri.file(to.file);
+    // The model's OWN uri for a result in the same file. They are usually identical; they are not
+    // when a file is open twice and the second model took a disambiguating authority (see
+    // {@link modelUriFor}), and a mismatch would send an in-file jump out through the opener as
+    // though it were a different document.
+    const here = built.path.toLowerCase() === model.uri.path.toLowerCase();
+    const uri = here ? model.uri : built;
+    if (!here && monaco.editor.getModel(uri) === null) return [];
+    remember(uri.toString(), to);
+    return [
+      {
+        uri,
+        range: {
+          startLineNumber: to.startLine,
+          startColumn: to.startColumn,
+          endLineNumber: to.endLine,
+          endColumn: to.endColumn,
+        },
+      },
+    ];
+  });
+}
+
+/** The caret, as both sides count it — 1-based line and column, which is Monaco's spelling already. */
+function caretAt(position: monaco.IPosition): { line: number; column: number } {
+  return { line: position.lineNumber, column: position.column };
+}
+
+for (const language of ["typescript", "javascript"]) {
+  monaco.languages.registerDefinitionProvider(language, {
+    async provideDefinition(model, position) {
+      const intel = intelOf.get(model.uri.toString());
+      if (intel?.definitions === undefined) return null;
+      const found = await intel.definitions(model.getValue(), caretAt(position));
+      // Before the answer is returned, so Peek Definition has something to preview: the widget
+      // resolves each result's model synchronously once it opens, and a file with none shows blank.
+      await shadow(found.definitions, intel.read);
+      return asLocations(model, found.definitions);
+    },
+  });
+
+  /**
+   * Find All References.
+   *
+   * The same answer read the other way round, and the same reason it could not work before: a use of
+   * a symbol lives in the files that import it, and a program holding one file knows of none of
+   * them. What Monaco used to show was the uses in the file you were already looking at, presented
+   * as though it were all of them.
+   */
+  monaco.languages.registerReferenceProvider(language, {
+    async provideReferences(model, position) {
+      const intel = intelOf.get(model.uri.toString());
+      if (intel?.references === undefined) return null;
+      const found = await intel.references(model.getValue(), caretAt(position));
+      await shadow(found.references, intel.read);
+      return asLocations(model, found.references);
+    },
+  });
+
+  /**
+   * The hover.
+   *
+   * Rendered as a fenced block so Monaco colours the signature with the same grammar the editor
+   * under it is using — a type is code, and reading it as prose is harder than it needs to be. The
+   * documentation follows as ordinary markdown, which is what a doc comment is.
+   */
+  monaco.languages.registerHoverProvider(language, {
+    async provideHover(model, position) {
+      const intel = intelOf.get(model.uri.toString());
+      if (intel?.hover === undefined) return null;
+      const said = await intel.hover(model.getValue(), caretAt(position));
+      if (said.info === undefined) return null;
+      return {
+        range: {
+          startLineNumber: said.info.startLine,
+          startColumn: said.info.startColumn,
+          endLineNumber: said.info.endLine,
+          endColumn: said.info.endColumn,
+        },
+        contents: [
+          { value: `\`\`\`${monacoGrammarOf(mimeOfPath(model.uri.path))}\n${said.info.signature}\n\`\`\`` },
+          ...(said.info.documentation === undefined ? [] : [{ value: said.info.documentation }]),
+        ],
+      };
+    },
+  });
+}
+
+/**
+ * Following a definition OUT of the editor it was asked from.
+ *
+ * The half Monaco has no answer for. A standalone editor holds one model, so its own handler can
+ * only move the caret within it and does nothing at all for anything else — which is why a
+ * cross-file jump appeared to be missing rather than failing. Registered handlers are tried newest
+ * first, so this runs before that one and falls through to it by returning `false`.
+ *
+ * `false` is also the right answer for a definition the window cannot reach: a dependency behind a
+ * junction, a file inside a worktree the Files view does not draw. Nothing happens, which is
+ * accurate — better than navigating to whatever is at that path in the tree it CAN draw.
+ */
+monaco.editor.registerEditorOpener({
+  openCodeEditor(source, resource) {
+    const model = source.getModel();
+    if (model === null) return false;
+    // The same document: Monaco's own handler moves the caret, and it does it better than we could.
+    if (model.uri.toString() === resource.toString()) return false;
+    const to = targets.get(resource.toString());
+    const intel = intelOf.get(model.uri.toString());
+    if (to === undefined || intel?.open === undefined) return false;
+    return intel.open(to);
+  },
+});
+
+/** Where this pane's real diagnostics are filed. Its OWN owner, so nothing else clears them. */
+const CHECK_OWNER = "jaira-project";
+
+/**
+ * How long typing has to stop before the compiler is asked again, ms.
+ *
+ * A check of a file in this repository costs about 230 ms in the worker that answers it, so asking
+ * per keystroke would queue work faster than it drains and every answer would be about text three
+ * characters old. Long enough that a burst of typing costs one check; short enough that stopping to
+ * look at what you wrote is when the squiggles arrive.
+ */
+const CHECK_DELAY = 400;
+
+/**
+ * The model's identity, which for a file on disk is the file.
+ *
+ * Not cosmetic. Monaco reads the SCRIPT KIND off the URI's extension, so a model with the default
+ * `inmemory://model/1` name is parsed as plain TypeScript however it is coloured — which made every
+ * tag in a `.tsx` file a syntax error, in a file the build compiles. A real path fixes that and, at
+ * the same time, gives the pane a name its diagnostics can be about.
+ *
+ * A URI must be unique, and the same file CAN be open twice — the Files view beside a settings
+ * preview, two panes on one document. The second gets the same path under a different authority:
+ * still `.tsx` where it matters, still not the first model.
+ */
+function modelUriFor(file: string | undefined): monaco.Uri | undefined {
+  if (file === undefined || file.length === 0) return undefined;
+  const path = monaco.Uri.file(file);
+  if (monaco.editor.getModel(path) === null) return path;
+  // A SHADOW holding the name gives it up. Those exist only so a peek widget has something to
+  // preview (see {@link shadowModels}); an editor a person is about to type in has the better claim,
+  // and leaving it to take a disambiguated name instead would mean the file on screen and the file
+  // its own definitions resolve to were two different documents.
+  const shadowed = shadowModels.get(path.toString());
+  if (shadowed !== undefined && !shadowed.model.isAttachedToEditor()) {
+    shadowModels.delete(path.toString());
+    shadowed.model.dispose();
+    return path;
+  }
+  for (let n = 2; n < 100; n += 1) {
+    const again = path.with({ authority: `pane${n}` });
+    if (monaco.editor.getModel(again) === null) return again;
+  }
+  // A hundred panes on one file is not a thing that happens; an unnamed model is a worse outcome
+  // than a wrong script kind, so give up on the name rather than on the editor.
+  return undefined;
+}
+
+/** Monaco's severity for one of ours. */
+function severityOf(d: FileDiagnostic): monaco.MarkerSeverity {
+  if (d.severity === "error") return monaco.MarkerSeverity.Error;
+  if (d.severity === "warning") return monaco.MarkerSeverity.Warning;
+  return monaco.MarkerSeverity.Info;
+}
+
+/**
+ * Draw a check's answer on a model.
+ *
+ * Diagnostics anchored in ANOTHER file are dropped: they are the "…is declared here" half of a chain
+ * and belong to a document this pane is not showing, so placing them here would put a squiggle on
+ * whatever happened to be at that line number. The message that points at them is kept, and carries
+ * the chain in its own text.
+ */
+function drawCheck(model: monaco.editor.ITextModel, check: FileCheck): void {
+  monaco.editor.setModelMarkers(
+    model,
+    CHECK_OWNER,
+    check.diagnostics
+      .filter((d) => d.file === undefined)
+      .map((d) => ({
+        severity: severityOf(d),
+        // The code as well as the message, so a person can look one up — Monaco renders it beside
+        // the message in the hover, which is where `2792` was legible in the first place.
+        code: String(d.code),
+        source: "ts",
+        message: d.message,
+        startLineNumber: d.startLine,
+        startColumn: d.startColumn,
+        endLineNumber: d.endLine,
+        endColumn: d.endColumn,
+      })),
+  );
+}
+
+/**
+ * Keep one model's markers in step with what the compiler says about its text.
+ *
+ * The whole of the asking, in one place, because three models want it and they want it for two
+ * different reasons. A file being EDITED has to be re-asked as it is typed in, debounced so a burst
+ * of keystrokes costs one check. The base side of a diff is read-only — it is a revision, and a
+ * revision does not change — so it is asked exactly once and never again.
+ *
+ * Versioned on the way back: `round` is compared when the answer lands, so a slow reply about text
+ * that has since moved is dropped rather than drawn over what is now on screen. A failure draws
+ * NOTHING — a refusal from main, or a worker that died, is not news about the code, and clearing the
+ * markers would read as "your file is fine now".
+ *
+ * Returns its own disposer, which also invalidates whatever is still in flight.
+ */
+function followCheck(
+  model: monaco.editor.ITextModel,
+  /** Read through a function, not captured: the caller holds it in a ref and it may move. */
+  ask: () => ((text: string) => Promise<FileCheck>) | undefined,
+  options: { live: boolean },
+): () => void {
+  let pending: ReturnType<typeof setTimeout> | undefined;
+  let round = 0;
+  const run = (delay: number): void => {
+    if (ask() === undefined) return;
+    if (pending !== undefined) clearTimeout(pending);
+    pending = setTimeout(() => {
+      const request = ask();
+      if (request === undefined) return;
+      const mine = ++round;
+      void request(model.getValue()).then(
+        (check) => {
+          if (mine === round && !model.isDisposed()) drawCheck(model, check);
+        },
+        () => {},
+      );
+    }, delay);
+  };
+  // At once: opening a file should show what is wrong with it without being typed in first.
+  run(0);
+  const typed = options.live ? model.onDidChangeContent(() => run(CHECK_DELAY)) : undefined;
+  return () => {
+    if (pending !== undefined) clearTimeout(pending);
+    // Past this line an answer still in flight has nowhere to land: the round moves so the reply is
+    // recognised as stale even before the model is gone.
+    round += 1;
+    typed?.dispose();
   };
 }
 
@@ -350,6 +850,41 @@ export interface MonacoDiffProps {
    * survives a narrow panel — which is where most of these are read.
    */
   sideBySide?: boolean;
+  /**
+   * What file the two sides ARE — a NAME, not a way of loading anything, so a path relative to the
+   * checkout is as good as an absolute one.
+   *
+   * The same reason {@link MonacoCodePane} takes one, minus the diagnostics: Monaco reads a model's
+   * script kind off its URI's extension, so an unnamed model holding a `.tsx` file is parsed as
+   * plain TypeScript and every tag in it is underlined as a syntax error — in a diff of code that
+   * compiles. Both sides get the name; {@link modelUriFor} is what keeps them two models.
+   *
+   * Absent where the two sides are not a file, which is what a value diffed against another value is.
+   */
+  file?: string;
+  /**
+   * What the compiler says about each side — the two questions a diff of code actually raises.
+   *
+   * They are two because the sides are two different trees, and a check is only worth anything when
+   * it is asked in the right one. The PROPOSED side is on a disk: an agent's worktree holds every
+   * changed file at its new content, with the same `tsconfig.json` and the same `node_modules`, so
+   * it is checked there and is re-asked as the reviewer edits it. The BASE side is a git revision
+   * that nothing holds a tree of, so it is checked against a program built by putting the changeset's
+   * files back — see `CheckFileRequest.baseline` — and asked once, because a revision does not
+   * change.
+   *
+   * Having both is the point. One red underline in a review means nothing on its own; the same
+   * underline present on the left and absent on the right means the change fixed something, and
+   * absent on the left and present on the right means it broke something. That is the question a
+   * reviewer is actually asking, and neither side answers it alone.
+   *
+   * A {@link CodeIntel} rather than a bare function each, so the same shape serves here and in
+   * {@link MonacoCodePane} — and so a side can grow navigation later without changing this prop.
+   */
+  intel?: {
+    modified?: CodeIntel;
+    original?: CodeIntel;
+  };
 }
 
 export function MonacoDiffPane({
@@ -361,6 +896,8 @@ export function MonacoDiffPane({
   onReady,
   readOnly,
   sideBySide,
+  file,
+  intel,
 }: MonacoDiffProps): JSX.Element {
   const host = useRef<HTMLDivElement>(null);
   // The latest callback, without tearing the editor down per render: the editor is created once per
@@ -373,7 +910,13 @@ export function MonacoDiffPane({
   const editorRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
   const ready = useRef(onReady);
   ready.current = onReady;
-
+  /**
+   * The checks, read through a ref for the reason every other callback here is: the object is built
+   * fresh on each of the host's renders, and an editor torn down and rebuilt per render is an editor
+   * whose caret and scroll position never survive a keystroke.
+   */
+  const ask = useRef(intel);
+  ask.current = intel;
   useEffect(() => {
     const node = host.current;
     if (node === null) return undefined;
@@ -382,8 +925,8 @@ export function MonacoDiffPane({
     // and {@link takeFront}. A pane that has just opened is the one in front. A diff is a reading of
     // two revisions whichever side can be typed in, so it takes the read view's palette.
     takeFront(mime, "read");
-    const originalModel = monaco.editor.createModel(original, language);
-    const modifiedModel = monaco.editor.createModel(modified, language);
+    const originalModel = monaco.editor.createModel(original, language, modelUriFor(file));
+    const modifiedModel = monaco.editor.createModel(modified, language, modelUriFor(file));
     const editor = monaco.editor.createDiffEditor(node, {
       automaticLayout: true,
       renderSideBySide: sideBySide !== false,
@@ -421,6 +964,16 @@ export function MonacoDiffPane({
     };
     editorRef.current = editor;
     const edits = modifiedModel.onDidChangeContent(() => report.current?.(modifiedModel.getValue()));
+    // Each side against its own tree — see {@link MonacoDiffProps.check}. The base side is asked
+    // once because it cannot change; the proposed side follows the reviewer's edits.
+    const checked = [
+      followCheck(originalModel, () => ask.current?.original?.check, { live: false }),
+      followCheck(modifiedModel, () => ask.current?.modified?.check, { live: true }),
+    ];
+    // Both sides register, so a definition asked for in either is answered by that side's own tree.
+    const registered = [originalModel, modifiedModel].map((m) => m.uri.toString());
+    if (ask.current?.original !== undefined) intelOf.set(registered[0]!, ask.current.original);
+    if (ask.current?.modified !== undefined) intelOf.set(registered[1]!, ask.current.modified);
 
     /**
      * Report a selection in the MODIFIED side, in the same terms a DOM selection is reported.
@@ -575,6 +1128,8 @@ export function MonacoDiffPane({
       picks.dispose();
       for (const s of sized) s.dispose();
       for (const one of front) one.dispose();
+      for (const stop of checked) stop();
+      for (const uri of registered) intelOf.delete(uri);
       editor.dispose();
       originalModel.dispose();
       modifiedModel.dispose();
@@ -582,8 +1137,12 @@ export function MonacoDiffPane({
     // `modified` is deliberately absent: the pane OWNS the modified text once open (it is the
     // editing surface), and resetting the model on every keystroke's round-trip would fight the
     // user's cursor.
+    //
+    // `file` IS here, and through the deps rather than a ref, because a model's URI is fixed the
+    // moment it is made: a pane that moved on to another change while keeping its models would hold
+    // two named after the file before it, and Monaco reads the script kind off that name.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [original, mime, readOnly, sideBySide]);
+  }, [original, mime, readOnly, sideBySide, file]);
 
   /**
    * Follow the `modified` prop after creation.
@@ -629,6 +1188,9 @@ export function MonacoCodePane({
   onChange,
   autoHeight,
   view,
+  file,
+  intel,
+  reveal,
 }: {
   text: string;
   mime: string;
@@ -656,6 +1218,32 @@ export function MonacoCodePane({
    * choosing them sees nothing happen.
    */
   view?: RenderView | undefined;
+  /**
+   * The file this text IS, absolute — its name, not a way of loading it.
+   *
+   * Two things need one. Monaco reads a model's script kind off its URI's extension, so without a
+   * name a `.tsx` file is parsed as plain TypeScript and every tag in it is a syntax error; and
+   * diagnostics that come back from a real compiler are about a path.
+   *
+   * Absent for a document that is not a file — a fenced block, a value drawn as source.
+   */
+  file?: string | undefined;
+  /**
+   * Who to ask about this text — see {@link CodeIntel}.
+   *
+   * Supplied by whatever knows where the file lives, which is not this pane; see `fileSurfaces.tsx`.
+   * Its absence is the ordinary case and means no diagnostics and no navigation, which is right for
+   * every surface showing code that is not a file in a project.
+   */
+  intel?: CodeIntel | undefined;
+  /**
+   * Where to put the caret once, on the way in — what following a definition INTO this file means.
+   *
+   * Only ever applied at creation, and that is enough: a jump within a file is Monaco's own business
+   * and never reaches here, so the only way a position arrives from outside is with a file that was
+   * not open a moment ago, and this pane is re-created per file (see `documents.tsx`'s `key`).
+   */
+  reveal?: { line: number; column: number } | undefined;
 }): JSX.Element {
   const host = useRef<HTMLDivElement>(null);
   /** The latest props, read through refs so the editor is created once — see the effect below. */
@@ -665,6 +1253,19 @@ export function MonacoCodePane({
   viewOf.current = view ?? "write";
   const seed = useRef({ text, mime });
   seed.current = { text, mime };
+  /**
+   * The file's name at CREATION, and the check as it stands.
+   *
+   * The name is a ref because the model's URI is fixed the moment it is made — a pane whose file is
+   * renamed under it keeps the name it was created with, which is what a model identity means. The
+   * check is a ref for the reason everything else here is one: the editor is created once, and a
+   * caller that rebuilds its callback every render must not tear it down.
+   */
+  const named = useRef(file);
+  const ask = useRef(intel);
+  ask.current = intel;
+  /** Read at creation and never after — see the prop. */
+  const startAt = useRef(reveal);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const writable = onChange !== undefined;
   /** Read through a ref for the same reason the rest is: the editor is created exactly once. */
@@ -675,7 +1276,11 @@ export function MonacoCodePane({
     const node = host.current;
     if (node === null) return undefined;
     takeFront(seed.current.mime, viewOf.current);
-    const model = monaco.editor.createModel(seed.current.text, monacoGrammarOf(seed.current.mime));
+    const model = monaco.editor.createModel(
+      seed.current.text,
+      monacoGrammarOf(seed.current.mime),
+      modelUriFor(named.current),
+    );
     const editor = monaco.editor.create(node, {
       model,
       automaticLayout: true,
@@ -728,6 +1333,12 @@ export function MonacoCodePane({
     // The document's own options rather than the editor's — see {@link keepDocumentOptions}.
     const kept = keepDocumentOptions(model, "code");
     const documentOptions = (): void => model.updateOptions({ tabSize: editorLook("code").tabSize });
+    // Who answers about this model, for the page-wide definition provider and editor opener — see
+    // {@link intelOf}. Registered by URI because those two are global and this pane is not.
+    const registered = model.uri.toString();
+    if (ask.current !== undefined) intelOf.set(registered, ask.current);
+    // What the compiler says, followed as this is typed in — see {@link followCheck}.
+    const checked = followCheck(model, () => ask.current?.check, { live: true });
     const typed = model.onDidChangeContent(() => report.current?.(model.getValue()));
     /**
      * The pane's height, taken from the text — see {@link MonacoCodePane}'s `autoHeight`.
@@ -749,6 +1360,20 @@ export function MonacoCodePane({
     const sized = editor.onDidContentSizeChange(fit);
     const front = editor.onDidFocusEditorText(() => takeFront(seed.current.mime, viewOf.current));
     fit();
+    /**
+     * The caret, where whoever opened this file asked for it.
+     *
+     * After `fit`, because revealing a line in the centre of a pane that has not taken its height yet
+     * centres it in the wrong pane. `focus` as well as position: arriving at a definition and having
+     * to click before you can move is the difference between a jump and a page change.
+     */
+    const at = startAt.current;
+    if (at !== undefined) {
+      const where = { lineNumber: at.line, column: at.column };
+      editor.setPosition(where);
+      editor.revealPositionInCenter(where);
+      editor.focus();
+    }
     // Theme AND typography: both are written onto the root — one as a data attribute, the other as
     // inline custom properties — so one observer covers both, and the editor follows a size slider
     // as it moves rather than at the next reopen.
@@ -767,6 +1392,8 @@ export function MonacoCodePane({
       fit();
     });
     return () => {
+      intelOf.delete(registered);
+      checked();
       typed.dispose();
       sized.dispose();
       front.dispose();

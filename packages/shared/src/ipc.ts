@@ -13,7 +13,7 @@
  * and no agent process can reach this surface.
  */
 import type { JsonValue } from "@declarative-ai/json";
-import type { Changeset } from "./changeset";
+import type { BaselineFile, Changeset } from "./changeset";
 import type { Choice, ComponentConfig } from "./components";
 import type { AvailabilitySnapshot, ExecutorInfo, ProbeResult, SecretTarget } from "./executors";
 import type { JairaSettings } from "./settings";
@@ -551,6 +551,242 @@ export interface ReadFileRequest {
   project?: ProjectRef;
   /** Relative to the layer root, forward slashes. */
   path: string;
+}
+
+/**
+ * WHICH file, and which tree to read it in — the address half of a check.
+ *
+ * Its own type because two channels take exactly this and nothing more: the check, and the release
+ * that withdraws its buffer. An address spelled twice is an address that eventually differs in one
+ * of the two places.
+ */
+export interface CheckTarget {
+  layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
+  /** Relative to the layer root, forward slashes — addressed exactly as {@link ReadFileRequest}. */
+  path: string;
+  /**
+   * Resolve `path` inside THIS task's worktree rather than in the checkout — what a review is about.
+   *
+   * An agent's work lives in a worktree, and a worktree is a whole tree: its own `tsconfig.json`,
+   * its own `node_modules` junction, its own copy of every sibling the file imports. So a review's
+   * proposed side is checked THERE, against the program it would actually be compiled in, rather
+   * than against the checkout — where the same path holds the version the agent started from.
+   *
+   * REFUSED rather than fallen back on when the task has no worktree. A fallback would answer about
+   * the checkout's copy of the file, which is a different text that would look like an answer.
+   */
+  taskId?: string;
+}
+
+/**
+ * Type-check one file against the REAL project it lives in.
+ *
+ * The editor already had diagnostics: Monaco ships a TypeScript service in a web worker, and it is
+ * the reason a `.ts` file in the Files view was underlined. What it could not do is read a disk. Its
+ * program held exactly one file — the one on screen — so every import resolved to nothing, and the
+ * squiggle it drew under `./main/service` said the module could not be found and suggested changing
+ * `moduleResolution`. The file compiles. The advice was wrong. Every other semantic complaint it
+ * made rested on the same empty program and was wrong for the same reason.
+ *
+ * So the check moves to where the project is. Main holds a real `ts.LanguageService` rooted at the
+ * `tsconfig.json` that actually covers the file, with that config's `paths`, `lib`, `jsx` and the
+ * checkout's `node_modules` — the same program `tsc` builds — and what comes back are the errors a
+ * build would report. Nothing is sent that the renderer could have worked out for itself: syntax is
+ * still Monaco's, because a parse needs no project and two parsers would draw every missing brace
+ * twice.
+ *
+ * The BUFFER, not the file. `text` is what is on screen including unsaved edits, so the check
+ * follows typing rather than trailing the last save — the rest of the program still comes off disk,
+ * which is what makes a rename in another file show up here.
+ */
+export interface CheckFileRequest extends CheckTarget {
+  /**
+   * The file as the editor holds it, unsaved edits included. ABSENT means "whatever is on disk",
+   * which is what a caller checking a file it is not editing wants.
+   */
+  text?: string;
+  /**
+   * Check against the tree as it was BEFORE these files changed, rather than as it stands.
+   *
+   * This is what makes a diff's left-hand side checkable. The right-hand side is on disk — a
+   * worktree holds every changed file at its proposed content — so it is checked in the ordinary
+   * way. The left-hand side is a git revision, and nothing anywhere holds a tree at that revision to
+   * compile against.
+   *
+   * It does not need one. A base revision differs from the worktree in exactly the changed files, so
+   * putting those files back is the whole difference: everything else is read off the disk it is
+   * already on. Send the changeset's before-side here and the answer is the errors that were there
+   * before anybody touched anything — which is what turns a red underline in a review from "the
+   * agent broke this" into a question that has an answer.
+   *
+   * The cost is a second program, so this is worth sending only for the side that needs it.
+   */
+  baseline?: BaselineFile[];
+}
+
+/** Where a diagnostic is, in the 1-based line/column an editor counts in. */
+export interface FileSpan {
+  startLine: number;
+  startColumn: number;
+  endLine: number;
+  endColumn: number;
+}
+
+/** One thing the compiler has to say about a file. */
+export interface FileDiagnostic extends FileSpan {
+  /** TypeScript's own severity. `error` is what fails a build. */
+  severity: "error" | "warning" | "info";
+  /** The TS error number — `2792` and the like, so a reader can look one up. */
+  code: number;
+  /** Flattened to one string, newline-separated: a chain reads as the paragraph it is. */
+  message: string;
+  /**
+   * Set when the diagnostic is anchored in ANOTHER file — the "…is declared here" half of a chain.
+   * Absolute, so the renderer can show where without resolving anything.
+   */
+  file?: string;
+  /** The related spans TypeScript attached, if any — kept so a message that points somewhere can. */
+  related?: (FileSpan & { file: string; message: string })[];
+}
+
+/**
+ * Where a symbol is defined — what "Go to Definition" needs and could not have.
+ *
+ * Same cause as the wrong squiggles, one step further on. Monaco ships a definition provider backed
+ * by its own in-browser TypeScript service, whose program is the single file on screen; a symbol
+ * that comes from an import therefore resolves to nothing, and the menu item did nothing at all.
+ * Anything defined in the same file worked, which is what made it read as broken rather than absent.
+ *
+ * Answered by the same `ts.LanguageService` that answers {@link CheckFileRequest} — the one with the
+ * project's `paths`, its `node_modules` and its `@types` — so a definition is wherever a build would
+ * say it is, including in another package of a monorepo or in a `.d.ts` that shipped with a
+ * dependency.
+ */
+export interface DefineFileRequest extends CheckFileRequest {
+  /** Where the caret is. 1-based, the way an editor counts and the way a diagnostic reports. */
+  line: number;
+  column: number;
+}
+
+/**
+ * One place a symbol is defined.
+ *
+ * TypeScript answers with a LIST rather than a place, and the list is genuinely plural: an
+ * overloaded function, a merged interface, a type and a value sharing a name. The renderer takes one
+ * or offers the choice; nothing here decides for it.
+ */
+export interface FileLocation extends FileSpan {
+  /** Absolute path of the file the definition is in — a NAME, and what a model URI is built from. */
+  file: string;
+  /**
+   * How the Files view would address it, so the window can open it.
+   *
+   * Absent when the definition is outside the tree the request was rooted at — a dependency resolved
+   * through a junction, a file in another checkout. The renderer then knows it cannot go there,
+   * which is a better answer than navigating somewhere plausible and wrong.
+   */
+  at?: { layer: WorkflowLayer; project?: ProjectRef; path: string };
+  /** What is defined, for a menu that has to offer several — `answer`, `AppService`. */
+  name?: string;
+}
+
+export interface FileDefinitions {
+  /** Empty when nothing is under the caret, or when what is there resolves nowhere. */
+  definitions: FileLocation[];
+  /** False for the same reasons {@link FileCheck.checked} is, and with the same meaning. */
+  checked: boolean;
+}
+
+/**
+ * Everywhere a symbol is used — "Find All References".
+ *
+ * The same question as {@link DefineFileRequest} asked in the other direction, and it needs the same
+ * program for the same reason: a name is referenced from files that import it, and a service that
+ * has read only the file on screen cannot know any of them.
+ */
+export interface FileReferences {
+  references: FileLocation[];
+  checked: boolean;
+  /**
+   * Set when the answer was cut short — see {@link REFERENCE_FILE_LIMIT}.
+   *
+   * A search that spans more files than the limit returns the files it did reach rather than a
+   * partial one silently dressed as complete. Saying so is the difference between "used in eleven
+   * places" and "used in at least eleven places".
+   */
+  truncated?: boolean;
+}
+
+/**
+ * How many distinct FILES a reference search will answer for.
+ *
+ * A bound rather than a taste. Every file in the answer needs a text model in the renderer before
+ * the references widget can preview it (Monaco can only resolve a model that already exists), so
+ * the size of the answer is the size of a read, and a search for something like `invoke` across a
+ * monorepo would be hundreds of them. Sixty file groups is already more than anyone reads in a
+ * peek widget, and it is stated rather than silent — see {@link FileReferences.truncated}.
+ */
+export const REFERENCE_FILE_LIMIT = 60;
+
+/**
+ * What the compiler says a symbol IS — the hover.
+ *
+ * Monaco's own hover comes from its in-browser program, so over an imported name it said `any`, or
+ * nothing at all. Which is worse than absent: a type is the one thing a hover exists to tell you,
+ * and `any` is a specific and wrong answer.
+ */
+/**
+ * The text of a file the PROGRAM holds — what a peek previews.
+ *
+ * Not a second `file:read`, and the difference is the whole reason it exists. `file:read` is
+ * addressed by layer and path and is contained to a tree root, which is right for a file the person
+ * opened and wrong for the answer to a question they did not ask: a definition can resolve outside
+ * the tree entirely. In this repository most of them do — `@declarative-ai/*` resolves through a
+ * workspace junction into a sibling checkout — so a peek that could only preview files under the
+ * project root could not preview the imports the project is mostly made of.
+ *
+ * What bounds it instead is the PROGRAM. The answer is served only when the compiler already holds a
+ * source file at that path, which is the set of files it resolved while answering — so a renderer
+ * cannot name a path and be given it. It is also free: the text is in memory, put there by the
+ * resolution that produced the definition in the first place, so this reads no disk at all.
+ */
+export interface SourceFileRequest extends CheckTarget {
+  /** Absolute path, exactly as a {@link FileLocation} reported it. */
+  file: string;
+  /** The tree the question was asked in — see {@link CheckFileRequest.baseline}. */
+  baseline?: BaselineFile[];
+}
+
+export interface FileHover {
+  checked: boolean;
+  /** Absent when there is nothing under the caret worth describing. */
+  info?: FileSpan & {
+    /** The signature as TypeScript prints it — `const answer: 42`, `function f(a: string): void`. */
+    signature: string;
+    /** The doc comment, flattened, when the symbol has one. */
+    documentation?: string;
+  };
+}
+
+/**
+ * What a check came back with.
+ *
+ * `checked: false` is a real answer and not a failure: it means no TypeScript project claims this
+ * file, so nobody knows anything about its types. The renderer draws NOTHING in that case, which is
+ * the honest rendering of not knowing — and is why Monaco's own semantic validation is off
+ * everywhere rather than left on as a fallback that would be guessing.
+ */
+export interface FileCheck {
+  checked: boolean;
+  /** Why not, when `checked` is false — for a surface that wants to say so rather than stay blank. */
+  reason?: string;
+  /** The `tsconfig.json` the answer came from, absolute. Absent when `checked` is false. */
+  config?: string;
+  /** True when this answer is about the BASELINE — see {@link CheckFileRequest.baseline}. */
+  baseline?: boolean;
+  diagnostics: FileDiagnostic[];
 }
 
 /**
@@ -1324,6 +1560,25 @@ export interface IpcContract {
   "schema:detect": { request: { text: string }; response: DetectSchemaResult };
   /** Read any file under a layer root as text. Refuses types that are not text. */
   "file:read": { request: ReadFileRequest; response: FileSource };
+  /** Type-check one file against its real project — see {@link CheckFileRequest}. */
+  "file:check": { request: CheckFileRequest; response: FileCheck };
+  /** Where the symbol under the caret is defined — see {@link DefineFileRequest}. */
+  "file:definition": { request: DefineFileRequest; response: FileDefinitions };
+  /** Everywhere the symbol under the caret is used — see {@link FileReferences}. */
+  "file:references": { request: DefineFileRequest; response: FileReferences };
+  /** What the symbol under the caret IS — see {@link FileHover}. */
+  "file:hover": { request: DefineFileRequest; response: FileHover };
+  /** The text of a file the program resolved — see {@link SourceFileRequest}. */
+  "file:source": { request: SourceFileRequest; response: { text?: string } };
+  /**
+   * Stop holding a file's unsaved buffer — the editor closed it.
+   *
+   * The checker keeps what is on screen so diagnostics follow typing, and a buffer nobody withdrew
+   * would go on shadowing the file on disk for the whole session. That matters beyond the file
+   * itself: a half-typed edit abandoned without saving would keep producing errors in every OTHER
+   * file that imports it.
+   */
+  "file:release": { request: CheckTarget; response: void };
   /** Read one addressable value — see {@link ReadUriRequest}. Refused rather than guessed at. */
   "uri:read": { request: ReadUriRequest; response: UriContent };
   "artifact:serve": { request: ServeArtifactRequest; response: ServedArtifact };
@@ -1502,6 +1757,12 @@ export const IPC_CHANNELS = [
   "schema:validate",
   "schema:detect",
   "file:read",
+  "file:check",
+  "file:definition",
+  "file:references",
+  "file:hover",
+  "file:source",
+  "file:release",
   "uri:read",
   "artifact:serve",
   "artifact:list",

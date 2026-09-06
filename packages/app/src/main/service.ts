@@ -245,6 +245,8 @@ import {
   type ModuleApproval,
 } from "@jaira/shared";
 import { Diagnostics } from "./diagnostics";
+import { WorkerTypeCheck } from "./tsCheck";
+import type { BaselineOverlay, TypeCheckPort } from "./tsProject";
 import { errorToJson, resetLogSink, setLogSink, type LogRecord, type LogSink } from "@declarative-ai/log";
 
 /**
@@ -276,9 +278,17 @@ import type {
   OperationRecordView,
   SessionView,
   CreateFileRequest,
+  CheckFileRequest,
+  CheckTarget,
+  DefineFileRequest,
+  FileDefinitions,
+  FileHover,
+  FileReferences,
+  SourceFileRequest,
   CreateTaskRequest,
   DeleteFileRequest,
   ExecutorInfo,
+  FileCheck,
   FileMutationResult,
   FileSource,
   FileNode,
@@ -411,6 +421,18 @@ export interface AppServiceOptions {
    * always available, and the snapshot is always readable — this only decides who triggers them.
    */
   probeOnStart?: boolean;
+  /**
+   * What answers {@link AppService.checkFile} — the TypeScript language service, wherever it runs.
+   *
+   * Injected for the reason every other port here is: the real one spawns a worker thread that loads
+   * a bundled file out of `dist/`, which exists in the packaged app and not in a test. A test hands
+   * in {@link TsProjects} directly and checks real files against a real `tsconfig.json`, which is
+   * the part worth testing — the thread is a performance decision, not part of the meaning.
+   *
+   * Absent means the worker-backed one, built on first use. Nothing is spawned by a service that is
+   * never asked to check a file.
+   */
+  typeCheck?: TypeCheckPort;
 }
 
 /**
@@ -1363,6 +1385,11 @@ export class AppService {
     // connection to the base database, and a service that shut down while still holding one leaves
     // the root it was using locked.
     resetUserModules();
+    // The worker holding the TypeScript program, if one was ever asked for. It is `unref`'d so it
+    // would not hold the process open, but a service that is closed and still answering checks is a
+    // service that is not closed.
+    await this.checker?.close();
+    this.checker = undefined;
   }
 
   /** Whether {@link close} has run. A closed service answers; it does not re-open anything. */
@@ -5033,6 +5060,164 @@ export class AppService {
       ...(this.stateIdOf(named) ?? {}),
     };
   }
+
+  /**
+   * Type-check one file against the project it is actually in (see {@link CheckFileRequest}).
+   *
+   * Addressed exactly like {@link readFile}, and through the same {@link treeFile} containment, so a
+   * path from the renderer cannot make the compiler read outside the root it names. `text` is the
+   * open buffer, which is what makes the answer follow typing rather than the last save.
+   *
+   * The refusals {@link readFile} makes are NOT repeated here. A file that does not exist, or that
+   * is not text, simply has nothing to check — and answering "no project covers it" is a better
+   * outcome for an editor than an exception it has to catch on every keystroke.
+   */
+  async checkFile(request: CheckFileRequest): Promise<FileCheck> {
+    const at = this.checkRoot(request);
+    const file = this.contained(at, request.path, request.layer);
+    const baseline = request.baseline?.map(
+      (b): BaselineOverlay => ({ file: this.contained(at, b.path, request.layer), text: b.text }),
+    );
+    return this.typeCheck().check(file, request.text, baseline);
+  }
+
+  /**
+   * The tree a check's paths are relative to — the checkout, or a task's worktree.
+   *
+   * The worktree is not a fallback and not a preference: a review is ABOUT the tree the agent
+   * worked in, which has its own `tsconfig.json`, its own dependencies and its own copy of every
+   * sibling the file imports. Answering out of the checkout instead would be answering about a
+   * different text — the version the agent started from — which is worse than not answering, because
+   * it looks like an answer.
+   *
+   * So a `taskId` that names no worktree is REFUSED rather than quietly resolved somewhere else.
+   */
+  private checkRoot(request: CheckTarget): string {
+    if (request.taskId === undefined) {
+      return request.layer === "base"
+        ? jairaBasePaths(this.baseDir).baseDir
+        : this.requireProject(request.project).paths.projectDir;
+    }
+    const worktree = this.requireProject(request.project).runtime.get(request.taskId)?.worktreePath;
+    if (worktree === undefined) {
+      throw this.refusal("file", `task '${request.taskId}' has no worktree to check '${request.path}' in`);
+    }
+    return worktree;
+  }
+
+  /**
+   * Where the symbol under the caret is defined — see {@link DefineFileRequest}.
+   *
+   * Each answer is given the address the Files view would open it by, when it has one. Working that
+   * out here rather than in the renderer is the same choice {@link checkFile} makes about
+   * containment: main knows which tree the question was rooted at, and a renderer re-deriving it
+   * from an absolute path would be guessing at the answer to a question it already asked.
+   */
+  async defineFile(request: DefineFileRequest): Promise<FileDefinitions> {
+    const asked = this.atCaret(request);
+    const found = await asked.ask.definitions(...asked.args);
+    return { ...found, definitions: found.definitions.map((d) => asked.addressed(d)) };
+  }
+
+  /** Everywhere the symbol under the caret is used — see {@link FileReferences}. */
+  async referencesInFile(request: DefineFileRequest): Promise<FileReferences> {
+    const asked = this.atCaret(request);
+    const found = await asked.ask.references(...asked.args);
+    return { ...found, references: found.references.map((r) => asked.addressed(r)) };
+  }
+
+  /** What the symbol under the caret IS — see {@link FileHover}. */
+  async hoverInFile(request: DefineFileRequest): Promise<FileHover> {
+    const asked = this.atCaret(request);
+    return asked.ask.hover(...asked.args);
+  }
+
+  /**
+   * Everything the three position questions need, worked out once.
+   *
+   * They ask the same thing of this class and differ only in which method of the port they call:
+   * resolve the path in the right tree ({@link checkRoot}), keep it and the baseline's paths
+   * contained, and give each answer the address the Files view would open it by. Three copies of
+   * that is how two of them stay right and the third quietly does not.
+   */
+  private atCaret(request: DefineFileRequest): {
+    ask: TypeCheckPort;
+    args: [string, { line: number; column: number }, string | undefined, BaselineOverlay[] | undefined];
+    addressed: <T extends { file: string }>(found: T) => T;
+  } {
+    const root = this.checkRoot(request);
+    return {
+      ask: this.typeCheck(),
+      args: [
+        this.contained(root, request.path, request.layer),
+        { line: request.line, column: request.column },
+        request.text,
+        request.baseline?.map((b) => ({ file: this.contained(root, b.path, request.layer), text: b.text })),
+      ],
+      addressed: (found) => ({ ...found, ...(this.addressOf(root, found.file, request) ?? {}) }),
+    };
+  }
+
+  /**
+   * How the Files view would address a file the compiler named, or nothing.
+   *
+   * Nothing is a real answer and the common one for a dependency: a definition in `node_modules`
+   * reached through a workspace junction resolves to a path outside this tree, and there is no row
+   * in the tree that means it. The renderer draws no link rather than one that goes somewhere else.
+   *
+   * The WORKTREE case deliberately answers nothing as well. A review's paths are addressed by task
+   * and the Files view is not — it draws the checkout — so a definition inside a worktree has no
+   * address the tree could open, even though the file is plainly there.
+   */
+  private addressOf(
+    root: string,
+    file: string,
+    request: CheckTarget,
+  ): { at: { layer: WorkflowLayer; project?: string; path: string } } | undefined {
+    if (request.taskId !== undefined) return undefined;
+    const rel = relative(root, file);
+    if (rel.length === 0 || rel.startsWith("..") || isAbsolute(rel)) return undefined;
+    return {
+      at: {
+        layer: request.layer,
+        ...(request.project !== undefined ? { project: request.project } : {}),
+        path: rel.split(sep).join("/"),
+      },
+    };
+  }
+
+  /**
+   * The text of a file the program resolved — see {@link SourceFileRequest}.
+   *
+   * `file` is NOT contained the way every other path here is, and deliberately: the bound is the
+   * program rather than a root. A path the compiler never resolved is simply not in it, so nothing
+   * can be fished for — while a definition that legitimately resolved outside the tree, which in
+   * this repository is most of them, can still be previewed.
+   */
+  async sourceOfFile(request: SourceFileRequest): Promise<{ text?: string }> {
+    const root = this.checkRoot(request);
+    const text = await this.typeCheck().sourceOf(
+      this.contained(root, request.path, request.layer),
+      request.file,
+      request.baseline?.map((b) => ({ file: this.contained(root, b.path, request.layer), text: b.text })),
+    );
+    return text === undefined ? {} : { text };
+  }
+
+  /** Forget an open buffer — the file on disk is the truth again. */
+  async releaseFile(request: CheckTarget): Promise<void> {
+    // Nothing is spawned to forget something nobody ever checked.
+    if (this.checker === undefined && this.options.typeCheck === undefined) return;
+    await this.typeCheck().release(this.contained(this.checkRoot(request), request.path, request.layer));
+  }
+
+  /** The checker, built on first use — see {@link AppServiceOptions.typeCheck}. */
+  private typeCheck(): TypeCheckPort {
+    this.checker ??= this.options.typeCheck ?? new WorkerTypeCheck();
+    return this.checker;
+  }
+
+  private checker: TypeCheckPort | undefined;
 
   /**
    * Project files matching a query — what an `@` in the composer completes against.

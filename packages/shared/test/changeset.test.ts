@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyDecisions,
   applyHunks,
+  baselineOf,
   changesetOf,
   checkDecisions,
   formatChangesetSource,
@@ -318,5 +319,63 @@ describe("reviewSettled reads the applied form", () => {
     // The case the old rule missed: judged but not applied is not settled.
     expect(reviewSettled(of(["approved", "approved"]))).toBe(false);
     expect(reviewSettled(of(["merged", "denied"]))).toBe(false);
+  });
+});
+
+/**
+ * The before-side, as a compiler can be handed it.
+ *
+ * This is what lets the left-hand pane of a review be type-checked at all: a base revision differs
+ * from the worktree in exactly the changeset's files, so putting those files back IS the base
+ * revision for every purpose a compiler has. Each of the three shapes below is a way of getting that
+ * wrong and inventing an error on the side of the diff that nobody touched.
+ */
+describe("baselineOf — the tree as it was", () => {
+  const set = (changes: Changeset["changes"]): Changeset => ({ source: "git:8f2a1c", changes });
+
+  it("puts an updated file back at its before-text", () => {
+    expect(
+      baselineOf(set([{ id: "c1", path: "src/a.ts", action: "update", before: "old", after: "new" }])),
+    ).toEqual([{ path: "src/a.ts", text: "old" }]);
+  });
+
+  it("brings a deleted file back, because at the base revision it was still there", () => {
+    // The one that would otherwise break everything importing it: the file is not on disk any more,
+    // so without this the before-side of its dependents would fail to resolve.
+    expect(baselineOf(set([{ id: "c1", path: "src/gone.ts", action: "delete", before: "was here" }]))).toEqual([
+      { path: "src/gone.ts", text: "was here" },
+    ]);
+  });
+
+  it("makes a created file ABSENT rather than empty", () => {
+    // `null`, not `""`. An empty module resolves and exports nothing; a missing one does not resolve.
+    // Those are two different errors and only one of them is what the base revision would say.
+    expect(baselineOf(set([{ id: "c1", path: "src/new.ts", action: "create", after: "fresh" }]))).toEqual([
+      { path: "src/new.ts", text: null },
+    ]);
+  });
+
+  it("takes both halves of a rename", () => {
+    expect(
+      baselineOf(
+        set([{ id: "c1", path: "src/to.ts", fromPath: "src/from.ts", action: "rename", before: "body", after: "body" }]),
+      ),
+    ).toEqual([
+      { path: "src/from.ts", text: "body" },
+      { path: "src/to.ts", text: null },
+    ]);
+  });
+
+  it("skips a change nothing can read, rather than deleting it from the baseline", () => {
+    // A binary carries no `before`, exactly as a create does — and treating the two alike would tell
+    // the compiler that a file which was never touched did not exist.
+    expect(
+      baselineOf(
+        set([
+          { id: "c1", path: "logo.png", action: "update", unshowable: "binary" },
+          { id: "c2", path: "src/a.ts", action: "update", before: "old", after: "new" },
+        ]),
+      ),
+    ).toEqual([{ path: "src/a.ts", text: "old" }]);
   });
 });

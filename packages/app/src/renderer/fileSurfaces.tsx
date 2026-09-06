@@ -10,7 +10,7 @@
  * `text/x-typescript` gets nothing, and therefore gets the plain editor with no viewer above it,
  * which is the correct surface for a file whose source *is* its presentation.
  */
-import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import {
   CONFIG_JSON,
   WORKFLOW_DESCRIPTION,
@@ -19,6 +19,7 @@ import {
   delimiterOf,
   hasGrammar,
   mimeOfPath,
+  monacoGrammarOf,
   parseDelimited,
   parseStructured,
   parseUnifiedDiff,
@@ -38,6 +39,8 @@ import { EditorActions, type EditorTab } from "./editorChrome";
 import { registerFileSurface, type FileSurfaceContext, type FileSurfaceProps } from "./fileTypes";
 import { MarkdownView } from "./fenceRender";
 import { CodeDocument, MarkdownDocument } from "./documents";
+import type { CodeIntel } from "./monacoDiff";
+import { invoke } from "./store";
 
 import { DataView, PatchView, TableView, ValueView } from "./valueView";
 import { SchemaJsonEditor, schemaReferenceProps } from "./schemaEditor";
@@ -111,6 +114,99 @@ export function TextEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.
    * for text that has no structure to show.
    */
   const coloured = hasGrammar(doc.mime);
+  /**
+   * The compiler, for the types that have one.
+   *
+   * TypeScript and JavaScript only, because that is what main can answer about — every other type
+   * here would cost a round trip to be told no project covers it. `doc` supplies the address rather
+   * than the pane working one out: `file:check` is addressed exactly like the `file:read` that
+   * opened this document, which is what keeps the containment check the same one.
+   *
+   * Rebuilt whenever the file does, and never otherwise: the pane holds it in a ref, so an identity
+   * that changed every render would be harmless but a stale ADDRESS would not.
+   */
+  const grammar = monacoGrammarOf(doc.mime);
+  /**
+   * Whether this document is a FILE — somewhere on a disk — rather than a sample that looks like one.
+   *
+   * `FileSource.file` is absolute for everything the tree opens, because that is what resolving a
+   * path against a layer root produces. The settings preview builds a document by hand to show what
+   * a renderer does to a type, and its `file` is the word "sample": asking the compiler about that
+   * would be a refused round trip per keystroke, in a pane whose subject is a colour scheme.
+   */
+  const located = /^([a-zA-Z]:[\\/]|[\\/])/.test(doc.file);
+  const checkable = located && (grammar === "typescript" || grammar === "javascript");
+  const address = useCallback(
+    () => ({
+      layer: doc.layer,
+      ...(doc.project === undefined ? {} : { project: doc.project }),
+      path: doc.path,
+    }),
+    [doc.layer, doc.project, doc.path],
+  );
+  /**
+   * Everything this pane can ask about its own text, and what it can do with an answer.
+   *
+   * `open` is the half Monaco has no way to perform: a standalone editor holds one model, so
+   * following a definition OUT of this file is navigation only the window can do. A definition main
+   * could not address — one outside the tree it searched — arrives without an `at` and is refused
+   * here, which draws nothing rather than going somewhere plausible and wrong.
+   */
+  const onDefinition = context.onOpenDefinition;
+  const intel = useMemo(
+    (): CodeIntel => ({
+      check: (text) => invoke("file:check", { ...address(), text }),
+      definitions: (text, at) => invoke("file:definition", { ...address(), text, ...at }),
+      references: (text, at) => invoke("file:references", { ...address(), text, ...at }),
+      hover: (text, at) => invoke("file:hover", { ...address(), text, ...at }),
+      /**
+       * Another file's text, for a peek to preview.
+       *
+       * `file:source` rather than `file:read`, because a definition is not addressed the way an
+       * opened file is: it can resolve outside the tree entirely, and in this repository most of
+       * them do — `@declarative-ai/*` goes through a workspace junction into a sibling checkout. A
+       * read contained to the project root could preview none of those, which would have made peek
+       * work only for the imports that were already the easy case.
+       *
+       * What bounds it instead is the program: main serves the text only for a file the compiler
+       * itself resolved. Failure is answered with nothing, and that result simply loses its preview.
+       */
+      read: async (to) => {
+        const source = await invoke("file:source", { ...address(), file: to.file }).catch(() => undefined);
+        return source?.text;
+      },
+      ...(onDefinition === undefined
+        ? {}
+        : {
+            open: (to) => {
+              if (to.at === undefined) return false;
+              onDefinition(to.at, { line: to.startLine, column: to.startColumn });
+              return true;
+            },
+          }),
+    }),
+    [address, onDefinition],
+  );
+  /**
+   * Withdraw the buffer when this surface goes away.
+   *
+   * The checker holds what is on screen so diagnostics follow typing, and a buffer nobody withdrew
+   * would go on shadowing the file on disk for the rest of the session — including for every OTHER
+   * file that imports it, which is how an edit abandoned without saving keeps producing errors
+   * somewhere else.
+   */
+  useEffect(() => {
+    if (!checkable) return undefined;
+    return () => {
+      void invoke("file:release", {
+        layer: doc.layer,
+        ...(doc.project === undefined ? {} : { project: doc.project }),
+        path: doc.path,
+      }).catch(() => {
+        // Closing an editor is not a place to report that a cache could not be cleared.
+      });
+    };
+  }, [checkable, doc.layer, doc.project, doc.path]);
 
   return (
     <div className="file-edit">
@@ -123,6 +219,16 @@ export function TextEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.
           // surface is the editor of most types and the READING of one whose editor is something
           // else, and only the thing that resolved it knows which — see `FileSurfaceContext.view`.
           view={context.view ?? "write"}
+          // The name Monaco parses by — without it a `.tsx` file is read as plain TypeScript and
+          // every tag in it is a syntax error.
+          {...(located ? { file: doc.file } : {})}
+          {...(checkable ? { intel } : {})}
+          // Where a definition asked for this file to be opened, if that is why it is open. Matched
+          // by PATH: opening some other file afterwards must not land the caret at a position that
+          // was about a different document.
+          {...(context.revealAt?.path === doc.path
+            ? { reveal: { line: context.revealAt.line, column: context.revealAt.column } }
+            : {})}
         />
       ) : (
         <textarea
@@ -378,7 +484,13 @@ function PatchSideBySide({ doc }: FileSurfaceProps): JSX.Element {
   return (
     <div className="file-edit">
       <Suspense fallback={<pre className="vv-source">{doc.text}</pre>}>
-        <DiffPane original={sides.before} modified={sides.after} mime={mimeOfPath(sides.file.path)} readOnly />
+        <DiffPane
+          original={sides.before}
+          modified={sides.after}
+          mime={mimeOfPath(sides.file.path)}
+          file={sides.file.path}
+          readOnly
+        />
       </Suspense>
       <div className="pane-actions pinned">
         <span className="sub">

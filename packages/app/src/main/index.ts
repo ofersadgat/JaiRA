@@ -385,6 +385,14 @@ const handlers: Record<IpcChannel, Handler> = {
     service.validateSchema(request)) as Handler,
   "schema:detect": ((request: { text: string }) => service.detectSchema(request.text)) as Handler,
   "file:read": ((request: Parameters<typeof service.readFile>[0]) => service.readFile(request)) as Handler,
+  "file:check": ((request: Parameters<typeof service.checkFile>[0]) => service.checkFile(request)) as Handler,
+  "file:definition": ((request: Parameters<typeof service.defineFile>[0]) => service.defineFile(request)) as Handler,
+  "file:references": ((request: Parameters<typeof service.referencesInFile>[0]) =>
+    service.referencesInFile(request)) as Handler,
+  "file:hover": ((request: Parameters<typeof service.hoverInFile>[0]) => service.hoverInFile(request)) as Handler,
+  "file:source": ((request: Parameters<typeof service.sourceOfFile>[0]) =>
+    service.sourceOfFile(request)) as Handler,
+  "file:release": ((request: Parameters<typeof service.releaseFile>[0]) => service.releaseFile(request)) as Handler,
   "uri:read": ((request: Parameters<typeof service.readUri>[0]) => service.readUri(request)) as Handler,
   "artifact:serve": ((request: Parameters<typeof service.serveArtifact>[0]) => service.serveArtifact(request)) as Handler,
   "artifact:list": ((request: Parameters<typeof service.listArtifacts>[0]) => service.listArtifacts(request)) as Handler,

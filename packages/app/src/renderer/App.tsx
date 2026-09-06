@@ -459,6 +459,18 @@ export default function App(): JSX.Element {
    */
   const [reveal, setReveal] = useState<{ path: string; nonce: number } | null>(null);
   /**
+   * Where a "Go to Definition" asked the caret to land, and in which file.
+   *
+   * Beside {@link reveal} because it is the same shape of problem — one column asking another to
+   * show a particular place — and held HERE for the same reason: opening the file unmounts the
+   * editor, so the request has to outlive the thing that made it.
+   *
+   * It carries its path and is only applied to a file whose path matches, which is what keeps a
+   * position that outlived its request from being applied to whatever the person opened instead.
+   * See `FileSurfaceContext.revealAt` for why there is no nonce.
+   */
+  const [revealAt, setRevealAt] = useState<{ path: string; line: number; column: number } | null>(null);
+  /**
    * Which reading the Files viewer is showing — a board, or the conversation.
    *
    * Held here rather than in the panel for the reason the layout is: it is set from the panel's top
@@ -1355,6 +1367,20 @@ export default function App(): JSX.Element {
     // Which renderer draws each type, for the panel that resolves one — see `resolveFileSurface`.
     renderers: state.settings.renderers,
     revealIssue: reveal,
+    /**
+     * Follow a definition into another file.
+     *
+     * The position is recorded BEFORE the open, so it is already there when the editor for the new
+     * file mounts — the pane reads it once, at creation, and there is no second render to wait for.
+     * `openPath` rather than `selectFile`: the compiler answered with a path, and there is no tree
+     * node to hand over — the file may be one the tree does not draw at all, such as a `.d.ts` under
+     * `node_modules` that a symbol legitimately resolves into.
+     */
+    onOpenDefinition: (at, caret) => {
+      setRevealAt({ path: at.path, line: caret.line, column: caret.column });
+      actions.openPath(at.layer, at.path);
+    },
+    revealAt,
   };
 
   /**

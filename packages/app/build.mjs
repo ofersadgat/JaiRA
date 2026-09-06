@@ -13,7 +13,7 @@ const outdir = "dist";
 // Remove only this build's own artifacts. Clearing all of `dist/` would delete
 // `dist/renderer/` (Vite's output), making the build order load-bearing.
 await Promise.all(
-  ["main.cjs", "main.cjs.map", "preload.cjs", "preload.cjs.map"].map((f) =>
+  ["main.cjs", "main.cjs.map", "preload.cjs", "preload.cjs.map", "tsProjectWorker.cjs", "tsProjectWorker.cjs.map"].map((f) =>
     rm(`${outdir}/${f}`, { force: true }).catch(() => {}),
   ),
 );
@@ -60,4 +60,14 @@ await build({
   outExtension: { ".js": ".cjs" },
 });
 
-console.log("built dist/main.cjs and dist/preload.cjs");
+// The type-check worker: its own bundle because `new Worker(file)` needs a file. It lands beside
+// main.cjs, which is what `tsCheck.ts` resolves it against, and it keeps `typescript` external for
+// exactly the reason the note above gives — a bundled compiler cannot find its own `lib.*.d.ts`.
+await build({
+  ...common,
+  entryPoints: { tsProjectWorker: "src/main/tsProjectWorker.ts" },
+  outdir,
+  outExtension: { ".js": ".cjs" },
+});
+
+console.log("built dist/main.cjs, dist/preload.cjs and dist/tsProjectWorker.cjs");

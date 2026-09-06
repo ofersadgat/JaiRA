@@ -44,6 +44,7 @@
  */
 import { lazy, Suspense, type JSX } from "react";
 import type { RenderView } from "@jaira/shared/browser";
+import type { CodeIntel } from "./monacoDiff";
 import { Markdown } from "./markdown";
 
 /**
@@ -124,6 +125,22 @@ export interface CodeDocumentProps {
    * is still not the editor view.
    */
   view?: RenderView | undefined;
+  /**
+   * The file this text IS, absolute — see {@link MonacoCodePane}'s prop of the same name.
+   *
+   * Absent for a document that is not a file, which is most of them: a fenced block, a value drawn
+   * as source, a schema shown beside a form.
+   */
+  file?: string | undefined;
+  /**
+   * Who to ask about it, when something knows where it lives — see {@link CodeIntel}.
+   *
+   * Only reaches the EDITOR. A reading has no model behind it — `CodeText` is coloured text and
+   * nothing else — so there is nowhere for a diagnostic to be drawn and nothing to right-click in.
+   */
+  intel?: CodeIntel | undefined;
+  /** Where to put the caret on the way in — see {@link MonacoCodePane}'s prop of the same name. */
+  reveal?: { line: number; column: number } | undefined;
 }
 
 /**
@@ -135,7 +152,16 @@ export interface CodeDocumentProps {
  * blocks in a conversation need and forty mounted editors would break. An editor buys scrolling,
  * folding, a caret, and the ability to type; nothing that is only being read wants any of it.
  */
-export function CodeDocument({ text, mime, onChange, autoHeight, view }: CodeDocumentProps): JSX.Element {
+export function CodeDocument({
+  text,
+  mime,
+  onChange,
+  autoHeight,
+  view,
+  file,
+  intel,
+  reveal,
+}: CodeDocumentProps): JSX.Element {
   if (onChange === undefined) {
     return (
       <Suspense fallback={<pre className="vv-source">{text}</pre>}>
@@ -146,11 +172,25 @@ export function CodeDocument({ text, mime, onChange, autoHeight, view }: CodeDoc
   return (
     <Suspense fallback={<pre className="vv-source">{text}</pre>}>
       <MonacoCodePane
+        /**
+         * A different file is a different EDITOR, not the same one holding other text.
+         *
+         * The panel mounts one surface and swaps the document under it, so without this the model
+         * outlives the file it was made for — and a model carries two things that cannot be swapped
+         * afterwards. Its URI, which is fixed at creation and is what Monaco reads the script kind
+         * off, so opening a `.ts` and then a `.tsx` parsed the second as the first and underlined
+         * every tag in it. And its undo stack, which is why undo in the newly opened file used to
+         * walk back into the contents of the one before it.
+         */
+        key={file}
         text={text}
         mime={mime}
         onChange={onChange}
         view={view ?? "write"}
         {...(autoHeight === undefined ? {} : { autoHeight })}
+        {...(file === undefined ? {} : { file })}
+        {...(intel === undefined ? {} : { intel })}
+        {...(reveal === undefined ? {} : { reveal })}
       />
     </Suspense>
   );

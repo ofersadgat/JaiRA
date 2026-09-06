@@ -225,6 +225,61 @@ export class App {
   }
 
   /**
+   * Click at a point, with REAL input events.
+   *
+   * {@link clickText}'s `element.click()` is enough for a button and is not enough for Monaco: the
+   * editor puts its caret from a `mousedown` at a position, and a synthetic click on a token span
+   * carries no position at all. So a gesture that has to land somewhere in a document comes through
+   * here, where the browser is told a mouse was actually pressed.
+   */
+  async clickAt(x: number, y: number): Promise<void> {
+    for (const type of ["mousePressed", "mouseReleased"]) {
+      await this.send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1, buttons: 1 });
+    }
+    await sleep(150);
+  }
+
+  /**
+   * Press a key, with REAL input events — the only way to reach an editor keybinding.
+   *
+   * `windowsVirtualKeyCode` is the field Monaco's keybinding service reads; a `KeyboardEvent`
+   * constructed in the page has a `keyCode` of 0 and matches nothing at all, which is how a
+   * synthetic F12 quietly does nothing.
+   */
+  async press(key: string, code: number, held: { alt?: boolean; shift?: boolean; ctrl?: boolean } = {}): Promise<void> {
+    // Chromium's bit field: 1 alt, 2 ctrl, 8 shift. Monaco reads the modifiers off the event rather
+    // than tracking key state, so a chord has to arrive as one event with them set.
+    const modifiers = (held.alt === true ? 1 : 0) | (held.ctrl === true ? 2 : 0) | (held.shift === true ? 8 : 0);
+    for (const type of ["rawKeyDown", "keyUp"]) {
+      await this.send("Input.dispatchKeyEvent", {
+        type,
+        key,
+        modifiers,
+        windowsVirtualKeyCode: code,
+        nativeVirtualKeyCode: code,
+      });
+    }
+    await sleep(500);
+  }
+
+  /**
+   * Move the pointer over a point and leave it there — what a hover is.
+   *
+   * `ctrl` is not decoration: holding it turns a hover into Monaco's go-to-definition preview, which
+   * is a different code path from the ordinary hover and from the peek widget, and the one a person
+   * triggers by accident most often.
+   */
+  async hover(x: number, y: number, held: { ctrl?: boolean } = {}): Promise<void> {
+    await this.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x,
+      y,
+      modifiers: held.ctrl === true ? 2 : 0,
+    });
+    await sleep(900);
+  }
+
+  /**
    * Click the first element whose visible text contains `text`.
    *
    * By text rather than by class, because a class is an implementation detail this rig has no

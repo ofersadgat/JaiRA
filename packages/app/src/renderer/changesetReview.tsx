@@ -33,11 +33,18 @@ import {
   mediaKindOf,
   mediaSrcOf,
   mimeOfPath,
+  monacoGrammarOf,
   reviewSettled,
+  baselineOf,
+  type BaselineFile,
   type Change,
   type Changeset,
+  type CheckFileRequest,
   type DecisionKind,
   type DiffStrategy,
+  type FileCheck,
+  type IpcRequest,
+  type IpcResponse,
   type ReviewArtifactsConfig,
   type ReviewDraft,
 } from "@jaira/shared/browser";
@@ -75,6 +82,20 @@ export interface ComponentServices {
   /** §7.1's registry, so a component renders diffs the way the app does. */
   diffStrategy(mime: string): DiffStrategy;
   /**
+   * What the compiler says about one side of one change — the `file:check` channel, bound to the
+   * reviewed task's worktree by whoever supplied this.
+   *
+   * Bound rather than addressed here for the reason {@link readUri} is: the component knows a
+   * change's PATH and nothing about where the review is happening, and a self-mounting component
+   * that went looking for the worktree itself is exactly what §8.2 exists to prevent.
+   *
+   * Absent means no diagnostics, which is right for every host that is not the app — the CLI has no
+   * Monaco to draw a marker on, and a test mounting the component is not testing the compiler.
+   */
+  checkFile?(request: { path: string; text: string; baseline?: BaselineFile[] }): Promise<FileCheck>;
+  /** Withdraw a buffer this reviewer had checked — see `CheckFileRequest`'s note on `file:release`. */
+  releaseFile?(path: string): void;
+  /**
    * Who a note is signed as (decision 0002).
    *
    * Supplied by the HOST rather than looked up here, and for the same reason every other member is:
@@ -103,10 +124,10 @@ export function mountChangesetReview(node: HTMLElement, ctx: MountContext): () =
 
 /** The default services a renderer host wires — `readUri` over IPC, the shared strategy registry. */
 export function rendererServices(
-  invoke: (
-    channel: "uri:read",
-    request: { uri: string; taskId?: string; project?: string },
-  ) => Promise<{ uri: string; mime: string; text: string }>,
+  invoke: <C extends "uri:read" | "file:check" | "file:release">(
+    channel: C,
+    request: IpcRequest<C>,
+  ) => Promise<IpcResponse<C>>,
   /**
    * What `$WORKTREE` means for THIS review — the reviewed task (`pending.about`), whose worktree is
    * where the changes live. Without it the worktree anchor simply fails to resolve and the drift
@@ -114,6 +135,19 @@ export function rendererServices(
    */
   scope: { taskId?: string; project?: string } = {},
 ): ComponentServices {
+  /**
+   * Where a change's path lives, for both of the file channels.
+   *
+   * `layer: "project"` with the reviewed task's id: a change's path is repo-root relative, and the
+   * repo the review is about is that task's worktree. A review with no task behind it — a sync —
+   * resolves to nothing and the channel refuses, which the caller reads as "no diagnostics here".
+   */
+  const at = (path: string): CheckFileRequest => ({
+    layer: "project",
+    path,
+    ...(scope.taskId !== undefined ? { taskId: scope.taskId } : {}),
+    ...(scope.project !== undefined ? { project: scope.project } : {}),
+  });
   return {
     readUri: (uri) =>
       invoke("uri:read", {
@@ -121,6 +155,17 @@ export function rendererServices(
         ...(scope.taskId !== undefined ? { taskId: scope.taskId } : {}),
         ...(scope.project !== undefined ? { project: scope.project } : {}),
       }),
+    checkFile: (request) =>
+      invoke("file:check", {
+        ...at(request.path),
+        text: request.text,
+        ...(request.baseline === undefined ? {} : { baseline: request.baseline }),
+      }),
+    releaseFile: (path) => {
+      void invoke("file:release", at(path)).catch(() => {
+        // Closing a review is not a place to report that a cache could not be cleared.
+      });
+    },
     diffStrategy: diffStrategyFor,
   };
 }
@@ -246,6 +291,15 @@ function ChangesetReview({ ctx }: { ctx: MountContext }): JSX.Element {
   };
 
   const decisions = deriveDecisions(changeset.changes, drafts, reviewComment);
+  /**
+   * The whole changeset's before-side, computed once — see {@link baselineOf}.
+   *
+   * The SET, not the change on screen. A file's base version does not compile on its own: it imports
+   * siblings, and at the base revision those siblings were also at their base versions. Sending only
+   * the open change would leave the rest of the changeset at its proposed content, which is a tree
+   * that never existed and would report errors nobody can act on.
+   */
+  const baseline = useMemo(() => baselineOf(changeset), [changeset]);
   const decisionOf = (id: string): DecisionKind => decisions.find((d) => d.id === id)!.decision;
   const counts = {
     keeping: decisions.filter((d) => d.decision === "merged" || d.decision === "approved").length,
@@ -300,6 +354,7 @@ function ChangesetReview({ ctx }: { ctx: MountContext }): JSX.Element {
               onDraft={(patch) => set(change.id, patch)}
               services={ctx.services}
               moved={moved.has(change.id)}
+              baseline={baseline}
             />
           )}
         </div>
@@ -510,6 +565,7 @@ function ChangeDetail({
   onDraft,
   services,
   moved,
+  baseline,
 }: {
   change: Change;
   tree: "base" | "proposal";
@@ -518,6 +574,8 @@ function ChangeDetail({
   onDraft(patch: Partial<Draft>): void;
   services: ComponentServices;
   moved: boolean;
+  /** The whole changeset's before-side — see {@link baselineOf} and `CheckFileRequest.baseline`. */
+  baseline: BaselineFile[];
 }): JSX.Element {
   const well = useRef<HTMLDivElement>(null);
   // The well is still the notes' host element; the diff inside it is Monaco's own DOM.
@@ -535,6 +593,43 @@ function ChangeDetail({
   const [diffActions, setDiffActions] = useState<DiffActions | null>(null);
   const [canRevertLines, setCanRevertLines] = useState(false);
   const [imageLayout, setImageLayout] = useState<ImageLayout>("overlay");
+  /**
+   * The compiler, on both sides — the two questions a diff of code raises, each asked in the tree
+   * that can answer it. See {@link MonacoDiffProps.check}.
+   *
+   * TypeScript and JavaScript only, and only where the host supplied the channel: every other type
+   * would cost a round trip to be told that nothing type-checks it.
+   *
+   * A side with no text is not asked about. The proposed side of a delete and the base side of a
+   * create are both "this file is not here", which is not a question a compiler has an answer to.
+   */
+  const askable = services.checkFile;
+  const grammar = monacoGrammarOf(mimeOfPath(change.path));
+  const code = grammar === "typescript" || grammar === "javascript";
+  const intel = useMemo(() => {
+    if (askable === undefined || !code) return undefined;
+    return {
+      ...(change.after === undefined
+        ? {}
+        : { modified: { check: (text: string) => askable({ path: change.path, text }) } }),
+      ...(change.before === undefined
+        ? {}
+        : { original: { check: (text: string) => askable({ path: change.path, text, baseline }) } }),
+    };
+  }, [askable, code, change.path, change.after, change.before, baseline]);
+  /**
+   * Withdraw the proposed side's buffer when this change is closed.
+   *
+   * The checker holds what is on screen so the answer follows the reviewer's edits, and a buffer
+   * nobody withdrew would go on shadowing the worktree for the rest of the session — including for
+   * every other file in it that imports this one, which is how an edit the reviewer abandoned keeps
+   * producing errors somewhere else.
+   */
+  const release = services.releaseFile;
+  useEffect(() => {
+    if (release === undefined || !code || change.after === undefined) return undefined;
+    return () => release(change.path);
+  }, [release, code, change.path, change.after]);
   /**
    * The two versions of a picture, when this change is one and the bytes are actually here.
    *
@@ -677,6 +772,7 @@ function ChangeDetail({
             // claiming something is about to happen that they had just refused.
             modified={draft.excluded === true ? (change.before ?? "") : (draft.content ?? change.after ?? "")}
             mime={mimeOfPath(change.path)}
+            file={change.path}
             readOnly={change.after === undefined}
             onModified={(text) => onDraft({ content: text === change.after ? undefined : text })}
             onSelect={(picked) => {
@@ -687,6 +783,7 @@ function ChangeDetail({
             }}
             onReady={setDiffActions}
             sideBySide={layout === "split"}
+            {...(intel === undefined ? {} : { intel })}
           />
         </Suspense>
       )}

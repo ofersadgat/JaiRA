@@ -478,6 +478,33 @@ export interface FileSurfaceContext {
    * visited would do nothing at all, which reads as a broken link rather than as "you are here".
    */
   revealIssue?: { path: string; nonce: number } | null;
+  /**
+   * Take the window to a definition — what "Go to Definition" does when the answer is another file.
+   *
+   * Held by the app rather than by the editor because it is navigation: the file has to be opened,
+   * the tree has to follow, and the inspector has to start describing the new path. A standalone
+   * Monaco can do none of that — it holds one model — which is why the menu item did nothing at all
+   * for a symbol that came from an import.
+   *
+   * Absent ⇒ the editor offers no cross-file jump. Right for a surface mounted with no shell behind
+   * it, where there is nowhere to navigate to.
+   */
+  onOpenDefinition?: (
+    at: { layer: WorkflowLayer; project?: string; path: string },
+    caret: { line: number; column: number },
+  ) => void;
+  /**
+   * Where the caret was asked to land, and in which file — the other half of {@link onOpenDefinition}.
+   *
+   * The PATH is carried with it and compared before it is used, because opening a file is
+   * asynchronous and the person may have clicked somewhere else in the meantime: a position that
+   * outlived the request it belonged to must not be applied to whatever is open now.
+   *
+   * No nonce, unlike {@link revealIssue}, and for a reason worth stating: a jump WITHIN a file never
+   * arrives here — Monaco performs that itself — so this only ever accompanies a file that was not
+   * open a moment ago, and the editor for it is being created rather than re-used.
+   */
+  revealAt?: { path: string; line: number; column: number } | null;
 }
 
 export interface FileSurfaceProps {
