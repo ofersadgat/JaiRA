@@ -1201,7 +1201,7 @@ export default function App(): JSX.Element {
             readState: actions.readState,
             loadStateSlots: actions.stateSlots,
             validateSchema: actions.validateSchema,
-            wrapJson: state.settings.wrapJson,
+            wrapJson: state.settings.editors.json.wrap,
             onWrapJson: actions.setWrapJson,
           }}
           onOpenState={(id) => {
@@ -1297,7 +1297,7 @@ export default function App(): JSX.Element {
             drafts: state.drafts,
             onDraft: actions.setDraft,
             validateSchema: actions.validateSchema,
-            wrapJson: state.settings.wrapJson,
+            wrapJson: state.settings.editors.json.wrap,
             onWrapJson: (wrap: boolean) => void actions.setWrapJson(wrap),
           },
         }
@@ -1350,8 +1350,10 @@ export default function App(): JSX.Element {
     editorTabLast: state.editorTabLast,
     onEditorTab: actions.setEditorTab,
     detectSchema: actions.detectSchema,
-    wrapJson: state.settings.wrapJson,
+    wrapJson: state.settings.editors.json.wrap,
     onWrapJson: actions.setWrapJson,
+    // Which renderer draws each type, for the panel that resolves one — see `resolveFileSurface`.
+    renderers: state.settings.renderers,
     revealIssue: reveal,
   };
 
@@ -2040,7 +2042,7 @@ export default function App(): JSX.Element {
                             drafts: state.drafts,
                             onDraft: actions.setDraft,
                             validateSchema: actions.validateSchema,
-                            wrapJson: state.settings.wrapJson,
+                            wrapJson: state.settings.editors.json.wrap,
                             onWrapJson: (wrap: boolean) => void actions.setWrapJson(wrap),
                           },
                         }
@@ -2215,7 +2217,15 @@ export default function App(): JSX.Element {
                   />
                 ) : null}
                 {state.section === "appearance" ? (
-                  <AppearancePane appearance={state.settings.appearance} busy={state.busy} onChange={actions.setAppearance} />
+                  <AppearancePane
+                    appearance={state.settings.appearance}
+                    editors={state.settings.editors}
+                    renderers={state.settings.renderers}
+                    busy={state.busy}
+                    onChange={actions.setAppearance}
+                    onEditor={actions.setEditorLook}
+                    onRenderer={actions.setRenderer}
+                  />
                 ) : null}
                 {state.section === "history" && state.at !== null ? (
                   <History

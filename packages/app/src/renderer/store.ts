@@ -58,14 +58,20 @@ import type {
   WorkflowSyncEdit,
   WorkflowSyncResult,
   WorkflowSyncStatus,
+  EditorKind,
+  EditorLook,
   TaskSummary,
   WorkflowEntry,
   WorkflowLayer,
   WorkflowSource,
+  RendererChoice,
+  RendererEdit,
 } from "@jaira/shared/browser";
 import {
   CONFIG_JSON,
   defaultAppearance,
+  defaultEditors,
+  defaultRendererChoice,
   foldWriting,
   isStreamBookkeeping,
   isTextMime,
@@ -108,6 +114,8 @@ import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } fr
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestFiles, selfTestScript } from "./debugWorkflow";
 import { CHAT_AGENT, CHAT_STATES, chatWorkflowFiles, titleOf } from "./chatWorkflow";
 import { applyAppearance } from "./appearance";
+import { applyEditors } from "./editorLook";
+import { publishRenderChoices } from "./renderChoice";
 import { unseenTasks } from "./pill";
 import { sessionKey, withoutSession } from "./sessionCache";
 import {
@@ -788,7 +796,15 @@ const EMPTY: AppState = {
   // first paint and the loaded setting agree in the common case. The layout starts EMPTY rather than
   // at the defaults: an absent id means "whatever this control opens at", so the first paint is the
   // default layout without this having to restate what those numbers are.
-  settings: { theme: "light", wrapJson: false, ui: emptyUiState(), appearance: defaultAppearance(), projects: [], filesHidden: [] },
+  settings: {
+    theme: "light",
+    ui: emptyUiState(),
+    appearance: defaultAppearance(),
+    editors: defaultEditors(),
+    renderers: {},
+    projects: [],
+    filesHidden: [],
+  },
   config: null,
   executors: [],
   probes: {},
@@ -2074,6 +2090,29 @@ export function useApp() {
   useEffect(() => {
     applyAppearance(document.documentElement, state.settings.appearance);
   }, [state.settings.appearance]);
+
+  /**
+   * Publish how each editor looks, on the same terms — see `editorLook.ts`.
+   *
+   * Beside the typography rather than inside it because the two travel differently: a font size is a
+   * custom property and nothing else, and these are typed values that live editors are TOLD about.
+   * Same gesture from here, though — one settings field, one effect, and every editor already on
+   * screen follows a switch as it is flipped instead of at the next time a file is opened.
+   */
+  useEffect(() => {
+    applyEditors(document.documentElement, state.settings.editors);
+  }, [state.settings.editors]);
+
+  /**
+   * Publish the renderer choices for the components that cannot be handed them.
+   *
+   * The Files panel gets this same field on its context — an explicit prop, because there is one
+   * panel. A value view is dozens of components deep inside a transcript, so it reads the published
+   * copy instead; see `renderChoice.ts` on why that is a delivery route rather than a second source.
+   */
+  useEffect(() => {
+    publishRenderChoices(state.settings.renderers);
+  }, [state.settings.renderers]);
 
   // Initial load + push subscription.
   useEffect(() => {
@@ -3949,11 +3988,72 @@ export function useApp() {
        * Written through to `user-settings.json` like the theme is, so the choice outlives the window. The
        * local patch lands first: waiting for the round-trip would make the toggle feel like it had
        * not registered, and a failed write leaves the setting where the file says it is on next read.
+       *
+       * It lands in `editors.json.wrap`, which is where the Appearance pane's own wrap switch reads
+       * from — so the toggle above the editor and the one in settings are the same setting rather
+       * than two that disagree the moment either is used. See {@link setEditorLook}.
        */
-      setWrapJson: async (wrapJson: boolean) => {
-        patch({ settings: { ...ref.current.settings, wrapJson } });
+      setWrapJson: (wrap: boolean) => {
+        void actions.setEditorLook("json", { wrap });
+      },
+
+      /**
+       * Change how one editing surface looks — see {@link EditorLook}.
+       *
+       * Patched locally first and written after, exactly like {@link setAppearance}: a switch that
+       * waited for a round trip before the editor moved would read as a switch that had not
+       * registered. Written WHOLE, for the reason every named block in that file is — `writeSettings`
+       * merges one level deep, so a partial `editors` would delete the three surfaces it omitted.
+       */
+      setEditorLook: async (kind: EditorKind, patchTo: Partial<EditorLook>) => {
+        const editors = { ...ref.current.settings.editors, [kind]: { ...ref.current.settings.editors[kind], ...patchTo } };
+        patch({ settings: { ...ref.current.settings, editors } });
         try {
-          patch({ settings: keepingUi(await invoke("settings:write", { wrapJson })) });
+          patch({ settings: keepingUi(await invoke("settings:write", { editors })) });
+        } catch (e) {
+          fail(e);
+        }
+      },
+
+      /**
+       * Say something about how a file type is drawn — see `fileTypes.ts`.
+       *
+       * A PATCH rather than a value, because one key now holds four separate statements: the reading,
+       * the editor, what the menu offers, and the palette each view is painted in. A caller changing
+       * the reading must not have to restate the other three, and one that did would silently undo
+       * whatever it had not thought about.
+       *
+       * `null` in a field, and `null` for the whole patch, both mean UNSAID rather than "store the
+       * default's id" — the same rule the typography follows. A key that ends up saying nothing is
+       * deleted rather than left behind as an empty object, so what is not chosen stays unwritten and
+       * the app's own default keeps reaching everybody who never expressed an opinion, including when
+       * that default changes.
+       */
+      setRenderer: async (edits: readonly RendererEdit[]) => {
+        const renderers = { ...ref.current.settings.renderers };
+        for (const { key, edit } of edits) {
+          if (edit === null) {
+            delete renderers[key];
+            continue;
+          }
+          const was = renderers[key] ?? defaultRendererChoice();
+          const next: RendererChoice = {
+            read: edit.read === undefined ? was.read : edit.read,
+            write: edit.write === undefined ? was.write : edit.write,
+            off: edit.off === undefined ? was.off : [...new Set(edit.off)],
+            theme: {
+              read: edit.theme?.read === undefined ? was.theme.read : edit.theme.read,
+              write: edit.theme?.write === undefined ? was.theme.write : edit.theme.write,
+            },
+          };
+          const says =
+            next.read !== null || next.write !== null || next.off.length > 0 || next.theme.read !== null || next.theme.write !== null;
+          if (says) renderers[key] = next;
+          else delete renderers[key];
+        }
+        patch({ settings: { ...ref.current.settings, renderers } });
+        try {
+          patch({ settings: keepingUi(await invoke("settings:write", { renderers })) });
         } catch (e) {
           fail(e);
         }

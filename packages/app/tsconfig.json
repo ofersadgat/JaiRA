@@ -9,5 +9,12 @@
   },
   // `vite.config.ts` is type-checked by Vite itself; including it here would
   // compare two copies of Vite's plugin types (root vs. nested) and fail.
-  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts"]
+  //
+  // `shots/**` IS here, and the gap it closes is the one that killed its predecessor. The snapshot
+  // harness built props by hand, nothing typechecked them, and they drifted out from under the app —
+  // numeric instance ids and a `runId` from before runs collapsed into tasks, a `FileRoot` missing
+  // four fields it had since grown — so the figures went on being taken from code that no longer
+  // matched. Nothing under `shots/` describes a surface any more: it starts real tasks and
+  // photographs what the app draws, and what little it does say is checked here.
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "shots/**/*.mts"]
 }

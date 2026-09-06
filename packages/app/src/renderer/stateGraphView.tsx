@@ -520,8 +520,8 @@ function Box({
   return (
     <div
       className={`sg-node sg-${node.kind}${node.offSpine ? " sg-aside" : ""}${mark}`}
-      // Named in the DOM: what the snapshot harness points at, and what a `document.querySelector`
-      // in the devtools console needs to say "that box" without counting siblings.
+      // Named in the DOM: what a `document.querySelector` — in the devtools console, or in the
+      // `shots/` driver — needs in order to say "that box" without counting siblings.
       data-node={node.id}
       style={{ left: box.x, top: box.y, width: box.w, height: box.h }}
       onMouseEnter={self}

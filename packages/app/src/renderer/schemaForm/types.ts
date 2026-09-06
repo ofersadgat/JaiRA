@@ -27,6 +27,44 @@ export type Schema = Record<string, unknown>;
 export interface SchemaFormContext {
   /** The dotted config path of the node being rendered, for the `param` tag. */
   path: string;
+  /**
+   * The DOCUMENT this schema came out of, for following a local `$ref`.
+   *
+   * On the context rather than as a prop because every recursion already spreads the context, so a
+   * document threads itself down to the leaf that needs it without a single call site changing.
+   * Absent at the top, where the schema being rendered IS the document — see `SchemaForm`, which
+   * fills it in on the way down.
+   */
+  root?: Schema;
+  /**
+   * The `$ref` pointers already expanded on the way to this node — how a self-referential schema
+   * stops.
+   *
+   * A JSON Schema that describes JSON Schema is the case, and it is not exotic: a slot's `schema`
+   * member is one, so it appears in every state file this app opens. Its `items` member refers to
+   * itself, so a renderer that follows references and draws every declared property will follow that
+   * one for ever. It did, the first time references were resolved here, and the window stopped
+   * responding — a hang rather than a crash, because the recursion is React rendering rather than a
+   * loop with an end.
+   *
+   * Depth alone would not do: nesting is legitimately deep in these documents, and any cap large
+   * enough to draw them is large enough to be slow before it fires. What is not legitimate is
+   * expanding the SAME pointer twice on one path, which is exactly what a cycle is.
+   */
+  refs?: readonly string[];
+  /**
+   * This form is a READING of a document rather than a place to fill one in.
+   *
+   * It draws only the members the value actually states. That is the difference between the two jobs
+   * the same component does: a settings form has to show a field nobody has set, because setting it
+   * is the point, while a form that READS a document and shows it twenty-six empty controls has
+   * buried the four things the document says.
+   *
+   * Not folded into `disabled`, though every reading is also disabled. A locked settings pane — a
+   * project layer you may look at but not edit — is disabled and still has to show the whole shape,
+   * or "what could be set here" becomes unanswerable the moment a layer is read-only.
+   */
+  reading?: boolean;
   /** True when the layer being edited states this value itself, rather than inheriting it. */
   isSet?: (path: string) => boolean;
   disabled?: boolean;

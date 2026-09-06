@@ -34,6 +34,7 @@
  * transcript beside the call that produced them, in the sync report, in a structured output.
  */
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { textRendererFor, useRenderChoice } from "./renderChoice";
 import type { Change, ParsedStructure, ParseSpot, PatchFile, RendererId, ServedArtifact, ViewHint, ViewId } from "@jaira/shared/browser";
 import {
   artifactOf,
@@ -98,8 +99,12 @@ const VIEW_META: Record<ViewId, { label: string; hint: string }> = {
  * The hint names the CONSEQUENCE rather than the implementation, because that is what somebody
  * opening this menu is choosing between. Nobody wants Monaco or a `<pre>`; they want to type, or
  * they want to drag a selection through the block and copy it.
+ *
+ * EXPORTED, so the Appearance pane offers these two under the same names with the same explanations.
+ * A settings screen that invented its own words for a choice a person also meets on a menu would be
+ * two vocabularies for one decision, and the second one is always the one nobody recognises.
  */
-const RENDERER_META: Record<RendererId, { label: string; hint: string }> = {
+export const RENDERER_META: Record<RendererId, { label: string; hint: string }> = {
   monaco: { label: "Monaco", hint: "A real editor — typing, a caret, its own selection" },
   // NOT "CodeMirror": both of these are Monaco. The editor is Monaco's editor and this is
   // `monaco.editor.colorize`, its tokenizer with no editor behind it — same grammars, same colours,
@@ -844,7 +849,18 @@ export function ValueView({
    * Views with no choice keep `edit` exactly as they had it.
    */
   const editable = edit !== undefined;
-  const renderer: RendererId = drawnBy[view] ?? "monaco";
+  /**
+   * This person's standing answer for the type, behind whatever they picked on THIS block.
+   *
+   * The menu is a per-block override and stays one — it is opened when a particular block is the
+   * wrong shape for what you are doing. What it lacked was a default to override: somebody who
+   * always wants coloured text rather than an editor had to say so once per block, forever. That
+   * default is the TEXT renderer in Appearance — the same one the Files panel opens the file with,
+   * because "draw my source as coloured text" is one statement about a type rather than two.
+   */
+  const chosenRenderers = useRenderChoice();
+  const preferred = textRendererFor(mime, chosenRenderers);
+  const renderer: RendererId = drawnBy[view] ?? preferred ?? "monaco";
   const plainly = renderer === "codeview" && renderersFor(view, mime, editable).length > 1;
   const writing = plainly ? undefined : edit;
 
@@ -1015,7 +1031,7 @@ export function ValueView({
               // only true answer here. The tag it drives means "this LAYER states this value", a
               // fact about editing a config file, and its default (`the key is present`) would put
               // a "set here" chip beside every field of a value nobody is editing at all.
-              ctx={{ path: "", disabled: true, isSet: () => false }}
+              ctx={{ path: "", disabled: true, reading: true, isSet: () => false }}
             />
           </div>
         </Suspense>
@@ -1171,7 +1187,7 @@ export function ValueView({
                       // something you are not looking at is a choice you cannot see the result of.
                       setPicked(id);
                       const at = e.currentTarget.getBoundingClientRect();
-                      const chosen = drawnBy[id] ?? "monaco";
+                      const chosen = drawnBy[id] ?? preferred ?? "monaco";
                       setRendMenu({
                         x: at.left,
                         y: at.bottom + 3,

@@ -28,10 +28,20 @@ describe("naming a type", () => {
     expect(typeNameOf("text/csv").family).toBe("table");
   });
 
-  it("names a vendor type after the syntax underneath it", () => {
-    // One entry for markdown names every dialect of it — the reason resolution walks the chain.
-    expect(typeNameOf("text/vnd.jaira.workflow-description+markdown").label).toBe("Markdown");
-    expect(typeNameOf("application/vnd.jaira.workflow+json").label).toBe("JSON");
+  it("names a vendor type after the syntax underneath it, unless it says otherwise", () => {
+    // One entry for markdown names every dialect of it — the reason resolution walks the chain, and
+    // still what an unregistered vendor type gets.
+    expect(typeNameOf("text/vnd.acme.notes+markdown").label).toBe("Markdown");
+    expect(typeNameOf("application/vnd.acme.thing+json").label).toBe("JSON");
+    // JaiRA's own four are named, and the reason is that a control started listing types by name
+    // for a person to set a preference against: three rows all called "JSON" is a list nobody can
+    // use, and what distinguishes them is exactly what the vendor type says.
+    expect(typeNameOf("text/vnd.jaira.workflow-description+markdown").label).toBe("Workflow description");
+    expect(typeNameOf("application/vnd.jaira.workflow+json").label).toBe("Workflow (JSON)");
+    // The FAMILY still comes from the syntax, which is what keeps one glyph per kind of thing: a
+    // workflow description is prose and a workflow is data, whoever wrote them.
+    expect(typeNameOf("text/vnd.jaira.workflow-description+markdown").family).toBe("prose");
+    expect(typeNameOf("application/vnd.jaira.workflow+json").family).toBe("data");
   });
 
   it("accepts the short spellings a slot actually authors", () => {

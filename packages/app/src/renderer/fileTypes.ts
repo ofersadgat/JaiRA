@@ -11,8 +11,22 @@
  * a component that already knows about workflows. The three concepts stay separate on purpose:
  *
  *  - **type** — a MIME string from `mimeOfPath`, carried on every tree node.
- *  - **action** — `view` (read it) or `edit` (change it).
+ *  - **kind** — `text`, `data` or `preview`: WHAT SORT of rendering this is (see {@link RenderKind}).
+ *  - **renderer** — a NAMED way of drawing a type in one of those kinds: an id, a label and a
+ *    component. A kind may have several, and the first registered is what draws it when nobody has
+ *    said otherwise.
  *  - **component** — a {@link FileSurface}, which is a plain React component over one props shape.
+ *
+ * The kind is the newest of the four and it replaced the wrong axis. The table used to be keyed by
+ * `view` and `edit` — which are not kinds of rendering but PLACES, the panel's two halves — and that
+ * conflation made both this file and the settings screen say untrue things. It made the JSON data
+ * tree and the JSON editor look like alternatives to each other, when they answer different
+ * questions and a person wants both at once; and it had no room at all for the fact that a `.json`
+ * file has a text rendering too, which is drawn by Monaco exactly like every other source file.
+ *
+ * A renderer says what it IS and whether it writes; where it goes follows. What has NOT changed is
+ * the default: every built-in leads its own list, so an app nobody has configured draws exactly what
+ * it drew before.
  *
  * Two rules make the table small. Resolution walks `mimeFallbacks`, so a vendor type inherits the
  * surfaces of the syntax it is written in and every text type ends at `text/plain` — which is why an
@@ -49,14 +63,21 @@ import type {
   WritingTool,
   PendingInteraction,
 } from "@jaira/shared/browser";
-import { mimeFallbacks } from "@jaira/shared/browser";
+import { defaultRendererChoice, mimeFallbacks, paneFamilyOf } from "@jaira/shared/browser";
+import type { EditorKind, PaneFamily, RendererChoice, RendererChoices, RenderView } from "@jaira/shared/browser";
 import type { ComponentServices } from "./changesetReview";
 import type { EditorServices } from "./components";
 import type { Drafts, SetDraft } from "./drafts";
 import type { EditorTab } from "./editorChrome";
 import type { TrailStep } from "./trail";
 
-/** What a surface does with the file. The two halves of the panel, top to bottom. */
+/**
+ * Which half of the panel a rendering lands in — DERIVED, never declared.
+ *
+ * Kept as a name because the panel's two halves are still two halves; what changed is that nothing
+ * registers itself into one. A renderer says what KIND of rendering it is (see {@link RenderKind})
+ * and whether it writes, and `viewerFor` / `editorFor` work out where that puts it.
+ */
 export type FileAction = "view" | "edit";
 
 /**
@@ -414,9 +435,29 @@ export interface FileSurfaceContext {
   sync?: SyncSurface | undefined;
   /** Which registered schema a document already satisfies. Null when nothing could be asked. */
   detectSchema: (text: string) => Promise<DetectSchemaResult | null>;
-  /** Word wrap in the JSON editor — a saved preference, not per-document. */
+  /** Word wrap in the JSON editor — a saved preference, not per-document (`editors.json.wrap`). */
   wrapJson: boolean;
   onWrapJson: (wrap: boolean) => void;
+  /**
+   * Which renderer this person has chosen per type and kind — see {@link chosenRenderer}.
+   *
+   * Carried on the context rather than read from a module, for the reason the draft store and the
+   * remembered layout are: a surface, and the panel that resolves one, must work when rendered
+   * outside the shell. Absent ⇒ every default, which is what a specimen and a gallery want.
+   */
+  renderers?: RendererChoices | undefined;
+  /**
+   * Which of the type's two views this surface is BEING mounted as.
+   *
+   * A surface cannot work it out: the same component is the reading of one type and the editor of
+   * another, and `onSave` says whether it may write rather than which half asked for it. Only the
+   * thing that resolved it knows, so the thing that resolved it says.
+   *
+   * Absent ⇒ the editor, which is what almost every mount is and what everything did before this
+   * existed. What reads it is the palette (`RendererChoice.theme`), which is keyed per view: a
+   * reading drawn in the editor's colours is the bug this field is here to stop.
+   */
+  view?: RenderView | undefined;
   /**
    * The window's remembered layout, for surfaces that have a pane or a fold of their own.
    *
@@ -455,38 +496,397 @@ export interface FileSurfaceProps {
 
 export type FileSurface = (props: FileSurfaceProps) => JSX.Element;
 
-/** `mime` → action → component. Populated by `fileSurfaces.tsx` at import time. */
-const REGISTRY = new Map<string, Partial<Record<FileAction, FileSurface>>>();
+/**
+ * What KIND of rendering a renderer is — the axis that was missing, and the one that matters.
+ *
+ * A document can be drawn three ways and they are not alternatives to each other. They are answers
+ * to three different questions, and a type can have one of each at the same time:
+ *
+ *  - **text** — the characters as they are on disk. Monaco, the code view, the live-preview editor,
+ *    the schema-aware editor: all of them draw the SOURCE, and they differ in what they let you do
+ *    with it.
+ *  - **data** — the value the document denotes, once parsed. The tree, a table of rows, the
+ *    authoring form. A JSON file has one of these and still has a text renderer; that is the whole
+ *    point of separating the two.
+ *  - **preview** — what the document MEANS, rendered. Markdown as prose, HTML as a page, an SVG as a
+ *    drawing, a patch as the change it describes, a state as its board.
+ *
+ * The registry used to be keyed by `view` and `edit` instead, which are not kinds but PLACES — the
+ * panel's upper and lower halves. That conflated two questions and made the settings screen
+ * incoherent: the JSON editor and the data tree appeared as alternatives to each other because one
+ * happened to be registered above the divider and the other below, when in fact they answer
+ * different questions and a person wants both. Where a renderer goes is now derived (see
+ * {@link viewerFor} and {@link editorFor}) rather than declared, which is the right way round: the
+ * panel's layout follows from what the renderers ARE.
+ */
+export type RenderKind = "text" | "data" | "preview";
+
+/** In the order the settings pane asks about them, and the order the panel resolves in. */
+export const RENDER_KINDS: readonly RenderKind[] = ["text", "data", "preview"];
 
 /**
- * Connect a type and an action to a component.
+ * One way of drawing a type — a component, and enough about it to put on a menu.
  *
- * Last registration wins, so a project-specific surface can replace a built-in one by registering
- * after it. That is the only override mechanism there is, and it is enough: the table is small, and
- * a priority number would be a second thing to reason about for a case that has not come up.
+ * The id is the part that has to be thought about, because it is the only thing here that is
+ * WRITTEN DOWN: it lands in `user-settings.json` and has to still mean the same thing after a
+ * rename, a refactor and a minifier. So it is a word chosen for the rendering it names — `monaco`,
+ * `rendered`, `tree` — never the component's own name, which `Function.name` would have given for
+ * free and which survives none of those three.
+ *
+ * `surface: null` is a real renderer and not an absence: "nothing here", offered under `preview` so
+ * a person who only ever wants the source can have the editor take the whole column. Resolution
+ * returns that null, and the panel already knows what to do with it — see `FilePanel`.
  */
-export function registerFileSurface(mime: string, action: FileAction, surface: FileSurface): void {
+export interface FileRenderer {
+  /** Stable across builds and renames: this is what a settings file stores. */
+  id: string;
+  /** What the picker says. A rendering, not a component: "Monaco", "Rendered", "Table". */
+  label: string;
+  /** One line under the label, where the choice is not self-evident. */
+  note?: string;
+  /**
+   * Whether this renderer can be TYPED INTO.
+   *
+   * What decides which half of the panel a renderer lands in, rather than a second registration.
+   * Most data and preview renderers only read — a table of rows is not a place to edit a CSV — and
+   * the two that do write (a workflow's authoring form; every text editor) are what the lower half
+   * is for. A text renderer that does not write is a legitimate choice and not an oversight: the
+   * code view is coloured source you cannot damage, which is exactly what some people want a file
+   * they are only reading to be.
+   */
+  writes?: boolean;
+  /**
+   * Whether this renderer has a PALETTE of its own — a theme, in the editor's sense.
+   *
+   * True for the surfaces Monaco and CodeMirror paint, and false for everything else, which is not a
+   * shortcoming: a data tree, an authoring form, a table of rows and a board are drawn in the app's
+   * own tokens, and they should be, because they are parts of the app rather than a rendering of
+   * somebody's source. What it decides is whether a colour-scheme control appears beside this
+   * renderer at all — and a control over a surface that would ignore it is the one thing a settings
+   * screen must not have, because it is invisible.
+   */
+  themed?: boolean;
+  /**
+   * Which editing SURFACE this renderer is, where it is one — the knobs that move it.
+   *
+   * Four implementations answer for every type this app opens (`EditorKind`), because a `.ts` and a
+   * `.yaml` are the same Monaco pane with a different grammar. Saying which one a renderer is puts
+   * its controls where the renderer is chosen, rather than in a second section that names surfaces
+   * a person would have to map back onto the file they were thinking about.
+   *
+   * Absent for everything that is not an editing surface — a tree, a table, a board, a rendering —
+   * and those show no knobs, which is a fact about them rather than an omission.
+   */
+  look?: EditorKind;
+  /** The component, or `null` for "draw nothing at all". */
+  surface: FileSurface | null;
+}
+
+/**
+ * `mime` → kind → the renderers registered for it, in order. Populated by `fileSurfaces.tsx`.
+ *
+ * A LIST rather than one component, and the order is the meaning: the first is what draws the type
+ * when nobody has said otherwise. Everything after it is an alternative a person may pick in
+ * Appearance, and a kind with only one entry has nothing to pick between — which is why the settings
+ * table can be derived from this map rather than written out beside it and left to drift.
+ */
+const REGISTRY = new Map<string, Partial<Record<RenderKind, FileRenderer[]>>>();
+
+/** How a choice is addressed, in settings and in the picker. One spelling, used by everything. */
+export function rendererKey(mime: string, kind: RenderKind): string {
+  return `${mime}:${kind}`;
+}
+
+/**
+ * The same, for a whole FAMILY of types — `family:code:text`.
+ *
+ * A second key shape rather than a preference against some parent type, because a family is not a
+ * MIME chain: `text/x-typescript` and `application/xml` are both code and share no ancestor but
+ * `text/plain`. So there is no type a preference about Code could be written against, and inventing
+ * one would make the settings file say something untrue about what inherits from what.
+ */
+export function familyKey(family: PaneFamily, kind: RenderKind): string {
+  return `family:${family}:${kind}`;
+}
+
+/**
+ * What one person has said about one type and kind, with their family's answer behind it.
+ *
+ * Read as a chain and per FIELD, which is the part worth stating: a type that names its own editor
+ * still takes its family's reading, because those are two decisions and only one of them was made
+ * here. `off` is the exception and is taken whole — a type that lists any refusal is describing its
+ * own menu, and merging two lists would leave no way to put back something the family removed.
+ */
+/**
+ * The stored lines that could speak about one type and kind, nearest first.
+ *
+ * Two axes rather than one, because they answer different questions. The MIME chain is about what a
+ * document IS — a workflow description is markdown, and a preference about markdown reaches it
+ * without anybody naming a vendor type they have never heard of. The family is about what a person
+ * SET TOGETHER, and it cannot be a link in that chain: `text/x-typescript` and `application/xml` are
+ * both code and share no ancestor but `text/plain`, so there is no type an opinion about Code could
+ * be written against.
+ *
+ * Kept as a list rather than merged here, because whether a line ANSWERS depends on what is being
+ * asked. A renderer id has to be checked against what this build actually offers before the walk
+ * stops on it — see {@link viewRenderer} — and a merge would have already thrown the alternatives
+ * away by then.
+ */
+function choiceLines(mime: string, kind: RenderKind, chosen: RendererChoices): RendererChoice[] {
+  const lines: RendererChoice[] = [];
+  for (const candidate of mimeFallbacks(mime)) {
+    const line = chosen[rendererKey(candidate, kind)];
+    if (line !== undefined) lines.push(line);
+  }
+  const family = chosen[familyKey(paneFamilyOf(mime), kind)];
+  if (family !== undefined) lines.push(family);
+  return lines;
+}
+
+export function rendererChoiceFor(
+  mime: string,
+  kind: RenderKind,
+  chosen?: RendererChoices | undefined,
+): RendererChoice {
+  if (chosen === undefined) return defaultRendererChoice();
+  /**
+   * The lines that could speak, nearest first: this type, then the syntax it is written in, then its
+   * family.
+   *
+   * Two axes rather than one, because they answer different questions. The MIME chain is about what
+   * a document IS — a workflow description is markdown, and a preference about markdown reaches it
+   * without anybody naming a vendor type they have never heard of. The family is about what a person
+   * SET TOGETHER, and it cannot be a link in that chain: `text/x-typescript` and `application/xml`
+   * are both code and share no ancestor but `text/plain`, so there is no type an opinion about Code
+   * could be written against.
+   */
+  const lines = choiceLines(mime, kind, chosen);
+  if (lines.length === 0) return defaultRendererChoice();
+  // Per FIELD, which is the part worth stating: a type that names its own editor still takes its
+  // family's reading, because those are two decisions and only one of them was made here.
+  const first = <T,>(read: (line: RendererChoice) => T | null): T | null => {
+    for (const line of lines) {
+      const said = read(line);
+      if (said !== null) return said;
+    }
+    return null;
+  };
+  return {
+    read: first((line) => line.read),
+    write: first((line) => line.write),
+    // Taken WHOLE from the nearest line that states one. Merging two lists would leave no way to put
+    // back something a vaguer line removed, and a refusal is a description of one menu.
+    off: lines.find((line) => line.off.length > 0)?.off ?? [],
+    theme: {
+      read: first((line) => line.theme.read),
+      write: first((line) => line.theme.write),
+    },
+  };
+}
+
+/**
+ * What a type is actually OFFERED for one kind — the registered list, less anything refused.
+ *
+ * Empty is a real answer and means the kind is off for this type: every renderer that could have
+ * drawn it was taken off the menu, and falling back to one of them would be honouring a preference
+ * by ignoring it.
+ */
+export function enabledRenderers(
+  mime: string,
+  kind: RenderKind,
+  chosen?: RendererChoices | undefined,
+): readonly FileRenderer[] {
+  const off = rendererChoiceFor(mime, kind, chosen).off;
+  if (off.length === 0) return fileRenderers(mime, kind);
+  return fileRenderers(mime, kind).filter((renderer) => !off.includes(renderer.id));
+}
+
+/**
+ * The renderer drawing one VIEW of a type — the reading, or the editor.
+ *
+ * The two differ in what may answer. Any renderer can be the reading, because every rendering can be
+ * looked at; only one that WRITES can be the editor, which is the registry's own flag rather than a
+ * second thing to configure. A kind with nothing that writes has no editor, and says so by answering
+ * null rather than by offering a surface that cannot be typed into.
+ *
+ * A choice naming a renderer this build does not have, or one that has been taken off the menu, is
+ * stepped over rather than repaired: the person is left looking at the default, which is a state
+ * they can see and correct, instead of at an empty panel with nothing to say why.
+ */
+export function viewRenderer(
+  mime: string,
+  kind: RenderKind,
+  view: RenderView,
+  chosen?: RendererChoices | undefined,
+): FileRenderer | null {
+  const offered = enabledRenderers(mime, kind, chosen);
+  // `Nothing` belongs to both views, but only where there is something to decline. It is not a
+  // renderer that writes, it is the ABSENCE of one — "do not give me the authoring form to type
+  // into" is a statement a person must be able to make, and "the editor for this preview is
+  // Nothing" is not a statement at all. So it joins the editor's list exactly when that list has a
+  // real writer in it; otherwise this kind has no editor and says so by answering null.
+  const writes = offered.some((renderer) => renderer.writes === true);
+  const list = offered.filter(
+    (renderer) => view === "read" || renderer.writes === true || (writes && renderer.surface === null),
+  );
+  if (list.length === 0) return null;
+  // Walked rather than merged, so that a line naming a renderer this build does not have is STEPPED
+  // OVER and a vaguer one still applies. Merging first would let a stale specific answer swallow a
+  // good general one — the person would see the app's default and have no way to tell which of their
+  // two preferences had gone stale.
+  for (const line of chosen === undefined ? [] : choiceLines(mime, kind, chosen)) {
+    const want = line[view];
+    if (want === null) continue;
+    const picked = list.find((renderer) => renderer.id === want);
+    if (picked !== undefined) return picked;
+  }
+  return list[0]!;
+}
+
+/**
+ * The palette one view is drawn in — see `RendererChoice.theme`.
+ *
+ * Null where nothing has been said, which is what `DEFAULT_EDITOR_THEME` answers; the caller is the
+ * one that knows whether the renderer it landed on has a palette at all.
+ */
+export function viewTheme(
+  mime: string,
+  kind: RenderKind,
+  view: RenderView,
+  chosen?: RendererChoices | undefined,
+): string | null {
+  return rendererChoiceFor(mime, kind, chosen).theme[view];
+}
+
+/**
+ * Connect a type and a kind of rendering to a way of doing it.
+ *
+ * FIRST registration wins as the default, which is what makes a stored preference meaningful: "last
+ * one wins" is a rule about load order, and a default that depends on load order is a default nobody
+ * can name in a settings file. A registration whose id is already present REPLACES it in place — so
+ * overriding a built-in is still one call, it just has to say which renderer it is overriding.
+ */
+export function registerFileSurface(mime: string, kind: RenderKind, renderer: FileRenderer): void {
   const entry = REGISTRY.get(mime) ?? {};
-  entry[action] = surface;
+  const list = entry[kind] ?? [];
+  const at = list.findIndex((known) => known.id === renderer.id);
+  if (at === -1) list.push(renderer);
+  else list[at] = renderer;
+  entry[kind] = list;
   REGISTRY.set(mime, entry);
 }
 
 /**
- * The component for a pair, or null when nothing handles it.
+ * What a type can be drawn by, for one kind, best first.
  *
- * Walks the fallback chain, so `application/vnd.jaira.workflow+yaml` with no editor of its own gets
- * the YAML one, and an unknown text type gets the plain editor. Null is a real answer for `view` —
- * see the module comment — and for `edit` it means the file is not text at all.
+ * Walks the fallback chain, so `application/vnd.jaira.workflow+yaml` with no text renderers of its
+ * own gets YAML's, and every text type ends at `text/plain` — which is why an unregistered file
+ * still opens in an editor instead of showing an error. The FIRST candidate with any registration
+ * for this kind answers; a more specific type therefore replaces the list rather than adding to it,
+ * which is what stops a config file from inheriting the plain JSON editor that would write it
+ * unvalidated.
  */
-export function resolveFileSurface(mime: string, action: FileAction): FileSurface | null {
+export function fileRenderers(mime: string, kind: RenderKind): readonly FileRenderer[] {
   for (const candidate of mimeFallbacks(mime)) {
-    const surface = REGISTRY.get(candidate)?.[action];
-    if (surface) return surface;
+    const list = REGISTRY.get(candidate)?.[kind];
+    if (list !== undefined && list.length > 0) return list;
   }
-  return null;
+  return [];
 }
 
-/** Every type with at least one registered surface. Exported for the tests that guard the table. */
+/**
+ * The renderer a person has chosen for one kind, or the one that leads.
+ *
+ * `chosen` is their preferences, keyed by {@link rendererKey}, and it is consulted AT THE LINK OF THE
+ * CHAIN the list came from — so choosing the source reading for `text/markdown` reaches a workflow
+ * description too, because that is markdown and it inherits markdown's list. A description with a
+ * choice of its own keeps it, because the walk finds the more specific list first.
+ *
+ * A choice naming a renderer this build does not have is ignored rather than repaired: the person is
+ * left looking at the default, which is a state they can see and correct, instead of at an empty
+ * panel with nothing to say why.
+ */
+export function chosenRenderer(
+  mime: string,
+  kind: RenderKind,
+  chosen?: RendererChoices | undefined,
+): FileRenderer | null {
+  return viewRenderer(mime, kind, "read", chosen);
+}
+
+/**
+ * The panel's UPPER half: what this document is, rather than what it says.
+ *
+ * Preview first, then data, and that order is the claim the two kinds make. A rendering answers
+ * "what does this mean" and beats a parse of the same file; a parsed value answers it for the types
+ * that have no rendering, which is most data formats. A WRITING data renderer is skipped here
+ * because it is the lower half — a workflow's authoring form is not a reading of the state, it is
+ * where the state is written.
+ *
+ * Null is a real answer and not a gap: a `.ts` file has no rendering distinct from its own text, and
+ * half a panel of nothing above it would be worse than the space. It is also what a person asks for
+ * by choosing `Nothing` under preview.
+ */
+export function viewerFor(mime: string, chosen?: RendererChoices | undefined): FileSurface | null {
+  const preview = viewRenderer(mime, "preview", "read", chosen);
+  if (preview !== null) return preview.surface;
+  const data = viewRenderer(mime, "data", "read", chosen);
+  return data !== null && data.writes !== true ? data.surface : null;
+}
+
+/**
+ * The panel's LOWER half: where the document is changed.
+ *
+ * A writing DATA renderer wins over the text one, which is the workflow authoring form and the
+ * reason this order exists: a state file opens on its fields, and its source is one choice away
+ * (pick `Nothing` under data, and this falls through to the text renderer). Everything else has no
+ * writing data renderer, so this is the text renderer — which is what "how do I edit a `.ts` file"
+ * has always meant.
+ *
+ * The renderer comes back WHOLE rather than as a component, because the panel has to be able to say
+ * that it does not write: choosing the code view is choosing not to type, and a Save button over a
+ * surface that cannot be typed into would be a lie.
+ */
+export function editorFor(mime: string, chosen?: RendererChoices | undefined): FileRenderer | null {
+  const data = viewRenderer(mime, "data", "write", chosen);
+  // A data editor that draws NOTHING is a refusal of the data editor, not of editing: the text
+  // renderer takes it, which is what "give me the source of my state file instead of the form" has
+  // always meant. Only a real surface stops the fall-through.
+  if (data !== null && data.surface !== null) return data;
+  // The reading FIRST, where it is one that cannot be typed into — which is only ever because
+  // somebody said so. Choosing the code view is choosing not to type, and the panel already knows
+  // how to draw a surface with no Save; without this, a text reading that does not write would be a
+  // preference the panel silently declined. Everything else falls through to the editor, which is
+  // what "how do I edit a `.ts` file" has always meant.
+  const read = viewRenderer(mime, "text", "read", chosen);
+  if (read !== null && read.writes !== true) return read;
+  return viewRenderer(mime, "text", "write", chosen);
+}
+
+/** Every type with at least one registered renderer. Exported for the tests that guard the table. */
 export function registeredMimes(): string[] {
   return [...REGISTRY.keys()].sort();
+}
+
+/**
+ * Every type-and-kind a person actually has a choice about — what the Appearance pane draws.
+ *
+ * Derived rather than declared, so a renderer added to the table below shows up in settings with
+ * nothing else to write, and one removed cannot leave behind a row that sets a preference nothing
+ * reads. Kinds with a single renderer are left out: a menu of one is a statement dressed as a
+ * question.
+ *
+ * Registration order throughout — the map's, and each list's — because that order is already the
+ * argument the table makes about what leads, and re-sorting it here would be this file having a
+ * second opinion about a decision it does not own.
+ */
+export function rendererChoices(): Array<{ mime: string; kind: RenderKind; renderers: readonly FileRenderer[] }> {
+  const out: Array<{ mime: string; kind: RenderKind; renderers: readonly FileRenderer[] }> = [];
+  for (const [mime, kinds] of REGISTRY) {
+    for (const kind of RENDER_KINDS) {
+      const renderers = kinds[kind];
+      if (renderers !== undefined && renderers.length > 1) out.push({ mime, kind, renderers });
+    }
+  }
+  return out;
 }

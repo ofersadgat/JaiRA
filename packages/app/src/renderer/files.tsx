@@ -42,7 +42,7 @@ import { isTextMime } from "@jaira/shared/browser";
 import { Badge } from "./board";
 import { CrumbBar, alternatives, runCrumbs, shortRunName, type Crumb } from "./crumbs";
 import { TaskPanel } from "./detail";
-import { resolveFileSurface, type FileSurfaceContext } from "./fileTypes";
+import { editorFor, viewerFor, type FileSurfaceContext } from "./fileTypes";
 import { AskDialog, ContextMenu, pointOf, type AskSpec, type MenuAnchor, type MenuItem, type MenuPoint } from "./menu";
 import { RunPanel, type RunSurface } from "./runPanel";
 import { RunModeToggle } from "./runViews";
@@ -1663,9 +1663,23 @@ export function FilePanel({
     );
   }
 
-  const View = resolveFileSurface(doc.mime, "view");
-  const Edit = resolveFileSurface(doc.mime, "edit");
+  /**
+   * The two halves, worked out from what this type can be drawn BY — see `viewerFor` / `editorFor`.
+   *
+   * Neither is declared any more. A renderer says what kind of rendering it is (text, data, preview)
+   * and whether it writes; the upper half takes the rendering, the lower half takes the thing that
+   * writes, and this person's choice per kind decides which of each. That indirection is why a
+   * `.json` file can have a data tree above and an editor below without either being described as
+   * the other's alternative.
+   */
+  const View = viewerFor(doc.mime, context.renderers);
+  const editor = editorFor(doc.mime, context.renderers);
+  const Edit = editor?.surface ?? null;
   const props = { doc, busy, onSave, context };
+  // The same props, said to be the READING. Only this function knows which half it is mounting, and
+  // the palette is keyed per view — so a viewer built from `props` would be drawn in the editor's
+  // colours. See `FileSurfaceContext.view`.
+  const viewProps = { ...props, context: { ...context, view: "read" as const } };
   // With no viewer the editor IS the panel, so there is nothing to fold it away from and nothing to
   // grow into: a file type with no viewer is always at `full`, whatever was remembered.
   const at: HalfMode = View === null ? "full" : half;
@@ -1679,7 +1693,7 @@ export function FilePanel({
       {View !== null && at !== "full" ? (
         <>
           <div className="run-half">
-            <View {...props} />
+            <View {...viewProps} />
           </div>
           {/* The halves were 46/54 and immovable, which is a guess about what you are doing: a board
               with nine columns and a form with three fields want opposite splits, and the same file

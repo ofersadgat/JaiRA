@@ -149,14 +149,34 @@ export interface JairaSettings {
    */
   baseDir?: string;
   /**
-   * Whether the JSON editor wraps long lines.
+   * How each editing surface looks — see {@link EditorLook}.
    *
-   * Here rather than in component state because it is the same KIND of thing as the theme: a display
-   * preference belonging to one person on one machine, and one that would be irritating to re-set on
-   * every file you opened. Off by default — an unwrapped editor keeps line numbers meaningful and
-   * gives the end-of-line schema hints somewhere to sit.
+   * This is where `wrapJson` went. It was one boolean for one editor, on the argument that word wrap
+   * is "the same KIND of thing as the theme"; that argument was right and it was never only about
+   * JSON. Every editor in the app has the same handful of questions to answer — does it number its
+   * lines, does it wrap, how far apart are they — and answering them one boolean at a time is how a
+   * settings file grows a field per editor per knob. A file written before this existed still says
+   * `wrapJson`, and {@link parseEditors} reads it into `editors.json.wrap` once; nothing else needs
+   * to know the field ever existed.
    */
-  wrapJson: boolean;
+  editors: Record<EditorKind, EditorLook>;
+  /**
+   * Which renderer draws a file type, where more than one can — see `app/renderer/fileTypes.ts`.
+   *
+   * Keyed `"<mime>:<kind>"` for one type, or `"family:<family>:<kind>"` for a whole family of them,
+   * and read in that order: a type's own line, then its family's, then whatever the app registers
+   * first. ABSENT is the common case — this map holds DISAGREEMENTS, not the table — which is what
+   * keeps a change to the app's own best answer reaching everybody who never had an opinion.
+   *
+   * A key naming a renderer that no longer exists is ignored rather than repaired, on the same terms
+   * as every other value in this file: a preference nobody can satisfy is not a reason to refuse the
+   * ones that can be.
+   *
+   * Here rather than in a project's `settings.json` for the reason the rest of this file is: whether
+   * you would rather read markdown rendered or as its source is a fact about you, not about the
+   * checkout, and it should not arrive through a pull request.
+   */
+  renderers: RendererChoices;
   /**
    * The two voices' faces and sizes — see {@link Appearance} and SHELL.md §6.
    *
@@ -217,6 +237,128 @@ export interface Appearance {
    * darkening.
    */
   smoothing: boolean;
+  /**
+   * Which palette the EDITORS are painted in — the id of a theme, or `app` for the window's own.
+   *
+   * A STRING rather than a union, and the list lives in the renderer (`editorThemes.ts`) where the
+   * colours are. This file cannot check an id and should not try: it would mean the palettes moving
+   * here, where nothing reads them, so that a preference file could be validated against a list it
+   * will outlive anyway. The renderer falls back to the default for an id it does not have, which is
+   * the same rule the renderer choices follow one field down.
+   *
+   * Beside `sizeEditor` and `advanced` rather than in `editors`, and for the same reason those two
+   * are here: it is one answer for every editing surface, not one per surface. It has to be. Monaco
+   * treats a theme as a global — `setTheme` repaints every editor in the page — and a diff pane and
+   * a code pane in the same window painted from different palettes would read as a rendering fault
+   * rather than as a preference anyway.
+   */
+  editorTheme: string;
+}
+
+/**
+ * What the editors are painted in when nobody has said — Monokai Light.
+ *
+ * A THEME rather than "follows the window", which is a product decision and worth stating as one:
+ * an editor is where code is read, code has been coloured by its own palettes for forty years, and
+ * an app whose editors are painted in its chrome's two greys is an app that has decided a person's
+ * syntax colours for them by not offering any. `app` remains one of the choices for whoever wants
+ * the window to be one palette throughout.
+ *
+ * Here rather than in the renderer's registry because `defaultAppearance` has to name it, and a
+ * default that lives on the other side of the settings boundary is a default the parser cannot state.
+ */
+export const DEFAULT_EDITOR_THEME = "monokai-light";
+
+/**
+ * Which of a file's two views a preference is about.
+ *
+ * A document is drawn twice and the two are not the same question: `read` is the view that cannot be
+ * typed into, `write` is the one that can. Every kind of rendering is therefore picked twice, and a
+ * renderer that does not write can only ever answer the first.
+ *
+ * WHERE those two go is not decided here and deliberately is not decidable here. A surface may show
+ * only the reading, only the editor, one control that toggles between them, or both at once; this
+ * file says which renderer each view IS, and the surface spends that however it lays itself out.
+ */
+export type RenderView = "read" | "write";
+
+/** In the order a control asks about them: what you get, then what you can change. */
+export const RENDER_VIEWS: readonly RenderView[] = ["read", "write"];
+
+/**
+ * One person's answer for one type and one kind of rendering.
+ *
+ * Every field is an override and every field may be absent, which is the point: a document holding
+ * `{}` and a document holding nothing at all mean the same thing, and both mean "whatever this app
+ * thinks best". That is what lets the app's own answer improve for everybody who never disagreed.
+ */
+export interface RendererChoice {
+  /** The renderer drawing the view that cannot be typed into, or `null` for the app's own. */
+  read: string | null;
+  /** The renderer drawing the view that can. Only a renderer that WRITES may be named here. */
+  write: string | null;
+  /**
+   * Renderers taken off this type's menu — not offered, and never resolved to.
+   *
+   * All of them means the kind is off for this type: the app draws nothing of that kind rather than
+   * falling back to one that was refused. An empty list is the normal state and is not written.
+   */
+  off: string[];
+  /**
+   * The palette each view is drawn in, where the renderer drawing it has one.
+   *
+   * Keyed by view rather than by type, because a theme is a property of the RENDERER and the
+   * renderer was chosen per view: the reading of a JSON file and its editor are two picks, and two
+   * palettes. `null` is the app's default (`DEFAULT_EDITOR_THEME`), and a renderer with no palette
+   * of its own — the data tree, a form, a table, a board — ignores this entirely.
+   */
+  theme: Record<RenderView, string | null>;
+}
+
+/**
+ * The preferences map: `"<mime>:<kind>"` for a type, `"family:<family>:<kind>"` for a family of them.
+ *
+ * Two key shapes and one map, rather than two maps, because they are read as one chain — the type's
+ * own line, then its family's — and splitting them would put half of one answer in each of two
+ * places. The kinds and families are the renderer's vocabulary (`app/renderer/fileTypes.ts`), which
+ * is why the key is an opaque string here: this file stores the disagreement, it does not adjudicate
+ * what a valid one is.
+ */
+export type RendererChoices = Record<string, RendererChoice>;
+
+/** Nothing said, about anything — what every unwritten key means. */
+export function defaultRendererChoice(): RendererChoice {
+  return { read: null, write: null, off: [], theme: { read: null, write: null } };
+}
+
+/**
+ * A change to one {@link RendererChoice} — one statement at a time.
+ *
+ * Every field is optional and an absent field means UNTOUCHED, which is the distinction that makes
+ * this a patch rather than a value: `null` is a thing a person can say (take my preference back, use
+ * the app's own), and the writer must be able to tell it from a field this caller had no opinion
+ * about. A control that had to send the whole choice would quietly undo the three settings it was
+ * not about.
+ */
+export interface RendererPatch {
+  read?: string | null;
+  write?: string | null;
+  off?: readonly string[];
+  theme?: Partial<Record<RenderView, string | null>>;
+}
+
+/**
+ * One key and what to do to it — the unit a settings screen changes things in.
+ *
+ * A LIST of these travels together, because one gesture is routinely several keys: setting a whole
+ * family writes the family's line and deletes the per-type lines that disagreed with it, and those
+ * have to land as one write. Sent separately they would be several round trips through the settings
+ * file, and a failure between two of them would leave a family half-agreed.
+ */
+export interface RendererEdit {
+  key: string;
+  /** `null` deletes the key outright — "I have no opinion about this after all". */
+  edit: RendererPatch | null;
 }
 
 /** The bounds each size is clamped to, in px. See {@link clampAppearance}. */
@@ -235,11 +377,163 @@ export function defaultAppearance(): Appearance {
     sizeEditor: SIZE_LIMITS.sizeEditor.default,
     advanced: false,
     smoothing: false,
+    editorTheme: DEFAULT_EDITOR_THEME,
+  };
+}
+
+/**
+ * The editing surfaces a person can style separately, as the app actually has them.
+ *
+ * FOUR, and the list is a statement about implementations rather than about file types. There is no
+ * "TypeScript editor" and no "YAML editor" — a `.ts` file and a `.yaml` file are the same Monaco
+ * pane with a different grammar, and offering to style them apart would be offering a control that
+ * writes to one place twice. What genuinely differ are the four components underneath:
+ *
+ *  - **code** — the Monaco pane, plus the plain box that a type with no grammar falls back to.
+ *  - **markdown** — CodeMirror with the live-preview decorations.
+ *  - **json** — the schema-aware editor: a textarea over a coloured layer, styled by CSS.
+ *  - **diff** — the two-sided Monaco panes a review is read in.
+ *
+ * They are not equally capable, which is why {@link EDITOR_KNOBS} exists rather than one flat shape
+ * that every surface promises to honour. A minimap is a Monaco feature; the JSON editor has no
+ * gutter to number. A control that a surface would silently ignore is worse than no control, so the
+ * table says which questions each one can actually answer and the pane draws only those.
+ */
+export type EditorKind = "code" | "markdown" | "json" | "diff";
+
+/** In the order the settings pane lists them: what you edit most, first. */
+export const EDITOR_KINDS: readonly EditorKind[] = ["code", "markdown", "json", "diff"];
+
+/**
+ * How one editing surface looks.
+ *
+ * Eight questions, and every one of them was already answered somewhere in the app — hard-coded in
+ * an options object, in a CodeMirror theme, or in two lines of CSS. That is the whole change here:
+ * the answers move from the components to this file, and the defaults below are exactly what those
+ * components did before, so a person who never opens the pane sees no difference at all.
+ */
+export interface EditorLook {
+  /** A numbered gutter. */
+  lineNumbers: boolean;
+  /** Break a long line at the pane's edge rather than scrolling sideways. */
+  wrap: boolean;
+  /** Monaco's scaled-down overview of the whole file, down the right-hand edge. */
+  minimap: boolean;
+  /** The faint vertical rules that mark each level of indentation. */
+  indentGuides: boolean;
+  /** Mark the line the caret is on. */
+  currentLine: boolean;
+  /** Draw spaces and tabs as dots and arrows. */
+  whitespace: boolean;
+  /**
+   * Tint matching brackets in rotating colours.
+   *
+   * OFF, which is not Monaco's default and is the point. Monaco ships this enabled, painting every
+   * bracket pair in its own gold / pink / blue — three colours that come from nowhere in the theme
+   * the rest of the editor is painted in, and the single most visible way an editor stops looking
+   * like the theme it is set to. A person who wants it can have it; what they should not get is a
+   * palette they never chose arriving underneath the one they did.
+   */
+  brackets: boolean;
+  /** How many columns a tab occupies — see {@link TAB_SIZES}. */
+  tabSize: number;
+  /** Line spacing, as a multiple of the editor's font size — see {@link LINE_HEIGHT}. */
+  lineHeight: number;
+}
+
+export type EditorKnob = keyof EditorLook;
+
+/**
+ * Which questions each surface can actually answer.
+ *
+ * The two Monaco surfaces answer all eight because Monaco has an option for each. CodeMirror has no
+ * minimap and no indent guides without an extension this app does not load, and the JSON editor is
+ * a textarea over a `<pre>`: it can wrap, and it can be spaced, and that is the honest end of the
+ * list. A knob missing here is drawn as `—` in the pane and read by nothing.
+ */
+export const EDITOR_KNOBS: Record<EditorKind, readonly EditorKnob[]> = {
+  code: ["lineNumbers", "wrap", "minimap", "indentGuides", "currentLine", "whitespace", "brackets", "tabSize", "lineHeight"],
+  diff: ["lineNumbers", "wrap", "minimap", "indentGuides", "currentLine", "whitespace", "brackets", "tabSize", "lineHeight"],
+  markdown: ["lineNumbers", "wrap", "currentLine", "tabSize", "lineHeight"],
+  json: ["wrap", "tabSize", "lineHeight"],
+};
+
+/** Whether a knob means anything for a surface — the one question {@link EDITOR_KNOBS} is asked. */
+export function editorKnobApplies(kind: EditorKind, knob: EditorKnob): boolean {
+  return EDITOR_KNOBS[kind].includes(knob);
+}
+
+/**
+ * The tab widths offered.
+ *
+ * Three rather than a number field: a tab is 2, 4 or 8 columns wide in every codebase anybody has
+ * ever worked in, and a stepper that can land on 7 is a stepper that will.
+ */
+export const TAB_SIZES: readonly number[] = [2, 4, 8];
+
+/** The bounds line spacing is held inside, as a multiple of the font size. */
+export const LINE_HEIGHT = { min: 1.1, max: 2.2, step: 0.05 } as const;
+
+/**
+ * What each surface does today, stated as data.
+ *
+ * Read these against the components and they are a transcript rather than a preference: Monaco is
+ * created with `minimap: {enabled: false}` and `renderLineHighlight: "none"`, the markdown editor is
+ * created with `EditorView.lineWrapping` and no gutter, and `1.55`/`1.6`/`1.5` are the three line
+ * heights the stylesheet and the CodeMirror theme already carried. Changing a default here changes
+ * the app for everybody who has not touched the control, which is exactly what a default is for —
+ * and the reason none of them was changed while they moved.
+ */
+export function defaultEditorLook(kind: EditorKind): EditorLook {
+  const base: EditorLook = {
+    lineNumbers: true,
+    wrap: false,
+    minimap: false,
+    indentGuides: true,
+    currentLine: false,
+    whitespace: false,
+    // See {@link EditorLook.brackets}: Monaco's own default is `true`, and this is one of the two
+    // places in this file where a default is a CORRECTION of the component's rather than a
+    // transcript of it. It is stated here rather than argued at the call site because the reason is
+    // about the theme, and the theme is what this whole block is in service of.
+    brackets: false,
+    // Two, not Monaco's four: this app colours code with `colorize({tabSize: 2})` everywhere it is
+    // read, and an editor that disagreed with the reading of the same file by two columns was a
+    // difference nobody chose.
+    tabSize: 2,
+    lineHeight: 1.5,
+  };
+  if (kind === "markdown") {
+    // A gutter of line numbers beside live-previewed prose is a gutter beside a document, which is
+    // not what anybody wants from a markdown editor; wrapping is not optional for prose so much as
+    // what prose IS, and it is the one default here that would be strange either way.
+    return { ...base, lineNumbers: false, wrap: true, lineHeight: 1.6 };
+  }
+  // The JSON editor's coloured layer and its textarea have to lay text out identically, so their
+  // spacing is one number in the stylesheet — 1.55 — and this is it.
+  if (kind === "json") return { ...base, lineNumbers: false, lineHeight: 1.55 };
+  return base;
+}
+
+export function defaultEditors(): Record<EditorKind, EditorLook> {
+  return {
+    code: defaultEditorLook("code"),
+    markdown: defaultEditorLook("markdown"),
+    json: defaultEditorLook("json"),
+    diff: defaultEditorLook("diff"),
   };
 }
 
 export function defaultSettings(): JairaSettings {
-  return { theme: "light", wrapJson: false, ui: defaultUiState(), appearance: defaultAppearance(), projects: [], filesHidden: [] };
+  return {
+    theme: "light",
+    ui: defaultUiState(),
+    appearance: defaultAppearance(),
+    editors: defaultEditors(),
+    renderers: {},
+    projects: [],
+    filesHidden: [],
+  };
 }
 
 /** No layout remembered yet — every control opens at its own default. */
@@ -270,9 +564,11 @@ export function parseSettings(raw: unknown): JairaSettings {
   const baseDir = doc["baseDir"];
   return {
     theme: THEMES.includes(theme as JairaTheme) ? (theme as JairaTheme) : "light",
-    wrapJson: doc["wrapJson"] === true,
     ui: parseUiState(doc["ui"]),
     appearance: parseAppearance(doc["appearance"]),
+    // The legacy field travels IN rather than being read beside the new one — see `editors`.
+    editors: parseEditors(doc["editors"], doc["wrapJson"] === true),
+    renderers: parseRenderers(doc["renderers"]),
     projects: parseProjects(doc["projects"]),
     // Trimmed and de-duplicated, dropping anything that is not a usable pattern. Forgiving like the
     // rest of this file: one unreadable entry is no reason to reset what a person can see.
@@ -315,6 +611,100 @@ function parseAppearance(raw: unknown): Appearance {
   }
   out.advanced = doc["advanced"] === true;
   out.smoothing = doc["smoothing"] === true;
+  // Any non-empty word, checked by whoever draws it — this file has no registry of palettes and an
+  // id it refused would be an id a future release could not add. The renderer falls back to the
+  // default for anything it does not recognise.
+  const editorTheme = doc["editorTheme"];
+  if (typeof editorTheme === "string" && editorTheme.length > 0) out.editorTheme = editorTheme;
+  return out;
+}
+
+/**
+ * Parse the per-editor looks, per surface and per knob, keeping whatever is readable.
+ *
+ * `legacyWrap` is the `wrapJson` boolean this block replaced, and it is applied ONLY where the new
+ * document says nothing about the JSON editor's wrapping. That ordering is the whole migration: a
+ * person who turned wrap on before the change keeps it, a person who has since turned it off in the
+ * new place keeps THAT, and the stale field in their file — which nothing rewrites away, because
+ * `writeSettings` merges rather than replaces — cannot come back and overrule them.
+ */
+function parseEditors(raw: unknown, legacyWrap: boolean): Record<EditorKind, EditorLook> {
+  const out = defaultEditors();
+  const doc = objectOf(raw);
+  const stated = objectOf(doc["json"]);
+  if (legacyWrap && typeof stated["wrap"] !== "boolean") out.json.wrap = true;
+  for (const kind of EDITOR_KINDS) {
+    const look = objectOf(doc[kind]);
+    for (const knob of EDITOR_KNOBS[kind]) {
+      const value = look[knob];
+      if (knob === "tabSize") {
+        // Snapped to what the control offers rather than clamped: a hand-written 3 is not a size
+        // this app draws, and rounding it to 2 is a choice somebody can see and correct.
+        if (typeof value === "number" && TAB_SIZES.includes(value)) out[kind].tabSize = value;
+      } else if (knob === "lineHeight") {
+        // Clamped, like a font size and for the same reason: a 0.2 line height is an editor whose
+        // rows overlap, with no control visible to drag it back.
+        if (typeof value === "number" && Number.isFinite(value)) {
+          out[kind].lineHeight = Math.min(LINE_HEIGHT.max, Math.max(LINE_HEIGHT.min, value));
+        }
+      } else if (typeof value === "boolean") {
+        out[kind][knob] = value;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Parse the renderer choices, keeping the entries that are plausibly one.
+ *
+ * Nothing here checks that the key names a type this app knows or that the value names a renderer
+ * that exists — neither question is answerable in `shared`, where there is no registry, and both are
+ * answered harmlessly at the point of use: an unrecognised choice falls through to the default. What
+ * IS checked is the shape, so a hand-edited file cannot put an object where a renderer id goes.
+ */
+/**
+ * The renderer preferences, per key, accepting the shape that came before.
+ *
+ * The older file said `"application/json:data": "form"` — one renderer for one type and kind, with
+ * no way to say that a file READS one way and is WRITTEN another. That value migrates to the read
+ * view, which is what it always meant: it was resolved for the half of the panel that shows the
+ * document, and the editor was picked by a rule nobody could see or change.
+ *
+ * Forgiving per ENTRY, like the rest of this file. A malformed line costs its own type rather than
+ * the other forty, because this is a document a person may have edited by hand and one bad key is
+ * not a reason to hand them back the defaults for everything.
+ */
+function parseRenderers(raw: unknown): RendererChoices {
+  const out: RendererChoices = {};
+  for (const [key, value] of Object.entries(objectOf(raw))) {
+    if (!key.includes(":")) continue;
+    // The value the older file held. Not a special case for long: it becomes the same shape here,
+    // and everything downstream only ever sees the new one.
+    if (typeof value === "string") {
+      if (value.length > 0) out[key] = { ...defaultRendererChoice(), read: value };
+      continue;
+    }
+    const doc = objectOf(value);
+    const choice = defaultRendererChoice();
+    const read = doc["read"];
+    const write = doc["write"];
+    if (typeof read === "string" && read.length > 0) choice.read = read;
+    if (typeof write === "string" && write.length > 0) choice.write = write;
+    if (Array.isArray(doc["off"])) {
+      choice.off = [...new Set(doc["off"].filter((id): id is string => typeof id === "string" && id.length > 0))];
+    }
+    const theme = objectOf(doc["theme"]);
+    for (const view of RENDER_VIEWS) {
+      const named = theme[view];
+      if (typeof named === "string" && named.length > 0) choice.theme[view] = named;
+    }
+    // A line that says nothing is not a line. Dropping it here is what keeps "unset stays unwritten"
+    // true after a round trip through this parser.
+    if (choice.read !== null || choice.write !== null || choice.off.length > 0 || choice.theme.read !== null || choice.theme.write !== null) {
+      out[key] = choice;
+    }
+  }
   return out;
 }
 

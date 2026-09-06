@@ -26,7 +26,26 @@
  * pane, and what a person needs beside the control is the preview, not a paragraph.
  */
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
-import { SIZE_LIMITS, type Appearance } from "@jaira/shared/browser";
+import {
+  EDITOR_KINDS,
+  EDITOR_KNOBS,
+  LINE_HEIGHT,
+  OFFERED_TYPES,
+  SIZE_LIMITS,
+  TAB_SIZES,
+  defaultEditorLook,
+  editorKnobApplies,
+  isCodeMime,
+  typeNameOf,
+  type Appearance,
+  type EditorKind,
+  type RendererChoices,
+  type RendererEdit,
+  type EditorKnob,
+  type EditorLook,
+} from "@jaira/shared/browser";
+import { FileTypesPane } from "./fileTypesPane";
+import { SizeStep, ToggleRow } from "./editorKnobs";
 import {
   DEFAULT_APP_STACK,
   DEFAULT_DATA_STACK,
@@ -37,7 +56,7 @@ import {
   shownFamilies,
   stackOf,
 } from "./appearance";
-import { Switch } from "./controls";
+import { Chip, SelectInput, Switch } from "./controls";
 import { Pill } from "./pill";
 
 /**
@@ -239,54 +258,6 @@ function FaceMenu({
   );
 }
 
-/**
- * A size, as a number with a stepper — not a slider.
- *
- * A slider is for a quantity whose exact value does not matter. This one lands on 12 or 12.5 and a
- * person knows which they want, so the control shows the number and moves it by the step the range
- * is quantised to. It is also a third of the width, which is what lets it share a line with the
- * family it applies to.
- */
-function SizeStep({
-  value,
-  limits,
-  disabled,
-  onChange,
-}: {
-  value: number;
-  limits: { min: number; max: number };
-  disabled?: boolean;
-  onChange: (size: number) => void;
-}): JSX.Element {
-  const step = (by: number): void => {
-    const next = Math.round((value + by) * 2) / 2;
-    onChange(Math.min(limits.max, Math.max(limits.min, next)));
-  };
-  return (
-    <div className={`size-box${disabled === true ? " off" : ""}`}>
-      <input
-        className="size-n data-num"
-        type="number"
-        min={limits.min}
-        max={limits.max}
-        step={0.5}
-        value={value}
-        disabled={disabled}
-        onChange={(e) => (Number.isFinite(e.target.valueAsNumber) ? onChange(e.target.valueAsNumber) : undefined)}
-      />
-      <span className="data-faint">px</span>
-      <span className="size-step">
-        <button title={`larger (max ${limits.max})`} disabled={disabled || value >= limits.max} onClick={() => step(0.5)}>
-          ▲
-        </button>
-        <button title={`smaller (min ${limits.min})`} disabled={disabled || value <= limits.min} onClick={() => step(-0.5)}>
-          ▼
-        </button>
-      </span>
-    </div>
-  );
-}
-
 /** A one-word heading over one control — this screen's whole label vocabulary. */
 function VoiceField({ label, children, note }: { label: string; children: ReactNode; note?: ReactNode }): JSX.Element {
   return (
@@ -294,29 +265,6 @@ function VoiceField({ label, children, note }: { label: string; children: ReactN
       <span className="app-label">{label}</span>
       <div className="ap-line">{children}</div>
       {note !== undefined ? <span className="ap-note data-faint">{note}</span> : null}
-    </div>
-  );
-}
-
-/** A switch, its name, and what it is currently worth — read down the right-hand edge. */
-function ToggleRow({
-  on,
-  label,
-  value,
-  disabled,
-  onChange,
-}: {
-  on: boolean;
-  label: string;
-  value: ReactNode;
-  disabled?: boolean;
-  onChange: (next: boolean) => void;
-}): JSX.Element {
-  return (
-    <div className="ap-toggle">
-      <Switch on={on} label={label} disabled={disabled} onChange={onChange} />
-      <span className="app-text">{label}</span>
-      <span className="ap-toggle-value">{value}</span>
     </div>
   );
 }
@@ -350,12 +298,29 @@ function Preview(): JSX.Element {
 
 export function AppearancePane({
   appearance,
+  editors,
+  renderers,
   busy,
   onChange,
+  onEditor,
+  onRenderer,
 }: {
   appearance: Appearance;
+  /**
+   * How each editing surface looks, and the two tables below it.
+   *
+   * All three optional TOGETHER with their callbacks, which is how the specimen and the gallery draw
+   * this pane without a store behind it: absent means the sections are not drawn at all, rather than
+   * drawn dead. Typography needs no such guard because it has always been passed one object and one
+   * callback, and a screen that shows a control it cannot honour is the thing this whole pane is
+   * careful about.
+   */
+  editors?: Record<EditorKind, EditorLook> | undefined;
+  renderers?: RendererChoices | undefined;
   busy: boolean;
   onChange: (patch: Partial<Appearance>) => void;
+  onEditor?: ((kind: EditorKind, patch: Partial<EditorLook>) => void) | undefined;
+  onRenderer?: ((edits: readonly RendererEdit[]) => void) | undefined;
 }): JSX.Element {
   // Measured once per stack rather than per render: reading a canvas metric is cheap but not free,
   // and the answer only changes when the list does.
@@ -451,6 +416,44 @@ export function AppearancePane({
 
       <span className="app-label">preview</span>
       <Preview />
+
+      {/* File types BEFORE editors, which is the order the questions are asked in: what opens this
+          file, and then what that thing looks like. It is also the order of consequence — picking
+          the source reading of a markdown document changes which editor you are looking at, and no
+          switch in the section below can. */}
+      {renderers !== undefined && onRenderer !== undefined && editors !== undefined && onEditor !== undefined ? (
+        <>
+          {/* `wide`: this section is a tree beside a stage beside a live preview, not a column of
+              labels and controls, so it opts out of the width the form half of this screen keeps. */}
+          <div className="ap-divider wide" />
+          <div className="ap-head wide">
+            <span className="app-title">File types</span>
+            <span className="app-secondary">what opens a file, and what that thing looks like</span>
+          </div>
+          <FileTypesPane
+            renderers={renderers}
+            editorTheme={appearance.editorTheme}
+            editors={editors}
+            busy={busy}
+            onRenderer={onRenderer}
+            onEditor={onEditor}
+          />
+        </>
+      ) : null}
+
+      {/*
+        * There is no Editors section any more, and that is the point.
+        *
+        * Every editing surface is reached from File types now: a renderer says which one it is
+        * (`FileRenderer.look`) and its knobs are drawn under the type it was chosen for. The diff was
+        * the last holdout — no file type resolved to it, so its controls sat outside in a section of
+        * their own — and it has a renderer now, `Side by side` under Changes, which is where a person
+        * looking for "how are my diffs drawn" was always going to look.
+        *
+        * The palette went the same way. It is per type and per view (§6.4), and
+        * `Appearance.editorTheme` is what a type nobody has said anything about falls back to — which
+        * is a default rather than a control, and lives with the other defaults in `settings.ts`.
+        */}
     </div>
   );
 }

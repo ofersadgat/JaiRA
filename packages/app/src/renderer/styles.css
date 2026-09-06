@@ -42,6 +42,14 @@
  * whatever `:root` says is what a cold start flashes. Making the default theme the default styling
  * is what removes that flash. `main/index.ts` sets the window's own background colour to match, for
  * the frame Chromium paints before the document exists at all.
+ *
+ * ## Where an editor's own palette lives instead
+ *
+ * These two are the WINDOW's. An editor may be painted in a palette of its own — Monokai Light by
+ * default — and that is not a third copy of a block like these: it is `editorThemes.ts`, a dozen
+ * named colours per theme, published as custom properties by `applyAppearance` and mapped onto these
+ * same token names by one rule further down, inside the three containers every DOM editor sits in.
+ * Monaco is not among them, because it draws into a canvas from a theme registry of its own.
  */
 :root {
   --bg: #f5f6f8;
@@ -2066,8 +2074,13 @@ button.side-twist:hover:not(:disabled) {
   margin: 0;
   padding: 8px;
   border: 0;
-  font: var(--size-editor)/1.55 var(--font-data);
-  tab-size: 2;
+  /* Spacing and tab width are preferences (`editors.json`), written onto `:root` by `applyEditors`;
+     the literals stay as the fallbacks, which is what this editor is set in before a settings file
+     has been read. BOTH layers take them from the same declaration, which is not a tidy but a
+     requirement — the coloured `<pre>` and the textarea over it have to lay text out identically, or
+     the caret and the characters stop agreeing about which column they are in. */
+  font: var(--size-editor)/var(--ed-json-lh, 1.55) var(--font-data);
+  tab-size: var(--ed-json-tab, 2);
   white-space: pre;
   overflow-wrap: normal;
   word-break: normal;
@@ -2431,6 +2444,31 @@ button.side-twist:hover:not(:disabled) {
   overflow-x: auto;
   white-space: pre;
 }
+/* A reading of source, coloured by Shiki with the colours INLINE — see `CodeText`.
+   The container carries the frame and the scroll; the `<pre>` Shiki returns carries the palette, so
+   this must not paint a background of its own or it would show through a theme that has already
+   stated one. `tab-size` is set inline from the code surface's own preference: the reading and the
+   editor of one file disagreeing about how far a tab goes is precisely the difference nobody chose. */
+.code-shiki {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.code-shiki .shiki {
+  font: var(--size-data) / 1.5 var(--font-data);
+  margin: 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  white-space: pre;
+}
+/* Shiki emits one `<span class="line">` per line. They are blocks so that a line's own background —
+   which some themes give to a diff's added and removed lines — spans the width rather than stopping
+   at the last character. */
+.code-shiki .shiki .line {
+  display: block;
+  min-height: 1.5em;
+}
+
 /* A document's YAML header, kept but out of the way — see `markdown.tsx`'s FRONT_MATTER. One dim
    line closed, the raw block open; it is metadata, so it never competes with the first heading. */
 .markdown .md-front {
@@ -4217,9 +4255,22 @@ ol.children li::marker {
      bottom padding, and overrides the two things a form of forty settings wants and a screen of six
      does not — a 34px gap between sections, and 780px of width. */
   gap: 10px;
-  /* Narrower than the other sections' 780px. Those are forms of forty settings whose controls need
-     the width; this one is six controls and a preview, and a stack box stretched across a wide
-     window puts a chip at each end of a line with nothing between them. */
+  /* Wide enough for the widest thing on it, which is no longer a form. This section used to be
+     typography alone and was capped at 560 for a good reason — a font stack stretched across a wide
+     window puts a chip at each end of a line with nothing between them — and then File types arrived
+     as a tree beside a stage beside a live preview, and inherited a width that was never about it.
+     So the CAP MOVED TO THE CONTROLS: everything that is a label-and-a-control still stops at 560
+     below, and the one thing that is a workspace gets the room. */
+  max-width: 1040px;
+}
+/* The form half of this screen. A label on the left and its control on the right reads worse the
+   wider it gets, whatever else is on the page. */
+.ap-field,
+.ap-toggle,
+.ap-preview,
+.ap-editor-preview,
+.ap-head:not(.wide),
+.ap-divider:not(.wide) {
   max-width: 560px;
 }
 /* Whose settings these are. A non-layered section is drawn without the chrome's `settings-head`
@@ -4272,6 +4323,516 @@ ol.children li::marker {
   margin-left: auto;
   display: flex;
   align-items: center;
+  /* Shrinkable, and elided rather than pushing the row wide. The words in this column say what the
+     switch will DO ("scrolls sideways", "dots and arrows"), which is worth more than one word — and
+     a settings pane that scrolls sideways to fit its own captions would be a poor advertisement for
+     the wrap preference three rows up. */
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ap-toggle > .app-text {
+  min-width: 0;
+}
+
+/* The four editing surfaces, as chips, and the button that puts one back. `.grow` between them is
+   what pushes `reset` to the far edge: it is an escape hatch rather than a fifth chip, and beside
+   them it would read as one. */
+.ap-chip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.ap-reset {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 8px;
+  background: none;
+  cursor: pointer;
+}
+.ap-reset:hover:not(:disabled) {
+  background: var(--fill-ghost-hover);
+}
+
+/* How each kind of file is drawn — a tree of families on the left, one stage on the right.
+   A grid rather than two floated columns, so the stage takes exactly what the tree does not and a
+   long renderer note ellipsizes inside it instead of widening the pane. The tree is fixed: it holds
+   five family names and nineteen type names, all of which are short, and a tree that resized as you
+   opened branches would move the stage under the pointer. */
+.ft {
+  display: grid;
+  grid-template-columns: 178px minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  overflow: hidden;
+  /* Tall enough for the deepest state — an open family, three modes, two views and the menu list —
+     so that choosing a type does not resize the pane under the pointer. */
+  min-height: 320px;
+}
+.ft-tree {
+  border-right: 1px solid var(--line);
+  background: var(--panel-2);
+  padding: 5px;
+  min-width: 0;
+}
+.ft-group + .ft-group {
+  margin-top: 1px;
+}
+.ft-kids {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 8px;
+  border-left: 1px solid var(--rule);
+  margin: 2px 0 5px 12px;
+}
+.ft-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--control-radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  /* Against the base `button` rule, which centres its content. A family row filled its width and
+     looked fine; a type row is one short word, so every type in the tree floated in the middle of
+     its own column and the list had no left edge to read down. */
+  justify-content: flex-start;
+}
+.ft-row:hover {
+  background: var(--fill-ghost-hover);
+}
+.ft-row[aria-selected="true"] {
+  background: var(--fill-ghost-selected);
+  font-weight: 500;
+}
+.ft-group > .ft-row {
+  font-weight: 500;
+}
+.ft-kids .ft-row {
+  font-weight: 400;
+  padding: 3px 8px;
+}
+.ft-caret {
+  width: 9px;
+  flex: none;
+  color: var(--dim);
+}
+.ft-count {
+  margin-left: auto;
+}
+/* A type that carries a preference of its own. A dot rather than a word: it says "not the same as
+   the family" at a glance, which is the only thing a tree row has room to say. */
+.ft-dot {
+  margin-left: auto;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+.ft-stage {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--panel);
+}
+.ft-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+}
+/* The subject's name, whole. It is two or three words and breaking it puts "All" on one line and
+   "code" on the next, which reads as two headings. What gives way instead is the line beside it. */
+.ft-head > .app-title {
+  white-space: nowrap;
+  flex: none;
+}
+
+/* The mode strip: three tabs, each carrying what that kind currently resolves to. The second line is
+   the whole point — it is what a person would otherwise have to click three times to learn. */
+.ft-modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+}
+.ft-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 6px 10px 5px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ft-mode:last-child {
+  border-right: 0;
+}
+.ft-mode:hover:not(:disabled) {
+  background: var(--fill-ghost-hover);
+}
+.ft-mode[aria-selected="true"] {
+  background: var(--panel);
+  border-bottom-color: var(--accent);
+}
+.ft-mode:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.ft-mode-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ft-bulb {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex: none;
+}
+.ft-mode.is-off .ft-bulb,
+.ft-mode:disabled .ft-bulb {
+  background: var(--rule);
+}
+.ft-mode-say {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 0.92);
+  color: var(--dim);
+}
+.ft-mode[aria-selected="true"] .ft-mode-say {
+  color: var(--text);
+}
+.ft-mode-say.is-mixed,
+.ft-slot .is-mixed {
+  font-style: italic;
+}
+
+.ft-body {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px 12px 13px;
+}
+/* Which of the two menus you are arranging. Above the menu rather than inside it: the menu is a
+   picture of one of them, and a control drawn on the picture would look like part of it. */
+.ft-arranging {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+/* The panel's own `▾` menu, drawn as itself — see `fileTypesPane.tsx`.
+   Lifted off the pane the way a real menu is, because that is what it is a picture of: the shadow
+   and the stronger border are the difference between "here is a list" and "here is the list you
+   will see". Capped, because a menu is as wide as its longest row and a menu the width of a
+   settings pane is not a menu anybody has met. */
+.ft-menu {
+  border: 1px solid var(--rule);
+  border-radius: var(--control-radius);
+  background: var(--panel);
+  box-shadow: var(--lift);
+  overflow: hidden;
+  max-width: 520px;
+}
+.ft-menu-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 11px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+/* A row is two buttons — the pick and the ✕ — rather than one with something clickable inside it,
+   so both are reachable from the keyboard. They share a hover so the pair still reads as one row. */
+.ft-mm-row {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+.ft-mm-row:hover {
+  background: var(--fill-ghost-hover);
+}
+.ft-mm-row.is-lead {
+  background: var(--fill-ghost-selected);
+}
+/* A lead that only reaches SOME of a family: the same mark, not filled all the way. */
+.ft-mm-row.is-part {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.ft-mm-row.is-part .ft-mm-tick {
+  opacity: 0.5;
+}
+.ft-mm-row.is-dim .ft-mm-name {
+  opacity: 0.45;
+}
+.ft-mm-pick {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 4px 5px 11px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  /* Both against the base `button` rule, which centres its content and refuses to wrap. A menu row
+     is a line of text with a tick in front of it, so it starts at the left edge like one; centred,
+     the whole list floated in the middle of the menu with the tick nowhere near its rows. */
+  justify-content: flex-start;
+  white-space: normal;
+}
+.ft-mm-pick:disabled {
+  cursor: default;
+}
+.ft-mm-tick {
+  width: 13px;
+  flex: none;
+  color: var(--accent);
+  font-size: calc(var(--size-app) * 0.9);
+}
+.ft-mm-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ft-mm-x {
+  flex: none;
+  padding: 0 11px;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: calc(var(--size-app) * 0.9);
+  cursor: pointer;
+}
+.ft-mm-x:hover:not(:disabled) {
+  color: var(--text);
+}
+.ft-mm-sep {
+  height: 1px;
+  background: var(--line);
+  margin: 3px 0 0;
+}
+.ft-mm-foot {
+  padding: 5px 11px 2px;
+}
+
+/* A palette as the colours it IS. Squares rather than circles: they read as swatches off a paint
+   chart, and the GROUND colour among them is what tells a light theme from a dark one at a glance,
+   which a list of names never does. */
+.ft-swatches {
+  display: inline-flex;
+  gap: 3px;
+  flex: none;
+}
+.ft-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  /* A hairline in the app's own line colour, so a theme whose ground is white still reads as a
+     square rather than as a gap in the row. */
+  border: 1px solid var(--line);
+}
+/* The one caveat worth interrupting a sentence for, and it is still only a clause. */
+.ft-caveat {
+  color: var(--warn);
+}
+
+/* The palette, once, for the view on screen — a strip under the table rather than a cell in it. */
+.ft-theme {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--panel-2);
+}
+.ft-theme > select {
+  flex: none;
+  max-width: 220px;
+}
+
+/* How far a control reaches, where that is not all of the family. Quiet: it QUALIFIES an answer
+   rather than warning about one. */
+.ft-reach {
+  background: var(--panel-2);
+  border-radius: 4px;
+  padding: 0 5px;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+
+/* The tick that says whether a renderer is offered at all — half-on where only some types in a
+   family offer it. */
+.ft-box {
+  accent-color: var(--accent);
+  margin: 0;
+  cursor: pointer;
+}
+
+/* The knobs that move the surface a renderer IS — folded in under the palette it is painted in, so
+   the three things about one renderer sit together. Its own box because the rows inside it are the
+   pane's switch-and-value shape, and a box is what keeps them from reading as more menu. */
+.ft-knobs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+}
+/* The switch rows were written for a 560px column; here they sit in a stage that is wider, and a
+   switch at one end of a line with its value at the other is a row nobody reads across. */
+.ft-knobs .ap-toggle {
+  max-width: 560px;
+}
+.ft-knobs-head {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 0;
+  padding-bottom: 5px;
+  margin-bottom: 3px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* The chosen renderer, drawing the chosen type — the real surface, under the controls that moved it.
+   A fixed height rather than the content's: these surfaces measure their container, and a preview
+   that grew as you typed in it would move the controls above it under the pointer. */
+.ft-preview {
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  overflow: hidden;
+}
+.ft-preview-bar {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 9px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+/* Which of the two views the picture is of, as a chip rather than a word in the sentence beside it:
+   it is the one thing in that bar that changes when the switch on the right is pressed. */
+.ft-tag {
+  font-family: var(--font-data);
+  font-size: calc(var(--size-data) * 0.85);
+  color: var(--dim);
+  background: var(--panel-3);
+  border-radius: 999px;
+  padding: 0 8px;
+  flex: none;
+}
+
+.ft-preview-body {
+  height: 190px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+/* The surfaces expect to fill a pane, and here they fill this one. */
+.ft-preview-body > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* No Save, no Revert. The surface is real and its ACTIONS are not: the text here is local and thrown
+   away, so a Save button would be a button that does nothing — and a preview showing controls it
+   cannot honour is the same lie this whole screen is careful about. */
+.ft-preview-body .pane-actions {
+  display: none;
+}
+.ft-preview-note {
+  padding: 22px 14px;
+  text-align: center;
+  line-height: 1.6;
+}
+/* The reading/editing switch, in the bar rather than beside the picks: it says which of the two
+   answers is on screen, which is a question about the preview and not about the settings. */
+.ft-seg {
+  display: inline-flex;
+  background: var(--panel-3);
+  border-radius: var(--control-radius);
+  padding: 2px;
+  gap: 2px;
+  flex: none;
+}
+.ft-seg button {
+  font: inherit;
+  font-size: calc(var(--size-app) * 0.88);
+  border: 0;
+  background: none;
+  color: var(--dim);
+  border-radius: var(--control-radius-sm);
+  padding: 1px 8px;
+  cursor: pointer;
+}
+.ft-seg button[aria-pressed="true"] {
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* The editor being configured, live — the real component, in a band tall enough to show a wrapped
+   line and a few rows of spacing. A fixed height rather than the content's: these editors measure
+   their container, and a preview that grew as you typed in it would move the controls above it. */
+.ap-editor-preview {
+  display: flex;
+  flex-direction: column;
+  height: 210px;
+  min-height: 210px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  /* The palette an editor is painted in may be the other one (`data-editor-theme`), and the tokens
+     are re-declared on the editor INSIDE this box — so the box itself must not paint a background
+     the editor then sits on. */
+  background: var(--bg);
+}
+/* Monaco carries no height of its own, CodeMirror wants to be told, and the JSON editor is a column
+   of its own chrome plus a stack — so all three are given the band and told to fill it. */
+.ap-editor-preview > .monaco-host,
+.ap-editor-preview > .vv-source,
+.ap-editor-preview > .md-editor,
+.ap-editor-preview > .file-edit {
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+}
+/* The diff preview sizes itself to its content between a floor and a ceiling (see `MonacoDiffPane`),
+   so the band is a viewport onto it rather than a frame it fills. */
+.ap-editor-preview.diff {
+  overflow: auto;
 }
 
 /* A choice between two named treatments, not a switch — see the note at the call site. Its own row
@@ -5021,8 +5582,69 @@ button.layer-on:hover:not(:disabled) {
   direction: rtl;
   text-align: left;
 }
+/*
+ * An editor painted in its own palette — the one rule a theme needs (`editorThemes.ts`).
+ *
+ * The theme publishes a dozen colours as `--ed-*` on the root; this maps them onto the app's own
+ * token names INSIDE the three containers every DOM editor is in, so everything below — CodeMirror's
+ * highlight style, the JSON editor's two layers, the plain box — is repainted without a single rule
+ * knowing it happened, and nothing outside them moves. Selected by the attribute's PRESENCE: no
+ * attribute means no theme of its own, and the editors inherit the window's palette as they always
+ * did.
+ *
+ * The containers are the TEXT, not the chrome around it. A schema picker or a Save button above an
+ * editor belongs to the app and stays in the app's palette, the same way the file tree beside it
+ * does — what somebody means by "a Monokai editor" is the code, not the furniture.
+ */
+:root[data-editor-theme] .md-editor,
+:root[data-editor-theme] .editor-stack,
+:root[data-editor-theme] .code-editor,
+/* …and the same mapping again, one element in, for a surface drawn in a palette of its OWN.
+   A theme is per type and per view now (§6.4), and the root can only hold one — so a container that
+   carries the twelve variables locally gets them mapped here, and everything under it is painted in
+   that palette without anything else on the page moving. It is what makes a colour scheme chosen for
+   Markdown visible in a CodeMirror editor, which reads these tokens and knows nothing about Monaco's
+   global theme. */
+.ed-themed .md-editor,
+.ed-themed .editor-stack,
+.ed-themed .code-editor {
+  /* Which way round the scrollbars and the form controls inside the editor are drawn. */
+  color-scheme: var(--ed-scheme);
+  --bg: var(--ed-bg);
+  --panel: var(--ed-bg);
+  --panel-2: var(--ed-panel);
+  --text: var(--ed-text);
+  --dim: var(--ed-dim);
+  --line: var(--ed-line);
+  --rule: var(--ed-line);
+  --tok-string: var(--ed-tok-string);
+  --tok-number: var(--ed-tok-number);
+  --tok-keyword: var(--ed-tok-keyword);
+  --tok-type: var(--ed-tok-type);
+  --tok-hint: var(--ed-tok-hint);
+  /*
+   * …and PAINT with them, rather than only redefining them.
+   *
+   * A redefined custom property only changes what USES it, and the markdown editor used neither: it
+   * sets no colour of its own, so its text was inherited from the document and computed with the
+   * app's token rather than this container's. The effect was a palette that moved every editor in
+   * the window except the one made of CodeMirror — quietly, because the variables were all correct.
+   *
+   * Stated here rather than on `.md-editor` so an editor NOT in a palette of its own is untouched:
+   * it sits inside a panel in a transcript and in a value, and giving it the page's ground there
+   * would repaint a card nobody asked about.
+   */
+  color: var(--ed-text);
+  background: var(--ed-bg);
+}
+
+/* The plain box a type with no grammar falls back to — the `code` surface's other half, so it takes
+   that surface's spacing and tab width (`applyEditors`), with its old values as the fallbacks.
+   Not its WRAPPING: this box is what text with no structure lands in, a textarea soft-wraps by
+   default, and prose that scrolled sideways because somebody turned wrapping off for their code
+   would be the preference reaching a surface it was never about. */
 .code-editor {
-  font: var(--size-editor)/1.5 var(--font-data);
+  font: var(--size-editor)/var(--ed-code-lh, 1.5) var(--font-data);
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--line);
@@ -5031,7 +5653,7 @@ button.layer-on:hover:not(:disabled) {
   width: 100%;
   min-height: 220px;
   resize: vertical;
-  tab-size: 2;
+  tab-size: var(--ed-code-tab, 2);
 }
 .code-editor.tall {
   min-height: 340px;
@@ -6607,6 +7229,17 @@ button.link.change-path {
   display: flex;
   min-width: 0;
 }
+/* A nested form inside a field's control, told to GROW — without which it is zero pixels wide.
+   `.cfg-fields` carries `container-type: inline-size`, which is what lets a field stack when its own
+   box is narrow; containment also makes the element's inline size independent of its contents, so a
+   flex item sized from its contents computes to nothing at all. Every nested object in every form in
+   this app was drawn in a column six characters wide, with each word of a description on its own
+   line — visible for the first time when the file form started resolving `$ref`s and there was
+   finally something deep enough to notice it in. */
+.cfg-control > .cfg-fields {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .cfg-stack {
   display: flex;
   flex-direction: column;
@@ -8153,6 +8786,24 @@ fieldset.reading {
    it reads as a stray word at the end of the description. */
 .vv-form .cfg-param {
   display: none;
+}
+/* The same form as the UPPER half of the Files panel (`JsonFormView`), where it is a reading of a
+   whole file rather than of a value in a message. It scrolls, because that half has a height the
+   divider decides and a settings document is longer than any of them. */
+.file-form {
+  overflow: auto;
+  padding: 8px 10px;
+}
+/* NESTED fields in a reading stack, rather than splitting into a statement and a value again.
+   The two-column field is right at the top level — the eye runs down the left edge for what a thing
+   is and the right edge for what it holds — and wrong the moment it repeats inside itself: each
+   level takes its label column out of the previous level's value column, so by the third the
+   description is six characters wide and wraps one word per line. `.cfg-span` is exactly the marker
+   for "this member is a block rather than a cell", so it is the right hook. */
+.vv-form .cfg-span .cfg-field,
+.file-form .cfg-span .cfg-field {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
 }
 /* A read-only form is a rendering, so its controls stop looking like somewhere to type: no fill, no
    focus ring, no cursor. What is left is the value, laid out as the fields its schema declares. */

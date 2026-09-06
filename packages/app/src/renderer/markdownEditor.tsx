@@ -38,7 +38,8 @@ import { codeMirrorGrammarOf, mimeOfFenceLang } from "@jaira/shared/browser";
 import { fenceRenderer } from "./markdown";
 import MarkdownIt from "markdown-it";
 import { Compartment, EditorState, Facet, StateEffect, StateField, type Extension, type Range } from "@codemirror/state";
-import { Decoration, EditorView, keymap, WidgetType, type DecorationSet } from "@codemirror/view";
+import { Decoration, EditorView, highlightActiveLine, keymap, lineNumbers, WidgetType, type DecorationSet } from "@codemirror/view";
+import { editorLook, onEditorLook } from "./editorLook";
 import { tags } from "@lezer/highlight";
 import type { SyntaxNode } from "@lezer/common";
 
@@ -1433,10 +1434,32 @@ function diffDecorations(spans: DiffSpans, length: number): Extension {
 const THEME = EditorView.theme({
   "&": { fontSize: "inherit" },
   "&.cm-focused": { outline: "none" },
-  ".cm-content": { fontFamily: "inherit", padding: "8px 2px", lineHeight: "1.6" },
+  // The spacing is a preference now (`editors.markdown.lineHeight`), published as a custom property
+  // by `applyEditors`. The literal stays as the fallback rather than being deleted: it is what this
+  // editor is set in before any settings file has been read, and it is the value the preference
+  // defaults to — so the two can never disagree about what "untouched" looks like.
+  ".cm-content": { fontFamily: "inherit", padding: "8px 2px", lineHeight: "var(--ed-markdown-lh, 1.6)" },
   ".cm-line": { padding: "0 2px" },
-  ".cm-scroller": { fontFamily: "inherit", lineHeight: "1.6" },
+  ".cm-scroller": { fontFamily: "inherit", lineHeight: "var(--ed-markdown-lh, 1.6)" },
 });
+
+/**
+ * The look, as extensions — swapped in a compartment rather than rebuilt with the editor.
+ *
+ * Three of the five knobs this surface answers are extensions (`lineNumbers`, `lineWrapping`,
+ * `highlightActiveLine`) and one is a facet (`tabSize`); the fifth, spacing, is CSS and reaches the
+ * theme above on its own. Wrapping used to be unconditional here, which was a defensible default
+ * for prose and an odd thing to have decided on somebody else's behalf.
+ */
+function lookExtensions(): Extension[] {
+  const look = editorLook("markdown");
+  return [
+    EditorState.tabSize.of(look.tabSize),
+    ...(look.lineNumbers ? [lineNumbers()] : []),
+    ...(look.wrap ? [EditorView.lineWrapping] : []),
+    ...(look.currentLine ? [highlightActiveLine()] : []),
+  ];
+}
 
 /**
  * The editor.
@@ -1471,6 +1494,8 @@ export function MarkdownEditor({
   const writable = readOnly !== true;
   /** Swapped rather than re-created, so toggling read-only keeps the caret and the undo history. */
   const editable = useRef(new Compartment());
+  /** The same trick for the appearance preferences — see {@link lookExtensions}. */
+  const look = useRef(new Compartment());
 
   useEffect(() => {
     const node = host.current;
@@ -1491,7 +1516,7 @@ export function MarkdownEditor({
       markdown({ base: markdownLanguage, codeLanguages: fenceLanguage }),
       syntaxHighlighting(LOOK),
       LIVE_PREVIEW,
-      EditorView.lineWrapping,
+      look.current.of(lookExtensions()),
       THEME,
       editable.current.of(EditorView.editable.of(writable)),
       diffs.current.of(spans === null ? [] : diffDecorations(spans, text.length)),
@@ -1539,6 +1564,18 @@ export function MarkdownEditor({
   useEffect(() => {
     view.current?.dispatch({ effects: editable.current.reconfigure(EditorView.editable.of(writable)) });
   }, [writable]);
+
+  /**
+   * Follow the appearance preferences while the editor is open.
+   *
+   * A subscription rather than a prop, for the reason `editorLook.ts` exists: this editor is created
+   * once and never re-created, so a value read in that effect is a value frozen at mount. The
+   * compartment is what lets the answer change without the document, the caret or the undo history
+   * going with it.
+   */
+  useEffect(() => onEditorLook(() => {
+    view.current?.dispatch({ effects: look.current.reconfigure(lookExtensions()) });
+  }), []);
 
   return <div className={writable ? "md-editor" : "md-editor read-only"} ref={host} />;
 }

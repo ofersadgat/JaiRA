@@ -186,8 +186,13 @@ export function SettingsPane({
  *
  * Spelled out rather than cast, so that adding a field to {@link FileSurfaceContext} makes this
  * fail to compile instead of quietly passing `undefined` into a surface that expects it.
+ *
+ * EXPORTED for the surfaces that mount one at a time with no shell behind them — the file-types
+ * preview is the one in the tree — because they need exactly this: every channel present and inert.
+ * A second hand-written copy would be a second thing to keep in step with the interface, and it
+ * would rot the first time somebody added a field.
  */
-const EMPTY_CONTEXT: FileSurfaceContext = {
+export const EMPTY_CONTEXT: FileSurfaceContext = {
   state: null,
   config: null,
   tree: null,

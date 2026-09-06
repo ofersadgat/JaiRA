@@ -99,8 +99,7 @@ export interface ComponentGalleryProps {
    * What to show. Defaults to everything, which is what the Debug view wants.
    *
    * A parameter rather than a constant because the gallery is a list of surfaces, and a caller that
-   * wants two of them — the snapshot harness photographs a pair — should not have to reimplement the
-   * card to get them.
+   * wants only some of them should not have to reimplement the card to get them.
    */
   surfaces?: readonly GallerySurface[];
 }

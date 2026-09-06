@@ -605,6 +605,24 @@ export function displayText(value: unknown): string {
 
 // --- lint: does the state pass the component what it needs? ------------------
 
+/**
+ * What an input-supplied config key stands in as, so the rest of the config still parses.
+ *
+ * Only the keys whose shape is not a plain string need an entry; a non-empty string satisfies every
+ * other one, and `str` refuses an empty one. None of these values is ever shown or used — they exist
+ * so a missing key does not mask the authoring mistakes that ARE in the file.
+ */
+const CONFIG_KEY_PLACEHOLDERS: Record<string, unknown> = {
+  options: ["supplied-by-an-input"],
+  decisions: ["supplied-by-an-input"],
+  fields: [{ name: "supplied-by-an-input" }],
+  tree: "proposal",
+  comments: true,
+  multiple: false,
+  require_confirm: false,
+  editable: false,
+};
+
 /** One thing wrong with a component operation's authored `args`. */
 export interface ComponentConfigIssue {
   stateId: string;
@@ -629,6 +647,16 @@ export interface ComponentConfigIssue {
  *
  * Read off the AUTHORED document rather than the loaded bundle. `args` is what an author writes and
  * what they will fix, and a message about `operation.args` should name the thing in the file.
+ *
+ * One thing `args` alone cannot tell us: a function receives its args MERGED WITH the state's
+ * resolved inputs into one namespace (see {@link changesetInputOf}), and main parses the component's
+ * config off that merge rather than off `args`. So a config key can legitimately arrive from an
+ * input — a `fill_form` whose `fields` are the questions an earlier state produced is the case that
+ * found this, and it cannot be authored any other way, because the questions are not known until the
+ * run makes them. Judging such a state from `args` alone reports a missing key against a state that
+ * supplies it. An input of the same name is therefore treated as satisfying the key, and what it
+ * actually resolves to is checked where it can be: at run time, by the same parse, before the dialog
+ * is shown.
  */
 export function componentConfigIssues(states: Record<string, unknown>): ComponentConfigIssue[] {
   const issues: ComponentConfigIssue[] = [];
@@ -645,8 +673,19 @@ export function componentConfigIssues(states: Record<string, unknown>): Componen
     // A referenced `args` block resolves to something this pass cannot see. Judging it from here
     // would report a missing option against a file that never claimed to declare one.
     if (op.args !== undefined && (typeof op.args !== "object" || op.args === null || Array.isArray(op.args))) continue;
+    // Stand in for the keys the state declares as inputs: at run time the merge supplies them, so
+    // their absence from `args` is not a defect. A placeholder that PARSES is what is wanted here —
+    // the point is to get past "this key is missing" and still check everything the author did write.
+    const declared = (def as { inputs?: unknown }).inputs;
+    const fromInputs: Record<string, unknown> = {};
+    if (declared !== null && typeof declared === "object" && !Array.isArray(declared)) {
+      for (const key of Object.keys(declared)) {
+        if (op.args !== undefined && Object.prototype.hasOwnProperty.call(op.args, key)) continue;
+        fromInputs[key] = CONFIG_KEY_PLACEHOLDERS[key] ?? "supplied-by-an-input";
+      }
+    }
     try {
-      parseComponentConfig(name, op.args);
+      parseComponentConfig(name, { ...fromInputs, ...(op.args as Record<string, unknown> | undefined) });
     } catch (e) {
       issues.push({ stateId, path: "operation.args", message: (e as Error).message });
     }

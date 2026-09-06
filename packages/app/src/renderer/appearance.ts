@@ -7,6 +7,7 @@
  * component — a px anywhere is a component this cannot reach.
  */
 import { SIZE_LIMITS, clampSize, type Appearance } from "@jaira/shared/browser";
+import { EDITOR_THEMES, editorThemeSpec, editorThemeVars } from "./editorThemes";
 
 /**
  * The stacks a chosen family is prepended TO — never replaced by.
@@ -88,6 +89,30 @@ export function applyAppearance(root: HTMLElement, a: Appearance): void {
   // Grayscale antialiasing, off by default — see `Appearance.smoothing`.
   set("-webkit-font-smoothing", a.smoothing ? "antialiased" : null);
   set("-moz-osx-font-smoothing", a.smoothing ? "grayscale" : null);
+  /**
+   * The editors' own palette: an ATTRIBUTE that switches the rule on, and the colours it reads.
+   *
+   * Both, because they do different jobs. One rule in the stylesheet maps a theme's colours onto the
+   * app's own tokens INSIDE the three DOM editor containers — that rule is selected by the attribute
+   * — and the colours themselves are custom properties, because they are values rather than a
+   * switch and there are twelve of them per theme (`editorThemeVars`).
+   *
+   * Written on `:root`, where the fonts and sizes are, so one observer on one element covers every
+   * display preference an editor has to follow. Monaco reads the attribute from here too, though it
+   * takes its colours from `defineTheme` rather than from these — a canvas inherits no CSS.
+   *
+   * REMOVED for `app`, which is the same "unset means unset" this whole module is built on: with no
+   * attribute the rule does not match, and every editor inherits the window's own theme, which is
+   * what they all did before palettes existed.
+   */
+  const theme = editorThemeSpec(a.editorTheme);
+  if (theme === undefined) {
+    delete root.dataset["editorTheme"];
+    for (const name of Object.keys(editorThemeVars(EDITOR_THEMES[0]!))) set(name, null);
+    return;
+  }
+  root.dataset["editorTheme"] = theme.id;
+  for (const [name, value] of Object.entries(editorThemeVars(theme))) set(name, value);
 }
 
 /**

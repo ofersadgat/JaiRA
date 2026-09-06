@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
-import { defaultAppearance, type PushMessage } from "@jaira/shared";
+import { defaultAppearance, defaultEditors, type PushMessage } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService, type KeychainPort } from "../src/main/service";
 
@@ -64,7 +64,7 @@ afterEach(async () => {
 describe("user settings", () => {
   it("defaults to the light theme, with no project open", () => {
     // Preferences belong to the person, not the checkout — the theme must apply on an empty window.
-    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), projects: [], filesHidden: [] });
+    expect(service.readSettings()).toEqual({ theme: "light", ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), editors: defaultEditors(), renderers: {}, projects: [], filesHidden: [] });
   });
 
   it("persists a change and reads it back", () => {
@@ -77,22 +77,40 @@ describe("user settings", () => {
     writeFileSync(join(baseDir, "user-settings.json"), "{ not json", "utf8");
 
     // A broken preferences file must never stop the app opening.
-    expect(service.readSettings()).toEqual({ theme: "light", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), projects: [], filesHidden: [] });
+    expect(service.readSettings()).toEqual({ theme: "light", ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), editors: defaultEditors(), renderers: {}, projects: [], filesHidden: [] });
   });
 
   it("keeps the JSON editor's wrap preference, and defaults it off", () => {
     // A display preference like the theme: it belongs to the person, so it lives here rather than in
-    // component state that resets on every file you open.
-    expect(service.readSettings().wrapJson).toBe(false);
-    expect(service.writeSettings({ wrapJson: true }).wrapJson).toBe(true);
-    expect(service.readSettings().wrapJson).toBe(true);
+    // component state that resets on every file you open. It sits with the other seven questions
+    // about that editor now (`editors.json`) rather than in a boolean of its own — see `EditorLook`.
+    expect(service.readSettings().editors.json.wrap).toBe(false);
+    const editors = { ...service.readSettings().editors };
+    editors.json = { ...editors.json, wrap: true };
+    expect(service.writeSettings({ editors }).editors.json.wrap).toBe(true);
+    expect(service.readSettings().editors.json.wrap).toBe(true);
     // And it does not disturb what was already saved.
     expect(service.readSettings().theme).toBe("light");
   });
 
+  it("carries a wrapJson written before the editor looks existed into its new home", () => {
+    // The migration, and the only thing that makes moving the field safe: a person who turned wrap
+    // on keeps it, with nothing to re-set and nothing rewriting their file behind them.
+    writeFileSync(join(baseDir, "user-settings.json"), JSON.stringify({ wrapJson: true }), "utf8");
+    expect(service.readSettings().editors.json.wrap).toBe(true);
+    // …and the NEW field wins where both are present, so a stale key cannot overrule a choice made
+    // since. `writeSettings` merges rather than replaces, so that key does outlive the change.
+    writeFileSync(
+      join(baseDir, "user-settings.json"),
+      JSON.stringify({ wrapJson: true, editors: { json: { wrap: false } } }),
+      "utf8",
+    );
+    expect(service.readSettings().editors.json.wrap).toBe(false);
+  });
+
   it("reads a settings file written before wrapJson existed", () => {
     writeFileSync(join(baseDir, "user-settings.json"), JSON.stringify({ theme: "dark" }), "utf8");
-    expect(service.readSettings()).toEqual({ theme: "dark", wrapJson: false, ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), projects: [], filesHidden: [] });
+    expect(service.readSettings()).toEqual({ theme: "dark", ui: { panes: {}, open: {}, modes: {}, shut: {}, unfolded: {}, seen: {} }, appearance: defaultAppearance(), editors: defaultEditors(), renderers: {}, projects: [], filesHidden: [] });
   });
 
   it("reads a hand-edited project list without throwing any of it away", () => {

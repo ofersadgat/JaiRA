@@ -25,7 +25,7 @@
  * entry for `text/markdown` therefore names every dialect of markdown that will ever exist, and a
  * type this table has never heard of still comes back wearing the name of the syntax underneath it.
  */
-import { mimeFallbacks } from "./mime";
+import { CONFIG_JSON, WORKFLOW_DESCRIPTION, WORKFLOW_JSON, WORKFLOW_YAML, mimeFallbacks } from "./mime";
 
 /**
  * The kinds of thing a value can be, at the resolution an icon can carry.
@@ -58,7 +58,9 @@ const NAMES: Record<string, TypeName> = {
   "text/x-typescript": { label: "TypeScript", family: "code" },
   "text/x-python": { label: "Python", family: "code" },
   "application/x-sh": { label: "Shell", family: "code" },
-  "application/sql": { label: "SQL", family: "code" },
+  // `text/x-sql`, which is what `mimeOfPath` produces for a `.sql` file. It was written here as
+  // `application/sql` — a type nothing in this app ever carries — so SQL files showed as Plain text.
+  "text/x-sql": { label: "SQL", family: "code" },
   "application/xml": { label: "XML", family: "code" },
   "application/json": { label: "JSON", family: "data" },
   "application/yaml": { label: "YAML", family: "data" },
@@ -66,6 +68,24 @@ const NAMES: Record<string, TypeName> = {
   "text/csv": { label: "CSV", family: "table" },
   "text/tab-separated-values": { label: "TSV", family: "table" },
   "text/x-diff": { label: "Diff", family: "changes" },
+  /**
+   * JaiRA's own four, which until now came back wearing the name of the syntax underneath them.
+   *
+   * That was right while nothing asked: `text/vnd.jaira.workflow-description+markdown` IS markdown,
+   * and the chain saying so is the whole reason a vendor type needs no entry here. It stopped being
+   * right when a control started listing types by name for a person to set a preference against —
+   * three separate rows called "JSON" is a list nobody can use, and the thing that distinguishes
+   * them is exactly what the vendor type says.
+   *
+   * The two workflow types are named by syntax rather than one being "Workflow" and the other
+   * "Workflow (YAML)", because they are not a type and its variant: the authoring form serialises
+   * JSON and must never be offered for the YAML one. A name that hid that would be hiding the reason
+   * they are two types.
+   */
+  [WORKFLOW_JSON]: { label: "Workflow (JSON)", family: "data" },
+  [WORKFLOW_YAML]: { label: "Workflow (YAML)", family: "data" },
+  [WORKFLOW_DESCRIPTION]: { label: "Workflow description", family: "prose" },
+  [CONFIG_JSON]: { label: "Project settings", family: "data" },
   // Markup that is also a picture. `media`, because what somebody wants from an SVG is to see it —
   // `viewsFor` keeps the source underneath, so naming it a picture takes nothing away.
   "image/svg+xml": { label: "SVG", family: "media" },
@@ -125,6 +145,69 @@ export function typeNameOf(mime: string | undefined): TypeName {
  * a model is to have produced one. Not every registered type is here — this is the list of things
  * worth OFFERING, and offering a font is offering a reading nothing can produce.
  */
+/**
+ * The families the Appearance pane groups types into — coarser than {@link TypeFamily}, on purpose.
+ *
+ * The icon families answer "what sort of thing is this" for a glyph in a tree, where `plain` and
+ * `table` earn their own marks. The settings pane is asking a different question — "which of these
+ * do I want to set together" — and the answer to that is coarser twice over: text with nothing
+ * claimed about it is prose, and a CSV is a document that denotes a value like any other data file.
+ * Folding them leaves five groups, each with enough members to be worth opening.
+ */
+export type PaneFamily = "prose" | "code" | "data" | "changes" | "media";
+
+/** In the order the pane lists them, with the line each group's row carries. */
+export const PANE_FAMILIES: ReadonlyArray<{ id: PaneFamily; label: string; note: string }> = [
+  { id: "prose", label: "Prose", note: "documents — including text with nothing claimed about it" },
+  { id: "code", label: "Code", note: "source files, drawn by grammar" },
+  { id: "data", label: "Data", note: "documents that denote a value — rows included" },
+  { id: "changes", label: "Changes", note: "a patch, and the edit it describes" },
+  { id: "media", label: "Media", note: "pictures, and the markup that draws them" },
+];
+
+/** Which of the five a type belongs to. Total, like {@link typeNameOf} — an unknown type is prose. */
+export function paneFamilyOf(mime: string | undefined): PaneFamily {
+  const family = typeNameOf(mime).family;
+  if (family === "plain") return "prose";
+  if (family === "table") return "data";
+  return family;
+}
+
+/**
+ * The types the Appearance pane offers a row for, in the order it lists them within each family.
+ *
+ * A LIST rather than every type this app can name, because the question here is which types a person
+ * might want to draw differently — and because two of the names that exist are not answers to it. A
+ * workflow description is markdown, and the chain already says so, so a row for it would be a second
+ * row called Markdown that somebody then has to tell apart from the first. Project settings is a
+ * particular FILE rather than a kind of file, and it is deliberately restricted to the editor that
+ * parses before it writes; offering a preference against it would offer to break that.
+ *
+ * Distinct from {@link OFFERED_TYPES}, which answers a different question — what a person may assert
+ * a piece of text IS — and which would be the wrong list here in both directions.
+ */
+export const PANE_TYPES: readonly string[] = [
+  "text/markdown",
+  "text/plain",
+  "text/x-typescript",
+  "text/javascript",
+  "text/x-python",
+  "application/x-sh",
+  "text/css",
+  "text/html",
+  "application/xml",
+  "text/x-sql",
+  "application/json",
+  "application/yaml",
+  "application/toml",
+  WORKFLOW_JSON,
+  WORKFLOW_YAML,
+  "text/csv",
+  "text/tab-separated-values",
+  "text/x-diff",
+  "image/svg+xml",
+];
+
 export const OFFERED_TYPES: readonly string[] = [
   "text/markdown",
   "text/plain",

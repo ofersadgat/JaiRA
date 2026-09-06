@@ -12,10 +12,22 @@
          refused before it is fetched. It admits that scheme and nothing else: a static artifact is
          still shown from srcdoc, which needs no allowance here and gets no scripts — this app's own
          script-src is inherited by such a frame, which is precisely why an interactive one cannot
-         use srcdoc at all. -->
+         use srcdoc at all.
+
+         'wasm-unsafe-eval' is for the TextMate tokenizer (`textmate.ts`): the grammars run on an
+         Oniguruma WASM build, and instantiating WebAssembly is compilation, which a bare
+         script-src 'self' refuses. It is the NARROW directive for exactly that — it permits
+         WebAssembly and nothing else, and in particular does not permit eval() of JavaScript, which
+         'unsafe-eval' would. The module is bundled and inlined, so this admits no remote code
+         either; the §7.3 Electron rule stands.
+
+         It was added after the app and the snapshot harness were found to disagree: the harness page
+         carries no CSP, so WASM instantiated there and the figures showed the real grammars while
+         the app quietly fell back to Monaco's own tokenizer. The harness now carries this same
+         header, so it cannot pass where the app fails. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; worker-src 'self' blob:; font-src 'self'; frame-src jaira-artifact:"
+      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; worker-src 'self' blob:; font-src 'self'; frame-src jaira-artifact:"
     />
     <title>JaiRA</title>
   </head>

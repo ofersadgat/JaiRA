@@ -43,6 +43,7 @@
  * hosting the value viewer inside a CodeMirror widget — possible, and a project rather than a tidy.
  */
 import { lazy, Suspense, type JSX } from "react";
+import type { RenderView } from "@jaira/shared/browser";
 import { Markdown } from "./markdown";
 
 /**
@@ -114,6 +115,15 @@ export interface CodeDocumentProps {
    * editor that waits to be told one draws a single line in a screenful of nothing.
    */
   autoHeight?: boolean | undefined;
+  /**
+   * Which of the type's two views this is — the palette it asks for.
+   *
+   * Absent is `write` for an editor and `read` for a reading, which is what `onChange` already says,
+   * so almost nobody passes it. The one caller that must is a surface mounted as the READING of a
+   * type by something other than the panel — the settings preview — where the editor is editable and
+   * is still not the editor view.
+   */
+  view?: RenderView | undefined;
 }
 
 /**
@@ -125,7 +135,7 @@ export interface CodeDocumentProps {
  * blocks in a conversation need and forty mounted editors would break. An editor buys scrolling,
  * folding, a caret, and the ability to type; nothing that is only being read wants any of it.
  */
-export function CodeDocument({ text, mime, onChange, autoHeight }: CodeDocumentProps): JSX.Element {
+export function CodeDocument({ text, mime, onChange, autoHeight, view }: CodeDocumentProps): JSX.Element {
   if (onChange === undefined) {
     return (
       <Suspense fallback={<pre className="vv-source">{text}</pre>}>
@@ -135,7 +145,13 @@ export function CodeDocument({ text, mime, onChange, autoHeight }: CodeDocumentP
   }
   return (
     <Suspense fallback={<pre className="vv-source">{text}</pre>}>
-      <MonacoCodePane text={text} mime={mime} onChange={onChange} {...(autoHeight === undefined ? {} : { autoHeight })} />
+      <MonacoCodePane
+        text={text}
+        mime={mime}
+        onChange={onChange}
+        view={view ?? "write"}
+        {...(autoHeight === undefined ? {} : { autoHeight })}
+      />
     </Suspense>
   );
 }

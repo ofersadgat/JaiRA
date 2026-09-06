@@ -20,8 +20,7 @@
     "start": "npm run build && npm run abi:electron && electron .",
     "abi:electron": "node ../../scripts/nativeAbi.mjs electron",
     "abi:node": "node ../../scripts/nativeAbi.mjs node",
-    "build:snapshot": "vite build --config vite.snapshot.config.ts",
-    "snapshot": "npm run build:snapshot && electron snapshot/shoot.mjs"
+    "shots": "tsx shots/run.mts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.0",
@@ -41,11 +40,13 @@
     "@jaira/shared": "*",
     "@lezer/highlight": "^1.2.3",
     "@lezer/markdown": "^1.7.2",
+    "@shikijs/monaco": "^4.4.3",
     "ajv": "^8.20.0",
     "markdown-it": "^15.0.0",
     "monaco-editor": "^0.56.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "shiki": "^4.4.3",
     "typescript": "^5.7.2",
     "yaml": "^2.9.0"
   },

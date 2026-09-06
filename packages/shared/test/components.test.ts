@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   COMPONENT_NAMES,
+  componentConfigIssues,
   displayText,
   isComponentName,
   parseComponentConfig,
@@ -256,5 +257,50 @@ describe("displayText", () => {
     expect(displayText({ artifact: true, path: "docs/plan.md" })).toBe("docs/plan.md");
     expect(displayText(undefined)).toBe("");
     expect(displayText({ a: 1 })).toBe('{\n  "a": 1\n}');
+  });
+});
+
+describe("componentConfigIssues", () => {
+  it("reports a config key that is neither authored nor an input", () => {
+    const issues = componentConfigIssues({
+      "feature/product/ask": {
+        inputs: { prompt: {} },
+        operation: { kind: "function", function: "fill_form", args: { prompt: "Answer these" } },
+      },
+    });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.stateId).toBe("feature/product/ask");
+    expect(issues[0]!.path).toBe("operation.args");
+    expect(issues[0]!.message).toContain("fill_form.fields");
+  });
+
+  it("accepts a config key the state declares as an input, because the run merges it in", () => {
+    // The questions are not known until the draft produces them, so `fields` CANNOT be authored.
+    // Main parses the config off args merged with resolved inputs, so this state is legal.
+    expect(
+      componentConfigIssues({
+        "feature/product/ask": {
+          inputs: { fields: { schema: { type: "array" }, default: [] } },
+          operation: { kind: "function", function: "fill_form", args: { prompt: "Answer these" } },
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  it("still reports the keys the author did write wrongly, next to an input-supplied one", () => {
+    const issues = componentConfigIssues({
+      "gate": {
+        inputs: { options: {} },
+        operation: { kind: "function", function: "choose_option", args: { prompt: "" } },
+      },
+    });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.message).toContain("prompt");
+  });
+
+  it("leaves a non-component function alone", () => {
+    expect(
+      componentConfigIssues({ s: { operation: { kind: "function", function: "run_command", args: {} } } }),
+    ).toEqual([]);
   });
 });

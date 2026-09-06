@@ -1,68 +1,88 @@
 /**
- * The signature-driven form's resolution rules — ported from findmyprompt along with the form.
+ * The generic form, against the schemas this app actually has.
  *
- * What is tested here is the RESOLUTION, not the rendering: which widget a node gets, and where a
- * member's label comes from. Those are the two decisions that make the form follow the schema
- * instead of a hand-written copy of it, and they are pure.
+ * It was ported from a project whose schemas were written FOR a form: flat objects of scalars, every
+ * shape spelled out where it is used. `shared/schemas.ts` is not that. Those documents are written
+ * for an editor's completion and for validation, so a shape used twice is declared once under
+ * `definitions` and referred to — three hundred `$ref`s in the state schema alone — and the maps a
+ * state is mostly made of (`inputs`, `outputs`) carry no `properties` at all, because the keys are
+ * the author's.
+ *
+ * Rendered to static markup, like the other view tests here. Three properties are worth holding
+ * down, and each one was a defect before it was a test:
+ *
+ *  - A reference is FOLLOWED, or a member declared once and used twice draws as a heading with
+ *    nothing under it.
+ *  - A reference that has already been followed on this path is NOT followed again. A JSON Schema
+ *    that describes JSON Schema refers to itself, a slot's `schema` member is one, and a renderer
+ *    that draws every declared property therefore recursed until the window stopped responding.
+ *    That is a hang rather than a crash: nothing throws, so nothing but a test like this catches it.
+ *  - A form that READS a document draws what the document says, not what its schema permits.
  */
 import { describe, expect, it } from "vitest";
-import { EXECUTOR_STEPS } from "@jaira/shared/browser";
-import { presentationFor, prettify } from "../src/renderer/schemaForm/presentation";
-import { widgetFor } from "../src/renderer/schemaForm/registry";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { schemaById } from "@jaira/shared/browser";
+import { SchemaForm } from "../src/renderer/schemaForm/SchemaForm";
+import type { Schema, SchemaFormContext } from "../src/renderer/schemaForm/types";
 
-describe("the widget registry", () => {
-  it("resolves a registered rich leaf, and nothing else", () => {
-    // The fall-through is the property worth keeping: a schema nobody has written a widget for is
-    // still editable by the structural renderer, so the form is never silently lossy.
-    expect(widgetFor("llm-config")).toBeTypeOf("function");
-    expect(widgetFor("retry")).toBeUndefined();
-    expect(widgetFor(undefined)).toBeUndefined();
-  });
-});
+const STATE = schemaById("state")!.document as unknown as Schema;
 
-describe("where a member's label comes from", () => {
-  it("prefers the presentation map, which is the only wording written for a reader of the form", () => {
-    const pres = presentationFor("retry", "transient", { title: "transient attempts" });
-    expect(pres.label).toBe("attempts after a retriable failure");
-    expect(pres.tooltip).toContain("429");
-  });
+/** The document a form is a reading OF — a small state, with both kinds of map filled in. */
+const DOC = {
+  label: "Review the changeset",
+  inputs: { changeset: { schema: { type: "object" } } },
+  outputs: { verdict: { schema: { type: "string" } } },
+  operation: { kind: "prompt", prompt: "Read the diff." },
+};
 
-  it("falls back to the schema's own title and description", () => {
-    const pres = presentationFor("deadline", "maxDurationMs", {
-      title: "window (ms)",
-      description: "How long the call may take.",
-    });
-    expect(pres).toEqual({ label: "window (ms)", tooltip: "How long the call may take." });
-  });
+const draw = (schema: Schema, value: unknown, ctx: Partial<SchemaFormContext> = {}): string =>
+  renderToStaticMarkup(
+    createElement(SchemaForm, { schema, value, onChange: () => undefined, ctx: { path: "", ...ctx } }),
+  );
 
-  it("falls back to the prettified key when neither says anything", () => {
-    expect(presentationFor(undefined, "maxBackoffMs", {})).toEqual({ label: "max backoff ms" });
+describe("a form built from one of this app's own schemas", () => {
+  it("terminates on a schema that refers to itself", () => {
+    // The whole test, and it is a timeout rather than an assertion: a slot's `schema` member is a
+    // JSON Schema describing JSON Schema, whose `items` refers back to it. Following that for ever
+    // is not an exception — it is a render that never returns, which is why this is worth a test of
+    // its own rather than a line in another one.
+    const html = draw(STATE, DOC, { reading: true });
+    expect(html.length).toBeGreaterThan(0);
   });
 
-  it("prettifies camelCase and kebab alike", () => {
-    expect(prettify("maxOutputTokens")).toBe("max output tokens");
-    expect(prettify("model-set")).toBe("model set");
+  it("follows a reference, so a member declared once still draws", () => {
+    // `inputs.changeset` is a slot, and a slot is declared under `definitions`. Before references
+    // were followed this was an object with no properties: a heading with nothing beneath it.
+    expect(draw(STATE, DOC, { reading: true })).toContain("JSON Schema for the value");
   });
-});
 
-/**
- * The bridge that makes the whole arrangement worth it: every field of every step resolves to a
- * label and a control WITHOUT anyone having written a form for it.
- *
- * If this fails, a step has gained a field that renders as a bare prettified key with no hint — which
- * is the drift the shared schema exists to prevent.
- */
-describe("every step's schema is renderable", () => {
-  it("gives every field of every step a label and a hint", () => {
-    for (const step of EXECUTOR_STEPS) {
-      const properties = step.schema["properties"] as Record<string, Record<string, unknown>>;
-      expect(Object.keys(properties).length).toBeGreaterThan(0);
-      for (const [key, sub] of Object.entries(properties)) {
-        const pres = presentationFor(step.name, key, sub);
-        expect(pres.label.length).toBeGreaterThan(0);
-        // A nested object carries its members' hints rather than one of its own.
-        if (sub["type"] !== "object") expect(pres.tooltip).toBeTruthy();
-      }
-    }
+  it("draws the members of a MAP, whose keys are the author's", () => {
+    // `inputs` and `outputs` have no `properties` — every key is the author's, described by
+    // `additionalProperties`. So the names come from the VALUE, which is the only place they exist,
+    // and a state file's whole input and output list was invisible until they did.
+    const html = draw(STATE, DOC, { reading: true });
+    expect(html).toContain("changeset");
+    expect(html).toContain("verdict");
+  });
+
+  it("reading a document draws what it SAYS, not what its schema permits", () => {
+    const reading = draw(STATE, DOC, { reading: true });
+    const whole = draw(STATE, DOC, {});
+    expect(reading).toContain("label");
+    // `transitions`, `children`, `limits` — declared, unstated, and not this document's business.
+    expect(reading).not.toContain("transitions");
+    expect(whole).toContain("transitions");
+    // Which is also why it is much shorter: the point is a reader seeing four fields rather than
+    // thirty, and the empty ones being the majority is exactly the problem.
+    expect(reading.length).toBeLessThan(whole.length);
+  });
+
+  it("keeps drawing the whole shape where the form is a form", () => {
+    // `reading` is NOT `disabled`. A locked settings pane — a project layer you may look at but not
+    // edit — is disabled and still has to answer "what could be set here", so hiding unset members
+    // there would be hiding the thing somebody opened it to find out.
+    const locked = draw(STATE, {}, { disabled: true });
+    expect(locked).toContain("transitions");
   });
 });

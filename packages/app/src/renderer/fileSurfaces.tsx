@@ -10,7 +10,7 @@
  * `text/x-typescript` gets nothing, and therefore gets the plain editor with no viewer above it,
  * which is the correct surface for a file whose source *is* its presentation.
  */
-import { useEffect, useMemo, useState, type JSX } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from "react";
 import {
   CONFIG_JSON,
   WORKFLOW_DESCRIPTION,
@@ -22,6 +22,8 @@ import {
   parseDelimited,
   parseStructured,
   parseUnifiedDiff,
+  schemaById,
+  type FileSource,
   type StructuredFormat,
   type WorkflowSource,
 } from "@jaira/shared/browser";
@@ -33,7 +35,7 @@ import { nodeAt } from "./trail";
 import { Paper, Transcript } from "./transcriptView";
 import { docKey, useDraftBox } from "./drafts";
 import { EditorActions, type EditorTab } from "./editorChrome";
-import { registerFileSurface, type FileSurfaceProps } from "./fileTypes";
+import { registerFileSurface, type FileSurfaceContext, type FileSurfaceProps } from "./fileTypes";
 import { MarkdownView } from "./fenceRender";
 import { CodeDocument, MarkdownDocument } from "./documents";
 
@@ -41,6 +43,18 @@ import { DataView, PatchView, TableView, ValueView } from "./valueView";
 import { SchemaJsonEditor, schemaReferenceProps } from "./schemaEditor";
 import { WorkflowEditor } from "./stateEditor";
 import { WorkflowSyncPanel } from "./syncPanel";
+
+/**
+ * Loaded when a form is first drawn, never with the table.
+ *
+ * The same lazy boundary `valueView.tsx` puts it behind, and for the same reason: the widget set and
+ * its presentation rules are a chunk nothing that merely opens a `.ts` file should pay for.
+ */
+// Megabytes, and only for the one renderer that needs it — the same lazy boundary the reviewer's
+// diff sits behind.
+const DiffPane = lazy(() => import("./monacoDiff").then((m) => ({ default: m.MonacoDiffPane })));
+
+const SchemaForm = lazy(() => import("./schemaForm/SchemaForm").then((m) => ({ default: m.SchemaForm })));
 
 // --- editing text ------------------------------------------------------------
 
@@ -101,7 +115,15 @@ export function TextEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.
   return (
     <div className="file-edit">
       {coloured ? (
-        <CodeDocument text={draft.text} mime={doc.mime} onChange={draft.set} />
+        <CodeDocument
+          text={draft.text}
+          mime={doc.mime}
+          onChange={draft.set}
+          // Which half the panel mounted this as, so the editor asks for that view's palette. This
+          // surface is the editor of most types and the READING of one whose editor is something
+          // else, and only the thing that resolved it knows which — see `FileSurfaceContext.view`.
+          view={context.view ?? "write"}
+        />
       ) : (
         <textarea
           className="code-editor"
@@ -161,27 +183,24 @@ export function JsonView({ doc }: FileSurfaceProps): JSX.Element {
 }
 
 /**
- * The JSON editor, with a schema picker.
+ * Which schema a document answers to, asking the app once if nobody has decided.
  *
- * Everything schema-shaped lives in {@link SchemaJsonEditor}; this is the adapter that gives it a
- * draft, a save path and somewhere to remember the choice. The draft rules are {@link TextEdit}'s,
- * for the same reasons — a reload must not land on unsaved typing, and a new file is a new draft.
+ * Shared by the two surfaces that need the answer — the JSON editor and the form — and that sharing
+ * is the point rather than a tidy. The choice used to be filled in by the editor's own effect, which
+ * was fine while the editor was the only thing that read it; a form drawn ABOVE an editor the person
+ * had swapped for Monaco would then have found nothing chosen and said so, on a file whose schema
+ * this app can identify perfectly well. Either surface alone now answers the question.
+ *
+ * Only when nothing has been decided — `chosen` absent, not `""`. The result is RECORDED as the
+ * choice, including a miss (`""`), so this asks once per file rather than on every keystroke, and so
+ * editing the document afterwards cannot pull the picker out from under the author.
+ *
+ * Detection reads `doc.text`, the file as it is on disk, rather than any draft: what schema a file IS
+ * should not change while it is half-typed.
  */
-export function JsonEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.Element {
+function useSchemaChoice(doc: FileSource, context: FileSurfaceContext): string | undefined {
   const key = docKey(doc.layer, doc.path);
-  const draft = useDraftBox(context.drafts, context.onDraft, key, doc.text);
   const chosen = context.schemaChoice[key];
-
-  /**
-   * Fill the picker from the document the first time this file is opened.
-   *
-   * Only when nothing has been decided — `chosen` absent, not `""`. The result is RECORDED as the
-   * choice, including a miss (`""`), so this asks once per file rather than on every keystroke, and
-   * so editing the document afterwards cannot pull the picker out from under the author.
-   *
-   * Detection reads `doc.text`, the file as it is on disk, rather than the draft: what schema a file
-   * IS should not change while it is half-typed.
-   */
   const { detectSchema, onSchemaChoice } = context;
   useEffect(() => {
     if (chosen !== undefined) return;
@@ -193,6 +212,84 @@ export function JsonEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.
       live = false;
     };
   }, [key, chosen, doc.text, detectSchema, onSchemaChoice]);
+  return chosen;
+}
+
+/**
+ * A JSON document as the fields its schema declares — the FORM, as a data renderer.
+ *
+ * The third way to read a `.json` file, beside the tree and its own source, and the one the value
+ * viewer has always had (`viewsFor` offers `form` for any value that arrives with an object schema).
+ * What it adds over the tree is everything the schema knows and the document does not: the order the
+ * fields were declared in, their descriptions, which are expected, and a widget per type instead of
+ * a string.
+ *
+ * **A reading, not an editor** — `disabled`, exactly as the value viewer draws it. Two reasons, and
+ * the second is the load-bearing one. It keeps the two forms one component rather than two that
+ * drift; and a form that wrote would have to serialise the whole document back through
+ * `JSON.stringify`, which reorders keys to the schema's declaration order and discards every choice
+ * of formatting in the file. The editor below it changes the document — with completion and
+ * validation against this same schema — and it does that without rewriting anything nobody touched.
+ *
+ * A state file is the exception that proves it: its authoring form DOES write, is registered as a
+ * writing data renderer, and therefore lands in the panel's lower half instead of this one. That is
+ * a workflow-shaped decision about a file the app itself owns, not a general licence to reformat
+ * somebody's JSON.
+ */
+export function JsonFormView({ doc, context }: FileSurfaceProps): JSX.Element {
+  const chosen = useSchemaChoice(doc, context);
+  const entry = chosen === undefined || chosen === "" ? undefined : schemaById(chosen);
+  if (doc.text.trim().length === 0) return <p className="empty">This file is empty.</p>;
+  const parsed = parseStructured(doc.text, "json");
+  if (!parsed.ok) {
+    return (
+      <div className="notice bad">
+        does not parse: {parsed.message}
+        {parsed.spot !== undefined ? ` (line ${parsed.spot.line}, column ${parsed.spot.column})` : ""}
+      </div>
+    );
+  }
+  if (entry === undefined) {
+    // Not an error and not a failure of this renderer: a form is a rendering OF a schema, and this
+    // document answers to none that the app knows. Naming the control that would change that is the
+    // useful part — the picker lives in the editor below, when the editor below is the schema-aware
+    // one. `detectSchema` has already been asked and came back empty.
+    return (
+      <p className="empty">
+        No schema for this document, so there are no fields to draw. Choose one in the editor’s Schema
+        picker, or read it as Data.
+      </p>
+    );
+  }
+  return (
+    <Suspense fallback={<p className="empty">Loading the form…</p>}>
+      <div className="vv-form file-form">
+        <SchemaForm
+          schema={entry.document as never}
+          value={parsed.value}
+          onChange={() => undefined}
+          // `isSet` answers false for everything, which is not a lie by omission — it is the only
+          // true answer here. The tag it drives means "this LAYER states this value", a fact about
+          // editing a layered config, and its default (`the key is present`) would put a "set here"
+          // chip beside every field of a document nobody is editing at all.
+          ctx={{ path: "", disabled: true, reading: true, isSet: () => false }}
+        />
+      </div>
+    </Suspense>
+  );
+}
+
+/**
+ * The JSON editor, with a schema picker.
+ *
+ * Everything schema-shaped lives in {@link SchemaJsonEditor}; this is the adapter that gives it a
+ * draft, a save path and somewhere to remember the choice. The draft rules are {@link TextEdit}'s,
+ * for the same reasons — a reload must not land on unsaved typing, and a new file is a new draft.
+ */
+export function JsonEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.Element {
+  const key = docKey(doc.layer, doc.path);
+  const draft = useDraftBox(context.drafts, context.onDraft, key, doc.text);
+  const chosen = useSchemaChoice(doc, context);
 
   return (
     <SchemaJsonEditor
@@ -238,6 +335,59 @@ export function PatchFileSurface({ doc }: FileSurfaceProps): JSX.Element {
   if (doc.text.trim().length === 0) return <p className="empty">This file is empty.</p>;
   if (files.length === 0) return <div className="notice bad">not a unified diff — the editor below has the text</div>;
   return <PatchView files={files} />;
+}
+
+/**
+ * A patch as the two revisions it is BETWEEN — the same change, side by side.
+ *
+ * The unified view above it is the patch as written: one column, markers down the left, every hunk
+ * in the order the file has them. This is the other reading, and it is the one for a change big
+ * enough that you stop reading the markers and start comparing the two texts — which is what the
+ * two-sided panes are for everywhere else in this app (a changeset review, a diff in a transcript).
+ *
+ * It also gives the diff surface somewhere to LIVE. Its look (`EditorLook`, `diff`) had no file type
+ * that resolved to it, so its controls sat in a section of their own outside File types — a surface
+ * named in the settings that nothing in the settings could reach. `text/x-diff` is a Changes file
+ * and this is a renderer for it, so the controls are where the type is.
+ *
+ * ## Reconstructing the two sides
+ *
+ * A unified diff carries both texts, interleaved: a context line belongs to both, a removed line to
+ * the left only, an added line to the right only. So the two are a fold over the hunks, and what is
+ * lost is only what the patch itself left out — the unchanged stretches between hunks, which is why
+ * the panes show the hunks rather than the files. A patch of several files shows the first and says
+ * how many others there are, because two panes can hold one comparison.
+ */
+function PatchSideBySide({ doc }: FileSurfaceProps): JSX.Element {
+  const files = useMemo(() => parseUnifiedDiff(doc.text), [doc.text]);
+  const sides = useMemo(() => {
+    const file = files[0];
+    if (file === undefined) return null;
+    const before: string[] = [];
+    const after: string[] = [];
+    for (const hunk of file.hunks) {
+      for (const line of hunk.lines) {
+        if (line.kind !== "add") before.push(line.text);
+        if (line.kind !== "del") after.push(line.text);
+      }
+    }
+    return { file, before: before.join("\n"), after: after.join("\n") };
+  }, [files]);
+  if (doc.text.trim().length === 0) return <p className="empty">This file is empty.</p>;
+  if (sides === null) return <div className="notice bad">not a unified diff — the editor below has the text</div>;
+  return (
+    <div className="file-edit">
+      <Suspense fallback={<pre className="vv-source">{doc.text}</pre>}>
+        <DiffPane original={sides.before} modified={sides.after} mime={mimeOfPath(sides.file.path)} readOnly />
+      </Suspense>
+      <div className="pane-actions pinned">
+        <span className="sub">
+          {sides.file.path}
+          {files.length > 1 ? ` — and ${files.length - 1} other ${files.length === 2 ? "file" : "files"} in this patch` : ""}
+        </span>
+      </div>
+    </div>
+  );
 }
 
 export function DelimitedView({ doc }: FileSurfaceProps): JSX.Element {
@@ -536,54 +686,149 @@ export function ConfigEdit({ doc, busy, context }: FileSurfaceProps): JSX.Elemen
   );
 }
 
+
 // --- the table ---------------------------------------------------------------
 
-registerFileSurface("text/plain", "edit", TextEdit);
+/**
+ * Source, coloured and read-only — the code view, as a file surface.
+ *
+ * The other half of the pair the value viewer has always offered (`RendererId`), which until now was
+ * reachable on a fenced block and nowhere else. It is a TEXT renderer like Monaco is: same grammar,
+ * same colours, drawn as ordinary DOM by `monaco.editor.colorize` with no editor behind it. What it
+ * does not do is write, which is the whole of the difference and why it is a real choice: a file you
+ * are only reading cannot be damaged by a stray keystroke, and a selection can be dragged straight
+ * through it.
+ */
+function CodeSourceView({ doc }: FileSurfaceProps): JSX.Element {
+  return (
+    <div className="file-edit">
+      <CodeDocument text={doc.text} mime={doc.mime} />
+      {/* Said out loud, in the row the Save button would have been in. A pane that quietly refuses
+          typing is a bug from the inside; a pane that says which preference is holding it open in
+          this state is a choice, and names the screen where it is taken back. */}
+      <div className="pane-actions pinned">
+        <span className="sub">Code view — coloured, not an editor. Appearance › File types › text.</span>
+      </div>
+    </div>
+  );
+}
 
-// Markdown, read above and edited below — the arrangement every other type here gets.
+/**
+ * "Draw nothing at all" — a renderer, offered under `preview` wherever there is a rendering to
+ * decline.
+ *
+ * It is not the absence of a registration and must not be confused with one. An unregistered kind
+ * falls through the chain to a vaguer type; THIS stops the walk, and the answer is that this type
+ * has no view of that kind at all — which is exactly what somebody means when they say they would
+ * rather just see the source.
+ *
+ * What a SURFACE does with that is the surface's business: one drawing both views gets its space
+ * back, one drawing a single view has nothing to draw. This says what the type has, never where it
+ * goes.
+ */
+const NOTHING = { id: "none", label: "Nothing", note: "no view of this kind — a surface that would show one shows none" };
+
+/**
+ * The two renderers every text type has, under the names the value viewer already uses for them.
+ *
+ * Registered at the floor of the chain, so a `.ts`, a `.py`, a `.rs` and a `.toml` all reach them
+ * with nothing to write per type. A type that wants an editor of its own — markdown's live preview,
+ * JSON's schema-aware editor — registers its own list and states these two again after it, because a
+ * more specific list REPLACES rather than extends (see `fileRenderers`): a config file inheriting the
+ * plain JSON editor would be a way to save an unvalidated settings file, and that is the one thing
+ * this chain must not quietly hand out.
+ */
+const MONACO = { id: "monaco", label: "Monaco", note: "a real editor — typing, a caret, its own selection", writes: true, themed: true, look: "code" as const, surface: TextEdit };
+const CODEVIEW = { id: "codeview", label: "Code view", note: "coloured, but not an editor — a selection can be dragged through it", themed: true, look: "code" as const, surface: CodeSourceView };
+
+// --- text: the characters as they are on disk ---------------------------------
+
+registerFileSurface("text/plain", "text", MONACO);
+registerFileSurface("text/plain", "text", CODEVIEW);
+
+// Markdown, edited in the live preview by default: the marks are drawn as what they mean, which is
+// the better surface for prose and the worse one for a document you are treating as source — a table
+// you are aligning by hand, front matter you are rewriting. Neither is right for everybody, so both
+// are here, and the plain pair follows because a `.md` file is still text.
+registerFileSurface("text/markdown", "text", { id: "live", label: "Live preview", note: "CodeMirror, marks drawn as what they mean", writes: true, themed: true, look: "markdown" as const, surface: MarkdownFileEdit });
+registerFileSurface("text/markdown", "text", MONACO);
+registerFileSurface("text/markdown", "text", CODEVIEW);
+
+// The schema-aware editor, not the plain one: a `.json` file is the one place a picker of known
+// document shapes has something to offer. It is a TEXT renderer — it draws the characters, with
+// completion and validation over them — which is what the data tree beside it is not.
+registerFileSurface("application/json", "text", { id: "schema", label: "Schema-aware", note: "completion and validation against a known shape", writes: true, themed: true, look: "json" as const, surface: JsonEdit });
+registerFileSurface("application/json", "text", MONACO);
+registerFileSurface("application/json", "text", CODEVIEW);
+
+// ONE text renderer, and deliberately no second: this editor writes through `config:write`, which
+// parses and validates the document, and every alternative writes bytes. Offering another here would
+// be offering a way to save a settings file that stops the app from opening.
+registerFileSurface(CONFIG_JSON, "text", { id: "validated", label: "Validated", note: "parsed and checked before it is written", writes: true, themed: true, look: "json" as const, surface: ConfigEdit });
+
+// --- data: the value the document denotes -------------------------------------
+
+registerFileSurface("application/json", "data", { id: "tree", label: "Data", note: "the value, as a tree", surface: JsonView });
+// The same value, as the fields its schema declares — see {@link JsonFormView}. Second rather than
+// first, because it is the reading that can decline to draw: a document answering to no schema this
+// app knows has no fields, and a default that renders nothing for most `.json` files on disk would
+// be a worse default than a tree that always works.
+registerFileSurface("application/json", "data", { id: "form", label: "Form", note: "the fields the document's schema declares, in the order it declares them", surface: JsonFormView });
+registerFileSurface("application/json", "data", { ...NOTHING, surface: null });
+registerFileSurface("application/yaml", "data", { id: "tree", label: "Data", note: "the value, as a tree", surface: YamlView });
+registerFileSurface("application/yaml", "data", { ...NOTHING, surface: null });
+registerFileSurface("text/csv", "data", { id: "table", label: "Table", note: "rows and columns, rather than the delimiters", surface: DelimitedView });
+registerFileSurface("text/csv", "data", { ...NOTHING, surface: null });
+registerFileSurface("text/tab-separated-values", "data", { id: "table", label: "Table", note: "rows and columns, rather than the delimiters", surface: DelimitedView });
+registerFileSurface("text/tab-separated-values", "data", { ...NOTHING, surface: null });
+
+registerFileSurface(CONFIG_JSON, "data", { id: "effective", label: "Effective", note: "both layers, merged as a run would read them", surface: ConfigEffectiveView });
+registerFileSurface(CONFIG_JSON, "data", { ...NOTHING, surface: null });
+
+// The authoring form is a data renderer that WRITES, which is what puts it in the panel's lower half
+// rather than its upper one — a state's fields are where the state is written, not a reading of it.
+// Choosing `Nothing` here is how you ask for the source instead: the panel falls through to the text
+// renderer, which for a JSON state is the schema-aware editor and validates against the same shape.
 //
-// It used to have no viewer at all, on the argument that the live-preview editor IS the rendering,
-// so a second one would be two renderings of one document that could disagree. That was true while
-// both were the same thing: markdown turned into styled text. It stopped being true when a fenced
-// block became a READING rather than a coloured quotation. The viewer draws a ```yaml block as the
-// value viewer — with its Code / Data / Source toggle, its table for a CSV, its diff for a patch —
-// and an editor structurally cannot: those are interactive components, and CodeMirror's document is
-// text with decorations over it, not a place to mount one.
-//
-// So they are not two answers to one question any more. The top half answers "what does this
-// document say", the bottom half is where you change it, and the fold that was already there is
-// what collapses whichever one you are not using.
-registerFileSurface("text/markdown", "view", MarkdownView);
-registerFileSurface("text/markdown", "edit", MarkdownFileEdit);
+// Registered for JSON states only. A YAML state inherits YAML's data renderers and edits as text —
+// the form serialises JSON, and offering it for a document it would rewrite in another syntax is
+// worse than offering an editor.
+registerFileSurface(WORKFLOW_JSON, "data", { id: "form", label: "Authoring form", note: "fields, with the JSON behind a tab", writes: true, surface: WorkflowEdit });
+registerFileSurface(WORKFLOW_JSON, "data", { ...NOTHING, surface: null });
+
+// --- preview: what the document means, rendered -------------------------------
+
+// Markdown reads above the editor that changes it. It used to have no viewer at all, on the argument
+// that the live-preview editor IS the rendering, so a second one would be two renderings of one
+// document that could disagree. That was true while both were the same thing: markdown turned into
+// styled text. It stopped being true when a fenced block became a READING rather than a coloured
+// quotation — the viewer draws a ```yaml block as the value viewer, with its toggle, its table for a
+// CSV and its diff for a patch, and an editor structurally cannot: those are components, and
+// CodeMirror's document is text with decorations over it rather than a place to mount one.
+registerFileSurface("text/markdown", "preview", { id: "rendered", label: "Rendered", surface: MarkdownView });
+registerFileSurface("text/markdown", "preview", { ...NOTHING, surface: null });
 
 // Any markdown under `workflows/` — each describes the workflow it is named for, and `workflow.md`
-// describes the whole layer. The viewer is the sync panel, which keeps the markdown preview behind a
-// toggle; the editor comes from `text/markdown` through the fallback chain, because the description
-// is edited exactly like any other document — which is what makes a proposed rewrite something you
-// can retype before saving.
-registerFileSurface(WORKFLOW_DESCRIPTION, "view", WorkflowSyncPanel);
+// describes the whole layer. Its preview is the sync panel, which keeps the markdown rendering behind
+// a toggle; the plain rendering is offered beside it for somebody who writes descriptions far more
+// often than they reconcile them. The TEXT renderers come from `text/markdown` through the chain,
+// because a description is edited exactly like any other document.
+registerFileSurface(WORKFLOW_DESCRIPTION, "preview", { id: "sync", label: "Sync panel", note: "which side has moved, and what to do about it", surface: WorkflowSyncPanel });
+registerFileSurface(WORKFLOW_DESCRIPTION, "preview", { id: "rendered", label: "Rendered", surface: MarkdownView });
+registerFileSurface(WORKFLOW_DESCRIPTION, "preview", { ...NOTHING, surface: null });
 
 // A page and a drawing both have a rendering, and neither had a viewer — an `.html` in a layer root
 // fell all the way to the plain text editor, which is the one surface that cannot show what it is.
-registerFileSurface("text/html", "view", RenderedFileView);
-registerFileSurface("image/svg+xml", "view", RenderedFileView);
+registerFileSurface("text/html", "preview", { id: "rendered", label: "Rendered", surface: RenderedFileView });
+registerFileSurface("text/html", "preview", { ...NOTHING, surface: null });
+registerFileSurface("image/svg+xml", "preview", { id: "drawn", label: "Drawn", surface: RenderedFileView });
+registerFileSurface("image/svg+xml", "preview", { ...NOTHING, surface: null });
 
-registerFileSurface("application/json", "view", JsonView);
-// The schema-aware editor, not the plain one: a `.json` file is the one place a picker of known
-// document shapes has something to offer. Everything else still reaches TextEdit through the chain.
-registerFileSurface("application/json", "edit", JsonEdit);
+registerFileSurface("text/x-diff", "preview", { id: "changes", label: "Changes", note: "the edit it describes, not the columns it describes it in", surface: PatchFileSurface });
+registerFileSurface("text/x-diff", "preview", { id: "sidebyside", label: "Side by side", note: "the two revisions it is between, in the panes a review uses", themed: true, look: "diff", surface: PatchSideBySide });
+registerFileSurface("text/x-diff", "preview", { ...NOTHING, surface: null });
 
-registerFileSurface("application/yaml", "view", YamlView);
-registerFileSurface("application/yaml", "edit", TextEdit);
-registerFileSurface("text/csv", "view", DelimitedView);
-registerFileSurface("text/tab-separated-values", "view", DelimitedView);
-registerFileSurface("text/x-diff", "view", PatchFileSurface);
-
-registerFileSurface(WORKFLOW_JSON, "view", WorkflowRunView);
-registerFileSurface(WORKFLOW_JSON, "edit", WorkflowEdit);
-
-// The board on top, and — through the `+yaml` fallback — the YAML editor below. See {@link WorkflowEdit}.
-registerFileSurface(WORKFLOW_YAML, "view", WorkflowRunView);
-
-registerFileSurface(CONFIG_JSON, "view", ConfigEffectiveView);
-registerFileSurface(CONFIG_JSON, "edit", ConfigEdit);
+registerFileSurface(WORKFLOW_JSON, "preview", { id: "board", label: "Board", note: "what this state is doing right now", surface: WorkflowRunView });
+registerFileSurface(WORKFLOW_JSON, "preview", { ...NOTHING, surface: null });
+registerFileSurface(WORKFLOW_YAML, "preview", { id: "board", label: "Board", note: "what this state is doing right now", surface: WorkflowRunView });
+registerFileSurface(WORKFLOW_YAML, "preview", { ...NOTHING, surface: null });
