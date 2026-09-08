@@ -2829,18 +2829,72 @@ run-record requirements of spec §10.2.
 
   | channel | asks | says |
   | --- | --- | --- |
-  | **position** | *when does it run* | columns are run order, left to right; lane 0 is the cursor's own path, lane 1 is everything it reaches only by jumping |
-  | **geometry** | *what kind of movement* | a smooth curve between two PORTS is a value moving; an arc between two BOX EDGES, with an arrowhead, is the cursor moving. Nothing else may be a line |
-  | **hue** | *which one* | a wire takes the colour of the VALUE it carries — one hue per source port, the same wherever that value goes; an arrow takes the colour of its DIRECTION. Hue never separates data from control: geometry does |
+  | **position** | *when does it run* | columns are ordered by run order, left to right; lane 0 is the cursor's own path, lane 1 is everything it reaches only by jumping. A session's frame is ONE column holding several boxes, so a column is no longer NUMBERED by run order — see the frames below |
+  | **geometry** | *what kind of movement* | a line between two PORTS is a value moving; an arc between two BOX EDGES, with an arrowhead, is the cursor moving. Nothing else may be a line. A value's line is a curve when it has only the box next door to reach and is ROUTED when it has further — see the channels below |
+  | **hue** | *which one, while it is asked* | an arrow takes the colour of its DIRECTION and keeps it — three of them, the same three in every state, so they can be learned. A wire is GREY until it is pointed at, and then takes the colour of the VALUE it carries: one hue per source port, the same wherever that value goes. Hue never separates data from control: geometry does |
   | **dash** | *how it is written* | solid is the plain case (a bare binding, a rule on the mount); dashed is one-of-several (a read inside an expression, a rule that belongs to no child); dotted is not-written-at-all (the implicit fill, a guard's read, a step that does not wait) |
-  | **weight · opacity · depth** | *what am I looking at* | and nothing else — see the attention model below |
+  | **weight · opacity · depth · a wire's hue** | *what am I looking at* | and nothing else — see the attention model below |
 
   Three directions a move can take, because three things can happen to a run:
-  **onward** (nearer the end — a later step, or out), **back** (over ground
-  already covered — a loop, or a step re-entered) and **abort** (an ending that
-  is not success). Measured by the target's COLUMN against the source's, which is
-  what makes it a fact about the drawing rather than a guess about intent. The
-  sequence keeps grey to itself: it is not a rule anybody wrote.
+  **onward** (nearer the end — a later step, or out) in the accent, which is
+  BLUE; **back** (over ground already covered — a loop, or a step re-entered) in
+  the bad hue, which is RED; and **abort** (an ending that is not success) in the
+  warning hue. Each is the colour its answer already wears everywhere else in the
+  app, so none of the three has to be learned twice. Measured by the target's
+  COLUMN against the source's, which is what makes it a fact about the drawing
+  rather than a guess about intent. The sequence keeps grey to itself: it is not
+  a rule anybody wrote.
+
+  **Colour on dataflow is rationed, because there is not enough of it.** A real
+  state moves twenty values, and twenty hues at once is not a key a reader can
+  hold — it is a hairball with the extra property of being loud. So a wire draws
+  grey, in the neutral of exactly the lightness its colour would have had, and
+  takes its hue only while it is what is being asked about: point at a box and
+  the values it takes and gives colour up together; point at a port and its own
+  value does, wherever it goes. At rest the drawing says *how much moves and
+  roughly where*, which is the question at rest; under the pointer it says which
+  value is which, which is never asked about more than one at a time.
+
+  **A conversation is a place, and it is drawn as one.** Two states that share a
+  `session` see each other's turns and two that do not cannot, and that has been
+  the one load-bearing fact about a state that no surface has ever stated. So a
+  session more than one box is in gets a dotted FRAME, and its members are stacked
+  inside it top to bottom in run order. The run then leaves the frame and comes
+  back to it — which is what a shared conversation actually looks like, and the
+  reason the drawing is no longer a straight line. A session only ONE box is in
+  gets no frame: that is a fact about the box, said on the box, and a container
+  drawn round a single thing draws a boundary that is not there.
+
+  A session is the pair **(name, scope)**, never the name — and the scope is
+  relative to whoever WROTE the declaration: `in` absent means the writer itself,
+  `"parent"` its parent, `"global"` the run root. So two siblings that each write
+  a bare `session: "review"` scope that name to themselves and share nothing,
+  which reads in the source exactly like the case that does share and has no error
+  and no other way of being seen. The drawing resolves the pair — this file's own
+  `environment`, each mount's, and the mounted state's own, nearest layer winning
+  — and groups on it, so the two cases finally look different. `null` is a
+  declaration and not an absence ("a fresh stream, private to this call"), and
+  joins nothing; `{ id }` and `{ expr }` name a position reached through data flow,
+  which is a fact about a run rather than about a document, and group nothing.
+
+  A frame costs two things and pays for both. Its FIRST member sits at the lane's
+  own y, level with every unframed box, and the caption is drawn above that —
+  otherwise one session anywhere would push the whole spine down by a caption's
+  height. And it holds a clear column down each side, inside the frame, because a
+  member may have a sibling directly above it: a line leaving through its top
+  would go through that sibling, so it steps sideways into the clear column first
+  and travels up THERE. That column is also where a routed value branches in — the
+  same gutter it would have used, moved inside the frame.
+
+  Because a frame's members can come from either end of the sequence, **a column is
+  no longer a run position**. A step of the sequence is still a straight line
+  between two boxes that are level and next door, and everything else is the
+  simplest shape that reaches the next box without crossing anything: a curve to
+  the column next door at a different height, a bracket down the frame's own clear
+  column between two of its members, and an arc for anything that skips a column
+  or goes back. `onward` and `back` are measured on RUN ORDER now rather than on x,
+  which stopped being the same question the moment a frame held both ends of a
+  loop in one column.
 
   **Every box shows both halves of its surface.** Inputs down the left edge,
   outputs down the right, one dot per slot — a node editor's arrangement, because
@@ -2848,8 +2902,9 @@ run-record requirements of spec §10.2.
   to fill in. A child's own declaration supplies the slots nothing is wired into
   yet; a slot only a binding claims exists is drawn all the same, ringed in the
   abort hue, since the wire to it is real and the far end may not be. The dot is
-  FILLED when a value passes through it and hollow when none does, and carries
-  that value's colour, so a dot and the wire leaving it are one statement.
+  FILLED when a value passes through it and hollow when none does, and wears
+  whatever the wire leaving it is wearing — grey at rest, that value's colour
+  when it is asked about — so a dot and its line are one statement.
 
   **A guard is shown whole, and is followable.** Never truncated, never numbered
   — a digit beside a condition reads as part of the condition, so a rule's
@@ -2881,7 +2936,9 @@ run-record requirements of spec §10.2.
   **A line is a target, and it says where it ends.** Two pixels of stroke is not
   something a pointer can be expected to find, so every line carries a fat
   invisible twin that answers for it: pointing at a line asks the same question
-  its label does. The dot a wire ARRIVES at is filled in that value's colour,
+  its label does — except on the stretch a BUNDLE has in common, which cannot
+  answer for one of its wires without leaving that wire's siblings grey, and so
+  asks about the port they all leave instead. The dot a wire ARRIVES at is filled
   exactly as the one it leaves is — marked at one end only, a fed slot reads as
   one nobody wired, and hollow-against-filled is how a box says which of its
   slots are actually carrying something.
@@ -2889,8 +2946,14 @@ run-record requirements of spec §10.2.
   **Zooming in costs the answer, and it is given back at the edge.** Close enough
   to read a box, most of what the boxes are joined TO is off the screen, and a
   line running off the edge stops saying anything. So a line that crosses the
-  edge gets a pill AT that edge naming what is at its far end, each name in its
-  own line's colour. Pills are pinned to the edge they crossed rather than left
+  edge gets a pill AT that edge naming what is at its far end — a box for the
+  cursor's own move, and `box.slot` for a VALUE, because a wire is one member of
+  a box rather than the box: four wires into `review` are four different values,
+  and four pills reading "review" name the same place four times and answer
+  nothing. Each name is in its own line's colour, said once per SLOT, and a pill
+  spells out four of them before it counts the rest — an eight-name pill is wider
+  than the pane and its ellipsis leaves eight prefixes that name nothing, so the
+  whole list goes on the tooltip where a list belongs. Pills are pinned to the edge they crossed rather than left
   where the curve was last seen, merged into a LIST when they cross within a
   pill's length of each other — and only then, since merging by name instead put
   one pill at the average of two crossings a screen apart, naming a box neither
@@ -2903,9 +2966,11 @@ run-record requirements of spec §10.2.
   up would leave the pane. All of it is worked out in viewport space, because all
   of it is a question about the camera rather than about the drawing.
 
-  **Attention is depth, not colour.** Hue is spent on which value and which
-  direction, so emphasis cannot use it; what is left is weight, opacity and
-  order. One model serves all four hovers, so they cannot drift into four ideas
+  **Attention is depth, and — on the wires — colour.** An arrow's hue is spent
+  on its direction and cannot be borrowed; a wire's is spent on nothing at all
+  until it is asked about, which is what makes it available. So emphasis is
+  weight, opacity and order everywhere, plus the arrival of colour on the lines
+  that are the answer. One model serves all four hovers, so they cannot drift into four ideas
   of what "related" means: the thing under the pointer and the lines that ARE its
   answer are lit and raised, whatever those lines touch stays legible, and
   everything else falls back hard. A box lights its own lines and recedes its
@@ -2920,7 +2985,34 @@ run-record requirements of spec §10.2.
   pass straight through it. With a column each, every vertical run is over empty
   ground and no transition ever crosses a box. Lane 0 is TOP-aligned rather than
   centred, so the sequence's own line runs level across the headings instead of
-  through the ports, where it used to be lost.
+  through the ports, where it used to be lost. An arc runs STRAIGHT for its first
+  and last dozen pixels: an arrowhead is drawn along the line's direction where it
+  ends, and on a bare cubic that direction is the tangent — exactly vertical,
+  while the last visible stretch of the curve is still coming in at an angle, so
+  the head reads as sitting beside its line rather than on the end of it. With a
+  straight run the line arrives vertically because it IS vertical there.
+
+  **No value is drawn across a box, and one value is one line.** A wire between
+  neighbours is a short hop over empty ground and stays a curve. A wire with
+  further to go is ROUTED: out of its port into the gutter, down into a channel
+  in the band between the two lanes, along the band, and back up the gutter
+  beside the box it is going to. Every straight run is then over ground nothing
+  else occupies — the gutters are between the columns and the band is between the
+  lanes — so the only crossings left are between one routed wire and another.
+  Drawn straight, those same lines crossed the boxes through the exact rows the
+  ports are on, which put the most ink over the densest part of the picture; over
+  the workflows in `~/.jaira/workflows` that is 2,167 sampled crossings before
+  and none after. A guard's read is routed too, leaving the band at the gutter
+  beside the box halfway along the arc its condition is written on.
+
+  Every wire out of ONE source port then shares that route until the last
+  moment, because a value read four times is one fact and four lines is four
+  times the ink for it: the bundle runs as a single line and peels off in each
+  destination's own gutter, so what is drawn separately is only the part where
+  the answers actually differ. The channels are packed shortest-first the way the
+  arc lanes are, and the band's height is what the lower lane is pushed down by —
+  which is why it has to be worked out from columns alone, before any box has a
+  y. Across the same workflows: 332 distinct lines before, 194 after.
 
   **The canvas is a map.** Drag to pan, wheel to zoom about the pointer, no
   scrollbars: a graph is not a page, and the reader is looking for a region rather

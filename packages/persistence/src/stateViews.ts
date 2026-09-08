@@ -527,6 +527,21 @@ function slotsOf(raw: unknown): StateSlotInfo[] | undefined {
 }
 
 /**
+ * What a state declares about its conversation — see {@link StateSlots.session}.
+ *
+ * Nearest layer wins, which for one document is `operation` over `environment` (WORKFLOWS.md §5.2).
+ * A composite declares only the `environment` one, and that is not a lesser answer: a session on a
+ * composite root is the ordinary way to give a whole subtree one conversation.
+ */
+function sessionOf(doc: Record<string, unknown>): { session: { declared: unknown } } | Record<string, never> {
+  for (const layer of ["operation", "environment"]) {
+    const block = record(doc[layer]);
+    if (block !== undefined && "session" in block) return { session: { declared: block["session"] } };
+  }
+  return {};
+}
+
+/**
  * The slots a set of states declare (SPEC §4.1) — see {@link StateSlots}.
  *
  * Ids that name nothing are simply absent from the result: the caller is a form where the reference
@@ -543,7 +558,7 @@ export function stateSlots(roots: readonly string[], stateIds: readonly string[]
     if (inputs === undefined) continue;
     // A transcluded `outputs` costs only the completion list, not the wiring rows, so it degrades to
     // an empty list rather than dropping the state's inputs with it.
-    out[stateId] = { inputs, outputs: slotsOf(doc["outputs"]) ?? [] };
+    out[stateId] = { inputs, outputs: slotsOf(doc["outputs"]) ?? [], ...sessionOf(doc) };
   }
   return out;
 }

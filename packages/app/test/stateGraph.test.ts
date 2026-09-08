@@ -25,9 +25,12 @@ import {
   idOf,
   layoutOf,
   OPERATION,
+  pathOfAll,
   pointOn,
   ruleNodeId,
+  samples,
   type GraphEdge,
+  type PlacedNode,
   type GraphNode,
   type StateGraph,
 } from "../src/renderer/stateGraph";
@@ -425,6 +428,283 @@ describe("pointOn", () => {
   });
 });
 
+
+/**
+ * Where the lines GO, which is the half of the drawing a reader is actually following.
+ *
+ * A state moves fifty values between a dozen boxes, and drawn straight most of those lines cross a
+ * box on the way — through the exact rows the ports are on, so the densest part of the picture is
+ * the part with the most lines over it. Two properties fix that, and both are asserted over the
+ * whole drawing rather than on one line: nothing is drawn across a box, and every wire out of one
+ * port is one line until it has a reason to be several.
+ */
+describe("routing", () => {
+  /** A state with the shape that breaks a straight drawing: one value read four boxes further on. */
+  const REACH = {
+    inputs: { issue: { schema: { type: "string" } } },
+    outputs: { done: { binding: ".children.d.output.out" } },
+    children: {
+      a: { inputs: { issue: ".inputs.issue" } },
+      b: { inputs: { issue: ".inputs.issue" } },
+      c: { inputs: { issue: ".inputs.issue" } },
+      d: { inputs: { issue: ".inputs.issue", from_a: ".children.a.output.out" } },
+    },
+    sequence: ["a", "b", "c", "d"],
+  };
+
+  /** Every point of every line, against every box that is not one of its own two ends. */
+  const acrossABox = (layout: ReturnType<typeof layoutOf>): number => {
+    let over = 0;
+    for (const line of layout.wires) {
+      for (const point of samples(line.curves, 60)) {
+        const inside = layout.nodes.some(
+          (box) =>
+            box.node.id !== line.wire.from.node &&
+            box.node.id !== line.wire.to.node &&
+            point.x > box.x + 1 &&
+            point.x < box.x + box.w - 1 &&
+            point.y > box.y + 1 &&
+            point.y < box.y + box.h - 1,
+        );
+        if (inside) over++;
+      }
+    }
+    return over;
+  };
+
+  it("draws no value across a box it is not joined to", () => {
+    expect(acrossABox(layoutOf(graphOf(REACH)))).toBe(0);
+    expect(acrossABox(layoutOf(graphOf(PLAN, "plan")))).toBe(0);
+  });
+
+  /**
+   * One value read in four places is ONE line until the last moment.
+   *
+   * Asserted on the geometry rather than on the flag: what matters is that the runs coincide, since
+   * that is the whole of what a reader sees. They are compared at the start, where a bundle has not
+   * yet had a reason to differ, and the branch is checked to be beside the box each one arrives at.
+   */
+  it("gives every read of one value the same line until it branches", () => {
+    const layout = layoutOf(graphOf(REACH));
+    const out = layout.wires.filter((w) => w.wire.from.node === ENTRY && w.wire.from.port === "out:issue");
+    expect(out.length).toBe(4);
+    const routed = out.filter((w) => w.bundle !== null);
+    // Three of the four reach past the box next door, so all four share the one run.
+    expect(routed.length).toBe(4);
+    expect(new Set(routed.map((w) => w.bundle)).size).toBe(1);
+    // On the SEGMENTS rather than on points along them: the four runs are different lengths, so
+    // walking each by the same fraction lands in four different places on the one shared route.
+    const head = (w: (typeof routed)[number]): string => JSON.stringify(w.curves.slice(0, 4));
+    for (const one of routed) expect(head(one)).toBe(head(routed[0]!));
+    // One channel, and it is the same channel: the run they share is a run, not four beside it.
+    expect(new Set(routed.map((w) => w.curves[3]!.y2)).size).toBe(1);
+    // And each ends up at its own box, by its own turn out of that channel.
+    expect(new Set(routed.map((w) => w.wire.to.node)).size).toBe(4);
+    expect(new Set(routed.map((w) => w.curves[w.curves.length - 2]!.x1)).size).toBe(4);
+  });
+
+  /** A hop to the box next door has nothing to route round, and a routed hop would cost three turns. */
+  it("leaves a value with only its neighbour to reach as the curve it was", () => {
+    const layout = layoutOf(graphOf({ children: { a: {}, b: { inputs: { x: ".children.a.output.x" } } }, sequence: ["a", "b"] }));
+    expect(layout.wires.map((w) => w.bundle)).toEqual([null]);
+    expect(layout.wires[0]!.curves.length).toBe(1);
+  });
+
+  /** One `M`, then a `C` each: a run drawn as several subpaths would be several lines, not one. */
+  it("draws a routed line as one stroke", () => {
+    const layout = layoutOf(graphOf(REACH));
+    const routed = layout.wires.find((w) => w.bundle !== null)!;
+    expect(routed.curves.length).toBeGreaterThan(1);
+    expect(routed.d.match(/M/g)?.length).toBe(1);
+    expect(pathOfAll(routed.curves)).toBe(routed.d);
+  });
+
+  /** The band is room the drawing has to be given, or the lane under the spine is drawn over it. */
+  it("makes room under the spine for the channels it routed into", () => {
+    const spread = layoutOf(graphOf(REACH));
+    const plain = layoutOf(
+      graphOf({ children: { a: {}, b: { inputs: { x: ".children.a.output.x" } } }, sequence: ["a", "b"] }),
+    );
+    expect(spread.height).toBeGreaterThan(plain.height);
+    for (const line of spread.wires) {
+      for (const point of samples(line.curves, 60)) {
+        expect(point.y).toBeGreaterThan(0);
+        expect(point.y).toBeLessThanOrEqual(spread.height);
+      }
+    }
+  });
+});
+
+/** Sampling is what answers "where does this line leave the pane", so it has to follow the line. */
+describe("samples", () => {
+  it("starts at the start, ends at the end, and follows the corners in between", () => {
+    const layout = layoutOf(
+      graphOf({
+        inputs: { issue: {} },
+        children: { a: {}, b: {}, c: { inputs: { issue: ".inputs.issue" } } },
+        sequence: ["a", "b", "c"],
+      }),
+    );
+    const routed = layout.wires.find((w) => w.bundle !== null)!;
+    const points = samples(routed.curves, 40);
+    expect(points[0]).toEqual({ x: routed.curves[0]!.x1, y: routed.curves[0]!.y1 });
+    const last = routed.curves[routed.curves.length - 1]!;
+    expect(points[points.length - 1]).toEqual({ x: last.x2, y: last.y2 });
+    // Spread by LENGTH: no two neighbours a whole channel run apart, whatever the segments do.
+    const steps = points.slice(1).map((p, i) => Math.hypot(p.x - points[i]!.x, p.y - points[i]!.y));
+    expect(Math.max(...steps)).toBeLessThan(Math.min(...steps) + 60);
+  });
+});
+
+
+/**
+ * Which boxes are in one conversation, which is the one load-bearing fact about a state that
+ * nothing on any surface has ever said.
+ *
+ * A session is the PAIR `(name, scope)`, and the scope is relative to whoever wrote the declaration
+ * — so the same four characters in two files name two different conversations, and two siblings that
+ * each write a bare `session: "review"` do not share a word. There is no error for getting that
+ * wrong and no way to see it, which is why the drawing says it.
+ */
+describe("sessions", () => {
+  /** Two children in one conversation, one on its own, and the sequence stepping between them. */
+  const joined = (a: unknown, b: unknown, c: unknown = undefined): StateGraph =>
+    graphOf(
+      {
+        children: { first: {}, alone: {}, second: {} },
+        sequence: ["first", "alone", "second"],
+        ...(c === undefined ? {} : { environment: { session: c } }),
+      },
+      "review",
+      {
+        "review/first": { inputs: [], outputs: [], ...(a === undefined ? {} : { session: { declared: a } }) },
+        "review/alone": { inputs: [], outputs: [] },
+        "review/second": { inputs: [], outputs: [], ...(b === undefined ? {} : { session: { declared: b } }) },
+      },
+    );
+  const shared = { name: "review", in: "parent" };
+
+  it("puts two children that name one conversation in one session", () => {
+    const graph = joined(shared, shared);
+    expect(graph.sessions.map((one) => [one.name, one.members])).toEqual([
+      ["review", [childNodeId("first"), childNodeId("second")]],
+    ]);
+    expect(graph.sessions[0]!.scope).toBe("in this state");
+  });
+
+  /**
+   * The trap, drawn. `in` is relative to the WRITER, so a bare name in each child's own file scopes
+   * that name to that child — two private conversations that read identically in the source.
+   */
+  it("keeps two siblings that each wrote a bare name apart", () => {
+    const graph = joined("review", "review");
+    expect(graph.sessions).toEqual([]);
+    const one = node(graph, childNodeId("first"))!.session;
+    const two = node(graph, childNodeId("second"))!.session;
+    expect(one?.name).toBe("review");
+    expect(two?.name).toBe("review");
+    expect(one?.id).not.toBe(two?.id);
+  });
+
+  /** `null` is a declaration — "a fresh stream, private to this call" — and joins nothing. */
+  it("takes an explicit null as the refusal it is", () => {
+    const graph = joined(null, null);
+    expect(graph.sessions).toEqual([]);
+    expect(node(graph, childNodeId("first"))!.session).toBeNull();
+  });
+
+  /** This file's own default reaches every child that declares nothing, so they are all in it. */
+  it("puts everything that inherits the state's own session in one conversation", () => {
+    const graph = joined(undefined, undefined, "phase");
+    expect(graph.sessions.length).toBe(1);
+    expect(graph.sessions[0]!.members.length).toBe(3);
+    expect(node(graph, childNodeId("alone"))!.session?.from).toBe("here");
+  });
+
+  /** Nearest layer wins: the mounted state's own word beats the default it would have inherited. */
+  it("lets a child's own declaration overrule the one it would inherit", () => {
+    const graph = joined(null, undefined, "phase");
+    expect(node(graph, childNodeId("first"))!.session).toBeNull();
+    expect(node(graph, childNodeId("second"))!.session?.name).toBe("phase");
+    // The two that said nothing are still in the state's own conversation; the refusal is out of it.
+    expect(graph.sessions.map((one) => one.members)).toEqual([[childNodeId("alone"), childNodeId("second")]]);
+  });
+
+  /** One box in a session is a fact about the box. A frame round one thing is a boundary that is not there. */
+  it("draws no frame for a conversation only one box is in", () => {
+    const graph = joined(shared, undefined);
+    expect(graph.sessions).toEqual([]);
+    expect(node(graph, childNodeId("first"))!.session?.name).toBe("review");
+    expect(layoutOf(graph).frames).toEqual([]);
+  });
+
+  it("stacks a session's members in one column, in run order, inside one frame", () => {
+    const layout = layoutOf(joined(shared, shared));
+    const box = (id: string): PlacedNode => layout.nodes.find((n) => n.node.id === id)!;
+    const first = box(childNodeId("first"));
+    const second = box(childNodeId("second"));
+    expect(second.x).toBe(first.x);
+    expect(second.y).toBeGreaterThan(first.y + first.h);
+    // And the box between them in the SEQUENCE is beside them, because columns are still run order.
+    expect(box(childNodeId("alone")).x).toBeGreaterThan(first.x);
+
+    expect(layout.frames.length).toBe(1);
+    const frame = layout.frames[0]!;
+    for (const member of [first, second]) {
+      expect(member.x).toBeGreaterThan(frame.x);
+      expect(member.x + member.w).toBeLessThan(frame.x + frame.w);
+      expect(member.y).toBeGreaterThan(frame.y);
+      expect(member.y + member.h).toBeLessThan(frame.y + frame.h);
+    }
+    // And nothing else is in it — a frame that enclosed a box not in the conversation would be
+    // stating the one thing it exists to state, wrongly.
+    for (const other of layout.nodes) {
+      if (other === first || other === second) continue;
+      expect(other.x > frame.x && other.x + other.w < frame.x + frame.w).toBe(false);
+    }
+  });
+
+  /** The frame pays for its own caption: its first member stays level with every unframed box. */
+  it("keeps the spine level across the first member of a frame", () => {
+    const layout = layoutOf(joined(shared, shared));
+    const y = (id: string): number => layout.nodes.find((n) => n.node.id === id)!.y;
+    expect(y(childNodeId("first"))).toBe(y(childNodeId("alone")));
+    expect(y(ENTRY)).toBe(y(childNodeId("first")));
+  });
+
+  /** Nothing crosses a box, frames and their stacked members included. */
+  it("still draws no line across a box it is not joined to", () => {
+    const layout = layoutOf(joined(shared, shared));
+    for (const line of [...layout.wires.map((w) => ({ c: w.curves, a: w.wire.from.node, b: w.wire.to.node })),
+                        ...layout.edges.map((e) => ({ c: e.curves, a: e.edge.from, b: e.edge.to }))]) {
+      for (const point of samples(line.c, 60)) {
+        const inside = layout.nodes.some(
+          (box) =>
+            box.node.id !== line.a &&
+            box.node.id !== line.b &&
+            point.x > box.x + 1 &&
+            point.x < box.x + box.w - 1 &&
+            point.y > box.y + 1 &&
+            point.y < box.y + box.h - 1,
+        );
+        expect(inside).toBe(false);
+      }
+    }
+  });
+
+  /** Pointing at a frame asks about the conversation: its boxes, and the traffic between them. */
+  it("lights a session with the boxes in it and the moves inside it", () => {
+    const graph = joined(shared, shared);
+    const { lit, near } = focusOf(graph, { kind: "session", id: graph.sessions[0]!.id });
+    expect(lit.has(idOf.session(graph.sessions[0]!.id))).toBe(true);
+    expect(lit.has(idOf.node(childNodeId("first")))).toBe(true);
+    expect(lit.has(idOf.node(childNodeId("second")))).toBe(true);
+    // The box between them is not in the conversation; it is at the end of a step that is.
+    expect(lit.has(idOf.node(childNodeId("alone")))).toBe(false);
+    expect(near.has(idOf.node(childNodeId("alone")))).toBe(true);
+  });
+});
+
 describe("layoutOf", () => {
   it("lays the spine out in run order, with the two ends bracketing it", () => {
     const layout = layoutOf(graphOf(PLAN, "plan"));
@@ -471,6 +751,27 @@ describe("layoutOf", () => {
     for (const edge of layout.edges) {
       for (const n of edge.d.matchAll(/-?\d+(\.\d+)?/g)) expect(Number(n[0])).toBeGreaterThanOrEqual(0);
       if (edge.label !== null) expect(edge.label.y - edge.label.h / 2).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * An arrowhead is drawn along the line's direction where it ENDS, so the line has to be straight
+   * there — otherwise the head points one way and the last stretch of its line another.
+   */
+  it("brings an arc into its box along a straight run", () => {
+    const layout = layoutOf(graphOf(PLAN, "plan"));
+    const arcs = layout.edges.filter((e) => e.edge.kind !== "sequence");
+    expect(arcs.length).toBeGreaterThan(0);
+    for (const arc of arcs) {
+      const last = arc.curves[arc.curves.length - 1]!;
+      // Straight: the control points sit on its own ends. Vertical: it comes into a box edge.
+      expect([last.c1x, last.c1y]).toEqual([last.x1, last.y1]);
+      expect([last.c2x, last.c2y]).toEqual([last.x2, last.y2]);
+      expect(last.x1).toBe(last.x2);
+      expect(Math.abs(last.y2 - last.y1)).toBeGreaterThan(4);
+      // And it is a continuation of the bend before it, not a jump.
+      const before = arc.curves[arc.curves.length - 2]!;
+      expect([before.x2, before.y2]).toEqual([last.x1, last.y1]);
     }
   });
 

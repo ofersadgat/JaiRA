@@ -562,6 +562,18 @@ export interface StateSlotInfo {
 export interface StateSlots {
   inputs: StateSlotInfo[];
   outputs: StateSlotInfo[];
+  /**
+   * What this state declares about the conversation its operation joins, exactly as authored.
+   *
+   * A WRAPPER rather than the value, because `null` is a declaration — the explicit "a fresh stream,
+   * private to this call" marker — and absent is not. The two mean opposite things and a bare
+   * nullable field cannot tell them apart.
+   *
+   * Raw rather than resolved, because resolving it needs the ancestry: a session is the pair
+   * (name, scope), and `in` names the scope RELATIVE to whoever wrote the declaration. The state
+   * that mounts this one is the only thing that knows where it sits, so it is the one that resolves.
+   */
+  session?: { declared: unknown };
 }
 
 /**

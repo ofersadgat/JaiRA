@@ -1,0 +1,127 @@
+{
+  "label": "Ask the person",
+  "description": "Put the product questions only a person can answer to that person, BEFORE the loop spends another pass arguing them (feature.md §0.6). Entered when the draft raises questions, or when the critique targets 'ask'. The fields are the draft's own `questions` — a component's config is its `args` merged with the state's resolved inputs, so an input named `fields` IS the form. Nothing here is a gate: an answer is an answer, not an approval, and the decision about the deliverables is still the gate's.",
+  "inputs": {
+    "fields": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "string",
+                "number",
+                "boolean",
+                "enum"
+              ]
+            },
+            "label": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "enum": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "optional": {
+              "type": "boolean"
+            },
+            "multiline": {
+              "type": "boolean"
+            },
+            "default": {}
+          }
+        }
+      }
+    }
+  },
+  "outputs": {
+    "answers": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      },
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "context.get",
+                  "input": {
+                    "name": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "operation"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "output"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "answers"
+    }
+  },
+  "operation": {
+    "kind": "function",
+    "functionRef": "fill_form",
+    "input": {
+      "prompt": {
+        "kind": "text",
+        "binding": {
+          "text": "These are the product questions the spec cannot answer from the repo. Answer the ones you have a view on and leave the rest blank — a blank stays an open question on the doc rather than being decided for you."
+        }
+      }
+    },
+    "output": {
+      "name": "answers",
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    }
+  },
+  "slotMeta": {
+    "inputs.fields": {
+      "default": [],
+      "description": "The questions, already in `fill_form` field shape — this is `draft.output.questions` passed straight through. Every one is optional at the component, because a person who does not know is a real answer and must not be trapped in the dialog."
+    },
+    "outputs.answers": {
+      "description": "One key per question, named by that question's `name`. An absent or empty key is 'they did not answer', which the draft must treat as still-open rather than as a decision."
+    }
+  }
+}

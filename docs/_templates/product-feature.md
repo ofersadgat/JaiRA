@@ -57,6 +57,21 @@ run artifact on the task and will not be read again.
 
 ## Open questions
 
-| Question | Resolved by |
-| --- | --- |
-| | phase N |
+Only what genuinely cannot be settled yet. **A question a person could answer in a
+sentence does not belong here** — it is asked while the spec is being written, and the
+answer is folded into the prose above as a plain statement of what the product does.
+A row here is a measurement nobody has taken, a decision that depends on work not yet
+done, or a choice that a later phase is better placed to make.
+
+Every row names the reading taken in the meantime, so the feature is buildable as
+written whatever the answer turns out to be.
+
+| Question | Reading taken for now | Resolved by |
+| --- | --- | --- |
+| | | design phase \| build phase \| a measurement |
+
+---
+
+**This document describes the product.** It does not record how it was written: no
+passes, no revisions, no earlier versions of itself, no arguments with a previous
+draft. Where a decision changed, the document simply states the decision that holds.

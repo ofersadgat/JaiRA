@@ -21,16 +21,24 @@
  *
  *  - **position** — WHEN it runs. Columns are run order, left to right; lane 0 is the cursor's own
  *    path, lane 1 is everything it reaches only by jumping.
- *  - **geometry** — WHAT KIND of movement. A smooth curve between two PORTS is a value moving. An
- *    arc between two BOX EDGES, with an arrowhead, is the cursor moving. Nothing else may be a line.
- *  - **hue** — WHICH ONE. A data wire takes the colour of the value it carries — one hue per source
- *    port, the same wherever that value goes, so a bundle of parallel wires can be told apart. A
- *    control edge takes the colour of its DIRECTION: grey for the sequence, {@link EdgeFlow} for the
- *    rest. Hue never distinguishes data from control; geometry does.
+ *  - **geometry** — WHAT KIND of movement. A line between two PORTS is a value moving. An arc
+ *    between two BOX EDGES, with an arrowhead, is the cursor moving. Nothing else may be a line.
+ *    A value's line is a curve when it has only the box next door to reach and is ROUTED when it has
+ *    further to go — out of the port, along a channel under the boxes, and up beside the box it is
+ *    going to. See {@link routes}: that is what keeps every line off every box.
+ *  - **hue** — WHICH ONE, and only while it is asked. A control edge takes the colour of its
+ *    DIRECTION and keeps it: grey for the sequence, {@link EdgeFlow} for the rest — there are three
+ *    of those and they are the same three in every state, so they can be learned. A data wire is
+ *    GREY until it is pointed at, and then takes the colour of the value it carries — one hue per
+ *    source port, the same wherever that value goes. A state moves twenty values and no reader can
+ *    hold twenty hues, so spending colour on all of them at once spends it on nothing; spending it
+ *    on the one being asked about is what makes a bundle of wires followable. Hue never
+ *    distinguishes data from control; geometry does.
  *  - **dash** — HOW IT IS WRITTEN. Solid is the plain case (a bare binding, a rule on the mount).
  *    Dashed is "one of several" (a read inside an expression, a rule that belongs to no child).
  *    Dotted is "not written at all" (the implicit fill, a guard's read, a step that does not wait).
- *  - **weight, opacity, depth** — ATTENTION, and nothing else. See {@link focusOf}.
+ *  - **weight, opacity, depth, and a wire's hue** — ATTENTION, and nothing else. See
+ *    {@link focusOf}.
  *
  * ## Where a transition leaves from
  *
@@ -101,8 +109,8 @@ export interface GraphPort {
    * The colour of the value this port carries, in degrees of hue, or `null` if nothing flows.
    *
    * Assigned per SOURCE port and carried by every wire leaving it, so one value is one colour
-   * wherever it turns up. That is what makes a bundle of eight parallel wires followable, and it is
-   * the only reason hue is spent on dataflow at all.
+   * wherever it turns up — and worn only while that value is the one being asked about. See the
+   * vocabulary above for why colour on dataflow is rationed rather than spent.
    */
   hue: number | null;
 }
@@ -145,6 +153,24 @@ export interface GraphNode {
   config: unknown;
   /** A child the cursor never walks into: declared, and reachable only by a jump (§6). */
   offSpine: boolean;
+  /**
+   * The conversation this box's call joins, or `null` when it starts one nobody else can reach.
+   *
+   * On the BOX rather than only in {@link GraphSession}, because a session of one is still a fact
+   * about the box — that its transcript survives the loop it sits in, and that it is scoped where it
+   * is scoped — and it is a fact nothing else on the drawing says.
+   */
+  session: NodeSession | null;
+}
+
+/** One box's answer to "which conversation does this run in". */
+export interface NodeSession {
+  /** The key two boxes must share to be in one conversation: the name AND the scope it lives in. */
+  id: string;
+  name: string;
+  scope: string;
+  /** Which document said so — this file, or the state being mounted. */
+  from: "here" | "mount" | "child";
 }
 
 /** One end of a wire: a port on a box, or a read of a guard (see {@link ruleNodeId}). */
@@ -191,6 +217,10 @@ export type GraphEdgeKind = "sequence" | "mount" | "state";
  * ground it has covered, or that it stops badly — and an author reading a graph is asking which of
  * those a given rule does. Measured by the target's COLUMN against the source's, because columns are
  * run order: that is what makes "forward" a fact about the drawing rather than a guess about intent.
+ *
+ * Blue onward, red back, amber for an ending that is not success — the palette's accent, bad and
+ * warning hues, which is to say each of the three already means what it is being asked to mean
+ * everywhere else in the app. See `--go-*` in the stylesheet.
  */
 export type EdgeFlow = "onward" | "back" | "abort";
 
@@ -239,12 +269,37 @@ export interface GraphEdge {
   dangling: boolean;
 }
 
+/**
+ * A conversation two or more of these boxes share, and the boxes that share it.
+ *
+ * A session is the one thing about a state that is both load-bearing and completely invisible: two
+ * children in one conversation see each other's turns, and two children in separate ones do not,
+ * and nothing on a form or in a drawing has ever said which. It is also the thing that is easiest to
+ * get subtly wrong — see {@link sessionKeyOf} for why a bare name on two siblings does NOT join
+ * them, which is a mistake no error will ever report.
+ *
+ * Drawn only when at least two boxes are in it. One box in a session is a fact about that box and
+ * belongs on the box, which is where the chip puts it; a container round a single thing draws a
+ * boundary where there is no boundary to draw.
+ */
+export interface GraphSession {
+  id: string;
+  /** The name as authored — what an author greps for. */
+  name: string;
+  /** Where that name lives, in words: what makes two identical names two different conversations. */
+  scope: string;
+  /** The boxes in it, in run order. */
+  members: string[];
+}
+
 export interface StateGraph {
   nodes: GraphNode[];
   /** Control flow: where the cursor goes. */
   edges: GraphEdge[];
   /** Dataflow: what moves, and where from. */
   wires: GraphWire[];
+  /** The conversations more than one box shares. */
+  sessions: GraphSession[];
   /** `limits`, spelled for the bar above the drawing. Empty when the state declares none. */
   limits: string[];
 }
@@ -472,8 +527,8 @@ export function graphOf(doc: unknown, stateId = "", declared: Record<string, Sta
   const edges: GraphEdge[] = [];
   const wires: GraphWire[] = [];
 
-  const add = (node: Omit<GraphNode, "ports">): Building => {
-    const box: Building = { ...node, ports: new Map() };
+  const add = (node: Omit<GraphNode, "ports" | "session"> & { session?: NodeSession | null }): Building => {
+    const box: Building = { session: null, ...node, ports: new Map() };
     building.set(node.id, box);
     return box;
   };
@@ -539,6 +594,48 @@ export function graphOf(doc: unknown, stateId = "", declared: Record<string, Sta
   const outputs = slotsOf(state["outputs"]);
   if (outputs.length === 0) exit.chips.push({ text: "no outputs", tone: "plain" });
 
+  /**
+   * What this file says about conversations, before any child is looked at.
+   *
+   * `environment.session` is the layer every child inherits when it declares none of its own, and it
+   * is also what a child's `join: "parent"` takes verbatim — so it is resolved once, here, and both
+   * questions are answered from it.
+   */
+  const environment = asRecord(state["environment"]);
+  const inherited = "session" in environment ? environment["session"] : undefined;
+  const inheritedKey =
+    inherited === undefined ? null : sessionKeyOf(inherited, "here", "");
+
+  /**
+   * Which conversation one box's call joins.
+   *
+   * Nearest layer wins (§5.2): the mounted state's own word beats the mount's, which beats this
+   * file's default. `null` is a word — the explicit fresh marker — so presence is tested rather than
+   * nullishness, which would let an explicit `null` fall through to the very default it refuses.
+   */
+  const sessionFor = (mountKey: string, mount: Record<string, unknown>, own: unknown, hasOwn: boolean): NodeSession | null => {
+    const mountEnv = asRecord(mount["environment"]);
+    const layer: { declared: unknown; from: NodeSession["from"] } | undefined = hasOwn
+      ? { declared: own, from: "child" }
+      : "session" in mountEnv
+        ? { declared: mountEnv["session"], from: "mount" }
+        : inherited !== undefined
+          ? { declared: inherited, from: "here" }
+          : undefined;
+    if (layer === undefined) return null;
+    // `join` names another declaration and takes its name and scope whole. The only ancestry this
+    // file can see is itself, so `join: "parent"` from a child is exactly what this state declares
+    // — and every other join names something outside the file and is left unresolved.
+    const join = asRecord(layer.declared)["join"];
+    if (typeof join === "string") {
+      return join === "parent" && layer.from === "child" && inheritedKey !== null
+        ? { ...inheritedKey, from: "here" }
+        : null;
+    }
+    const key = sessionKeyOf(layer.declared, layer.from === "child" ? "child" : "here", mountKey);
+    return key === null ? null : { ...key, from: layer.from };
+  };
+
   // --- the operation --------------------------------------------------------
   const operation = state["operation"];
   const hasOperation = operation !== undefined;
@@ -555,6 +652,9 @@ export function graphOf(doc: unknown, stateId = "", declared: Record<string, Sta
       id: OPERATION,
       kind: "operation",
       title: "operation",
+      // Its own `session`, else this file's default — the same nearest-wins ladder a child walks,
+      // with the middle rung missing because an operation has no mount.
+      session: sessionFor("", {}, block["session"], "session" in block),
       // A whole block written as a reference is a string in an object position (§2.2), so the
       // reference IS the value — there is nothing to take apart and nothing to list.
       subtitle: typeof operation === "string" ? operation : kind.length > 0 ? "" : "kind inherited",
@@ -591,10 +691,12 @@ export function graphOf(doc: unknown, stateId = "", declared: Record<string, Sta
       const value = oneLine(environment[field]);
       if (value.length > 0) chips.push({ text: value, tone: "plain", title: `environment.${field}` });
     }
+    const slots = declared[childStateIdOf(stateId, key, ref)];
     add({
       id: childNodeId(key),
       kind: "child",
       title: key,
+      session: sessionFor(key, decl, slots?.session?.declared, slots?.session !== undefined),
       // `./<key>` is what an omitted `state` means (§6), so the box says it rather than leaving the
       // second line blank on the majority of mounts.
       subtitle: ref.length > 0 ? ref : `./${key}`,
@@ -606,7 +708,6 @@ export function graphOf(doc: unknown, stateId = "", declared: Record<string, Sta
     });
     // What the child DECLARES, ahead of what this file happens to have wired: an unfilled input is
     // the port worth seeing, and it is exactly the one a wiring-only reading leaves out.
-    const slots = declared[childStateIdOf(stateId, key, ref)];
     if (slots !== undefined) known.add(childNodeId(key));
     for (const slot of slots?.inputs ?? []) port(childNodeId(key), "in", slot.name, slot.optional ? "optional" : "");
     for (const slot of slots?.outputs ?? []) port(childNodeId(key), "out", slot.name);
@@ -796,7 +897,23 @@ export function graphOf(doc: unknown, stateId = "", declared: Record<string, Sta
   if (typeof limits["timeout"] === "number") stated.push(`timeout ${limits["timeout"]}s`);
 
   const nodes = [...building.values()].map((box) => ({ ...box, ports: [...box.ports.values()] }));
-  return { nodes, edges, wires, limits: stated };
+  /**
+   * The conversations more than one box is in, in the order the run reaches them.
+   *
+   * Two and not one: a box's own session is already on the box, and a container drawn round a single
+   * thing draws a boundary that is not there. What a container says that a chip cannot is that these
+   * boxes can see each other's turns — which is a statement about a SET.
+   */
+  const shared = new Map<string, GraphSession>();
+  for (const node of nodes) {
+    if (node.session === null) continue;
+    const found = shared.get(node.session.id);
+    if (found === undefined) {
+      shared.set(node.session.id, { ...node.session, members: [node.id] });
+    } else found.members.push(node.id);
+  }
+  const sessions = [...shared.values()].filter((one) => one.members.length > 1);
+  return { nodes, edges, wires, sessions, limits: stated };
 }
 
 /** One transition as declared. */
@@ -844,6 +961,68 @@ function operationRows(operation: Record<string, unknown>): GraphRow[] {
     .map(([key, value]) => ({ label: key, value: oneLine(value) }));
 }
 
+
+// --- conversations -------------------------------------------------------------
+
+/**
+ * Which conversation a declaration names — the PAIR, which is the whole of the difficulty.
+ *
+ * A session is `(name, scope)`, and `in` names the scope relative to WHOEVER WROTE the declaration:
+ * absent means the writer itself, `"parent"` means the writer's parent, `"global"` the run root, and
+ * anything else an ancestor by id. So the same four characters mean different conversations
+ * depending on which file they are in, and — the trap this is mostly here for — two siblings that
+ * each write a bare `session: "review"` scope that name to THEMSELVES and do not share a word.
+ * Sharing is spelled by naming a common scope, and the commonest spelling of that is
+ * `{ "name": "review", "in": "parent" }` in each child, whose parent is the state drawn here.
+ *
+ * `writer` is which document the declaration was found in, which is what `in` is relative to:
+ *
+ *  - `child` — the mounted state's own file. `parent` then means THIS state, which is why a child
+ *    saying `in: "parent"` is groupable at all.
+ *  - `here` / `mount` — this file, either the state's own `environment` or one mount's. The writer
+ *    is this state, so a bare name scopes HERE and every child inheriting it is in one conversation.
+ *
+ * `null` is a declaration and not an absence — "a fresh stream, private to this call" — so it
+ * resolves to nothing groupable, deliberately. So do `{ id }` and `{ expr }`, which name a position
+ * arrived at through data flow: what they resolve to is a fact about a RUN, and this is a drawing of
+ * a document.
+ */
+function sessionKeyOf(
+  declared: unknown,
+  writer: "child" | "mount" | "here",
+  mountKey: string,
+): { id: string; name: string; scope: string } | null {
+  const name = typeof declared === "string" ? declared : undefined;
+  const record = asRecord(declared);
+  // `join` takes another declaration's name AND its scope verbatim: the joiner does not know the
+  // name and must not have to. `join: "parent"` from a child is therefore whatever THIS state
+  // declares — which the caller has already resolved and passes back in as `here`.
+  const named = name ?? (typeof record["name"] === "string" ? record["name"] : undefined);
+  if (named === undefined || named.length === 0) return null;
+  const scope = typeof record["in"] === "string" ? record["in"] : undefined;
+  const mine = writer === "child" ? `the child ${mountKey}` : "this state";
+  if (scope === undefined) {
+    // The writer itself. Written in this file that is this state — so every child inheriting it is
+    // in one conversation. Written in the CHILD's file it is that child, and a sibling writing the
+    // same name is somewhere else entirely; keyed per MOUNT, since two mounts of one state are two
+    // instances and two conversations.
+    return writer === "child"
+      ? { id: `${named}@child:${mountKey}`, name: named, scope: `in ${mine}` }
+      : { id: `${named}@here`, name: named, scope: "in this state" };
+  }
+  if (scope === "parent") {
+    return writer === "child"
+      ? { id: `${named}@here`, name: named, scope: "in this state" }
+      : { id: `${named}@up`, name: named, scope: "in whatever mounts this state" };
+  }
+  if (scope === "global") return { id: `${named}@global`, name: named, scope: "in the run" };
+  // An ancestor by id. Which one is outside this file, but the pair is still the key: two boxes
+  // naming the same name in the same ancestor are in the same conversation wherever it turns out
+  // to be. `document` is refused by the loader and so names nothing here either.
+  if (scope === "document") return null;
+  return { id: `${named}@id:${scope}`, name: named, scope: `in ${scope}` };
+}
+
 // --- attention -----------------------------------------------------------------
 
 /** What the pointer is on. Each of these is something a reader can ask a question about. */
@@ -851,7 +1030,8 @@ export type Focus =
   | { kind: "node"; id: string }
   | { kind: "edge"; id: string }
   | { kind: "port"; node: string; port: string }
-  | { kind: "wire"; id: string };
+  | { kind: "wire"; id: string }
+  | { kind: "session"; id: string };
 
 /** Everything the drawing can raise or fade, under one naming scheme. */
 export const idOf = {
@@ -859,6 +1039,7 @@ export const idOf = {
   edge: (id: string): string => `edge:${id}`,
   wire: (id: string): string => `wire:${id}`,
   port: (node: string, port: string): string => `port:${node}:${port}`,
+  session: (id: string): string => `session:${id}`,
 };
 
 /**
@@ -876,6 +1057,9 @@ export const idOf = {
  *  - a RULE — itself, its arrow, the two boxes it joins, and the reads its condition makes.
  *  - a PORT — itself, the wires through it, and the ports and boxes at their far ends.
  *  - a TERM in a rule — the one wire it reads, the port it comes from, and that port's box.
+ *  - a SESSION — itself, the boxes in it, and the lines that run BETWEEN them, which are the only
+ *    lines the conversation itself explains. A line to somewhere outside is a line about something
+ *    else, so its far end is merely kept legible.
  */
 export function focusOf(graph: StateGraph, focus: Focus | null): { lit: Set<string>; near: Set<string> } {
   const lit = new Set<string>();
@@ -927,6 +1111,23 @@ export function focusOf(graph: StateGraph, focus: Focus | null): { lit: Set<stri
         (wire.to.node === focus.node && wire.to.port === focus.port);
       if (mine) litWire(wire);
     }
+  } else if (focus.kind === "session") {
+    const session = graph.sessions.find((one) => one.id === focus.id);
+    if (session !== undefined) {
+      const inside = new Set(session.members);
+      lit.add(idOf.session(session.id));
+      for (const member of session.members) lit.add(idOf.node(member));
+      for (const edge of graph.edges) {
+        if (inside.has(edge.from) && inside.has(edge.to)) lit.add(idOf.edge(edge.id));
+        else if (inside.has(edge.from) || inside.has(edge.to)) {
+          near.add(idOf.edge(edge.id));
+          near.add(idOf.node(inside.has(edge.from) ? edge.to : edge.from));
+        }
+      }
+      for (const wire of graph.wires) {
+        if (inside.has(wire.from.node) && inside.has(wire.to.node)) lit.add(idOf.wire(wire.id));
+      }
+    }
   } else {
     const wire = graph.wires.find((w) => w.id === focus.id);
     if (wire !== undefined) litWire(wire);
@@ -963,6 +1164,67 @@ const LANE_PAD = 14;
 const MARGIN = 24;
 /** How far into a box's edge the outermost arc may attach. */
 const ANCHOR_INSET = 18;
+/**
+ * How far an arc runs STRAIGHT out of a box before it starts to bend, and straight back in.
+ *
+ * An arrowhead is drawn along the line's direction at the point it ends, and on a bare cubic that
+ * direction is the tangent — which for these is exactly vertical, while the last visible stretch of
+ * the curve is still coming in at an angle. The head then reads as sitting beside its line rather
+ * than on the end of it. A short straight run at each end makes the two the same thing: the line
+ * arrives vertically because it IS vertical there, over ground the columns already keep clear.
+ */
+const ARC_STUB = 12;
+
+/*
+ * How a value's line is routed once it has further to go than the box next door.
+ *
+ * A wire between neighbours is a short hop over empty ground and stays the curve it always was. A
+ * wire that reaches PAST the box beside it is a different thing entirely: drawn straight it crosses
+ * every box in between, through the exact rows their ports are on, and that is the point at which a
+ * state with eight values in it stops being readable. Those are routed instead — out of the port,
+ * down into a CHANNEL under the boxes, along it, and back up in the gutter beside the box it is
+ * going to. Every straight run is then over ground nothing else occupies, so the only crossings left
+ * in the drawing are between one routed wire and another.
+ */
+/** How far past a port a wire runs before it turns — enough to read as leaving that port. */
+const STUB = 22;
+/** Between two routed wires running down the same gutter: what keeps them from being one line. */
+const TRUNK_STEP = 9;
+/** How far short of a box a wire leaves its channel to come into one of that box's ports. */
+const BRANCH_INSET = 16;
+/**
+ * One channel of the band the routed wires run along, and the clear air above and below the band.
+ *
+ * Tight, because the band is HEIGHT the drawing did not need before and a state that will not fit
+ * the pane is zoomed until its type is a smudge. A wire is under two pixels wide and its neighbours
+ * in the band are parallel to it, so a channel needs to be a legible gap and nothing more.
+ */
+const CHANNEL_H = 11;
+const BAND_GAP = 14;
+/** How tightly a routed wire turns its corners. */
+const TURN = 9;
+
+/*
+ * A session's frame: what it costs to draw a conversation as a place.
+ *
+ * Its members are stacked rather than laid along the run, so the frame is ONE column and the run
+ * leaves it and comes back — which is what a shared conversation actually looks like and what makes
+ * this drawing stop being a straight line. Everything here is the room that costs.
+ */
+/** The caption above the first member, and the air around the stack. */
+const GROUP_HEAD = 20;
+const GROUP_PAD = 10;
+/**
+ * The clear column inside the frame, on each side of its members.
+ *
+ * The thing that makes stacking survivable. A framed box may have a sibling directly above it, so a
+ * line leaving through its top would go through that sibling; it steps sideways into this column
+ * first and travels up THERE. It is also where a routed value branches in — the same gutter it would
+ * have used, moved inside the frame.
+ */
+const GROUP_INSET = 34;
+/** Between two members of one session: room for a line to get out sideways between them. */
+const GROUP_GAP = 34;
 
 /**
  * A guard label's box, measured rather than guessed.
@@ -1029,11 +1291,84 @@ export function pathOf(c: Curve): string {
   return `M ${c.x1} ${c.y1} C ${c.c1x} ${c.c1y}, ${c.c2x} ${c.c2y}, ${c.x2} ${c.y2}`;
 }
 
+/** The `d` of a run of joined curves: one `M`, then a `C` each, so the run draws as one stroke. */
+export function pathOfAll(curves: Curve[]): string {
+  const first = curves[0];
+  if (first === undefined) return "";
+  const rest = curves.map((c) => `C ${c.c1x} ${c.c1y}, ${c.c2x} ${c.c2y}, ${c.x2} ${c.y2}`).join(" ");
+  return `M ${first.x1} ${first.y1} ${rest}`;
+}
+
+/**
+ * `n + 1` points spread along a run of curves, by LENGTH rather than by segment.
+ *
+ * A routed wire is a 9px corner beside a 600px channel run, so spreading the samples evenly over the
+ * segments would put five points on the corner and five on the run — and the one question this is
+ * asked ("where does this line leave the pane") would be answered a hundred pixels out. Chord length
+ * is close enough to arc length for a run this straight, and it is the measure that has to be cheap.
+ */
+export function samples(curves: Curve[], n: number): { x: number; y: number }[] {
+  if (curves.length === 0) return [];
+  const lengths = curves.map((c) => Math.hypot(c.x2 - c.x1, c.y2 - c.y1) || 1);
+  const total = lengths.reduce((sum, one) => sum + one, 0);
+  const points: { x: number; y: number }[] = [];
+  for (let i = 0; i <= n; i++) {
+    let want = (i / n) * total;
+    let which = 0;
+    while (which < lengths.length - 1 && want > lengths[which]!) {
+      want -= lengths[which]!;
+      which++;
+    }
+    points.push(pointOn(curves[which]!, Math.min(1, want / lengths[which]!)));
+  }
+  return points;
+}
+
+/** A straight run, as the cubic every line here is: its control points on its own ends. */
+function straight(a: { x: number; y: number }, b: { x: number; y: number }): Curve {
+  return { x1: a.x, y1: a.y, c1x: a.x, c1y: a.y, c2x: b.x, c2y: b.y, x2: b.x, y2: b.y };
+}
+
+/** `by` px from `from` toward `to`, or all the way there when the run is shorter than that. */
+function toward(from: { x: number; y: number }, to: { x: number; y: number }, by: number): { x: number; y: number } {
+  const len = Math.hypot(to.x - from.x, to.y - from.y);
+  const k = Math.min(1, by / (len === 0 ? 1 : len));
+  return { x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k };
+}
+
+/**
+ * A polyline with its corners rounded off, as a run of curves.
+ *
+ * The corner IS both control points, which is what makes the turn read as a turn: the curve leaves
+ * along the run coming in and arrives along the run going out, so nothing kinks. A radius never eats
+ * more than half of the run it is taken out of, so two corners close together stay two corners.
+ */
+function roundedPath(points: { x: number; y: number }[], radius: number): Curve[] {
+  const pts = points.filter(
+    (p, i) => i === 0 || Math.hypot(p.x - points[i - 1]!.x, p.y - points[i - 1]!.y) > 0.01,
+  );
+  if (pts.length < 2) return [];
+  const curves: Curve[] = [];
+  let from = pts[0]!;
+  for (let i = 1; i + 1 < pts.length; i++) {
+    const corner = pts[i]!;
+    const next = pts[i + 1]!;
+    const back = toward(corner, from, Math.min(radius, Math.hypot(corner.x - from.x, corner.y - from.y) / 2));
+    const on = toward(corner, next, Math.min(radius, Math.hypot(next.x - corner.x, next.y - corner.y) / 2));
+    if (Math.hypot(back.x - from.x, back.y - from.y) > 0.01) curves.push(straight(from, back));
+    curves.push({ x1: back.x, y1: back.y, c1x: corner.x, c1y: corner.y, c2x: corner.x, c2y: corner.y, x2: on.x, y2: on.y });
+    from = on;
+  }
+  curves.push(straight(from, pts[pts.length - 1]!));
+  return curves;
+}
+
 export interface PlacedEdge {
   edge: GraphEdge;
   /** The SVG path. Straight for a step of the sequence, an arc over or under everything otherwise. */
   d: string;
-  curve: Curve;
+  /** The line as a run of joined curves: one for a step, a straight-bend-straight three for an arc. */
+  curves: Curve[];
   /** Which way it takes the run — its hue. See {@link EdgeFlow}. */
   flow: EdgeFlow;
   /** Where the guard is written, and how much room it needs. `null` for a step of the sequence. */
@@ -1043,13 +1378,35 @@ export interface PlacedEdge {
 export interface PlacedWire {
   wire: GraphWire;
   d: string;
-  curve: Curve;
+  /** The line as a run of joined curves — one for a short hop, six for a routed one. */
+  curves: Curve[];
+  /**
+   * The bundle this line belongs to, or `null` when it is drawn on its own.
+   *
+   * Every wire out of one source port shares its route until the last moment, so the DRAWING holds
+   * one line where the document holds four reads of one value. They are still four wires — each has
+   * its own binding and its own far end — and what they share is only geometry, which is why this is
+   * here: the part they have in common cannot answer for one of them, so pointing at it asks about
+   * the PORT, and the port's answer is the whole bundle.
+   */
+  bundle: string | null;
+}
+
+/** One session's frame, drawn behind its members. */
+export interface PlacedSession {
+  session: GraphSession;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 export interface GraphLayout {
   nodes: PlacedNode[];
   edges: PlacedEdge[];
   wires: PlacedWire[];
+  /** The conversations, as the regions holding the boxes that are in them. */
+  frames: PlacedSession[];
   width: number;
   height: number;
 }
@@ -1081,6 +1438,7 @@ function bodyTop(node: GraphNode): number {
     BORDER +
     TITLE_H +
     (node.subtitle.length > 0 ? SUB_H : 0) +
+    (node.session !== null ? ROW_H : 0) +
     (node.chips.length > 0 ? CHIP_H : 0) +
     node.rows.length * ROW_H +
     (node.ports.length > 0 ? PORTS_GAP : 0)
@@ -1092,6 +1450,139 @@ function heightOf(node: GraphNode): number {
   const ins = node.ports.filter((p) => p.side === "in").length;
   const outs = node.ports.length - ins;
   return bodyTop(node) + Math.max(ins, outs) * ROW_H + PAD + BORDER;
+}
+
+/**
+ * Every wire out of one source port, as one line with somewhere to run.
+ *
+ * Two facts about a value, and one shape that says both: it comes from ONE place, and it is read in
+ * several. Drawn as one line per read, a value read four times is four lines that leave the same dot
+ * and stay side by side for most of their length — four times the ink for one fact, and four things
+ * to follow where there is one. Drawn as a bundle it is one line that splits where the answers
+ * actually differ, which is beside the box each read happens in.
+ */
+interface Bundle {
+  key: string;
+  from: WireEnd;
+  wires: GraphWire[];
+  /** Where it turns out of the gutter beside its source box. */
+  stubX: number;
+  /** Which channel of the band under the boxes it runs along. */
+  channel: number;
+  /** Wire id ⇒ the x it leaves the channel at, which is the gutter beside the box it arrives in. */
+  branches: Map<string, number>;
+}
+
+interface Routing {
+  /** How many channels the band has to hold. Zero when nothing needs routing at all. */
+  channels: number;
+  /** Wire id ⇒ its bundle. A wire that is not here is a short hop and is drawn as its own curve. */
+  of: Map<string, Bundle>;
+}
+
+/**
+ * Decide which wires are routed, where they run, and how many channels that takes.
+ *
+ * Over COLUMNS and x alone, and that is what makes it usable: the band's height decides where the
+ * lane below the spine starts, so this has to be answerable before a single box has a y.
+ *
+ * Two rules, and nothing else:
+ *
+ *  - a bundle whose every read is in the box NEXT DOOR is left alone. Nothing is in the way, and
+ *    three corners spent on a hop that needs none is worse than the hop.
+ *  - a value read both further on and further back is two bundles, because one line cannot travel
+ *    in two directions and pretending otherwise would draw a line through its own source.
+ */
+function routes(graph: StateGraph, colOf: Map<string, number>, boxX: (id: string) => number): Routing {
+  /** A port's row on its own side of its box: the order two lines out of one box are fanned in. */
+  const rowOf = new Map<string, number>();
+  for (const node of graph.nodes) {
+    let ins = 0;
+    let outs = 0;
+    for (const port of node.ports) rowOf.set(`${node.id}/${port.key}`, port.side === "in" ? ins++ : outs++);
+  }
+  const row = (node: string, port: string): number => rowOf.get(`${node}/${port}`) ?? 0;
+
+  const groups = new Map<string, GraphWire[]>();
+  for (const wire of graph.wires) {
+    const from = colOf.get(wire.from.node);
+    const to = colOf.get(wire.to.node);
+    // A rule is not a box, and it still has a column — see where `colOf` is built. Anything with no
+    // column at all is something this cannot route, and it stays the curve it was.
+    if (from === undefined || to === undefined) continue;
+    const key = `${wire.from.node}/${wire.from.port}|${to > from ? "on" : "back"}`;
+    const found = groups.get(key);
+    if (found === undefined) groups.set(key, [wire]);
+    else found.push(wire);
+  }
+
+  const bundles: Bundle[] = [];
+  for (const [key, list] of groups) {
+    const from = colOf.get(list[0]!.from.node)!;
+    if (list.every((w) => colOf.get(w.to.node) === from + 1)) continue;
+    bundles.push({ key, from: list[0]!.from, wires: list, stubX: 0, channel: 0, branches: new Map() });
+  }
+
+  // Fanned on the way out, in the order the ports are stacked: two bundles sharing a gutter x would
+  // share a vertical run, which is the one thing routing them was for.
+  const leaving = new Map<string, Bundle[]>();
+  for (const bundle of bundles) {
+    const found = leaving.get(bundle.from.node);
+    if (found === undefined) leaving.set(bundle.from.node, [bundle]);
+    else found.push(bundle);
+  }
+  for (const [node, list] of leaving) {
+    list.sort((a, b) => row(node, a.from.port) - row(node, b.from.port) || a.key.localeCompare(b.key));
+    list.forEach((bundle, i) => {
+      // Never past the gutter either, for the same reason the branches are held inside it.
+      bundle.stubX = boxX(node) + NODE_W + Math.min(COL_GAP - 10, STUB + i * TRUNK_STEP);
+    });
+  }
+
+  // And fanned on the way in, by the row each is going to — so the branch for the topmost port turns
+  // up nearest the box and the rest stack out behind it, without ever leaving the gutter.
+  const arriving = new Map<string, { bundle: Bundle; wire: GraphWire }[]>();
+  for (const bundle of bundles) {
+    for (const wire of bundle.wires) {
+      const found = arriving.get(wire.to.node);
+      if (found === undefined) arriving.set(wire.to.node, [{ bundle, wire }]);
+      else found.push({ bundle, wire });
+    }
+  }
+  for (const [node, list] of arriving) {
+    list.sort((a, b) => row(node, a.wire.to.port) - row(node, b.wire.to.port) || a.wire.id.localeCompare(b.wire.id));
+    list.forEach((one, i) => {
+      // Never further out than the gutter is wide: past that a branch would turn up under the box to
+      // the LEFT, which is the crossing this whole arrangement exists to avoid.
+      const back = Math.min(COL_GAP - 10, BRANCH_INSET + i * TRUNK_STEP);
+      one.bundle.branches.set(one.wire.id, boxX(node) - back);
+    });
+  }
+
+  /** How far along the band a bundle reaches: its own gutter, and the gutter of its furthest read. */
+  const spanOf = (bundle: Bundle): { lo: number; hi: number } => {
+    const xs = [bundle.stubX, ...bundle.branches.values()];
+    return { lo: Math.min(...xs), hi: Math.max(...xs) };
+  };
+  // Shortest first, into the lowest channel it fits — the same packing the arcs use, for the same
+  // reason: a short run stays near the boxes and the long one that crosses the state rides under it.
+  const lanes: { lo: number; hi: number }[][] = [];
+  const packed = [...bundles].sort((a, b) => {
+    const one = spanOf(a);
+    const two = spanOf(b);
+    return one.hi - one.lo - (two.hi - two.lo) || a.key.localeCompare(b.key);
+  });
+  for (const bundle of packed) {
+    const span = spanOf(bundle);
+    let lane = 0;
+    while ((lanes[lane] ?? []).some((o) => o.lo < span.hi && span.lo < o.hi)) lane++;
+    (lanes[lane] ??= []).push(span);
+    bundle.channel = lane;
+  }
+
+  const of = new Map<string, Bundle>();
+  for (const bundle of bundles) for (const wire of bundle.wires) of.set(wire.id, bundle);
+  return { channels: lanes.length, of };
 }
 
 /**
@@ -1128,7 +1619,62 @@ export function layoutOf(graph: StateGraph): GraphLayout {
     ...outcomes,
   ];
   const onSpine = new Set([ENTRY, EXIT, ...spine.map((n) => n.id)]);
-  const colX = (col: number): number => MARGIN + col * (NODE_W + COL_GAP);
+  /**
+   * Where in the RUN each box sits, which is no longer where in the drawing it sits.
+   *
+   * The two used to be one number: a column WAS a run position, so "does this rule go forward" could
+   * be read straight off the x axis. A session's frame breaks that — its members are stacked in one
+   * column however far apart in the sequence they are — so the question goes back to the list that
+   * always answered it. Columns are still ordered BY run order; they are no longer numbered by it.
+   */
+  const runAt = new Map(order.map((node, i) => [node.id, i]));
+
+  // --- the columns ----------------------------------------------------------
+  /**
+   * One column per box, except that one session is one column.
+   *
+   * Its members stack top to bottom in run order, and the run leaves the frame and comes back to it
+   * — which is the shape a shared conversation actually has, and the reason this drawing stops being
+   * a straight line. A frame goes where the run FIRST reaches it, so left to right is still the
+   * order in which things start happening.
+   */
+  type Column = { nodes: GraphNode[]; session: GraphSession | null };
+  const sessionOf = new Map<string, GraphSession>();
+  for (const one of graph.sessions) for (const member of one.members) sessionOf.set(member, one);
+  const columns: Column[] = [];
+  const drawn = new Set<string>();
+  for (const node of order) {
+    const session = sessionOf.get(node.id);
+    if (session === undefined) {
+      columns.push({ nodes: [node], session: null });
+      continue;
+    }
+    if (drawn.has(session.id)) continue;
+    drawn.add(session.id);
+    columns.push({ nodes: order.filter((n) => session.members.includes(n.id)), session });
+  }
+  /** A framed column is wider than its members by the two clear columns their lines get out through. */
+  const columnW = (column: Column | undefined): number =>
+    column === undefined || column.session === null ? NODE_W : NODE_W + GROUP_INSET * 2;
+  const columnX: number[] = [];
+  let running = MARGIN;
+  for (const column of columns) {
+    columnX.push(running);
+    running += columnW(column) + COL_GAP;
+  }
+  /** Which column a box is in, and where inside its frame — the two facts its lines are routed by. */
+  const seat = new Map<string, { column: number; index: number; count: number; framed: boolean }>();
+  columns.forEach((column, i) => {
+    column.nodes.forEach((node, index) => {
+      seat.set(node.id, { column: i, index, count: column.nodes.length, framed: column.session !== null });
+    });
+  });
+  /** A box's own left edge: inside its frame when it has one, at the column's edge when it has none. */
+  const boxX = (id: string): number => {
+    const where = seat.get(id);
+    if (where === undefined) return MARGIN;
+    return (columnX[where.column] ?? MARGIN) + (where.framed ? GROUP_INSET : 0);
+  };
 
   const placed: PlacedNode[] = [];
   const at = new Map<string, PlacedNode>();
@@ -1148,19 +1694,87 @@ export function layoutOf(graph: StateGraph): GraphLayout {
   };
 
   /**
+   * The band the routed wires run along, worked out before anything has a y.
+   *
+   * It sits between the spine and the lane under it, which is the one strip of the drawing nothing
+   * else wants: the arcs ride above the top of everything and below the bottom of it, the boxes are
+   * in the two lanes, and this is the gap that was already there between them. Its HEIGHT is what
+   * the lane below has to be pushed down by, so it has to be known first — see {@link routes},
+   * which answers in columns and needs no y from anybody.
+   */
+  const colOf = new Map([...seat].map(([id, where]) => [id, where.column]));
+  /**
+   * A rule's column: halfway along the arc it is written on.
+   *
+   * A guard READS values, and those reads are the same dataflow as everything else — so they want
+   * the same channel and the same gutters, and the only thing standing in the way is that a rule is
+   * not in a column because it is not a box. It is over one, though: its label sits at the middle of
+   * its arc, so the gutter beside the box halfway along is the gutter to come up through. Near
+   * enough to leave from, and — being a gutter — clear of every box in both lanes on the way.
+   */
+  for (const edge of graph.edges) {
+    if (edge.kind === "sequence") continue;
+    const from = colOf.get(edge.from);
+    const to = colOf.get(edge.to);
+    if (from === undefined || to === undefined) continue;
+    const mid = Math.round((from + to) / 2);
+    colOf.set(ruleNodeId(edge.id), Math.min(columns.length - 1, Math.max(1, mid)));
+  }
+  const plan = routes(graph, colOf, boxX);
+
+  /**
    * Lane 0 is TOP-aligned rather than centred, and that is what keeps the spine legible.
    *
    * Centred boxes put the sequence's own line through the middle of every box — which is exactly
    * where the ports are, so the one line that says what runs next was drawn through the densest part
    * of the drawing and lost in it. Aligned at the top, the spine runs level across the HEADINGS,
    * over ground nothing else uses, and the ports hang below it.
+   *
+   * A framed column obeys the same rule and pays for its own name out of its own pocket: its FIRST
+   * member sits at the lane's y, level with every unframed box, and the frame is drawn ABOVE it.
+   * Otherwise one session anywhere in a state would push the whole spine down by a caption.
    */
-  const belowY = Math.max(...[...onSpine].map(height), 0) + LANE_GAP;
-  order.forEach((node, col) => place(node, colX(col), onSpine.has(node.id) ? 0 : belowY));
-  const columns = order.length;
+  /** How far below its lane's top a column reaches, frame and all. */
+  const columnH = (column: Column): number => {
+    const stack = column.nodes.reduce((sum, n) => sum + height(n.id), 0) + (column.nodes.length - 1) * GROUP_GAP;
+    return column.session === null ? stack : stack + GROUP_PAD;
+  };
+  const spineBottom = Math.max(...columns.filter((c) => c.nodes.some((n) => onSpine.has(n.id))).map(columnH), 0);
+  const bandTop = spineBottom + BAND_GAP;
+  const bandH = plan.channels * CHANNEL_H;
+  const belowY = spineBottom + Math.max(LANE_GAP, BAND_GAP * 2 + bandH);
 
-  const boxTop = Math.min(...placed.map((b) => b.y));
-  const boxBottom = Math.max(...placed.map((b) => b.y + b.h));
+  const frames: PlacedSession[] = [];
+  columns.forEach((column, i) => {
+    const lane = column.nodes.some((n) => onSpine.has(n.id)) ? 0 : belowY;
+    const x = columnX[i] ?? MARGIN;
+    let y = lane;
+    for (const node of column.nodes) {
+      place(node, x + (column.session === null ? 0 : GROUP_INSET), y);
+      y += height(node.id) + GROUP_GAP;
+    }
+    if (column.session === null) return;
+    // `y` has run one gap past the last member, so the stack ends a gap back.
+    frames.push({
+      session: column.session,
+      x,
+      y: lane - GROUP_PAD - GROUP_HEAD,
+      w: NODE_W + GROUP_INSET * 2,
+      h: y - GROUP_GAP - lane + GROUP_HEAD + GROUP_PAD * 2,
+    });
+  });
+
+  const boxTop = Math.min(...placed.map((b) => b.y), ...frames.map((f) => f.y));
+  const boxBottom = Math.max(...placed.map((b) => b.y + b.h), ...frames.map((f) => f.y + f.h));
+  /**
+   * What an arc going under the drawing has to clear.
+   *
+   * The boxes, the frames, and the band — which is normally between the two lanes and so already
+   * above the lowest box, but is the lowest thing there is in a state with no lane below the spine.
+   */
+  const floor = Math.max(boxBottom, bandTop + bandH);
+  const frameOf = new Map<string, PlacedSession>();
+  for (const frame of frames) for (const member of frame.session.members) frameOf.set(member, frame);
 
   // --- the arcs -------------------------------------------------------------
   /**
@@ -1169,6 +1783,7 @@ export function layoutOf(graph: StateGraph): GraphLayout {
    * Both routes clear every box — one rides above the top of everything, the other below the bottom
    * — so no transition ever crosses a box, whatever the shape of the state.
    */
+  type Point = { x: number; y: number };
   type Arc = {
     edge: GraphEdge;
     flow: EdgeFlow;
@@ -1178,22 +1793,83 @@ export function layoutOf(graph: StateGraph): GraphLayout {
     lane: number;
     x1: number;
     x2: number;
+    /** From the source box's edge to where the bend begins, and from where it ends to the target's. */
+    lead: Point[];
+    trail: Point[];
+    /** False for a step of the sequence that could not be drawn straight: no guard, so no label. */
+    labelled: boolean;
     size: { w: number; h: number };
   };
   const arcs: Arc[] = [];
+  const arcOf = (edge: GraphEdge, from: PlacedNode, to: PlacedNode, labelled: boolean): void => {
+    const bad = to.node.kind === "outcome" || to.node.kind === "missing";
+    // On RUN ORDER rather than on x, which stopped being the same question the moment a session's
+    // frame began holding members from either end of the sequence in one column.
+    const ahead = (runAt.get(to.node.id) ?? 0) > (runAt.get(from.node.id) ?? 0);
+    const flow: EdgeFlow = bad ? "abort" : ahead ? "onward" : "back";
+    // Over the top when it is a forward jump between two boxes ON the line — a skip reads as a skip
+    // when it arcs over what it skipped. Everything else goes under the bottom: a backwards jump is
+    // a loop and looks like one there, and traffic to or from the lane below stays in the half of
+    // the drawing those boxes are in rather than sweeping over the spine to reach them.
+    const overhead = flow === "onward" && onSpine.has(from.node.id) && onSpine.has(to.node.id);
+    arcs.push({
+      edge,
+      flow,
+      up: overhead,
+      from,
+      to,
+      lane: 0,
+      x1: 0,
+      x2: 0,
+      lead: [],
+      trail: [],
+      labelled,
+      size: labelled ? labelSize(edge) : { w: 0, h: 0 },
+    });
+  };
   for (const edge of graph.edges) {
     if (edge.kind === "sequence") continue;
     const from = at.get(edge.from);
     const to = at.get(edge.to);
     if (from === undefined || to === undefined) continue;
-    const bad = to.node.kind === "outcome" || to.node.kind === "missing";
-    const flow: EdgeFlow = bad ? "abort" : to.x > from.x ? "onward" : "back";
-    // Over the top when it is a forward jump between two boxes ON the line — a skip reads as a skip
-    // when it arcs over what it skipped. Everything else goes under the bottom: a backwards jump is
-    // a loop and looks like one there, and traffic to or from the lane below stays in the half of
-    // the drawing those boxes are in rather than sweeping over the spine to reach them.
-    const up = flow === "onward" && onSpine.has(edge.from) && onSpine.has(edge.to);
-    arcs.push({ edge, flow, up, from, to, lane: 0, x1: 0, x2: 0, size: labelSize(edge) });
+    arcOf(edge, from, to, true);
+  }
+
+  /**
+   * A step of the sequence, which used to be able to assume it was a horizontal line.
+   *
+   * It still is in the ordinary case, and that case is most of every drawing: two boxes side by side
+   * at the same height, joined across the gutter at the level of their headings. A session's frame
+   * is what breaks the assumption — its second member is a column further DOWN rather than a column
+   * further along — so there are three more shapes, each the simplest thing that reaches the next
+   * box without crossing anything:
+   *
+   *  - a step into or out of a frame, still to the next column along: a curve, the same one a value's
+   *    line takes between neighbours.
+   *  - a step INSIDE one frame, between two of its members: out the right, down the frame's own clear
+   *    column, across the gap between the two, and in at the left. It never leaves the frame, which
+   *    is the truth of it — the conversation does not end between those two states.
+   *  - a step BACKWARDS, to a frame the run has already been in: an arc, like every other move over
+   *    ground already covered, and still grey, because it is still the sequence.
+   */
+  type Step = { edge: GraphEdge; from: PlacedNode; to: PlacedNode; shape: "straight" | "curve" | "inside" };
+  const steps: Step[] = [];
+  for (const edge of graph.edges) {
+    if (edge.kind !== "sequence") continue;
+    const from = at.get(edge.from);
+    const to = at.get(edge.to);
+    if (from === undefined || to === undefined) continue;
+    const frame = frameOf.get(from.node.id);
+    // NEXT DOOR, and that is the whole of what "straight" and "curve" are allowed to assume: a
+    // frame holds members from either end of the sequence, so a step can now skip a column, and a
+    // line drawn across the gap between two columns that are not next to each other goes through
+    // whatever is between them.
+    const beside = (seat.get(to.node.id)?.column ?? -1) === (seat.get(from.node.id)?.column ?? -1) + 1;
+    if (beside && from.y === to.y) steps.push({ edge, from, to, shape: "straight" });
+    else if (beside) steps.push({ edge, from, to, shape: "curve" });
+    else if (to.x === from.x && frame !== undefined && frameOf.get(to.node.id) === frame) {
+      steps.push({ edge, from, to, shape: "inside" });
+    } else arcOf(edge, from, to, false);
   }
 
   /**
@@ -1225,9 +1901,54 @@ export function layoutOf(graph: StateGraph): GraphLayout {
       anchors.set(`${end.arc.edge.id}:${end.role}`, x);
     });
   }
+
+  /**
+   * How a line gets out of a session's frame when a sibling is in the way.
+   *
+   * An arc leaves through the top or the bottom of the box it starts at, and a framed box may have
+   * another one directly above or below it — so a run that went straight up would go straight
+   * through a sibling. It steps sideways first: out into the gap between the two members, across
+   * into the frame's clear column, and up or down THAT, which is what the clear column is for.
+   * Nothing is ever in the way there, whatever else the frame holds.
+   *
+   * The unobstructed case is the same shape with the sideways step missing — see {@link ARC_STUB}
+   * for why there is a straight run at all.
+   */
+  const sideChannels = new Map<string, number>();
+  const escapeOf = (arc: Arc, role: "from" | "to"): { x: number; y: number; lead: Point[] } => {
+    const box = role === "from" ? arc.from : arc.to;
+    const ax = anchors.get(`${arc.edge.id}:${role}`) ?? box.x + NODE_W / 2;
+    const edgeY = arc.up ? box.y : box.y + box.h;
+    const away = arc.up ? -ARC_STUB : ARC_STUB;
+    const frame = frameOf.get(box.node.id);
+    const where = seat.get(box.node.id);
+    const blocked =
+      frame !== undefined && where !== undefined && (arc.up ? where.index > 0 : where.index < where.count - 1);
+    if (!blocked || frame === undefined) return { x: ax, y: edgeY + away, lead: [{ x: ax, y: edgeY }] };
+    // The side the rest of the line is on, so the detour is a step towards where it is going.
+    const other = role === "from" ? arc.to : arc.from;
+    const key = `${frame.session.id}:${other.x >= box.x ? "r" : "l"}:${arc.up ? "u" : "d"}`;
+    const taken = sideChannels.get(key) ?? 0;
+    sideChannels.set(key, taken + 1);
+    const inset = Math.min(GROUP_INSET - 6, GROUP_INSET / 2 + taken * TRUNK_STEP);
+    const chX = other.x >= box.x ? frame.x + frame.w - inset : frame.x + inset;
+    return {
+      x: chX,
+      y: arc.up ? frame.y : frame.y + frame.h,
+      lead: [
+        { x: ax, y: edgeY },
+        { x: ax, y: edgeY + away },
+        { x: chX, y: edgeY + away },
+      ],
+    };
+  };
   for (const arc of arcs) {
-    arc.x1 = anchors.get(`${arc.edge.id}:from`) ?? arc.from.x + NODE_W / 2;
-    arc.x2 = anchors.get(`${arc.edge.id}:to`) ?? arc.to.x + NODE_W / 2;
+    const out = escapeOf(arc, "from");
+    const into = escapeOf(arc, "to");
+    arc.x1 = out.x;
+    arc.x2 = into.x;
+    arc.lead = [...out.lead, { x: out.x, y: out.y }];
+    arc.trail = [{ x: into.x, y: into.y }, ...[...into.lead].reverse()];
   }
 
   /**
@@ -1239,9 +1960,9 @@ export function layoutOf(graph: StateGraph): GraphLayout {
    * tall as the tallest guard in it, which is what keeps a five-clause condition off the line above.
    */
   const laneHeight: Record<"up" | "down", number[]> = { up: [], down: [] };
-  for (const up of [true, false]) {
+  for (const overhead of [true, false]) {
     const lanes: { lo: number; hi: number }[][] = [];
-    const side = arcs.filter((a) => a.up === up);
+    const side = arcs.filter((a) => a.up === overhead);
     side.sort((a, b) => Math.abs(a.x2 - a.x1) - Math.abs(b.x2 - b.x1) || a.edge.id.localeCompare(b.edge.id));
     for (const arc of side) {
       const mid = (arc.x1 + arc.x2) / 2;
@@ -1251,60 +1972,97 @@ export function layoutOf(graph: StateGraph): GraphLayout {
       while ((lanes[lane] ?? []).some((s) => s.lo < hi && lo < s.hi)) lane++;
       (lanes[lane] ??= []).push({ lo, hi });
       arc.lane = lane;
-      const tall = laneHeight[up ? "up" : "down"];
+      const tall = laneHeight[overhead ? "up" : "down"];
       tall[lane] = Math.max(tall[lane] ?? 0, arc.size.h);
     }
   }
   /** The rail of lane n sits past every lane below it, each as tall as its own tallest label. */
-  const railOffset = (up: boolean, lane: number): number => {
-    const tall = laneHeight[up ? "up" : "down"];
+  const railOffset = (overhead: boolean, lane: number): number => {
+    const tall = laneHeight[overhead ? "up" : "down"];
     let offset = ARC_GAP;
     for (let i = 0; i < lane; i++) offset += (tall[i] ?? 0) + LANE_PAD;
     return offset + (tall[lane] ?? 0) / 2;
   };
   const railY = (arc: Arc): number =>
-    arc.up ? boxTop - railOffset(true, arc.lane) : boxBottom + railOffset(false, arc.lane);
+    arc.up ? boxTop - railOffset(true, arc.lane) : floor + railOffset(false, arc.lane);
 
   // --- into positive coordinates -------------------------------------------
   const rails = arcs.map((arc) => ({ y: railY(arc), h: arc.size.h }));
   const minY = Math.min(boxTop, ...rails.map((r) => r.y - r.h / 2));
-  const maxY = Math.max(boxBottom, ...rails.map((r) => r.y + r.h / 2));
+  const maxY = Math.max(floor, ...rails.map((r) => r.y + r.h / 2));
   const shift = MARGIN - minY;
+  const down = (p: Point): Point => ({ x: p.x, y: p.y + shift });
 
-  /** The height the spine runs at: the middle of a box's heading — see the lane-0 note above. */
-  const spineY = PAD + BORDER + TITLE_H / 2 + shift;
+  /** The height a step of the sequence runs at on one box: the middle of its heading. */
+  const headY = (box: PlacedNode): number => box.y + PAD + BORDER + TITLE_H / 2 + shift;
   const edges: PlacedEdge[] = [];
-  for (const edge of graph.edges) {
-    if (edge.kind !== "sequence") continue;
-    const from = at.get(edge.from);
-    const to = at.get(edge.to);
-    if (from === undefined || to === undefined) continue;
-    // A step is straight, which is a cubic whose control points sit on its own ends.
-    const line: Curve = {
-      x1: from.x + NODE_W,
-      y1: spineY,
-      c1x: from.x + NODE_W,
-      c1y: spineY,
-      c2x: to.x,
-      c2y: spineY,
-      x2: to.x,
-      y2: spineY,
-    };
-    edges.push({ edge, flow: "onward", d: pathOf(line), curve: line, label: null });
+  for (const { edge, from, to, shape } of steps) {
+    const y1 = headY(from);
+    const y2 = headY(to);
+    if (shape === "straight") {
+      // A step is straight, which is a cubic whose control points sit on its own ends.
+      const line: Curve = { x1: from.x + NODE_W, y1, c1x: from.x + NODE_W, c1y: y1, c2x: to.x, c2y: y2, x2: to.x, y2 };
+      edges.push({ edge, flow: "onward", d: pathOfAll([line]), curves: [line], label: null });
+      continue;
+    }
+    if (shape === "curve") {
+      const bow = Math.max(36, (to.x - (from.x + NODE_W)) * 0.55);
+      const line: Curve = {
+        x1: from.x + NODE_W,
+        y1,
+        c1x: from.x + NODE_W + bow,
+        c1y: y1,
+        c2x: to.x - bow,
+        c2y: y2,
+        x2: to.x,
+        y2,
+      };
+      edges.push({ edge, flow: "onward", d: pathOfAll([line]), curves: [line], label: null });
+      continue;
+    }
+    const frame = frameOf.get(from.node.id)!;
+    // Halfway down the gap between the two members, whichever way round they are.
+    const gap = (from.y < to.y ? from.y + from.h + to.y : to.y + to.h + from.y) / 2 + shift;
+    const curves = roundedPath(
+      [
+        { x: from.x + NODE_W, y: y1 },
+        { x: frame.x + frame.w - GROUP_INSET / 2, y: y1 },
+        { x: frame.x + frame.w - GROUP_INSET / 2, y: gap },
+        { x: frame.x + GROUP_INSET / 2, y: gap },
+        { x: frame.x + GROUP_INSET / 2, y: y2 },
+        { x: to.x, y: y2 },
+      ],
+      TURN,
+    );
+    edges.push({ edge, flow: "onward", d: pathOfAll(curves), curves, label: null });
   }
   for (const arc of arcs) {
     const rail = railY(arc) + shift;
-    const y1 = arc.up ? arc.from.y + shift : arc.from.y + arc.from.h + shift;
-    const y2 = arc.up ? arc.to.y + shift : arc.to.y + arc.to.h + shift;
-    const curve: Curve = { x1: arc.x1, y1, c1x: arc.x1, c1y: rail, c2x: arc.x2, c2y: rail, x2: arc.x2, y2 };
+    const lead = arc.lead.map(down);
+    const trail = arc.trail.map(down);
+    const start = lead[lead.length - 1]!;
+    const end = trail[0]!;
+    const bend: Curve = {
+      x1: start.x,
+      y1: start.y,
+      c1x: arc.x1,
+      c1y: rail,
+      c2x: arc.x2,
+      c2y: rail,
+      x2: end.x,
+      y2: end.y,
+    };
+    const curves = [...roundedPath(lead, TURN), bend, ...roundedPath(trail, TURN)];
     edges.push({
       edge: arc.edge,
       flow: arc.flow,
-      d: pathOf(curve),
-      curve,
-      // The apex of that curve, worked out rather than guessed: at t = ½ a cubic sits at
+      d: pathOfAll(curves),
+      curves,
+      // The apex of the BEND, worked out rather than guessed: at t = ½ a cubic sits at
       // (y1 + 3·rail + 3·rail + y2) / 8, which is where the line is flat and a label reads level.
-      label: { x: (arc.x1 + arc.x2) / 2, y: (y1 + y2 + 6 * rail) / 8, w: arc.size.w, h: arc.size.h },
+      label: arc.labelled
+        ? { x: (arc.x1 + arc.x2) / 2, y: (bend.y1 + bend.y2 + 6 * rail) / 8, w: arc.size.w, h: arc.size.h }
+        : null,
     });
   }
 
@@ -1315,6 +2073,10 @@ export function layoutOf(graph: StateGraph): GraphLayout {
    * makes a line readable as belonging to the port it touches rather than to the one beside it. A
    * wire that runs backwards — a loop reading a later child's output — bows out further, so it reads
    * as going back rather than as a crease.
+   *
+   * That is the SHORT hop, between neighbours, over ground nothing else is on. A wire with further
+   * to go is routed instead — see {@link routes} for why, and for the two rules that decide which of
+   * the two a given wire gets.
    *
    * A guard's read ends at the RULE instead of at a port, on whichever side of the label the value
    * comes from, fanned down that edge so several reads of one condition stay apart.
@@ -1339,6 +2101,27 @@ export function layoutOf(graph: StateGraph): GraphLayout {
     const from = endOf(wire.from);
     const to = endOf(wire.to);
     if (from === null || to === null) continue;
+    const bundle = plan.of.get(wire.id);
+    const branch = bundle?.branches.get(wire.id);
+    if (bundle !== undefined && branch !== undefined) {
+      // Out of the port, down to the channel, along it, up the gutter beside the box it is going to,
+      // and in. Every wire of one bundle is given the SAME first three corners, so the run they have
+      // in common lands on itself to the pixel and the drawing holds one line until it branches.
+      const channel = bandTop + shift + (bundle.channel + 0.5) * CHANNEL_H;
+      const curves = roundedPath(
+        [
+          { x: from.x, y: from.y },
+          { x: bundle.stubX, y: from.y },
+          { x: bundle.stubX, y: channel },
+          { x: branch, y: channel },
+          { x: branch, y: to.y },
+          { x: to.x, y: to.y },
+        ],
+        TURN,
+      );
+      wires.push({ wire, d: pathOfAll(curves), curves, bundle: bundle.key });
+      continue;
+    }
     const back = to.x < from.x;
     const bow = back ? Math.max(90, (from.x - to.x) / 2) : Math.max(36, (to.x - from.x) * 0.45);
     const curve: Curve = {
@@ -1351,13 +2134,14 @@ export function layoutOf(graph: StateGraph): GraphLayout {
       x2: to.x,
       y2: to.y,
     };
-    wires.push({ wire, d: pathOf(curve), curve });
+    wires.push({ wire, d: pathOf(curve), curves: [curve], bundle: null });
   }
 
   // A label is centred on its arc and is wider than the point it sits on, so the last box's column
   // is not necessarily the right-hand edge of the drawing.
+  const last = columns.length - 1;
   const width = Math.max(
-    colX(columns - 1) + NODE_W + MARGIN,
+    (columnX[last] ?? MARGIN) + columnW(columns[last]) + MARGIN,
     ...edges.map((e) => (e.label === null ? 0 : e.label.x + e.label.w / 2 + MARGIN)),
   );
   return {
@@ -1368,6 +2152,7 @@ export function layoutOf(graph: StateGraph): GraphLayout {
     })),
     edges,
     wires,
+    frames: frames.map((f) => ({ ...f, y: f.y + shift })),
     width,
     height: maxY - minY + MARGIN * 2,
   };

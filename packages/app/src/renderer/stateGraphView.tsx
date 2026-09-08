@@ -65,6 +65,7 @@ import {
   idOf,
   layoutOf,
   pointOn,
+  samples,
   unconditional,
   type Curve,
   type EdgeFlow,
@@ -112,12 +113,18 @@ function chipTone(tone: GraphChip["tone"]): string {
 }
 
 /**
- * A value's colour, from its hue.
+ * A value's colour, from its hue — spent only on what is being asked about.
  *
- * `oklch` rather than `hsl`, and that is the whole reason the palette can afford twenty of these: in
- * OKLCH a fixed lightness IS a fixed lightness at every hue, so yellow and blue come out equally
- * readable on the same ground. In HSL they do not, and half a wheel of wires would be invisible. The
- * two numbers are theme tokens — see `--wire-l` and `--wire-c`.
+ * At rest every wire is grey, and that is the whole point of the channel: colour is expensive, and a
+ * drawing that spends it on twenty values at once has spent it on nothing. Grey wires are the shape
+ * of the dataflow, which is the question at rest ("how much moves, and roughly where"); the moment a
+ * box, a port or a line is pointed at, the lines that ARE the answer take their colours and the rest
+ * stay as they were. So one hue at a time means one thing, instead of twenty meaning "a value".
+ *
+ * `oklch` rather than `hsl`, and that is what lets the grey be the same grey: a fixed lightness in
+ * OKLCH IS a fixed lightness at every hue, so draining the chroma out of any of these leaves a
+ * neutral of exactly the weight the coloured line had. In HSL it would not, and half the wheel would
+ * change weight as it lit. The two numbers are theme tokens — see `--wire-l` and `--wire-c`.
  */
 const inkOf = (hue: number): string => `oklch(var(--wire-l) var(--wire-c) ${hue})`;
 
@@ -165,7 +172,8 @@ interface Marker {
   into: boolean;
   x: number;
   y: number;
-  names: { node: string; label: string; ink: string | undefined }[];
+  /** `port` is the slot at that end — set for a value's line, absent for the cursor's own moves. */
+  names: { node: string; port: string | null; label: string; ink: string | undefined }[];
 }
 
 interface Sight {
@@ -185,9 +193,27 @@ interface Rect {
 const overlaps = (a: Rect, b: Rect): boolean =>
   Math.abs(a.x - b.x) < (a.w + b.w) / 2 && Math.abs(a.y - b.y) < (a.h + b.h) / 2;
 
+/**
+ * How many names one pill spells out before it counts the rest instead.
+ *
+ * A slot-precise name is two words where a box's was one, so a crossing that used to list four boxes
+ * now lists eight slots — and eight names in one pill is a pill wider than the pane, which the
+ * ellipsis then cuts back to eight prefixes that name nothing. Four is what fits and is read; the
+ * remainder is a count, and the whole list is on the pill's tooltip where a list belongs.
+ */
+const MARKER_NAMES = 4;
+
+/** The names a pill actually spells out, and how many it is standing in for. */
+const shownNames = (marker: Marker): { names: Marker["names"]; rest: number } => ({
+  names: marker.names.slice(0, MARKER_NAMES),
+  rest: Math.max(0, marker.names.length - MARKER_NAMES),
+});
+
 /** About as wide as a pill gets: the mono face's advance, plus its padding and separators. */
-const markerWidth = (marker: Marker): number =>
-  26 + marker.names.reduce((wide, name) => wide + name.label.length * 6.6 + 10, 0);
+const markerWidth = (marker: Marker): number => {
+  const { names, rest } = shownNames(marker);
+  return 26 + names.reduce((wide, name) => wide + name.label.length * 6.6 + 10, 0) + (rest > 0 ? 32 : 0);
+};
 
 /**
  * What zooming in costs, and how to give it back.
@@ -222,12 +248,21 @@ function sightlines(
   const rect = { l: EDGE_INSET, t: EDGE_INSET, r: room.w - EDGE_INSET, b: room.h - EDGE_INSET };
   const seen = (p: { x: number; y: number }): boolean =>
     p.x >= rect.l && p.x <= rect.r && p.y >= rect.t && p.y <= rect.b;
-  const walk = (curve: Curve): { x: number; y: number }[] =>
-    Array.from({ length: WALK + 1 }, (_, i) => at(pointOn(curve, i / WALK)));
+  const walk = (curves: Curve[]): { x: number; y: number }[] => samples(curves, WALK).map(at);
 
   // --- where each line leaves, and what is out there -------------------------
   /** One line's exit: the side it crossed, where along that side, and what is beyond it. */
-  type Exit = { side: Side; along: number; into: boolean; node: string; label: string; ink: string | undefined };
+  type Exit = {
+    side: Side;
+    along: number;
+    into: boolean;
+    node: string;
+    port: string | null;
+    label: string;
+    ink: string | undefined;
+  };
+  /** Which end of a line, as the two things it takes to name one: a box, and the slot on it. */
+  type End = { node: string; port: string | null };
   const exits: Exit[] = [];
   /**
    * Which edge a line left by.
@@ -244,23 +279,32 @@ function sightlines(
     ].sort((a, b) => b.by - a.by);
     return over[0]!.side;
   };
+  /**
+   * What is out there, named as far as it can be named.
+   *
+   * A box for the cursor's own move — "where does this arrow go" is a question about a step. For a
+   * VALUE it is the box AND the slot, because a wire is one member of a box rather than the box:
+   * four wires off the same edge into `review` are four different values, and four pills all reading
+   * "review" name the same place four times and answer nothing. `review.findings` is the answer.
+   */
   const exit = (
-    node: string | null,
+    end: End | null,
     inside: { x: number; y: number },
     outside: { x: number; y: number },
     into: boolean,
     hue: string | undefined,
   ): void => {
-    const label = node === null ? undefined : titles.get(node);
-    if (node === null || label === undefined) return;
+    const title = end === null ? undefined : titles.get(end.node);
+    if (end === null || title === undefined) return;
+    const slot = end.port === null ? "" : `.${end.port.slice(end.port.indexOf(":") + 1)}`;
     const side = sideOf(outside);
     const along = side === "l" || side === "r" ? inside.y : inside.x;
-    exits.push({ side, along, into, node, label, ink: hue });
+    exits.push({ side, along, into, node: end.node, port: end.port, label: `${title}${slot}`, ink: hue });
   };
 
-  const crossing = (line: PlacedEdge | PlacedWire, id: string, from: string | null, to: string | null): void => {
+  const crossing = (line: PlacedEdge | PlacedWire, id: string, from: End | null, to: End | null): void => {
     if (!shows(id)) return;
-    const pts = walk(line.curve);
+    const pts = walk(line.curves);
     const vis = pts.map(seen);
     const first = vis.indexOf(true);
     if (first < 0) return; // the whole line is somewhere else
@@ -272,11 +316,11 @@ function sightlines(
   for (const line of layout.wires) {
     // A guard's read ends at a RULE rather than at a box, and "a condition" is not a place a reader
     // can be sent — so that end is left unmarked.
-    const to = line.wire.to.node.startsWith("rule:") ? null : line.wire.to.node;
-    crossing(line, idOf.wire(line.wire.id), line.wire.from.node, to);
+    const to = line.wire.to.node.startsWith("rule:") ? null : { node: line.wire.to.node, port: line.wire.to.port };
+    crossing(line, idOf.wire(line.wire.id), { node: line.wire.from.node, port: line.wire.from.port }, to);
   }
   for (const line of layout.edges) {
-    crossing(line, idOf.edge(line.edge.id), line.edge.from, line.edge.to);
+    crossing(line, idOf.edge(line.edge.id), { node: line.edge.from, port: null }, { node: line.edge.to, port: null });
   }
 
   // --- merge what would collide, then push apart what is left ----------------
@@ -305,7 +349,9 @@ function sightlines(
     for (const one of group) {
       const last = held.at(-1);
       if (last !== undefined && one.along - last.along < MARKER_H + 8) {
-        if (!last.names.some((n) => n.node === one.node)) last.names.push(one);
+        // Said once per SLOT rather than once per box: two values leaving the same box the same way
+        // are two facts, and the pill that named the box twice named neither of them.
+        if (!last.names.some((n) => n.node === one.node && n.port === one.port)) last.names.push(one);
         continue;
       }
       held.push({ along: one.along, names: [one] });
@@ -376,7 +422,7 @@ function sightlines(
       labels.set(placed.edge.id, { x: label.x, y: label.y });
       continue;
     }
-    const pts = walk(placed.curve);
+    const pts = walk(placed.curves);
     // Nearest to where it belongs — the apex — among the places it can still be read. Whole first;
     // then merely on screen, because a condition half over the edge is worth more than none.
     const nearest = (ok: (p: { x: number; y: number }) => boolean): number => {
@@ -430,18 +476,26 @@ function sightlines(
 function Port({
   port,
   mark,
+  hot,
   onEnter,
   onLeave,
 }: {
   port: GraphPort;
   mark: string;
+  /** True when this port is what is being asked about — the one condition colour is spent under. */
+  hot: boolean;
   onEnter: () => void;
   onLeave: () => void;
 }): JSX.Element {
-  const ink = port.hue === null ? undefined : inkOf(port.hue);
+  // Filled or hollow says whether anything is wired here, and it says it in grey: the DOT is the end
+  // of a line, so it wears whatever that line is wearing — see `inkOf`.
+  const ink = port.hue === null || !hot ? undefined : inkOf(port.hue);
   const dot: CSSProperties = port.inferred
     ? {}
-    : { borderColor: ink, background: port.wired ? ink : "var(--panel)" };
+    : {
+        ...(ink === undefined ? {} : { borderColor: ink }),
+        background: port.wired ? (ink ?? "var(--wire-idle)") : "var(--panel)",
+      };
   const title = [
     `${port.name} — ${port.side === "in" ? "taken" : "handed back"}`,
     port.note.length > 0 ? port.note : "",
@@ -489,6 +543,7 @@ function Box({
   onOpen,
   onShow,
   portMark,
+  portHot,
 }: {
   box: PlacedNode;
   mark: string;
@@ -497,6 +552,7 @@ function Box({
   /** Put this box's own configuration in the side panel. Absent ⇒ there is no panel to put it in. */
   onShow: (() => void) | null;
   portMark: (port: GraphPort) => string;
+  portHot: (port: GraphPort) => boolean;
 }): JSX.Element {
   const { node } = box;
   const ins = node.ports.filter((p) => p.side === "in");
@@ -509,6 +565,7 @@ function Box({
           key={port.key}
           port={port}
           mark={portMark(port)}
+          hot={portHot(port)}
           onEnter={() => onFocus({ kind: "port", node: node.id, port: port.key })}
           // Leaving a port does not leave the box it is on — the pointer is still inside, so the
           // question falls back to the box rather than to nothing.
@@ -538,6 +595,26 @@ function Box({
       {node.subtitle.length > 0 ? (
         <div className="sg-subtitle data-secondary" title={node.subtitle}>
           {node.subtitle}
+        </div>
+      ) : null}
+      {node.session !== null ? (
+        // On every box that has one, framed or not: a session of one is still a fact about the box —
+        // that its transcript outlives the loop it sits in — and it is a fact nothing else says.
+        <div
+          className="sg-node-session"
+          title={
+            `runs in the conversation "${node.session.name}", scoped ${node.session.scope}\n\n` +
+            `declared ${
+              node.session.from === "child"
+                ? "by the state this mounts"
+                : node.session.from === "mount"
+                  ? "on this mount"
+                  : "by this state, and inherited"
+            }`
+          }
+        >
+          <i className="sg-session-mark" />
+          <span className="data-text ellip">{node.session.name}</span>
         </div>
       ) : null}
       {node.chips.length > 0 ? (
@@ -725,10 +802,14 @@ export function StateGraphView({
     if (whole >= READABLE) {
       return { x: (room.w - layout.width * whole) / 2, y: (room.h - layout.height * whole) / 2, k: whole };
     }
-    // Vertically it still centres what it can: the spine sits near the top of the drawing, and it is
-    // the row the eye starts on whether or not the loops below it are on screen.
+    // Vertically it parks at the TOP of what it can show rather than at the middle of what it
+    // cannot: the spine is the row the eye starts on, and a drawing taller than the pane centred on
+    // its own middle puts the spine off the top of it — the loops below are the part a reader pans
+    // to, not the part they are shown first. Only a drawing SHORTER than the pane is centred, and
+    // then no further down than the inset the horizontal one uses.
     const k = READABLE;
-    return { x: 16, y: Math.min(16, (room.h - layout.height * k) / 2), k };
+    const spare = (room.h - layout.height * k) / 2;
+    return { x: 16, y: spare > 0 ? Math.min(16, spare) : 16, k };
   }, [room, layout]);
   const shown = camera ?? fit;
   /**
@@ -872,7 +953,16 @@ export function StateGraphView({
     panel?.open({ title: node.title, value: node.config });
   };
 
-  const wireStyle = (wire: GraphWire): CSSProperties => ({ stroke: inkOf(wire.hue) });
+  /** Lit and nothing less: `near` is what a lit line TOUCHES, and touching is not being asked about. */
+  const isLit = (id: string): boolean => attention.on && attention.lit.has(id);
+  /**
+   * A wire's colour, or nothing — in which case the stylesheet's grey stands.
+   *
+   * Nothing rather than an explicit grey, so that the one place the resting colour is written is the
+   * `.sg-flow` rule beside the weight and the dash it goes with.
+   */
+  const wireStyle = (placed: PlacedWire): CSSProperties =>
+    isLit(idOf.wire(placed.wire.id)) ? { stroke: inkOf(placed.wire.hue) } : {};
   const lineClass = (placed: PlacedEdge | PlacedWire): string => {
     if ("wire" in placed) return `sg-flow sg-flow-${placed.wire.kind}`;
     const { edge, flow } = placed;
@@ -889,7 +979,9 @@ export function StateGraphView({
   /** A line's own colour, which its edge marker borrows: the pill and the line are one statement. */
   const inkFor = (line: PlacedEdge | PlacedWire): string | undefined =>
     "wire" in line
-      ? inkOf(line.wire.hue)
+      ? isLit(idOf.wire(line.wire.id))
+        ? inkOf(line.wire.hue)
+        : undefined
       : line.edge.kind === "sequence"
         ? undefined
         : `var(--go-${line.flow})`;
@@ -906,9 +998,19 @@ export function StateGraphView({
     ...layout.wires.map((w) => ({ id: idOf.wire(w.wire.id), placed: w as PlacedEdge | PlacedWire })),
     ...layout.edges.map((e) => ({ id: idOf.edge(e.edge.id), placed: e as PlacedEdge | PlacedWire })),
   ].sort((a, b) => depth(attention, a.id) - depth(attention, b.id));
-  /** What hovering a line means. The line itself is the question, the same as its label is. */
-  const askAbout = (placed: PlacedEdge | PlacedWire): Focus =>
-    "wire" in placed ? { kind: "wire", id: placed.wire.id } : { kind: "edge", id: placed.edge.id };
+  /**
+   * What hovering a line means. The line itself is the question, the same as its label is.
+   *
+   * With one turn: most of a BUNDLED wire is the run it shares with the rest of its bundle, and that
+   * run cannot answer for one of them — pointing at it would light one read of a value at random and
+   * leave its siblings grey. So a bundled line asks about the port they all leave, whose answer is
+   * the whole bundle. The far ends stay separable: each has a stretch of its own past the branch.
+   */
+  const askAbout = (placed: PlacedEdge | PlacedWire): Focus => {
+    if (!("wire" in placed)) return { kind: "edge", id: placed.edge.id };
+    if (placed.bundle === null) return { kind: "wire", id: placed.wire.id };
+    return { kind: "port", node: placed.wire.from.node, port: placed.wire.from.port };
+  };
 
   return (
     <div className="sg">
@@ -918,7 +1020,11 @@ export function StateGraphView({
       <div className="sg-bar edit-bar">
         <span
           className="sg-key"
-          title="a value moving from where it is produced to where it is read — one colour per value"
+          title={
+            "a value moving from where it is produced to where it is read\n\n" +
+            "grey until you point at something: the lines that answer take the colour of the value " +
+            "they carry, one colour per value, wherever it goes"
+          }
         >
           <i className="sg-swatch sg-swatch-data" />
           values
@@ -939,6 +1045,18 @@ export function StateGraphView({
           <span className="sg-key" title="a dashed arrow leaves the `any` box: a rule that belongs to no child">
             <i className="sg-swatch sg-swatch-any" />
             from any
+          </span>
+        ) : null}
+        {graph.sessions.length > 0 ? (
+          <span
+            className="sg-key"
+            title={
+              "a dotted frame is one conversation, and the boxes inside it share a transcript\n\n" +
+              "the run leaves it and comes back, which is why the drawing is not a straight line"
+            }
+          >
+            <i className="sg-swatch sg-swatch-session" />
+            one conversation
           </span>
         ) : null}
         {graph.limits.map((limit) => (
@@ -993,6 +1111,26 @@ export function StateGraphView({
             transform: `translate(${shown.x}px, ${shown.y}px) scale(${shown.k})`,
           }}
         >
+          {/* Behind the lines and behind the boxes: a frame is the ground its members stand on, and
+              a region drawn over a line would be claiming to be one. */}
+          {layout.frames.map((frame) => (
+            <div
+              key={frame.session.id}
+              className={`sg-frame${tier(attention, idOf.session(frame.session.id))}`}
+              data-session={frame.session.id}
+              style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
+              title={
+                `${frame.session.name} — one conversation, shared by ${frame.session.members.length} of these\n\n` +
+                `scoped ${frame.session.scope}: two states are in one conversation only when the name AND ` +
+                `the scope match, so the same name written somewhere else is somewhere else`
+              }
+              onMouseEnter={() => setFocus({ kind: "session", id: frame.session.id })}
+              onMouseLeave={() => setFocus(null)}
+            >
+              <span className="sg-frame-name data-text">{frame.session.name}</span>
+              <span className="sg-frame-scope sub">{frame.session.scope}</span>
+            </div>
+          ))}
           <svg className="sg-lines" width={layout.width} height={layout.height} aria-hidden focusable="false">
             <defs>
               {HEADS.map((head) => (
@@ -1016,7 +1154,7 @@ export function StateGraphView({
                   <path
                     d={placed.d}
                     className={lineClass(placed) + tier(attention, id)}
-                    style={wireStyle(placed.wire)}
+                    style={wireStyle(placed)}
                   />
                 ) : (
                   <path
@@ -1074,6 +1212,7 @@ export function StateGraphView({
               mark={tier(attention, idOf.node(box.node.id))}
               onFocus={setFocus}
               portMark={(port) => tier(attention, idOf.port(box.node.id, port.key))}
+              portHot={(port) => isLit(idOf.port(box.node.id, port.key))}
               onOpen={
                 onOpenState !== undefined && box.node.stateId.length > 0
                   ? () => onOpenState(box.node.stateId)
@@ -1093,23 +1232,36 @@ export function StateGraphView({
               key={marker.key}
               className={`sg-edge-mark sg-edge-${marker.side}${marker.into ? " sg-edge-mark-to" : ""}`}
               style={{ left: marker.x, top: marker.y }}
-              title={`off the screen ${marker.into ? "at the end of" : "at the start of"} the lines that cross here`}
+              title={
+                `off the screen ${marker.into ? "at the end of" : "at the start of"} the lines that cross here\n\n` +
+                marker.names.map((name) => name.label).join("\n")
+              }
             >
               {/* The arrow points the way the lines run: `goals →` is what they come FROM, and
                   `→ exit` is where they go. Once, for the whole list — the direction is the same for
                   everything in one pill, which is why they were allowed to merge. */}
               {marker.into ? <span className="sg-edge-arrow">→</span> : null}
-              {marker.names.map((name) => (
+              {shownNames(marker).names.map((name) => (
                 <span
-                  key={name.node}
+                  key={`${name.node}/${name.port ?? ""}`}
                   className="sg-edge-name data-text"
                   style={{ color: name.ink }}
-                  onMouseEnter={() => setFocus({ kind: "node", id: name.node })}
+                  // Whatever the name says: a slot when it names one, the box when it names a box.
+                  onMouseEnter={() =>
+                    setFocus(
+                      name.port === null
+                        ? { kind: "node", id: name.node }
+                        : { kind: "port", node: name.node, port: name.port },
+                    )
+                  }
                   onMouseLeave={() => setFocus(null)}
                 >
                   {name.label}
                 </span>
               ))}
+              {shownNames(marker).rest > 0 ? (
+                <span className="sg-edge-name sg-edge-rest sub">+{shownNames(marker).rest}</span>
+              ) : null}
               {marker.into ? null : <span className="sg-edge-arrow">→</span>}
             </div>
           ))}
