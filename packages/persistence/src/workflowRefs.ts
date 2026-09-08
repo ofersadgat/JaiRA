@@ -154,7 +154,15 @@ function searchPathFor(workflowsDir: string, roots: Readonly<Record<string, stri
   return out;
 }
 
-/** Options for a workflows directory with no project behind it (`jaira workflow lint --workflows`). */
+/**
+ * Options for a workflows directory with NO PROJECT behind it (`jaira workflow lint --workflows`).
+ *
+ * ⚠️ Deliberately minimal, and therefore not interchangeable with {@link workflowLoadOptions}: no
+ * search path, no `roots`, no vfs, no registry contributor and no modules. A caller that HAS a
+ * project must use `workflowLoadOptions` — using this one instead is why `jaira run --root` could
+ * not load any workflow calling a `.ts` function, reporting "'confidence.score' is not a known
+ * operation" about a function that is approved, resolved and registered.
+ */
 export function standaloneLoadOptions(workflowsDir: string, tolerant = false): LoadBundleOptions {
   return {
     defaultRoot: workflowsDir,

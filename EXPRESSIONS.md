@@ -272,7 +272,24 @@ inputs, output bindings and guards. Memoized by the resolved op's content hash, 
 is one execution and a call whose argument changed is a different call. A rooted callee
 (`$JAIRA/prompts/review('x')`) works alongside the bare and dotted forms.
 
-What is NOT built: higher-order operations (§3.5).
+Higher-order operations are built too (§3.5) — this line used to say they were not, and had been
+stale since §3.5 landed.
+
+**A reference need not be called.** An uncalled one is the DOCUMENT, exactly as a single-segment bare
+name is: both parse to `ident`, both lower through `resolveName`, and `bindingForDocument` decides
+what comes back — a `.md`'s text, a `.json`'s value, or the operation itself (§3.1's first tier).
+That is what lets a template be an argument, `renderTemplate($/prompts/turns/revise.md, { … })`,
+rather than only a callee. Which of the two a call wants is already settled by the callee's own
+signature: a parameter declaring `kind: "function"` takes the operation, anything else takes data
+(§3.5, *Passing the operation*).
+
+**A multi-segment reference must open with a `$` root** — `$/functions/eq`, `$JAIRA/prompts/review`,
+`$BASE/lib/x`. Every other `/` in an expression is division. This replaced "is there a NAME to the
+left of the slash", which cost the language division of two bare names (`foo / bar` parsed as the
+reference `foo/bar`); the searched multi-segment spelling it gave up had no users. A SINGLE-segment
+bare name is untouched — still a document, still a callee, still what `map(xs, classify)` passes.
+⚠️ The rule is the EXPRESSION parser's alone. A whole-binding path (`"binding": "feature/plan"`) is
+expansion's, and `children[].state` is `resolveStateRef`'s; neither requires a `$`.
 
 **An operator and a call are the same node.** The AST had five compute nodes — `unary`, `binary`,
 `logical`, `cond`, `call` — which was a taxonomy over *syntax*, not over meaning. All five lower to
@@ -554,6 +571,11 @@ default root with an ordered list**, with the semantics of a shell `PATH`.
 | `./goals`, `../shared/lint` | anchored to the referring state's id, then searched (§4.1) |
 | `eq`, `feature/plan` | **yes** — the state path, first match wins |
 | `.inputs.issue` | n/a — a property of this file, not a file reference |
+
+⚠️ Inside an EXPRESSION the multi-segment bare form is not available: `feature/plan` there is
+`feature` divided by `plan`, because a reference with a `/` must open with a `$` root (§3). Every
+other position — a whole-binding path, `children[].state`, an import — takes the table as written.
+Spell it `$/feature/plan` (or `$JAIRA/…`, `$BASE/…`) where an expression needs it.
 
 `./x` never consulting the path is what a shell does, and it is also what the existing rule requires:
 a relative reference is anchored to the referrer's id-as-a-directory, and searching would make that
