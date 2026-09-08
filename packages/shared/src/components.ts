@@ -104,8 +104,15 @@ export interface ChoiceFreeText {
 export interface Choice {
   /** The complete question. Also the key an agent's answers are returned under. */
   question: string;
+  /**
+   * The key an AUTHORED answer lands on, when the state named one (a multi-part `choose_option`'s
+   * `questions[].name`). Absent ⇒ the question text is the key, which is the agent caller's rule.
+   */
+  name?: string;
   /** A short chip beside it, e.g. `Library`. */
   header?: string;
+  /** Why it is being asked, or what each answer would change — a line under the question. */
+  description?: string;
   options: ComponentOption[];
   /** Several may be chosen; the answer is then a list. */
   multiple?: boolean;
@@ -120,14 +127,46 @@ export interface Choice {
    * author's call rather than a rule about how many options there are.
    */
   requireConfirm?: boolean;
+  /**
+   * Leaving it unanswered is allowed — the step can be passed and the answer is simply absent.
+   *
+   * The product-questions case: a person with no view must be able to move on, and "no view" spelt
+   * as one more option would be an answer the state then has to know to ignore.
+   */
+  optional?: boolean;
+  /** The option pre-picked when the question first appears — the reading the author took. */
+  default?: string;
 }
 
-/** The one question an authored `choose_option` state asks. */
+/** The "own answer" field an authored state offers when it says `custom: true`. */
+const OWN_ANSWER: ChoiceFreeText = { label: "Your own answer", placeholder: "Type your own answer…", role: "instead" };
+
+/**
+ * What an authored `choose_option` (or a review's decision row) asks, as the renderer draws it.
+ *
+ * One question for the ordinary gate; several for a state that declared `questions` — each of which
+ * is its own {@link Choice}, keyed by its `name`, and asked one at a time by the same stepper an
+ * agent's batch of questions uses. `custom` on either becomes the same INSTEAD free text an agent's
+ * "Other" is, because that is what it is: one more option, said in words.
+ */
 export function choicesOfConfig(config: ChooseOptionConfig | ReviewArtifactConfig): Choice[] {
+  if (config.component === "choose_option" && config.questions !== undefined) {
+    return config.questions.map((q) => {
+      const choice: Choice = { question: q.question, name: q.name, options: q.options };
+      if (q.header !== undefined) choice.header = q.header;
+      if (q.description !== undefined) choice.description = q.description;
+      if (q.multiple === true) choice.multiple = true;
+      if (q.optional === true) choice.optional = true;
+      if (q.default !== undefined) choice.default = q.default;
+      if (q.custom === true) choice.freeText = OWN_ANSWER;
+      return choice;
+    });
+  }
   const choice: Choice = { question: config.prompt, options: config.options };
   if (config.icon !== undefined) choice.icon = config.icon;
   if (config.component === "choose_option" && config.multiple === true) choice.multiple = true;
   if (config.component === "choose_option" && config.requireConfirm === true) choice.requireConfirm = true;
+  if (config.component === "choose_option" && config.custom === true) choice.freeText = OWN_ANSWER;
   if (config.comments === true) {
     choice.freeText = {
       label: "Comments (optional)",
@@ -150,11 +189,42 @@ export interface FormField {
   default?: JsonValue;
   /** `string` fields only: render a textarea. */
   multiline?: boolean;
+  /**
+   * `enum` fields only: the list ends in a "Custom…" entry that opens a text box, and what is typed
+   * there is the answer. The declared values are then the common answers rather than the only ones,
+   * and the contract accepts any non-empty string on the field.
+   */
+  custom?: boolean;
+}
+
+/**
+ * One part of a multi-part `choose_option` — a question of its own, with its own options.
+ *
+ * Each answers under its `name`, which is what makes the result a record rather than a decision:
+ * `{ answers: { [name]: value } }`. The per-question knobs are the single question's knobs, moved
+ * down a level, because there is no longer one question for them to be about.
+ */
+export interface ChoiceQuestion {
+  /** The key the answer lands on. Unique within the state. */
+  name: string;
+  /** The question, as the person reads it. */
+  question: string;
+  header?: string;
+  description?: string;
+  options: ComponentOption[];
+  multiple?: boolean;
+  /** Offer an "own answer" text box — any non-empty string is then accepted. */
+  custom?: boolean;
+  /** May be left unanswered; the key is then absent from `answers`. */
+  optional?: boolean;
+  /** Pre-picked when the question appears. Must be one of the options. */
+  default?: string;
 }
 
 export interface ChooseOptionConfig {
   component: "choose_option";
   prompt: string;
+  /** The choices. EMPTY when `questions` carries them instead — the two spellings are exclusive. */
   options: ComponentOption[];
   /** Offer a free-text comment alongside the choice. */
   comments?: boolean;
@@ -162,6 +232,20 @@ export interface ChooseOptionConfig {
   multiple?: boolean;
   /** Hold the pick until a confirm button is pressed — see {@link Choice.requireConfirm}. */
   requireConfirm?: boolean;
+  /**
+   * Offer an "own answer" box beside the options — the agent caller's "Other", on a gate.
+   *
+   * Exclusive with `comments`: there is one free-text field, and the two roles it can play are
+   * opposites (see {@link ChoiceFreeText}). `decision` is then any non-empty string.
+   */
+  custom?: boolean;
+  /**
+   * Several questions in one gate, asked one at a time; the answer is `{ answers }` keyed by name.
+   *
+   * Present ⇒ `options` is empty and the single-question knobs (`comments`, `multiple`, `custom`,
+   * `require_confirm`) are refused at the top level: each question carries its own.
+   */
+  questions?: ChoiceQuestion[];
   /** A glyph beside the question. Absent ⇒ a message bubble. */
   icon?: string;
 }
@@ -317,7 +401,48 @@ function fields(raw: unknown, where: string): FormField[] {
     if (record["optional"] === true) field.optional = true;
     if (record["default"] !== undefined) field.default = record["default"] as JsonValue;
     if (record["multiline"] === true) field.multiline = true;
+    if (record["custom"] === true) {
+      // A text box under a text box is not a "custom" anything: the escape hatch only means
+      // something where the declared values would otherwise be the only answers.
+      if (field.type !== "enum") throw new ConfigError(`${where}[${i}].custom is only meaningful on an enum field`);
+      field.custom = true;
+    }
     return field;
+  });
+}
+
+/** The parts of a multi-part `choose_option` — see {@link ChoiceQuestion}. */
+function questions(raw: unknown, where: string): ChoiceQuestion[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new ConfigError(`${where} must be a non-empty array of questions`);
+  }
+  const names = new Set<string>();
+  return raw.map((entry, i) => {
+    const record = asRecord(entry, `${where}[${i}]`);
+    const name = str(record["name"], `${where}[${i}].name`);
+    if (names.has(name)) throw new ConfigError(`${where}[${i}].name '${name}' is used twice — answers are keyed by it`);
+    names.add(name);
+    const question: ChoiceQuestion = {
+      name,
+      question: str(record["question"], `${where}[${i}].question`),
+      options: options(record["options"], `${where}[${i}].options`),
+    };
+    if (record["header"] !== undefined) question.header = str(record["header"], `${where}[${i}].header`);
+    if (record["description"] !== undefined) {
+      question.description = str(record["description"], `${where}[${i}].description`);
+    }
+    if (record["multiple"] === true) question.multiple = true;
+    if (record["custom"] === true) question.custom = true;
+    if (record["optional"] === true) question.optional = true;
+    if (record["default"] !== undefined) {
+      const preset = str(record["default"], `${where}[${i}].default`);
+      // A default that is not on offer would pre-pick nothing and pass validation for no reason.
+      if (!question.options.some((o) => o.value === preset)) {
+        throw new ConfigError(`${where}[${i}].default '${preset}' is not one of its options`);
+      }
+      question.default = preset;
+    }
+    return question;
   });
 }
 
@@ -330,6 +455,27 @@ export function parseComponentConfig(component: ComponentName, raw: unknown): Co
   const prompt = str(config["prompt"], `${component}.prompt`, defaultPrompt(component));
   switch (component) {
     case "choose_option": {
+      if (config["questions"] !== undefined) {
+        // The multi-part spelling. The single question's knobs have nothing to be about here, so
+        // they are refused rather than silently ignored — an author who wrote `comments: true`
+        // beside `questions` expected a box somewhere, and no box is the wrong way to say no.
+        if (config["options"] !== undefined) {
+          throw new ConfigError("choose_option takes options or questions, not both");
+        }
+        for (const knob of ["comments", "multiple", "custom", "require_confirm"]) {
+          if (config[knob] !== undefined) {
+            throw new ConfigError(`choose_option.${knob} is per question when questions is set`);
+          }
+        }
+        const parsed: ChooseOptionConfig = {
+          component,
+          prompt,
+          options: [],
+          questions: questions(config["questions"], "choose_option.questions"),
+        };
+        if (config["icon"] !== undefined) parsed.icon = str(config["icon"], "choose_option.icon");
+        return parsed;
+      }
       const parsed: ChooseOptionConfig = {
         component,
         prompt,
@@ -338,6 +484,11 @@ export function parseComponentConfig(component: ComponentName, raw: unknown): Co
       if (config["comments"] === true) parsed.comments = true;
       if (config["multiple"] === true) parsed.multiple = true;
       if (config["require_confirm"] === true) parsed.requireConfirm = true;
+      if (config["custom"] === true) {
+        // One free-text field, and the two roles it can play are opposites (see `ChoiceFreeText`).
+        if (parsed.comments === true) throw new ConfigError("choose_option.custom and comments are exclusive — one free-text field");
+        parsed.custom = true;
+      }
       if (config["icon"] !== undefined) parsed.icon = str(config["icon"], "choose_option.icon");
       return parsed;
     }
@@ -456,6 +607,43 @@ export function changesetInputOf(inputs: Record<string, unknown>): { changeset?:
   return { error: `no input holds a changeset${lastError === undefined ? "" : `: ${lastError}`}` };
 }
 
+/**
+ * One pick against the options that offered it — the check a `decision` and every multi-part
+ * answer share. Returns the complaint, or `undefined` for a pick the state could have produced.
+ *
+ * A multi-select answers with a LIST, and the list is checked the same way one value is: every
+ * member declared, nothing repeated, and not empty — "none of these" is a decision the state did
+ * not offer, and an empty array is how it would arrive by accident. `custom` widens "declared" to
+ * "any non-empty string", which is exactly what a text box beside the options can produce.
+ */
+function checkPick(
+  at: string,
+  value: unknown,
+  options: readonly ComponentOption[],
+  rules: { multiple?: boolean | undefined; custom?: boolean | undefined },
+): string | undefined {
+  const named = options.map((o) => o.value);
+  const allowed = (one: unknown): one is string =>
+    typeof one === "string" && (named.includes(one) || (rules.custom === true && one.trim().length > 0));
+  const complaint = (one: unknown): string =>
+    rules.custom === true
+      ? `${at} '${String(one)}' must be one of: ${named.join(", ")} — or a non-empty answer of your own`
+      : `${at} '${String(one)}' is not one of: ${named.join(", ")}`;
+  if (rules.multiple === true) {
+    if (!Array.isArray(value)) return `${at} must be an array on a multi-select`;
+    if (value.length === 0) return `${at} must name at least one option`;
+    const seen = new Set<string>();
+    for (const one of value) {
+      if (!allowed(one)) return complaint(one);
+      if (seen.has(one)) return `${at} names '${one}' twice`;
+      seen.add(one);
+    }
+    return undefined;
+  }
+  if (typeof value !== "string") return `${at} must be a string`;
+  return allowed(value) ? undefined : complaint(value);
+}
+
 export function validateComponentResult(
   config: ComponentConfig,
   value: unknown,
@@ -505,28 +693,33 @@ export function validateComponentResult(
     }
     case "choose_option":
     case "review_artifact": {
-      const named = config.options.map((o) => o.value);
-      const decision = result["decision"];
-      // A multi-select answers with a LIST, and the list is checked the same way one value is:
-      // every member declared, nothing repeated, and not empty — "none of these" is a decision the
-      // state did not offer, and an empty array is how it would arrive by accident.
-      if (config.component === "choose_option" && config.multiple === true) {
-        if (!Array.isArray(decision)) return bad("result.decision must be an array on a multi-select");
-        if (decision.length === 0) return bad("result.decision must name at least one option");
-        const seen = new Set<string>();
-        for (const value of decision) {
-          if (typeof value !== "string" || !named.includes(value)) {
-            return bad(`result.decision '${String(value)}' is not one of: ${named.join(", ")}`);
+      if (config.component === "choose_option" && config.questions !== undefined) {
+        // The multi-part shape: `{ answers }`, one key per question, each checked the way a single
+        // decision is. A key naming no question is refused — nothing on screen could have made it.
+        const answers = result["answers"];
+        if (answers === null || typeof answers !== "object" || Array.isArray(answers)) {
+          return bad("result.answers must be an object keyed by question name");
+        }
+        const record = answers as Record<string, unknown>;
+        const known = new Set(config.questions.map((q) => q.name));
+        for (const key of Object.keys(record)) {
+          if (!known.has(key)) return bad(`result.answers.${key} names no question of this state`);
+        }
+        for (const question of config.questions) {
+          const value = record[question.name];
+          if (value === undefined || value === null || value === "") {
+            if (question.optional === true) continue;
+            return bad(`result.answers.${question.name} is required`);
           }
-          if (seen.has(value)) return bad(`result.decision names '${value}' twice`);
-          seen.add(value);
+          const checked = checkPick(`result.answers.${question.name}`, value, question.options, question);
+          if (checked !== undefined) return bad(checked);
         }
-      } else {
-        if (typeof decision !== "string") return bad("result.decision must be a string");
-        if (!named.includes(decision)) {
-          return bad(`result.decision '${decision}' is not one of: ${named.join(", ")}`);
-        }
+        return { ok: true };
       }
+      const decision = result["decision"];
+      const single = config.component === "choose_option" ? config : { multiple: false, custom: false };
+      const checked = checkPick("result.decision", decision, config.options, single);
+      if (checked !== undefined) return bad(checked);
       if (result["comments"] !== undefined && typeof result["comments"] !== "string") {
         return bad("result.comments must be a string when present");
       }
@@ -573,7 +766,11 @@ export function validateComponentResult(
             if (typeof raw !== "boolean") problems.push(`result.${field.name} must be a boolean`);
             break;
           case "enum":
-            if (typeof raw !== "string" || !(field.enum ?? []).includes(raw)) {
+            // `custom` widens the field to any non-empty string — the typed answer is the answer.
+            // (An empty one already read as "not answered" above.)
+            if (typeof raw !== "string") {
+              problems.push(`result.${field.name} must be a string`);
+            } else if (field.custom !== true && !(field.enum ?? []).includes(raw)) {
               problems.push(`result.${field.name} must be one of: ${(field.enum ?? []).join(", ")}`);
             }
             break;
@@ -616,10 +813,14 @@ const CONFIG_KEY_PLACEHOLDERS: Record<string, unknown> = {
   options: ["supplied-by-an-input"],
   decisions: ["supplied-by-an-input"],
   fields: [{ name: "supplied-by-an-input" }],
+  // The multi-part gate's questions are the case that made this table necessary in the first
+  // place: a state whose `questions` are what an earlier state raised cannot author them.
+  questions: [{ name: "supplied-by-an-input", question: "supplied-by-an-input", options: ["supplied-by-an-input"] }],
   tree: "proposal",
   comments: true,
   multiple: false,
   require_confirm: false,
+  custom: false,
   editable: false,
 };
 

@@ -35,6 +35,26 @@ export interface Answer {
 export const EMPTY_ANSWER: Answer = { picked: [], text: "" };
 
 /**
+ * Where a set of questions starts: each one's authored `default` already picked, and nothing typed.
+ *
+ * A pre-picked option is the reading the author took, so answering is confirming or overruling
+ * rather than composing from nothing — which is what makes a question a person has no view on
+ * passable without a "no view" option in the list.
+ */
+export function initialAnswers(choices: readonly Choice[]): Record<string, Answer> {
+  const answers: Record<string, Answer> = {};
+  for (const choice of choices) {
+    if (choice.default !== undefined) answers[choice.question] = { picked: [choice.default], text: "" };
+  }
+  return answers;
+}
+
+/** Whether a question can be moved past: answered, or declared passable. */
+export function settled(choice: Choice, answer: Answer): boolean {
+  return choice.optional === true || answerOf(choice, answer) !== undefined;
+}
+
+/**
  * What one question currently answers to, or `undefined` when it is unanswered.
  *
  * The free-text role decides the precedence, which is the whole reason the role exists: `instead`
@@ -95,12 +115,17 @@ export function ChoiceSteps({
   const at = Math.min(step, choices.length - 1);
   const choice = choices[at]!;
   const last = at === choices.length - 1;
-  const answered = answerOf(choice, answers[choice.question] ?? EMPTY_ANSWER) !== undefined;
+  const answer = answers[choice.question] ?? EMPTY_ANSWER;
+  const answered = answerOf(choice, answer) !== undefined;
+  // An optional question can be passed unanswered; the button says so rather than pretending an
+  // empty step was confirmed.
+  const passing = !answered && choice.optional === true;
 
   return (
     <>
       <p className="question-step">
         Question {at + 1} of {choices.length}
+        {choice.optional === true ? <span className="sub"> · optional</span> : null}
       </p>
       <ChoiceList choices={[choice]} answers={answers} onAnswer={onAnswer} />
       <div className="options">
@@ -109,8 +134,12 @@ export function ChoiceSteps({
             Back
           </button>
         ) : null}
-        <button className="primary" disabled={!answered} onClick={() => (last ? onSubmit() : setStep(at + 1))}>
-          {last ? "Confirm" : "Next"}
+        <button
+          className={passing ? "ghost" : "primary"}
+          disabled={!settled(choice, answer)}
+          onClick={() => (last ? onSubmit() : setStep(at + 1))}
+        >
+          {last ? (passing ? "Skip and confirm" : "Confirm") : passing ? "Skip" : "Next"}
         </button>
         {extra}
       </div>
@@ -198,6 +227,10 @@ export function ChoiceList({
                 {choices.length > 1 ? choice.question : null}
               </p>
             ) : null}
+            {/* Why it is asked, or what each answer would change. Under the question rather than in
+                a tooltip: a question a person cannot answer without reading the spec is a question
+                that has not been finished, and this line is where it gets finished. */}
+            {choice.description !== undefined ? <p className="question-desc">{choice.description}</p> : null}
             {/* An `alongside` free text is written BEFORE the decision — it is a note about the
                 thing being decided, and a single-select answers on the click, so a comment box
                 below the buttons is a box you can never reach in time. An `instead` one belongs

@@ -41,7 +41,7 @@ import { Icon } from "./icons";
 import { docKey, useDraftBox, type DraftBox, type Drafts, type SetDraft } from "./drafts";
 import { EditorActions } from "./editorChrome";
 import { SchemaJsonEditor } from "./schemaEditor";
-import { answerOf, ChoiceList, ChoiceSteps, EMPTY_ANSWER, submitsOnClick, type Answer } from "./choices";
+import { answerOf, ChoiceList, ChoiceSteps, EMPTY_ANSWER, initialAnswers, submitsOnClick, type Answer } from "./choices";
 import { mountChangesetReview, rendererServices, type ComponentServices } from "./changesetReview";
 import { ValueView } from "./valueView";
 import {
@@ -71,12 +71,37 @@ export interface ComponentProps<C extends ComponentConfig> {
  */
 function ChooseOption({ config, onSubmit }: ComponentProps<ChooseOptionConfig>): JSX.Element {
   const choices = choicesOfConfig(config);
-  const [answers, setAnswers] = useState<Record<string, Answer>>({});
+  const [answers, setAnswers] = useState<Record<string, Answer>>(() => initialAnswers(choices));
+
+  // The multi-part gate: the same stepper an agent's batch of questions uses, and the answer is a
+  // record keyed by each question's `name` rather than one `decision` — a question passed on stays
+  // out of it, which is how "they had no view" reaches the state as an absence rather than a word.
+  if (config.questions !== undefined) {
+    const submit = (): void => {
+      const out: Record<string, string | string[]> = {};
+      for (const choice of choices) {
+        const value = answerOf(choice, answers[choice.question] ?? EMPTY_ANSWER);
+        if (value !== undefined) out[choice.name ?? choice.question] = value;
+      }
+      onSubmit({ answers: out });
+    };
+    return (
+      <ChoiceSteps
+        choices={choices}
+        answers={answers}
+        onAnswer={(question, next) => setAnswers((prev) => ({ ...prev, [question]: next }))}
+        onSubmit={submit}
+      />
+    );
+  }
+
   const only = choices[0]!;
   const answer = answers[only.question] ?? EMPTY_ANSWER;
 
   const send = (picked: string | string[]): void => {
-    const comments = answer.text.trim();
+    // `custom` text is the decision itself (INSTEAD) and never a comment; `comments` text rides
+    // alongside. The role on the Choice is what tells them apart, so the config need not be asked.
+    const comments = only.freeText?.role === "alongside" ? answer.text.trim() : "";
     onSubmit({ decision: picked, ...(comments === "" ? {} : { comments }) });
   };
 
@@ -527,9 +552,28 @@ function seedValue(field: FormField): unknown {
   }
 }
 
+/**
+ * The `<select>` value that stands for "none of these" on an enum field with `custom: true`.
+ *
+ * A sentinel rather than a real value, so an author's own option can never collide with it: the
+ * separator makes it unspellable as a JSON string an author would write, and it never leaves the
+ * form — what is submitted is the text typed under it.
+ */
+const CUSTOM_CHOICE = " custom";
+
 function FillForm({ config, onSubmit }: ComponentProps<FillFormConfig>): JSX.Element {
   const [values, setValues] = useState<Record<string, unknown>>(() =>
     Object.fromEntries(config.fields.map((f) => [f.name, seedValue(f)])),
+  );
+  // Which enum fields are on their Custom… entry. Held apart from the value, because the value is
+  // the typed text — and a typed text that happens to equal a declared option is still typed.
+  // Seeded from a default the list does not contain, which is the one way a form can start there.
+  const [custom, setCustom] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(
+      config.fields
+        .filter((f) => f.type === "enum" && f.custom === true && f.default !== undefined && !(f.enum ?? []).includes(String(f.default)))
+        .map((f) => [f.name, true]),
+    ),
   );
   const set = (name: string, value: unknown): void => setValues((v) => ({ ...v, [name]: value }));
 
@@ -548,13 +592,39 @@ function FillForm({ config, onSubmit }: ComponentProps<FillFormConfig>): JSX.Ele
               onChange={(e) => set(field.name, e.target.checked)}
             />
           ) : field.type === "enum" ? (
-            <select value={String(values[field.name] ?? "")} onChange={(e) => set(field.name, e.target.value)}>
-              {(field.enum ?? []).map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
+            <>
+              <select
+                value={custom[field.name] === true ? CUSTOM_CHOICE : String(values[field.name] ?? "")}
+                onChange={(e) => {
+                  if (e.target.value === CUSTOM_CHOICE) {
+                    // Opening the box clears the pick: the text is the answer from here on, and an
+                    // untouched box reads as "not answered" — never as the option that was showing.
+                    setCustom((c) => ({ ...c, [field.name]: true }));
+                    set(field.name, "");
+                  } else {
+                    setCustom((c) => ({ ...c, [field.name]: false }));
+                    set(field.name, e.target.value);
+                  }
+                }}
+              >
+                {(field.enum ?? []).map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+                {field.custom === true ? <option value={CUSTOM_CHOICE}>Custom…</option> : null}
+              </select>
+              {custom[field.name] === true ? (
+                <input
+                  className="field-custom"
+                  data-testid={`custom-${field.name}`}
+                  autoFocus
+                  placeholder="Type your own answer…"
+                  value={String(values[field.name] ?? "")}
+                  onChange={(e) => set(field.name, e.target.value)}
+                />
+              ) : null}
+            </>
           ) : field.multiline ? (
             <textarea rows={4} value={String(values[field.name] ?? "")} onChange={(e) => set(field.name, e.target.value)} />
           ) : (

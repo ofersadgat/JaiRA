@@ -19,9 +19,10 @@
  *    credentials, history. Its section list is an accordion in the sidebar, so it is no longer a
  *    second left column that existed in one view only.
  *
- * Two more sit beside them and belong to neither: **Logs** is what the app said about itself, and
+ * Three more sit beside them and belong to neither: **Logs** is what the app said about itself,
  * **Debug** (DESIGN §11.3) runs a two-state workflow against this installation so that "does any of
- * this work" is a button rather than an afternoon.
+ * this work" is a button rather than an afternoon, and **Components** (DESIGN §11.4) draws every
+ * surface a run can park at, in every variation its config can express, with nothing behind it.
  *
  * The approvals strip spans all three. A blocked tool loop is the one thing that must never scroll
  * away, and it stays visible while you are deep in the Files tree.
@@ -99,6 +100,7 @@ import { LayerPicker, SettingsPane } from "./panes";
 import { ConfigPane } from "./configPane";
 import { ConfigPanel } from "./configPanel";
 import { DebugPane } from "./debugPane";
+import { GalleryPane } from "./galleryPane";
 import { ProvidersPane } from "./providersPane";
 import { ExecutorsPane } from "./executorsPane";
 import { initialRunValues, runFieldsOf, runTargetOf, runValuesOf } from "./runForm";
@@ -275,6 +277,10 @@ const VIEWS: readonly SidebarView[] = [
 const FOOTER_VIEWS: readonly SidebarView[] = [
   { id: "logs", glyph: "≡", label: "Logs" },
   { id: "debug", glyph: "⌁", label: "Debug" },
+  // The gallery was the foot of Debug once. It is about authoring rather than diagnosis — what a
+  // gate looks like before a run has to reach it — and a page you scroll to the bottom of a
+  // self-test for is a page nobody opens on purpose.
+  { id: "gallery", glyph: "▤", label: "Components" },
 ];
 
 /**
@@ -2168,9 +2174,10 @@ export default function App(): JSX.Element {
               onDismissError={actions.debugDismissError}
               onOpenState={(stateId) => void actions.openWorkflow(stateId, "base")}
               onShowSession={actions.showSession}
-              validateSchema={actions.validateSchema}
             />
           ) : null}
+
+          {view === "gallery" ? <GalleryPane validateSchema={actions.validateSchema} /> : null}
 
           {view === "settings" ? (
             /* One column now. The section list moved into the sidebar's accordion, and the project

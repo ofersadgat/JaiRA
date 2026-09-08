@@ -304,3 +304,110 @@ describe("componentConfigIssues", () => {
     ).toEqual([]);
   });
 });
+
+describe("an answer of your own (custom)", () => {
+  it("widens a fill_form enum to any non-empty string, and only an enum", () => {
+    const config = parse("fill_form", {
+      fields: [{ name: "store", type: "enum", enum: ["memory", "sqlite"], custom: true }],
+    });
+    expect(config).toMatchObject({ fields: [{ name: "store", type: "enum", custom: true }] });
+    expect(validateComponentResult(config, { store: "sqlite" })).toEqual({ ok: true });
+    expect(validateComponentResult(config, { store: "the blob store" })).toEqual({ ok: true });
+    // Empty is "not answered", not a custom answer — and the field is required.
+    expect(validateComponentResult(config, { store: "" })).toMatchObject({ ok: false, errors: "result.store is required" });
+    expect(validateComponentResult(config, { store: 3 })).toMatchObject({ ok: false });
+    // A text box under a text box means nothing.
+    expect(() => parse("fill_form", { fields: [{ name: "x", custom: true }] })).toThrow(/only meaningful on an enum/);
+  });
+
+  it("still holds a plain enum to its list", () => {
+    const config = parse("fill_form", { fields: [{ name: "store", type: "enum", enum: ["memory", "sqlite"] }] });
+    expect(validateComponentResult(config, { store: "the blob store" })).toMatchObject({ ok: false });
+  });
+
+  it("lets a choose_option decision be any non-empty string, and refuses it beside comments", () => {
+    const config = parse("choose_option", { options: ["30 seconds", "5 minutes"], custom: true });
+    expect(config).toMatchObject({ custom: true });
+    expect(validateComponentResult(config, { decision: "5 minutes" })).toEqual({ ok: true });
+    expect(validateComponentResult(config, { decision: "an hour, and only on open" })).toEqual({ ok: true });
+    expect(validateComponentResult(config, { decision: "   " })).toMatchObject({ ok: false });
+    // One free-text field, and the two roles it can play are opposites.
+    expect(() => parse("choose_option", { options: ["a"], custom: true, comments: true })).toThrow(/exclusive/);
+  });
+
+  it("applies to every member of a multi-select", () => {
+    const config = parse("choose_option", { options: ["a", "b"], multiple: true, custom: true });
+    expect(validateComponentResult(config, { decision: ["a", "something else"] })).toEqual({ ok: true });
+    expect(validateComponentResult(config, { decision: ["a", ""] })).toMatchObject({ ok: false });
+  });
+});
+
+describe("a multi-part choose_option (questions)", () => {
+  const raw = {
+    prompt: "The product questions.",
+    questions: [
+      {
+        name: "sort",
+        question: "Where does a stopped conversation sort?",
+        header: "Sort",
+        description: "One predicate member either way.",
+        options: ["above", { value: "below", description: "you can find it by name" }],
+        default: "below",
+        custom: true,
+        optional: true,
+      },
+      { name: "rows", question: "Do rows carry counts?", options: ["counts", "name only"], multiple: true },
+    ],
+  };
+
+  it("parses each part with its own knobs, and empties the top-level options", () => {
+    const config = parse("choose_option", raw);
+    expect(config).toMatchObject({
+      component: "choose_option",
+      options: [],
+      questions: [
+        { name: "sort", question: "Where does a stopped conversation sort?", header: "Sort", default: "below", custom: true, optional: true },
+        { name: "rows", options: [{ value: "counts" }, { value: "name only" }], multiple: true },
+      ],
+    });
+  });
+
+  it("refuses the single question's knobs beside questions, both spellings at once, a repeated name and a default not on offer", () => {
+    expect(() => parse("choose_option", { ...raw, comments: true })).toThrow(/comments is per question/);
+    expect(() => parse("choose_option", { ...raw, options: ["a"] })).toThrow(/not both/);
+    expect(() =>
+      parse("choose_option", { questions: [raw.questions[1], { ...raw.questions[1] }] }),
+    ).toThrow(/used twice/);
+    expect(() =>
+      parse("choose_option", { questions: [{ name: "q", question: "?", options: ["a"], default: "z" }] }),
+    ).toThrow(/default 'z' is not one of/);
+    expect(() => parse("choose_option", { questions: [] })).toThrow(/non-empty array of questions/);
+  });
+
+  it("validates { answers } keyed by name, each the way a decision is", () => {
+    const config = parse("choose_option", raw);
+    expect(validateComponentResult(config, { answers: { sort: "below", rows: ["counts"] } })).toEqual({ ok: true });
+    // The own answer, and the pass.
+    expect(validateComponentResult(config, { answers: { sort: "above, but dimmed", rows: ["name only"] } })).toEqual({ ok: true });
+    expect(validateComponentResult(config, { answers: { rows: ["counts", "name only"] } })).toEqual({ ok: true });
+    // A required part missing, a list where a string belongs, an undeclared value, a key naming nothing.
+    expect(validateComponentResult(config, { answers: { sort: "below" } })).toMatchObject({ ok: false, errors: "result.answers.rows is required" });
+    expect(validateComponentResult(config, { answers: { rows: "counts" } })).toMatchObject({ ok: false });
+    expect(validateComponentResult(config, { answers: { rows: ["elsewhere"] } })).toMatchObject({ ok: false });
+    expect(validateComponentResult(config, { answers: { rows: ["counts"], ghost: "x" } })).toMatchObject({
+      ok: false,
+      errors: "result.answers.ghost names no question of this state",
+    });
+    expect(validateComponentResult(config, { decision: "below" })).toMatchObject({ ok: false });
+  });
+
+  it("lints a state whose questions arrive from an input rather than its args", () => {
+    const states = {
+      "feature/product/ask": {
+        inputs: { questions: { schema: { type: "array" } } },
+        operation: { kind: "function", function: "choose_option", args: { prompt: "Answer these." } },
+      },
+    };
+    expect(componentConfigIssues(states)).toEqual([]);
+  });
+});

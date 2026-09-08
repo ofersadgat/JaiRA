@@ -179,3 +179,57 @@ describe("free-text placement and the affirmative label", () => {
     expect(choicesOfQuestions([{ question: "q", options: [{ label: "a" }] }])[0]!.freeText?.first).toBeUndefined();
   });
 });
+
+describe("an own answer on a gate (custom)", () => {
+  it("offers the same INSTEAD free text an agent's Other is", () => {
+    const [choice] = choicesOfConfig(choose({ options: ["a", "b"], custom: true }));
+    expect(choice!.freeText).toMatchObject({ role: "instead", label: "Your own answer" });
+    // Typing overrides the pick, exactly as it does for the agent caller.
+    expect(validateComponentResult(choose({ options: ["a", "b"], custom: true }), { decision: "c, actually" })).toEqual({ ok: true });
+  });
+});
+
+describe("a multi-part gate reduces to several Choices", () => {
+  const config = choose({
+    prompt: "The product questions.",
+    questions: [
+      {
+        name: "sort",
+        question: "Where does a stopped conversation sort?",
+        header: "Sort",
+        description: "One predicate member either way.",
+        options: ["above", "below"],
+        default: "below",
+        custom: true,
+        optional: true,
+      },
+      { name: "rows", question: "Do rows carry counts?", options: ["counts", "name only"], multiple: true },
+    ],
+  });
+
+  it("keeps each part's name, header, description, default and knobs", () => {
+    const choices = choicesOfConfig(config);
+    expect(choices).toHaveLength(2);
+    expect(choices[0]).toMatchObject({
+      name: "sort",
+      question: "Where does a stopped conversation sort?",
+      header: "Sort",
+      description: "One predicate member either way.",
+      default: "below",
+      optional: true,
+      freeText: { role: "instead" },
+    });
+    expect(choices[1]).toMatchObject({ name: "rows", multiple: true });
+    expect(choices[1]!.freeText).toBeUndefined();
+    expect(choices[1]!.optional).toBeUndefined();
+  });
+
+  it("is the same shape an agent's batch of questions reduces to, so one stepper draws both", () => {
+    const agent = choicesOfQuestions([
+      { question: "Where does a stopped conversation sort?", header: "Sort", options: [{ label: "above" }, { label: "below" }] },
+    ]);
+    const gate = choicesOfConfig(config);
+    expect(Object.keys(agent[0]!).sort()).toEqual(expect.arrayContaining(["question", "header", "options", "freeText"]));
+    expect(gate[0]!.options.map((o) => o.value)).toEqual(agent[0]!.options.map((o) => o.value));
+  });
+});

@@ -1,16 +1,18 @@
 /**
- * Every human-facing surface the app can put on screen, as data (DESIGN §11.3).
+ * Every human-facing surface the app can put on screen, as data (DESIGN §11.4).
  *
- * The Debug view runs a workflow against itself; this is the other half of the same question — *does
- * the thing a workflow parks at actually render?* A UI state's whole visible behaviour comes from a
- * config an author wrote inside a state file, and until now the only way to see one was to author
- * that file, start a run and wait for the engine to reach it. Three steps, any of which can be the
- * broken one, to answer a question about the last.
+ * The Debug view runs a workflow against itself; the Components view is the other half of the same
+ * question — *does the thing a workflow parks at actually render?* A UI state's whole visible
+ * behaviour comes from a config an author wrote inside a state file, and until now the only way to
+ * see one was to author that file, start a run and wait for the engine to reach it. Three steps,
+ * any of which can be the broken one, to answer a question about the last.
  *
  * So each surface is described here once: what it is called, what it is for, the schema its config
- * answers to, and a config that exercises it. The gallery in the renderer walks this list, hands
- * each entry's config through `parseComponentConfig` — the same call main makes — and renders the
- * real dialog with the result. Nothing is mocked but the run.
+ * answers to, and the configs that exercise it — a GROUP per surface, a VARIANT per thing its
+ * config can express, because one sample of a `fill_form` shows one form and the contract is a
+ * small language. The gallery in the renderer walks this list, hands each variant's config through
+ * `parseComponentConfig` — the same call main makes — and renders the real dialog with the result.
+ * Nothing is mocked but the run.
  *
  * ## Why the schemas are registered but not pickable
  *
@@ -34,13 +36,53 @@ import { registerSchema, type SchemaDoc } from "./schemas";
 /** What raises the surface — see the module note. */
 export type GalleryKind = "interaction" | "approval" | "question";
 
-export interface GallerySurface {
+/** One configuration of a surface — a card, and the thing a variant's `note` is about. */
+export interface GalleryVariant {
+  /** Stable within its group: `plain`, `comments`, `custom`… */
+  id: string;
+  /** What this variation is, in a few words. */
+  title: string;
+  /** What it turns on that the others do not, and what to look for. */
+  note: string;
+  /** The editable document, seeded — see {@link GallerySurface.sample}. */
+  sample: JsonValue;
+  /** The state's other resolved inputs — see {@link GallerySurface.inputs}. */
+  inputs?: Record<string, JsonValue>;
+}
+
+/** One surface and everything its config can express. */
+export interface GalleryGroup {
   /** Stable id: the registered function name for a component, else what the dialog is called. */
   id: string;
   kind: GalleryKind;
   /** Heading, in the app's own words rather than the wire's. */
   title: string;
   /** One or two sentences: what it is for, and what an answer to it means. */
+  blurb: string;
+  /** The registered function name, for `interaction` groups — see {@link GallerySurface.component}. */
+  component?: string;
+  /** The schema every variant's document answers to. `null` ⇒ freeform JSON. */
+  schemaId: string | null;
+  variants: readonly GalleryVariant[];
+}
+
+/**
+ * One card: a group's variant, flattened with what the card needs from the group.
+ *
+ * The unit the renderer draws and the tests walk. {@link GALLERY_SURFACES} is derived from
+ * {@link GALLERY_GROUPS}, so nothing is declared twice.
+ */
+export interface GallerySurface {
+  /** `group/variant` — unique across the gallery, and readable in a request id. */
+  id: string;
+  group: string;
+  variant: string;
+  kind: GalleryKind;
+  /** The variant's heading. */
+  title: string;
+  /** What this variation shows — the variant's note. */
+  note: string;
+  /** The group's one or two sentences: what the surface is for, and what an answer to it means. */
   blurb: string;
   /**
    * The registered function name, for `interaction` surfaces.
@@ -141,9 +183,29 @@ const FORM_FIELD: SchemaDoc = {
     enum: { type: "array", title: "choices", description: "enum fields only", items: { type: "string" } },
     optional: bool("optional", "an empty answer is allowed"),
     multiline: bool("multiline", "string fields only: render a textarea"),
+    custom: bool("custom", "enum fields only: end the list in Custom…, which opens a text box; what is typed is the answer"),
     default: { title: "default", description: "the value the control starts on" },
   },
   required: ["name"],
+  additionalProperties: false,
+};
+
+/** One part of a multi-part `choose_option` (`components.ts`'s {@link ChoiceQuestion}). */
+const CHOICE_QUESTION: SchemaDoc = {
+  type: "object",
+  title: "question",
+  properties: {
+    name: str("name", "the key this question's answer lands on, under `answers`"),
+    question: str("question", "the complete question, as the person reads it"),
+    header: str("header", "a short chip beside it, e.g. Library"),
+    description: str("description", "why it is asked, or what each answer would change — a line under the question"),
+    options: OPTIONS,
+    multiple: bool("multiple", "several options may be chosen; the answer is then a list"),
+    custom: bool("custom", "offer an own-answer box; any non-empty string is then accepted"),
+    optional: bool("optional", "may be left unanswered; the key is then absent"),
+    default: str("default", "the option pre-picked when the question appears; must be one of the options"),
+  },
+  required: ["name", "question", "options"],
   additionalProperties: false,
 };
 
@@ -164,11 +226,20 @@ function configSchema(title: string, description: string, properties: Record<str
 const CONFIG_SCHEMAS: Record<ComponentName, { hint: string; document: SchemaDoc; expected: readonly string[] }> = {
   choose_option: {
     hint: "a decision with named outcomes — `choose_option`'s args",
-    document: configSchema("choose_option", "one decision, taken from a named set", {
+    document: configSchema("choose_option", "one decision, taken from a named set — or several, asked in steps", {
       options: OPTIONS,
       comments: bool("comments", "offer a free-text note alongside the choice"),
       multiple: bool("multiple", "several options may be chosen; the answer is then a list"),
       require_confirm: bool("require_confirm", "picking holds the choice; a Confirm button sends it"),
+      custom: bool("custom", "offer an own-answer box instead of the options; exclusive with comments"),
+      questions: {
+        type: "array",
+        title: "questions",
+        description:
+          "several questions in one gate, asked one at a time; replaces options, and the answer is { answers } keyed by name",
+        minItems: 1,
+        items: CHOICE_QUESTION,
+      },
       icon: str("icon", "a glyph beside the question; absent ⇒ a message bubble"),
     }),
     expected: ["prompt", "options"],
@@ -223,6 +294,13 @@ const CONFIG_SCHEMAS: Record<ComponentName, { hint: string; document: SchemaDoc;
         description:
           "what the files currently hold: `proposal` for a worktree an agent already edited, `base` for a sync whose edits exist only as data",
       },
+      // The review-level vocabulary, on the plural exactly as on the singular (decision 0002). The
+      // schema lacked it while the parser took it — which the gallery's routed card is what caught.
+      options: {
+        ...OPTIONS,
+        description: "the review-level decision beside the per-change ones; absent ⇒ one Submit and the changes carry the answer",
+      },
+      decisions: { ...OPTIONS, title: "decisions", description: "an alias for options — it reads better in a review state" },
     }),
     expected: ["prompt", "tree"],
   },
@@ -417,7 +495,78 @@ export const GALLERY_CHANGESET: Changeset = {
 
 // --- the surfaces ------------------------------------------------------------
 
-export const GALLERY_SURFACES: readonly GallerySurface[] = [
+/** The questions a phase's `ask` state puts to a person, in the multi-part gate's own shape. */
+const PRODUCT_QUESTIONS: JsonValue[] = [
+  {
+    name: "chat-run-order__canceled-sort",
+    question: "Should a conversation you stopped yourself sort with the unsettled ones, or with the finished ones?",
+    header: "Sort",
+    description:
+      'The brief says "uncompleted first", which puts it above; the spec puts it below, on the argument that you already know about a thread you ended.',
+    options: [
+      { value: "above, as the brief says", description: "one predicate member; the brief is honoured to the letter" },
+      { value: "below, with the finished", description: "you ended it, so you can find it by name" },
+    ],
+    default: "below, with the finished",
+    custom: true,
+    optional: true,
+  },
+  {
+    name: "chat-run-order__group-boundary",
+    question: "Should the Chat list draw a visible boundary between the unsettled and settled rows, or only re-sort them?",
+    header: "Boundary",
+    description: "Drawn, it needs a rule line and two group names the board has no word for; undrawn, one design decision disappears.",
+    options: ["draw a boundary", "sort only, draw nothing"],
+    default: "draw a boundary",
+    custom: true,
+    optional: true,
+  },
+  {
+    name: "tasks-workflow-index__row-counts",
+    question: "Should each workflow row carry a task count and status roll-up, or just the workflow's name?",
+    header: "Rows",
+    options: [
+      { value: "count and status roll-up", description: 'a row answers "where does my work stand" without opening it' },
+      { value: "name only", description: "the board one click away carries the numbers" },
+    ],
+    custom: true,
+    optional: true,
+  },
+];
+
+/**
+ * The variant ids, in the order the gallery's top bar lists them — and the vocabulary they come from.
+ *
+ * A variant id is SHARED across groups on purpose: `comments` on a chooser and `comments` on a
+ * review are the same knob seen from two components, and `steps` is an agent's batch and a gate's
+ * `questions` — the same stepper. That is what lets one button slide every row to the same
+ * variation, which is how the two are compared. `basic` is every group's plainest form, so the bar
+ * always has somewhere to send every row.
+ */
+export const GALLERY_VARIANT_ORDER: readonly string[] = [
+  "basic",
+  "comments",
+  "custom",
+  "multiple",
+  "steps",
+  "confirm",
+  "defaults",
+  "editable",
+  "routed",
+  "base",
+  "input",
+  "empty",
+];
+
+/**
+ * Every surface, grouped by what raises it, each with the VARIATIONS its config can express.
+ *
+ * One group per component (and per dialog), because that is the unit an author reasons in; several
+ * cards per group, because a component's config is a small language and a single sample shows one
+ * sentence of it. The variants are chosen to cover the knobs rather than to be pretty: each one
+ * turns on something `basic` left off, so reading a group across is reading the contract.
+ */
+export const GALLERY_GROUPS: readonly GalleryGroup[] = [
   {
     id: "choose_option",
     kind: "interaction",
@@ -426,15 +575,78 @@ export const GALLERY_SURFACES: readonly GallerySurface[] = [
     blurb:
       "One decision, taken from a set the state names. The answer lands as `decision`, which is why the state's declared output usually carries the same enum. The SAME control draws a running agent's question — the two differ in where the answer goes and in nothing you can see (decision 0002).",
     schemaId: componentConfigSchemaId("choose_option"),
-    sample: {
-      prompt: "Pick a direction for the plan.",
-      options: [
-        { value: "approve", description: "the plan goes forward as written", icon: "check" },
-        { value: "request_changes", description: "back to the model with your note", icon: "comment" },
-        { value: "block", description: "nothing downstream is built", tone: "danger", icon: "cross" },
-      ],
-      comments: true,
-    },
+    variants: [
+      {
+        id: "basic",
+        title: "One tap",
+        note: "A single-select with no free text answers on the click. Descriptions, icons and a `danger` tone are the option's own to declare.",
+        sample: {
+          prompt: "Pick a direction for the plan.",
+          options: [
+            { value: "approve", description: "the plan goes forward as written", icon: "check" },
+            { value: "request_changes", description: "back to the model with your note", icon: "comment" },
+            { value: "block", description: "nothing downstream is built", tone: "danger", icon: "cross" },
+          ],
+        },
+      },
+      {
+        id: "comments",
+        title: "With a comment",
+        note: "`comments: true` adds an ALONGSIDE box: said in addition to the pick, so the click still answers even with text in it.",
+        sample: {
+          prompt: "Pick a direction for the plan.",
+          options: ["approve", "request_changes", { value: "block", tone: "danger" }],
+          comments: true,
+        },
+      },
+      {
+        id: "custom",
+        title: "With an answer of your own",
+        note: '`custom: true` adds an INSTEAD box — the agent caller\'s "Other", on a gate. Typing overrides the pick, the answer waits for Confirm, and `decision` may then be any non-empty string.',
+        sample: {
+          prompt: "Which cache interval should the probe use?",
+          options: [
+            { value: "30 seconds", description: "fresh enough that a settings change is visible almost at once" },
+            { value: "5 minutes", description: "cheaper, at the cost of a stale badge after a write" },
+          ],
+          custom: true,
+        },
+      },
+      {
+        id: "multiple",
+        title: "Several at once",
+        note: "`multiple: true` makes each option a checkbox and `decision` a list — checked for declared members, no repeats, and never empty.",
+        sample: {
+          prompt: "Which lenses should the critique apply?",
+          options: [
+            { value: "product", description: "does it serve the person named in the brief" },
+            { value: "engineering", description: "can it be built as described" },
+            { value: "documentation", description: "does the doc say what the thing does" },
+          ],
+          multiple: true,
+        },
+      },
+      {
+        id: "confirm",
+        title: "Held until confirmed",
+        note: "`require_confirm: true` keeps a single-select from answering on the click — for the decision where a mis-click is expensive.",
+        sample: {
+          prompt: "Delete the worktree and everything in it?",
+          icon: "alert",
+          options: [{ value: "keep" }, { value: "delete", tone: "danger", description: "not recoverable" }],
+          require_confirm: true,
+        },
+      },
+      {
+        id: "steps",
+        title: "Several questions, one at a time",
+        note: "`questions` replaces `options`: each part is its own question with its own options, asked in steps, and the answer is `{ answers }` keyed by `name`. A `default` is pre-picked, `custom` offers an own answer, and `optional` lets a step be passed — the shape a phase's product questions take.",
+        sample: {
+          prompt: "The product questions the spec cannot answer from the repo.",
+          questions: PRODUCT_QUESTIONS,
+        },
+      },
+    ],
   },
   {
     id: "review_artifact",
@@ -444,14 +656,35 @@ export const GALLERY_SURFACES: readonly GallerySurface[] = [
     blurb:
       "The same decision, shown beside the thing it is about. `artifact` names the input to display — a decision about something you cannot see is the failure this component exists to prevent.",
     schemaId: componentConfigSchemaId("review_artifact"),
-    sample: {
-      prompt: "Review the plan document.",
-      artifact: "plan_doc",
-      decisions: ["approve", { value: "reject", tone: "danger" }],
-      comments: true,
-      editable: true,
-    },
-    inputs: { plan_doc: GALLERY_DOCUMENT },
+    variants: [
+      {
+        id: "basic",
+        title: "Read and decide",
+        note: "The artifact above, a decision row at the bottom, and nothing to type. Select a passage to leave an anchored note.",
+        sample: { prompt: "Review the plan document.", artifact: "plan_doc", decisions: ["approve", { value: "reject", tone: "danger" }] },
+        inputs: { plan_doc: GALLERY_DOCUMENT },
+      },
+      {
+        id: "comments",
+        title: "With a review-level comment",
+        note: "`comments: true` puts the box FIRST here — the options are a row at the very bottom, and a comment under them would be typed after the click that already submitted. Text in it changes the footer: a review with something to say goes back.",
+        sample: { prompt: "Review the plan document.", artifact: "plan_doc", decisions: ["approve", "reject"], comments: true },
+        inputs: { plan_doc: GALLERY_DOCUMENT },
+      },
+      {
+        id: "editable",
+        title: "Editable",
+        note: '`editable: true` turns the same pane writable: "approve this, but with that word fixed" is one gesture, and the edit rides back as `content` only when it differs from what arrived.',
+        sample: {
+          prompt: "Review the plan document.",
+          artifact: "plan_doc",
+          decisions: ["approve", { value: "reject", tone: "danger" }],
+          comments: true,
+          editable: true,
+        },
+        inputs: { plan_doc: GALLERY_DOCUMENT },
+      },
+    ],
   },
   {
     id: "edit_artifact",
@@ -461,8 +694,21 @@ export const GALLERY_SURFACES: readonly GallerySurface[] = [
     blurb:
       "A person edits what the run produced and hands it back as `content`. `source` seeds the editor from an input; without one the editor starts empty.",
     schemaId: componentConfigSchemaId("edit_artifact"),
-    sample: { prompt: "Tidy up the plan.", source: "plan_doc" },
-    inputs: { plan_doc: GALLERY_DOCUMENT },
+    variants: [
+      {
+        id: "basic",
+        title: "Seeded from an input",
+        note: 'The app\'s own editor for the type, Revert meaning "throw away what I typed", and a Changes reading of what you did.',
+        sample: { prompt: "Tidy up the plan.", source: "plan_doc" },
+        inputs: { plan_doc: GALLERY_DOCUMENT },
+      },
+      {
+        id: "empty",
+        title: "From nothing",
+        note: "No `source`: the editor starts empty, and submitting it empty is still an answer — the run is parked until one arrives.",
+        sample: { prompt: "Write the release note." },
+      },
+    ],
   },
   {
     id: "fill_form",
@@ -472,16 +718,71 @@ export const GALLERY_SURFACES: readonly GallerySurface[] = [
     blurb:
       "Several typed answers, submitted together. Each answer lands on its field's name, so the field list and the state's declared outputs are two spellings of one contract.",
     schemaId: componentConfigSchemaId("fill_form"),
-    sample: {
-      prompt: "Describe the follow-up.",
-      fields: [
-        { name: "title", label: "Title" },
-        { name: "severity", type: "enum", enum: ["minor", "significant", "critical"], label: "Severity" },
-        { name: "estimate", type: "number", label: "Estimate (days)" },
-        { name: "blocking", type: "boolean", label: "Blocking?", optional: true },
-        { name: "notes", type: "string", multiline: true, optional: true, description: "Anything else" },
-      ],
-    },
+    variants: [
+      {
+        id: "basic",
+        title: "Every type once",
+        note: "The JSON-Schema subset a form can honestly render: `string` (with `multiline`), `number`, `boolean`, `enum` — with `optional` where an empty answer is allowed.",
+        sample: {
+          prompt: "Describe the follow-up.",
+          fields: [
+            { name: "title", label: "Title" },
+            { name: "severity", type: "enum", enum: ["minor", "significant", "critical"], label: "Severity" },
+            { name: "estimate", type: "number", label: "Estimate (days)" },
+            { name: "blocking", type: "boolean", label: "Blocking?", optional: true },
+            { name: "notes", type: "string", multiline: true, optional: true, description: "Anything else" },
+          ],
+        },
+      },
+      {
+        id: "defaults",
+        title: "Pre-answered, all optional",
+        note: "`default` seeds each control and `description` says what the answer changes — so answering is confirming or overruling, and a person with no view can submit it untouched.",
+        sample: {
+          prompt: "Confirm the readings the draft took.",
+          fields: [
+            {
+              name: "canceled_sort",
+              type: "enum",
+              label: "Where does a conversation you stopped yourself sort?",
+              description: 'The brief says "uncompleted first"; the spec puts it with the finished ones.',
+              enum: ["above, as the brief says", "below, with the finished", "no view"],
+              default: "below, with the finished",
+              optional: true,
+            },
+            {
+              name: "row_counts",
+              type: "enum",
+              label: "Does a workflow row carry counts?",
+              description: 'Counts answer "where does my work stand" without opening the row.',
+              enum: ["count and status roll-up", "name only", "no view"],
+              default: "count and status roll-up",
+              optional: true,
+            },
+            { name: "blocking", type: "boolean", label: "Blocking?", default: true, optional: true },
+          ],
+        },
+      },
+      {
+        id: "custom",
+        title: "An enum with a way out",
+        note: "`custom: true` on an enum field ends its list in Custom…, which opens a text box; what is typed there is the answer, and the contract accepts any non-empty string on that field.",
+        sample: {
+          prompt: "Where should the cache live?",
+          fields: [
+            {
+              name: "store",
+              type: "enum",
+              label: "Store",
+              enum: ["memory", "sqlite", "the existing blob store"],
+              custom: true,
+              description: "Pick one, or name somewhere else.",
+            },
+            { name: "interval", type: "number", label: "Interval (seconds)", default: 30 },
+          ],
+        },
+      },
+    ],
   },
   {
     id: "confirm_action",
@@ -490,7 +791,20 @@ export const GALLERY_SURFACES: readonly GallerySurface[] = [
     title: "Confirm an action",
     blurb: "A yes/no whose buttons say what they do. The answer is `confirmed`, and nothing else.",
     schemaId: componentConfigSchemaId("confirm_action"),
-    sample: { prompt: "Merge the plan into main?", confirmLabel: "Merge", cancelLabel: "Not yet" },
+    variants: [
+      {
+        id: "basic",
+        title: "Buttons that say what they do",
+        note: "`confirmLabel` and `cancelLabel` are the whole of the config: a yes/no whose buttons are verbs.",
+        sample: { prompt: "Merge the plan into main?", confirmLabel: "Merge", cancelLabel: "Not yet" },
+      },
+      {
+        id: "defaults",
+        title: "Defaults",
+        note: "With no labels the buttons read Confirm and Cancel, and with no prompt the heading is the component's own.",
+        sample: {},
+      },
+    ],
   },
   {
     id: "review_artifacts",
@@ -500,8 +814,33 @@ export const GALLERY_SURFACES: readonly GallerySurface[] = [
     blurb:
       "N artifacts, each decided — today's case being a changeset (CHANGESETS.md §4.1). It finds its changeset among the state's inputs BY SHAPE — no config field names it — and returns a decision per change.",
     schemaId: componentConfigSchemaId("review_artifacts"),
-    sample: { prompt: "Review the proposed changes.", tree: "proposal" },
-    inputs: { changeset: GALLERY_CHANGESET as unknown as JsonValue },
+    variants: [
+      {
+        id: "basic",
+        title: "A proposal in a worktree",
+        note: "`tree: proposal` — the files already hold the agent's edits, so `merged` is a no-op on disk and `reverted` is the change. One Submit; the per-change decisions carry the whole answer.",
+        sample: { prompt: "Review the proposed changes.", tree: "proposal" },
+        inputs: { changeset: GALLERY_CHANGESET as unknown as JsonValue },
+      },
+      {
+        id: "routed",
+        title: "With a review-level decision",
+        note: "`decisions` adds the routing question beside the per-change ones: `approve` / `revise` / `cut`, where `cut` is a direction for the run rather than a disposition on any file.",
+        sample: {
+          prompt: "Review the proposed changes.",
+          tree: "proposal",
+          decisions: ["approve", "revise", { value: "cut", tone: "danger" }],
+        },
+        inputs: { changeset: GALLERY_CHANGESET as unknown as JsonValue },
+      },
+      {
+        id: "base",
+        title: "A sync against the base",
+        note: "`tree: base` — the edits exist only as data, so the files column reads the other way round: `merged` is the write and `reverted` leaves the tree alone.",
+        sample: { prompt: "Review the sync.", tree: "base" },
+        inputs: { changeset: GALLERY_CHANGESET as unknown as JsonValue },
+      },
+    ],
   },
   {
     id: "unknown-function",
@@ -511,7 +850,14 @@ export const GALLERY_SURFACES: readonly GallerySurface[] = [
     blurb:
       "The fallback, and NOT a real component: `unknown_function` is a name nothing implements. A UI state whose function is not a built-in still parks and still has to be answerable, so you get a JSON box — the honest offer when nothing declares what the answer should look like, and what a typo in `operation.function` looks like from here.",
     schemaId: "gallery-unknown-function",
-    sample: { function: "unknown_function" },
+    variants: [
+      {
+        id: "basic",
+        title: "The JSON box",
+        note: "Type any function name: whatever it is, this is what a state calling it parks at.",
+        sample: { function: "unknown_function" },
+      },
+    ],
   },
   {
     id: "approval",
@@ -520,12 +866,29 @@ export const GALLERY_SURFACES: readonly GallerySurface[] = [
     blurb:
       "Not a workflow gate: policy escalated a tool call, so what is judged is a command and the answer carries a SCOPE — the reason you are not asked again on the next call (DESIGN §10.2).",
     schemaId: "gallery-approval",
-    sample: {
-      tool: "Bash",
-      command: "rm -rf build && npm run build",
-      reason: "`rm -rf` is not on the allow list for this profile",
-      input: { command: "rm -rf build && npm run build", cwd: "/repo" },
-    },
+    variants: [
+      {
+        id: "basic",
+        title: "A command line",
+        note: "A tool that takes a command shows the command, and the policy's reason under it. The three allows widen left to right; deny sits apart so the destructive-looking choice is not the easy mis-click.",
+        sample: {
+          tool: "Bash",
+          command: "rm -rf build && npm run build",
+          reason: "`rm -rf` is not on the allow list for this profile",
+          input: { command: "rm -rf build && npm run build", cwd: "/repo" },
+        },
+      },
+      {
+        id: "input",
+        title: "Structured input",
+        note: "A tool with no command line shows its arguments instead — the whole of what the call would do, since there is nothing shorter that is honest.",
+        sample: {
+          tool: "write_file",
+          reason: "writes outside the worktree",
+          input: { path: "/etc/hosts", content: "127.0.0.1 registry.internal" },
+        },
+      },
+    ],
   },
   {
     id: "question",
@@ -534,17 +897,87 @@ export const GALLERY_SURFACES: readonly GallerySurface[] = [
     blurb:
       "A running agent asked something (`AskUserQuestion`). Nothing is being authorized — the options are the agent's own and the answer travels back as its tool input, so a question is answered, never approved.",
     schemaId: "gallery-question",
-    sample: {
-      questions: [
-        {
-          question: "Which cache interval should the probe use?",
-          header: "Interval",
-          options: [
-            { label: "30 seconds", description: "Fresh enough that a settings change is visible almost at once." },
-            { label: "5 minutes", description: "Cheaper, at the cost of a stale badge after a write." },
+    variants: [
+      {
+        id: "basic",
+        title: "One question",
+        note: "One question with a single choice answers on the click; the Other box is INSTEAD text, so typing in it waits for Answer. Dismissal is the one affordance a gate never gets.",
+        sample: {
+          questions: [
+            {
+              question: "Which cache interval should the probe use?",
+              header: "Interval",
+              options: [
+                { label: "30 seconds", description: "Fresh enough that a settings change is visible almost at once." },
+                { label: "5 minutes", description: "Cheaper, at the cost of a stale badge after a write." },
+              ],
+            },
           ],
         },
-      ],
-    },
+      },
+      {
+        id: "steps",
+        title: "Several, in steps",
+        note: "A batch is one tool call, so the questions are asked one at a time — Next until the last, Confirm on it, Back to change an earlier answer — and half an answer never travels.",
+        sample: {
+          questions: [
+            {
+              question: "Which cache interval should the probe use?",
+              header: "Interval",
+              options: [{ label: "30 seconds" }, { label: "5 minutes" }],
+            },
+            {
+              question: "Where should the snapshot be kept?",
+              header: "Store",
+              options: [
+                { label: "In memory", description: "Lost on restart, which is fine for a probe." },
+                { label: "On disk", description: "Survives a restart; costs a write per probe." },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        id: "multiple",
+        title: "Pick several",
+        note: "`multiSelect` draws a box on each option and answers with a list — the person learns it is multi-select from the options, not by clicking twice and being surprised.",
+        sample: {
+          questions: [
+            {
+              question: "Which providers should the probe check?",
+              header: "Providers",
+              multiSelect: true,
+              options: [{ label: "anthropic" }, { label: "openai" }, { label: "local" }],
+            },
+          ],
+        },
+      },
+    ],
   },
 ];
+
+/**
+ * The groups flattened: one surface per variant, which is the unit a card renders and a test checks.
+ *
+ * The id is `group/variant`, so a request minted from it (`gallery-choose_option/custom`) says which
+ * fixture raised it, and a caller that wants one group's cards can filter on the prefix.
+ */
+export function surfacesOfGroups(groups: readonly GalleryGroup[]): GallerySurface[] {
+  return groups.flatMap((group) =>
+    group.variants.map((variant) => ({
+      id: `${group.id}/${variant.id}`,
+      group: group.id,
+      variant: variant.id,
+      kind: group.kind,
+      title: variant.title,
+      note: variant.note,
+      blurb: group.blurb,
+      ...(group.component === undefined ? {} : { component: group.component }),
+      schemaId: group.schemaId,
+      sample: variant.sample,
+      ...(variant.inputs === undefined ? {} : { inputs: variant.inputs }),
+    })),
+  );
+}
+
+export const GALLERY_SURFACES: readonly GallerySurface[] = surfacesOfGroups(GALLERY_GROUPS);

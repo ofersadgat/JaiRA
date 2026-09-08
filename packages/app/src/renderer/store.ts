@@ -771,7 +771,7 @@ export interface ChatState {
 }
 
 /** The destinations on the activity rail. */
-export type View = "files" | "tasks" | "chat" | "logs" | "debug" | "settings";
+export type View = "files" | "tasks" | "chat" | "logs" | "debug" | "gallery" | "settings";
 
 /**
  * Sections of the Settings view — everything that was never one of the two activities.

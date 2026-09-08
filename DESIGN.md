@@ -3047,6 +3047,10 @@ run-record requirements of spec §10.2.
   screen. In the sidebar rather than inside Settings — it is what you reach for when
   the app is misbehaving, and burying it behind a configuration screen would make
   it hardest to find in exactly the situation it exists for.
+- **Components** (§11.4): every surface a run can put in front of a person, in
+  every variation its config can express, with nothing behind it. Beside Debug
+  rather than under it — it is about authoring a gate, not diagnosing an
+  installation.
 
 ### 11.2 IPC Contract
 
@@ -3115,23 +3119,41 @@ session transcript and the journal viewer are the same components Tasks and File
 render. A debug view that drew its own version of the screen it exists to test
 would be testing the wrong screen.
 
-#### 11.3.1 The component gallery — every surface, with nothing behind it
+### 11.4 The Components view — every surface, in every variation, with nothing behind it
 
-The self-test answers *does a workflow run*. The gallery under it answers the
-question a run cannot answer cheaply: *what does the thing it parks at look like,
-and what does an answer to it return?* A UI state's entire visible behaviour comes
-from a config an author writes inside a state file, and the only way to see one
-was to author that file, start a run and wait for the engine to reach it.
+The self-test answers *does a workflow run*. This view answers the question a run
+cannot answer cheaply: *what does the thing it parks at look like, and what does
+an answer to it return?* A UI state's entire visible behaviour comes from a config
+an author writes inside a state file, and the only way to see one was to author
+that file, start a run and wait for the engine to reach it.
 
-**One card per surface, and the three kinds are distinguished.** The six built-in
-components a state's `operation.function` may name (§7.1) are `interaction`
-cards; the raw-JSON fallback for a function that is NOT built in is a seventh,
-because a typo in `operation.function` is a thing you should be able to
-recognise; and the two dialogs JaiRA raises on its own — a command approval
-(§10.2) and a running agent's question — are `approval` and `question`. All three
-are things that appear in front of a person, which is what the gallery is a
-gallery of; only the first is a component in the engine's sense, and the cards say
-so rather than blurring it.
+It was the foot of the Debug view once, and that was the wrong room. Debug is
+reached for when something is broken; this is reached for while *authoring* — a
+`fill_form` with a `custom` field, a `choose_option` carrying five questions — to
+see the shape before a run has to reach it. Two questions, two rooms.
+
+**A row per surface, a carousel of its variations, and the three kinds are
+distinguished.** The six built-in components a state's `operation.function` may
+name (§7.1) are `interaction` rows; the raw-JSON fallback for a function that is
+NOT built in is a seventh, because a typo in `operation.function` is a thing you
+should be able to recognise; and the two dialogs JaiRA raises on its own — a
+command approval (§10.2) and a running agent's question — are `approval` and
+`question`. All three are things that appear in front of a person, which is what
+the gallery is a gallery of; only the first is a component in the engine's sense,
+and the headings say so rather than blurring it. Each row holds a carousel with one
+slide per thing the config can express — `comments` on, `custom` on, several
+questions in steps — with a note saying what it turns on that `basic` did not. A
+carousel rather than a column, because a row is one thing seen several ways, and
+the way to compare two variations of it is to flip between them in place.
+
+**The variant ids are one vocabulary, and the bar at the top slides every row to
+the same one.** `comments` on a chooser and `comments` on a review are the same
+knob seen from two components; `steps` is an agent's batch and a gate's
+`questions` — the same stepper. Naming them the same is what lets one button put
+every row on its `comments` at once, side by side, which is how "is this really
+the same thing" gets checked. Every row has a `basic`, so the bar always has
+somewhere to send every row; a row that lacks the variant asked for stays where it
+was rather than being sent somewhere that was not asked for.
 
 **It renders the real dialog.** Each card parses its config with
 `parseComponentConfig` — the call main makes on a live gate — hands the result to

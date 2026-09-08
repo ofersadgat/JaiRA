@@ -16,13 +16,16 @@ import { testHome } from "@jaira/testing";
 import {
   COMPONENT_NAMES,
   GALLERY_CHANGESET,
+  GALLERY_GROUPS,
   GALLERY_SURFACES,
+  GALLERY_VARIANT_ORDER,
   changesetInputOf,
   componentConfigSchemaId,
   isComponentName,
   listSchemas,
   parseComponentConfig,
   schemaById,
+  surfacesOfGroups,
   validateComponentResult,
   type ComponentName,
 } from "@jaira/shared";
@@ -59,9 +62,71 @@ describe("what the gallery covers", () => {
     expect(GALLERY_SURFACES.map((s) => s.kind)).toContain("approval");
     expect(GALLERY_SURFACES.map((s) => s.kind)).toContain("question");
     // The fallback's whole point: a function that is NOT a component, so the raw-JSON box renders.
-    const unknown = GALLERY_SURFACES.find((s) => s.id === "unknown-function");
+    const unknown = GALLERY_SURFACES.find((s) => s.group === "unknown-function");
     expect(unknown?.component).toBeDefined();
     expect(isComponentName(unknown!.component!)).toBe(false);
+  });
+
+  it("is a group per surface with a variation per card, every id unique", () => {
+    expect(GALLERY_SURFACES).toEqual(surfacesOfGroups(GALLERY_GROUPS));
+    for (const group of GALLERY_GROUPS) expect(group.variants.length, `${group.id} has no variants`).toBeGreaterThan(0);
+    const ids = GALLERY_SURFACES.map((s) => s.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const surface of GALLERY_SURFACES) expect(surface.id).toBe(`${surface.group}/${surface.variant}`);
+  });
+
+  it("names its variants from one shared vocabulary, and every row has a basic one", () => {
+    // The top bar slides every row to the same variant, which only means something if `comments`
+    // on a chooser and `comments` on a review are the same word — so the ids come from one list.
+    for (const group of GALLERY_GROUPS) {
+      expect(group.variants[0]!.id, `${group.id} does not start with basic`).toBe("basic");
+      for (const variant of group.variants) {
+        expect(GALLERY_VARIANT_ORDER, `${group.id}/${variant.id} is not a canonical variant`).toContain(variant.id);
+      }
+    }
+    // And every word in the vocabulary is used somewhere — a button that slides no row is noise.
+    const used = new Set(GALLERY_SURFACES.map((s) => s.variant));
+    for (const id of GALLERY_VARIANT_ORDER) expect(used, `no group has a ${id} variant`).toContain(id);
+  });
+
+  it("covers every knob a choose_option and a fill_form can express", () => {
+    // Reading a group top to bottom is reading the contract — so the contract's knobs each have a
+    // card. A knob with no card is a knob nobody can see before a run reaches it.
+    const chooser = GALLERY_GROUPS.find((g) => g.id === "choose_option")!;
+    const keys = new Set(chooser.variants.flatMap((v) => Object.keys(v.sample as Record<string, unknown>)));
+    for (const knob of ["options", "comments", "multiple", "require_confirm", "custom", "questions", "icon"]) {
+      expect(keys, `choose_option has no card showing ${knob}`).toContain(knob);
+    }
+    const form = GALLERY_GROUPS.find((g) => g.id === "fill_form")!;
+    const fieldKeys = new Set(
+      form.variants.flatMap((v) => ((v.sample as { fields: Record<string, unknown>[] }).fields).flatMap((f) => Object.keys(f))),
+    );
+    for (const knob of ["type", "label", "description", "enum", "optional", "multiline", "default", "custom"]) {
+      expect(fieldKeys, `fill_form has no card showing ${knob}`).toContain(knob);
+    }
+  });
+});
+
+describe("the multi-part chooser fixture", () => {
+  const surface = GALLERY_SURFACES.find((s) => s.id === "choose_option/steps")!;
+  const config = parseComponentConfig("choose_option", surface.sample);
+
+  it("asks several questions, each passable and each answerable in your own words", () => {
+    expect(config.component === "choose_option" && config.questions?.length).toBeGreaterThan(1);
+    if (config.component !== "choose_option" || config.questions === undefined) throw new Error("not multi-part");
+    for (const question of config.questions) {
+      expect(question.optional, question.name).toBe(true);
+      expect(question.custom, question.name).toBe(true);
+    }
+  });
+
+  it("accepts a complete answer, a pass, and an own answer — and refuses a stray key", () => {
+    if (config.component !== "choose_option" || config.questions === undefined) throw new Error("not multi-part");
+    const [first, second] = config.questions;
+    expect(validateComponentResult(config, { answers: { [first!.name]: first!.options[0]!.value } }).ok).toBe(true);
+    expect(validateComponentResult(config, { answers: {} }).ok).toBe(true);
+    expect(validateComponentResult(config, { answers: { [second!.name]: "neither — put it in Settings" } }).ok).toBe(true);
+    expect(validateComponentResult(config, { answers: { nobody: "asked" } }).ok).toBe(false);
   });
 });
 

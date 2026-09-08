@@ -60,8 +60,10 @@ Four ideas, composed rather than parallel. `review_artifact` is a viewer plus a
 | `confirm_action` | `{ confirmed }` |
 
 `fill_form` reads a JSON-Schema **subset**: `string` · `number` · `boolean` ·
-`enum`, with `optional`, `default`, `multiline`. Not arbitrary schemas — that is
-what a form can honestly render.
+`enum`, with `optional`, `default`, `multiline`, and — on an `enum` only —
+`custom`, which ends the list in *Custom…* and opens a text box: what is typed
+there is the answer, and the field then accepts any non-empty string. Not
+arbitrary schemas — that is what a form can honestly render.
 
 ### `choose_option` — one component, two callers
 
@@ -81,9 +83,36 @@ person can see, which is why they are not two components.
 | `options[].tone` | no | `danger` draws it as the destructive choice |
 | `comments` | no | Offer a free-text field beside the choice |
 | `multiple` | no | Several options may be chosen; `decision` is then an array |
+| `require_confirm` | no | Picking holds the choice; a Confirm button sends it |
+| `custom` | no | Offer an own-answer box; `decision` may then be any non-empty string. Exclusive with `comments` |
+| `questions` | no | Several questions in one gate — see below. Replaces `options` |
 
 Both callers normalize to one `Choice` — `choicesOfConfig` for a state,
 `choicesOfQuestions` for an agent — and the renderer draws that and nothing else.
+
+**Several questions, one at a time.** `questions` replaces `options` with a
+list of parts, each a question of its own, asked in steps by the same stepper an
+agent's batch uses, and the answer is `{ answers }` keyed by each part's `name`.
+The single question's knobs move down a level — `comments`, `multiple`,
+`custom` and `require_confirm` are refused at the top — because there is no
+longer one question for them to be about.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `questions[].name` | yes | The key the answer lands on. Unique within the state |
+| `questions[].question` | yes | The question, as the person reads it |
+| `questions[].options` | yes | As above |
+| `questions[].header` | no | A short chip beside the question |
+| `questions[].description` | no | Why it is asked, or what each answer would change — a line under it |
+| `questions[].multiple` | no | The answer is a list |
+| `questions[].custom` | no | Offer an own-answer box on this part |
+| `questions[].optional` | no | The step may be passed; the key is then **absent** from `answers` |
+| `questions[].default` | no | Pre-picked when the step appears. Must be one of its options |
+
+A passed question is an absent key, never a word. That is what makes "they had
+no view" reach the state as an absence it can test for rather than a value it
+has to know to ignore — and why a "no view" option in the list is the wrong
+spelling.
 
 **The free-text field has a role, and the role is the only real difference.** A
 gate's `comments` is `alongside`: said in addition to the choice, so clicking an
@@ -267,9 +296,11 @@ what makes a chooser row scannable without separating two hues.
 
 | Condition | Response | Caller does |
 | --- | --- | --- |
-| Undeclared `decision` | Refused in the main process | Fix the state's options |
+| Undeclared `decision` | Refused in the main process — unless the state said `custom` | Fix the state's options |
 | Missing required field | Refused in the main process | Fix the form config |
 | `choose_option` with no options | ERROR at parse time, not an empty dialog | Fix the state file |
+| `options` and `questions` together, or `comments` beside `questions` | ERROR at parse time | One spelling; per-question knobs go on the question |
+| An `answers` key naming no question | Refused in the main process | Nothing on screen could have produced it |
 | A `review_artifacts` result missing an artifact | Refused in the main process | The set must be complete |
 
 Re-validation happens in main because the renderer is the untrusted side of the
