@@ -8,55 +8,31 @@ kind: api | schema | event | format | cli
 owned_by: [engineering/units/<unit-name>]
 consumers: ["<who calls this>"]
 since: <version or date>
-siblings: [engineering/contracts/<confusable>]
+siblings: [engineering/contracts/<neighbouring-contract>]
 ---
 
 # <Contract name>
 
-What this is, in one sentence.
+<What this is, in one sentence.>
 
-## Use when
+## <When a caller reaches for this contract, and when it does not>
 
-When a caller should reach for this contract.
+**Use when.**
 
-## Don't use when
+**Do not use when.**
 
-When they shouldn't.
-
-## Instead consider
-
-| Situation | Use | Why |
-| --- | --- | --- |
-| | [engineering/contracts/…](…) | |
-
-## Where this fits
-
-- **Serves** — the unit that owns it and the deliverables behind it.
-- **Neighbors** — nearby contracts and the line between them.
-- **Depends on / used by** — the consumers above, named specifically if public.
-- **History** — what version introduced it; what it supersedes.
-
-## Shape
-
-The signature, schema, route, or format. Exhaustive — this is reference
-material, and the audience-facing copy in phase 7 points here.
+## <The shape, exhaustively>
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | | | | |
 
-## Errors
+## <The errors, and what the caller does about each>
 
-| Condition | Response | What the caller should do |
+| Condition | Response | Caller does |
 | --- | --- | --- |
 | | | |
 
-## Compatibility
+## <What a change here breaks, and the deprecation path>
 
-What a change here breaks, and the deprecation path. For `visibility: public`,
-this section is mandatory before any change lands.
-
-## Traps
-
-The things that fail silently, or work differently than the obvious reading
-suggests.
+## <What fails silently or works differently than the obvious reading>

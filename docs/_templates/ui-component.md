@@ -1,87 +1,52 @@
 ---
 id: ui/components/<component-name>
 type: ui-component
-status: proposal          # proposal → shipped; stale when the code moved on
+status: proposed
 updated: YYYY-MM-DD
-realizes: [ux/flows/<flow-name>]
+realizes: [ux/patterns/<pattern-name>]
+serves: [product/<feature-name>]
 surfaces: [ui/surfaces/<surface-name>]
 reuses: [ui/components/<other>]
-implemented_by: [engineering/units/<name>]   # added in phase 4
-verified_by: ["packages/…/foo.test.ts"]      # added in phase 6
-mockups: [ui/assets/<component-name>/default.png]
-exceptions: [{doc: ui/direction, rule: "…", why: "…"}]
-siblings: [ui/components/<confusable>]
+implemented_by: []
+verified_by: []
+mockups: [ui/assets/<component-name>/default.html]
+siblings: [ui/components/<neighbouring-component>]
 ---
 
 # <Component name>
 
-One sentence someone could match against a screenshot.
+<One sentence someone could match against a screenshot.>
 
-## Use when
+## <When this component is the right one, and when it is not>
 
-The situations this is the right component for.
+**Use when.**
 
-## Don't use when
+**Do not use when.**
 
-The situations it isn't — as concrete as the list above.
+## <What the person sees first, and the hierarchy below it>
 
-## Instead consider
-
-| Situation | Use | Why |
-| --- | --- | --- |
-| | [ui/components/…](…) | |
-
-## Where this fits
-
-- **Direction** — how this reads against [ui/direction.md](../direction.md):
-  density, tone of the copy, motion. Silence means it conforms; a departure is an
-  `exceptions` entry or an amendment to the direction itself.
-- **Serves** — the flow steps this carries.
-- **Neighbors** — the components nearest this one and how we keep them distinct.
-- **Depends on / used by** — what it reuses; which surfaces place it.
-- **History** — what it replaces. If new, what in the catalog was checked first
-  and why none of it fit.
-
-## Anatomy
-
-Contents in priority order, most prominent first.
-
-## States
+## <Every state, and what occupies the space in each>
 
 | State | Rendered as | Mockup |
 | --- | --- | --- |
-| empty | | [empty.png](../assets/<component-name>/empty.png) |
+| empty | | [empty.html](../assets/<component-name>/empty.html) |
 | loading | | |
 | partial | | |
 | error | | |
 | success | | |
 
-## Interactions
+## <What each interaction does, and how the person sees that it happened>
 
 | On | Does | Feedback |
 | --- | --- | --- |
 | | | |
 
-`Feedback` is what changes to confirm it happened. "Nothing" is an answer that
-needs defending.
-
-## Copy
+## <The copy, in the product's voice>
 
 | Where | String |
 | --- | --- |
 | | |
 
-Every error says what happened and what to do next.
+## <How it behaves on resize, theme change, focus order, and long or missing content>
 
-## Behavior
-
-Resize, theme, focus order, overflow, missing or very long content.
-
-## Mockups
-
-| State | File | Captured | Reflects |
-| --- | --- | --- | --- |
-| | | YYYY-MM-DD | proposal / shipped / stale |
-
-`reflects: shipped` means it matched the code on the captured date. A mockup
-without these columns is worse than no mockup, because it will be believed.
+## <Where this departs from the UI direction, if it does>

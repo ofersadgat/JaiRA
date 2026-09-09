@@ -1,37 +1,30 @@
 # Templates
 
-Copy the matching file, rename it to the deliverable's id, fill it in, and add
-the row to the parent index in the same sitting. Field meanings are in
-[WORKFLOW.md](../../WORKFLOW.md).
-
-A `draft` state is given the matching template as prompt context, so a template
-edit changes what the workflow produces.
+Copy the matching file, rename it to the doc's id, fill it in, and add the row to the area's index.
 
 | Template | Phase | Lands in |
 | --- | --- | --- |
 | [standing.md](standing.md) | any | `principles.md`, `architecture.md`, `standards.md`, `direction.md` |
-| [product-feature.md](product-feature.md) | 1 | `docs/product/` |
-| [ux-flow.md](ux-flow.md) | 2 | `docs/ux/flows/` |
-| [ux-pattern.md](ux-pattern.md) | 2 | `docs/ux/patterns/` |
-| [ui-surface.md](ui-surface.md) | 3 | `docs/ui/surfaces/` |
-| [ui-component.md](ui-component.md) | 3 | `docs/ui/components/` |
-| [engineering-unit.md](engineering-unit.md) | 4 | `docs/engineering/units/` |
-| [engineering-contract.md](engineering-contract.md) | 4 | `docs/engineering/contracts/` |
-| [decision.md](decision.md) | 4 | `docs/engineering/decisions/` |
-| [guide.md](guide.md) | 6-7 | `docs/guides/` or `docs/reference/` |
+| [product-feature.md](product-feature.md) | product | `docs/product/` |
+| [ux-pattern.md](ux-pattern.md) | ux | `docs/ux/patterns/` |
+| [ui-surface.md](ui-surface.md) | ui | `docs/ui/surfaces/` |
+| [ui-component.md](ui-component.md) | ui | `docs/ui/components/` |
+| [engineering-unit.md](engineering-unit.md) | engineering | `docs/engineering/units/` |
+| [engineering-contract.md](engineering-contract.md) | engineering | `docs/engineering/contracts/` |
+| [decision.md](decision.md) | by hand | `docs/engineering/decisions/` |
+| [guide.md](guide.md) | documentation | `docs/guides/` or `docs/reference/` |
 
-## No template for these
+## How a doc is written
 
-Phases 5, 6, and 8 produce **process output**, which belongs on the issue or PR
-rather than in `docs/`:
+A doc is a standalone source of truth. Someone who has never seen the work that produced it reads it and knows what is true.
 
-| Phase | Output | Where it goes |
-| --- | --- | --- |
-| 1-7 Exploration | Brief, criteria, candidates, scoring | The task. Only the residue lands in `docs/` — a **Framings considered** row, an **Instead consider** entry, or a decision record when a losing option deserves its full argument. |
-| 5 Implementation | The change plan — what lands in what order | The task. Its durable residue is doc *edits*, applied by the `sync_docs` state: units move to `shipped`, mockups get re-captured, decision records land. |
-| 6 Acceptance | The coverage map | The task, plus `verified_by` written onto the docs by the `link` state. Manual procedures become guides with `audience: operator`. |
-| 8 Review | Findings, disposition, follow-ups | The task, plus corrections applied by the `correct` state. |
+- Only what is true. Every sentence states a fact about the product, the design or the code.
+- As little as achieves the goal. A detail stays only if a reader would otherwise build the wrong thing, pick the wrong pattern, or miss something they need.
+- Headings carry the idea. Every heading is a sentence stating its conclusion; the headings alone give the whole doc.
+- One concept per file. One feature, one pattern, one component, one unit.
+- Layers reference upward only. A product doc names people, goals and abilities. A UX doc names patterns and features. A UI doc names components, patterns and features. An engineering doc names units, components, patterns and features. No doc names anything from a layer below it.
+- No questions. A doc holds answers.
+- No alternatives, unless the choice departs from the usual way, in which case one line states the departure and the reason.
+- No process. No draft, pass, revision, critique, finding, conversation or earlier version is mentioned.
 
-A review is not a thing that gets filed; it is the pass that checks the build
-against every layer that specified it, and its backward jump is the only loop in
-the root workflow. See [WORKFLOW.md §8](../../WORKFLOW.md).
+The angle-bracketed headings in a template are placeholders: replace each with the sentence that states the doc's conclusion for that section.

@@ -3,41 +3,40 @@ id: ux/patterns/<pattern-name>
 type: ux-pattern
 status: proposed
 updated: YYYY-MM-DD
-used_by: [ux/flows/<flow-name>]
-siblings: [ux/patterns/<confusable>]
+serves: [product/<feature-name>]
+siblings: [ux/patterns/<neighbouring-pattern>]
 ---
 
 # <Pattern name>
 
-The recurring shape, in one paragraph.
+<The recurring interaction shape, in one paragraph.>
 
-## Use when
+## <When this shape is the right answer, and when it is not>
 
-Concrete situations this is the right answer to.
+**Use when.**
 
-## Don't use when
+**Do not use when.**
 
-Concrete situations it isn't. As specific as the list above.
+## <The steps, as what the person does, what the system does, and what they know>
 
-## Instead consider
+| # | Person does | System does | Person knows |
+| --- | --- | --- | --- |
+| 1 | | | |
 
-| Situation | Use | Why |
+## <Every state, and what the person can do next in each>
+
+| State | Person sees | Can do next |
 | --- | --- | --- |
-| | [ux/patterns/…](…) | |
+| first_run | | |
+| empty | | |
+| loading | | |
+| partial | | |
+| error | | |
+| denied | | |
+| success | | |
 
-## Where this fits
+## <What can be undone, for how long, and what is lost on abandonment>
 
-- **Serves** — the flows that lean on this.
-- **Neighbors** — nearby patterns and the boundary between them.
-- **History** — where this shape was first used, and what generalized it.
+## <How it behaves with keyboard only, a screen reader, a small window and a slow machine>
 
-## The shape
-
-Steps, states, and the invariants that make it recognizable to someone who has
-seen it elsewhere in the product.
-
-## Deviations on record
-
-| Flow | Deviates by | Why this case is different |
-| --- | --- | --- |
-| | | |
+## <Where this departs from the UX principles, if it does>

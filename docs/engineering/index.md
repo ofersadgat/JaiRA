@@ -1,19 +1,16 @@
 # Engineering
 
-Standing docs for this area:
+Standing docs:
 
 | Doc | Governs |
 | --- | --- |
-| [architecture.md](architecture.md) | The layers, the boundaries, how data moves. A unit names its layer and may depend downward only. |
-| [principles.md](principles.md) | The values, and how tradeoffs get resolved when two pull apart. |
-| [standards.md](standards.md) | The concrete rules a reviewer can cite by name. |
-
-Source: [WORKFLOW.md §4](../../WORKFLOW.md).
+| [architecture.md](architecture.md) | The layers, the boundaries, how data moves |
+| [principles.md](principles.md) | The values, and how tradeoffs resolve |
+| [standards.md](standards.md) | The rules a reviewer can cite |
 
 ## Units
 
-A module, store, service, or job. Template:
-[_templates/engineering-unit.md](../_templates/engineering-unit.md).
+Template: [_templates/engineering-unit.md](../_templates/engineering-unit.md).
 
 | Unit | Layer | Responsibility | Implements | Status |
 | --- | --- | --- | --- | --- |
@@ -21,7 +18,6 @@ A module, store, service, or job. Template:
 
 ## Contracts
 
-APIs, schemas, events, formats, CLI surfaces. Check here before inventing one.
 Template: [_templates/engineering-contract.md](../_templates/engineering-contract.md).
 
 | Contract | Visibility | Owned by | Consumers | Status |
@@ -30,17 +26,9 @@ Template: [_templates/engineering-contract.md](../_templates/engineering-contrac
 
 ## Decisions
 
-Numbered, immutable once accepted — a reversal is a new record superseding the
-old one. An architecture amendment gets one. Template:
-[_templates/decision.md](../_templates/decision.md).
+Written by hand when a choice departs from the usual way and the reason must outlive the doc it is about. Template: [_templates/decision.md](../_templates/decision.md).
 
 | # | Decision | Status | Supersedes |
 | --- | --- | --- | --- |
 | [0001](decisions/0001-decision-brief-gates.md) — gates get a decision brief; confidence decides whether to ask | proposed | — |
 | [0002](decisions/0002-one-gate-vocabulary.md) — one gate vocabulary; a review's decisions come from gestures | proposed | — |
-
-## Exceptions to standards
-
-| Unit | Rule | Why |
-| --- | --- | --- |
-| _none yet_ | | |
