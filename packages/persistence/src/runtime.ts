@@ -34,6 +34,13 @@ export interface TaskRuntimeRow {
   rootInstanceId?: string;
   /** The task this one re-ran — the re-run chain (§05). Absent for a task started on its own. */
   parentTaskId?: string;
+  /**
+   * Where this task was CUT FROM its parent, when it is a fork (migration 17): the parent's journal
+   * seq the copy stops before. Paired with {@link parentTaskId}; a re-run carries the parent alone.
+   */
+  forkedAtSeq?: number;
+  /** The copy's own last journaled event — the seam, in this task's coordinates. */
+  forkBoundarySeq?: number;
   createdAt: number;
   updatedAt: number;
   /** When the machine last started executing. Absent for a task that never ran. */
@@ -53,6 +60,8 @@ interface RawRuntime {
   worktree_path: string | null;
   root_instance_id: string | number | null;
   parent_task_id: string | null;
+  forked_at_seq?: number | null;
+  fork_boundary_seq?: number | null;
   created_at: number;
   updated_at: number;
   started_at: number | null;
@@ -71,6 +80,8 @@ function toRuntime(row: RawRuntime): TaskRuntimeRow {
     worktreePath: row.worktree_path ?? undefined,
     rootInstanceId: row.root_instance_id === null ? undefined : String(row.root_instance_id),
     parentTaskId: row.parent_task_id ?? undefined,
+    forkedAtSeq: row.forked_at_seq ?? undefined,
+    forkBoundarySeq: row.fork_boundary_seq ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     startedAt: row.started_at ?? undefined,
@@ -163,6 +174,66 @@ export class RuntimeStore {
           WHERE task_id = ?`,
       )
       .run(snapshotHash, nowMs, nowMs, taskId);
+    if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
+    this.logTask(taskId);
+  }
+
+  /**
+   * The machine was CUT — a rewind deleted its tail (see `cut.ts`).
+   *
+   * `interrupted`, because that is the truthful word for a run whose end was taken away rather than
+   * reached: the task is startable again, and the resume that follows a rewind is what picks up at
+   * the cut. The end is stamped, not cleared, so a task left un-resumed still reads as stopped.
+   */
+  markCut(taskId: string, nowMs: number): void {
+    const res = this.db
+      .prepare(
+        `UPDATE task_runtime SET status = 'interrupted', outcome = 'interrupted', ended_at = ?,
+                outputs_json = NULL, failure_json = NULL, updated_at = ?
+          WHERE task_id = ?`,
+      )
+      .run(nowMs, nowMs, taskId);
+    if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
+    this.logTask(taskId);
+  }
+
+  /**
+   * Stamp a task as a COPY of a prefix of another (migration 17) — everything the copy inherits
+   * that a fresh task would earn by running: the snapshot, the machine's root, and how it stands.
+   */
+  stampFork(
+    taskId: string,
+    fork: {
+      snapshotHash: string;
+      rootInstanceId?: string | undefined;
+      forkedAtSeq: number;
+      forkBoundarySeq: number;
+      status: TaskStatus;
+      startedAt?: number | undefined;
+      endedAt?: number | undefined;
+      outcome?: TaskRuntimeRow["outcome"] | undefined;
+    },
+    nowMs: number,
+  ): void {
+    const res = this.db
+      .prepare(
+        `UPDATE task_runtime
+            SET snapshot_hash = ?, root_instance_id = ?, forked_at_seq = ?, fork_boundary_seq = ?,
+                status = ?, started_at = ?, ended_at = ?, outcome = ?, updated_at = ?
+          WHERE task_id = ?`,
+      )
+      .run(
+        fork.snapshotHash,
+        fork.rootInstanceId ?? null,
+        fork.forkedAtSeq,
+        fork.forkBoundarySeq,
+        fork.status,
+        fork.startedAt ?? null,
+        fork.endedAt ?? null,
+        fork.outcome ?? null,
+        nowMs,
+        taskId,
+      );
     if (res.changes === 0) throw refusal(log, `no task_runtime row for task '${taskId}'`, { taskId });
     this.logTask(taskId);
   }

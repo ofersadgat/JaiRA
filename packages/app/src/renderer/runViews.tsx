@@ -38,8 +38,9 @@ import { Paper, Pulse, Transcript, clockOf, durationOf, useElapsed } from "./tra
 import { advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
 import { isComponentName, parseComponentConfig, readCall, TASK_DRAG, type ReadCall } from "@jaira/shared/browser";
 import { Icon } from "./icons";
-import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type SessionPiece } from "./sessionBands";
-import { SessionBandsView } from "./sessionPanels";
+import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type BandNote, type SessionPiece } from "./sessionBands";
+import { SessionBandsView, cutNameOf, type CutOffer } from "./sessionPanels";
+import { AskDialog, type AskSpec } from "./menu";
 import { paletteOfRun } from "./runIndex";
 import type { FileSurfaceProps } from "./fileTypes";
 import { Composer } from "./composer";
@@ -776,6 +777,34 @@ export function RunConversation({
     [gate, onGate, detail?.instances],
   );
 
+  /**
+   * A rewind the reader has ARMED from an entered row or a knot — see `CutOffer` and `cut.ts`.
+   *
+   * Held here because the two things it changes are both this component's: the rail fades what
+   * would go, and the strip under the conversation asks in words. Cleared with the task, since a
+   * cut is a question about one journal. A fork needs no arming: there is nothing to type, so the
+   * fork's first act is the machine's, and the shell opens the copy.
+   */
+  const [armed, setArmed] = useState<ArmedRewind | null>(null);
+  useEffect(() => setArmed(null), [detail?.taskId]);
+  const { onRewind, onFork } = context;
+  const onCut = useMemo<CutOffer | undefined>(() => {
+    if (detail === null || onRewind === undefined || onFork === undefined) return undefined;
+    const taskId = detail.taskId;
+    return {
+      rewind: (note: BandNote) =>
+        setArmed({
+          seq: note.seq,
+          at: note.at,
+          name: cutNameOf(note, rootPath),
+          // Every state entered at or after the cut, named — the sentence in the strip is what makes
+          // "everything after it" a checkable claim.
+          doomed: notes.filter((one) => one.kind === "entered" && one.at >= note.at).map((one) => cutNameOf(one, rootPath)),
+        }),
+      fork: (note: BandNote) => onFork(taskId, note.seq),
+    };
+  }, [detail, onRewind, onFork, notes, rootPath]);
+
   // Every panel is open, so every transcript in them is needed — fetched in one round rather than
   // on expand, which is what the folded card design paid for and this one does not.
   useEffect(() => {
@@ -890,6 +919,11 @@ export function RunConversation({
           {...(focus !== undefined ? { focus } : {})}
           palette={palette}
           empty="This run has not entered a child yet."
+          {...(onCut !== undefined ? { onCut } : {})}
+          {...(armed !== null ? { armed: { seq: armed.seq, at: armed.at } } : {})}
+          {...(detail.origin !== undefined
+            ? { origin: { ...detail.origin, onGo: () => context.onSelectTask(detail.origin!.taskId) } }
+            : {})}
         />
         {/* AFTER the bands, always. A wait is the present tense of a run — it is where the thing
             stopped — so it belongs at the bottom of what has happened rather than sorted into it by
@@ -910,7 +944,60 @@ export function RunConversation({
         {...(asking === true ? { asking: true } : {})}
         {...(context.onRerun !== undefined ? { onRerun: context.onRerun } : {})}
         {...(context.onResume !== undefined ? { onResume: context.onResume } : {})}
+        {...(armed !== null && onRewind !== undefined
+          ? {
+              armed,
+              onRewindConfirm: () => {
+                setArmed(null);
+                onRewind(detail.taskId, armed.seq);
+              },
+              onArmCancel: () => setArmed(null),
+            }
+          : {})}
       />
+    </div>
+  );
+}
+
+/** A rewind that is armed and not yet confirmed — what the strip asks about. See `RunConversation`. */
+export interface ArmedRewind {
+  seq: number;
+  at: number;
+  /** The state the cut is before. */
+  name: string;
+  /** Every state the cut deletes, the named one first. */
+  doomed: string[];
+}
+
+/** "a, b and c" — the deleted states, said as a list. */
+function listed(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/**
+ * The strip while a rewind is armed: the sentence, and the one filled button in the danger colour.
+ *
+ * In `RunActivity`'s place, because that is where this task already reports what is happening to
+ * it and offers the one button that changes it — and a rewind is that, for a moment. The worktree
+ * is named because it is the thing a reader would otherwise assume goes back too, and it does not.
+ */
+export function CutStrip({ armed, onConfirm, onCancel }: { armed: ArmedRewind; onConfirm: () => void; onCancel: () => void }): JSX.Element {
+  const gone = armed.doomed.length === 0 ? [armed.name] : armed.doomed;
+  return (
+    <div className="run-doing bad cut-strip" role="alertdialog" aria-label={`Rewind to before ${armed.name}`}>
+      <span className="run-doing-mark bad" aria-hidden="true" />
+      <span className="ellip">
+        Rewind to before <b>{armed.name}</b> — {listed(gone)} {gone.length === 1 ? "is" : "are"} deleted and the run enters{" "}
+        {armed.name} again. Files edited in the worktree stay as they are.
+      </span>
+      <span className="grow" />
+      <button type="button" className="ghost" onClick={onCancel}>
+        Cancel
+      </button>
+      <button type="button" className="cut" onClick={onConfirm}>
+        Rewind
+      </button>
     </div>
   );
 }
@@ -994,10 +1081,17 @@ function ChatComposer({
   asking,
   onRerun,
   onResume,
+  armed,
+  onRewindConfirm,
+  onArmCancel,
 }: {
   taskId: string;
   instanceId: string | undefined;
   project?: string | undefined;
+  /** A rewind armed above — the strip asks about it here, in place of whatever it was showing. */
+  armed?: ArmedRewind | undefined;
+  onRewindConfirm?: (() => void) | undefined;
+  onArmCancel?: (() => void) | undefined;
   /** The TASK is still going — what makes the button a stop button. See {@link stop}. */
   running?: boolean;
   /** A gate is on offer below — passed straight through, see {@link RunConversation}. */
@@ -1093,23 +1187,30 @@ function ChatComposer({
   // The three-state `plan` is what makes this safe, and collapsing it is the way to get it wrong:
   // `undefined` is "not asked yet" and `null` is "asked, and there is no conversation here". Acting
   // on both would flash the composer out of existence and back on every first render.
+  const cutStrip =
+    armed !== undefined && onRewindConfirm !== undefined && onArmCancel !== undefined ? (
+      <CutStrip armed={armed} onConfirm={onRewindConfirm} onCancel={onArmCancel} />
+    ) : null;
   if (plan === null && instanceId !== undefined) {
     return (
       <div className="cx-doing">
         {error !== null ? <p className="cx-error">{error}</p> : null}
-        <RunActivity
-          detail={detail}
-          onStop={stop}
-          {...(asking === true ? { asking: true } : {})}
-          {...(onRerun !== undefined ? { onRerun } : {})}
-          {...(onResume !== undefined ? { onResume } : {})}
-        />
+        {cutStrip ?? (
+          <RunActivity
+            detail={detail}
+            onStop={stop}
+            {...(asking === true ? { asking: true } : {})}
+            {...(onRerun !== undefined ? { onRerun } : {})}
+            {...(onResume !== undefined ? { onResume } : {})}
+          />
+        )}
       </div>
     );
   }
 
   return (
     <>
+      {cutStrip !== null ? <div className="cx-doing">{cutStrip}</div> : null}
       {error !== null ? <p className="cx-error">{error}</p> : null}
       <Composer
         plan={plan ?? null}
@@ -1465,6 +1566,39 @@ export function TaskContext({
    * question that silently belongs to nobody.
    */
   const hosted = gate !== undefined && detail.instances.some((node) => hasAsking(node));
+  /**
+   * The index's two verbs — the same cut the conversation offers, from the Details reading.
+   *
+   * A row there is a state, and the journal position of its entry is in the conversation the shell
+   * already holds. No strip to arm in this reading, so the rewind asks through a dialog instead.
+   */
+  const [ask, setAsk] = useState<AskSpec | null>(null);
+  const seqOfEntry = (node: InstanceNode): number | undefined =>
+    context.conversation?.turns.find((turn) => turn.kind === "entered" && turn.instanceId === node.instanceId)?.seq;
+  const nameOfNode = (node: InstanceNode): string => node.childKey ?? node.stateId.split("/").pop() ?? node.stateId;
+  const indexCut =
+    context.onRewind !== undefined && context.onFork !== undefined
+      ? {
+          rewind: (node: InstanceNode) => {
+            const seq = seqOfEntry(node);
+            if (seq === undefined) return;
+            setAsk({
+              title: `Rewind to before ${nameOfNode(node)}?`,
+              note: "It and every state entered after it are deleted, and the run enters it again. Files edited in the worktree stay as they are. This cannot be undone.",
+              confirmLabel: "Rewind",
+              danger: true,
+              onConfirm: () => {
+                setAsk(null);
+                context.onRewind?.(detail.taskId, seq);
+              },
+            });
+          },
+          fork: (node: InstanceNode) => {
+            const seq = seqOfEntry(node);
+            if (seq !== undefined) context.onFork?.(detail.taskId, seq);
+          },
+        }
+      : undefined;
   const hops = prunedTrail(chain, detail.instances, (id) => context.sessions[id]);
   const pushHop = (node: InstanceNode, call: string, name: string): void =>
     setChain([...hops, { instanceId: node.instanceId, stateId: node.stateId, sidechain: call, name }]);
@@ -1490,7 +1624,9 @@ export function TaskContext({
           onGoTo={goTo}
           {...(hosted ? { asking: askingInstanceOf(detail.instances) } : {})}
           {...(focus !== undefined ? { here: focus.instance } : {})}
+          {...(indexCut !== undefined ? { onCut: indexCut } : {})}
         />
+        {ask !== null ? <AskDialog spec={ask} onCancel={() => setAsk(null)} /> : null}
       </div>
     );
   }

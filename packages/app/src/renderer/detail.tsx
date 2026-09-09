@@ -8,6 +8,7 @@
 import type { JSX, ReactNode } from "react";
 import type { ConversationView, InstanceNode, TaskDetail } from "@jaira/shared/browser";
 import { Badge } from "./board";
+import { Icon } from "./icons";
 import { RunIndex } from "./runIndex";
 import { stoppedAction } from "./taskAction";
 
@@ -52,6 +53,13 @@ export function TaskHead({
         <div className="sub" title={detail.worktreePath ?? ""}>
           ⎇ {detail.branch}
           {detail.worktreePath ? ` · ${detail.worktreePath}` : " · worktree pending"}
+        </div>
+      ) : null}
+      {detail.origin !== undefined ? (
+        // Where a FORK came from, on the line the task's own facts are on. The seam in the
+        // conversation is where the link is; this is the head saying the same thing in words.
+        <div className="sub" title={`forked from ${detail.origin.taskId}`}>
+          <Icon name="choice" className="sub-glyph" /> forked from {detail.origin.title ?? "a task since deleted"}, {detail.origin.label}
         </div>
       ) : null}
       <div className="actions">
@@ -130,6 +138,7 @@ export function TaskDetailSections({
   here,
   asking,
   onGoTo,
+  onCut,
 }: {
   detail: TaskDetail;
   stream: string[];
@@ -139,6 +148,8 @@ export function TaskDetailSections({
   here?: string | undefined;
   /** Take the conversation to a state. Absent ⇒ this host has no conversation beside it. */
   onGoTo?: ((node: InstanceNode) => void) | undefined;
+  /** The index's row menu — see {@link RunIndex}. */
+  onCut?: { rewind: (node: InstanceNode) => void; fork: (node: InstanceNode) => void } | undefined;
 }): JSX.Element {
   const latest = detail.runs[detail.runs.length - 1];
   return (
@@ -164,6 +175,7 @@ export function TaskDetailSections({
         {...(here !== undefined ? { here } : {})}
         {...(asking !== undefined ? { asking } : {})}
         {...(onGoTo !== undefined ? { onGoTo } : {})}
+        {...(onCut !== undefined ? { onCut } : {})}
       />
 
       <section>

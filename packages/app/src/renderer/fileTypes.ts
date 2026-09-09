@@ -368,6 +368,16 @@ export interface FileSurfaceContext {
    * offers the restart, with the restart's wording.
    */
   onResume?: ((taskId: string) => void) | undefined;
+  /**
+   * Delete everything past a point in the task's journal and carry on from there ("task:rewind").
+   *
+   * `seq` is the journal position of the row the person chose — a state's entry, a transition — and
+   * the deletion is confirmed BEFORE this is called: the strip asks, the conversation shows what
+   * goes, and this is what pressing the filled button does. Absent ⇒ the verbs are not offered.
+   */
+  onRewind?: ((taskId: string, seq: number) => void) | undefined;
+  /** A second task sharing everything before `seq` ("task:fork"). Starts at once; the shell opens it. */
+  onFork?: ((taskId: string, seq: number) => void) | undefined;
   /** Write a configuration layer as a parsed document — validated in main, unlike a raw file write. */
   onSaveConfig: (layer: ConfigLayer, doc: unknown) => void;
   /** Check a draft against a registered schema — what the JSON editor's picker turns on. */

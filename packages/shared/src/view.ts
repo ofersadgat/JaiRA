@@ -260,6 +260,8 @@ export interface TaskDetail {
   worktreePath?: string;
   createdAt: string;
   inputs?: Record<string, JsonValue>;
+  /** Where this task was forked from, when it is a fork — see {@link TaskOrigin}. */
+  origin?: TaskOrigin;
   /**
    * Instance forest for the TASK — its one machine, projected from its one journal.
    *
@@ -901,6 +903,8 @@ export interface TaskSummary {
    * simply does not resolve here.
    */
   parentTaskId?: string;
+  /** Present when this task is a FORK of {@link parentTaskId} — a copy cut at a point, not a re-run. */
+  origin?: TaskOrigin;
   createdAt: string;
   updatedAt: number;
 }
@@ -1164,6 +1168,8 @@ export interface ChatThreadView {
    * somebody replaces a message. See {@link ChatFork}.
    */
   forks?: ChatFork[];
+  /** Where this conversation was forked from, when it is a fork — see {@link TaskOrigin}. */
+  origin?: TaskOrigin;
 }
 
 /**
@@ -1195,6 +1201,33 @@ export interface ChatEditPoint {
   turn: number;
   /** Opaque. It goes back to `chat:send` as `branchAt` and is parsed by nothing in the renderer. */
   at: string;
+  /**
+   * The journal position this message's turn begins at — what `task:rewind` and `task:fork` take.
+   *
+   * A chat turn is a transition on the chat instance, so cutting the journal there is cutting the
+   * conversation before this message. Absent for a turn the journal does not name, which nothing
+   * can be cut at.
+   */
+  seq?: number;
+}
+
+/**
+ * Where a forked task CAME FROM — what the origin seam draws and links to.
+ *
+ * `at` is the parent's journal position the copy was cut before; `boundary` is the copy's own last
+ * journaled event, which is where the seam sits in this task's coordinates. `label` says the cut in
+ * words — "before review", "after message 3" — computed where the parent's journal can still be
+ * read, because it may not be readable later (the parent can be deleted, and the copy survives it).
+ */
+export interface TaskOrigin {
+  taskId: string;
+  /** The parent's title, when the parent is still there to have one. */
+  title?: string;
+  at: number;
+  boundary: number;
+  /** When the boundary event happened — where the seam sits among rows laid out by the clock. */
+  boundaryAt: number;
+  label: string;
 }
 
 /** How bad an entry is. Filtering by one means "this and worse", not "this exactly". */

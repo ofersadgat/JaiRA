@@ -360,6 +360,8 @@ const handlers: Record<IpcChannel, Handler> = {
   "task:resume": ((request: Parameters<typeof service.resumeTask>[0]) => service.resumeTask(request)) as Handler,
   "task:resumable": ((request: { taskId: string; project?: string }) =>
     service.resumable(request.taskId, request.project)) as Handler,
+  "task:rewind": ((request: Parameters<typeof service.rewindTask>[0]) => service.rewindTask(request)) as Handler,
+  "task:fork": ((request: Parameters<typeof service.forkTask>[0]) => service.forkTask(request)) as Handler,
   "task:delete": ((request: { taskId: string; project?: string }) =>
     service.deleteTask(request.taskId, request.project)) as Handler,
   "task:rename": ((request: Parameters<typeof service.renameTask>[0]) => service.renameTask(request)) as Handler,

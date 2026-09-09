@@ -12879,3 +12879,101 @@ fieldset.reading {
   gap: 5px;
   padding: 2px 0;
 }
+
+/* --- rewind and fork (`cut.ts`) ---
+   Two verbs on a point in the journal. Rewind ARMS first: the messages or rows it would delete fade
+   under one counted line, and the banner (chat) or the strip (run) asks in words with the one filled
+   button in the danger colour. Fork needs no arming and no chrome of its own — a forked task's seam
+   is `ForkMark`'s drawing with a different sentence (`OriginMark`). */
+.ts-doomed {
+  opacity: 0.38;
+}
+.ts-doomed .ts-bubble {
+  background: var(--panel-2);
+  border-color: var(--line);
+}
+.rail-row.doomed {
+  opacity: 0.35;
+}
+/* The counted line. In a transcript it sits between messages; on the grey it is a row of its own. */
+.ts-cut,
+.sb-cut {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 2px;
+  color: var(--bad);
+  font-size: calc(var(--size-app) * 10.5 / 12.5);
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+.ts-cut::before,
+.ts-cut::after,
+.sb-cut::before,
+.sb-cut::after {
+  content: "";
+  flex: 1;
+  border-top: 1px dashed color-mix(in srgb, var(--bad) 60%, var(--line));
+}
+.sb-cut {
+  margin: 2px 4px 6px;
+}
+/* The banner above the box, when what it asks is a deletion rather than a replacement. */
+.chat-editing.danger {
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+}
+/* The one filled button a deletion gets, in the colour the app keeps for exactly that. */
+.chat-editing button.cut,
+.run-doing button.cut {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: var(--sheen);
+}
+.chat-editing button.cut:hover:not(:disabled),
+.run-doing button.cut:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bad) 88%, black);
+  border-color: color-mix(in srgb, var(--bad) 88%, black);
+}
+/* The sentence in the strip wraps: it names every state that goes, and a cut list is not a status. */
+.run-doing.cut-strip .ellip {
+  white-space: normal;
+}
+/* The two verbs on an "entered" row — at the row's end, revealed the way the message rail is. */
+.sb-note .ts-rail {
+  margin: 0 0 0 auto;
+  min-height: 0;
+  padding: 0;
+  align-self: center;
+  flex-wrap: nowrap;
+}
+.sb-note:hover .ts-rail,
+.sb-note:focus-within .ts-rail {
+  opacity: 1;
+}
+/* The ring an armed rewind puts on the knot it cuts at. */
+.rail-cap .rail-halo.cut {
+  stroke: var(--bad);
+  pointer-events: none;
+}
+/* A fork's glyph, in the list row and the task head — the one its seam wears. */
+.chat-row-fork,
+.sub-glyph {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  margin-right: 4px;
+  vertical-align: -1px;
+  color: color-mix(in srgb, var(--accent) 70%, var(--dim));
+}
+/* A seam whose task is gone has nowhere to go, and says so by not being a button. */
+.origin-mark .fork-chip:disabled {
+  cursor: default;
+}
+.origin-mark .fork-chip:disabled:hover {
+  border-color: transparent;
+  background: none;
+  color: var(--dim);
+}

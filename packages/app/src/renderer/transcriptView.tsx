@@ -106,17 +106,27 @@ export interface EditMessage {
   can: (turn: number) => boolean;
   edit: (turn: number, text: string) => void;
   /**
-   * Put the conversation back to just before this message, with an empty composer.
+   * Which CUT this message can be the point of, if any — see `cut.ts`.
    *
-   * The same fork {@link edit} makes, and deliberately a separate verb rather than a second button
-   * onto the same one. Editing is "I said that badly"; rewinding is "everything from here was a
-   * wrong turn, let me say something else" — the text is what tells them apart, and a rewind that
-   * prefilled the old words would be an edit wearing a different icon.
+   * A message that begins a turn is cut BEFORE: it and everything after it go. A reply ends one and
+   * is cut AFTER: it stays, and everything after it goes. Both land on the same kind of point — the
+   * start of the next turn in the journal — so the sentence in the tooltip is the only thing that
+   * differs. `undefined` means neither verb is offered here: nothing comes after this message, or
+   * the journal does not name its turn.
+   */
+  cut?: ((turn: number) => "before" | "after" | undefined) | undefined;
+  /**
+   * Delete from the cut on, then carry on from there.
    *
-   * Optional: a host may offer replacement without offering this, and the button is absent where it
-   * does. Guarded by {@link can}, like the edit it forks the same way.
+   * Not the fork {@link edit} makes: a rewind KEEPS nothing. It ARMS the deletion — the transcript
+   * shows what would go and the host asks in words — and the host does it when the person says so.
    */
   rewind?: ((turn: number, text: string) => void) | undefined;
+  /**
+   * A second conversation sharing everything before the cut. Arms the host's composer: the next
+   * message is what starts the new conversation, so nothing exists until one is sent.
+   */
+  fork?: ((turn: number, text: string) => void) | undefined;
 }
 
 /** `09:14:02`. Seconds included: the gap between two calls is the thing being read. */
@@ -862,15 +872,22 @@ function Message({
   entry,
   onEdit,
   scope,
+  doomed = false,
 }: {
   entry: MessageEntry;
   onEdit?: EditMessage | undefined;
   scope?: string | undefined;
+  /** Past an armed cut: drawn faded, because it is what a rewind would delete. */
+  doomed?: boolean;
 }): JSX.Element {
   // Only a message the host can NAME a position for is editable, which is why this asks rather than
   // being told: the host holds the edit points, and a button offered over a message nothing can be
   // sent in place of would be a button that fails when pressed.
   const editable = onEdit !== undefined && entry.turn !== undefined && onEdit.can(entry.turn);
+  // …and only one the host can name a CUT for offers the two verbs — the same question, asked of
+  // the reply as well as the message, since a reply can end a conversation as well as a message can
+  // begin one.
+  const cut = onEdit !== undefined && entry.turn !== undefined ? onEdit.cut?.(entry.turn) : undefined;
   const store = useMessageTypes();
   const panel = useValuePanel();
   /**
@@ -1109,15 +1126,34 @@ function Message({
           <Icon name="pencil" />
         </button>
       ) : null}
-      {editable && onEdit.rewind !== undefined ? (
+      {cut !== undefined && onEdit?.rewind !== undefined ? (
         <button
           type="button"
           className="ts-act"
-          title="Rewind to here — everything after it is left behind"
-          aria-label="Rewind to here"
+          title={
+            cut === "before"
+              ? "Rewind to before this message — it and everything after it are deleted"
+              : "Rewind to this reply — everything after it is deleted"
+          }
+          aria-label={cut === "before" ? "Rewind to before this message" : "Rewind to this reply"}
           onClick={() => onEdit.rewind!(entry.turn!, entry.text ?? "")}
         >
           <Icon name="rewind" />
+        </button>
+      ) : null}
+      {cut !== undefined && onEdit?.fork !== undefined ? (
+        <button
+          type="button"
+          className="ts-act"
+          title={
+            cut === "before"
+              ? "Fork before this message — a new conversation that shares everything up to here"
+              : "Fork after this reply — a new conversation that shares everything up to here"
+          }
+          aria-label={cut === "before" ? "Fork before this message" : "Fork after this reply"}
+          onClick={() => onEdit.fork!(entry.turn!, entry.text ?? "")}
+        >
+          <Icon name="choice" />
         </button>
       ) : null}
       {said || entry.output !== undefined ? (
@@ -1197,9 +1233,10 @@ function Message({
   const day = dayLabelOf(entry.at);
   const stamped = day !== undefined ? { "data-day": day } : {};
 
+  const fade = doomed ? " ts-doomed" : "";
   if (entry.role === "user") {
     return (
-      <div className="ts-msg ts-msg-user" {...stamped}>
+      <div className={`ts-msg ts-msg-user${fade}`} {...stamped}>
         <div className="ts-bubble">{said ? body : <span className="sub">(empty)</span>}</div>
         {rail}
       </div>
@@ -1207,14 +1244,14 @@ function Message({
   }
   if (entry.role === "assistant") {
     return (
-      <div className="ts-msg ts-msg-assistant" {...stamped}>
+      <div className={`ts-msg ts-msg-assistant${fade}`} {...stamped}>
         {said || entry.output !== undefined ? body : <p className="empty">(no answer was recorded)</p>}
         {rail}
       </div>
     );
   }
   return (
-    <div className="ts-msg ts-msg-aside" {...stamped}>
+    <div className={`ts-msg ts-msg-aside${fade}`} {...stamped}>
       <span className="ts-tag">{entry.role}</span>
       {/* Shown as written, which is what `text/plain` now MEANS rather than merely what happened to
           happen: this is the input, and reformatting an input is how you stop being able to see what
@@ -1418,9 +1455,16 @@ export function Transcript({
   artifacts,
   narrated,
   scope,
+  doomedFrom,
 }: {
   session?: SessionView | null;
   entries: TranscriptEntry[];
+  /**
+   * An ARMED cut: every message from this turn on is what a rewind would delete, drawn faded under
+   * one counted line, so "everything after it" is a claim the reader can check before agreeing to
+   * it. Absent is the ordinary transcript.
+   */
+  doomedFrom?: number | undefined;
   /**
    * The live tail behind {@link entries}, when the record is still open — here for its SIDECHAINS,
    * which the doorway rows render while the subagent's turns are still streaming by. The tail's own
@@ -1480,9 +1524,25 @@ export function Transcript({
       ? (call) => sidechainEntriesOf(session ?? null, call, live?.sidechains?.[call])
       : undefined;
   const blocks = blocksOf(shown);
+  // What an armed cut takes, counted once: the messages at or past the turn, replies included.
+  const doomedCount =
+    doomedFrom === undefined
+      ? 0
+      : shown.filter((entry) => entry.kind === "message" && entry.turn !== undefined && entry.turn >= doomedFrom).length;
+  let doomed = false;
   return (
     <div className="ts">
       {blocks.map((block, i) => {
+        // Once a doomed message has gone by, everything under it goes too: the tool calls of a
+        // doomed reply carry no turn of their own and are read by their place in the flow.
+        const crossed =
+          !doomed && doomedFrom !== undefined && block.kind === "message" && block.turn !== undefined && block.turn >= doomedFrom;
+        if (crossed) doomed = true;
+        const cutLine = crossed ? (
+          <div className="ts-cut" key={`cut-${i}`} role="note">
+            {doomedCount} message{doomedCount === 1 ? "" : "s"} below this line will be deleted
+          </div>
+        ) : null;
         // The pause before this block, drawn as space rather than as a rule — see `gapBetween`.
         // Measured between BLOCKS rather than between messages, because a stretch of forty tool
         // calls is not a silence: the agent was working, and marking that as "3 hours later" would
@@ -1493,6 +1553,8 @@ export function Transcript({
           return (
             <Fragment key={i}>
               {before}
+              {cutLine}
+              <div className={doomed ? "ts-doomed" : undefined}>
               <WorkBlockView
                 entries={block.entries}
                 {...(sidechainOf !== undefined ? { sidechainOf } : {})}
@@ -1500,21 +1562,24 @@ export function Transcript({
                 {...(artifacts !== undefined ? { artifacts } : {})}
                 {...(narrated === true ? { narrated } : {})}
               />
+              </div>
             </Fragment>
           );
         if (block.kind === "message")
           return (
             <Fragment key={i}>
               {before}
+              {cutLine}
               <Message
                 entry={block}
                 {...(onEdit !== undefined ? { onEdit } : {})}
                 {...(scope !== undefined ? { scope } : {})}
+                doomed={doomed}
               />
             </Fragment>
           );
         return (
-          <div key={i} className="ts-msg ts-msg-assistant ts-live">
+          <div key={i} className={`ts-msg ts-msg-assistant ts-live${doomed ? " ts-doomed" : ""}`}>
             {/* Plain text, not markdown: a half-arrived answer has half a fenced block in it, and
                 rendering that produces a code block that swallows the rest of the stream. */}
             <pre className="ts-text-live">{block.text}</pre>

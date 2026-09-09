@@ -280,9 +280,14 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
   private logSession(sessionKey: string): void {
     if (this.log === undefined) return;
     const row = this.db
-      .prepare(`SELECT id, parent, cursor, provider, provider_session_id, created_at FROM sessions WHERE id = ?`)
+      .prepare(`SELECT id, parent, cursor, provider, provider_session_id, cut_at, created_at FROM sessions WHERE id = ?`)
       .get(sessionKey) as SessionRow | undefined;
     if (row !== undefined) this.log.append({ kind: "session", row });
+  }
+
+  /** A record or a session that is GONE — the append-only file's way of saying so (see `cut.ts`). */
+  private logTombstone(row: { record_id?: string; session_id?: string; task_id?: string | null }): void {
+    this.log?.append({ kind: "tombstone", row: { ...(this.scope.taskId !== undefined ? { task_id: this.scope.taskId } : {}), ...row } });
   }
 
   // --- SessionStore ------------------------------------------------------------
@@ -314,14 +319,25 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // its owning provider. A row carrying only one of the two is not one — see `sessionHandle`.
     const atHead = mode === "append" && seq === this.head(id);
     const own = atHead ? this.sessionHandle(id) : undefined;
+    // A REWOUND conversation (migration 17, `cutSession`) has a remote that runs past its rows — the
+    // provider cannot truncate a conversation — so its own handle is a COPY SOURCE cut at the last
+    // message the rows still hold, never a resume target: resuming it would put the next turn after
+    // turns this conversation no longer has. The settle at head stamps the copy's new handle and
+    // clears the cut (`stampSessionHandle`), and the conversation is ordinary again.
+    const cut = own !== undefined ? this.cutOf(id) : undefined;
     // Nothing of our own to resume, but an ancestor has a remote: that is a branch POINT, not an
     // append target. Offered as `forkFrom` so only an adapter that can copy a session server-side
     // acts on it — see `ResolvedSession.forkFrom`.
-    const forkFrom = own === undefined ? this.ancestorHandle(id) : undefined;
+    const forkFrom =
+      own === undefined
+        ? this.ancestorHandle(id)
+        : cut !== undefined
+          ? { handle: own.handle, provider: own.provider, at: cut }
+          : undefined;
     return resolveSessionRef<JsonValue>(join(id, seq), {
       mode,
       at: { id, seq },
-      ...(own !== undefined ? { providerSessionId: own.handle, provider: own.provider } : {}),
+      ...(own !== undefined && cut === undefined ? { providerSessionId: own.handle, provider: own.provider } : {}),
       ...(forkFrom !== undefined ? { forkFrom } : {}),
       // Carried so a FORK does not need the original request back — see `ResolvedSession.seed`.
       ...(request.seed !== undefined ? { seed: request.seed } : {}),
@@ -484,10 +500,111 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // own seat, and its handle is still the conversation's newest remote fact — the very thing a
     // resume continues from.
     if (pos.seq + 1 < this.head(pos.id)) return;
+    // The cut goes with it: a handle reported at the head is the remote the rows now describe,
+    // whether it is the copy a cut asked for or the same conversation carried on.
     this.db
-      .prepare(`UPDATE sessions SET provider_session_id = ?, provider = ? WHERE id = ?`)
+      .prepare(`UPDATE sessions SET provider_session_id = ?, provider = ?, cut_at = NULL WHERE id = ?`)
       .run(handle, provider, this.k(pos.id));
     this.logSession(this.k(pos.id));
+  }
+
+  /**
+   * Cut a conversation at a seat: every row at or after it goes, and so does every branch that left
+   * it at or after that point — a branch's prefix IS those rows, and a branch of a tail nobody can
+   * read any more is a conversation nobody can have (see `cut.ts`, rewind).
+   *
+   * What the conversation is left holding is then stamped as its remote identity: the last kept
+   * row's handle, marked as CUT at the last kept message — the provider still has the deleted
+   * turns, so the next call copies the remote up to that message rather than resuming it. A
+   * conversation whose entries carry no message ids cannot say where to cut, and drops its handle
+   * instead: the next call replays the prefix, which is slower and exactly right.
+   *
+   * Returns the record ids removed, seated on this conversation and its dropped branches alike.
+   */
+  cutSession(sessionId: string, seq: number): string[] {
+    const id = this.existingSessionOf(sessionId) ?? sessionId;
+    const removed: string[] = [];
+    this.db.transaction(() => {
+      this.dropBranchesFrom(id, seq, removed);
+      removed.push(...this.deleteRowsFrom(id, seq));
+      if (removed.length === 0) return;
+      const handle = this.handleAt(id, seq);
+      const provider = this.providerOf(id);
+      const cut = this.messageIdAt(id, seq);
+      // The pair or nothing, as everywhere: a handle whose cut cannot be named is one the next call
+      // must not resume, and one without a provider is no identity at all.
+      const kept = handle !== undefined && provider !== undefined && cut !== undefined;
+      this.db
+        .prepare(`UPDATE sessions SET provider_session_id = ?, provider = ?, cut_at = ? WHERE id = ?`)
+        .run(kept ? handle : null, provider ?? null, kept ? cut : null, this.k(id));
+      this.logSession(this.k(id));
+    })();
+    return removed;
+  }
+
+  /**
+   * Delete records by id, wherever they sit — the half of a rewind `cutSession` cannot reach: a call
+   * that claimed no seat (a function op, a computed call) has no conversation to be cut from.
+   */
+  dropRecords(recordIds: readonly string[]): number {
+    let dropped = 0;
+    this.db.transaction(() => {
+      for (const recordId of recordIds) dropped += this.deleteRecord(recordId) ? 1 : 0;
+    })();
+    return dropped;
+  }
+
+  private deleteRecord(recordId: string): boolean {
+    const row = this.db
+      .prepare(`SELECT id, task_id, result_json, request_json FROM operation_records WHERE id = ?`)
+      .get(recordId) as { id: string; task_id: string | null; result_json: string | null; request_json: string | null } | undefined;
+    if (row === undefined) return false;
+    // The bytes a record referenced are let go while there is still something to read them off —
+    // the same order `prune` keeps, for the same reference count.
+    for (const text of [row.result_json, row.request_json]) {
+      if (text !== null) release(this.db, JSON.parse(text) as JsonValue);
+    }
+    this.db.prepare(`DELETE FROM operation_records WHERE id = ?`).run(row.id);
+    this.logTombstone({ record_id: row.id, task_id: row.task_id });
+    return true;
+  }
+
+  /** Every row at or after a seat on one conversation, by effective position — deleted, ids returned. */
+  private deleteRowsFrom(id: string, seq: number): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id FROM operation_records
+          WHERE COALESCE(landed_session_id, session_id) = ? AND COALESCE(landed_seq, session_seq) >= ?`,
+      )
+      .all(this.k(id), seq) as Array<{ id: string }>;
+    const removed: string[] = [];
+    for (const row of rows) if (this.deleteRecord(row.id)) removed.push(row.id);
+    return removed;
+  }
+
+  /** Every branch that left `parent` at or after `cursor`, whole — rows, names, lineage row, recursively. */
+  private dropBranchesFrom(parent: string, cursor: number, removed: string[]): void {
+    const children = this.db
+      .prepare(`SELECT id FROM sessions WHERE parent = ? AND cursor >= ?`)
+      .all(this.k(parent), cursor) as Array<{ id: string }>;
+    for (const child of children) {
+      this.dropBranchesFrom(child.id, 0, removed);
+      removed.push(...this.deleteRowsFrom(child.id, 0));
+      this.db.prepare(`DELETE FROM session_names WHERE session_id = ?`).run(child.id);
+      this.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(child.id);
+      this.logTombstone({ session_id: child.id });
+    }
+  }
+
+  /** Where a rewound conversation's remote is to be cut, when it is one — see {@link cutSession}. */
+  private cutOf(id: string): string | undefined {
+    const row = this.db.prepare(`SELECT cut_at FROM sessions WHERE id = ?`).get(this.k(id)) as { cut_at: string | null } | undefined;
+    return row?.cut_at ?? undefined;
+  }
+
+  private providerOf(id: string): string | undefined {
+    const row = this.db.prepare(`SELECT provider FROM sessions WHERE id = ?`).get(this.k(id)) as { provider: string | null } | undefined;
+    return row?.provider ?? undefined;
   }
 
   /**
@@ -559,6 +676,9 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     const trunk = bareSessionId(this.scope, pos.session_id);
     const expected = this.handleAt(trunk, pos.seq);
     if (expected === undefined || expected === reported) return;
+    // A CUT conversation asked for a copy (see `resolve`), and a copy's new handle is the answer it
+    // asked for — not a divergence. The stamp at settle clears the cut and takes the handle.
+    if (this.cutOf(trunk) !== undefined) return;
 
     // SAID, as well as done. The landed columns and the branch land in the journal below, which is
     // the durable account — but a provider that quietly moves a conversation out from under a run
@@ -1016,7 +1136,12 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
         // naming the cut is the store's job, since only it knows which message the branch ends at.
         // A conversation whose entries carry no provider ids cannot be cut, so it offers no source
         // and the caller replays: correct, and the only honest answer.
-        if (bound === this.readHead(at)) return { handle: found, provider };
+        if (bound === this.readHead(at)) {
+          // …unless the ancestor was itself rewound: its rows end where its remote does not, and a
+          // plain copy would hand this branch the very turns the rewind deleted.
+          const rewound = this.cutOf(at);
+          return { handle: found, provider, ...(rewound !== undefined ? { at: rewound } : {}) };
+        }
         const cut = this.messageIdAt(at, bound);
         return cut === undefined ? undefined : { handle: found, provider, at: cut };
       }

@@ -425,6 +425,21 @@ export const MIGRATIONS: Migration[] = [
     // parentless).
     run: collapseRunsIntoTasks,
   },
+  {
+    version: 17,
+    note: "a conversation remembers where its remote was cut, and a task remembers where it was forked from",
+    // Rewind and fork. A rewound session still has a remote that runs past its rows — the provider
+    // cannot truncate a conversation — so `cut_at` names the last message the rows still hold, and
+    // the next call copies the remote cut there instead of resuming a tip the rows no longer
+    // describe. A forked task copies a prefix of another's journal; `forked_at_seq` is the parent's
+    // position it was cut at, `fork_boundary_seq` the copy's own last journaled event, so the seam
+    // can be drawn in both journals' coordinates.
+    run: (db) => {
+      addColumn(db, "sessions", "cut_at", "TEXT");
+      addColumn(db, "task_runtime", "forked_at_seq", "INTEGER");
+      addColumn(db, "task_runtime", "fork_boundary_seq", "INTEGER");
+    },
+  },
 ];
 
 /**

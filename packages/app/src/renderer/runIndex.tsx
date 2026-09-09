@@ -28,13 +28,14 @@
  * said are gone, each because the drawing already says it: the step number is the row's position,
  * the nesting is the lanes, and the operation kind is one landing away.
  */
-import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useState, type JSX, type MouseEvent as ReactMouseEvent } from "react";
 import type { InstanceNode } from "@jaira/shared/browser";
 import { paletteOf, type RailLane, type RailStep } from "./rail";
 import { RailedRows } from "./railView";
 import { headerToneOf, surfaceKindOf, type HeaderTone } from "./stateSurface";
 import { isLiveNode, metaOf } from "./sessionPanels";
 import { Icon } from "./icons";
+import { ContextMenu, pointOf, type MenuAnchor } from "./menu";
 
 /** How often a live row's elapsed time is redrawn. A second, because that is the unit it shows. */
 const ELAPSED_TICK_MS = 1000;
@@ -297,7 +298,13 @@ export function RunIndex({
   here,
   asking,
   onGoTo,
+  onCut,
 }: {
+  /**
+   * The two verbs of a cut (`cut.ts`), on a row's menu — the same point the conversation's entered
+   * row offers, from the reading that surveys the run. Absent ⇒ a row has no menu.
+   */
+  onCut?: { rewind: (node: InstanceNode) => void; fork: (node: InstanceNode) => void } | undefined;
   instances: readonly InstanceNode[];
   /** The state the reader is on, by {@link keyOfNode}. */
   here?: string | undefined;
@@ -314,6 +321,7 @@ export function RunIndex({
 }): JSX.Element {
   const [shutLanes, setShutLanes] = useState<ReadonlySet<string>>(() => new Set());
   const [shutLoops, setShutLoops] = useState<ReadonlySet<string>>(() => new Set());
+  const [menu, setMenu] = useState<MenuAnchor | null>(null);
   /**
    * The clock the live rows read. Every state on the active path is live — the leaf that is running
    * AND the composites above it, which entered earlier and are still open — so a lane's parent shows
@@ -424,6 +432,8 @@ export function RunIndex({
         {metaOf(node, now) !== "" ? <span className="rail-mark-meta">{metaOf(node, now)}</span> : null}
       </>
     );
+    // The run's own root has nothing before it to rewind to, and no cut names it.
+    const cuttable = onCut !== undefined && node.parentInstanceId !== undefined;
     return (
       <div
         className={[
@@ -435,6 +445,26 @@ export function RunIndex({
         ]
           .filter((one) => one.length > 0)
           .join(" ")}
+        {...(cuttable
+          ? {
+              onContextMenu: (e: ReactMouseEvent<HTMLDivElement>) => {
+                e.preventDefault();
+                setMenu({
+                  ...pointOf(e),
+                  items: [
+                    ...(onGoTo !== undefined ? [{ label: `Go to ${name} in the conversation`, onSelect: () => onGoTo(node) }] : []),
+                    {
+                      label: `Rewind to before ${name}`,
+                      note: "deletes it and everything after",
+                      separator: onGoTo !== undefined,
+                      onSelect: () => onCut.rewind(node),
+                    },
+                    { label: `Fork before ${name}`, note: "a new task from here", onSelect: () => onCut.fork(node) },
+                  ],
+                });
+              },
+            }
+          : {})}
       >
         {what.lane !== undefined ? (
           <button
@@ -510,6 +540,7 @@ export function RunIndex({
           </button>
         ) : null}
       </h3>
+      {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
       {instances.length === 0 ? <p className="empty">No run yet.</p> : <RailedRows
         className="run-index"
         steps={steps}

@@ -72,6 +72,7 @@ function RailGutter({
   mark,
   hideExit,
   here,
+  cut,
 }: {
   row: RailRow;
   centres: readonly number[];
@@ -92,6 +93,8 @@ function RailGutter({
   hideExit?: boolean;
   /** Halo the mark's knot: this is the row the reader is on. */
   here?: boolean;
+  /** Halo the FORK's knot, in the danger colour: this is the row an armed rewind cuts at. */
+  cut?: boolean;
 }): JSX.Element {
   const lanes = Math.max(lanesOf(row), mark === undefined ? 0 : row.open.length + 1);
   const width = gutterWidth(centres, lanes);
@@ -152,6 +155,7 @@ function RailGutter({
               centres={centres}
               folded={folded}
               palette={palette}
+              cut={cut === true}
             />
           )}
         </svg>
@@ -212,6 +216,7 @@ function RailFork({
   centres,
   folded,
   palette,
+  cut,
 }: {
   lane: RailLane;
   depth: number;
@@ -219,6 +224,8 @@ function RailFork({
   centres: readonly number[];
   folded: boolean;
   palette: Palette;
+  /** The ring an armed rewind puts on the knot it cuts at — the index's "you are here", in the danger colour. */
+  cut: boolean;
 }): JSX.Element {
   const colour = laneColour(lane, root, palette);
   const cx = centres[root ? 0 : depth - 1] ?? 0;
@@ -243,6 +250,7 @@ function RailFork({
           strokeWidth={1.6}
         />
       )}
+      {cut && <circle className="rail-halo cut" cx={cx} cy={MID} r={7.5} fill="none" stroke="var(--bad)" strokeWidth={1.5} />}
       {/* A circle you can actually hit. The knot is 9px across and is the only way back into a lane
           that has been rolled up, so the target is more than twice that and invisible. */}
       <circle className="rail-hit" cx={cx} cy={MID} r={11} data-lane={lane.key} data-name={lane.stateId} />
@@ -269,11 +277,18 @@ export function RailedRows({
   onShut,
   foldable,
   onPick,
+  onContext,
 }: {
   steps: readonly RailStep[];
   /** What row `index` of `steps` draws. */
   renderStep: (index: number) => ReactNode;
   className?: string;
+  /**
+   * A right-click on a lane in the gutter — its knot, or the line itself. The lane's key, and
+   * where the pointer was, for a host with verbs to offer about the state (a rewind, a fork). Absent
+   * ⇒ the gutter has no menu and the browser's own is left alone.
+   */
+  onContext?: ((key: string, point: { x: number; y: number }) => void) | undefined;
   /**
    * A step that opens a lane and closes it again in its own row, drawn as a lobe rather than as a
    * fork and a join — see {@link RailLobe}. Absent ⇒ every step is an ordinary row.
@@ -443,8 +458,28 @@ export function RailedRows({
     });
   }, [foldable, onPick, setShut]);
 
+  const onContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>): void => {
+      if (onContext === undefined) return;
+      const target = event.target instanceof Element ? event.target.closest("[data-lane]") : null;
+      const inGutter = event.target instanceof Element && event.target.closest(".rail-gut") !== null;
+      const key = target?.getAttribute("data-lane");
+      if (!inGutter || key === null || key === undefined) return;
+      event.preventDefault();
+      onContext(key, { x: event.clientX, y: event.clientY });
+    },
+    [onContext],
+  );
+
   return (
-    <div className={className === undefined ? "rail" : `rail ${className}`} ref={host} onMouseMove={onMove} onMouseLeave={onLeave} onClick={onClick}>
+    <div
+      className={className === undefined ? "rail" : `rail ${className}`}
+      ref={host}
+      onMouseMove={onMove}
+      onMouseLeave={onLeave}
+      onClick={onClick}
+      onContextMenu={onContextMenu}
+    >
       {/*
         A fold or a fan re-renders this component and NOT the conversation inside it. `renderStep`
         hands back element objects its caller built once, so React sees the same reference for every
@@ -491,6 +526,7 @@ export function RailedRows({
               {...(lobe !== undefined ? { mark: lobe } : {})}
               {...(orphan ? { hideExit: true } : {})}
               {...(extra !== undefined && extra.includes("is-here") ? { here: true } : {})}
+              {...(extra !== undefined && extra.includes("is-cut") ? { cut: true } : {})}
             />
             <div className="rail-content">
               {rolled !== undefined ? (

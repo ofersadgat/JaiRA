@@ -10,8 +10,9 @@ import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import { loadBundle, type StateDef, type WorkflowBundle } from "@declarative-ai/hw";
-import type { BoardView, InstanceAddress, InstanceNode, TaskDetail, TaskSummary, TimelineEntry } from "@jaira/shared";
+import type { BoardView, InstanceAddress, InstanceNode, TaskDetail, TaskOrigin, TaskSummary, TimelineEntry } from "@jaira/shared";
 import type { Project } from "./project";
+import type { TaskRuntimeRow } from "./runtime";
 import { workflowLoadOptions } from "./workflowRefs";
 import {
   activePathOf,
@@ -53,6 +54,7 @@ export function functionRefsOf(bundle: WorkflowBundle): Set<string> {
 export function taskSummaries(project: Project): TaskSummary[] {
   return project.runtime.list().map((row) => {
     const meta = project.tasks.tryRead(row.taskId);
+    const origin = taskOriginOf(project, row);
     return {
       taskId: row.taskId,
       title: meta?.title ?? "(missing task file)",
@@ -61,10 +63,65 @@ export function taskSummaries(project: Project): TaskSummary[] {
       ...(meta?.labels !== undefined ? { labels: meta.labels } : {}),
       ...(row.snapshotHash !== undefined ? { snapshotHash: row.snapshotHash } : {}),
       ...(meta?.parentTaskId !== undefined ? { parentTaskId: meta.parentTaskId } : {}),
+      ...(origin !== undefined ? { origin } : {}),
       createdAt: meta?.createdAt ?? new Date(row.createdAt).toISOString(),
       updatedAt: row.updatedAt,
     };
   });
+}
+
+/**
+ * Where a forked task came from, in words — see `TaskOrigin` and `cut.ts`.
+ *
+ * The label reads the parent's journal at the cut, which is the only place that knows what the
+ * point WAS: a state's entry, a rule, a message. Read per ask rather than stored, and cheap enough
+ * for a list because it is one row by primary key; a parent that is gone leaves a copy that still
+ * says it is one, with the point it can no longer describe.
+ */
+export function taskOriginOf(project: Project, row: TaskRuntimeRow): TaskOrigin | undefined {
+  if (row.parentTaskId === undefined || row.forkedAtSeq === undefined || row.forkBoundarySeq === undefined) return undefined;
+  const parent = project.tasks.tryRead(row.parentTaskId);
+  const event = project.db
+    .prepare(`SELECT type, payload_json FROM state_machine_events WHERE task_id = ? AND seq = ?`)
+    .get(row.parentTaskId, row.forkedAtSeq) as { type: string; payload_json: string } | undefined;
+  const boundary = project.db
+    .prepare(`SELECT created_at FROM state_machine_events WHERE task_id = ? AND seq = ?`)
+    .get(row.taskId, row.forkBoundarySeq) as { created_at: number } | undefined;
+  return {
+    taskId: row.parentTaskId,
+    ...(parent !== undefined ? { title: parent.title } : {}),
+    at: row.forkedAtSeq,
+    boundary: row.forkBoundarySeq,
+    boundaryAt: boundary?.created_at ?? 0,
+    label: event === undefined ? (parent === undefined ? "a task since deleted" : `event ${row.forkedAtSeq}`) : cutLabelOf(event.type, event.payload_json),
+  };
+}
+
+/** The sentence a cut point makes: what the journal was about to do there. */
+function cutLabelOf(type: string, payloadJson: string): string {
+  let payload: { instanceId?: unknown; stateId?: unknown; childKey?: unknown; to?: unknown; index?: unknown } = {};
+  try {
+    payload = JSON.parse(payloadJson) as typeof payload;
+  } catch {
+    // An unreadable payload still has a type to name.
+  }
+  const chat = typeof payload.instanceId === "string" && payload.instanceId.startsWith("chat:");
+  if (type === "instance.entered") {
+    // Counted as a reader counts the thread: the run's own message is the first, the first typed one the second.
+    if (chat) return "before message 2";
+    const name =
+      typeof payload.childKey === "string"
+        ? payload.childKey
+        : typeof payload.stateId === "string"
+          ? (payload.stateId.split("/").pop() ?? payload.stateId)
+          : "a state";
+    return `before ${name}`;
+  }
+  if (type === "transition.taken") {
+    if (chat && typeof payload.index === "number") return `before message ${payload.index + 2}`;
+    return typeof payload.to === "string" ? `before ${payload.to}` : "at a transition";
+  }
+  return `at ${type}`;
 }
 
 /**
@@ -489,6 +546,7 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
   // The TASK, not its last run — see `taskRun`. The timeline below is still every event in order,
   // so the panel shows the folded tree beside the unfolded history that produced it.
   const run = taskRun(project, taskId, shape);
+  const origin = taskOriginOf(project, row);
   const timeline: TimelineEntry[] = project.events
     .list(taskId)
     .slice(-TIMELINE_LIMIT)
@@ -512,6 +570,7 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
     ...(row.worktreePath !== undefined ? { worktreePath: row.worktreePath } : {}),
     createdAt: meta?.createdAt ?? new Date(row.createdAt).toISOString(),
     ...(meta?.inputs !== undefined ? { inputs: meta.inputs } : {}),
+    ...(origin !== undefined ? { origin } : {}),
     instances: run.instances,
     activePath: run.activePath,
     blocked: run.blocked,

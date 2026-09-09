@@ -52,7 +52,28 @@ export interface JournalLine {
   runId?: number;
   /** `number` only on lines journaled before instance ids became durable strings. */
   instanceId?: string | number;
-  event: EngineEvent;
+  event: EngineEvent | RewoundEvent;
+}
+
+/**
+ * A REWIND, as the append-only file records one: which earlier lines are no longer part of the
+ * journal (see `cut.ts`).
+ *
+ * The lines are named by their PHYSICAL ordinal in this file — the position among every line the
+ * file holds, tombstones included — because that is the one coordinate a file has that nothing
+ * re-mints: the table's `seq` is assigned on replay and written down nowhere. Replay applies
+ * tombstones in order and inserts what survives, so the deleted events never reach the table again
+ * and the bytes stay where a merge can still see them.
+ */
+export interface RewoundEvent {
+  type: typeof REWOUND;
+  lines: number[];
+}
+
+export const REWOUND = "jaira.rewound";
+
+export function isRewound(line: JournalLine): line is JournalLine & { event: RewoundEvent } {
+  return line.type === REWOUND;
 }
 
 /** Where a task's journal lives. */
@@ -153,7 +174,7 @@ export function replayJournal(db: JairaDb, journalDir: string): number | undefin
   let rows = 0;
   db.transaction(() => {
     for (const { file } of files) {
-      for (const line of readJournalFile(file)) {
+      for (const { line } of effectiveLines(file)) {
         insert.run(
           line.taskId,
           // Stringified for lines journaled before ids were strings; `-1` was a sentinel for absence.
@@ -167,6 +188,37 @@ export function replayJournal(db: JairaDb, journalDir: string): number | undefin
     }
   })();
   return rows;
+}
+
+/**
+ * The lines a file still stands for, each with the physical ordinal it sits at.
+ *
+ * Tombstones are applied in order and are not themselves lines of the journal: what comes back is
+ * exactly what a replay inserts, in the order it inserts it — which is also how a rewind maps the
+ * table's rows back onto the file (see `cut.ts`): the n-th surviving line IS the n-th row.
+ */
+export function effectiveLines(file: string): Array<{ line: JournalLine; ordinal: number }> {
+  const physical = readJournalFile(file);
+  const dropped = new Set<number>();
+  for (const line of physical) {
+    if (isRewound(line)) for (const ordinal of line.event.lines) dropped.add(ordinal);
+  }
+  const out: Array<{ line: JournalLine; ordinal: number }> = [];
+  for (const [ordinal, line] of physical.entries()) {
+    if (isRewound(line) || dropped.has(ordinal)) continue;
+    out.push({ line, ordinal });
+  }
+  return out;
+}
+
+/** Say that lines are gone — see {@link RewoundEvent}. */
+export function appendRewound(journalDir: string, taskId: string, lines: readonly number[], atMs = Date.now()): void {
+  appendJournal(journalDir, {
+    type: REWOUND,
+    timestamp: new Date(atMs).toISOString(),
+    taskId,
+    event: { type: REWOUND, lines: [...lines] },
+  });
 }
 
 /** Delete a task's whole journal directory — what deleting the task does now that the file is the truth. */

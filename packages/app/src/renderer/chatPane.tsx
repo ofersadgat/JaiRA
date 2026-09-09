@@ -46,7 +46,7 @@ import type {
 import { SHARED_SESSION } from "@jaira/shared/browser";
 import { Composer } from "./composer";
 import { projectName } from "./projects";
-import { ForkMark, ZigDefs } from "./sessionPanels";
+import { ForkMark, OriginMark, ZigDefs } from "./sessionPanels";
 import { useStickToBottom } from "./stickToBottom";
 import { CHAT_AGENT, isChatWorkflow, titleOf } from "./chatWorkflow";
 import { ContextMenu, AskDialog, pointOf, type AskSpec, type MenuAnchor } from "./menu";
@@ -117,7 +117,27 @@ export interface ChatSurface {
   onDelete: (taskIds: readonly string[], project?: string) => void;
   /** Stop the RUN — what the first message is. Later messages are turns, and `chat:cancel` stops those. */
   onCancelRun: (taskId: string, project?: string) => void;
+  /**
+   * Cut the conversation before a message and carry on from there ("task:rewind"). `seq` is the
+   * message's journal position (`ChatEditPoint.seq`). Confirmed in the banner before it is called.
+   */
+  onRewind: (taskId: string, seq: number, project?: string) => Promise<void>;
+  /** A second conversation sharing everything before `seq`, with `message` as its next turn ("task:fork"). */
+  onFork: (taskId: string, seq: number, message: string, overrides?: ChatSettings, project?: string) => Promise<string | null>;
 }
+
+/**
+ * What the box is ARMED for beyond a reply — see `EditMessage`.
+ *
+ * An edit sends in another message's place; a fork sends into a new conversation; a rewind sends
+ * nothing at all and deletes when the banner's button is pressed. One state rather than three,
+ * because they share the banner above the box and the box itself, and only one can be meant.
+ * `from` is the first turn a cut would take, which is what the transcript fades from.
+ */
+type Arming =
+  | { kind: "edit"; at: string; was: string }
+  | { kind: "rewind"; seq: number; from: number; was: string; side: "before" | "after" }
+  | { kind: "fork"; seq: number; from: number; was: string; side: "before" | "after" };
 
 /**
  * What this conversation PRODUCED, collected in one place.
@@ -381,7 +401,14 @@ export function ChatListPanel({ surface, find = false }: { surface: ChatSurface;
                     className={`chat-row-mark${unread(task) ? " unread" : ""}`}
                     title={unread(task) ? "The latest reply has not been read" : "Read"}
                   />
-                  <span className="chat-row-title ellip">{task.title}</span>
+                  <span
+                    className="chat-row-title ellip"
+                    {...(task.origin !== undefined ? { title: `forked from ${task.origin.title ?? "a task since deleted"}, ${task.origin.label}` } : {})}
+                  >
+                    {/* A fork wears the glyph its seam does, so the list says what the thread says. */}
+                    {task.origin !== undefined ? <Icon name="choice" className="chat-row-fork" /> : null}
+                    {task.title}
+                  </span>
                   {/* Only on a row that carries its own project, which is only at the ROOT: inside
                       one project every row is the same project and a chip on each would be a column
                       of identical marks. The hue is the one that project wears everywhere else. */}
@@ -577,7 +604,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   /** Which message is being replaced, when one is — see `chat:send`'s `branchAt`. */
-  const [editing, setEditing] = useState<{ at: string; was: string } | null>(null);
+  const [arming, setArming] = useState<Arming | null>(null);
   const mentions = useMentions(surface.hasProject, project);
   /**
    * Follow the live edge while the reader is standing on it — see {@link useStickToBottom}, which
@@ -674,11 +701,19 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const send = (message: string): void => {
     const instanceId = thread?.instanceId;
     if (instanceId === undefined) return;
+    const armed = arming;
+    setArming(null);
+    setError(null);
+    if (armed?.kind === "fork") {
+      // The message starts the NEW conversation — see "task:fork" — and the shell opens it, so this
+      // thread has nothing to show for it and nothing pending to keep.
+      setSending((n) => n + 1);
+      void surface.onFork(taskId, armed.seq, message, overrides, project).finally(() => setSending((n) => Math.max(0, n - 1)));
+      return;
+    }
     setSending((n) => n + 1);
     setSent((was) => [...was, message]);
-    setError(null);
-    const at = editing?.at;
-    setEditing(null);
+    const at = armed?.kind === "edit" ? armed.at : undefined;
     // Sending re-pins. Typing into the box is the clearest possible statement that the live edge is
     // where you are, whatever you had scrolled up to read while composing.
     jump();
@@ -801,6 +836,42 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
 
   /** Turn index → the position a replacement is sent at. Built once per thread, read per message. */
   const points = useMemo(() => new Map((thread?.points ?? []).map((p) => [p.turn, p.at] as const)), [thread]);
+  /**
+   * The CUTS the thread offers, by the turn each begins at — the messages whose turn the journal
+   * names (see `ChatEditPoint.seq`), in order. A message is cut BEFORE itself; a reply is cut
+   * AFTER, which is the same point as before the next message.
+   */
+  const cuts = useMemo(
+    () =>
+      (thread?.points ?? [])
+        .filter((p): p is typeof p & { seq: number } => p.seq !== undefined)
+        .map((p) => ({ turn: p.turn, seq: p.seq }))
+        .sort((a, b) => a.turn - b.turn),
+    [thread],
+  );
+  const cutAt = useCallback(
+    (turn: number): { seq: number; from: number; side: "before" | "after" } | undefined => {
+      const own = cuts.find((c) => c.turn === turn);
+      if (own !== undefined) return { seq: own.seq, from: own.turn, side: "before" };
+      const next = cuts.find((c) => c.turn > turn);
+      return next === undefined ? undefined : { seq: next.seq, from: next.turn, side: "after" };
+    },
+    [cuts],
+  );
+  /**
+   * Where this conversation was FORKED FROM, drawn as a seam between the shared part and its own.
+   *
+   * The boundary is a journal position; the first message whose turn begins past it is the first
+   * this conversation said for itself. Absent for the ordinary conversation, and set aside while an
+   * edit's split is showing — two seams in one thread is a case nobody has had.
+   */
+  const origin = thread?.origin;
+  const seam = useMemo(() => {
+    if (thread === null || origin === undefined) return null;
+    const firstOwn = cuts.find((c) => c.seq > origin.boundary)?.turn;
+    const cut = firstOwn === undefined ? -1 : entries.findIndex((entry) => entry.kind === "message" && entry.turn !== undefined && entry.turn >= firstOwn);
+    return cut < 0 ? { shared: entries, own: [] } : { shared: entries.slice(0, cut), own: entries.slice(cut) };
+  }, [thread, origin, cuts, entries]);
 
   /**
    * The thread, cut at each place it divided, with the sides of each division beside it.
@@ -850,29 +921,46 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   // they happened now, so `branches[0]` is the oldest thing the conversation said and landing there
   // by accident would mean opening a chat on a branch nobody is having.
   const shown = split?.branches.find((b) => b.key === branch) ?? split?.branches.find((b) => b.key === KEPT);
-  /** Replacing a message: the same offer on either transcript, so it is stated once. */
+  /** Replacing, cutting and forking: the same offer on either transcript, so it is stated once. */
   const edit = useMemo(
     () => ({
       can: (turn: number) => points.has(turn),
       edit: (turn: number, text: string) => {
-        setEditing({ at: points.get(turn)!, was: text });
+        setArming({ kind: "edit", at: points.get(turn)!, was: text });
         setDraft(text);
       },
+      cut: (turn: number) => cutAt(turn)?.side,
       /**
-       * The same fork, with the box left empty.
-       *
-       * `editing` still carries the words that were there, because the banner above the composer
-       * names the message being replaced and that is as true of a rewind as of an edit. What changes
-       * is only the draft. Rewinding is not "say that again" — it is "everything from here was a
-       * wrong turn", and prefilling the wrong turn is the one thing that makes it hard to leave.
+       * ARMS a deletion: the transcript fades what would go and the banner asks. Nothing is typed
+       * for a rewind — the box empties so what is said next is said after the cut, not instead of
+       * anything — and nothing happens until the banner's button is pressed.
        */
       rewind: (turn: number, text: string) => {
-        setEditing({ at: points.get(turn)!, was: text });
+        const cut = cutAt(turn);
+        if (cut === undefined) return;
+        setArming({ kind: "rewind", seq: cut.seq, from: cut.from, was: text, side: cut.side });
+        setDraft("");
+      },
+      /** Arms the box: the next message starts a new conversation that shares everything before the cut. */
+      fork: (turn: number, text: string) => {
+        const cut = cutAt(turn);
+        if (cut === undefined) return;
+        setArming({ kind: "fork", seq: cut.seq, from: cut.from, was: text, side: cut.side });
         setDraft("");
       },
     }),
-    [points],
+    [points, cutAt],
   );
+  /** What the transcript fades: everything from the cut an armed rewind would take. */
+  const doomedFrom = arming?.kind === "rewind" ? arming.from : undefined;
+  /** The banner's name for the message a cut stands at — its first line, kept short. */
+  const named = (was: string): string => `“${was.split("\n").find((line) => line.trim() !== "")?.trim().slice(0, 60) ?? ""}”`;
+  const confirmRewind = (): void => {
+    if (arming?.kind !== "rewind") return;
+    const { seq } = arming;
+    setArming(null);
+    void surface.onRewind(taskId, seq, project).then(read);
+  };
 
   return (
     <div className="chat-thread">
@@ -899,11 +987,11 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         <Paper>
           <Transcript
             session={thread?.session ?? null}
-            entries={split === null ? entries : split.shared}
+            entries={split !== null ? split.shared : seam !== null ? seam.shared : entries}
             // The live tail belongs to the END of the conversation, so it rides with whatever is
             // showing there — and a reader looking at the side that was replaced is not looking at
             // where a turn is arriving.
-            {...(split === null || shown?.key === KEPT ? { live: surface.live ?? afterglow } : {})}
+            {...(split === null && (seam === null || seam.own.length === 0) ? { live: surface.live ?? afterglow } : {})}
             empty={running ? "Working…" : "This conversation has not said anything yet."}
             artifacts={artifacts}
             onEdit={edit}
@@ -912,8 +1000,32 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
             // keyed to a message nobody can reach again is a preference nobody can clear.
             scope={taskId}
             {...(status !== null ? { narrated: true } : {})}
+            {...(doomedFrom !== undefined ? { doomedFrom } : {})}
           />
         </Paper>
+        {split === null && seam !== null && origin !== undefined ? (
+          <>
+            {/* Where this conversation came from — the same torn edge an edit's seam uses, with a
+                different sentence: there is nothing to choose between here, only somewhere to go. */}
+            <div className="chat-fork">
+              <OriginMark origin={origin} onGo={() => surface.onOpen(origin.taskId, project)} />
+            </div>
+            {seam.own.length > 0 ? (
+              <Paper>
+                <Transcript
+                  session={thread?.session ?? null}
+                  entries={seam.own}
+                  live={surface.live ?? afterglow}
+                  artifacts={artifacts}
+                  onEdit={edit}
+                  scope={taskId}
+                  {...(status !== null ? { narrated: true } : {})}
+                  {...(doomedFrom !== undefined ? { doomedFrom } : {})}
+                />
+              </Paper>
+            ) : null}
+          </>
+        ) : null}
         {split !== null && shown !== undefined ? (
           <>
             <div className="chat-fork">
@@ -935,6 +1047,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
                 // from a position, which that side no longer holds.
                 {...(shown.key === KEPT ? { onEdit: edit } : {})}
                 {...(status !== null && shown.key === KEPT ? { narrated: true } : {})}
+                {...(shown.key === KEPT && doomedFrom !== undefined ? { doomedFrom } : {})}
               />
             </Paper>
           </>
@@ -947,22 +1060,40 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
       {status !== null ? <LiveStatusBar status={status} {...(away ? { onJump: jump } : {})} /> : null}
 
       <div className="chat-foot">
-        {editing !== null ? (
+        {arming !== null ? (
           // Said plainly, above the box, because it changes what pressing Enter MEANS: the message
-          // will not be added to the end of this conversation, it will take another one's place.
-          <div className="chat-editing">
+          // will not be added to the end of this conversation — it will take another one's place,
+          // or start a conversation of its own. A rewind changes what a BUTTON means instead, and
+          // the button is the only filled thing in the row, in the app's danger colour.
+          <div className={arming.kind === "rewind" ? "chat-editing danger" : "chat-editing"} role={arming.kind === "rewind" ? "alertdialog" : undefined}>
             <span className="ellip">
-              Replacing “{editing.was.split("\n")[0]?.slice(0, 60)}” — everything after it is left behind.
+              {arming.kind === "edit" ? (
+                <>Replacing {named(arming.was)} — everything after it is left behind.</>
+              ) : arming.kind === "fork" ? (
+                <>
+                  Forking {arming.side === "before" ? "before" : "after"} {named(arming.was)} — your next message starts a new conversation from there.
+                  This one is not changed.
+                </>
+              ) : (
+                <>
+                  Rewind to {arming.side === "before" ? "before" : ""} {named(arming.was)} — the messages after it are deleted. This cannot be undone.
+                </>
+              )}
             </span>
             <button
               className="ghost"
               onClick={() => {
-                setEditing(null);
+                setArming(null);
                 setDraft("");
               }}
             >
               Cancel
             </button>
+            {arming.kind === "rewind" ? (
+              <button className="cut" onClick={confirmRewind}>
+                Rewind
+              </button>
+            ) : null}
           </div>
         ) : null}
         {error !== null ? <p className="cx-error">{error}</p> : null}
@@ -979,7 +1110,7 @@ function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
           onValue={setDraft}
           onSend={send}
           onStop={stop}
-          placeholder={editing !== null ? "Say this instead…" : "Reply…"}
+          placeholder={arming?.kind === "edit" ? "Say this instead…" : arming?.kind === "fork" ? "Start the new conversation with…" : "Reply…"}
           {...(plan === null && thread === null ? { disabled: "This conversation cannot be continued." } : {})}
           {...mentions}
         />

@@ -2989,6 +2989,73 @@ export function useApp() {
         }
       },
       /**
+       * Delete everything past a point and carry on from there — see "task:rewind".
+       *
+       * The same task, so the selection stays; what changes is everything the detail and the
+       * conversation were drawing past the point, which the refresh below replaces.
+       */
+      rewindTask: async (taskId: string, seq: number, project?: string) => {
+        patch({ busy: true, error: null, stream: [] });
+        try {
+          await invoke("task:rewind", { taskId, at: seq, ...(project !== undefined ? { project } : {}) });
+          patch({ busy: false });
+          await Promise.all([refreshTasks(), refreshBoard(), refreshDetail(taskId, project)]);
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /**
+       * A second task sharing everything before a point — see "task:fork". The copy is what is
+       * running now, so the selection follows it, exactly as a re-run's does.
+       */
+      forkTask: async (taskId: string, seq: number, project?: string) => {
+        patch({ busy: true, error: null, stream: [] });
+        try {
+          const started = await invoke("task:fork", { taskId, at: seq, ...(project !== undefined ? { project } : {}) });
+          patch({ busy: false, selected: started.taskId, selectedProject: project ?? ref.current.selectedProject });
+          await Promise.all([refreshTasks(), refreshBoard(), refreshDetail(started.taskId, project)]);
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /**
+       * The Chat view's fork: a second conversation sharing everything before a message, with the
+       * message typed into it as its first own turn. Opened as the conversation being read, the way
+       * a new conversation is.
+       */
+      forkConversation: async (taskId: string, seq: number, message: string, overrides: ChatSettings = {}, project?: string): Promise<string | null> => {
+        const text = message.trim();
+        if (text === "") return null;
+        patch({ chat: { ...ref.current.chat, busy: true, error: null } });
+        try {
+          const forked = await invoke("task:fork", {
+            taskId,
+            at: seq,
+            message: text,
+            overrides,
+            ...(project !== undefined ? { project } : {}),
+          });
+          patch({ chat: { ...ref.current.chat, taskId: forked.taskId, project: project ?? ref.current.chat.project, busy: false, opening: null } });
+          actionsRef.current.select(forked.taskId, project);
+          await Promise.all([project === SHARED_SESSION ? refreshSharedTasks() : refreshTasks(), refreshBoard()]);
+          return forked.taskId;
+        } catch (e) {
+          patch({ chat: { ...ref.current.chat, busy: false, error: e instanceof Error ? e.message : String(e) } });
+          return null;
+        }
+      },
+      /** The Chat view's rewind: the conversation is cut before a message and stays the one being read. */
+      rewindConversation: async (taskId: string, seq: number, project?: string): Promise<void> => {
+        patch({ chat: { ...ref.current.chat, busy: true, error: null } });
+        try {
+          await invoke("task:rewind", { taskId, at: seq, ...(project !== undefined ? { project } : {}) });
+          patch({ chat: { ...ref.current.chat, busy: false } });
+          await Promise.all([project === SHARED_SESSION ? refreshSharedTasks() : refreshTasks(), refreshBoard(), refreshDetail(taskId, project)]);
+        } catch (e) {
+          patch({ chat: { ...ref.current.chat, busy: false, error: e instanceof Error ? e.message : String(e) } });
+        }
+      },
+      /**
        * Delete tasks for good. The confirmation happened in the UI; by here the only job left is
        * to not keep showing what no longer exists — a deleted task that is also the selection would
        * otherwise leave the panel describing a record the next fetch cannot find.

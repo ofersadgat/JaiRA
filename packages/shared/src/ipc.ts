@@ -1298,6 +1298,40 @@ export interface IpcContract {
   /** What resuming would do — see {@link ResumePlan}. Cheap enough to ask whenever the panel draws. */
   "task:resumable": { request: { taskId: string; project?: ProjectRef }; response: ResumePlan };
   /**
+   * Delete everything past a point in a task's journal, then carry on from there.
+   *
+   * `at` is a journal seq the view was handed: a chat message's turn (`ChatEditPoint.seq`), a
+   * state's entry or a transition (`ConversationTurn.seq`). Every instance entered before the point
+   * keeps everything it did; everything entered at or after it goes, with its conversations, and the
+   * task resumes through the ordinary load — a parent whose child was cut advances again, a state
+   * whose answer was cut asks again. Refused while the task runs. Nothing comes back.
+   */
+  "task:rewind": {
+    request: { taskId: string; at: number; project?: ProjectRef; interactions?: Record<string, JsonValue[]>; fake?: JsonValue };
+    response: { taskId: string };
+  };
+  /**
+   * A second task that shares everything up to a point — a COPY of what a rewind at `at` would
+   * keep, linked to this one by `parentTaskId`, with fresh ids throughout. The original is not
+   * touched.
+   *
+   * With `message`, the fork is a chat fork: the copy stands as its parent does and the message is
+   * sent into it as the next turn. Without one, it is a run fork: the copy resumes at once, and the
+   * machine picks up at the cut. Answers the new task's id either way.
+   */
+  "task:fork": {
+    request: {
+      taskId: string;
+      at: number;
+      message?: string;
+      overrides?: ChatSettings;
+      project?: ProjectRef;
+      interactions?: Record<string, JsonValue[]>;
+      fake?: JsonValue;
+    };
+    response: { taskId: string };
+  };
+  /**
    * Delete a task outright — its runs, its journal, its worktree, its file. Refused while it is
    * running (here or in another process); everything else may go, and none of it comes back.
    */
@@ -1717,6 +1751,8 @@ export const IPC_CHANNELS = [
   "task:rerun",
   "task:resume",
   "task:resumable",
+  "task:rewind",
+  "task:fork",
   "task:delete",
   "task:rename",
   "board:view",

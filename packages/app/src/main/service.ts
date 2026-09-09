@@ -48,6 +48,10 @@ import {
   releaseRevivedFailures,
   resetUserModules,
   releaseUnconsumedFailures,
+  rewindTask as cutTaskJournal,
+  forkTask as copyTaskPrefix,
+  taskOriginOf,
+  parseSessionRef,
   loadSnapshot,
   userModules,
   canonicalModulePath,
@@ -4180,6 +4184,32 @@ export class AppService {
     }
     const store = sessionStoreFor(project, { taskId: request.taskId });
     const rows = store.transcript(context.position);
+    /**
+     * Where each record's TURN begins in the journal — what a cut takes (see `cut.ts`).
+     *
+     * A chat turn is a transition on the chat instance (the first is its entry), and the record it
+     * dispatched is named by the settle that follows. So the journal is walked once: each instance's
+     * newest turn start is remembered, and a settle stamps its record with it.
+     */
+    const turnStarts = new Map<string, number>();
+    const seqOfRecord = new Map<string, number>();
+    /** By SEAT, for a chat turn: its settle names no record, only the position the call ended at. */
+    const seqOfSeat = new Map<string, number>();
+    for (const row of project.events.list(request.taskId)) {
+      if (row.instanceId === undefined) continue;
+      if (row.type === "instance.entered" || row.type === "transition.taken") turnStarts.set(row.instanceId, row.seq);
+      if (row.type !== "operation.dispatched" && row.type !== "operation.completed" && row.type !== "operation.failed") continue;
+      const start = turnStarts.get(row.instanceId);
+      if (start === undefined) continue;
+      if (row.operationId !== undefined && !seqOfRecord.has(row.operationId)) seqOfRecord.set(row.operationId, start);
+      const ended = parseSessionRef((row.event as { metrics?: { sessionRef?: string } }).metrics?.sessionRef ?? "");
+      // The record sits one back from where its call ended — `stateSessions` makes the same reading.
+      if (ended !== undefined && !seqOfSeat.has(`${ended.id}@${ended.seq - 1}`)) seqOfSeat.set(`${ended.id}@${ended.seq - 1}`, start);
+    }
+    const origin = (() => {
+      const row = project.runtime.get(request.taskId);
+      return row === undefined ? undefined : taskOriginOf(project, row);
+    })();
 
     const turns: SessionTurn[] = [];
     const points: ChatEditPoint[] = [];
@@ -4200,7 +4230,10 @@ export class AppService {
       turns.push(...said);
       // The run's own call is not a message somebody typed — editing it means running the task
       // again with different inputs, which is a different verb in a different place.
-      if (i > 0) points.push({ turn: at, at: `${sessionOf(context.position)}@${row.seq}` });
+      if (i > 0) {
+        const seq = seqOfRecord.get(row.recordId) ?? seqOfSeat.get(`${row.sessionId}@${row.seq}`);
+        points.push({ turn: at, at: `${sessionOf(context.position)}@${row.seq}`, ...(seq !== undefined ? { seq } : {}) });
+      }
       // A TURN index is record-relative, so it shifts onto the thread by where that record started —
       // the same arithmetic the two index families below do. A call id needs no shifting: it is the
       // provider's own id and is unique across the whole thread, which is why it is not a position.
@@ -4257,7 +4290,124 @@ export class AppService {
       session,
       points,
       ...(forks.length > 0 ? { forks } : {}),
+      ...(origin !== undefined ? { origin } : {}),
     };
+  }
+
+  /**
+   * Delete everything past a point in a task's journal and carry on from there ("task:rewind").
+   *
+   * The deletion is `cut.ts`'s; what this adds is the boundary a service owns. A running task is
+   * refused — here, and by the same test `deleteTask` makes for a run driven by another process —
+   * and a question parked on the task is dismissed, because it was asked by a state that no longer
+   * ran. Then the ordinary resume: the truncated journal loads exactly as a crash does, and the
+   * machine picks up at the cut.
+   */
+  async rewindTask(request: {
+    taskId: string;
+    at: number;
+    project?: string;
+    interactions?: Record<string, JsonValue[]>;
+    fake?: JsonValue;
+  }): Promise<{ taskId: string }> {
+    const session = this.session(request.project);
+    const { taskId } = request;
+    if (session.live.has(taskId) || session.project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
+      throw this.refusal("run", `task '${taskId}' is running — stop it before rewinding it`);
+    }
+    const before = session.project.runtime.get(taskId);
+    if (before === undefined) throw this.refusal("run", `unknown task '${taskId}'`);
+    // The parked question, if any, goes with the state that asked it — dismissed, not answered.
+    for (const [requestId, owner] of session.requestTask) {
+      if (owner === taskId) session.hub.reject(requestId, "the task was rewound to before this question");
+    }
+    session.questions.dismissFor(taskId);
+    const cut = cutTaskJournal(session.project, taskId, request.at);
+    this.log({
+      level: "info",
+      source: "run",
+      message: `rewound ${taskId} to before event ${request.at}: ${cut.events} event(s) and ${cut.records} record(s) deleted`,
+      project: session.key,
+      taskId,
+    });
+    this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+    // Only a machine with something left to do is resumed. A cut inside the turns typed AFTER a run
+    // finished — the chat case — leaves the machine exactly as it ended, and a resume of that
+    // would be a run that does nothing; the task goes back to standing as it did.
+    const plan = this.resumable(taskId, request.project);
+    if (plan.frontier.length === 0) {
+      if (before.outcome !== undefined) session.project.runtime.endTask(taskId, before.outcome, Date.now());
+      session.project.runtime.setStatus(taskId, before.status, Date.now());
+      this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+      return { taskId };
+    }
+    return this.resumeTask({
+      taskId,
+      ...(request.project !== undefined ? { project: request.project } : {}),
+      ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
+      ...(request.fake !== undefined ? { fake: request.fake } : {}),
+    });
+  }
+
+  /**
+   * A second task that shares everything up to a point ("task:fork") — see `cut.ts`.
+   *
+   * A run fork resumes at once: there is nothing to type, and the fork's first act is the
+   * machine's. A chat fork (with a message) stands as its parent does and takes the message as its
+   * next turn — sent, not awaited, so the caller gets the new conversation to open while the turn
+   * is answered into it, exactly as a `chat:send` into an open conversation is watched.
+   */
+  async forkTask(request: {
+    taskId: string;
+    at: number;
+    message?: string;
+    overrides?: ChatSettings;
+    project?: string;
+    interactions?: Record<string, JsonValue[]>;
+    fake?: JsonValue;
+  }): Promise<{ taskId: string }> {
+    const session = this.session(request.project);
+    const { taskId } = request;
+    if (session.live.has(taskId) || session.project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
+      throw this.refusal("run", `task '${taskId}' is running — stop it before forking it`);
+    }
+    const message = request.message?.trim();
+    const fork = copyTaskPrefix(session.project, taskId, request.at, { standing: message !== undefined && message !== "" ? "asIs" : "startable" });
+    this.log({
+      level: "info",
+      source: "run",
+      message: `forked ${taskId} before event ${request.at} as ${fork.taskId}`,
+      project: session.key,
+      taskId: fork.taskId,
+    });
+    this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+    if (message === undefined || message === "") {
+      return this.resumeTask({
+        taskId: fork.taskId,
+        ...(request.project !== undefined ? { project: request.project } : {}),
+        ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
+        ...(request.fake !== undefined ? { fake: request.fake } : {}),
+      });
+    }
+    const host = this.chatHostOf(fork.taskId, request.project);
+    if (host === null) throw this.refusal("run", `the fork of '${taskId}' holds no conversation to continue`);
+    void this.sendChatMessage({
+      taskId: fork.taskId,
+      instanceId: host,
+      message,
+      ...(request.overrides !== undefined ? { overrides: request.overrides } : {}),
+      ...(request.project !== undefined ? { project: request.project } : {}),
+      ...(request.fake !== undefined ? { fake: request.fake } : {}),
+    }).catch((e: unknown) => {
+      this.log({
+        level: "error",
+        source: "run",
+        message: `the fork's first message failed: ${e instanceof Error ? e.message : String(e)}`,
+        project: session.key,
+        taskId: fork.taskId,
+      });
+    });
+    return { taskId: fork.taskId };
   }
 
   /**

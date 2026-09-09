@@ -605,6 +605,8 @@ export default function App(): JSX.Element {
     onRename: actions.renameTask,
     onDelete: actions.deleteTasks,
     onCancelRun: actions.cancelTask,
+    onRewind: actions.rewindConversation,
+    onFork: actions.forkConversation,
   };
 
   /**
@@ -1330,6 +1332,8 @@ export default function App(): JSX.Element {
     // place, rather than copying one that has nothing to copy.
     onRerun: (taskId: string) => void startAgain(taskId),
     onResume: (taskId: string) => void actions.resumeTask(taskId, state.selectedProject ?? undefined),
+    onRewind: (taskId: string, seq: number) => void actions.rewindTask(taskId, seq, state.selectedProject ?? undefined),
+    onFork: (taskId: string, seq: number) => void actions.forkTask(taskId, seq, state.selectedProject ?? undefined),
     onSaveConfig: actions.saveConfig,
     validateSchema: actions.validateSchema,
     stateSlots: actions.stateSlots,

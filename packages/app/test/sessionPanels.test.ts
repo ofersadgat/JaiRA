@@ -616,3 +616,62 @@ describe("what a bookmark can land on", () => {
     expect(landings(html)).toEqual(parentOf([{ id: 2, from: 0, to: 10 }]).children.map(keyOfNode));
   });
 });
+
+/**
+ * Rewind and fork on the grey — see `cut.ts` and `CutOffer`.
+ *
+ * The entered row is the handle: every state has exactly one, which a letterhead (absent on a
+ * one-state sheet) and a gutter (absent on a question) cannot say. Arming a rewind is drawn on the
+ * rail — the knot rings, what follows fades under one counted line — and a fork's origin is a seam
+ * placed by the clock among the rows the copy inherited.
+ */
+describe("rewind and fork on the grey", () => {
+  const entered = (seq: number, at: number, id: number, key: string): BandNote =>
+    note({ seq, at, kind: "entered", stateId: `s${id}`, instanceId: String(id), path: key, text: "" });
+  const twoStates = (): { parent: InstanceNode; refs: SessionRef[]; notes: BandNote[] } => ({
+    parent: parentOf([
+      { id: 2, from: 10, to: 20 },
+      { id: 3, from: 30, to: 40 },
+    ]),
+    refs: [ref(2, "planning", 10, 20), ref(3, "review", 30, 40)],
+    notes: [entered(5, 9, 2, "k2"), entered(15, 29, 3, "k3")],
+  });
+
+  it("offers the two verbs on an entered row only when a host has them to offer", () => {
+    const { parent, refs, notes } = twoStates();
+    const quiet = drawWith(parent, refs, { notes });
+    expect(quiet).not.toContain("Rewind to before");
+    const offered = drawWith(parent, refs, { notes, onCut: { rewind: () => undefined, fork: () => undefined } } as never);
+    expect(offered).toContain('aria-label="Rewind to before k3"');
+    expect(offered).toContain('aria-label="Fork before k3"');
+    // Once per entered row — the handle is the row, and a failure note is not one.
+    expect(offered.match(/aria-label="Rewind to before/g)).toHaveLength(2);
+  });
+
+  it("draws an armed rewind as a ring on the knot, a counted line, and everything after it faded", () => {
+    const { parent, refs, notes } = twoStates();
+    const html = drawWith(parent, refs, { notes, armed: { seq: 15, at: 29 } } as never);
+    expect(html).toContain("1 state below this line will be deleted");
+    // The entry's own row keeps its words and takes the ring; the sheet it opened is what fades.
+    expect(html).toContain("rail-halo cut");
+    expect(html.match(/rail-row doomed/g)?.length ?? 0).toBeGreaterThanOrEqual(1);
+    const cut = html.indexOf("sb-cut");
+    expect(cut).toBeGreaterThan(html.indexOf("said by #2"));
+    expect(cut).toBeLessThan(html.indexOf("said by #3"));
+    // Nothing before the cut is touched.
+    expect(html.indexOf("rail-row doomed")).toBeGreaterThan(html.indexOf("said by #2"));
+  });
+
+  it("places a fork's origin seam after the rows the copy inherited", () => {
+    const { parent, refs, notes } = twoStates();
+    const html = drawWith(parent, refs, {
+      notes,
+      origin: { taskId: "t-parent", title: "The parent", at: 40, boundary: 12, boundaryAt: 25, label: "before k3" },
+    } as never);
+    expect(html).toContain("forked from:");
+    expect(html).toContain("The parent, before k3");
+    const seam = html.indexOf("origin-mark");
+    expect(seam).toBeGreaterThan(html.indexOf("said by #2"));
+    expect(seam).toBeLessThan(html.indexOf("said by #3"));
+  });
+});

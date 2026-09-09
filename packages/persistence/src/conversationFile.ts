@@ -105,6 +105,8 @@ export interface SessionRow {
   provider?: string | null;
   /** The conversation's current handle; NULL on a fork until it earns one. Absent on legacy lines. */
   provider_session_id?: string | null;
+  /** Where the remote is to be cut before it is next used  set by a rewind or a fork copy (migration 17). */
+  cut_at?: string | null;
   created_at: number;
 }
 
@@ -115,11 +117,25 @@ export interface NameRow {
   session_id: string;
 }
 
+/**
+ * A row that is GONE  a rewind deleted it, or the branch it sat on (see `cut.ts`).
+ *
+ * The append-only file cannot take a line back, so it says so with one more: replay folds a
+ * tombstone by dropping the key it names, the same last-wins rule every other line plays by. Bytes
+ * stay in the file; the table they replay to does not have the row.
+ */
+export interface TombstoneRow {
+  record_id?: string;
+  session_id?: string;
+  task_id?: string | null;
+}
+
 export type ConversationEntry =
   | { kind: "record"; row: RecordRow }
   | { kind: "position"; row: PositionRow }
   | { kind: "session"; row: SessionRow }
-  | { kind: "name"; row: NameRow };
+  | { kind: "name"; row: NameRow }
+  | { kind: "tombstone"; row: TombstoneRow };
 
 // --- dialects ------------------------------------------------------------------
 
@@ -159,12 +175,14 @@ const TYPE_OF: Record<ConversationEntry["kind"], string> = {
   position: "jaira.position",
   session: "jaira.session",
   name: "jaira.name",
+  tombstone: "jaira.tombstone",
 };
 const KIND_OF: Record<string, ConversationEntry["kind"]> = {
   "jaira.record": "record",
   "jaira.position": "position",
   "jaira.session": "session",
   "jaira.name": "name",
+  "jaira.tombstone": "tombstone",
 };
 
 /** A line id that does not need a random source — the file's own position is already unique. */
@@ -377,6 +395,12 @@ export function replayConversations(db: JairaDb, dir: string): number | undefine
         positions.set(`${entry.row.session_id} ${entry.row.seq}`, entry.row);
       } else if (entry.kind === "name") {
         names.set(entry.row.task_id + " " + entry.row.name, entry.row);
+      } else if (entry.kind === "tombstone") {
+        // Last wins, so a tombstone after the row it names takes the row out of the fold. A
+        // current-format record line keys with no run and attempt 1  the shape every line since
+        // migration 16 has, and the only shape a rewind ever deletes.
+        if (entry.row.record_id !== undefined) records.delete(`${entry.row.task_id ?? ""}  ${entry.row.record_id} 1`);
+        if (entry.row.session_id !== undefined) sessions.delete(entry.row.session_id);
       } else {
         sessions.set(entry.row.id, entry.row);
       }
@@ -447,11 +471,11 @@ export function replayConversations(db: JairaDb, dir: string): number | undefine
   db.transaction(() => {
     // Lineage first: a position's session must exist before anything reads the chain it is on.
     const session = db.prepare(
-      `INSERT OR REPLACE INTO sessions (id, parent, cursor, provider, provider_session_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO sessions (id, parent, cursor, provider, provider_session_id, cut_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const row of sessions.values()) {
-      session.run(row.id, row.parent, row.cursor, row.provider ?? null, row.provider_session_id ?? null, row.created_at);
+      session.run(row.id, row.parent, row.cursor, row.provider ?? null, row.provider_session_id ?? null, row.cut_at ?? null, row.created_at);
       rows++;
     }
     const record = db.prepare(

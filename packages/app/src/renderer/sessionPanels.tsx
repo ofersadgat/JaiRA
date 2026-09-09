@@ -44,7 +44,7 @@ import { Icon } from "./icons";
 import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
 import { clockOf, durationOf } from "./transcriptView";
 import { signatureOf } from "./transcript";
-import type { InstanceNode } from "@jaira/shared/browser";
+import type { InstanceNode, TaskOrigin } from "@jaira/shared/browser";
 import { StateBlock, StateHeader, headerToneOf, surfaceKindOf } from "./stateSurface";
 import {
   forksOf,
@@ -839,6 +839,60 @@ function Band({
 }
 
 /**
+ * What a run offers about a state's ENTRY — the two verbs of `cut.ts`, on the row that is the
+ * entry (see {@link NoteRow}) and on the knot beside it.
+ *
+ * Handed the note rather than a seq, because the host wants the whole row: its position for the
+ * channel, its clock for what to fade, its path for the sentence.
+ */
+export interface CutOffer {
+  /** Arm a rewind to before this state. The host confirms it in the strip. */
+  rewind: (note: BandNote) => void;
+  /** Fork before this state — a new task that keeps everything before it. Starts at once. */
+  fork: (note: BandNote) => void;
+}
+
+/** The rewind a host has ARMED: which entry, and when it happened — what the page fades from. */
+export interface ArmedCut {
+  seq: number;
+  at: number;
+}
+
+/**
+ * Where a forked task CAME FROM — the same torn edge and chip a divided conversation gets
+ * (`ForkMark`), with a different sentence: there is nothing to choose between here, only somewhere
+ * to go back to. Drawn between the copied part and the task's own, in whichever view.
+ */
+export function OriginMark({ origin, onGo }: { origin: TaskOrigin; onGo?: (() => void) | undefined }): JSX.Element {
+  const from = origin.title ?? "a task since deleted";
+  return (
+    <div className="fork-mark fork-torn origin-mark" role="note">
+      <Zig />
+      <button
+        type="button"
+        className="fork-chip"
+        title={onGo === undefined ? `forked from ${from}, ${origin.label}` : `go to ${from}, where this was forked from`}
+        {...(onGo === undefined ? { disabled: true } : { onClick: onGo })}
+      >
+        <Icon name="choice" />
+        <span className="fork-kind">forked from:</span>
+        <span className="fork-side ellip">
+          {from}, {origin.label}
+        </span>
+        {onGo !== undefined ? <Icon name="chevron" /> : null}
+      </button>
+      <Zig />
+    </div>
+  );
+}
+
+/** What a note's state is CALLED in a sentence about it: its path from the module being read, or its id. */
+export function cutNameOf(note: BandNote, root: string): string {
+  const where = pathFrom(note.path, root);
+  return where !== "" ? where : (note.stateId?.split("/").pop() ?? "this state");
+}
+
+/**
  * One failure, on the grey between the panels.
  *
  * Deliberately not a sheet and not a card. A panel is a conversation, and this is the opposite of
@@ -846,7 +900,7 @@ function Band({
  * is drawn as an annotation on the background the panels sit on: the same place a note would be
  * written in the margin of a printed transcript, at the point in the stack where it happened.
  */
-function NoteRow({ note, root }: { note: BandNote; root: string }): JSX.Element {
+function NoteRow({ note, root, onCut }: { note: BandNote; root: string; onCut?: CutOffer | undefined }): JSX.Element {
   // Moving is not going wrong: a forking-path glyph and the ordinary text colour, against the alert
   // and `--bad` a failure gets. Same shape and same column either way, because they are the same KIND
   // of thing — a fact about a state, written where the state has no page of its own — and reading a
@@ -877,6 +931,37 @@ function NoteRow({ note, root }: { note: BandNote; root: string }): JSX.Element 
       {note.kind === "entered" || note.text.length === 0 ? null : (
         <span className="sb-note-text">{note.kind === "blocked" ? `: ${note.text}` : note.text}</span>
       )}
+      {/* The two verbs of a cut, on the row that IS the entry — every state has exactly one, which
+          is what a letterhead (absent on a one-state sheet) and a gutter (absent on a question)
+          cannot say. Revealed the way the message rail is: a row at rest is its three words. */}
+      {onCut !== undefined && moved ? (
+        <span className="ts-rail sb-note-rail">
+          <button
+            type="button"
+            className="ts-act"
+            title={`Rewind to before ${cutNameOf(note, root)} — it and everything after it are deleted, and the run enters it again`}
+            aria-label={`Rewind to before ${cutNameOf(note, root)}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCut.rewind(note);
+            }}
+          >
+            <Icon name="rewind" />
+          </button>
+          <button
+            type="button"
+            className="ts-act"
+            title={`Fork before ${cutNameOf(note, root)} — a new task that keeps everything before it and starts by entering it`}
+            aria-label={`Fork before ${cutNameOf(note, root)}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCut.fork(note);
+            }}
+          >
+            <Icon name="choice" />
+          </button>
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -931,9 +1016,21 @@ export function SessionBandsView({
   focus,
   palette,
   empty,
+  onCut,
+  armed,
+  origin,
 }: {
   bands: readonly SessionBand[];
   render: (piece: SessionPiece) => ReactNode;
+  /** The two verbs of a cut, offered on every entered row and knot — see {@link CutOffer}. */
+  onCut?: CutOffer | undefined;
+  /**
+   * A rewind the host has ARMED: the entry's knot takes the danger ring, and every row past it
+   * fades under one counted line, lanes included, so the drawing says the path ends here.
+   */
+  armed?: ArmedCut | undefined;
+  /** Where this task was forked from — drawn as a seam at the boundary, see {@link OriginMark}. */
+  origin?: (TaskOrigin & { onGo?: (() => void) | undefined }) | undefined;
   /**
    * The instance whose QUESTION is on offer right now — passed through to the letterhead.
    *
@@ -1060,16 +1157,30 @@ export function SessionBandsView({
    */
   const steps: RailStep[] = [];
   const nodes: ReactNode[] = [];
-  const add = (step: RailStep, node: ReactNode): void => {
+  /** Each row's clock, for the two things placed among rows by time: an armed cut, and the origin seam. */
+  const ats: number[] = [];
+  /** The entered note behind each row that is one, by row index and by lane key — what a cut names. */
+  const noteRows = new Map<number, BandNote>();
+  const laneNotes = new Map<string, BandNote>();
+  const add = (step: RailStep, node: ReactNode, at: number): void => {
     steps.push(step);
     nodes.push(node);
+    ats.push(at);
   };
+  const [menu, setMenu] = useState<MenuAnchor | null>(null);
   /** Where a panel's state sits. The address is stamped from the run's root, the same basis a note's
    *  path has, so both are trimmed to the module being read the same way. */
   const atPiece = (piece: SessionPiece): string[] =>
     segmentsFrom((piece.node.address ?? []).map((step) => step.childKey).join("/"), root);
   const addNotes = (list: readonly BandNote[]): void => {
-    for (const note of list) add(stepOfNote(note, root), <NoteRow note={note} root={root} />);
+    for (const note of list) {
+      const step = stepOfNote(note, root);
+      if (note.kind === "entered" || note.kind === "transition") {
+        noteRows.set(steps.length, note);
+        laneNotes.set(step.key, note);
+      }
+      add(step, <NoteRow note={note} root={root} {...(onCut !== undefined ? { onCut } : {})} />, note.at);
+    }
   };
 
   for (const [i, band] of bands.entries()) {
@@ -1104,9 +1215,73 @@ export function SessionBandsView({
         scope={scope}
         render={render}
       />,
+      band.startedAt,
     );
   }
   addNotes(placed[bands.length]!);
+
+  /**
+   * The ARMED cut, drawn on the rail.
+   *
+   * The entry's own row keeps its words and takes the ring; the counted line goes right under it,
+   * and everything after fades — the sheet the state opened, the states after it, their lanes. By
+   * the clock when the entry is not a row on this page (a cut armed from the index of a state a
+   * fold has hidden), which is the same order the journal has.
+   */
+  let cutRow = -1;
+  let doomedFrom = -1;
+  if (armed !== undefined) {
+    const own = [...noteRows].find(([, note]) => note.seq === armed.seq)?.[0];
+    const first = own ?? ats.findIndex((at) => at >= armed.at);
+    if (first >= 0) {
+      const states = notes.filter((note) => note.kind === "entered" && note.at >= armed.at).length;
+      const line = (
+        <div className="sb-cut" role="note">
+          {states} state{states === 1 ? "" : "s"} below this line will be deleted
+        </div>
+      );
+      const after = own !== undefined ? first + 1 : first;
+      const beside = steps[first]!;
+      steps.splice(after, 0, { key: `cut${armed.seq}`, stateId: "", at: own !== undefined && beside.opens ? beside.at : beside.opens ? beside.at.slice(0, -1) : beside.at, opens: false });
+      nodes.splice(after, 0, line);
+      ats.splice(after, 0, armed.at);
+      cutRow = own !== undefined ? first : -1;
+      doomedFrom = after + 1;
+    }
+  }
+  /**
+   * The seam a fork carries: after the last row the copy inherited. Placed by the clock, because
+   * the copied rows keep the parent's clocks and the task's own come later — the same coordinate
+   * the origin reports (`boundaryAt`).
+   */
+  if (origin !== undefined) {
+    let k = 0;
+    while (k < ats.length && ats[k]! <= origin.boundaryAt) k += 1;
+    steps.splice(k, 0, { key: "origin", stateId: "", at: [], opens: false });
+    nodes.splice(k, 0, <OriginMark origin={origin} {...(origin.onGo !== undefined ? { onGo: origin.onGo } : {})} />);
+    ats.splice(k, 0, origin.boundaryAt);
+    if (cutRow >= k) cutRow += 1;
+    if (doomedFrom > k) doomedFrom += 1;
+  }
+  const rowClass = (i: number): string | undefined =>
+    i === cutRow ? "is-cut" : doomedFrom >= 0 && i >= doomedFrom ? "doomed" : undefined;
+
+  /** The knot's menu: the same two verbs the entered row offers, for a reader pointing at the lane. */
+  const onContext =
+    onCut === undefined
+      ? undefined
+      : (key: string, point: { x: number; y: number }): void => {
+          const note = laneNotes.get(key);
+          if (note === undefined) return;
+          const name = cutNameOf(note, root);
+          setMenu({
+            ...point,
+            items: [
+              { label: `Rewind to before ${name}`, note: "deletes it and everything after", onSelect: () => onCut.rewind(note) },
+              { label: `Fork before ${name}`, note: "a new task from here", onSelect: () => onCut.fork(note) },
+            ],
+          });
+        };
 
   return (
     <div className="sb" ref={sheets}>
@@ -1116,7 +1291,10 @@ export function SessionBandsView({
         renderStep={(i) => nodes[i]}
         {...(bands.some((band) => band.segments.length > 1) ? { className: "rail-wide" } : {})}
         {...(palette !== undefined ? { palette } : {})}
+        {...(armed !== undefined || origin !== undefined ? { rowClass } : {})}
+        {...(onContext !== undefined ? { onContext } : {})}
       />
+      {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
     </div>
   );
 }
