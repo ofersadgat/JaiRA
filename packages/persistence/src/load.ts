@@ -12,10 +12,14 @@
  *
  * ## The fold is by INSTANCE ID, across runs
  *
- * A continuing run re-states `instance.entered` for the live spine — with the SAME ids — and
- * journals nothing that already happened. So folding every run's events into one table keyed by id
- * yields one tree: a re-stated entry merges into the instance it continues, and history entered
- * once stays entered once. The machine's root is the task's NEWEST parentless entry — a task is one
+ * A continuing run journals nothing that already happened — a loaded instance is not entered again.
+ * It USED to re-state `instance.entered` for the live spine (same ids) so a resume's own journal
+ * could stand alone, from when a resume was a separate run; after runs collapsed into one journal
+ * per task that meant a fresh "entered" per live state on every reload of a waiting task, and hw
+ * stopped emitting it (2026-09-08). Journals written before then still carry the re-statements, and
+ * older history holds several trees from in-place restarts, so folding every event into one table
+ * keyed by id is still what yields one tree: a re-stated entry merges into the instance it
+ * continues, and history entered once stays entered once. The machine's root is the task's NEWEST parentless entry — a task is one
  * machine now, so there is normally exactly one, and where history holds several trees (an
  * in-place restart) the newest attempt is the task's own. `task_runtime.root_instance_id`
  * (stamped by migration 16 while run boundaries still existed) wins where present.
@@ -99,8 +103,10 @@ interface FoldNode {
   id: string;
   stateId: string;
   childKey?: string;
+  /** The element of a fanned-out mount this instance is — see `InstanceNode.element`. */
+  element?: number;
   inputs: Record<string, JsonValue>;
-  /** In FIRST-entry order — a re-stated entry merges rather than appending. */
+  /** In FIRST-entry order — a re-stated entry (older journals) merges rather than appending. */
   children: FoldNode[];
   terminated?: { outcome: string; failure?: Failure; at: number };
   index: number;
@@ -278,8 +284,8 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
   // --- fold the journal into one instance table, keyed by durable id -------
   const nodes = new Map<string, FoldNode>();
   /**
-   * The LAST first-time parentless entry — the machine. One task normally has exactly one (a
-   * continuation re-states the same root, which merges above rather than landing here), and where
+   * The LAST first-time parentless entry — the machine. One task normally has exactly one (an older
+   * continuation re-stated the same root, which merges above rather than landing here), and where
    * history holds several — an in-place restart, before re-runs minted tasks — the newest attempt
    * is the task's machine and the older trees are history it does not stand on.
    */
@@ -303,9 +309,10 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
         if (!event.instanceId.includes("-")) legacy = true;
         const existing = nodes.get(event.instanceId);
         if (existing !== undefined) {
-          // The live spine re-stated by a continuing run, or a revived instance re-entered: the
-          // structure is already known, and the entry means it is LIVE again. Deliberately not an
-          // advancement of the parent — a re-statement answers nothing.
+          // The live spine re-stated by a continuing run (journals written before hw stopped doing
+          // that) or a revived instance re-entered: the structure is already known, and the entry
+          // means it is LIVE again. Deliberately not an advancement of the parent — a re-statement
+          // answers nothing.
           delete existing.terminated;
           break;
         }
@@ -313,6 +320,7 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
           id: event.instanceId,
           stateId: event.stateId,
           ...(event.childKey !== undefined ? { childKey: event.childKey } : {}),
+          ...(event.element !== undefined ? { element: event.element } : {}),
           inputs: (event.inputs ?? {}) as Record<string, JsonValue>,
           children: [],
           index: 0,
@@ -483,17 +491,19 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
 
   const emit = (node: FoldNode, live: boolean, occurrence: number, prefix: InstanceAddress): LoadedInstance => {
     const address: InstanceAddress =
-      node.childKey === undefined ? prefix : [...prefix, { childKey: node.childKey, occurrence }];
+      node.childKey === undefined
+        ? prefix
+        : [...prefix, { childKey: node.childKey, occurrence, ...(node.element !== undefined ? { element: node.element } : {}) }];
     const children: LoadedInstance[] = [];
     const unanswered: Array<{ key: string; at: number }> = [];
     // Occurrence counts entries under one key IN THIS PARENT, superseded included — a loop's second
-    // iteration is occurrence 1 whether or not the first was cleared.
+    // iteration is occurrence 1 whether or not the first was cleared. The ELEMENTS of one fan-out
+    // entry share an occurrence (`occurrenceOf`): a batch is one entry, however many it ran.
     const seen = new Map<string, number>();
     let anyChildLive = false;
     for (const child of node.children) {
       const key = child.childKey ?? "";
-      const childOccurrence = seen.get(key) ?? 0;
-      seen.set(key, childOccurrence + 1);
+      const childOccurrence = occurrenceOf(seen, key, child.element);
       // A sequence reset disowned it: history whose entry still counts, and nothing to load.
       if (child.superseded) continue;
       // The revival rule (see the header): still-running continues, and an unhandled non-success
@@ -538,6 +548,7 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
       stateId: node.stateId,
       ...(node.childKey !== undefined ? { childKey: node.childKey } : {}),
       occurrence,
+      ...(node.element !== undefined ? { element: node.element } : {}),
       inputs: node.inputs as Record<string, ResolvedValue>,
       index: node.index,
       iteration: node.iteration,
@@ -639,5 +650,22 @@ function isLlmPayload(value: JsonValue, op: "prompt" | "function"): boolean {
  * `#`, neither reserved in a child key). Kept from the replay module for the callers that log one.
  */
 export function addressKey(address: InstanceAddress): string {
-  return address.map((step) => `${step.childKey}#${step.occurrence}`).join("/");
+  return address.map((step) => `${step.childKey}#${step.occurrence}${step.element === undefined ? "" : `[${step.element}]`}`).join("/");
+}
+
+/**
+ * The occurrence of the next entry under `key`, counting it — with one rule for a fan-out's elements
+ * (WORKFLOWS.md §6.2): the batch is ONE entry, so its first element takes a fresh occurrence and the
+ * rest share it. Entries arrive in journal order, so "the rest" are the elements that follow with a
+ * position above 0; a new batch begins the moment a position 0 appears again.
+ *
+ * Shared by the fold and the projection because the two must agree to the number: an address the
+ * projection stamps is compared against an address the load computed, and a walk that counted the
+ * elements as passes would put the second element in a different place than the engine did.
+ */
+export function occurrenceOf(seen: Map<string, number>, key: string, element: number | undefined): number {
+  if (element !== undefined && element > 0) return Math.max(0, (seen.get(key) ?? 1) - 1);
+  const occurrence = seen.get(key) ?? 0;
+  seen.set(key, occurrence + 1);
+  return occurrence;
 }

@@ -127,8 +127,10 @@ describe("the operation one message runs as", () => {
     // The whole of continue-or-fork: §3 appends when the position is still the head and forks when
     // it is not. Setting `fork` would force a branch even where an append was available.
     const { environment } = chatOperationOf(plan, { message: "why did that fail?", session: { id: "s@14" } });
+    // `fork` is a field of the session REQUEST now, not of the environment: the ref is all that is
+    // set, and a ref alone continues when it can and forks when it must.
     expect(environment.session).toEqual({ id: "s@14" });
-    expect(environment.fork).toBeUndefined();
+    expect((environment.session as { fork?: boolean }).fork).toBeUndefined();
   });
 
   it("uses the message verbatim as the prompt", () => {

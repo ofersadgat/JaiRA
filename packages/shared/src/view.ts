@@ -59,6 +59,12 @@ export interface OperationView {
 export interface AddressStep {
   childKey: string;
   occurrence: number;
+  /**
+   * The element position under a mount that FANS OUT (`each: true` on one of its wires,
+   * WORKFLOWS.md §6.2). The elements of one entry share an occurrence and differ here; an ordinary
+   * entry has none, and none is not 0.
+   */
+  element?: number;
 }
 
 /** Where an instance sits in the workflow — the root is the empty address. See {@link AddressStep}. */
@@ -71,6 +77,13 @@ export interface InstanceNode {
   /** Key in the parent's `children` map — distinct from `stateId`, since one
    *  state file can be mounted under several keys. */
   childKey?: string;
+  /**
+   * Which element of a fanned-out mount this is (WORKFLOWS.md §6.2) — what tells the third element
+   * of a batch from the third pass of a loop, which are otherwise the same thing in a journal: one
+   * more entry under one key in one parent. A pass supersedes the one before it; an element sits
+   * beside its siblings. Absent for an ordinary entry.
+   */
+  element?: number;
   parentInstanceId?: string;
   status: InstanceStatus;
   /** Transitions taken so far (SPEC §3.4) — every one, not just a loop's passes. */

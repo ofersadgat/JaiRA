@@ -17,6 +17,7 @@
  */
 import type { EngineEvent } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
+import { occurrenceOf } from "./load";
 import { resolveLabel } from "./runLabel";
 import type {
   BlockedChild,
@@ -111,10 +112,10 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
     const at = atMs?.[i] ?? 0;
     switch (event.type) {
       case "instance.entered": {
-        // A RE-STATED entry — the live spine of a continuation, or a revived failure re-entering
-        // (Identity and Resume §04) — merges into the instance it continues rather than growing a
-        // twin: the id is durable, the structure is already known, and the entry means the machine
-        // is IN this instance again.
+        // A RE-STATED entry — the live spine of a continuation in a journal written before hw
+        // stopped re-stating it, or a revived failure re-entering (Identity and Resume §04) — merges
+        // into the instance it continues rather than growing a twin: the id is durable, the
+        // structure is already known, and the entry means the machine is IN this instance again.
         const existing = byId.get(event.instanceId);
         if (existing !== undefined) {
           existing.status = "running";
@@ -125,6 +126,7 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
           instanceId: event.instanceId,
           stateId: event.stateId,
           ...(event.childKey !== undefined ? { childKey: event.childKey } : {}),
+          ...(event.element !== undefined ? { element: event.element } : {}),
           ...(event.parentInstanceId !== undefined ? { parentInstanceId: event.parentInstanceId } : {}),
           status: "running",
           index: 0,
@@ -143,7 +145,11 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
         if (parent) {
           // A re-entered child key (loop iteration) supersedes the previous
           // instance under that key even without an explicit reset event.
-          if (node.childKey !== undefined) {
+          //
+          // Not so for the elements of a fan-out (WORKFLOWS.md §6.2), which sit BESIDE each other:
+          // the batch's first element is the entry and supersedes what came before under the key,
+          // and every later element joins it rather than replacing it.
+          if (node.childKey !== undefined && !(node.element !== undefined && node.element > 0)) {
             for (const sibling of parent.children) {
               if (sibling.childKey === node.childKey && sibling.instanceId !== node.instanceId) {
                 sibling.superseded = true;
@@ -174,9 +180,9 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
        * outputs each call a function emits three of these and no `started` at all — which is exactly
        * the state that used to draw as "this ran nothing".
        *
-       * Appended in journal order and DEDUPED by id: a resumed run re-states the spine, so the same
-       * dispatch can arrive twice, and two rows for one call would show the reader the same function
-       * twice with the same answer.
+       * Appended in journal order and DEDUPED by id: a resumed run re-issues a cut call under the
+       * same scoped id, so the same dispatch can arrive twice, and two rows for one call would show
+       * the reader the same function twice with the same answer.
        */
       case "operation.dispatched": {
         const node = byId.get(event.instanceId);
@@ -290,9 +296,8 @@ function stampAddresses(roots: readonly InstanceNode[], prefix: InstanceAddress 
   return roots.map((node) => {
     let address = prefix;
     if (node.childKey !== undefined) {
-      const occurrence = seen.get(node.childKey) ?? 0;
-      seen.set(node.childKey, occurrence + 1);
-      address = [...prefix, { childKey: node.childKey, occurrence }];
+      const occurrence = occurrenceOf(seen, node.childKey, node.element);
+      address = [...prefix, { childKey: node.childKey, occurrence, ...(node.element !== undefined ? { element: node.element } : {}) }];
     }
     return { ...node, address, children: stampAddresses(node.children, address) };
   });

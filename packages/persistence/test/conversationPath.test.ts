@@ -50,6 +50,20 @@ function turnsOf(events: EngineEvent[]) {
 }
 
 describe("a turn's mount path", () => {
+  it("spells an element of a fan-out as key[i], the way the engine addresses it", () => {
+    const element = (id: string, element: number): EngineEvent => ({
+      type: "instance.entered",
+      instanceId: id,
+      stateId: "feature/ui/component",
+      parentInstanceId: "1",
+      childKey: "component",
+      element,
+      inputs: {},
+    });
+    const turns = turnsOf([entered("1", "feature/ui"), element("2", 0), element("3", 1), entered("4", "feature/ui/component/draft", "3", "draft")]);
+    expect(turns.map((t) => t.path)).toEqual(["", "component[0]", "component[1]", "component[1]/draft"]);
+  });
+
   it("is the chain of child keys, and the empty string at the root", () => {
     const turns = turnsOf([
       entered("1", "feature"),
@@ -162,5 +176,39 @@ describe("which instance a turn names", () => {
       },
     ]);
     expect(turns.find((t) => t.kind === "failure")?.instanceId).toBe("3");
+  });
+});
+
+describe("a re-stated entry", () => {
+  it("is folded into the instance it continues, not narrated again", () => {
+    // Until 2026-09-08 a resume re-entered the live spine with the SAME ids and journaled that.
+    // Every open of the app that finds a task waiting on a person resumes it, so a projection that
+    // narrated such a journal as written grew "entered product" and "entered product → ask" at its
+    // tail once per reload. hw no longer writes them; the journals that hold them are still read.
+    const turns = turnsOf([
+      entered("1", "feature"),
+      entered("2", "feature/product", "1", "product"),
+      entered("3", "feature/product/ask", "2", "ask"),
+      { type: "operation.started", instanceId: "3", stateId: "feature/product/ask", op: "function" },
+      // The app is reloaded: an older continuing run re-states the spine.
+      entered("1", "feature"),
+      entered("2", "feature/product", "1", "product"),
+      entered("3", "feature/product/ask", "2", "ask"),
+      { type: "operation.started", instanceId: "3", stateId: "feature/product/ask", op: "function" },
+    ]);
+    expect(turns.filter((t) => t.kind === "entered").map((t) => [t.instanceId, t.path])).toEqual([
+      ["1", ""],
+      ["2", "product"],
+      ["3", "product/ask"],
+    ]);
+  });
+
+  it("still tells a loop's second pass apart, because that pass has its own id", () => {
+    const turns = turnsOf([
+      entered("1", "plan"),
+      entered("2", "plan/draft", "1", "draft"),
+      entered("3", "plan/draft", "1", "draft"),
+    ]);
+    expect(turns.filter((t) => t.kind === "entered").map((t) => t.instanceId)).toEqual(["1", "2", "3"]);
   });
 });

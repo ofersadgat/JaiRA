@@ -852,8 +852,9 @@ exists in the declaring state. It is meaningless once inherited; use
 | --- | --- | --- |
 | `children.<key>.state` | optional | The child's state reference (§2.1). **Absent ⇒ `./<key>`**, so a child whose key names it says nothing. |
 | `children.<key>.inputs` | optional | Wiring into the child's declared inputs, as **bare bindings** (§8) — no `binding:` wrapper. Every required input of the child must be wired. |
-| `children.<key>.async` | optional | `true` ⇒ the cursor does not wait for this child (see below). |
+| `children.<key>.async` | optional | `true` ⇒ the cursor does not wait for this child (see below). On a mount that fans out (§6.2), also: the elements run concurrently. |
 | `children.<key>.environment` | optional | Defaults for **this mount** of the child and its subtree (§6.1). |
+| `children.<key>.inputs.<name>` as `{ "expr": …, "each": true }` | optional | **Fan out** (§6.2): the wire must produce an array, and the child is entered once per element with `<name>` holding the element. |
 
 ### 6.1 `environment` on a child: one state, mounted twice
 
@@ -965,6 +966,67 @@ Entering a sequence member **moves the cursor to it**:
   reset*, recorded as `child.superseded`) and re-run. This is the re-plan loop.
 - **Forwards** — the members it skipped stay skipped. The cursor does not fall
   back to fill them in.
+
+### 6.2 `each`: one child, entered once per element
+
+A mount input written in the object form may say `each: true`. The wire must
+produce an **array**, and the child is entered once per element, with that input
+holding the element. The child declares the input as it always did, with the
+element's schema — nothing names the element twice.
+
+```jsonc
+"children": {
+  "plan":      { "state": "./plan" },                         // emits `new_components`, an array
+  "component": {
+    "state": "./component",                                   // declares `component`, one object
+    "inputs": {
+      "component": { "expr": ".children.plan.output.new_components", "each": true },
+      "flow":      ".inputs.flows[.each.index]",              // a parallel array, by position
+      "position":  ".each.axis.component"
+    }
+  },
+  "link":      { "state": "./link", "inputs": { "built": ".children.component.output.id" } }
+},
+"sequence": ["plan", "component", "link"]
+```
+
+**What the parent reads back.** One record per key, as for any child: every output
+of `component` is an **array in element order** — `.children.component.output.id`
+above is a list of ids — and the validator types it that way. An empty array enters
+nothing and every output reads as `[]`, which is how "nothing new here" skips a
+step with no guard at all.
+
+**`.each`.** Readable only in the wires of a mount that fans out, and refused
+everywhere else — it is evaluated once per element, and nothing else is:
+
+| Reads | Meaning |
+| --- | --- |
+| `.each.index` | The element's number: its row-major position across every `each` axis, 0-based |
+| `.each.axis.<input>` | Its position along the `each` wire feeding `<input>` |
+
+**Several `each` wires** on one mount take the **cartesian product**, the first
+declared being the outer axis, so `.each.index` counts the way the wires were
+declared. A parallel array is reached by indexing with `.each.axis.<input>`.
+
+**Order.** The elements run in sequence, and the first that ends badly ends the
+batch — the rest are never entered, and the failure names the element (`child
+'component' element 1: …`). `async: true` on the mount runs them concurrently; it
+is the one flag that already means "do not wait", and concurrency between the
+elements is the same thing as concurrency between this child and the spine.
+
+**A transition's override** (§7.2) of an `each` input is the whole array. Its
+override of any other input applies to every element, per name.
+
+**Addresses and sessions.** The elements of one entry share an occurrence and
+differ by element — `component[2]`, or `component:1[2]` on the second pass of a
+loop around it — so a session scoped to the fanned-out state gets one bundle per
+element, and a loop around the fan-out is still one occurrence per pass. A
+backward jump into a fanned-out child re-enters the whole batch: the jump names
+the key, and a key is a batch.
+
+**What it is not.** `map(xs, op)` (§9) applies a leaf *operation* per element and
+reads the results as one value; it cannot enter a state, park at a gate, or take a
+transition. `each` is the same idea one level up, for a *child*.
 
 ---
 
@@ -1135,6 +1197,7 @@ the preferred spelling, and the one the rest of this file uses:
 | `{ "json": { "a": 1 } }` | A literal JSON value |
 | `"add(.children.a.outputs.n, 1)"` | A computation (§9) — no wrapper needed |
 | `{ "expr": "add(.children.a.outputs.n, 1)" }` | The same computation, wrapped |
+| `{ "expr": ".children.plan.outputs.items", "each": true }` | On a child mount's input only: enter the child once per element (§6.2) |
 
 **One rule decides all of these: a leading dot is *data*, a bare name is a
 *document*.** It holds at every depth — at the top of a binding, inside an

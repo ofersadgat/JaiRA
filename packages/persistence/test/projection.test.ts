@@ -136,6 +136,46 @@ describe("projectRun", () => {
     expect(kids.map((k) => k.superseded)).toEqual([true, false]);
   });
 
+  it("keeps the elements of a fan-out beside each other, and lets a new batch supersede them", () => {
+    const element = (id: string, element: number): EngineEvent => ({
+      type: "instance.entered",
+      instanceId: id,
+      stateId: "feature/plan/goals",
+      parentInstanceId: "1",
+      childKey: "goals",
+      element,
+      inputs: {},
+    });
+    const run = projectRun([
+      entered("1", "feature/plan"),
+      element("2", 0),
+      element("3", 1),
+      element("4", 2),
+      terminated("2", "feature/plan/goals", "success"),
+      terminated("3", "feature/plan/goals", "success"),
+      terminated("4", "feature/plan/goals", "success"),
+      // The batch entered again: a new occurrence, whose first element is what supersedes the old batch.
+      element("5", 0),
+      element("6", 1),
+    ]);
+    const kids = run.instances[0]!.children;
+    expect(kids.map((k) => [k.instanceId, k.element, k.superseded])).toEqual([
+      ["2", 0, true],
+      ["3", 1, true],
+      ["4", 2, true],
+      ["5", 0, false],
+      ["6", 1, false],
+    ]);
+    // One occurrence per BATCH: the elements of one entry share it and differ by element.
+    expect(kids.map((k) => k.address)).toEqual([
+      [{ childKey: "goals", occurrence: 0, element: 0 }],
+      [{ childKey: "goals", occurrence: 0, element: 1 }],
+      [{ childKey: "goals", occurrence: 0, element: 2 }],
+      [{ childKey: "goals", occurrence: 1, element: 0 }],
+      [{ childKey: "goals", occurrence: 1, element: 1 }],
+    ]);
+  });
+
   it("records a blocked child without inventing an instance for it", () => {
     const run = projectRun([
       entered("1", "feature/plan"),

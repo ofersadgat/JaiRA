@@ -54,6 +54,11 @@ function entered(id: string, stateId: string, childKey?: string, parent?: string
   journal(id, { type: "instance.entered", instanceId: id, stateId, childKey, parentInstanceId: parent, inputs: {} });
 }
 
+/** An element of a fanned-out mount entered — `element` is what tells it from a loop's pass. */
+function element(id: string, stateId: string, childKey: string, parent: string, element: number): void {
+  journal(id, { type: "instance.entered", instanceId: id, stateId, childKey, parentInstanceId: parent, inputs: {}, element });
+}
+
 function started(id: string, stateId: string): void {
   journal(id, { type: "operation.started", instanceId: id, stateId, op: "function" });
 }
@@ -268,6 +273,29 @@ describe("revival: what counts as still-to-do", () => {
     // happened and renumbering it would move every later address.
     expect(kids.map((c) => [c.id, c.occurrence])).toEqual([["i-a2", 1]]);
     expect(load.frontier[0]!.address).toEqual([{ childKey: "a", occurrence: 1 }]);
+  });
+});
+
+describe("a fanned-out mount in the description", () => {
+  it("gives the elements of one batch one occurrence, and each its element", () => {
+    begin();
+    entered("i-root", "root");
+    element("i-a0", "root/a", "a", "i-root", 0);
+    terminated("i-a0", "root/a", "success");
+    element("i-a1", "root/a", "a", "i-root", 1);
+    terminated("i-a1", "root/a", "success");
+    element("i-a2", "root/a", "a", "i-root", 2);
+
+    const load = buildTaskLoad(project, "t", SHAPE);
+    const kids = load.loaded!.children!;
+    // Three instances under one key, ONE entry: a batch is one occurrence however many it ran, and
+    // the engine gathers them back into the one record it keeps per key.
+    expect(kids.map((c) => [c.id, c.occurrence, c.element, c.live])).toEqual([
+      ["i-a0", 0, 0, false],
+      ["i-a1", 0, 1, false],
+      ["i-a2", 0, 2, true],
+    ]);
+    expect(load.frontier[0]!.address).toEqual([{ childKey: "a", occurrence: 0, element: 2 }]);
   });
 });
 

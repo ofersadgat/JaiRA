@@ -83,10 +83,13 @@ export function conversationView(project: Project, taskId: string, options: Conv
    * those as the root would put every historical block on the module itself and, worse, make two
    * blocks with the same reason indistinguishable.
    */
-  const under = (parentInstanceId: string | undefined, childKey: string | undefined): string | undefined => {
+  const under = (parentInstanceId: string | undefined, childKey: string | undefined, element?: number): string | undefined => {
     if (parentInstanceId === undefined || childKey === undefined) return undefined;
     const base = pathOf.get(parentInstanceId) ?? "";
-    return base === "" ? childKey : `${base}/${childKey}`;
+    // An element of a fan-out (WORKFLOWS.md §6.2) is `key[i]` — the same spelling the engine gives
+    // its address, so a reader can tell the batch's third element from the mount's third pass.
+    const step = element === undefined ? childKey : `${childKey}[${element}]`;
+    return base === "" ? step : `${base}/${step}`;
   };
 
   /** A `path` field, or none at all — an absent mount is not a mount at the root. */
@@ -110,9 +113,17 @@ export function conversationView(project: Project, taskId: string, options: Conv
     });
     switch (event.type) {
       case "instance.entered": {
+        // A RE-STATED entry is not a step. Until 2026-09-08 a continuing run re-entered the live
+        // spine under the SAME ids and journaled that (Identity and Resume §04, `load.ts`), and
+        // every open of the app that finds a task waiting resumes it — so a journal read as written
+        // grew a fresh "entered product" and "entered product → ask" at its tail per reload. hw no
+        // longer writes them, but the journals that hold them are still read here, and the rule is
+        // the one `projectRun` applies: an id already in the map is the machine being IN that
+        // instance again, not entering it. History entered once stays entered once.
+        if (pathOf.has(event.instanceId)) break;
         // A root has no parent, and its path is the empty string — not "unknown". Every instance is
         // entered before anything else is said about it, so this is what fills the map.
-        pathOf.set(event.instanceId, under(event.parentInstanceId, event.childKey) ?? "");
+        pathOf.set(event.instanceId, under(event.parentInstanceId, event.childKey, event.element) ?? "");
         turns.push({ seq, at, kind: "entered", stateId: event.stateId, ...at_(event.instanceId) });
         break;
       }
