@@ -36,12 +36,13 @@ import {
   type ServedArtifact,
   type ValidateSchemaResult,
 } from "@jaira/shared/browser";
+import type { JsonValue } from "@declarative-ai/json";
 import { invoke } from "./store";
 import { Icon } from "./icons";
 import { docKey, useDraftBox, type DraftBox, type Drafts, type SetDraft } from "./drafts";
 import { EditorActions } from "./editorChrome";
 import { SchemaJsonEditor } from "./schemaEditor";
-import { answerOf, ChoiceList, ChoiceSteps, EMPTY_ANSWER, initialAnswers, submitsOnClick, type Answer } from "./choices";
+import { answerOf, answersOfValue, ChoiceList, ChoiceSteps, EMPTY_ANSWER, initialAnswers, submitsOnClick, type Answer } from "./choices";
 import { mountChangesetReview, rendererServices, type ComponentServices } from "./changesetReview";
 import { ValueView } from "./valueView";
 import {
@@ -60,6 +61,44 @@ export interface ComponentProps<C extends ComponentConfig> {
   config: C;
   inputs: Record<string, unknown>;
   onSubmit: (value: unknown) => void;
+  /**
+   * The gate has SETTLED: draw it as it was answered, and let nothing be pressed.
+   *
+   * The same component, not a summary of it — see {@link GateSurface}. `onSubmit` is never called
+   * while this is set.
+   */
+  settled?: Settled | undefined;
+}
+
+/**
+ * What a settled gate is drawn from: the value its answer carried.
+ *
+ * `value` absent is a gate that was never answered — the run was stopped on it, the call failed, or
+ * the process went away under it. It is drawn all the same, empty, because which question was
+ * asked is part of what happened even when nobody got to answer it.
+ */
+export interface Settled {
+  value?: JsonValue | undefined;
+}
+
+/** The recorded value as a record, or nothing — every component reads its answer through this. */
+function recordOf(settled: Settled | undefined): Record<string, JsonValue> {
+  const value = settled?.value;
+  if (value === undefined || value === null || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, JsonValue>;
+}
+
+/**
+ * A draft box that holds what a person SUBMITTED, over what they were shown.
+ *
+ * The artifact panes read their edit through a {@link DraftBox}, and a settled gate has no live
+ * draft — it has the content that came back, when the person changed it. Handing that in as the
+ * box's text draws the pane in its changes reading, which is the edit they made, rather than the
+ * original with no sign anything happened to it.
+ */
+function recordedDraft(seed: string, content: JsonValue | undefined): DraftBox {
+  const text = typeof content === "string" ? content : seed;
+  return { text, dirty: text !== seed, set: () => undefined, revert: () => undefined };
 }
 
 /**
@@ -69,9 +108,12 @@ export interface ComponentProps<C extends ComponentConfig> {
  * `alongside` free text, which is what keeps a single-select answering on the click even with a
  * comment typed. See `choices.tsx` for why the role is what decides that.
  */
-function ChooseOption({ config, onSubmit }: ComponentProps<ChooseOptionConfig>): JSX.Element {
+function ChooseOption({ config, onSubmit, settled }: ComponentProps<ChooseOptionConfig>): JSX.Element {
   const choices = choicesOfConfig(config);
-  const [answers, setAnswers] = useState<Record<string, Answer>>(() => initialAnswers(choices));
+  const readOnly = settled !== undefined;
+  const [answers, setAnswers] = useState<Record<string, Answer>>(() =>
+    settled !== undefined ? answersOfValue(choices, settled.value) : initialAnswers(choices),
+  );
 
   // The multi-part gate: the same stepper an agent's batch of questions uses, and the answer is a
   // record keyed by each question's `name` rather than one `decision` — a question passed on stays
@@ -91,6 +133,7 @@ function ChooseOption({ config, onSubmit }: ComponentProps<ChooseOptionConfig>):
         answers={answers}
         onAnswer={(question, next) => setAnswers((prev) => ({ ...prev, [question]: next }))}
         onSubmit={submit}
+        readOnly={readOnly}
       />
     );
   }
@@ -112,10 +155,11 @@ function ChooseOption({ config, onSubmit }: ComponentProps<ChooseOptionConfig>):
         answers={answers}
         onAnswer={(question, next) => setAnswers((prev) => ({ ...prev, [question]: next }))}
         onImmediate={(_question, value) => send(value)}
+        readOnly={readOnly}
       />
-      {submitsOnClick(choices, answers) ? null : (
+      {readOnly || submitsOnClick(choices, answers) ? null : (
         <div className="options">
-          <button className="primary" disabled={answer.picked.length === 0} onClick={() => send(answerOf(only, answer)!)}>
+          <button className="primary" disabled={answerOf(only, answer) === undefined} onClick={() => send(answerOf(only, answer)!)}>
             Confirm
           </button>
         </div>
@@ -144,21 +188,28 @@ function ReviewArtifact({
   project,
   requestId,
   editor,
+  settled,
 }: ComponentProps<ReviewArtifactConfig> & {
   serve?: ((path: string) => Promise<ServedArtifact>) | undefined;
   project?: string | undefined;
   requestId: string;
   editor?: EditorServices | undefined;
 }): JSX.Element {
-  const [answers, setAnswers] = useState<Record<string, Answer>>({});
-  const [notes, setNotes] = useState<ReviewNote[]>([]);
+  const recorded = recordOf(settled);
+  const [answers, setAnswers] = useState<Record<string, Answer>>(() =>
+    settled !== undefined ? answersOfValue(choicesOfConfig(config), settled.value) : {},
+  );
+  const [notes, setNotes] = useState<ReviewNote[]>(() =>
+    Array.isArray(recorded["notes"]) ? (recorded["notes"] as unknown as ReviewNote[]) : [],
+  );
   const author = useAuthor(project);
 
   const value = inputs[config.artifact];
   const seed = displayText(value);
   const artifact = artifactOf(value);
   const mime = artifact?.mime ?? (artifact?.path === undefined ? undefined : mimeOfPath(artifact.path));
-  const draft = useDraftBox(editor?.drafts, editor?.onDraft, docKey("gate", `${requestId}:${config.artifact}`), seed);
+  const live = useDraftBox(editor?.drafts, editor?.onDraft, docKey("gate", `${requestId}:${config.artifact}`), seed);
+  const draft = settled !== undefined ? recordedDraft(seed, recorded["content"]) : live;
 
   const comments = (answers[config.prompt] ?? EMPTY_ANSWER).text.trim();
   /**
@@ -202,18 +253,23 @@ function ReviewArtifact({
           seed={seed}
           mime={mime}
           draft={draft}
-          editable={config.editable === true}
+          editable={settled === undefined && config.editable === true}
           serve={serve}
           notes={notes}
-          onNote={(note) => setNotes((prev) => [...prev, note])}
-          onRemoveNote={(i) => setNotes((prev) => prev.filter((_, at) => at !== i))}
-          onReply={(i, body) =>
-            setNotes((prev) =>
-              prev.map((note, at) =>
-                at === i ? { ...note, replies: [...(note.replies ?? []), { author, body, at: new Date().toISOString() }] } : note,
-              ),
-            )
-          }
+          {...(settled !== undefined
+            ? {}
+            : {
+                onNote: (note: ReviewNote) => setNotes((prev) => [...prev, note]),
+                onRemoveNote: (i: number) => setNotes((prev) => prev.filter((_, at) => at !== i)),
+                onReply: (i: number, body: string) =>
+                  setNotes((prev) =>
+                    prev.map((note, at) =>
+                      at === i
+                        ? { ...note, replies: [...(note.replies ?? []), { author, body, at: new Date().toISOString() }] }
+                        : note,
+                    ),
+                  ),
+              })}
           author={author}
           artifactId={config.artifact}
         />
@@ -237,7 +293,24 @@ function ReviewArtifact({
           back with comments" asks the reviewer to choose between two things that are not
           alternatives, which is what a row of options reads as. The free-text box is drawn by
           `ChoiceList` above, so it is present in both shapes. */}
-      {speaking ? (
+      {settled !== undefined ? (
+        // As it was decided, in the shape it was decided in. A review that went back with comments
+        // never showed a row of options — it showed the comment and one button — and drawing the
+        // row here would say a choice was made among options nobody was offered. A review decided
+        // in silence showed the row, so the row it is, with the decision lit.
+        speaking ? (
+          <>
+            <ChoiceList choices={[{ ...choices[0]!, options: [] }]} answers={answers} onAnswer={() => undefined} readOnly />
+            <div className="options">
+              <button className="primary" disabled>
+                Send back with comments
+              </button>
+            </div>
+          </>
+        ) : (
+          <ChoiceList choices={choices} answers={answers} onAnswer={() => undefined} readOnly />
+        )
+      ) : speaking ? (
         <>
           <ChoiceList
             choices={[{ ...choices[0]!, options: [] }]}
@@ -264,7 +337,7 @@ function ReviewArtifact({
             <div className="options">
               <button
                 className="primary"
-                disabled={(answers[config.prompt] ?? EMPTY_ANSWER).picked.length === 0}
+                disabled={answerOf(choices[0]!, answers[config.prompt] ?? EMPTY_ANSWER) === undefined}
                 onClick={() => send(answerOf(choices[0]!, answers[config.prompt] ?? EMPTY_ANSWER) as string)}
               >
                 Confirm
@@ -478,6 +551,7 @@ function EditArtifact({
   project,
   requestId,
   editor,
+  settled,
 }: ComponentProps<EditArtifactConfig> & {
   serve?: ((path: string) => Promise<ServedArtifact>) | undefined;
   project?: string | undefined;
@@ -489,7 +563,8 @@ function EditArtifact({
   const seed = value === undefined ? "" : displayText(value);
   const artifact = artifactOf(value);
   const mime = artifact?.mime ?? (artifact?.path === undefined ? undefined : mimeOfPath(artifact.path));
-  const draft = useDraftBox(editor?.drafts, editor?.onDraft, docKey("gate", `${requestId}:${config.source ?? ""}`), seed);
+  const live = useDraftBox(editor?.drafts, editor?.onDraft, docKey("gate", `${requestId}:${config.source ?? ""}`), seed);
+  const draft = settled !== undefined ? recordedDraft(seed, recordOf(settled)["content"]) : live;
   const author = useAuthor(project);
 
   // Nothing to type into: a picture, a sound, a video. Show it and say so, rather than offering a
@@ -503,11 +578,13 @@ function EditArtifact({
         <p className="reason-note">
           This is {mime ?? "not text"}, so there is nothing here to type into. Submitting hands it back unchanged.
         </p>
-        <div className="options">
-          <button className="primary" onClick={() => onSubmit({ content: seed })}>
-            Done
-          </button>
-        </div>
+        {settled !== undefined ? null : (
+          <div className="options">
+            <button className="primary" onClick={() => onSubmit({ content: seed })}>
+              Done
+            </button>
+          </div>
+        )}
       </>
     );
   }
@@ -519,7 +596,7 @@ function EditArtifact({
         seed={seed}
         mime={mime}
         draft={draft}
-        editable
+        editable={settled === undefined}
         serve={serve}
         notes={[]}
         author={author}
@@ -532,7 +609,9 @@ function EditArtifact({
 
           No `onRevert`: the pane's own header already carries one, beside the thing being reverted.
           Two buttons with the same name and the same effect is one of them being noise. */}
-      <EditorActions dirty={draft.dirty || undefined} onSave={() => onSubmit({ content: draft.text })} />
+      {settled !== undefined ? null : (
+        <EditorActions dirty={draft.dirty || undefined} onSave={() => onSubmit({ content: draft.text })} />
+      )}
     </>
   );
 }
@@ -561,17 +640,26 @@ function seedValue(field: FormField): unknown {
  */
 const CUSTOM_CHOICE = " custom";
 
-function FillForm({ config, onSubmit }: ComponentProps<FillFormConfig>): JSX.Element {
+function FillForm({ config, onSubmit, settled }: ComponentProps<FillFormConfig>): JSX.Element {
+  const readOnly = settled !== undefined;
+  const recorded = recordOf(settled);
+  // Settled: what was submitted, field by field; a field the record does not name is drawn empty
+  // rather than at its default, because a default the person never saw sent is not their answer.
   const [values, setValues] = useState<Record<string, unknown>>(() =>
-    Object.fromEntries(config.fields.map((f) => [f.name, seedValue(f)])),
+    Object.fromEntries(config.fields.map((f) => [f.name, settled !== undefined ? (recorded[f.name] ?? "") : seedValue(f)])),
   );
   // Which enum fields are on their Custom… entry. Held apart from the value, because the value is
   // the typed text — and a typed text that happens to equal a declared option is still typed.
-  // Seeded from a default the list does not contain, which is the one way a form can start there.
+  // Seeded from a default the list does not contain, which is the one way a form can start there —
+  // or, settled, from an answer the list does not contain, which is the one way it can end there.
   const [custom, setCustom] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(
       config.fields
-        .filter((f) => f.type === "enum" && f.custom === true && f.default !== undefined && !(f.enum ?? []).includes(String(f.default)))
+        .filter((f) => {
+          if (f.type !== "enum" || f.custom !== true) return false;
+          const at = settled !== undefined ? recorded[f.name] : f.default;
+          return at !== undefined && !(f.enum ?? []).includes(String(at));
+        })
         .map((f) => [f.name, true]),
     ),
   );
@@ -589,12 +677,14 @@ function FillForm({ config, onSubmit }: ComponentProps<FillFormConfig>): JSX.Ele
             <input
               type="checkbox"
               checked={values[field.name] === true}
+              disabled={readOnly}
               onChange={(e) => set(field.name, e.target.checked)}
             />
           ) : field.type === "enum" ? (
             <>
               <select
                 value={custom[field.name] === true ? CUSTOM_CHOICE : String(values[field.name] ?? "")}
+                disabled={readOnly}
                 onChange={(e) => {
                   if (e.target.value === CUSTOM_CHOICE) {
                     // Opening the box clears the pick: the text is the answer from here on, and an
@@ -618,25 +708,33 @@ function FillForm({ config, onSubmit }: ComponentProps<FillFormConfig>): JSX.Ele
                 <input
                   className="field-custom"
                   data-testid={`custom-${field.name}`}
-                  autoFocus
-                  placeholder="Type your own answer…"
+                  autoFocus={!readOnly}
+                  placeholder={readOnly ? "" : "Type your own answer…"}
                   value={String(values[field.name] ?? "")}
+                  readOnly={readOnly}
                   onChange={(e) => set(field.name, e.target.value)}
                 />
               ) : null}
             </>
           ) : field.multiline ? (
-            <textarea rows={4} value={String(values[field.name] ?? "")} onChange={(e) => set(field.name, e.target.value)} />
+            <textarea
+              rows={4}
+              value={String(values[field.name] ?? "")}
+              readOnly={readOnly}
+              onChange={(e) => set(field.name, e.target.value)}
+            />
           ) : (
             <input
               type={field.type === "number" ? "number" : "text"}
               value={String(values[field.name] ?? "")}
+              readOnly={readOnly}
               onChange={(e) => set(field.name, e.target.value)}
             />
           )}
           {field.description ? <small>{field.description}</small> : null}
         </label>
       ))}
+      {readOnly ? null : (
       <div className="options">
         <button
           onClick={() => {
@@ -658,15 +756,28 @@ function FillForm({ config, onSubmit }: ComponentProps<FillFormConfig>): JSX.Ele
           Submit
         </button>
       </div>
+      )}
     </>
   );
 }
 
-function ConfirmAction({ config, onSubmit }: ComponentProps<ConfirmActionConfig>): JSX.Element {
+function ConfirmAction({ config, onSubmit, settled }: ComponentProps<ConfirmActionConfig>): JSX.Element {
+  // Settled: the button that was pressed is the filled one, and neither can be pressed again.
+  const confirmed = settled === undefined ? undefined : recordOf(settled)["confirmed"];
   return (
     <div className="options">
-      <button onClick={() => onSubmit({ confirmed: true })}>{config.confirmLabel}</button>
-      <button className="ghost" onClick={() => onSubmit({ confirmed: false })}>
+      <button
+        className={confirmed === true ? "primary" : undefined}
+        disabled={settled !== undefined}
+        onClick={() => onSubmit({ confirmed: true })}
+      >
+        {config.confirmLabel}
+      </button>
+      <button
+        className={confirmed === false ? "primary" : "ghost"}
+        disabled={settled !== undefined}
+        onClick={() => onSubmit({ confirmed: false })}
+      >
         {config.cancelLabel}
       </button>
     </div>
@@ -714,6 +825,7 @@ export function ChangesetGate({
   project,
   services,
   mountKey,
+  settled,
 }: ComponentProps<ReviewArtifactsConfig> & {
   about?: string | undefined;
   project?: string | undefined;
@@ -744,6 +856,7 @@ export function ChangesetGate({
             ...(services ?? {}),
           },
           onSubmit,
+          ...(settled !== undefined ? { settled: settled.value } : {}),
         })
       }
     />
@@ -751,8 +864,11 @@ export function ChangesetGate({
 }
 
 /** Fallback for a gate whose function is not one of the built-ins. */
-function RawJson({ onSubmit }: { onSubmit: (value: unknown) => void }): JSX.Element {
+function RawJson({ onSubmit, settled }: { onSubmit: (value: unknown) => void; settled?: Settled | undefined }): JSX.Element {
   const [text, setText] = useState("");
+  if (settled !== undefined) {
+    return <pre className="outputs">{settled.value === undefined ? "" : JSON.stringify(settled.value, null, 2)}</pre>;
+  }
   return (
     <>
       <label className="field">
@@ -811,6 +927,7 @@ export function GateSurface({
   onSubmit,
   services,
   editor,
+  settled,
 }: {
   pending: PendingInteraction;
   error?: string | null;
@@ -819,13 +936,25 @@ export function GateSurface({
   services?: Partial<ComponentServices>;
   /** What `edit_artifact` needs to be the app's editor — see {@link EditorServices}. */
   editor?: EditorServices | undefined;
+  /**
+   * The gate as it WAS answered — the conversation's record of it, once the run has moved on.
+   *
+   * Drawn by the same components with the same config, seeded with the value that came back and
+   * with every control inert: the pick lit, the words as typed, the artifact as edited. A settled
+   * gate used to be replaced by the call's arguments and result as JSON, which is the same fact at
+   * lower fidelity — a reader of the conversation wants to see what was asked and what was chosen
+   * in the form it was chosen in, not to decode it.
+   */
+  settled?: Settled | undefined;
 }): JSX.Element {
   const config = pending.config;
   const inputs = pending.inputs as Record<string, unknown>;
   // The same join `ChangesetGate` makes, for the same reason: a review is parked in one project and
   // is ABOUT a task in another, and a grant is minted against the task that produced the artifact.
   const subject = pending.about ?? pending.taskId;
-  const subjectProject = pending.subjectProject ?? pending.project;
+  // An empty project is "the focused one" — the spelling a settled gate rebuilt from a record uses,
+  // since a record does not say which project parked it (see `settledGateOf` in `runViews.tsx`).
+  const subjectProject = pending.subjectProject ?? (pending.project === "" ? undefined : pending.project);
   const serve = (path: string): Promise<ServedArtifact> =>
     invoke("artifact:serve", { taskId: subject, path, ...(subjectProject !== undefined ? { project: subjectProject } : {}) });
   const body = ((): JSX.Element => {
@@ -838,7 +967,7 @@ export function GateSurface({
     }
     switch (config?.component) {
       case "choose_option":
-        return <ChooseOption config={config} inputs={inputs} onSubmit={onSubmit} />;
+        return <ChooseOption config={config} inputs={inputs} onSubmit={onSubmit} settled={settled} />;
       case "review_artifact":
         return (
           <ReviewArtifact
@@ -849,6 +978,7 @@ export function GateSurface({
             project={subjectProject}
             requestId={pending.requestId}
             editor={editor}
+            settled={settled}
           />
         );
       case "edit_artifact":
@@ -861,12 +991,13 @@ export function GateSurface({
             project={subjectProject}
             requestId={pending.requestId}
             editor={editor}
+            settled={settled}
           />
         );
       case "fill_form":
-        return <FillForm config={config} inputs={inputs} onSubmit={onSubmit} />;
+        return <FillForm config={config} inputs={inputs} onSubmit={onSubmit} settled={settled} />;
       case "confirm_action":
-        return <ConfirmAction config={config} inputs={inputs} onSubmit={onSubmit} />;
+        return <ConfirmAction config={config} inputs={inputs} onSubmit={onSubmit} settled={settled} />;
       case "review_artifacts":
         return (
           <ChangesetGate
@@ -874,13 +1005,14 @@ export function GateSurface({
             inputs={inputs}
             onSubmit={onSubmit}
             about={pending.about}
-            project={pending.subjectProject ?? pending.project}
+            project={subjectProject}
             services={services}
             mountKey={pending.requestId}
+            settled={settled}
           />
         );
       default:
-        return <RawJson onSubmit={onSubmit} />;
+        return <RawJson onSubmit={onSubmit} settled={settled} />;
     }
   })();
 
@@ -901,11 +1033,14 @@ export function GateSurface({
           waiting to be picked back up. Both are answered here and neither reads differently, so a
           gate whose process went away says so rather than letting somebody wonder why the task is
           not running while a question about it is on the screen. */}
-      {pending.resumes ? <p className="gate-resumes">Answering this continues the task.</p> : null}
+      {pending.resumes && settled === undefined ? <p className="gate-resumes">Answering this continues the task.</p> : null}
+      {/* A question nobody got to answer says so, over the question — which is still drawn, because
+          what was asked is part of what happened. */}
+      {settled !== undefined && settled.value === undefined ? <p className="gate-never">Never answered.</p> : null}
       {/* No sub-line beyond that. It carried the function name (an implementation fact) and then the
           task id (an opaque rowid) — neither is something the person answering the question needs,
           and both sat between the question and its answers. */}
-      {body}
+      {settled !== undefined ? <div className="gate-settled">{body}</div> : body}
       {error ? <p className="reason">{error}</p> : null}
     </>
   );

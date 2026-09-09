@@ -5896,6 +5896,38 @@ button.layer-on:hover:not(:disabled) {
   margin-top: 2px;
   white-space: normal;
 }
+/* The "own answer" block: one more option said in words, so it sits IN the list and lights up the
+   way the others do. Full width in a bare row — a box you type in is not a word-sized button — and a
+   text cursor, because clicking it is choosing to write. */
+.question-option.own {
+  flex-basis: 100%;
+  cursor: text;
+}
+/* The box has no edge of its own: the BLOCK is what is selected, and it is the block that lights
+   up. A bordered box inside a lit card drew two outlines around one thing, and the focus ring on
+   top of that a third. The box's focus is shown by the block being selected, which typing does. */
+.question-option.own textarea {
+  display: block;
+  margin-top: 4px;
+  padding: 2px 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  /* Prose, in the option's own face — the global textarea is a data field and sets the mono. */
+  font: inherit;
+  /* As tall as the words: a new line is a new line, never a scroll. */
+  field-sizing: content;
+  resize: none;
+  overflow: hidden;
+}
+.question-option.own textarea:hover:not(:disabled),
+.question-option.own textarea:focus,
+.question-option.own textarea:focus-visible {
+  border: none;
+  outline: none;
+  box-shadow: none;
+}
 /* The artifact preview inside review_artifact. */
 .artifact {
   background: var(--bg);
@@ -6836,6 +6868,75 @@ button.link.change-path {
 /* Said quietly, under the question, because it is a fact about the RUN and not part of what is
    being asked: nothing is blocked on this answer, and giving one starts the task again. See
    `PendingInteraction.resumes`. */
+/* --- a gate as it was answered --------------------------------------------------------------- */
+/* The same controls, none of them live. The app's disabled look (half opacity, the dim field
+   colours) says "you cannot use this yet"; a record says "this is what was chosen", and the chosen
+   thing has to stay as legible as it was when it was chosen. So inside a record the controls keep
+   their colours and lose only their affordances: no pointer, no hover, no ring. */
+.gate-settled button:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.gate-settled button.primary:disabled {
+  box-shadow: var(--sheen);
+}
+.gate-settled input:disabled,
+.gate-settled select:disabled,
+.gate-settled textarea:disabled {
+  color: var(--text);
+  background: var(--bg);
+  cursor: default;
+}
+.gate-settled input[readonly],
+.gate-settled textarea[readonly] {
+  cursor: default;
+}
+.gate-settled input[readonly]:hover,
+.gate-settled textarea[readonly]:hover,
+.gate-settled select:disabled:hover {
+  border-color: var(--line);
+}
+.gate-settled .question-option:disabled:hover {
+  border-color: var(--line);
+}
+.gate-settled .question-option.selected:disabled:hover {
+  border-color: var(--accent, var(--text));
+}
+.gate-settled .question-option.own {
+  cursor: default;
+}
+/* A bare row draws its affirmative option filled, as the action it is. Once the row is a record
+   there is no action, and a fill on an option that was NOT chosen reads as the choice — so only the
+   chosen option keeps its emphasis, filled if it was the affirmative one, outlined otherwise. */
+.gate-settled .question-option.primary:not(.selected) {
+  background: var(--bg);
+  border-color: var(--line);
+  box-shadow: none;
+}
+.gate-settled .question-option.primary:not(.selected) .question-option-label {
+  color: var(--text);
+  font-weight: 400;
+}
+/* A question nobody got to answer, said over the question — which is drawn all the same. */
+.gate-never {
+  margin: 0 0 10px;
+  color: var(--dim);
+  font-style: italic;
+}
+/* The call's own record — arguments and result — behind a toggle under the answered control. */
+.gate-record {
+  margin-top: 12px;
+}
+.gate-record > button {
+  margin-bottom: 6px;
+}
+/* An agent's question under its row in a transcript: the chooser, a size down from a gate's. */
+.ts-asked .question-block {
+  margin-top: 6px;
+}
+.ts-asked .options {
+  margin-top: 8px;
+}
 .gate-resumes {
   margin: 4px 0 0;
   color: var(--dim);

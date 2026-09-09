@@ -577,7 +577,8 @@ export function NoteList({
   onHover?: ((index: number | null) => void) | undefined;
   onReselect: (note: ReviewNote) => void;
   onReply?: ((index: number, body: string) => void) | undefined;
-  onRemove: (index: number) => void;
+  /** Absent ⇒ the threads are a record: nothing can be deleted. */
+  onRemove?: ((index: number) => void) | undefined;
 }): JSX.Element | null {
   if (notes.length === 0) return null;
   const anchored = anchorNotes(text, notes);
@@ -598,7 +599,7 @@ export function NoteList({
           onLeave={() => onHover?.(null)}
           onReselect={() => onReselect(note)}
           onReply={onReply === undefined ? undefined : (body) => onReply(i, body)}
-          onRemove={() => onRemove(i)}
+          onRemove={onRemove === undefined ? undefined : () => onRemove(i)}
         />
       ))}
     </div>
@@ -624,7 +625,7 @@ function NoteThread({
   onLeave(): void;
   onReselect(): void;
   onReply?: ((body: string) => void) | undefined;
-  onRemove(): void;
+  onRemove?: (() => void) | undefined;
 }): JSX.Element {
   const [reply, setReply] = useState("");
   const messages = [{ author: note.author, body: note.body, at: note.at }, ...(note.replies ?? [])];
@@ -644,9 +645,11 @@ function NoteThread({
         >
           {orphan ? "text changed" : shortQuote(note.quote)}
         </button>
+        {onRemove === undefined ? null : (
         <button className="ghost note-row-remove" title="delete this thread" onClick={onRemove}>
           <Icon name="cross" />
         </button>
+        )}
       </div>
 
       {messages.map((message, i) => (

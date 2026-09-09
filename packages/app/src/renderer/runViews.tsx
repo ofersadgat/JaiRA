@@ -36,7 +36,7 @@ import { STOPPED, stoppedAction } from "./taskAction";
 import { instanceOf as instanceOfState, nodeAt, prunedTrail, type TrailStep } from "./trail";
 import { Paper, Pulse, Transcript, clockOf, durationOf, useElapsed } from "./transcriptView";
 import { advanceTargetOf, isAsking, surfaceKindOf } from "./stateSurface";
-import { readCall, TASK_DRAG, type ReadCall } from "@jaira/shared/browser";
+import { isComponentName, parseComponentConfig, readCall, TASK_DRAG, type ReadCall } from "@jaira/shared/browser";
 import { Icon } from "./icons";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type SessionPiece } from "./sessionBands";
 import { SessionBandsView } from "./sessionPanels";
@@ -454,6 +454,107 @@ function CallBlock({ call }: { call: ReadCall }): JSX.Element {
 }
 
 /** Exported for the test that renders one — the same reason {@link TableView} is. */
+/**
+ * The function call a settled `asked` state made, when its record is still there.
+ *
+ * Settled means the operation is no longer running, or the instance was cut from under it — a
+ * cancel leaves `operation.status` at `running` (nothing ever completes it), so the instance's own
+ * status has to be read too; see `headerToneOf` for the same rule. `asking` is the live gate being
+ * hosted right now, which is never settled however the node reads.
+ *
+ * `undefined` when the record has been pruned, and then the panel falls back to the call listing:
+ * a gate cannot be drawn from a call nothing remembers.
+ */
+function settledGateCallOf(
+  node: InstanceNode,
+  records: Record<string, OperationRecordView>,
+  asking: boolean,
+): ReadCall | undefined {
+  if (asking || surfaceKindOf(node) !== "asked") return undefined;
+  const operation = node.operation;
+  if (operation === undefined) return undefined;
+  const cut = node.status === "canceled" || node.status === "failed" || node.status === "timeout";
+  if (operation.status === "running" && !cut) return undefined;
+  const calls = (node.calls ?? [])
+    .map((call) => records[call.operationId])
+    .filter((row): row is OperationRecordView => row !== undefined)
+    .map(readCall);
+  return calls.filter((call) => call.ref !== undefined || call.kind === "function").at(-1) ?? calls.at(-1);
+}
+
+/**
+ * The request a settled gate is drawn from, rebuilt from its record.
+ *
+ * Everything `GateSurface` reads is on the call: the component is the function it called, the
+ * inputs are the arguments it was called with (a component's authored surface IS its args — see
+ * `withContract` in main), and the contract is parsed from those the way main parses it for a live
+ * gate. What the record does not carry is which project parked it, spelled here as the empty
+ * project, which `GateSurface` reads as "the focused one".
+ */
+function settledGateOf(call: ReadCall, node: InstanceNode, taskId: string | undefined, project: string | undefined): PendingInteraction {
+  const component = call.name ?? call.ref ?? "function";
+  const pending: PendingInteraction = {
+    requestId: `settled:${node.instanceId}`,
+    taskId: taskId ?? "",
+    project: project ?? "",
+    component,
+    inputs: call.args,
+  };
+  if (isComponentName(component)) {
+    try {
+      pending.config = parseComponentConfig(component, call.args);
+    } catch (e) {
+      pending.configError = (e as Error).message;
+    }
+  }
+  return pending;
+}
+
+/** A settled gate in its state's panel: the control as answered, and the record behind a toggle. */
+function SettledGate({
+  call,
+  node,
+  taskId,
+  project,
+  services,
+  editor,
+}: {
+  call: ReadCall;
+  node: InstanceNode;
+  taskId: string | undefined;
+  project: string | undefined;
+  services?: Partial<ComponentServices> | undefined;
+  editor?: EditorServices | undefined;
+}): JSX.Element {
+  const [record, setRecord] = useState(false);
+  const pending = useMemo(() => settledGateOf(call, node, taskId, project), [call, node, taskId, project]);
+  // Answered iff the call answered: an error, a cut, or a record with no result is a question
+  // nobody got to answer, whatever the arguments say.
+  const answered = call.error === undefined && call.result !== undefined;
+  return (
+    <>
+      {/* Keyed on the answer's arrival. The panel mounts the moment the request is gone, and the
+          record can still be open then — the result lands a beat later — and a component seeds its
+          answers once, on mount. Without the remount the chooser drew the question with nothing
+          lit, the answer having arrived after it had already looked. */}
+      <GateSurface
+        key={answered ? "answered" : "open"}
+        pending={pending}
+        onSubmit={() => undefined}
+        services={services}
+        {...(editor !== undefined ? { editor } : {})}
+        settled={answered ? { value: call.result } : {}}
+      />
+      <div className="gate-record">
+        <button type="button" className="quiet" aria-expanded={record} onClick={() => setRecord((v) => !v)}>
+          {record ? "Hide the record" : "Show the record"}
+        </button>
+        {record ? <CallBlock call={call} /> : null}
+      </div>
+    </>
+  );
+}
+
 export function SilentState({ node, records }: { node: InstanceNode; records: Record<string, OperationRecordView> }): JSX.Element {
   const failure = node.operation?.status === "failed" ? node.operation.reason : undefined;
   /**
@@ -719,6 +820,23 @@ export function RunConversation({
           onSubmit={onGate}
           services={gateServices}
           {...(gateEditor !== undefined ? { editor: gateEditor } : {})}
+        />
+      );
+    }
+    // The question once it is no longer being asked: the same control, as it was answered — or,
+    // for a run stopped on it, as it was never answered. Under the same letterhead, in the same
+    // place, so the conversation reads the same before and after. The call's arguments and result
+    // are still there, behind a toggle, for anyone who wants the record rather than the reading.
+    const settledCall = settledGateCallOf(piece.node, records, gate !== undefined && isAsking(piece.node));
+    if (settledCall !== undefined) {
+      return (
+        <SettledGate
+          call={settledCall}
+          node={piece.node}
+          taskId={detail?.taskId}
+          project={context.project}
+          services={gateServices}
+          editor={gateEditor}
         />
       );
     }

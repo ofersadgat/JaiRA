@@ -37,7 +37,7 @@
  * with its children's cards underneath — and that arrangement is gone, because it grouped by state
  * where the thing being read is grouped by conversation. See `sessionBands.ts`.
  */
-import { Fragment, useCallback, useEffect, useRef, useState, type JSX, type ReactNode, type RefObject } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type JSX, type ReactNode, type RefObject } from "react";
 import {
   artifactOf,
   detectedMime,
@@ -54,6 +54,8 @@ import {
   type ViewId,
 } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
+import { choicesOfQuestions, type AgentQuestion } from "@jaira/shared/browser";
+import { answersOfAnsweredText, answersOfValue, ChoiceList, ChoiceSteps, type Answer } from "./choices";
 import { Markdown } from "./markdown";
 import { ValueView } from "./valueView";
 import { familyIcon, Icon } from "./icons";
@@ -385,6 +387,103 @@ export function producedArtifact(result: JsonValue | undefined): JsonValue | und
  * blocks use, so a mockup looks identical wherever it turns up and arrives with its
  * Rendered / Code / Text toggle rather than a second one built here.
  */
+/**
+ * An agent's question to the person, out of the call that asked it — `AskUserQuestion`.
+ *
+ * The questions are the call's arguments. The answers are what came back, read from the richest
+ * record there is: the agent's own `toolUseResult` keeps them as a map, and the wire result the
+ * model saw spells them out as text, which is parsed when the map was not captured. A call still in
+ * flight, or a dismissal, answers nothing and is drawn unanswered.
+ */
+export function askedOf(entry: ToolEntry): { questions: AgentQuestion[]; answers: Record<string, JsonValue> | undefined } | undefined {
+  if (entry.name !== "AskUserQuestion" && !entry.name.endsWith("__AskUserQuestion")) return undefined;
+  const args = entry.args;
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const questions = (args as Record<string, JsonValue>)["questions"];
+  if (!Array.isArray(questions)) return undefined;
+  const sound = questions.filter(
+    (q): q is JsonValue & Record<string, JsonValue> =>
+      q !== null && typeof q === "object" && !Array.isArray(q) && typeof (q as Record<string, JsonValue>)["question"] === "string",
+  );
+  if (sound.length === 0) return undefined;
+  const asked = sound.map(
+    (q): AgentQuestion => ({
+      question: q["question"] as string,
+      ...(typeof q["header"] === "string" ? { header: q["header"] } : {}),
+      ...(q["multiSelect"] === true ? { multiSelect: true } : {}),
+      options: Array.isArray(q["options"])
+        ? q["options"]
+            .filter((o): o is JsonValue & Record<string, JsonValue> => o !== null && typeof o === "object" && !Array.isArray(o))
+            .map((o) => ({
+              label: String(o["label"] ?? ""),
+              ...(typeof o["description"] === "string" ? { description: o["description"] } : {}),
+            }))
+        : [],
+    }),
+  );
+  const detail = entry.detail;
+  const kept =
+    detail !== undefined && detail !== null && typeof detail === "object" && !Array.isArray(detail)
+      ? (detail as Record<string, JsonValue>)["answers"]
+      : undefined;
+  if (kept !== undefined && kept !== null && typeof kept === "object" && !Array.isArray(kept)) {
+    return { questions: asked, answers: kept as Record<string, JsonValue> };
+  }
+  const text = resultTextOf(entry.result);
+  const parsed = text === undefined ? undefined : answersOfAnsweredText(text);
+  return { questions: asked, answers: parsed };
+}
+
+/** The text of a tool's result, out of whichever envelope the transport left it in. */
+function resultTextOf(result: JsonValue | undefined): string | undefined {
+  if (typeof result === "string") return result;
+  if (Array.isArray(result)) {
+    const texts = result
+      .map((block) =>
+        block !== null && typeof block === "object" && !Array.isArray(block) && typeof (block as Record<string, JsonValue>)["text"] === "string"
+          ? ((block as Record<string, JsonValue>)["text"] as string)
+          : typeof block === "string"
+            ? block
+            : "",
+      )
+      .filter((t) => t.length > 0);
+    return texts.length > 0 ? texts.join("\n") : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * The agent's question as the person saw it, with what they answered — the same chooser the dialog
+ * drew, inert. Several questions keep their stepper, Back and Next included: they were read one at
+ * a time, and they are re-read the same way.
+ */
+function AskedQuestions({ questions, answers }: { questions: AgentQuestion[]; answers: Record<string, JsonValue> | undefined }): JSX.Element {
+  const choices = useMemo(() => choicesOfQuestions(questions), [questions]);
+  const [state, setState] = useState<Record<string, Answer>>(() =>
+    answersOfValue(choices, answers === undefined ? undefined : { answers }),
+  );
+  return (
+    <div className="gate-settled ts-asked" data-testid="asked">
+      {choices.length > 1 ? (
+        <ChoiceSteps
+          choices={choices}
+          answers={state}
+          onAnswer={(question, next) => setState((prev) => ({ ...prev, [question]: next }))}
+          onSubmit={() => undefined}
+          readOnly
+        />
+      ) : (
+        <ChoiceList
+          choices={choices}
+          answers={state}
+          onAnswer={(question, next) => setState((prev) => ({ ...prev, [question]: next }))}
+          readOnly
+        />
+      )}
+    </div>
+  );
+}
+
 function Tool({
   entry,
   sidechainOf,
@@ -397,6 +496,7 @@ function Tool({
   artifacts?: ArtifactSurface | undefined;
 }): JSX.Element {
   const sub = entry.sidechain !== undefined && sidechainOf !== undefined ? sidechainOf(entry.sidechain) : undefined;
+  const asked = askedOf(entry);
   // What the crumb will read: the call's first argument is the Task's short description, which is
   // the one name a person chose for this subagent. The tool's own name is the honest fallback.
   const chainName = `⑂ ${entry.summary.length > 0 ? entry.summary : entry.name}`;
@@ -412,7 +512,15 @@ function Tool({
       preview={entry.sidechain !== undefined ? `⑂ ${entry.summary}` : entry.summary}
       tone={entry.ok === false ? "bad" : "plain"}
       mark={entry.ok === undefined ? "waiting" : entry.ok ? "ok" : "bad"}
-      {...(produced !== undefined
+      {...(asked !== undefined
+        ? {
+            // The question the agent put to the person, and their answer, drawn under the line
+            // without being asked for: it is the one call in a transcript whose arguments a person
+            // wrote half of. Keyed on whether it has been answered, so a row that was in flight
+            // redraws with the answer rather than keeping its empty state.
+            shown: <AskedQuestions key={asked.answers === undefined ? "asking" : "answered"} questions={asked.questions} answers={asked.answers} />,
+          }
+        : produced !== undefined
         ? {
             shown: (
               <ValueView

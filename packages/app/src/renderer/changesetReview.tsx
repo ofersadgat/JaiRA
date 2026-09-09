@@ -23,6 +23,7 @@
  * the same component sit in a conversation pane — but the CLI reviewer is now a DIFFERENT surface
  * (`packages/cli/src/changesetReviewer.ts`), sharing the derivation and not the layout.
  */
+import type { JsonValue } from "@declarative-ai/json";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -110,6 +111,39 @@ export interface MountContext {
   inputs: Record<string, unknown>;
   services: ComponentServices;
   onSubmit(value: unknown): void;
+  /**
+   * The review has been SUBMITTED, and this is what it submitted: draw it as decided, inert.
+   *
+   * `undefined` inside the field (as opposed to the field absent) is a review that was never
+   * submitted — stopped, or the process gone — drawn with nothing decided. `onSubmit` is never
+   * called while the field is present.
+   */
+  settled?: JsonValue | undefined;
+}
+
+/**
+ * The drafts a submitted review's DECISIONS spell — the inverse of `deriveDecisions`, so the
+ * chooser and the detail draw a settled review from the same state they draw a live one.
+ *
+ * `denied` and `reverted` were an X; `comment` was words, which are in the decision itself;
+ * `approved` and `merged` were nothing at all. The set-level conversion (comment ⇒ approved,
+ * silence ⇒ merged) needs no undoing: it is recomputed from these drafts and the review comment.
+ */
+function draftsOfDecisions(decisions: JsonValue | undefined): Drafts {
+  const out: Drafts = {};
+  if (!Array.isArray(decisions)) return out;
+  for (const decided of decisions) {
+    if (decided === null || typeof decided !== "object" || Array.isArray(decided)) continue;
+    const row = decided as Record<string, JsonValue>;
+    if (typeof row["id"] !== "string") continue;
+    const draft: Draft = {};
+    if (row["decision"] === "denied" || row["decision"] === "reverted") draft.excluded = true;
+    if (typeof row["comment"] === "string") draft.comment = row["comment"];
+    if (Array.isArray(row["notes"])) draft.notes = row["notes"] as unknown as NonNullable<Draft["notes"]>;
+    if (typeof row["content"] === "string") draft.content = row["content"];
+    out[row["id"]] = draft;
+  }
+  return out;
 }
 
 /**
@@ -212,8 +246,16 @@ function ChangesetReview({ ctx }: { ctx: MountContext }): JSX.Element {
     return found.changeset === undefined ? { error: found.error ?? "no input holds a changeset" } : { changeset: found.changeset };
   }, [ctx.inputs]);
 
-  const [drafts, setDrafts] = useState<Drafts>({});
-  const [reviewComment, setReviewComment] = useState("");
+  // Settled: the state the submitted decisions spell, and nothing that can change it.
+  const readOnly = "settled" in ctx;
+  const recorded: Record<string, JsonValue> =
+    ctx.settled !== null && typeof ctx.settled === "object" && !Array.isArray(ctx.settled)
+      ? (ctx.settled as Record<string, JsonValue>)
+      : {};
+  const [drafts, setDrafts] = useState<Drafts>(() => (readOnly ? draftsOfDecisions(recorded["decisions"]) : {}));
+  const [reviewComment, setReviewComment] = useState(() =>
+    readOnly && typeof recorded["comments"] === "string" ? recorded["comments"] : "",
+  );
   const [selected, setSelected] = useState<string | undefined>(undefined);
   /**
    * Which changes were actually put on screen.
@@ -234,7 +276,9 @@ function ChangesetReview({ ctx }: { ctx: MountContext }): JSX.Element {
   const [moved, setMoved] = useState<ReadonlySet<string>>(new Set());
   const changesetForDrift = parsed.changeset;
   useEffect(() => {
-    if (changesetForDrift === undefined) return undefined;
+    // Drift is a warning about what a merge would do; a record of a review already made has no
+    // merge ahead of it, and a badge on it would be about the present rather than the review.
+    if (changesetForDrift === undefined || readOnly) return undefined;
     let alive = true;
     void (async () => {
       const flagged = new Set<string>();
@@ -251,7 +295,7 @@ function ChangesetReview({ ctx }: { ctx: MountContext }): JSX.Element {
     return () => {
       alive = false;
     };
-  }, [changesetForDrift, ctx.services, ctx.config.tree]);
+  }, [changesetForDrift, ctx.services, ctx.config.tree, readOnly]);
 
   // Open the first change on mount. A reviewer landing on an empty right pane has to click before
   // the component does anything, and the first file is the one they would have clicked.
@@ -355,6 +399,7 @@ function ChangesetReview({ ctx }: { ctx: MountContext }): JSX.Element {
               services={ctx.services}
               moved={moved.has(change.id)}
               baseline={baseline}
+              readOnly={readOnly}
             />
           )}
         </div>
@@ -366,8 +411,9 @@ function ChangesetReview({ ctx }: { ctx: MountContext }): JSX.Element {
           <textarea
             className="review-comment"
             rows={2}
-            placeholder="Anything that is about the set rather than one file…"
+            placeholder={readOnly ? "" : "Anything that is about the set rather than one file…"}
             value={reviewComment}
+            readOnly={readOnly}
             onChange={(e) => setReviewComment(e.target.value)}
           />
         </label>
@@ -376,14 +422,27 @@ function ChangesetReview({ ctx }: { ctx: MountContext }): JSX.Element {
 
         <div className="options">
           {ctx.config.options === undefined ? (
-            <button className="primary" onClick={() => submit()} data-testid="submit-review">
+            // Settled: the one button there was, as it read when it was pressed, and unpressable.
+            <button className="primary" disabled={readOnly} onClick={() => submit()} data-testid="submit-review">
               {going ? "Apply the review" : "Send back with comments"}
             </button>
           ) : (
             ctx.config.options.map((option) => (
               <button
                 key={option.value}
-                className={option.tone === "danger" ? "danger" : "primary"}
+                // Settled: the option that was chosen keeps its fill; the others go quiet.
+                className={
+                  readOnly
+                    ? recorded["decision"] === option.value
+                      ? option.tone === "danger"
+                        ? "danger"
+                        : "primary"
+                      : "ghost"
+                    : option.tone === "danger"
+                      ? "danger"
+                      : "primary"
+                }
+                disabled={readOnly}
                 onClick={() => submit(option.value)}
                 data-testid={`submit-${option.value}`}
               >
@@ -566,6 +625,7 @@ function ChangeDetail({
   services,
   moved,
   baseline,
+  readOnly,
 }: {
   change: Change;
   tree: "base" | "proposal";
@@ -576,6 +636,8 @@ function ChangeDetail({
   moved: boolean;
   /** The whole changeset's before-side — see {@link baselineOf} and `CheckFileRequest.baseline`. */
   baseline: BaselineFile[];
+  /** The change as it was decided: the diff, the notes and the comment, none of them editable. */
+  readOnly?: boolean | undefined;
 }): JSX.Element {
   const well = useRef<HTMLDivElement>(null);
   // The well is still the notes' host element; the diff inside it is Monaco's own DOM.
@@ -703,7 +765,7 @@ function ChangeDetail({
             </button>
           </span>
         ) : null}
-        {draft.excluded === true ? (
+        {readOnly === true ? null : draft.excluded === true ? (
           // `content: undefined` as well: putting a change back restores what was PROPOSED, not the
           // proposal plus edits that were discarded on the way out. Leaving the edit behind meant a
           // restored change came back looking unchanged until "Undo my edits" was pressed too.
@@ -734,7 +796,7 @@ function ChangeDetail({
             {canRevertLines ? "Revert these lines" : "Revert"}
           </button>
         )}
-        {draft.excluded !== true && draft.content !== undefined && draft.content !== change.after ? (
+        {readOnly !== true && draft.excluded !== true && draft.content !== undefined && draft.content !== change.after ? (
           <button className="ghost" onClick={() => onDraft({ content: undefined })}>
             Undo my edits
           </button>
@@ -773,8 +835,10 @@ function ChangeDetail({
             modified={draft.excluded === true ? (change.before ?? "") : (draft.content ?? change.after ?? "")}
             mime={mimeOfPath(change.path)}
             file={change.path}
-            readOnly={change.after === undefined}
-            onModified={(text) => onDraft({ content: text === change.after ? undefined : text })}
+            readOnly={readOnly === true || change.after === undefined}
+            onModified={(text) => {
+              if (readOnly !== true) onDraft({ content: text === change.after ? undefined : text });
+            }}
             onSelect={(picked) => {
               setMonacoSelection(picked);
               // Recomputed on every selection change rather than on click: the button's LABEL has to
@@ -788,7 +852,7 @@ function ChangeDetail({
         </Suspense>
       )}
 
-      {selection !== null ? (
+      {selection !== null && readOnly !== true ? (
         <NoteComposer
           selection={selection}
           author={author}
@@ -823,16 +887,19 @@ function ChangeDetail({
         hovered={hovered ?? hotThread}
         onHover={setHotThread}
         onReselect={(note) => reselect(well.current, note)}
-        onReply={(i, body) =>
-          onDraft({
-            notes: notes.map((note, at) =>
-              at === i
-                ? { ...note, replies: [...(note.replies ?? []), { author, body, at: new Date().toISOString() }] }
-                : note,
-            ),
-          })
-        }
-        onRemove={(i) => onDraft({ notes: notes.filter((_, at) => at !== i) })}
+        {...(readOnly === true
+          ? {}
+          : {
+              onReply: (i: number, body: string) =>
+                onDraft({
+                  notes: notes.map((note, at) =>
+                    at === i
+                      ? { ...note, replies: [...(note.replies ?? []), { author, body, at: new Date().toISOString() }] }
+                      : note,
+                  ),
+                }),
+              onRemove: (i: number) => onDraft({ notes: notes.filter((_, at) => at !== i) }),
+            })}
       />
 
       <label className="field">
@@ -846,6 +913,7 @@ function ChangeDetail({
               : "For anything that is not about one passage…"
           }
           value={draft.comment ?? ""}
+          readOnly={readOnly === true}
           onChange={(e) => onDraft({ comment: e.target.value })}
         />
       </label>
