@@ -23,6 +23,7 @@ A doc is a standalone source of truth. Someone who has never seen the work that 
 - Headings carry the idea. Every heading is a sentence stating its conclusion; the headings alone give the whole doc.
 - One concept per file. One feature, one pattern, one component, one unit.
 - Layers reference upward only. A product doc names people, goals and abilities. A UX doc names patterns and features. A UI doc names components, patterns and features. An engineering doc names units, components, patterns and features. No doc names anything from a layer below it.
+- Each layer writes at its own altitude. A product doc describes outcomes and never how: a list, an order, a row, a click or a screen in it is a defect. A UX doc describes interactions and never visuals. A UI doc describes visuals and never code.
 - No questions. A doc holds answers.
 - No alternatives, unless the choice departs from the usual way, in which case one line states the departure and the reason.
 - No process. No draft, pass, revision, critique, finding, conversation or earlier version is mentioned.

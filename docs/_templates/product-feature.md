@@ -16,22 +16,16 @@ verified_by: []
 
 > As a <who>, I can <what>, so that <value>.
 
-## <Who is served, and what they do today instead>
+## <Who is served, and what they cannot do today>
 
-## <What they can do that they could not before>
+## <What they can now do>
 
-## <Success is measured by a number that moves only when the value is delivered>
+## <Why it matters to them>
+
+## <Success shows as a number that moves only when the outcome is delivered>
 
 | Metric | Read from | Success |
 | --- | --- | --- |
 | | | |
-
-## <What is necessary, what is sufficient, what is nice to have>
-
-**Necessary.**
-
-**Sufficient.**
-
-**Nice to have.**
 
 ## <Where this departs from the product principles, if it does>
