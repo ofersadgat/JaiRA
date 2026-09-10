@@ -1212,16 +1212,20 @@ export function ModuleApprovalDialog({
  * Dismissal is the one affordance a gate does not get. An agent continues either way — told to use
  * its own judgment — where a gate's state has declared outputs that must receive a value.
  */
-export function QuestionDialog({
-  pending,
-  error,
-  onSubmit,
-}: {
+export interface QuestionSurfaceProps {
   pending: PendingQuestion;
   error?: string | null;
   /** `undefined` dismisses: the agent is told to use its own judgment and continue. */
   onSubmit: (answers: Record<string, string | string[]> | undefined) => void;
-}): JSX.Element {
+}
+
+/**
+ * The question as a RENDER FUNCTION: the control and its buttons, with no opinion about where it
+ * sits. Where it renders is the caller's call — a conversation hosts it under the state whose agent
+ * asked (`RunConversation`), the gallery draws it in a row, and `QuestionDialog` is the one caller
+ * that still puts it in a modal.
+ */
+export function QuestionSurface({ pending, error, onSubmit }: QuestionSurfaceProps): JSX.Element {
   const choices = choicesOfQuestions(pending.questions);
   const [answers, setAnswers] = useState<Record<string, Answer>>({});
 
@@ -1242,43 +1246,52 @@ export function QuestionDialog({
   );
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal" data-testid="question">
-        <h3>
-          <Icon name="comment" className="gate-icon" />{" "}
-          {choices.length === 1 ? "The agent has a question" : "The agent has questions"}
-        </h3>
-        {pending.taskId !== undefined ? <div className="sub">{pending.taskId}</div> : null}
-        {/* With one question the heading says only that there IS one, so the question itself has to
-            be printed. The stepped view prints its own. */}
-        {choices.length === 1 ? <p className="question-text">{choices[0]!.question}</p> : null}
-        {choices.length > 1 ? (
-          <ChoiceSteps
+    <div className="question-surface" data-testid="question">
+      <h3>
+        <Icon name="comment" className="gate-icon" />{" "}
+        {choices.length === 1 ? "The agent has a question" : "The agent has questions"}
+      </h3>
+      {/* With one question the heading says only that there IS one, so the question itself has to
+          be printed. The stepped view prints its own. */}
+      {choices.length === 1 ? <p className="question-text">{choices[0]!.question}</p> : null}
+      {choices.length > 1 ? (
+        <ChoiceSteps
+          choices={choices}
+          answers={answers}
+          onAnswer={(question, next) => setAnswers((prev) => ({ ...prev, [question]: next }))}
+          onSubmit={submit}
+          extra={dismiss}
+        />
+      ) : (
+        <>
+          <ChoiceList
             choices={choices}
             answers={answers}
             onAnswer={(question, next) => setAnswers((prev) => ({ ...prev, [question]: next }))}
-            onSubmit={submit}
-            extra={dismiss}
+            onImmediate={(question, value) => onSubmit({ [question]: value })}
           />
-        ) : (
-          <>
-            <ChoiceList
-              choices={choices}
-              answers={answers}
-              onAnswer={(question, next) => setAnswers((prev) => ({ ...prev, [question]: next }))}
-              onImmediate={(question, value) => onSubmit({ [question]: value })}
-            />
-            <div className="options">
-              {immediate ? null : (
-                <button className="primary" disabled={!complete} onClick={submit}>
-                  Answer
-                </button>
-              )}
-              {dismiss}
-            </div>
-          </>
-        )}
-        {error ? <p className="reason">{error}</p> : null}
+          <div className="options">
+            {immediate ? null : (
+              <button className="primary" disabled={!complete} onClick={submit}>
+                Answer
+              </button>
+            )}
+            {dismiss}
+          </div>
+        </>
+      )}
+      {error ? <p className="reason">{error}</p> : null}
+    </div>
+  );
+}
+
+/** The question in a modal — one caller's choice of place, and no longer the shell's. */
+export function QuestionDialog(props: QuestionSurfaceProps): JSX.Element {
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        {props.pending.taskId !== undefined ? <div className="sub">{props.pending.taskId}</div> : null}
+        <QuestionSurface {...props} />
       </div>
     </div>
   );

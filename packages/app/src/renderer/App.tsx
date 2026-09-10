@@ -42,7 +42,7 @@ import { Board, lanesOf } from "./board";
 import { dragOffersOf } from "./taskDrag";
 import { ChatListPanel, ChatView, chatProjectOf, conversationsOf, type ChatSurface } from "./chatPane";
 import { isChatWorkflow } from "./chatWorkflow";
-import { ApprovalDialog, ModuleApprovalDialog, QuestionDialog } from "./components";
+import { ApprovalDialog, ModuleApprovalDialog } from "./components";
 import {
   AskDialog,
   ContextMenu,
@@ -646,6 +646,12 @@ export default function App(): JSX.Element {
     view === "tasks" && detail !== null
       ? (pending.find((p) => p.about === detail.taskId || p.taskId === detail.taskId) ?? null)
       : null;
+  /**
+   * The agent question this conversation is holding, hosted the same way. An agent addressing you
+   * mid-turn is not a different kind of thing from a state asking you: both are where the task is
+   * sitting, and the strip below is how you reach either from anywhere else.
+   */
+  const inlineQuestion = view === "tasks" && detail !== null ? (state.questions.find((q) => q.taskId === detail.taskId) ?? null) : null;
 
   /**
    * The Files tree's folded branches.
@@ -1320,6 +1326,12 @@ export default function App(): JSX.Element {
             wrapJson: state.settings.editors.json.wrap,
             onWrapJson: (wrap: boolean) => void actions.setWrapJson(wrap),
           },
+        }
+      : {}),
+    ...(inlineQuestion !== null
+      ? {
+          runQuestion: inlineQuestion,
+          onRunQuestion: (answers: Record<string, string | string[]> | undefined) => actions.answerQuestion(inlineQuestion.requestId, answers),
         }
       : {}),
     // The request's OWN project, not the ambient one. A parked request stamps the project it parked
@@ -2313,15 +2325,6 @@ export default function App(): JSX.Element {
           onApprove={actions.approveModulesAndStart}
           onCancel={actions.dismissModuleApproval}
         />
-      ) : state.questions.length > 0 ? (
-        // The agent ASKED — that outranks everything else waiting, because it is the one item the
-        // person was explicitly addressed by.
-        <QuestionDialog
-          key={state.questions[0]!.requestId}
-          pending={state.questions[0]!}
-          error={state.error}
-          onSubmit={(answers) => actions.answerQuestion(state.questions[0]!.requestId, answers)}
-        />
       ) : state.approvals.length > 0 ? (
         <ApprovalDialog
           pending={state.approvals[0]!}
@@ -2329,12 +2332,13 @@ export default function App(): JSX.Element {
           onDecide={(decision, scope) => actions.decideApproval(state.approvals[0]!.requestId, decision, scope)}
         />
       ) : null}
-      {/* And no fourth dialog. A gate is NOT a modal any more (CHANGESETS.md §8.1): it renders in
-          its task's conversation — see `inlineGate` — and the strip below is how you get there from
-          anywhere else. The three above stay modal because each is a question about the thing you
-          are doing right now: a module about to be trusted, an agent addressing you mid-turn, a
-          command waiting on the other side of the approval gate. A workflow state's question is not
-          that. It is a place its task is sitting, and it will still be sitting there tomorrow. */}
+      {/* And no third dialog. A gate is NOT a modal (CHANGESETS.md §8.1), and neither is an agent's
+          question any more: both render in their task's conversation — see `inlineGate` and
+          `inlineQuestion` — and the strip below is how you get there from anywhere else. Every
+          component is a render function; where it renders is its caller's choice, and a
+          conversation always renders inline. The two above stay modal because each is about the
+          thing you are doing right now: a module about to be trusted, a command waiting on the
+          other side of the approval gate. */}
 
       {taskMenu !== null ? <ContextMenu anchor={taskMenu} onClose={() => setTaskMenu(null)} /> : null}
       {newMenu !== null ? <ContextMenu anchor={newMenu} onClose={() => setNewMenu(null)} /> : null}

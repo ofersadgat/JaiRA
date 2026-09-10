@@ -19,13 +19,14 @@ import type {
   InstanceNode,
   OperationRecordView,
   PendingInteraction,
+  PendingQuestion,
   PendingUserEvent,
   StateChild,
   StateView,
   TaskDetail,
 } from "@jaira/shared/browser";
 import { Board, Column, Tile } from "./board";
-import { GateSurface, type EditorServices } from "./components";
+import { GateSurface, QuestionSurface, type EditorServices } from "./components";
 import type { ComponentServices } from "./changesetReview";
 import { TaskDetailSections, TaskHead } from "./detail";
 import { entriesOf, journalFor, previewOf, sidechainEntriesOf, signatureOf } from "./transcript";
@@ -71,6 +72,20 @@ function hasAsking(node: InstanceNode): boolean {
  * instance, since SPEC §7.1 gives an instance one operation and one task's tree cannot hold two
  * parked calls on one state.
  */
+/**
+ * The instance whose CALL is running and which has no running child — where an agent that asks is
+ * asking from. Deepest first, since a running composite's own call is never the one talking.
+ */
+function runningLeafOf(nodes: readonly InstanceNode[]): string | undefined {
+  for (const node of nodes) {
+    if (node.superseded) continue;
+    const inside = runningLeafOf(node.children);
+    if (inside !== undefined) return inside;
+    if (node.status === "running" && node.operation?.status === "running") return node.instanceId;
+  }
+  return undefined;
+}
+
 function askingInstanceOf(nodes: readonly InstanceNode[]): string | undefined {
   for (const node of nodes) {
     if (isAsking(node)) return node.instanceId;
@@ -641,6 +656,8 @@ export function RunConversation({
   onGate,
   gateServices,
   gateEditor,
+  question,
+  onQuestion,
 }: {
   /** The run whose conversation this is. Undefined ⇒ nothing has run here yet. */
   parent: InstanceNode | undefined;
@@ -667,6 +684,14 @@ export function RunConversation({
   onGate?: ((value: unknown) => void) | undefined;
   gateServices?: Partial<ComponentServices> | undefined;
   gateEditor?: EditorServices | undefined;
+  /**
+   * A running agent's question, hosted under the state whose agent asked it — the transcript so far
+   * above, the question below, because the agent asked mid-turn and what it said first is the
+   * context for what it is asking. The journal does not say which instance asked, so the question
+   * goes under the leaf whose call is running: an agent asks from inside its own call.
+   */
+  question?: PendingQuestion | undefined;
+  onQuestion?: ((answers: Record<string, string | string[]> | undefined) => void) | undefined;
   /** A state to go to, asked for by the Instances index — see `SessionBandsView`. */
   focus?: { instance: string; at: number } | undefined;
   /**
@@ -776,6 +801,10 @@ export function RunConversation({
     () => (gate === undefined || onGate === undefined ? undefined : askingInstanceOf(detail?.instances ?? [])),
     [gate, onGate, detail?.instances],
   );
+  const questionHere = useMemo(
+    () => (question === undefined || onQuestion === undefined ? undefined : runningLeafOf(detail?.instances ?? [])),
+    [question, onQuestion, detail?.instances],
+  );
 
   /**
    * A rewind the reader has ARMED from an entered row or a knot — see `CutOffer` and `cut.ts`.
@@ -883,7 +912,7 @@ export function RunConversation({
     // sidechains included, which is what lets a doorway row show its subagent talking live.
     const live = matches ? liveTurn : null;
     const entries = entriesOf(view, journalFor(conversation?.turns ?? [], piece.node.stateId), live);
-    return (
+    const transcript = (
       <Transcript
         session={view}
         entries={entries}
@@ -898,6 +927,19 @@ export function RunConversation({
           : {})}
       />
     );
+    // The agent's question, under what it said before asking. Keyed on the request so a second
+    // question from the same agent starts with nothing lit.
+    if (question !== undefined && onQuestion !== undefined && piece.node.instanceId === questionHere) {
+      return (
+        <>
+          {transcript}
+          <div className="inline-gate">
+            <QuestionSurface key={question.requestId} pending={question} onSubmit={onQuestion} />
+          </div>
+        </>
+      );
+    }
+    return transcript;
   };
 
   return (
@@ -1450,6 +1492,9 @@ export function RunView({ context }: { context: FileSurfaceProps["context"] }): 
                 ...(context.runGateServices !== undefined ? { gateServices: context.runGateServices } : {}),
                 ...(context.runGateEditor !== undefined ? { gateEditor: context.runGateEditor } : {}),
               }
+            : {})}
+          {...(context.runQuestion !== undefined && context.onRunQuestion !== undefined
+            ? { asking: true, question: context.runQuestion, onQuestion: context.onRunQuestion }
             : {})}
         />
       )}

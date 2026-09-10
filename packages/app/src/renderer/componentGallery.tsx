@@ -37,12 +37,13 @@
  * to be typed. That is the same bargain the config pane strikes with its raw-document escape hatch,
  * and for the same reason — a form that is the only way in is a form that decides what you may say.
  *
- * ## Why the dialogs render inline
+ * ## Why the surfaces render inline
  *
- * All three are modal by construction (`.modal-backdrop` is fixed and covers the window). A gallery
- * of nine modals opened one at a time is a gallery you cannot compare, so the stage neutralises the
- * backdrop's positioning in CSS and nothing about the dialogs themselves changes. What you see is
- * what the modal shows, minus the scrim.
+ * Every component is a render function, and where it goes is the caller's choice: the gallery is a
+ * caller and it chooses a row. The two dialogs that are still modal by construction
+ * (`.modal-backdrop` is fixed and covers the window) have their positioning neutralised in CSS by
+ * the stage, so nothing about them changes; a question renders as the same `QuestionSurface` the
+ * conversation hosts, with no modal to neutralise.
  */
 import { useRef, useState, type JSX } from "react";
 import {
@@ -62,7 +63,7 @@ import {
   type ValidateSchemaResult,
 } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { ApprovalDialog, InteractionDialog, QuestionDialog } from "./components";
+import { ApprovalDialog, InteractionDialog, QuestionSurface } from "./components";
 import { SchemaJsonEditor } from "./schemaEditor";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
@@ -462,12 +463,14 @@ function Stage({
       at: 0,
     };
     return (
-      <QuestionDialog
-        pending={pending}
-        // `undefined` is the dismissal the real channel carries — shown as itself rather than
-        // collapsed into "no answer", because "let the agent decide" IS an answer the agent receives.
-        onSubmit={(answers) => onResult({ value: answers === undefined ? { dismissed: true } : { answers } })}
-      />
+      <div className="inline-gate">
+        <QuestionSurface
+          pending={pending}
+          // `undefined` is the dismissal the real channel carries — shown as itself rather than
+          // collapsed into "no answer", because "let the agent decide" IS an answer the agent receives.
+          onSubmit={(answers) => onResult({ value: answers === undefined ? { dismissed: true } : { answers } })}
+        />
+      </div>
     );
   }
 

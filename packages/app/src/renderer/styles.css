@@ -5821,7 +5821,10 @@ button.layer-on:hover:not(:disabled) {
   width: auto;
   justify-self: start;
 }
-/* --- the agent-question dialog (AskUserQuestion) --- */
+/* --- the agent question (AskUserQuestion), wherever its caller puts it --- */
+.question-surface > h3 {
+  margin: 0 0 8px;
+}
 .question-block {
   margin-top: 14px;
 }

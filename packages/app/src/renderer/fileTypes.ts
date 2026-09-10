@@ -62,6 +62,7 @@ import type {
   WorkflowSyncStatus,
   WritingTool,
   PendingInteraction,
+  PendingQuestion,
 } from "@jaira/shared/browser";
 import { defaultRendererChoice, mimeFallbacks, paneFamilyOf } from "@jaira/shared/browser";
 import type { EditorKind, PaneFamily, RendererChoice, RendererChoices, RenderView } from "@jaira/shared/browser";
@@ -346,6 +347,13 @@ export interface FileSurfaceContext {
   onRunGate?: ((value: unknown) => void) | undefined;
   runGateServices?: Partial<ComponentServices> | undefined;
   runGateEditor?: EditorServices | undefined;
+  /**
+   * The question a running agent in this task has asked, hosted in the conversation under the state
+   * whose agent asked it — the same place a gate goes, for the same reason: a question is where the
+   * task is sitting, and a modal over the whole window is not a place.
+   */
+  runQuestion?: PendingQuestion | undefined;
+  onRunQuestion?: ((answers: Record<string, string | string[]> | undefined) => void) | undefined;
   onAnswer?: (() => void) | undefined;
   /**
    * Set this run going again — `task:rerun`, and the shell's own action rather than a raw call.
