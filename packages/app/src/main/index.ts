@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, protocol, safeStorage, shell, type IpcMainInvokeEvent } from "electron";
 import { isProject } from "@jaira/persistence";
 import {
   ARTIFACT_SCHEME,
@@ -33,6 +33,32 @@ const RENDERER_HTML = join(DIST, "renderer", "index.html");
 const PRELOAD = join(DIST, "preload.cjs");
 
 let window: BrowserWindow | undefined;
+
+/**
+ * Whether the window's renderer is there to hear a push.
+ *
+ * `isDestroyed()` answers for the WINDOW, and a window outlives its renderer: after the renderer
+ * process dies the BrowserWindow stands, `isDestroyed()` says no, and `webContents.send` reaches a
+ * frame that no longer exists. Electron reports that by printing "Error sending from webFrameMain"
+ * to the console itself, from inside `send`, without throwing — so the guard around the push could
+ * not catch it, and every push after a crash printed one, the crash's own log entry included.
+ *
+ * True from the page's first load, false from the moment the renderer goes, true again once the
+ * reload in {@link reloadAfterCrash} has brought a page back.
+ */
+let rendererAlive = false;
+
+/**
+ * Where the renderer's death is written down, when it is written down at all.
+ *
+ * A renderer that dies of a native fault leaves nothing behind by default: Chromium handles its own
+ * exceptions, so Windows files no Application Error event for it, and without a reporter no
+ * minidump is written either. One did exactly that at four in the morning, idle, and the whole of
+ * the record was its exit code. Started here, before anything else, so the crashpad handler is
+ * attached to every process the app goes on to create. Never uploaded: the dumps stay under
+ * `crashDumps`, which the crash entry names, so the next report can be read rather than guessed at.
+ */
+crashReporter.start({ uploadToServer: false });
 
 /**
  * The encrypted secret store, backed by Electron's `safeStorage`.
@@ -187,7 +213,8 @@ const service = new AppService({
     // GUARDED, because this is a send into another process and the service treats it as a statement.
     //
     // `webContents.send` structure-clones its argument and throws on anything it cannot represent, and
-    // it throws again for a window torn down between the check and the call. Every caller upstream is
+    // it throws again for a window torn down between the check and the call. A window whose RENDERER
+    // is gone is a third case, and one `send` does not throw for — see `rendererAlive`. Every caller upstream is
     // ordinary bookkeeping — "a run started", "the board changed" — written as if telling the window
     // were free. It is not, and an exception here surfaces wherever that bookkeeping happened to sit,
     // which for an engine event is inside the run.
@@ -196,7 +223,7 @@ const service = new AppService({
     // renderer refetches on reconnect and on `store:invalidate`, so a dropped frame costs latency and
     // nothing else.
     try {
-      if (window && !window.isDestroyed()) window.webContents.send(PUSH_CHANNEL, message);
+      if (window && !window.isDestroyed() && rendererAlive) window.webContents.send(PUSH_CHANNEL, message);
     } catch (e) {
       // Not through `service.log`, which would publish a `log:entry` back through this same failing
       // channel. `recordCrash` records; whether the window hears about it is a separate question that
@@ -630,8 +657,21 @@ async function createWindow(): Promise<BrowserWindow> {
    * errors: it is what carries the renderer's own thrown exceptions across, which is what makes the
    * error boundary's `console.error` reach a place that outlives the crash.
    */
+  win.webContents.on("did-finish-load", () => {
+    rendererAlive = true;
+  });
   win.webContents.on("render-process-gone", (_event, details) => {
-    reportCrash("renderer", new Error(`the window's renderer process ended: ${details.reason} (exit ${details.exitCode})`));
+    // BEFORE the report: the report is a log entry, a log entry is a push, and the frame it would be
+    // pushed into is the one that just went.
+    rendererAlive = false;
+    reportCrash(
+      "renderer",
+      new Error(
+        `the window's renderer process ended: ${details.reason} (exit ${details.exitCode}); ` +
+          `minidumps, if any, are under ${app.getPath("crashDumps")}`,
+      ),
+    );
+    reloadAfterCrash(win, details.reason);
   });
   win.webContents.on("unresponsive", () => {
     reportCrash("renderer", new Error("the window stopped responding — the renderer is blocked or thrashing"));
@@ -661,6 +701,45 @@ async function createWindow(): Promise<BrowserWindow> {
   await win.loadFile(RENDERER_HTML);
   win.show();
   return win;
+}
+
+/**
+ * How long a reloaded renderer has to stay up before its next death counts as a fresh one. Inside
+ * it, a second death is the same fault meeting the same page, and reloading again would be a loop
+ * drawing a white window at full speed.
+ */
+const RELOAD_BACKOFF_MS = 30_000;
+let reloadedAt = 0;
+
+/**
+ * Bring the page back after its renderer died.
+ *
+ * The window stood for eight hours over a dead renderer once — white, with a run parked behind it
+ * waiting for an answer nobody could give, until somebody quit the app. Nothing about that wait was
+ * necessary: everything the page shows is refetched from the service on load, and the run had never
+ * left the service. So a dead renderer is reloaded, once; if the reload dies inside the backoff the
+ * window is left as it is, with the reason on record, because a loop would be worse than a blank.
+ *
+ * `clean-exit` is the renderer leaving on purpose — what a navigation or the quit looks like from
+ * here — and is not reloaded. Neither is anything after `before-quit`.
+ */
+function reloadAfterCrash(win: BrowserWindow, reason: string): void {
+  if (reason === "clean-exit" || closing || win.isDestroyed()) return;
+  const now = Date.now();
+  if (now - reloadedAt < RELOAD_BACKOFF_MS) {
+    service.recordApp(
+      "error",
+      `the renderer died again within ${RELOAD_BACKOFF_MS / 1000}s of being reloaded; leaving the window as it is`,
+    );
+    return;
+  }
+  reloadedAt = now;
+  service.recordApp("info", "reloading the window after its renderer died");
+  try {
+    win.webContents.reload();
+  } catch (e) {
+    reportCrash("renderer", new Error(`the window could not be reloaded: ${(e as Error).message}`));
+  }
 }
 
 /**
