@@ -5822,7 +5822,8 @@ button.layer-on:hover:not(:disabled) {
   justify-self: start;
 }
 /* --- the agent question (AskUserQuestion), wherever its caller puts it --- */
-.question-surface > h3 {
+.question-surface > h3,
+.approval-surface > h3 {
   margin: 0 0 8px;
 }
 .question-block {

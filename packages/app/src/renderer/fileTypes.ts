@@ -63,6 +63,8 @@ import type {
   WritingTool,
   PendingInteraction,
   PendingQuestion,
+  ApprovalScope,
+  PendingApproval,
 } from "@jaira/shared/browser";
 import { defaultRendererChoice, mimeFallbacks, paneFamilyOf } from "@jaira/shared/browser";
 import type { EditorKind, PaneFamily, RendererChoice, RendererChoices, RenderView } from "@jaira/shared/browser";
@@ -354,6 +356,9 @@ export interface FileSurfaceContext {
    */
   runQuestion?: PendingQuestion | undefined;
   onRunQuestion?: ((answers: Record<string, string | string[]> | undefined) => void) | undefined;
+  /** The command approval a running agent in this task is waiting on, hosted the same way. */
+  runApproval?: PendingApproval | undefined;
+  onRunApproval?: ((decision: "allow" | "deny", scope: ApprovalScope) => void) | undefined;
   onAnswer?: (() => void) | undefined;
   /**
    * Set this run going again — `task:rerun`, and the shell's own action rather than a raw call.

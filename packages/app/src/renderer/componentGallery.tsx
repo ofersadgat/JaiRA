@@ -40,10 +40,10 @@
  * ## Why the surfaces render inline
  *
  * Every component is a render function, and where it goes is the caller's choice: the gallery is a
- * caller and it chooses a row. The two dialogs that are still modal by construction
- * (`.modal-backdrop` is fixed and covers the window) have their positioning neutralised in CSS by
- * the stage, so nothing about them changes; a question renders as the same `QuestionSurface` the
- * conversation hosts, with no modal to neutralise.
+ * caller and it chooses a row. A question and an approval render as the same `QuestionSurface` and
+ * `ApprovalSurface` the conversation hosts, with no modal to neutralise; the one dialog still modal
+ * by construction (`.modal-backdrop` is fixed and covers the window) has its positioning
+ * neutralised in CSS by the stage, so nothing about it changes.
  */
 import { useRef, useState, type JSX } from "react";
 import {
@@ -63,7 +63,7 @@ import {
   type ValidateSchemaResult,
 } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { ApprovalDialog, InteractionDialog, QuestionSurface } from "./components";
+import { ApprovalSurface, InteractionDialog, QuestionSurface } from "./components";
 import { SchemaJsonEditor } from "./schemaEditor";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
@@ -446,10 +446,9 @@ function Stage({
       at: 0,
     };
     return (
-      <ApprovalDialog
-        pending={pending}
-        onDecide={(decision, scope) => onResult({ value: { decision, scope } })}
-      />
+      <div className="inline-gate">
+        <ApprovalSurface pending={pending} onDecide={(decision, scope) => onResult({ value: { decision, scope } })} />
+      </div>
     );
   }
 

@@ -20,13 +20,15 @@ import type {
   OperationRecordView,
   PendingInteraction,
   PendingQuestion,
+  ApprovalScope,
+  PendingApproval,
   PendingUserEvent,
   StateChild,
   StateView,
   TaskDetail,
 } from "@jaira/shared/browser";
 import { Board, Column, Tile } from "./board";
-import { GateSurface, QuestionSurface, type EditorServices } from "./components";
+import { ApprovalSurface, GateSurface, QuestionSurface, type EditorServices } from "./components";
 import type { ComponentServices } from "./changesetReview";
 import { TaskDetailSections, TaskHead } from "./detail";
 import { entriesOf, journalFor, previewOf, sidechainEntriesOf, signatureOf } from "./transcript";
@@ -658,6 +660,8 @@ export function RunConversation({
   gateEditor,
   question,
   onQuestion,
+  approval,
+  onApproval,
 }: {
   /** The run whose conversation this is. Undefined ⇒ nothing has run here yet. */
   parent: InstanceNode | undefined;
@@ -692,6 +696,9 @@ export function RunConversation({
    */
   question?: PendingQuestion | undefined;
   onQuestion?: ((answers: Record<string, string | string[]> | undefined) => void) | undefined;
+  /** A command approval a running agent is waiting on, hosted under the same leaf for the same reason. */
+  approval?: PendingApproval | undefined;
+  onApproval?: ((decision: "allow" | "deny", scope: ApprovalScope) => void) | undefined;
   /** A state to go to, asked for by the Instances index — see `SessionBandsView`. */
   focus?: { instance: string; at: number } | undefined;
   /**
@@ -801,9 +808,13 @@ export function RunConversation({
     () => (gate === undefined || onGate === undefined ? undefined : askingInstanceOf(detail?.instances ?? [])),
     [gate, onGate, detail?.instances],
   );
-  const questionHere = useMemo(
-    () => (question === undefined || onQuestion === undefined ? undefined : runningLeafOf(detail?.instances ?? [])),
-    [question, onQuestion, detail?.instances],
+  // Where a running agent's question or approval is drawn: under the leaf whose call is running.
+  const agentHere = useMemo(
+    () =>
+      (question !== undefined && onQuestion !== undefined) || (approval !== undefined && onApproval !== undefined)
+        ? runningLeafOf(detail?.instances ?? [])
+        : undefined,
+    [question, onQuestion, approval, onApproval, detail?.instances],
   );
 
   /**
@@ -927,15 +938,22 @@ export function RunConversation({
           : {})}
       />
     );
-    // The agent's question, under what it said before asking. Keyed on the request so a second
-    // question from the same agent starts with nothing lit.
-    if (question !== undefined && onQuestion !== undefined && piece.node.instanceId === questionHere) {
+    // The agent's question or the command it is waiting to run, under what it said before asking.
+    // Keyed on the request so a second one from the same agent starts with nothing lit.
+    if (piece.node.instanceId === agentHere) {
       return (
         <>
           {transcript}
-          <div className="inline-gate">
-            <QuestionSurface key={question.requestId} pending={question} onSubmit={onQuestion} />
-          </div>
+          {approval !== undefined && onApproval !== undefined ? (
+            <div className="inline-gate">
+              <ApprovalSurface key={approval.requestId} pending={approval} onDecide={onApproval} />
+            </div>
+          ) : null}
+          {question !== undefined && onQuestion !== undefined ? (
+            <div className="inline-gate">
+              <QuestionSurface key={question.requestId} pending={question} onSubmit={onQuestion} />
+            </div>
+          ) : null}
         </>
       );
     }
@@ -1495,6 +1513,9 @@ export function RunView({ context }: { context: FileSurfaceProps["context"] }): 
             : {})}
           {...(context.runQuestion !== undefined && context.onRunQuestion !== undefined
             ? { asking: true, question: context.runQuestion, onQuestion: context.onRunQuestion }
+            : {})}
+          {...(context.runApproval !== undefined && context.onRunApproval !== undefined
+            ? { asking: true, approval: context.runApproval, onApproval: context.onRunApproval }
             : {})}
         />
       )}

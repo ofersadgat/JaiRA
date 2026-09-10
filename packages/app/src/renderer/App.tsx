@@ -32,6 +32,7 @@ import type {
   BoardCard,
   ConfigLayer,
   PendingApproval,
+  ApprovalScope,
   PendingInteraction,
   PendingQuestion,
   ProjectSummary,
@@ -652,6 +653,13 @@ export default function App(): JSX.Element {
    * sitting, and the strip below is how you reach either from anywhere else.
    */
   const inlineQuestion = view === "tasks" && detail !== null ? (state.questions.find((q) => q.taskId === detail.taskId) ?? null) : null;
+  /** The command approval this conversation is holding, hosted the same way. */
+  const inlineApproval = view === "tasks" && detail !== null ? (state.approvals.find((a) => a.taskId === detail.taskId) ?? null) : null;
+  /**
+   * An approval no conversation can host: one that names no task. The shell is its caller, and the
+   * shell's place for it is a modal. Everything with a task renders where the task is.
+   */
+  const orphanApproval = state.approvals.find((a) => a.taskId === undefined) ?? null;
 
   /**
    * The Files tree's folded branches.
@@ -1332,6 +1340,12 @@ export default function App(): JSX.Element {
       ? {
           runQuestion: inlineQuestion,
           onRunQuestion: (answers: Record<string, string | string[]> | undefined) => actions.answerQuestion(inlineQuestion.requestId, answers),
+        }
+      : {}),
+    ...(inlineApproval !== null
+      ? {
+          runApproval: inlineApproval,
+          onRunApproval: (decision: "allow" | "deny", scope: ApprovalScope) => actions.decideApproval(inlineApproval.requestId, decision, scope),
         }
       : {}),
     // The request's OWN project, not the ambient one. A parked request stamps the project it parked
@@ -2325,20 +2339,19 @@ export default function App(): JSX.Element {
           onApprove={actions.approveModulesAndStart}
           onCancel={actions.dismissModuleApproval}
         />
-      ) : state.approvals.length > 0 ? (
+      ) : orphanApproval !== null ? (
         <ApprovalDialog
-          pending={state.approvals[0]!}
+          pending={orphanApproval}
           error={state.error}
-          onDecide={(decision, scope) => actions.decideApproval(state.approvals[0]!.requestId, decision, scope)}
+          onDecide={(decision, scope) => actions.decideApproval(orphanApproval.requestId, decision, scope)}
         />
       ) : null}
-      {/* And no third dialog. A gate is NOT a modal (CHANGESETS.md §8.1), and neither is an agent's
-          question any more: both render in their task's conversation — see `inlineGate` and
-          `inlineQuestion` — and the strip below is how you get there from anywhere else. Every
-          component is a render function; where it renders is its caller's choice, and a
-          conversation always renders inline. The two above stay modal because each is about the
-          thing you are doing right now: a module about to be trusted, a command waiting on the
-          other side of the approval gate. */}
+      {/* Every component is a render function; where it renders is its caller's choice, and a
+          conversation always renders inline. A gate (CHANGESETS.md §8.1), an agent's question and a
+          command approval all render in their task's conversation — see `inlineGate`,
+          `inlineQuestion` and `inlineApproval` — and the strip below is how you get there from
+          anywhere else. What is still modal is what has no conversation to sit in: a module about to
+          be trusted before any run exists, and an approval that names no task. */}
 
       {taskMenu !== null ? <ContextMenu anchor={taskMenu} onClose={() => setTaskMenu(null)} /> : null}
       {newMenu !== null ? <ContextMenu anchor={newMenu} onClose={() => setNewMenu(null)} /> : null}
