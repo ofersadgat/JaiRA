@@ -910,6 +910,40 @@ describe("stateSessions — a run the process died inside", () => {
       { instanceId: 1, stateId: "wf/a", sessionId: "chat", seq: 0, at: 21, outcome: "error" },
     ]);
   });
+
+  /**
+   * Only a COMPLETED call occupies a position. A position is what the provider's session holds in
+   * its message history, and a call that failed added nothing to it — so its seat is released and
+   * the next call in that conversation claims the same seq. Seen live: a draft died at startup at
+   * seat 0, the loop's next draft reclaimed seat 0, and for the twelve minutes it ran it had no row
+   * here, because the dead attempt's terminal event was read as accounting for the position.
+   */
+  it("lists a call that reclaimed a FAILED call's position, while it runs", () => {
+    db.prepare(`INSERT INTO task_runtime (task_id, status, started_at, created_at, updated_at) VALUES ('t3','running',1,1,1)`).run();
+    const placed = (recordId: string, instanceId: number, status: string): void => {
+      const cut = recordId.lastIndexOf(":");
+      const session = { id: `t3/1/${recordId.slice(0, cut)}`, seq: Number(recordId.slice(cut + 1)) };
+      db.prepare(`INSERT INTO operation_records (id, task_id, status, request_json, started_at) VALUES (?, 't3', ?, ?, 5)`).run(
+        `${recordId}#${instanceId}`,
+        status,
+        JSON.stringify({ session, scope: { instanceId, sequence: 0 } }),
+      );
+    };
+    // The dead attempt: started, dispatched, failed — its record released seat 0 but is still there.
+    started(1, "wf/draft", 20);
+    db.prepare(
+      `INSERT INTO state_machine_events (task_id, type, payload_json, created_at) VALUES ('t3', 'operation.failed', ?, ?)`,
+    ).run(JSON.stringify({ instanceId: 1, stateId: "wf/draft", metrics: { sessionRef: "chat@1" } }), 21);
+    placed("chat:0", 1, "failed");
+    // The reclaiming call: same seat, still talking.
+    started(2, "wf/draft", 30);
+    placed("chat:0", 2, "open");
+
+    expect(stateSessions({ db } as never, "t3")).toEqual([
+      { instanceId: 1, stateId: "wf/draft", sessionId: "chat", seq: 0, at: 21, outcome: "error" },
+      { instanceId: 2, stateId: "wf/draft", sessionId: "chat", seq: 0, at: 30, outcome: "running" },
+    ]);
+  });
 });
 
 /**

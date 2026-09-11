@@ -279,6 +279,15 @@ describe("agentSpawn — the child's diagnostics", () => {
     await proc.exit;
 
     expect(seen.join("")).toContain("stderr:boom");
+    // …and keeps it for the exit message, which is where a reader meets a dead agent first.
+    expect(proc.stderrTail?.()).toBe("boom");
+  });
+
+  it("names a binary that could not be launched, rather than a sentinel -1", async () => {
+    const proc = agentSpawn({})(["definitely-not-a-binary-on-this-machine"], {});
+    for await (const _line of proc.lines) void _line;
+    expect(await proc.exit).toBe(-1);
+    expect(proc.launchFailure?.()?.message).toContain("ENOENT");
   });
 
   it("still exits when the child writes more to stderr than a pipe holds", async () => {

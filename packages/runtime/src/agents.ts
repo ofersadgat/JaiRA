@@ -15,7 +15,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { runtimeFunction, type CapabilityRegistry, type RuntimeCapabilities } from "@declarative-ai/exec";
 import { createClaudeCodeFunction, type AgentQuery, type ClaudeCodeFunctionOptions } from "@declarative-ai/agents-api";
-import { createCliAgentFunction, createCodexAgentFunction, CODEX_CAPS, type CodexSandbox, type SpawnProcess } from "@declarative-ai/agents-cli";
+import { createCliAgentFunction, createCodexAgentFunction, CODEX_CAPS, stderrTail, type CodexSandbox, type SpawnProcess } from "@declarative-ai/agents-cli";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { resolveInvocation, type ExecObserver } from "./exec";
 import { detachedForTree, killTree } from "./killTree";
@@ -109,8 +109,13 @@ export function agentSpawn(options: { execEnv?: ExecEnv; observer?: ExecObserver
     // THE DRAIN, and it is not optional. Attached unconditionally, before anything can await the
     // process: with `stdio[2]` piped and nobody reading, the child blocks at ~64 KB and never exits.
     // Forwarding to the observer is the point; consuming the bytes is the requirement.
+    // The tail is kept as well as forwarded: the job store holds the whole stream for anyone who goes
+    // looking, but the FAILURE REASON is what a reader sees first, and a CLI that died at startup
+    // said why here and nowhere else (`AgentProcess.stderrTail`).
+    const tail = stderrTail();
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string) => {
+      tail.push(chunk);
       try {
         observer?.onOutput?.(token, { stream: "stderr", chunk });
       } catch (e) {
@@ -147,6 +152,11 @@ export function agentSpawn(options: { execEnv?: ExecEnv; observer?: ExecObserver
       // real `claude` running against the pipe it had inherited — the run was recorded as stopped
       // while the agent went on working and billing. See `killTree`.
       kill: () => killTree(child),
+      // Both halves of "why did it fail", which this seam used to answer with `-1` and `1`
+      // respectively: the launch error names a binary that could not start, the tail names what a
+      // binary that did start said before it died.
+      launchFailure: () => spawnError,
+      stderrTail: () => tail.read(),
       exit: new Promise<number>((resolve) => {
         child.on("error", () => {
           observeExit(-1);

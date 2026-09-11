@@ -380,16 +380,31 @@ function interruptedSessions(project: Project, taskId: string): StateSession[] {
    * directly instead of reconstructing an id and hoping the two agree.
    */
   const listed = new Set<string>();
+  /**
+   * The calls the journal says FAILED. A position is what the provider's session holds in its
+   * message history, and a failed call added nothing to it — so it occupies no position, its seat
+   * is released, and the next call in that conversation claims the same seq. Its record is still
+   * on disk under that seq, though, and it must not be mistaken for the call now sitting there:
+   * counting it as "accounted for" hid the reclaiming call for as long as it ran, and counting it
+   * as a record made the pairing below ambiguous. Set aside by instance, which is the one thing a
+   * failed record and the live claimant of its seat never share.
+   */
+  const failed = new Set<string>();
   for (const row of events) {
     const event = JSON.parse(row.payload_json) as { instanceId?: string; stateId?: string };
     if (event.instanceId === undefined) continue;
     if (row.type === "operation.started") {
       started.set(event.instanceId, { stateId: event.stateId ?? "", at: row.created_at });
-    } else {
-      started.delete(event.instanceId);
-      const end = row.session_ref === null ? undefined : parseSessionRef(row.session_ref);
-      if (end !== undefined) listed.add(`${end.id}@${end.seq - 1}`);
+      continue;
     }
+    started.delete(event.instanceId);
+    if (row.type === "operation.failed") {
+      failed.add(String(event.instanceId)); // as TEXT: the generated column below has text affinity
+      continue;
+    }
+    // Only a COMPLETED call occupies a position.
+    const end = row.session_ref === null ? undefined : parseSessionRef(row.session_ref);
+    if (end !== undefined) listed.add(`${end.id}@${end.seq - 1}`);
   }
   if (started.size === 0) return [];
   // The records those calls left: placed ones — an unplaced call has no conversation to list —
@@ -402,13 +417,14 @@ function interruptedSessions(project: Project, taskId: string): StateSession[] {
   const records = (
     project.db
       .prepare(
-        `SELECT ${EFFECTIVE_SESSION} AS session_id, ${EFFECTIVE_SEQ} AS seq, status FROM operation_records
+        `SELECT ${EFFECTIVE_SESSION} AS session_id, ${EFFECTIVE_SEQ} AS seq, status, instance_id FROM operation_records
         WHERE task_id = ? AND session_id IS NOT NULL
         ORDER BY rowid`,
       )
-      .all(taskId) as Array<{ session_id: string; seq: number; status: string }>
+      .all(taskId) as Array<{ session_id: string; seq: number; status: string; instance_id: string | null }>
   ).filter(
     (record) =>
+      (record.instance_id === null || !failed.has(String(record.instance_id))) &&
       !listed.has(`${record.session_id}@${record.seq}`) &&
       !listed.has(`${bareSessionId(scope, record.session_id)}@${record.seq}`),
   );
