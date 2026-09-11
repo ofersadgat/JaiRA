@@ -15,7 +15,19 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { runtimeFunction, type CapabilityRegistry, type RuntimeCapabilities } from "@declarative-ai/exec";
 import { createClaudeCodeFunction, type AgentQuery, type ClaudeCodeFunctionOptions } from "@declarative-ai/agents-api";
-import { createCliAgentFunction, createCodexAgentFunction, CODEX_CAPS, stderrTail, type CodexSandbox, type SpawnProcess } from "@declarative-ai/agents-cli";
+import {
+  createCliAgentFunction,
+  createCodexAgentFunction,
+  CODEX_CAPS,
+  stderrTail,
+  type CodexSandbox,
+  type SpawnProcess,
+  type StartMcpBridge,
+} from "@declarative-ai/agents-cli";
+
+// The persistent bridge, re-exported so the app and the CLI reach it through the runtime they already
+// depend on rather than growing a dependency on the adapter package for one factory.
+export { createMcpBridgeHost, type McpBridgeHost, type McpBridgeHostOptions, type StartMcpBridge } from "@declarative-ai/agents-cli";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { resolveInvocation, type ExecObserver } from "./exec";
 import { detachedForTree, killTree } from "./killTree";
@@ -196,6 +208,13 @@ export interface AgentRuntimeOptions {
    * stands in for the binary — which is the half worth testing for a CLI agent.
    */
   spawn?: SpawnProcess;
+  /**
+   * How a CLI agent's permission and tool bridge is stood up — a `createMcpBridgeHost().start` in
+   * production, so every run registers on ONE listener on a worker thread instead of binding its
+   * own on the main loop. Absent ⇒ upstream's per-run in-process bridge, which is fine for a process
+   * whose loop is idle and was measured losing the CLI's handshake race in one that is not.
+   */
+  startBridge?: StartMcpBridge;
   /** Path to the codex binary (default: `codex` on PATH). */
   codexCommand?: string;
   /**
@@ -264,6 +283,7 @@ export function registerAgentRuntimes(
         : createCliAgentFunction({
             ...options.sdk,
             ...(options.cliCommand !== undefined ? { command: options.cliCommand } : {}),
+            ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
             spawn,
           });
     registry.functions.set(
@@ -283,6 +303,7 @@ export function registerAgentRuntimes(
             ...options.sdk,
             ...(options.codexCommand !== undefined ? { command: options.codexCommand } : {}),
             ...(options.codexSandbox !== undefined ? { sandbox: options.codexSandbox } : {}),
+            ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
             spawn,
           });
     registry.functions.set(

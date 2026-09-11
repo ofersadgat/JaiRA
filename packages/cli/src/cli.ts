@@ -81,6 +81,9 @@ import {
   defaultExecutorTree,
   modelRouterOptions,
   agentPromptRoutes,
+  createMcpBridgeHost,
+  type McpBridgeHost,
+  type StartMcpBridge,
   SecretResolver,
   newRegistry,
   NodeExec,
@@ -245,7 +248,31 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     // invocation exits here and the OS would reclaim it; a test that calls `runCli` in-process does
     // not, and neither does anything else that drives the CLI as a library.
     resetUserModules();
+    await closeBridgeHost();
   }
+}
+
+/**
+ * The persistent MCP bridge every CLI agent run registers on: one listener, on a worker thread,
+ * spawned by the first run that needs it and closed with the invocation.
+ *
+ * The worker is loaded by path. The bundle ships it beside `cli.mjs` (see `build.mjs`); a source run
+ * — tests, `tsx` — has no bundle and reaches the adapter package's own copy instead.
+ */
+let bridgeHost: McpBridgeHost | undefined;
+const startBridge: StartMcpBridge = (spec) => {
+  bridgeHost ??= createMcpBridgeHost({ workerFile: bridgeWorkerFile() });
+  return bridgeHost.start(spec);
+};
+function bridgeWorkerFile(): URL {
+  const bundled = new URL("./mcpBridgeWorker.mjs", import.meta.url);
+  if (existsSync(bundled)) return bundled;
+  return new URL(import.meta.resolve("@declarative-ai/agents-cli/mcpBridgeWorker"));
+}
+async function closeBridgeHost(): Promise<void> {
+  const host = bridgeHost;
+  bridgeHost = undefined;
+  await host?.close();
 }
 
 async function dispatch(argv: string[], io: CliIo): Promise<number> {
@@ -454,6 +481,7 @@ function buildRunEnvironment(
   registerAgentRuntimes(registry, {
     execEnv: config.execEnvironment,
     adapters: enabledAdapters(config.agents),
+    startBridge,
     ...(files?.observer !== undefined ? { observer: files.observer } : {}),
     ...(config.agents.claudeCli?.command !== undefined ? { cliCommand: config.agents.claudeCli.command } : {}),
     ...(config.agents.codex?.command !== undefined ? { codexCommand: config.agents.codex.command } : {}),
@@ -517,6 +545,7 @@ function buildRunEnvironment(
           routes: agentPromptRoutes(config.agents, {
             execEnv: config.execEnvironment,
             exec,
+            startBridge,
             ...(files?.observer !== undefined ? { observer: files.observer } : {}),
           }),
           ...(presets !== undefined ? { configs: { get: (id: string) => presets[id] } } : {}),

@@ -27,7 +27,7 @@ import { existsSync } from "node:fs";
 import { keyForModel, ModelInfo } from "@declarative-ai/llm";
 import type { EmbeddedModelConfig, LocalServerConfig, ModelRouterOptions } from "@declarative-ai/llm";
 import { AGENT_DEFAULT_MODEL, AgentApiExecutor, type AgentQuery } from "@declarative-ai/agents-api";
-import { AgentCliExecutor, AgentCodexExecutor, type SpawnProcess } from "@declarative-ai/agents-cli";
+import { AgentCliExecutor, AgentCodexExecutor, type SpawnProcess, type StartMcpBridge } from "@declarative-ai/agents-cli";
 import {
   type ExecServices,
   type Executor,
@@ -187,6 +187,9 @@ export interface AgentRouteOptions {
    * agent. Absent ⇒ JaiRA's own spawn, which is what production always wants.
    */
   spawn?: SpawnProcess;
+  /** The bridge seam, the same one {@link AgentRuntimeOptions.startBridge} is: the persistent
+   *  worker-hosted listener in production, upstream's per-run bridge when absent. */
+  startBridge?: StartMcpBridge;
 }
 
 /**
@@ -223,6 +226,7 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
       new AgentCliExecutor({
         spawn,
         ...(agents.claudeCli?.command !== undefined ? { command: agents.claudeCli.command } : {}),
+        ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
         ...(query !== undefined ? { query } : {}),
       }),
     );
@@ -234,6 +238,7 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
         spawn,
         ...(agents.codex?.command !== undefined ? { command: agents.codex.command } : {}),
         ...(agents.codex?.sandbox !== undefined ? { sandbox: agents.codex.sandbox } : {}),
+        ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
         ...(query !== undefined ? { query } : {}),
       }),
     );

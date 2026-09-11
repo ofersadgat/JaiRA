@@ -14,16 +14,17 @@
  * before the CLI has printed anything. Declaring it as a dependency is what externalizes it.
  */
 import { build } from "esbuild";
-import { copyFile, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const pkg = require("./package.json");
 
 await rm("dist", { recursive: true, force: true });
 
-await build({
-  entryPoints: { cli: "src/main.ts" },
+/** @type {import("esbuild").BuildOptions} */
+const common = {
   outdir: "dist",
   outExtension: { ".js": ".mjs" },
   bundle: true,
@@ -40,11 +41,17 @@ await build({
   alias: { "jsonc-parser": "jsonc-parser/lib/esm/main.js" },
   define: { "process.env.NODE_ENV": '"production"' },
   logLevel: "info",
+};
+
+await build({ ...common, entryPoints: { cli: "src/main.ts" } });
+
+// The MCP bridge worker: the one listener every CLI agent run registers on, kept off the main loop
+// (see `mcpBridgeWorker.ts` upstream). It is loaded by path — `new Worker(file)` — so inlining the
+// adapter into cli.mjs does not carry it along; it is its own entry beside the bundle, which is
+// where `cli.ts` looks first.
+await build({
+  ...common,
+  entryPoints: { mcpBridgeWorker: fileURLToPath(import.meta.resolve("@declarative-ai/agents-cli/mcpBridgeWorker")) },
 });
 
-// declarative-ai is MIT and we inline ~100 of its modules; MIT wants its notice
-// carried along. Copied from the source we just bundled, so it cannot describe a
-// version we did not ship.
-await copyFile("../../../declarative-ai/LICENSE", "dist/LICENSE-declarative-ai");
-
-console.log("built dist/cli.mjs");
+console.log("built dist/cli.mjs and dist/mcpBridgeWorker.mjs");

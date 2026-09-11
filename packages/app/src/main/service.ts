@@ -160,6 +160,9 @@ import {
   agentPromptRoutes,
   agentPromptRouteNames,
   agentRouteVendors,
+  createMcpBridgeHost,
+  type McpBridgeHost,
+  type StartMcpBridge,
   knownModels,
   JAIRA_TOOLS,
   usableRouteKeys,
@@ -393,6 +396,12 @@ export type Publish = (message: PushMessage) => void;
 export interface AppServiceOptions {
   /** Where pushes go — the Electron main process forwards them to the renderer. */
   publish?: Publish;
+  /**
+   * The persistent MCP bridge CLI agent runs register on. Default: a worker-thread host reading its
+   * worker file from beside `main.cjs` — right for the bundled app, and a seam here so a test that
+   * runs a real CLI agent from source can hand in a host that knows where the worker is.
+   */
+  bridgeHost?: McpBridgeHost;
   /** Deterministic request ids in tests. */
   nextInteractionId?: () => string;
   nextApprovalId?: () => string;
@@ -1498,10 +1507,30 @@ export class AppService {
     // service that is not closed.
     await this.checker?.close();
     this.checker = undefined;
+    // The bridge worker, if a CLI agent ever ran. `unref`'d like the checker, and closed for the
+    // same reason: a run that ends after its service has is a run nobody is watching.
+    await this.bridgeHost?.close();
+    this.bridgeHost = undefined;
   }
 
   /** Whether {@link close} has run. A closed service answers; it does not re-open anything. */
   private closed = false;
+
+  /**
+   * The persistent MCP bridge every CLI agent run registers on: one listener, on a worker thread.
+   *
+   * Spawned on the first run that needs it, never at construction — a headless caller reading one
+   * projection starts no thread. The worker file lands beside `main.cjs` (see `build.mjs`), which is
+   * the one address a bundled main process has for it; the per-run in-process bridge this replaces
+   * lived on the main loop and was measured losing the CLI's handshake race whenever that loop was
+   * busy, which mid-task it is.
+   */
+  private bridgeHost: McpBridgeHost | undefined;
+  private readonly startBridge: StartMcpBridge = (spec) => {
+    if (this.closed) return Promise.reject(new Error("the service is closed"));
+    this.bridgeHost ??= this.options.bridgeHost ?? createMcpBridgeHost({ workerFile: join(__dirname, "mcpBridgeWorker.cjs") });
+    return this.bridgeHost.start(spec);
+  };
 
   /** Every user project, leaving the base root open. What switching a checkout does. */
   private async closeUserSessions(): Promise<void> {
@@ -2863,6 +2892,7 @@ export class AppService {
       registerAgentRuntimes(registry, {
         execEnv: config.execEnvironment,
         observer,
+        startBridge: this.startBridge,
         adapters: enabledAdapters(config.agents),
         ...(config.agents.claudeCli?.command !== undefined ? { cliCommand: config.agents.claudeCli.command } : {}),
         ...(config.agents.codex?.command !== undefined ? { codexCommand: config.agents.codex.command } : {}),
@@ -7152,6 +7182,7 @@ export class AppService {
         // stopped. The CLI has always passed this (`cli.ts`); the app never did, so the two drivers
         // disagreed about what a run leaves behind — and the app is the one with a Stop button.
         ...(opts.observer !== undefined ? { observer: opts.observer } : {}),
+        startBridge: this.startBridge,
       }),
       ...(presets !== undefined ? { configs: { get: (id: string) => presets[id] } } : {}),
       // The named stacks. Each becomes a route keyed by its name, so a state naming `review/…` gets

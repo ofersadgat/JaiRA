@@ -8,14 +8,22 @@
  */
 import { build } from "esbuild";
 import { rm } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 const outdir = "dist";
 // Remove only this build's own artifacts. Clearing all of `dist/` would delete
 // `dist/renderer/` (Vite's output), making the build order load-bearing.
 await Promise.all(
-  ["main.cjs", "main.cjs.map", "preload.cjs", "preload.cjs.map", "tsProjectWorker.cjs", "tsProjectWorker.cjs.map"].map((f) =>
-    rm(`${outdir}/${f}`, { force: true }).catch(() => {}),
-  ),
+  [
+    "main.cjs",
+    "main.cjs.map",
+    "preload.cjs",
+    "preload.cjs.map",
+    "tsProjectWorker.cjs",
+    "tsProjectWorker.cjs.map",
+    "mcpBridgeWorker.cjs",
+    "mcpBridgeWorker.cjs.map",
+  ].map((f) => rm(`${outdir}/${f}`, { force: true }).catch(() => {})),
 );
 
 /** @type {import("esbuild").BuildOptions} */
@@ -70,4 +78,15 @@ await build({
   outExtension: { ".js": ".cjs" },
 });
 
-console.log("built dist/main.cjs, dist/preload.cjs and dist/tsProjectWorker.cjs");
+// The MCP bridge worker: the one listener every CLI agent run registers on, kept off the main loop
+// (see `mcpBridgeWorker.ts` upstream). Loaded by path, so it is its own entry, resolved through the
+// package's export rather than a hand-written path into `node_modules` — beside main.cjs, which is
+// where `service.ts` looks for it.
+await build({
+  ...common,
+  entryPoints: { mcpBridgeWorker: fileURLToPath(import.meta.resolve("@declarative-ai/agents-cli/mcpBridgeWorker")) },
+  outdir,
+  outExtension: { ".js": ".cjs" },
+});
+
+console.log("built dist/main.cjs, dist/preload.cjs, dist/tsProjectWorker.cjs and dist/mcpBridgeWorker.cjs");
