@@ -66,7 +66,23 @@ describe("opening and closing lanes", () => {
       // a content row is as tall as what it says, and a curve stretched to that height is not a curve.
       "open=product join context@1",
       "open=product step 2",
-      "open= join product@0",
+    ]);
+  });
+
+  it("keeps the TRUNK open through the run's own rows and off the bottom — a spine, not a segment", () => {
+    // The lane at depth 0 is the run as this view reads it. Its own note — the terminate, a seam —
+    // is drawn on it, and nothing joins it into nothing at the end: the rail runs to the last row.
+    expect(shape([enter("product", "i1"), enter("product/context", "i2"), inside("")])).toEqual([
+      "open= fork product@0 step 0",
+      "open=product fork context@1 step 1",
+      "open=product join context@1",
+      "open=product step 2",
+    ]);
+    // A sibling at depth 0 still closes the one before it: stepping sideways is one row, two curves.
+    expect(shape([enter("a", "i1"), enter("b", "i2"), inside("")])).toEqual([
+      "open= fork a@0 step 0",
+      "open= join a@0 fork b@0 step 1",
+      "open=b step 2",
     ]);
   });
 
@@ -81,9 +97,9 @@ describe("opening and closing lanes", () => {
     expect(rows[2]).toBe("open=product join context@1 fork draft@1 step 2");
   });
 
-  it("closes every lane at the end, so a run that ends deep still joins back to the trunk", () => {
+  it("closes every lane UNDER the trunk at the end, so a run that ends deep joins back to it", () => {
     const rows = shape([enter("a", "i1"), enter("a/b", "i2"), enter("a/b/c", "i3")]);
-    expect(rows.slice(3)).toEqual(["open=a,b join c@2", "open=a join b@1", "open= join a@0"]);
+    expect(rows.slice(3)).toEqual(["open=a,b join c@2", "open=a join b@1"]);
   });
 
   it("gives a loop TWO lanes with one colour — which is what makes a loop legible", () => {
@@ -114,7 +130,6 @@ describe("opening and closing lanes", () => {
       "open=p,ex join brief@2",
       "open=p join ex@1 fork ex@1 step 3",
       "open=p join ex@1",
-      "open= join p@0",
     ]);
   });
 

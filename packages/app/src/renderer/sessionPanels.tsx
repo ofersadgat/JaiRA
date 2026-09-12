@@ -44,7 +44,7 @@ import { Icon } from "./icons";
 import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
 import { clockOf, durationOf } from "./transcriptView";
 import { signatureOf } from "./transcript";
-import type { InstanceNode, TaskOrigin } from "@jaira/shared/browser";
+import { addressSegment, segmentKey, type InstanceNode, type TaskOrigin } from "@jaira/shared/browser";
 import { StateBlock, StateHeader, headerToneOf, surfaceKindOf } from "./stateSurface";
 import {
   forksOf,
@@ -639,7 +639,10 @@ function Sheet({
           )}
         </div>
       ) : null}
-      <section className={`sb-sheet${segment.resumed ? " resumed" : ""}${segment.paused ? " paused" : ""}`}>
+      {/* A folded SOLO sheet is its gutter and nothing else. The section stayed, and drew as an empty
+          bordered box under every folded row: a sheet's padding with no body in it — which, over a
+          long run folded to read the headings, was most of what was on screen. */}
+      <section className={`sb-sheet${segment.resumed ? " resumed" : ""}${segment.paused ? " paused" : ""}${solo && allShut ? " shut" : ""}`}>
         {segment.resumed && segment.sessionId !== undefined ? (
           <TearBar kind="resumed">
             resumed session <span className="mono">{segment.sessionId}</span>
@@ -995,7 +998,10 @@ export function stepOfNote(note: BandNote, root: string): RailStep {
     // (`conversation.ts` builds it from `childKey`), the palette is keyed by child key, and
     // `note.stateId` is the state DEFINITION's id — `feature/product/draft` against a palette
     // holding `draft`. The id is the fallback for a root, which has no key.
-    stateId: at[at.length - 1] ?? note.stateId?.split("/").pop() ?? "",
+    // The KEY, not the segment: a fan-out element's segment is `build[0]`, and the palette — shared
+    // with the index — is keyed by `build`. The lane's identity keeps the element (`at`); its name
+    // and colour do not.
+    stateId: segmentKey(at[at.length - 1] ?? note.stateId?.split("/").pop() ?? ""),
     at: inside,
     opens,
   };
@@ -1171,7 +1177,7 @@ export function SessionBandsView({
   /** Where a panel's state sits. The address is stamped from the run's root, the same basis a note's
    *  path has, so both are trimmed to the module being read the same way. */
   const atPiece = (piece: SessionPiece): string[] =>
-    segmentsFrom((piece.node.address ?? []).map((step) => step.childKey).join("/"), root);
+    segmentsFrom((piece.node.address ?? []).map(addressSegment).join("/"), root);
   const addNotes = (list: readonly BandNote[]): void => {
     for (const note of list) {
       const step = stepOfNote(note, root);

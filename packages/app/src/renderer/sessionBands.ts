@@ -351,7 +351,11 @@ export function forksOf(pieces: readonly SessionPiece[]): Map<string, SessionPie
 /** Whether two addresses name the same place. Structural, because an address is not a string. */
 export function sameAddress(a: InstanceAddress | undefined, c: InstanceAddress | undefined): boolean {
   if (a === undefined || c === undefined) return a === c;
-  return a.length === c.length && a.every((step, i) => step.childKey === c[i]?.childKey && step.occurrence === c[i]?.occurrence);
+  // The element too: the members of a fan-out share a key and an occurrence and are different places.
+  return (
+    a.length === c.length &&
+    a.every((step, i) => step.childKey === c[i]?.childKey && step.occurrence === c[i]?.occurrence && step.element === c[i]?.element)
+  );
 }
 
 /**

@@ -494,6 +494,8 @@ export default function App(): JSX.Element {
    * that column: the mode says it is the conversation, the focus says where in it.
    */
   const [runFocus, setRunFocus] = useState<{ instance: string; at: number } | undefined>(undefined);
+  /** The state the middle column's conversation is scrolled to — see `FileSurfaceContext.runHere`. */
+  const [runHere, setRunHere] = useState<string | undefined>(undefined);
   /**
    * Which of the sidebar drawers is currently showing its FIND field (SHELL.md §5.1).
    *
@@ -1322,6 +1324,8 @@ export default function App(): JSX.Element {
     onRunMode: setRunMode,
     ...(runFocus !== undefined ? { runFocus } : {}),
     onRunFocus: setRunFocus,
+    ...(runHere !== undefined ? { runHere } : {}),
+    onRunHere: setRunHere,
     // The same gate, channel and services the task panel hosts — see `FileSurfaceContext.runGate`.
     ...(inlineGate !== null
       ? {

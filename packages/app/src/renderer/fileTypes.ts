@@ -337,6 +337,14 @@ export interface FileSurfaceContext {
   runFocus?: { instance: string; at: number } | undefined;
   onRunFocus?: ((focus: { instance: string; at: number }) => void) | undefined;
   /**
+   * Where the reader IS in the middle column's conversation: the instance whose section is under
+   * the top of the scroller. The other half of `runFocus` — that one sends the conversation to a
+   * state; this one tells the task panel's Instances index which state the conversation is at, so
+   * the index marks it as the reader scrolls. Undefined when nothing is on screen yet.
+   */
+  runHere?: string | undefined;
+  onRunHere?: ((instance: string | undefined) => void) | undefined;
+  /**
    * The gate parked on the selected task, for the middle column's conversation to host.
    *
    * The task panel has hosted it since gates moved out of the modal; the middle column, which draws

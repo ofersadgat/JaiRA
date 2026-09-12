@@ -12,7 +12,7 @@
  * one card per EXECUTION, because a state that ran three times is three things that happened and a
  * single card cannot be clicked into three different transcripts.
  */
-import { useEffect, useLayoutEffect, useMemo, useState, type DragEvent as ReactDragEvent, type JSX, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type JSX, type ReactNode } from "react";
 import type {
   ChatPlanView,
   ChatSettings,
@@ -662,6 +662,7 @@ export function RunConversation({
   onQuestion,
   approval,
   onApproval,
+  onHere,
 }: {
   /** The run whose conversation this is. Undefined ⇒ nothing has run here yet. */
   parent: InstanceNode | undefined;
@@ -702,6 +703,12 @@ export function RunConversation({
   /** A state to go to, asked for by the Instances index — see `SessionBandsView`. */
   focus?: { instance: string; at: number } | undefined;
   /**
+   * Where the reader is, reported as they scroll — the state whose section is under the top of the
+   * scroller, by instance id, for the Instances index to mark. The reverse of `focus`. Undefined
+   * when no section has reached the top yet, and on unmount.
+   */
+  onHere?: ((instance: string | undefined) => void) | undefined;
+  /**
    * Where "walk into this subagent conversation" goes, when this panel's host has somewhere for it.
    * Defaults to the trail (`context.onWalkIntoSidechain`); the task panel passes its own stack.
    * The node is the PIECE the doorway was clicked in — the host whose session holds the chain.
@@ -740,10 +747,61 @@ export function RunConversation({
    * Follow the live edge — the behaviour this panel is watched in and did not have.
    *
    * Everything that makes the transcript taller is in the follow list: the bands (a state entered),
-   * the fetched transcripts (a record landed), the tail (a word arrived). The task is the reset — a
-   * different run is a different conversation, and the pin does not travel between them.
+   * the fetched transcripts (a record landed), the tail (a word arrived) — and the folds, which make
+   * it SHORTER: a reader at the live edge who folds a section above it is still at the live edge,
+   * and without this the scroller was left wherever the browser's clamp dropped it, which read as
+   * empty space where the last message had been. The task is the reset — a different run is a
+   * different conversation, and the pin does not travel between them.
    */
-  const follow = useStickToBottom<HTMLDivElement>([bands, sessions, liveTurn, conversation], [detail?.taskId]);
+  const follow = useStickToBottom<HTMLDivElement>([bands, sessions, liveTurn, conversation, shutStates], [detail?.taskId]);
+  /**
+   * Which state the reader is at, for the index beside this column — see {@link onHere}.
+   *
+   * The LAST section whose top has passed the upper part of the scroller: a section is "where you
+   * are" once its heading has scrolled up into the top third, which is where a reader's eye is when
+   * they are reading it, rather than the moment its heading touches the top edge. The entered row
+   * and the letterhead both carry the instance id, which is what lets one query name both — the row
+   * is what a bookmark lands on, so the two agree about where a state starts. Measured against the
+   * viewport, as the board's spy is, so a restyle that positions an ancestor changes nothing here.
+   * Nothing past the line yet ⇒ the first section, so the index never marks nothing while something
+   * is on screen.
+   */
+  const track = useCallback((): void => {
+    if (onHere === undefined) return;
+    const el = follow.ref.current;
+    if (el === null) return;
+    const line = el.getBoundingClientRect().top + el.clientHeight / 3;
+    let at: string | undefined;
+    let first: string | undefined;
+    for (const row of el.querySelectorAll<HTMLElement>("[data-entered], [data-instance]")) {
+      const id = row.dataset["entered"] ?? row.dataset["instance"];
+      if (id === undefined) continue;
+      first ??= id;
+      if (row.getBoundingClientRect().top <= line) at = id;
+    }
+    onHere(at ?? first);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onHere]);
+  // Coalesced to a frame: a scroll fires many times per paint, and the answer only changes per paint.
+  const trackFrame = useRef<number | null>(null);
+  const trackSoon = useCallback((): void => {
+    if (trackFrame.current !== null) return;
+    trackFrame.current = window.requestAnimationFrame(() => {
+      trackFrame.current = null;
+      track();
+    });
+  }, [track]);
+  // Sections arriving, folding, or the follow pin moving the scroller all move what is under the
+  // line, and none of them is a scroll the listener would see — so it is re-read after each.
+  useEffect(trackSoon, [trackSoon, bands, sessions, liveTurn, conversation, shutStates]);
+  useEffect(
+    () => () => {
+      if (trackFrame.current !== null) window.cancelAnimationFrame(trackFrame.current);
+      onHere?.(undefined);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
   /**
    * A bookmark takes the reader off the live edge, so stop following BEFORE it lands.
    *
@@ -962,7 +1020,14 @@ export function RunConversation({
 
   return (
     <div className="run-convo-wrap">
-      <div className="run-convo scroll" ref={follow.ref} onScroll={follow.onScroll}>
+      <div
+        className="run-convo scroll"
+        ref={follow.ref}
+        onScroll={() => {
+          follow.onScroll();
+          trackSoon();
+        }}
+      >
         <SessionBandsView
           bands={bands}
           render={render}
@@ -1502,6 +1567,7 @@ export function RunView({ context }: { context: FileSurfaceProps["context"] }): 
           detail={detail}
           context={context}
           {...(context.runFocus !== undefined ? { focus: context.runFocus } : {})}
+          {...(context.onRunHere !== undefined ? { onHere: context.onRunHere } : {})}
           {...(context.runGate !== undefined && context.onRunGate !== undefined
             ? {
                 asking: true,
@@ -1602,6 +1668,12 @@ export function TaskContext({
     setFocus(bookmark);
     setMode("conversation");
   };
+  /**
+   * The state the index marks as "here": where the middle column's conversation is scrolled to, when
+   * that column is the conversation (`runHere` follows its scroll), else the last bookmark pressed
+   * in this panel — the one thing this panel knows about its own conversation's position.
+   */
+  const here = context.runMode === "conversation" && context.onRunFocus !== undefined ? context.runHere : focus?.instance;
   // The task's own root run. A task that has never run has none, and the conversation says so.
   const root = detail.instances[0];
   /**
@@ -1689,7 +1761,7 @@ export function TaskContext({
           stream={stream}
           onGoTo={goTo}
           {...(hosted ? { asking: askingInstanceOf(detail.instances) } : {})}
-          {...(focus !== undefined ? { here: focus.instance } : {})}
+          {...(here !== undefined ? { here } : {})}
           {...(indexCut !== undefined ? { onCut: indexCut } : {})}
         />
         {ask !== null ? <AskDialog spec={ask} onCancel={() => setAsk(null)} /> : null}

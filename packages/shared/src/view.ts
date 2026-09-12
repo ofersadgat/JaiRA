@@ -70,6 +70,24 @@ export interface AddressStep {
 /** Where an instance sits in the workflow — the root is the empty address. See {@link AddressStep}. */
 export type InstanceAddress = readonly AddressStep[];
 
+/**
+ * One address step as a PATH SEGMENT — the spelling a journal path uses for the same place.
+ *
+ * `build` for an ordinary entry, `build[0]` for the first element of a fan-out: the element is part
+ * of where the instance is, and a path that dropped it would name the mount rather than the
+ * instance. The conversation's notes are spelled this way by the projection, and its panels are
+ * placed by their address; the rail reads both, so the two have to agree — when they did not, every
+ * panel under a fan-out closed every lane and opened them again, and the rail read as broken.
+ */
+export function addressSegment(step: AddressStep): string {
+  return step.element === undefined ? step.childKey : `${step.childKey}[${step.element}]`;
+}
+
+/** The child key of a path segment: `build[0]` → `build`. What a lane is called and coloured by. */
+export function segmentKey(segment: string): string {
+  return segment.replace(/\[\d+\]$/, "");
+}
+
 /** One state instance in a task's tree. */
 export interface InstanceNode {
   instanceId: string;

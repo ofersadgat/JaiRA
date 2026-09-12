@@ -275,6 +275,14 @@ function holds(lane: RailLane, at: readonly string[]): boolean {
  * A row whose path is DEEPER than anything open opens the missing lanes silently. That should not
  * happen — the journal records every entry — but a projection with a hole in it would otherwise draw
  * a panel at its grandparent's depth, claiming a nesting the run did not have.
+ *
+ * **The trunk is never closed.** The lane at depth 0 is the run itself as this view reads it — drawn
+ * in the rule colour, it is the spine every other lane forks off. A row at the top of the view (the
+ * run's own note: its terminate, a fork's seam, an armed cut at the root) is drawn ON that spine, and
+ * the spine runs off the bottom of the last row rather than curving into nothing. It used to close
+ * like any other lane: the run's last note sat below a join with no line beside it, and the rail
+ * read as broken where the run had merely ended. A sibling at depth 0 still closes the one before it,
+ * because that is the run stepping sideways and the two curves are one row.
  */
 export function railOf(steps: readonly RailStep[]): { rows: RailRow[]; deepest: number } {
   const stack: RailLane[] = [];
@@ -316,9 +324,15 @@ export function railOf(steps: readonly RailStep[]): { rows: RailRow[]; deepest: 
     stack.push(lane);
   };
 
+  /** Close everything under the trunk, and keep the trunk — see above. */
+  const closeUnderTrunk = (): void => {
+    if (stack.length > 0) closeTo(stack[0]!.at);
+  };
+
   for (const [i, step] of steps.entries()) {
     const inside = step.opens ? step.at.slice(0, -1) : step.at;
-    closeTo(inside);
+    if (!step.opens && inside.length === 0) closeUnderTrunk();
+    else closeTo(inside);
     if (step.opens) {
       open({ key: step.key, stateId: step.stateId, at: step.at }, i);
       continue;
@@ -331,7 +345,7 @@ export function railOf(steps: readonly RailStep[]): { rows: RailRow[]; deepest: 
     }
     push({ open: [...stack], step: i, turn: false });
   }
-  closeTo([]);
+  closeUnderTrunk();
 
   const deepest = rows.reduce((most, row) => Math.max(most, lanesOf(row)), 1);
   return { rows, deepest };

@@ -10129,6 +10129,10 @@ fieldset.reading {
   box-shadow: 0 1px 3px rgba(15, 20, 30, 0.06);
   overflow: hidden;
 }
+/* A folded solo sheet: the gutter is the letterhead, and there is nothing under it to frame. */
+.sb-sheet.shut {
+  display: none;
+}
 :root[data-theme="dark"] .sb-sheet {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }

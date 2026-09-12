@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { InstanceNode, SessionRef } from "@jaira/shared/browser";
-import { bandsOf, piecesOf, type BandNote, type SessionPiece } from "../src/renderer/sessionBands";
+import { bandsOf, piecesOf, sameAddress, type BandNote, type SessionPiece } from "../src/renderer/sessionBands";
 import { SessionBandsView, ZigDefs, stepOfNote } from "../src/renderer/sessionPanels";
 import { keyOfNode, paletteOfRun } from "../src/renderer/runIndex";
 
@@ -446,6 +446,62 @@ describe("the colour of a lane in the conversation", () => {
     const step = stepOfNote({ seq: 1, at: 0, kind: "entered", stateId: "feature", path: "", text: "" }, "");
     expect(step.stateId).toBe("feature");
   });
+
+  it("keeps a fan-out element in the lane's PLACE and drops it from the lane's NAME", () => {
+    // The projection spells the first element of `build` as `build[0]`, and that is where the lane
+    // is; but `build[0]` is not a state anybody coloured, so the name the palette is asked with is
+    // the key.
+    const step = stepOfNote({ seq: 1, at: 0, kind: "entered", stateId: "feature/build", path: "build[0]", text: "" }, "");
+    expect(step.at).toEqual(["build[0]"]);
+    expect(step.stateId).toBe("build");
+  });
+});
+
+describe("a panel under a fan-out", () => {
+  /**
+   * The same run twice: once mounted plainly, once as the first element of a fan-out. The rail has
+   * to draw the two alike — the element changes where the lane is, not how many turns the run took.
+   *
+   * It did not: the note rows said `build[0]` and the panel's address said `build`, so at every
+   * panel the rail closed every lane down to nothing and opened them all again, and read as broken.
+   */
+  const scene = (element: number | undefined): string => {
+    const segment = element === undefined ? "build" : `build[${element}]`;
+    const parent = node({
+      instanceId: "1",
+      stateId: "feature",
+      children: [
+        node({
+          instanceId: "2",
+          stateId: "feature/build",
+          childKey: "build",
+          address: [{ childKey: "build", occurrence: 0, ...(element === undefined ? {} : { element }) }],
+          startedAt: 0,
+          endedAt: 10,
+          operation: { kind: "prompt", status: "completed" },
+        }),
+      ],
+    });
+    return drawWith(parent, [ref(2, "planning", 0, 10)], {
+      notes: [
+        note({ seq: 1, at: 0, kind: "entered", path: segment, text: "", instanceId: "2", stateId: "feature/build" }),
+        note({ seq: 2, at: 9, kind: "transition", path: `${segment}/next`, text: "next", stateId: "feature/build" }),
+      ],
+    });
+  };
+  const turns = (html: string): number => html.split("rail-turn").length - 1;
+
+  it("takes exactly the turns a plain mount takes — no lane closed and reopened around the panel", () => {
+    expect(turns(scene(0))).toBe(turns(scene(undefined)));
+    expect(scene(0)).toContain("said by #2");
+  });
+
+  it("tells the elements of a fan-out apart as places", () => {
+    const at = (element?: number) => [{ childKey: "build", occurrence: 0, ...(element === undefined ? {} : { element }) }];
+    expect(sameAddress(at(0), at(0))).toBe(true);
+    expect(sameAddress(at(0), at(1))).toBe(false);
+    expect(sameAddress(at(0), at())).toBe(false);
+  });
 });
 
 describe("a panel that is one side of a fork", () => {
@@ -557,6 +613,24 @@ describe("what a fold does", () => {
     // single-run projection stamps no run at all, which is why the task has to be in the key too.
     expect(twoStates(new Set(["t-2:2:0"]))).toContain("said by #2");
     expect(twoStates(new Set(["t-1:9:0"]))).toContain("said by #2");
+  });
+
+  it("draws a folded SOLO sheet as its gutter alone — no empty sheet under the row", () => {
+    const solo = (shut: ReadonlySet<string>): string =>
+      renderToStaticMarkup(
+        createElement(SessionBandsView, {
+          bands: bandsOf(piecesOf(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)])),
+          shut,
+          scope: "t-1",
+          render: (piece) => createElement("p", null, `said by #${piece.node.instanceId}`),
+        }),
+      );
+    expect(solo(new Set())).toContain("said by #2");
+    expect(solo(new Set())).not.toContain("sb-sheet shut");
+    const folded = solo(new Set(["t-1:2:0"]));
+    expect(folded).not.toContain("said by #2");
+    // The section is still in the markup for its tear bars, and hidden by its class.
+    expect(folded).toContain("sb-sheet shut");
   });
 
   it("says `expand all` once every state in the sheet is folded", () => {
