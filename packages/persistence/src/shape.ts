@@ -52,6 +52,9 @@ export function workflowShape(bundle: WorkflowBundle, options?: ShapeOptions): W
     const entry: StateShape = { children };
     if (def.label !== undefined) entry.label = def.label;
     if (interactive) entry.interactive = true;
+    // A title is a computed field (SPEC §5.3), so the loaded state carries it as a FIELD entry and
+    // never as a literal `title` — which is only written back once an instance has evaluated it.
+    if (def.fields?.some((field) => field.path === "title") === true) entry.titled = true;
     shape[stateId] = entry;
   }
   return shape;

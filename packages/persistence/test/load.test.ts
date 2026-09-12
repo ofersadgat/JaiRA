@@ -472,3 +472,62 @@ describe("the content behind an engine artifact ref", () => {
     expect(rehydrateArtifactInputs(project, "t", untouched)).toBe(untouched);
   });
 });
+
+/**
+ * Computed fields (SPEC §5.3): a settled value is journaled once, and a resume hands it back as
+ * `LoadedInstance.fields` so the engine uses it verbatim instead of paying for it again.
+ */
+describe("settled fields in the description", () => {
+  function settled(id: string, stateId: string, field: string, value: unknown, extra: Record<string, unknown> = {}): void {
+    journal(id, { type: "value.settled", instanceId: id, stateId, field, outcome: "value", ...(value !== undefined ? { value } : {}), ...extra });
+  }
+
+  it("loads the last settled value per field, a fallback's value included, on the instance it settled on", () => {
+    begin();
+    entered("i-root", "root");
+    settled("i-root", "root", "title", "Ship the docs");
+    settled("i-root", "root", "operation.config.model", "slow");
+    settled("i-root", "root", "operation.config.model", "fast");
+    entered("i-a", "root/a", "a", "i-root");
+    settled("i-a", "root/a", "title", "Untitled", { outcome: "error", error: "no title today", fallback: true });
+    entered("i-b", "root/b", "b", "i-root");
+
+    const load = buildTaskLoad(project, "t", SHAPE);
+    expect(load.loaded?.fields).toEqual({ title: "Ship the docs", "operation.config.model": "fast" });
+    const [a, b] = load.loaded!.children!;
+    expect(a!.fields).toEqual({ title: "Untitled" });
+    // Nothing settled: no `fields` at all, so the engine evaluates the title afresh.
+    expect(b!.fields).toBeUndefined();
+  });
+
+  it("drops a field whose binding failed with nothing standing in, so the retry evaluates it again", () => {
+    begin();
+    entered("i-root", "root");
+    settled("i-root", "root", "title", undefined, { outcome: "error", error: "no title today" });
+    terminated("i-root", "root", "error");
+
+    const load = buildTaskLoad(project, "t", SHAPE);
+    expect(load.loaded?.live).toBe(true);
+    expect(load.loaded?.fields).toBeUndefined();
+    // …and the retry deletes that failure from the journal with the termination it caused, while a
+    // fallback — a value the instance ran with — would have stayed.
+    expect(releaseRevivedFailures(project, load)).toBe(2);
+    const left = project.db.prepare(`SELECT type FROM state_machine_events WHERE task_id = 't' ORDER BY seq`).all() as Array<{ type: string }>;
+    expect(left.map((row) => row.type)).toEqual(["instance.entered"]);
+  });
+
+  it("keeps a fallback's journal row when the retry revives its instance", () => {
+    begin();
+    entered("i-root", "root");
+    settled("i-root", "root", "title", "Untitled", { outcome: "error", error: "no title today", fallback: true });
+    started("i-root", "root");
+    opFailed("i-root", "root");
+    terminated("i-root", "root", "error");
+
+    const load = buildTaskLoad(project, "t", SHAPE);
+    expect(load.loaded?.fields).toEqual({ title: "Untitled" });
+    expect(releaseRevivedFailures(project, load)).toBe(2);
+    const left = project.db.prepare(`SELECT type FROM state_machine_events WHERE task_id = 't' ORDER BY seq`).all() as Array<{ type: string }>;
+    expect(left.map((row) => row.type)).toEqual(["instance.entered", "value.settled", "operation.started"]);
+  });
+});

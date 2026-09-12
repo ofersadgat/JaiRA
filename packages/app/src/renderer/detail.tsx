@@ -11,6 +11,7 @@ import { Badge } from "./board";
 import { Icon } from "./icons";
 import { RunIndex } from "./runIndex";
 import { stoppedAction } from "./taskAction";
+import { TaskName } from "./taskName";
 
 /**
  * What a task IS: its name, where it came from, and the two buttons that operate it.
@@ -42,7 +43,7 @@ export function TaskHead({
   return (
     <header>
       <h2>
-        <Badge status={detail.status} /> {detail.title}
+        <Badge status={detail.status} /> <TaskName task={detail} />
       </h2>
       <div className="sub">
         {detail.taskId} · {detail.workflow}

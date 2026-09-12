@@ -28,8 +28,10 @@ import type {
   InstanceAddress,
   InstanceNode,
   InstanceStatus,
+  InstanceTitle,
   OperationView,
   PathStep,
+  TaskHeading,
   TaskStatus,
 } from "@jaira/shared";
 import type { StoredEvent } from "./eventLog";
@@ -41,6 +43,12 @@ export interface StateShape {
   children: Array<{ key: string; stateId: string; label?: string }>;
   /** True when this state's operation needs a human (an interactive function). */
   interactive?: boolean;
+  /**
+   * True when the state DECLARES a computed `title` (SPEC §5.2) — what tells an instance whose title
+   * is still pending from one that will never have one. The journal cannot say it: until the
+   * `value.settled` event arrives, both look like nothing.
+   */
+  titled?: boolean;
 }
 
 /** The workflow shape a projection reads: state id → shape. */
@@ -97,6 +105,30 @@ function runLabelOf(
 ): string | undefined {
   const declared = shape?.[event.stateId]?.label;
   return resolveLabel(declared, inputsOf(event) ?? {}).label;
+}
+
+/**
+ * A settled field's value as display text. A `title` is typed a string, so anything else is a value
+ * the engine should have refused; it is shown as JSON rather than dropped, because a card that says
+ * something odd is easier to trace than one that silently says its label.
+ */
+function settledText(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const unwrapped = typeof value === "object" && !Array.isArray(value) && "value" in value ? (value as { value: unknown }).value : value;
+  if (typeof unwrapped === "string") return unwrapped;
+  if (unwrapped === undefined || unwrapped === null) return undefined;
+  return JSON.stringify(unwrapped);
+}
+
+/** A `value.settled` event for `title`, as the instance node carries it — see {@link InstanceTitle}. */
+export function titleOf(event: Extract<EngineEvent, { type: "value.settled" }>): InstanceTitle {
+  const text = settledText(event.value);
+  return {
+    outcome: event.outcome,
+    ...(text !== undefined ? { text } : {}),
+    ...(event.fallback === true ? { fallback: true } : {}),
+    ...(event.error !== undefined ? { error: event.error } : {}),
+  };
 }
 
 export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape, atMs?: readonly number[]): ProjectedRun {
@@ -238,6 +270,24 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
         if (node.status === "waiting_for_user" && (waits === undefined || waits.size === 0)) node.status = "running";
         break;
       }
+      /**
+       * A computed field settled (SPEC §5.3). Two are the board's business: the `title` a card is
+       * named by, and a computed `label`, which stands in for the declared one the shape could not
+       * carry (a bound label is absent from the loaded state until an instance evaluates it).
+       *
+       * The LATEST event wins. A field settles once per instance, but a retry that revived a failed
+       * instance evaluates an absent field afresh, and the second answer is the one that stands.
+       */
+      case "value.settled": {
+        const node = byId.get(event.instanceId);
+        if (!node) break;
+        if (event.field === "title") node.title = titleOf(event);
+        else if (event.field === "label") {
+          const text = settledText(event.value);
+          if (text !== undefined) node.label = text;
+        }
+        break;
+      }
       case "transition.taken": {
         const node = byId.get(event.instanceId);
         if (node) node.index = event.index;
@@ -368,6 +418,54 @@ export function boardPathOf(run: ProjectedRun): PathStep[] {
 }
 
 /**
+ * The name a task displays — see {@link TaskHeading} and SPEC §5.2.
+ *
+ * Walks the board path ({@link boardPathOf}, so a finished task keeps the name it had while running)
+ * from the INNERMOST instance outward and stops at the first one that declares a title: its state is
+ * `titled` in the shape, or — the same fact from the journal's side — a title has settled on it. The
+ * nearest declarer wins over any ancestor's, settled or not: a child that names itself is what the
+ * task is about right now, and falling through to a parent's title while the child's is still
+ * settling would show one name and then swap it for another.
+ *
+ * While the title is PENDING the declaring state's label stands in, flagged so a renderer can draw
+ * it as a placeholder. Pending needs the instance to still be live: a run that ended before its title
+ * settled is not waiting for one, and drawing it as though it were would be a promise nobody keeps.
+ * A binding that failed with no `failureValue` also leaves the label, with the error beside it.
+ *
+ * Undefined when nothing on the path declares a title, which is the caller's cue to keep the task's
+ * own name.
+ */
+export function headingOf(run: ProjectedRun, shape?: WorkflowShape): TaskHeading | undefined {
+  const path = boardPathOf(run);
+  if (path.length === 0) return undefined;
+  const byId = new Map(flattenInstances(run.instances).map((node) => [node.instanceId, node]));
+  for (let i = path.length - 1; i >= 0; i--) {
+    const step = path[i]!;
+    const node = byId.get(step.instanceId);
+    if (node === undefined) continue;
+    const title = node.title;
+    if (title === undefined && shape?.[node.stateId]?.titled !== true) continue;
+    const at = { instanceId: node.instanceId, stateId: node.stateId };
+    if (title?.text !== undefined) {
+      return {
+        text: title.text,
+        ...(title.fallback === true ? { fallback: true } : {}),
+        ...(title.error !== undefined ? { error: title.error } : {}),
+        ...at,
+      };
+    }
+    const label = node.label ?? shape?.[node.stateId]?.label ?? node.stateId.split("/").pop() ?? node.stateId;
+    return {
+      text: label,
+      ...(title === undefined && isLive(node) ? { pending: true } : {}),
+      ...(title?.error !== undefined ? { error: title.error } : {}),
+      ...at,
+    };
+  }
+  return undefined;
+}
+
+/**
  * The child a level's instance rests on: its last non-superseded child, live or not.
  *
  * The same reading {@link restingPathOf} takes one level down, asked of ONE instance — the level a
@@ -417,12 +515,19 @@ const TERMINAL: ReadonlySet<TaskStatus> = new Set(["completed", "failed", "cance
  * card is placed in the column at `levelIndex + 1`, so a drill-down is only
  * meaningful when the path continues *below* that column — hence `+ 2`.
  */
-function cardOf(task: TaskProjection, path: PathStep[], levelIndex: number, activeStatus?: InstanceStatus): BoardCard {
+function cardOf(
+  task: TaskProjection,
+  path: PathStep[],
+  levelIndex: number,
+  activeStatus?: InstanceStatus,
+  shape?: WorkflowShape,
+): BoardCard {
   const deepest = path[path.length - 1];
   // Only for a run that is OVER. A live run has terminated instances behind it — every child it has
   // finished with — and reporting the newest of those as a completion date would put a date on a
   // card that is still moving.
   const ended = TERMINAL.has(task.status) ? endedAtOf(task.run) : undefined;
+  const heading = headingOf(task.run, shape);
   return {
     ...(ended !== undefined ? { endedAt: ended } : {}),
     taskId: task.taskId,
@@ -434,6 +539,7 @@ function cardOf(task: TaskProjection, path: PathStep[], levelIndex: number, acti
     activePath: path,
     hasSubBoard: path.length > levelIndex + 2,
     ...(task.labels !== undefined ? { labels: task.labels } : {}),
+    ...(heading !== undefined ? { heading } : {}),
     updatedAt: task.updatedAt,
   };
 }
@@ -496,7 +602,7 @@ export function projectBoard(
     const path = boardPathOf(task.run);
     // Where does this path sit relative to `level`?
     const at = path.findIndex((step) => step.stateId === level);
-    const card = cardOf(task, path, Math.max(at, 0), activeStatusOf(task.run));
+    const card = cardOf(task, path, Math.max(at, 0), activeStatusOf(task.run), shape);
 
     if (path.length === 0) {
       // Never run. It will BEGIN at its workflow root, so it is at this level exactly when this

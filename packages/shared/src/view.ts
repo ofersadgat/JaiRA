@@ -133,7 +133,50 @@ export interface InstanceNode {
    * only in principle: a state that dispatched nothing simply has no entry.
    */
   calls?: OperationCall[];
+  /**
+   * This instance's computed TITLE, once it has settled (SPEC §5.2) — the latest `value.settled`
+   * event for the field `title`.
+   *
+   * Absent means nothing has settled: either the state declares no title, or it does and the value
+   * is still PENDING. Which of the two is a question about the STATE, answered by the workflow shape
+   * rather than the journal — see `headingOf`.
+   */
+  title?: InstanceTitle;
   children: InstanceNode[];
+}
+
+/**
+ * A settled `title` field, as the journal recorded it (`value.settled`, SPEC §5.3).
+ *
+ * `outcome: "error"` WITH a `text` is a fallback: the binding failed and its `failureValue` stood
+ * in, so the text is displayable and `error` says why it is not the computed one. With no `text` the
+ * binding failed with nothing to stand in, and the instance failed with it.
+ */
+export interface InstanceTitle {
+  outcome: "value" | "error";
+  text?: string;
+  fallback?: boolean;
+  error?: string;
+}
+
+/**
+ * The name a task displays, derived from its path (SPEC §5.2): the title of the nearest instance
+ * whose state declares one, or that state's label while the title is still settling.
+ *
+ * Absent from a card or a detail when no state on the path declares a title — the task's own
+ * `title` is the name then, as it always was.
+ */
+export interface TaskHeading {
+  text: string;
+  /** The title has not settled yet, so {@link text} is the declaring state's label standing in. */
+  pending?: boolean;
+  /** The title's binding failed and its `failureValue` is what {@link text} shows. */
+  fallback?: boolean;
+  /** Why the title could not be computed — on a fallback, or on a failure that left only the label. */
+  error?: string;
+  /** The instance the title belongs to, and its state. */
+  instanceId: string;
+  stateId: string;
 }
 
 /** A child that never became an instance because its input wiring failed. */
@@ -164,6 +207,8 @@ export interface BoardCard {
   /** True when the active path continues below this board level (drill-down). */
   hasSubBoard: boolean;
   labels?: string[];
+  /** The name the task's path gives it, when a state on the path declares a title — see {@link TaskHeading}. */
+  heading?: TaskHeading;
   updatedAt: number;
   /**
    * When the run ENDED, from the journal — the last instance of it to terminate.
@@ -284,6 +329,8 @@ export interface TaskDetail {
   instances: InstanceNode[];
   activePath: PathStep[];
   blocked: BlockedChild[];
+  /** The name the task's path gives it, when a state on the path declares a title — see {@link TaskHeading}. */
+  heading?: TaskHeading;
   /** Empty for a task that never started; otherwise the machine's one summary. */
   runs: RunView[];
   /** Most recent events last. */

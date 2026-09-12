@@ -10,6 +10,7 @@ import {
   activePathOf,
   breadcrumbOf,
   flattenInstances,
+  headingOf,
   projectBoard,
   projectRun,
   type TaskProjection,
@@ -547,5 +548,112 @@ describe("one machine across a stop and its continuation", () => {
     expect(root.children.map((c) => c.status)).toEqual(["running"]);
     // One node per durable id — the re-entry did not grow a second occurrence.
     expect(root.children).toHaveLength(1);
+  });
+});
+
+/**
+ * Computed titles (SPEC §5.2, §5.3): a `value.settled` event names an instance, and the board names a
+ * task after the nearest instance on its path whose state declares one.
+ */
+describe("computed titles", () => {
+  const TITLED: WorkflowShape = {
+    feature: {
+      label: "Feature",
+      titled: true,
+      children: [{ key: "plan", stateId: "feature/plan", label: "Planning" }],
+    },
+    "feature/plan": { label: "Planning", titled: true, children: [{ key: "goals", stateId: "feature/plan/goals" }] },
+    "feature/plan/goals": { label: "Goals", children: [] },
+  };
+  const settled = (
+    id: string,
+    stateId: string,
+    value: string | undefined,
+    extra: { outcome?: "value" | "error"; error?: string; fallback?: boolean; field?: string } = {},
+  ): EngineEvent => ({
+    type: "value.settled",
+    instanceId: id,
+    stateId,
+    field: extra.field ?? "title",
+    outcome: extra.outcome ?? "value",
+    ...(value !== undefined ? { value } : {}),
+    ...(extra.error !== undefined ? { error: extra.error } : {}),
+    ...(extra.fallback !== undefined ? { fallback: extra.fallback } : {}),
+  });
+  const nodeOf = (events: EngineEvent[], id: string, shape: WorkflowShape = TITLED) =>
+    flattenInstances(projectRun(events, shape).instances).find((n) => n.instanceId === id);
+
+  it("projects the latest settled title per instance, and leaves an unsettled one absent", () => {
+    const events: EngineEvent[] = [
+      entered("r", "feature"),
+      settled("r", "feature", "Ship the docs"),
+      entered("p", "feature/plan", "r", "plan"),
+      settled("p", "feature/plan", "first"),
+      settled("p", "feature/plan", "second"),
+      // Another field settling is not a title.
+      settled("p", "feature/plan", "fast", { field: "operation.config.model" }),
+      entered("g", "feature/plan/goals", "p", "goals"),
+    ];
+    expect(nodeOf(events, "r")?.title).toEqual({ outcome: "value", text: "Ship the docs" });
+    expect(nodeOf(events, "p")?.title).toEqual({ outcome: "value", text: "second" });
+    expect(nodeOf(events, "g")?.title).toBeUndefined();
+  });
+
+  it("keeps a fallback's value with its error, and a failure with nothing standing in as an error alone", () => {
+    const fallback = [entered("r", "feature"), settled("r", "feature", "Untitled", { outcome: "error", error: "no title today", fallback: true })];
+    expect(nodeOf(fallback, "r")?.title).toEqual({ outcome: "error", text: "Untitled", fallback: true, error: "no title today" });
+    const failed = [entered("r", "feature"), settled("r", "feature", undefined, { outcome: "error", error: "no title today" })];
+    expect(nodeOf(failed, "r")?.title).toEqual({ outcome: "error", error: "no title today" });
+  });
+
+  it("names the task after the NEAREST declared title, not an ancestor's", () => {
+    const events: EngineEvent[] = [
+      entered("r", "feature"),
+      settled("r", "feature", "Ship the docs"),
+      entered("p", "feature/plan", "r", "plan"),
+      settled("p", "feature/plan", "Plan the docs"),
+      // The innermost instance declares nothing, so the walk goes up past it.
+      entered("g", "feature/plan/goals", "p", "goals"),
+    ];
+    expect(headingOf(projectRun(events, TITLED), TITLED)).toEqual({ text: "Plan the docs", instanceId: "p", stateId: "feature/plan" });
+  });
+
+  it("shows the declaring state's label while its title is pending, even when an ancestor's has settled", () => {
+    const events: EngineEvent[] = [
+      entered("r", "feature"),
+      settled("r", "feature", "Ship the docs"),
+      entered("p", "feature/plan", "r", "plan"),
+    ];
+    const heading = headingOf(projectRun(events, TITLED), TITLED);
+    expect(heading).toEqual({ text: "Planning", pending: true, instanceId: "p", stateId: "feature/plan" });
+    // The same run with the title settled swaps the placeholder for the name.
+    const done = headingOf(projectRun([...events, settled("p", "feature/plan", "Plan the docs")], TITLED), TITLED);
+    expect(done).toEqual({ text: "Plan the docs", instanceId: "p", stateId: "feature/plan" });
+  });
+
+  it("carries a fallback title's error, and falls back to the label with the error when nothing stood in", () => {
+    const fallback = [entered("r", "feature"), settled("r", "feature", "Untitled", { outcome: "error", error: "boom", fallback: true })];
+    expect(headingOf(projectRun(fallback, TITLED), TITLED)).toEqual({ text: "Untitled", fallback: true, error: "boom", instanceId: "r", stateId: "feature" });
+    const failed = [entered("r", "feature"), settled("r", "feature", undefined, { outcome: "error", error: "boom" }), terminated("r", "feature", "error")];
+    expect(headingOf(projectRun(failed, TITLED), TITLED)).toEqual({ text: "Feature", error: "boom", instanceId: "r", stateId: "feature" });
+  });
+
+  it("is nothing when no state on the path declares a title, and no longer pending once the run has ended", () => {
+    expect(headingOf(projectRun([entered("1", "feature/plan"), entered("2", "feature/plan/goals", "1", "goals")], SHAPE), SHAPE)).toBeUndefined();
+    // The resting path of a finished run still names it — but a title that never settled is not awaited.
+    const ended = [entered("r", "feature"), terminated("r", "feature", "canceled")];
+    expect(headingOf(projectRun(ended, TITLED), TITLED)).toEqual({ text: "Feature", instanceId: "r", stateId: "feature" });
+  });
+
+  it("treats a settled title as a declaration when there is no shape to ask", () => {
+    const events = [entered("r", "feature"), entered("p", "feature/plan", "r", "plan"), settled("r", "feature", "Ship the docs")];
+    expect(headingOf(projectRun(events))).toEqual({ text: "Ship the docs", instanceId: "r", stateId: "feature" });
+  });
+
+  it("puts the heading on the board card", () => {
+    const run = projectRun([entered("r", "feature"), entered("p", "feature/plan", "r", "plan")], TITLED);
+    const board = projectBoard(TITLED, "feature", [{ taskId: "t", title: "my task", status: "running", workflow: "feature", updatedAt: 1, run }]);
+    const card = board.columns.find((c) => c.key === "plan")?.cards[0];
+    expect(card).toMatchObject({ title: "my task", heading: { text: "Planning", pending: true, instanceId: "p" } });
   });
 });

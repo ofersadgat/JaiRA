@@ -122,6 +122,14 @@ interface FoldNode {
   opSettled: boolean;
   opCompleted?: { operationId?: string; op: "prompt" | "function"; metrics?: WorkflowMetrics };
   opInterrupted: boolean;
+  /**
+   * The computed fields that SETTLED (SPEC §5.3), by authored path — `LoadedInstance.fields`.
+   *
+   * The last `value.settled` per field wins, and a fallback's value counts: it is the value the
+   * instance ran with, and handing it back is what keeps a resume from paying for the title prompt
+   * again and coming back with a different name.
+   */
+  fields: Map<string, ResolvedValue>;
 }
 
 /** The record row the description joins to. */
@@ -161,8 +169,9 @@ export function releaseUnconsumedFailures(project: Project, taskId: string): num
  * and nothing advanced past, as LIVE again — and the failed call's record is already freed by
  * {@link releaseUnconsumedFailures}. What stayed behind was the journal's account of the failure:
  * the `instance.terminated` rows for the leaf and every ancestor that fell with it, the
- * `operation.failed` row for the call, and the `call.waiting`/`call.settled` pair of a wait the stop
- * withdrew. Every reader of the journal then drew the failure beside the retry — the conversation's
+ * `operation.failed` row for the call, the `call.waiting`/`call.settled` pair of a wait the stop
+ * withdrew, and the `value.settled` row of a computed field (a title) that failed with no
+ * `failureValue` to stand in. Every reader of the journal then drew the failure beside the retry — the conversation's
  * grey notes, the run causes, a resume of the resume — as an error the run still had. The state
  * info was deleted; the error info was not. This deletes it.
  *
@@ -192,6 +201,10 @@ export function releaseRevivedFailures(project: Project, load: TaskLoad): number
            OR type = 'operation.failed'
            OR type = 'call.waiting'
            OR type = 'call.settled'
+           -- A computed field that failed with nothing standing in: the failure that ended the
+           -- instance. The retry evaluates it afresh; a fallback is a value, and stays.
+           OR (type = 'value.settled' AND json_extract(payload_json, '$.value') IS NULL
+               AND COALESCE(json_extract(payload_json, '$.fallback'), 0) = 0)
          )`,
     )
     .run(load.taskId, ...live);
@@ -330,6 +343,7 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
           opStarted: false,
           opSettled: false,
           opInterrupted: false,
+          fields: new Map(),
         };
         nodes.set(node.id, node);
         const parent = event.parentInstanceId === undefined ? undefined : nodes.get(event.parentInstanceId);
@@ -402,6 +416,16 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
       }
       case "call.waiting": {
         deferredOps.add(event.operationId);
+        break;
+      }
+      case "value.settled": {
+        const node = nodes.get(event.instanceId);
+        if (node === undefined) break;
+        // A failure with nothing standing in carries no value and failed the instance. A retry that
+        // revives it must evaluate the field afresh, so an earlier value — there is none in practice,
+        // a field settles once — is not left behind to be loaded in its place.
+        if (event.value === undefined) node.fields.delete(event.field);
+        else node.fields.set(event.field, event.value);
         break;
       }
       default:
@@ -566,6 +590,8 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
         : {}),
       ...(sites !== undefined ? { sites } : {}),
       ...(nextSite !== undefined ? { nextSite } : {}),
+      // Settled fields are used verbatim by `loadRun` and never re-evaluated; an absent one is.
+      ...(node.fields.size > 0 ? { fields: Object.fromEntries(node.fields) } : {}),
       ...(children.length > 0 ? { children } : {}),
     };
   };

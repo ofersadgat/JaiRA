@@ -16,6 +16,7 @@ import type { BoardCard, BoardView, InstanceStatus, TaskStatus } from "@jaira/sh
 import { pointOf, type MenuPoint } from "./menu";
 import { Pill, PILL_WORD, pillKindOf } from "./pill";
 import { canDrag, requestFor, NO_DRAG_OFFERS, type DragOffers } from "./taskDrag";
+import { TaskName } from "./taskName";
 
 /**
  * The four things a card in a column can be DOING, in the order work moves through them.
@@ -495,7 +496,9 @@ export function Card({
   return (
     <Tile
       status={status}
-      title={card.title}
+      // The name the task's path gives it where a state declares a title (SPEC §5.2), drawn as a
+      // placeholder while that title is still settling — see `TaskName`.
+      title={<TaskName task={card} />}
       selected={selected}
       // A finished card's tooltip is the exact moment it ended — the footer rounds to one unit, and
       // "2 days ago" is the reading you want until the moment it is not.

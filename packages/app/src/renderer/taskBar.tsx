@@ -79,6 +79,7 @@ export function TaskAddressBar({
         runs: readonly BoardCard[];
         selectedTask: string | null;
         taskTitle?: string | undefined;
+        taskTitlePending?: boolean | undefined;
         onWalkTo: (index: number, node: InstanceNode) => void;
         onSelectTask: (taskId: string) => void;
       }
@@ -185,6 +186,7 @@ export function TaskAddressBar({
         selectedTask: run.selectedTask,
         ...(levels.at(-1) !== undefined ? { stateId: levels.at(-1)!.stateId } : {}),
         ...(run.taskTitle !== undefined ? { taskTitle: run.taskTitle } : {}),
+        ...(run.taskTitlePending === true ? { taskTitlePending: true } : {}),
         onWalkBack,
         onWalkTo: run.onWalkTo,
         onSelectTask: run.onSelectTask,

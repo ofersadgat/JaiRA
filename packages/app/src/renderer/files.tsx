@@ -50,6 +50,7 @@ import { RunModeToggle } from "./runViews";
 import { signatureOf } from "./transcript";
 import { durationOf } from "./transcriptView";
 import { Splitter } from "./splitter";
+import { taskNameOf, taskNamePending } from "./taskName";
 import { nodeAt, stepOf, type TrailStep } from "./trail";
 import { HALVES, PANE, paneDefault, type HalfMode } from "./uiState";
 
@@ -1225,6 +1226,8 @@ export interface CrumbInput {
    * whichever run you picked. See {@link runCrumbOf}.
    */
   taskTitle?: string | undefined;
+  /** {@link taskTitle} is a label standing in for a computed title still settling. */
+  taskTitlePending?: boolean | undefined;
   onOpenState: (stateId: string) => void;
   onOpenFile: (layer: WorkflowLayer, path: string) => void;
   /** Show a directory's contents. `""` is the root. */
@@ -1360,6 +1363,7 @@ export function crumbsOf(input: CrumbInput): Crumb[] {
       selectedTask,
       ...(stateId !== undefined ? { stateId } : {}),
       ...(input.taskTitle !== undefined ? { taskTitle: input.taskTitle } : {}),
+      ...(input.taskTitlePending === true ? { taskTitlePending: true } : {}),
       onWalkBack: input.onWalkBack,
       onWalkTo: input.onWalkTo,
       onSelectTask: input.onSelectTask,
@@ -1549,7 +1553,7 @@ export function FileAddressBar({
     // then the ones that have been through. Same order the leaf panel lists them in.
     runs: [...(context.state?.tasksHere ?? []), ...(context.state?.tasksRecent ?? [])],
     selectedTask: context.selected,
-    ...(context.detail !== null ? { taskTitle: context.detail.title } : {}),
+    ...(context.detail !== null ? { taskTitle: taskNameOf(context.detail), taskTitlePending: taskNamePending(context.detail) } : {}),
     onOpenState: context.onDrill,
     onOpenFile: context.onOpenFile ?? ((): void => {}),
     onOpenDir: context.onOpenDir ?? ((): void => {}),

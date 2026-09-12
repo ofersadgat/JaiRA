@@ -13,6 +13,7 @@
 import { useState, type CSSProperties, type JSX, type ReactNode } from "react";
 import type { BoardCard, InstanceNode } from "@jaira/shared/browser";
 import { ContextMenu, type MenuAnchor, type MenuItem } from "./menu";
+import { taskNameOf } from "./taskName";
 import { nodeAt, stepOf, type TrailStep } from "./trail";
 
 /**
@@ -44,6 +45,11 @@ export interface Crumb {
   hue?: string;
   /** The full story, for the tooltip: which instance, which state it ran, where on disk. */
   title?: string;
+  /**
+   * The text is a PLACEHOLDER — a state's label standing in for a computed title still settling
+   * (SPEC §5.2). Drawn the way `TaskName` draws one, so the bar and the board agree on what is final.
+   */
+  pending?: boolean;
   go?: () => void;
   /**
    * The other things that could be at this level — what the `›` before this crumb drops down.
@@ -120,8 +126,10 @@ export interface RunCrumbInput {
   selectedTask: string | null;
   /** The state the walk began at — what the base crumb's name is shortened against. */
   stateId?: string | undefined;
-  /** The selected task's own name, which is what the base crumb reads. */
+  /** The selected task's own name, which is what the base crumb reads — its computed title where it has one. */
   taskTitle?: string | undefined;
+  /** {@link taskTitle} is a label standing in for a title still settling — see `Crumb.pending`. */
+  taskTitlePending?: boolean | undefined;
   onWalkBack: (index: number) => void;
   /** Replace the path from `index` down with this run — walking sideways rather than in. */
   onWalkTo: (index: number, node: InstanceNode) => void;
@@ -159,7 +167,7 @@ export function runCrumbs(input: RunCrumbInput): Crumb[] {
         ? runs.map((card) => ({
             // Shortened exactly as the crumb it would become, so picking `#2` out of this list puts
             // `#2` on the bar rather than something that has to be recognised as the same run.
-            label: shortRunName(card.title, stateId),
+            label: shortRunName(taskNameOf(card), stateId),
             note: card.activeStateId ?? card.status,
             checked: card.taskId === selectedTask,
             onSelect: () => input.onSelectTask(card.taskId),
@@ -180,6 +188,7 @@ export function runCrumbs(input: RunCrumbInput): Crumb[] {
     return {
       text: runCrumbOf(step, i, taskTitle, stateId),
       kind: "run" as const,
+      ...(i === 0 && taskTitle !== undefined && input.taskTitlePending === true ? { pending: true } : {}),
       title:
         i === 0 && taskTitle !== undefined
           ? `${taskTitle} — run #${shortId(step.instanceId)} of ${step.stateId}`
@@ -260,14 +269,14 @@ export function CrumbBar({
           )}
           {crumb.go === undefined ? (
             <span
-              className={`crumb crumb-${crumb.kind}${allCrumb(crumb)} ${i === crumbs.length - 1 ? "last" : "inert"}`}
+              className={`crumb crumb-${crumb.kind}${allCrumb(crumb)}${crumb.pending === true ? " crumb-pending" : ""} ${i === crumbs.length - 1 ? "last" : "inert"}`}
               title={crumb.title}
             >
               {crumb.text}
             </span>
           ) : (
             <button
-              className={`crumb crumb-${crumb.kind}${allCrumb(crumb)}`}
+              className={`crumb crumb-${crumb.kind}${allCrumb(crumb)}${crumb.pending === true ? " crumb-pending" : ""}`}
               title={crumb.title ?? (crumb.kind === "run" ? "back to this run" : "open this state")}
               onClick={(e) => {
                 e.stopPropagation();

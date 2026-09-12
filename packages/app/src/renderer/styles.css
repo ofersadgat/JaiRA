@@ -4018,6 +4018,19 @@ button.crumb-sep.open {
 .card-selected > .card-head > .card-title {
   font-weight: 600;
 }
+/* A task's COMPUTED name (taskName.tsx). While the title is still settling the state's label stands
+   in, and it is drawn as a placeholder — italic and dimmed — so it cannot be read as the name the
+   task will have. A fallback title is real text with a caveat, so it keeps the ink and gains a dotted
+   underline that points at the hover note saying why. */
+.task-name-pending,
+.crumb.crumb-pending {
+  font-style: italic;
+  color: var(--dim);
+}
+.task-name-fallback {
+  text-decoration: underline dotted var(--dim);
+  text-underline-offset: 3px;
+}
 /* The second line: where the task is, and — where there is room to say it — which KIND of waiting or
    how long ago it ended. The rule above it went with the card's box; the gap does the same job now
    that there is no fill for a border to sit inside. */

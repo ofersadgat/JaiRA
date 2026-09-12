@@ -2332,6 +2332,12 @@ export function useApp() {
             void refreshDetail(ref.current.selected);
             void refreshSession(ref.current.selected, ref.current.sessionInstance);
           }
+          // A computed TITLE settled (SPEC §5.2): the detail header names the task by it, and was
+          // fetched while it was still pending. Only the detail — the board refetches on its own
+          // per-entry invalidate, and a settled field changes no session history.
+          else if (ev.type === "value.settled" && (message.event as { field?: string }).field === "title") {
+            void refreshDetail(ref.current.selected);
+          }
           // The run's NARRATION, on the wider set — see {@link NARRATED_EVENTS}. The instance tree
           // says what exists; this says what happened, and the transcript draws the second between
           // its panels. Refetched here rather than left to the end-of-run invalidate, which is when

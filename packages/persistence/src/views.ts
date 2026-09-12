@@ -18,6 +18,7 @@ import {
   activePathOf,
   breadcrumbOf,
   eventsOf,
+  headingOf,
   projectBoard,
   projectRun,
   type ProjectedRun,
@@ -562,6 +563,7 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
   // The TASK, not its last run — see `taskRun`. The timeline below is still every event in order,
   // so the panel shows the folded tree beside the unfolded history that produced it.
   const run = taskRun(project, taskId, shape);
+  const heading = headingOf(run, shape);
   const origin = taskOriginOf(project, row);
   const timeline: TimelineEntry[] = project.events
     .list(taskId)
@@ -590,6 +592,8 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
     instances: run.instances,
     activePath: run.activePath,
     blocked: run.blocked,
+    // The name the path gives the task, drawn by the same rule the board card uses so the two agree.
+    ...(heading !== undefined ? { heading } : {}),
     // The machine's one execution summary — an array still, because a task that never started has
     // nothing to summarize and the renderer maps over what there is.
     runs:

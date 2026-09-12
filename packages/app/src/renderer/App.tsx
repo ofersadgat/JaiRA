@@ -111,6 +111,7 @@ import { Sidebar, type SidebarAct, type SidebarProject, type SidebarView } from 
 import { primaryAct } from "./taskAction";
 import { Splitter } from "./splitter";
 import { TaskAddressBar } from "./taskBar";
+import { taskNameOf, taskNamePending } from "./taskName";
 import { nodeAt } from "./trail";
 import {
   FOLD,
@@ -1748,7 +1749,8 @@ export default function App(): JSX.Element {
                 // under the base run's chevron, taken from the board rather than from a StateView.
                 runs: taskLevelCards,
                 selectedTask: state.selected,
-                ...(detail?.title !== undefined ? { taskTitle: detail.title } : {}),
+                // The name the path gives the task where a state declares a title — see `TaskName`.
+                ...(detail != null ? { taskTitle: taskNameOf(detail), taskTitlePending: taskNamePending(detail) } : {}),
                 onWalkTo: actions.walkTo,
                 onSelectTask: (taskId) => actions.select(taskId, state.selectedProject ?? undefined),
               }}

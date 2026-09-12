@@ -29,6 +29,7 @@ import {
   type WorkflowSource,
 } from "@jaira/shared/browser";
 import { Badge } from "./board";
+import { TaskName } from "./taskName";
 import { CompositeView, SidechainConversation } from "./runViews";
 import { entriesOf, journalFor } from "./transcript";
 import { useStickToBottom } from "./stickToBottom";
@@ -607,7 +608,7 @@ function LeafPanel({ context }: FileSurfaceProps): JSX.Element {
             onClick={() => onSelectTask(card.taskId)}
           >
             <Badge status={card.activeStatus ?? card.status} />
-            <span className="grow ellip">{card.title}</span>
+            <TaskName task={card} className="grow ellip" />
           </div>
         ))}
         {state.tasksHere.length === 0 ? <p className="empty">Nothing here right now.</p> : null}
@@ -622,7 +623,7 @@ function LeafPanel({ context }: FileSurfaceProps): JSX.Element {
                 onClick={() => onSelectTask(card.taskId)}
               >
                 <Badge status={card.status} />
-                <span className="grow ellip">{card.title}</span>
+                <TaskName task={card} className="grow ellip" />
               </div>
             ))}
           </>

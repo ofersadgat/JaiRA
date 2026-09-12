@@ -41,7 +41,7 @@ import type {
   WorkflowLayer,
 } from "@jaira/shared";
 import type { Project } from "./project";
-import { boardPathOf, breadcrumbOf, endedAtOf, projectBoard, type TaskProjection, type WorkflowShape } from "./projection";
+import { boardPathOf, breadcrumbOf, endedAtOf, headingOf, projectBoard, type TaskProjection, type WorkflowShape } from "./projection";
 import { isStateFile } from "./snapshots";
 import { workflowShape } from "./shape";
 import { bundleFor, taskRun, taskSummaries, type ViewOptions } from "./views";
@@ -765,6 +765,7 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
     // When it ended, for a run that has. See `BoardCard.endedAt` — the task row's own clock moves for
     // anything that touches the record, and this is the journal's answer.
     const ended = over ? endedAtOf(run) : undefined;
+    const heading = headingOf(run, shape);
     const card: BoardCard = {
       ...(ended !== undefined ? { endedAt: ended } : {}),
       taskId: summary.taskId,
@@ -776,6 +777,7 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
       // Every root has children worth walking into, so a card here is always a drill.
       hasSubBoard: path.length > 0,
       ...(summary.labels !== undefined ? { labels: summary.labels } : {}),
+      ...(heading !== undefined ? { heading } : {}),
       updatedAt: summary.updatedAt,
     };
     // Always found: the loop above made a column for every flow the summaries resolve to, whether
