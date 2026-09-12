@@ -264,4 +264,74 @@ describe("folding a tool result into the entry that asked for it", () => {
     expect(block["content"]).toBe("something the renderer would never produce");
     expect(block["data"]).toBeDefined();
   });
+
+  it("pairs by the CALL ID, not by order — parallel calls land in the file as they finish, and a result can precede its call", async () => {
+    // Verbatim shape from a feature run (2026-09-10): the file wrote `USE a`, then B's result, then
+    // A's result, then `USE b`; the stream called a, b and answered a, b. Paired by order, A's block
+    // got B's record and the later question got a file read's — its answers drew blank.
+    const at = (ms: number) => new Date(ms).toISOString();
+    const lines = [
+      { cwd: "C:/w", type: "assistant", uuid: "s1", timestamp: at(1000), message: { role: "assistant", content: [{ type: "tool_use", id: "a", name: "Read", input: {} }] } },
+      { cwd: "C:/w", type: "user", uuid: "u-b", timestamp: at(2000), toolUseResult: { mode: "files_with_matches", filenames: ["x"], numFiles: 1 }, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "b", content: "x" }] } },
+      { cwd: "C:/w", type: "user", uuid: "u-a", timestamp: at(2100), toolUseResult: { type: "text", file: { filePath: "a.md", content: CONTENT, numLines: 4, startLine: 1, totalLines: 4 } }, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "a", content: RENDERED }] } },
+      { cwd: "C:/w", type: "assistant", uuid: "s2", timestamp: at(2200), message: { role: "assistant", content: [{ type: "tool_use", id: "b", name: "Grep", input: {} }] } },
+      { cwd: "C:/w", type: "assistant", uuid: "s3", timestamp: at(3000), message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
+    ];
+    const entries = [
+      { kind: "message", role: "assistant", provider: "anthropic", timestamp: "t", content: [{ type: "tool_use", id: "a", name: "Read", input: {} }] },
+      { kind: "message", role: "assistant", provider: "anthropic", timestamp: "t", content: [{ type: "tool_use", id: "b", name: "Grep", input: {} }] },
+      { kind: "message", role: "user", provider: "anthropic", timestamp: "t", content: [{ type: "tool_result", tool_use_id: "a", content: RENDERED }] },
+      { kind: "message", role: "user", provider: "anthropic", timestamp: "t", content: [{ type: "tool_result", tool_use_id: "b", content: "x" }] },
+      { kind: "message", role: "assistant", provider: "anthropic", timestamp: "t", content: [{ type: "text", text: "done" }] },
+    ];
+    const { store, closes } = recorder();
+    const wrapped = withNativeCapture(store, { cwd: "C:/w", read: async () => lines as never });
+    await wrapped.finish({ id: "r1" }, {
+      result: { value: { entries, finishReason: "stop" } as never },
+      metrics: { startMs: 500, durationMs: 10 },
+      sessionOutcome: { providerSessionId: SID },
+    });
+    const value = (closes[0]!.settled.result as { value: Record<string, unknown> }).value;
+    const out = value["entries"] as Array<{ uuid?: string; content?: Array<Record<string, unknown>> }>;
+    // Each call's line reached the entry that made it, each result's the block that answered it.
+    expect(out[0]!.uuid).toBe("s1");
+    expect(out[1]!.uuid).toBe("s2");
+    expect(out[2]).toMatchObject({ uuid: "u-a", content: [{ tool_use_id: "a", data: { file: { filePath: "a.md" } } }] });
+    expect(out[3]).toMatchObject({ uuid: "u-b", content: [{ tool_use_id: "b", data: { mode: "files_with_matches" } }] });
+    // And the text after them, which names no call, still pairs by order — past everything above.
+    expect(out[4]!.uuid).toBe("s3");
+  });
+
+  it("puts one line's result on ITS block when the stream bundled several results into one entry", async () => {
+    const at = (ms: number) => new Date(ms).toISOString();
+    const lines = [
+      { cwd: "C:/w", type: "user", uuid: "u-b", timestamp: at(2000), toolUseResult: { b: true }, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "b", content: "x" }] } },
+      { cwd: "C:/w", type: "user", uuid: "u-a", timestamp: at(2100), toolUseResult: { a: true }, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "a", content: "y" }] } },
+    ];
+    const entries = [
+      {
+        kind: "message",
+        role: "user",
+        provider: "anthropic",
+        timestamp: "t",
+        content: [
+          { type: "tool_result", tool_use_id: "a", content: "y" },
+          { type: "tool_result", tool_use_id: "b", content: "x" },
+        ],
+      },
+    ];
+    const { store, closes } = recorder();
+    const wrapped = withNativeCapture(store, { cwd: "C:/w", read: async () => lines as never });
+    await wrapped.finish({ id: "r1" }, {
+      result: { value: { entries, finishReason: "stop" } as never },
+      metrics: { startMs: 500, durationMs: 10 },
+      sessionOutcome: { providerSessionId: SID },
+    });
+    const value = (closes[0]!.settled.result as { value: Record<string, unknown> }).value;
+    const out = value["entries"] as Array<{ content?: Array<Record<string, unknown>> }>;
+    expect(out[0]!.content).toMatchObject([
+      { tool_use_id: "a", data: { a: true } },
+      { tool_use_id: "b", data: { b: true } },
+    ]);
+  });
 });

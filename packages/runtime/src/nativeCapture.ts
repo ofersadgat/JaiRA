@@ -119,14 +119,14 @@ export async function captureNativeSession(
   const readSidechains = options.readSidechains ?? readNativeSidechains;
   const captured: Captured = {};
   const cut = options.sinceMs !== undefined ? { sinceMs: options.sinceMs } : {};
-  const native = nativeLinesOf(await read(providerSessionId, options.cwd), cut);
+  const native = nativeLinesOf(namingTools(await read(providerSessionId, options.cwd)), cut);
   if (native.length > 0) captured.nativeLines = native;
   // The subagents' files, keyed the way `sidechains` already is. The same cut applies per file: a
   // subagent spawned by an EARLIER call in a resumed session folds to nothing here, because that
   // call's own close captured it.
   const chains: NonNullable<Captured["nativeSidechains"]> = {};
   for (const chain of await readSidechains(providerSessionId, options.cwd)) {
-    const lines = nativeLinesOf(chain.lines, { ...cut, sidechain: true });
+    const lines = nativeLinesOf(namingTools(chain.lines), { ...cut, sidechain: true });
     if (lines.length === 0) continue;
     chains[chain.toolUseId ?? `agent-${chain.agentId}`] = {
       agentId: chain.agentId,
@@ -207,9 +207,11 @@ const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typ
  *    `kind: "event"` entries at their woven position. Without a place for them they are simply lost;
  *    the transcript renders two of the three and names the conversation from the third.
  *
- * Paired by ROLE AND ORDER, which is the rule the reader used and the reason this now happens once:
- * the file holds message lines the stream never carried (the prompt itself), so index arithmetic
- * against the turns is off by one the moment a run begins.
+ * Paired by the TOOL CALL ID wherever a line names one (a call it makes, a result it answers), and by
+ * role and order only for the lines that name none (a thought, a text). Order alone was the rule the
+ * reader used, and it is wrong twice over: the file holds message lines the stream never carried
+ * (the prompt itself), and parallel tool calls land in the file in the order they finished, which
+ * is not the order the stream called them.
  */
 export function foldIntoEntries(value: Record<string, unknown>, captured: Captured): Record<string, unknown> {
   const entries = Array.isArray(value["entries"]) ? [...(value["entries"] as Record<string, unknown>[])] : [];
@@ -286,31 +288,109 @@ function foldChain(
       folded.push({ ...eventEntryOf(line, type), ...(marker !== undefined ? { sidechain: { ...marker } } : {}) });
       continue;
     }
-    // A user line pairs only when it carries a tool result: the PROMPT user line is input, never
-    // rode the stream back, and pairing it would shift every annotation after it by one.
-    if (type === "user" && line["toolUseResult"] === undefined) continue;
-    const entry = nextEntryOfRole(entries, cursor, type);
+    // A line that names a tool call pairs BY THAT ID, wherever in the chain the call sits. The file
+    // and the stream do not agree on order: when the agent calls several tools at once the file
+    // writes each result as its own line, in the order the tools FINISHED, and a result can even
+    // precede the line that called it. Walking both by role and order drifted the moment that
+    // happened — one run put a file read's record on the agent's question, and the question's own
+    // answers three calls later on a structured output.
+    const ids = toolIdsOf(line);
+    // A user line with no call to name pairs only when it carries a tool result: the PROMPT user
+    // line is input, never rode the stream back, and pairing it would shift every annotation after
+    // it by one.
+    if (type === "user" && ids.length === 0 && line["toolUseResult"] === undefined) continue;
+    const entry = ids.length > 0 ? entryNamingTool(entries, ids, type, marker) : nextEntryOfRole(entries, cursor, type, marker);
     if (entry === undefined) continue;
-    cursor = entry.at + 1;
-    annotate(entry.entry, line);
+    // Only ever forward: a result that arrived before its call must not send the order-paired
+    // lines after it (a thought, a text) back to entries already annotated.
+    cursor = Math.max(cursor, entry.at + 1);
+    annotate(entry.entry, line, ids);
   }
 }
 
-/** The next main-chain message entry of `role` at or after `from`. */
-function nextEntryOfRole(
+/** Whether an entry belongs to the chain being walked — the main one, or one subagent's. */
+function inChain(entry: Record<string, unknown>, marker: { id: string } | undefined): boolean {
+  if (entry["kind"] !== "message") return false;
+  const sidechain = entry["sidechain"];
+  if (marker === undefined) return sidechain === undefined;
+  return isRecord(sidechain) && sidechain["id"] === marker.id;
+}
+
+/**
+ * The file's lines with the tool call ids each message names stamped on its envelope, as `toolIds`.
+ *
+ * The reducer (`nativeLinesOf`) drops a message line's body, rightly — it rode the stream — but the
+ * body is where the `tool_use` ids and `tool_result` ids are, and those are what pairs a line to
+ * its entry. So they are read off before the body goes: a few strings on the envelope, consumed by
+ * the fold and never stored.
+ */
+function namingTools(lines: readonly unknown[]): unknown[] {
+  return lines.map((raw) => {
+    if (!isRecord(raw) || (raw["type"] !== "user" && raw["type"] !== "assistant")) return raw;
+    const message = raw["message"];
+    const ids = isRecord(message) ? toolIdsOfContent(message["content"]) : [];
+    return ids.length > 0 ? { ...raw, toolIds: ids } : raw;
+  });
+}
+
+/** The tool call ids a message's content names: the `tool_use` blocks it makes, the `tool_result` blocks it answers. */
+function toolIdsOfContent(content: unknown): string[] {
+  if (!Array.isArray(content)) return [];
+  const ids: string[] = [];
+  for (const block of content as unknown[]) {
+    if (!isRecord(block)) continue;
+    const id = block["type"] === "tool_use" ? block["id"] : block["type"] === "tool_result" ? block["tool_use_id"] : undefined;
+    if (typeof id === "string") ids.push(id);
+  }
+  return ids;
+}
+
+/** The ids a reduced line names — see {@link namingTools}. */
+function toolIdsOf(line: Record<string, unknown>): string[] {
+  const ids = line["toolIds"];
+  return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+}
+
+/**
+ * The chain's entry of `role` whose content names one of `ids` — the assistant entry that MADE the
+ * call, or the user entry that ANSWERED it; the same id is on both, and the role tells them apart.
+ */
+function entryNamingTool(
   entries: Record<string, unknown>[],
-  from: number,
+  ids: readonly string[],
   role: string,
+  marker: { id: string } | undefined,
 ): { entry: Record<string, unknown>; at: number } | undefined {
-  for (let i = from; i < entries.length; i++) {
+  for (let i = 0; i < entries.length; i++) {
     const entry = entries[i]!;
-    if (entry["kind"] === "message" && entry["sidechain"] === undefined && entry["role"] === role) return { entry, at: i };
+    if (!inChain(entry, marker) || entry["role"] !== role) continue;
+    if (toolIdsOfContent(entry["content"]).some((id) => ids.includes(id))) return { entry, at: i };
   }
   return undefined;
 }
 
-/** Copy a line's threading, its clock and its structured tool result onto the entry it belongs to. */
-function annotate(entry: Record<string, unknown>, line: Record<string, unknown>): void {
+/** The chain's next message entry of `role` at or after `from` — for a line that names no call. */
+function nextEntryOfRole(
+  entries: Record<string, unknown>[],
+  from: number,
+  role: string,
+  marker: { id: string } | undefined,
+): { entry: Record<string, unknown>; at: number } | undefined {
+  for (let i = from; i < entries.length; i++) {
+    const entry = entries[i]!;
+    if (inChain(entry, marker) && entry["role"] === role) return { entry, at: i };
+  }
+  return undefined;
+}
+
+/**
+ * Copy a line's threading, its clock and its structured tool result onto the entry it belongs to.
+ *
+ * The result lands on the `tool_result` block the line answers — named by `ids` — and on the first
+ * one only when the line names none: a stream that bundles several results into one entry gets one
+ * line per result, and each has to reach its own block.
+ */
+function annotate(entry: Record<string, unknown>, line: Record<string, unknown>, ids: readonly string[]): void {
   if (typeof line["uuid"] === "string") entry["uuid"] = line["uuid"];
   if (typeof line["parentUuid"] === "string") entry["parentUuid"] = line["parentUuid"];
   if (typeof line["timestamp"] === "string") entry["timestamp"] = line["timestamp"];
@@ -320,6 +400,7 @@ function annotate(entry: Record<string, unknown>, line: Record<string, unknown>)
   if (!Array.isArray(content)) return;
   for (const block of content as Record<string, unknown>[]) {
     if (!isRecord(block) || block["type"] !== "tool_result") continue;
+    if (ids.length > 0 && !ids.includes(block["tool_use_id"] as string)) continue;
     block["data"] = result;
     // The rendered text goes only where a renderer puts it back exactly. Unregistered shapes keep
     // theirs: a new tool or an unrecognized variant costs bytes, never fidelity.
