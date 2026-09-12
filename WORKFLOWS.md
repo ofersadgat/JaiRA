@@ -1017,6 +1017,15 @@ elements is the same thing as concurrency between this child and the spine.
 **A transition's override** (§7.2) of an `each` input is the whole array. Its
 override of any other input applies to every element, per name.
 
+**Fed by a sibling.** The wire is an ordinary expression, so the array may come from
+another child — `plan` above — and the fan-out waits for it exactly as any wire
+waits for a running producer. When that sibling **itself fanned out**, its output is
+already an array in element order, and `each` over it enters once per sibling
+element. If the sibling produced an array *per* element, the read is an array of
+arrays and the fan-out's elements are those inner arrays — `each` never looks
+inside an element. To fan out over the union, put a state between them whose output
+is `flatten(.inputs.groups)` and read that.
+
 **Addresses and sessions.** The elements of one entry share an occurrence and
 differ by element — `component[2]`, or `component:1[2]` on the second pass of a
 loop around it — so a session scoped to the fanned-out state gets one bundle per
@@ -1450,7 +1459,7 @@ Ship with the language; a built-in name wins over the path.
 | --- | --- |
 | arithmetic | `add` `sub` `mul` `div` `mod` `min` `max` `abs` `round` `floor` `ceil` — or their operator spellings |
 | access | `get(obj, key)` `at(array, i)` — member access takes a *literal* name, these take a computed one |
-| arrays | `len` `first` `last` `isEmpty` `slice` `sort` `unique` `reverse` `append` `range` `join` `contains` |
+| arrays | `len` `first` `last` `isEmpty` `slice` `sort` `unique` `reverse` `append` `range` `join` `contains` `flatten` |
 | aggregates | `sum` `avg` `dot` `any` `all` `pluck(xs, key)` `maxBy(xs, key)` `minBy(xs, key)` `sortBy(xs, key)` `find(xs, key, value)` |
 | strings | `concat` `split` `trim` `lower` `upper` `replace` `startsWith` `endsWith` |
 | objects | `keys` `values` `entries` `fromEntries` `merge` `pick` `omit` |
@@ -1459,9 +1468,11 @@ Ship with the language; a built-in name wins over the path.
 
 All are pure and **total**: `div(1, 0)` is `Infinity`, `at(xs, 99)` is nothing,
 `parse_json('{')` is nothing. None throws, and none mutates — `append` returns a new
-array, which is why there is no `push`. One deliberate choice inside that rule:
-`avg([])` is `0`, not `NaN`, because every comparison against `NaN` is false and a
-`NaN` score would make `score < ask_below` quietly false.
+array, which is why there is no `push`. `flatten` removes **one** level of nesting,
+as `Array.prototype.flat()` does, and keeps an element that is not an array where it
+is. One deliberate choice inside that rule: `avg([])` is `0`, not `NaN`, because
+every comparison against `NaN` is false and a `NaN` score would make
+`score < ask_below` quietly false.
 
 **The aggregates take a KEY NAME where the higher-order forms take an operation.** Both
 work; the difference is what you have to have on disk. `map`/`filter`/`reduce` apply an
