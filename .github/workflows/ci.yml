@@ -38,6 +38,12 @@ jobs:
         run: npm install
         working-directory: declarative-ai
 
+      # The linked packages' `exports` point at `dist`, which is not committed, so
+      # JaiRA's typecheck, tests and bundle all need declarative-ai built first.
+      - name: Build declarative-ai
+        run: npm run build
+        working-directory: declarative-ai
+
       - name: Install JaiRA deps
         run: npm install
         working-directory: JaiRA
