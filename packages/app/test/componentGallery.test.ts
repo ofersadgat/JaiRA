@@ -94,7 +94,7 @@ describe("what the gallery covers", () => {
     // card. A knob with no card is a knob nobody can see before a run reaches it.
     const chooser = GALLERY_GROUPS.find((g) => g.id === "choose_option")!;
     const keys = new Set(chooser.variants.flatMap((v) => Object.keys(v.sample as Record<string, unknown>)));
-    for (const knob of ["options", "comments", "multiple", "require_confirm", "custom", "questions", "icon"]) {
+    for (const knob of ["options", "comments", "multiple", "require_confirm", "custom", "questions", "follow_up", "icon"]) {
       expect(keys, `choose_option has no card showing ${knob}`).toContain(knob);
     }
     const form = GALLERY_GROUPS.find((g) => g.id === "fill_form")!;

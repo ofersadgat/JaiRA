@@ -118,17 +118,28 @@ function answerFrom(choice: Choice, given: JsonValue, comments: string | undefin
 /**
  * The answers out of the text an agent's question tool RETURNED, when no richer record was kept.
  *
- * The wire result reads `The user answered: "question"="answer", "question"="answer"` with each
- * half JSON-quoted, which is what makes it parseable at all: the quotes are balanced and escaped,
- * so a question containing a comma or a quote does not split the list. Anything else — a dismissal,
- * a refusal, an older spelling — answers nothing.
+ * Two spellings have shipped. The older reads `The user answered: "question"="answer", …` with each
+ * half JSON-quoted, so the quotes inside are escaped and the pairs parse on their own. The current
+ * one reads `User has answered your questions: "question"="answer", …. You can now continue with the
+ * user's answers in mind.` and quotes NOTHING inside the halves — a question that itself quotes the
+ * issue, or an answer with a comma in it, defeats any parse that goes by punctuation, and one such
+ * question drew as never answered. So when the caller knows the questions (it always can: they are
+ * the call's own arguments) each is looked up VERBATIM as `"question"=`, and its answer runs to the
+ * next question's marker or to the closing sentence. The quoted parse remains for the older spelling
+ * and for text with no known question in it. Anything else — a dismissal, a refusal — answers
+ * nothing.
  */
-export function answersOfAnsweredText(text: string): Record<string, string> | undefined {
-  const at = text.indexOf("The user answered:");
-  if (at < 0) return undefined;
+export function answersOfAnsweredText(text: string, questions: readonly string[] = []): Record<string, string> | undefined {
+  const legacyAt = text.indexOf("The user answered:");
+  const currentAt = text.indexOf("User has answered your questions:");
+  if (legacyAt < 0 && currentAt < 0) return undefined;
+  if (currentAt >= 0) {
+    const anchored = answersAnchoredOn(text.slice(currentAt), questions);
+    if (anchored !== undefined) return anchored;
+  }
   const out: Record<string, string> = {};
   const pair = /"((?:[^"\\]|\\.)*)"="((?:[^"\\]|\\.)*)"/g;
-  for (const match of text.slice(at).matchAll(pair)) {
+  for (const match of text.slice(legacyAt >= 0 ? legacyAt : currentAt).matchAll(pair)) {
     try {
       out[JSON.parse(`"${match[1]!}"`) as string] = JSON.parse(`"${match[2]!}"`) as string;
     } catch {
@@ -136,6 +147,36 @@ export function answersOfAnsweredText(text: string): Record<string, string> | un
     }
   }
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** The sentence that closes the current spelling — what the last answer runs up to. */
+const ANSWERED_CLOSE = ". You can now continue";
+
+/**
+ * Each known question's answer, cut between the question markers — see {@link answersOfAnsweredText}.
+ * Nothing when no known question is in the text at all.
+ */
+function answersAnchoredOn(body: string, questions: readonly string[]): Record<string, string> | undefined {
+  const marks = questions
+    .map((question) => ({ question, at: body.indexOf(`"${question}"="`) }))
+    .filter((mark) => mark.at >= 0)
+    .sort((a, b) => a.at - b.at);
+  if (marks.length === 0) return undefined;
+  const out: Record<string, string> = {};
+  marks.forEach((mark, i) => {
+    const from = mark.at + mark.question.length + 4; // past `"`, the question, and `"="`
+    const next = marks[i + 1];
+    let to: number;
+    if (next !== undefined) {
+      to = next.at - 2; // the `, ` between one answer's closing quote and the next question's opening one
+    } else {
+      const close = body.lastIndexOf(ANSWERED_CLOSE);
+      to = close >= from ? close : body.length;
+    }
+    const answer = body.slice(from, Math.max(from, to)).trimEnd();
+    out[mark.question] = answer.endsWith('"') ? answer.slice(0, -1) : answer;
+  });
+  return out;
 }
 
 /**

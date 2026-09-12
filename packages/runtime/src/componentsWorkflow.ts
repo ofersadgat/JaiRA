@@ -67,6 +67,7 @@ export function componentsWorkflowFiles(): Record<string, unknown> {
       outputs: {
         decision: { schema: { type: "string", enum: ["approve", "reject"] } },
         comments: { schema: { type: "string" }, optional: true },
+        notes: { schema: { type: "array", items: { type: "object" } }, optional: true },
       },
       operation: {
         kind: "function",

@@ -10,6 +10,7 @@ import {
   displayText,
   isComponentName,
   parseComponentConfig,
+  sendBackOption,
   validateComponentResult,
   type ComponentConfig,
 } from "../src/components";
@@ -141,6 +142,31 @@ describe("anchored notes on a review result (decision 0002)", () => {
     const choice = parse("choose_option", { options: ["a", "b"] });
     expect(validateComponentResult(choice, { decision: "a", notes: [note] })).toMatchObject({ ok: false });
     expect(validateComponentResult(choice, { decision: "a" })).toEqual({ ok: true });
+  });
+});
+
+describe("a commented review goes back (sendBackOption)", () => {
+  it("names the author's second non-destructive option — approve / revise / cut sends back as revise", () => {
+    const config = parse("review_artifact", {
+      prompt: "Approve?",
+      artifact: "docs",
+      options: ["approve", "revise", { value: "cut", tone: "danger" }],
+      comments: true,
+    });
+    if (config.component !== "review_artifact") throw new Error("shape");
+    expect(sendBackOption(config.options)?.value).toBe("revise");
+  });
+
+  it("skips destructive options wherever the author put them", () => {
+    expect(
+      sendBackOption([{ value: "cut", tone: "danger" }, { value: "ship" }, { value: "block", tone: "danger" }, { value: "again" }])?.value,
+    ).toBe("again");
+  });
+
+  it("has no send-back for a two-word vocabulary, so the row of options stays", () => {
+    expect(sendBackOption([{ value: "merged" }, { value: "reverted", tone: "danger" }])).toBeUndefined();
+    expect(sendBackOption([{ value: "approve" }])).toBeUndefined();
+    expect(sendBackOption([])).toBeUndefined();
   });
 });
 
@@ -303,6 +329,25 @@ describe("componentConfigIssues", () => {
       componentConfigIssues({ s: { operation: { kind: "function", function: "run_command", args: {} } } }),
     ).toEqual([]);
   });
+
+  it("warns about a review_artifact state that would drop its anchored notes", () => {
+    // The engine lands declared outputs only. A reviewer's comments pinned to passages come back as
+    // `notes`; a state naming only `decision` and `comments` forgets them without a word.
+    const review = (outputs: Record<string, unknown>) => ({
+      inputs: { docs: {} },
+      outputs,
+      operation: { kind: "function", function: "review_artifact", args: { prompt: "?", artifact: "docs", options: ["approve", "revise"] } },
+    });
+    const issues = componentConfigIssues({ verify: review({ decision: {}, comments: { optional: true } }) });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ stateId: "verify", path: "outputs", severity: "warning" });
+    expect(issues[0]!.message).toMatch(/notes/);
+    expect(componentConfigIssues({ verify: review({ decision: {}, notes: { optional: true } }) })).toEqual([]);
+    // A config the component cannot read is the error it always was, and the only issue reported.
+    const broken = componentConfigIssues({ verify: { ...review({ decision: {} }), operation: { kind: "function", function: "review_artifact", args: {} } } });
+    expect(broken).toHaveLength(1);
+    expect(broken[0]!.path).toBe("operation.args");
+  });
 });
 
 describe("an answer of your own (custom)", () => {
@@ -399,6 +444,26 @@ describe("a multi-part choose_option (questions)", () => {
       errors: "result.answers.ghost names no question of this state",
     });
     expect(validateComponentResult(config, { decision: "below" })).toMatchObject({ ok: false });
+  });
+
+  it("offers follow-up questions only beside questions, and takes the flag only where it was offered", () => {
+    expect(() => parse("choose_option", { options: ["a", "b"], follow_up: true })).toThrow(/follow_up needs questions/);
+    const plain = parse("choose_option", raw);
+    expect(plain).not.toHaveProperty("followUp");
+    // A flag the state never offered is refused: nothing on screen could have produced it.
+    expect(validateComponentResult(plain, { answers: { rows: ["counts"] }, follow_up: true })).toMatchObject({
+      ok: false,
+      errors: "result.follow_up: this state did not offer follow-up questions",
+    });
+    const offered = parse("choose_option", { ...raw, follow_up: true });
+    expect(offered).toMatchObject({ followUp: true });
+    expect(validateComponentResult(offered, { answers: { rows: ["counts"] }, follow_up: true })).toEqual({ ok: true });
+    expect(validateComponentResult(offered, { answers: { rows: ["counts"] }, follow_up: false })).toEqual({ ok: true });
+    expect(validateComponentResult(offered, { answers: { rows: ["counts"] } })).toEqual({ ok: true });
+    expect(validateComponentResult(offered, { answers: { rows: ["counts"] }, follow_up: "yes" })).toMatchObject({
+      ok: false,
+      errors: "result.follow_up must be a boolean",
+    });
   });
 
   it("lints a state whose questions arrive from an input rather than its args", () => {

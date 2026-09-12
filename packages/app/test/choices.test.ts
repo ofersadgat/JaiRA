@@ -108,6 +108,26 @@ describe("the agent's answer text", () => {
     expect(answersOfAnsweredText(text)).toEqual({ "Which, then?": 'A "quoted" one', Second: "plain" });
   });
 
+  it("reads the current spelling by the questions it knows — nothing inside the halves is quoted", () => {
+    // Verbatim shape from a feature run (2026-09-10): the first question quotes the issue, the second
+    // answer has commas and a question mark, and the closing sentence follows the last quote.
+    const q1 = 'In "Tasks should show a list item per top level workflow", what does one item stand for?';
+    const q2 = 'For the chat ordering, what should "uncompleted first" put at the top?';
+    const a2 = "Every list should have a sort + group by. The chat list groups by nothing (but optionally can be status). Does that make sense?";
+    const text = `User has answered your questions: "${q1}"="One workflow kind", "${q2}"="${a2}". You can now continue with the user's answers in mind.`;
+    expect(answersOfAnsweredText(text, [q1, q2])).toEqual({ [q1]: "One workflow kind", [q2]: a2 });
+    // The questions in the order the agent ASKED them, not the order the text lists them.
+    expect(answersOfAnsweredText(text, [q2, q1])).toEqual({ [q1]: "One workflow kind", [q2]: a2 });
+    // Without the closing sentence, the last answer runs to the end.
+    expect(answersOfAnsweredText(`User has answered your questions: "${q1}"="One root run"`, [q1])).toEqual({ [q1]: "One root run" });
+  });
+
+  it("falls back to the quoted parse of the current spelling when no known question is in it", () => {
+    const text = 'User has answered your questions: "Which?"="b". You can now continue with the user\'s answers in mind.';
+    expect(answersOfAnsweredText(text, ["Something else"])).toEqual({ "Which?": "b" });
+    expect(answersOfAnsweredText(text)).toEqual({ "Which?": "b" });
+  });
+
   it("answers nothing for a dismissal or another tool's result", () => {
     expect(answersOfAnsweredText("The user declined to answer; use your judgment.")).toBeUndefined();
     expect(answersOfAnsweredText("file written")).toBeUndefined();
@@ -162,6 +182,34 @@ describe("an agent's question read off its call", () => {
     const choices = choicesOfQuestions(asked!.questions);
     const got = answersOfValue(choices, { answers: asked!.answers! });
     expect(got["Where should the logger live?"]).toEqual({ picked: [], text: "neither, inline it", own: true });
+  });
+
+  it("reads the current wire spelling by the call's own questions, and ignores a record that is not the answers", async () => {
+    const { askedOf } = await import("../src/renderer/transcriptView");
+    // What the capture left on the block after pairing by order went wrong: a file read's record.
+    const asked = askedOf({
+      kind: "tool",
+      name: "AskUserQuestion",
+      summary: "",
+      args,
+      result: 'User has answered your questions: "Where should the logger live?"="Keep it where it is". You can now continue with the user\'s answers in mind.',
+      detail: { type: "text", file: { filePath: "a.ts", content: "", numLines: 0, startLine: 1, totalLines: 0 } },
+    });
+    expect(asked?.answers).toEqual({ "Where should the logger live?": "Keep it where it is" });
+  });
+
+  it("is nothing for a call the binary refused — a question nobody was asked is not drawn as one", async () => {
+    const { askedOf } = await import("../src/renderer/transcriptView");
+    // What the CLI answers to five questions: its own limit is four, checked before any person sees them.
+    const refused = askedOf({
+      kind: "tool",
+      name: "AskUserQuestion",
+      summary: "",
+      ok: false,
+      args,
+      result: "<tool_use_error>InputValidationError: Too big: expected array to have <=4 items</tool_use_error>",
+    });
+    expect(refused).toBeUndefined();
   });
 
   it("is nothing for any other call, and unanswered while the call is in flight", async () => {

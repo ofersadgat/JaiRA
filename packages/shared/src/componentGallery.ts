@@ -240,6 +240,10 @@ const CONFIG_SCHEMAS: Record<ComponentName, { hint: string; document: SchemaDoc;
         minItems: 1,
         items: CHOICE_QUESTION,
       },
+      follow_up: bool(
+        "follow_up",
+        "with questions only: offer 'the model may ask follow-up questions' on the last step; the answer then carries follow_up beside answers",
+      ),
       icon: str("icon", "a glyph beside the question; absent ⇒ a message bubble"),
     }),
     expected: ["prompt", "options"],
@@ -549,6 +553,7 @@ export const GALLERY_VARIANT_ORDER: readonly string[] = [
   "custom",
   "multiple",
   "steps",
+  "follow_up",
   "confirm",
   "defaults",
   "editable",
@@ -644,6 +649,16 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
         sample: {
           prompt: "The product questions the spec cannot answer from the repo.",
           questions: PRODUCT_QUESTIONS,
+        },
+      },
+      {
+        id: "follow_up",
+        title: "With follow-up questions on offer",
+        note: "`follow_up: true` puts a box on the last step: the model may ask follow-up questions. Ticked, the gate is held while a model reads the answers (and the state's other inputs as context) and asks what they opened; those come back as another round of this same gate, and the state gets every round's answers in one `answers`.",
+        sample: {
+          prompt: "The product questions the spec cannot answer from the repo.",
+          questions: PRODUCT_QUESTIONS,
+          follow_up: true,
         },
       },
     ],

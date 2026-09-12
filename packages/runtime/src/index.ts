@@ -13,6 +13,7 @@ export * from "./modelRoutes";
 export * from "./fakeExecutor";
 export * from "./scriptedFunctions";
 export * from "./interaction";
+export * from "./followUp";
 export * from "./demoWorkflow";
 export * from "./componentsWorkflow";
 export * from "./conformanceWorkflow";

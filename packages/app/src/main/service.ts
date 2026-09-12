@@ -8,6 +8,7 @@
  * "task status is derived from the instance tree" is enforced: every view goes
  * through the projection, never through a UI-side copy of engine semantics.
  */
+import type { ChoiceQuestion, ChooseOptionConfig } from "@jaira/shared";
 import {
   copyFileSync,
   existsSync,
@@ -126,6 +127,16 @@ import {
   ApprovalHub,
   artifactWiring,
   buildPromptExecutor,
+  askedSoFar,
+  followUpOperation,
+  followUpQuestionsOf,
+  followUpServices,
+  MAX_FOLLOW_UP_ROUNDS,
+  mergedAnswers,
+  nextRoundInputs,
+  roundOf,
+  settledFollowUp,
+  wantsFollowUp,
   causesOfEvents,
   compilePolicy,
   enabledAdapters,
@@ -3043,6 +3054,7 @@ export class AppService {
     open.userEvents.register(registry, taskId);
 
     const fakeRules = opts.fake !== undefined ? parseFakeRules(opts.fake) : undefined;
+    if (fakeRules !== undefined) open.fakeRules.set(taskId, fakeRules);
     // The scope floor, compiled into a delegated agent's OWN permission rules and folded over every
     // prompt call. This is the run path's half of the rule compiler: the chat path emits the same
     // rules per message, and without this a workflow's states bounded nothing but our own callbacks
@@ -3310,6 +3322,7 @@ export class AppService {
         // spend it on whatever the NEXT run of this task asks first, which from the person's side is
         // a gate that answered itself with something they said about a different question.
         open.hub.unseed(taskId);
+        open.fakeRules.delete(taskId);
         open.live.delete(taskId);
         open.liveTurns.drop(taskId);
         liveFlush.dispose();
@@ -4910,8 +4923,101 @@ export class AppService {
       if (!check.ok) throw this.refusal("run", `invalid ${contract.config.component} response: ${check.errors}`);
     }
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
-    if (owner !== undefined && owner.hub.submit(requestId, value)) return { requestId };
-    return this.answerRecoveredInteraction(requestId, value);
+    // A multi-part chooser's answer is EVERY round's answers, and the loop's own flag stays out of
+    // what the engine gets — see `followUp.ts`. A first round with no follow-up asked for is the
+    // plain case: its own answers, merged with nothing.
+    let settled = value;
+    if (contract !== undefined && contract.config.component === "choose_option" && contract.config.questions !== undefined) {
+      const answers = mergedAnswers(contract.inputs, value);
+      if (owner !== undefined && wantsFollowUp(contract.config, value) && owner.hub.list().some((r) => r.requestId === requestId)) {
+        this.followUp(owner, requestId, contract.config, contract.inputs, answers);
+        return { requestId };
+      }
+      // A RECOVERED gate has no live park to hold, so a follow-up asked for on one settles as it is:
+      // the loop needs a run to re-park on, and the resumed run gets these answers seeded.
+      settled = settledFollowUp(answers);
+    }
+    if (owner !== undefined && owner.hub.submit(requestId, settled)) return { requestId };
+    return this.answerRecoveredInteraction(requestId, settled);
+  }
+
+  /**
+   * The follow-up round of a multi-part chooser — the loop `choose_option`'s `follow_up: true` runs.
+   *
+   * The person answered and asked for more. The park is HELD (off the screen, its row closed, the
+   * engine still waiting), a model is asked whether the answers opened anything only a person can
+   * settle, and the same call is then either parked again with those questions — a new request, a
+   * new row, the same promise — or settled with every round's answers. A model that fails, or a
+   * person who has been round the loop `MAX_FOLLOW_UP_ROUNDS` times, settles too: a follow-up is a
+   * courtesy, and the answers already given are never lost to it.
+   */
+  private followUp(
+    open: ProjectSession,
+    requestId: string,
+    config: ChooseOptionConfig,
+    inputs: Record<string, JsonValue>,
+    answers: Record<string, JsonValue>,
+  ): void {
+    const held = open.hub.hold(requestId);
+    if (held === undefined) return;
+    const taskId = held.taskId ?? "";
+    const settle = (): void => {
+      open.hub.release(requestId, settledFollowUp(answers));
+    };
+    if (roundOf(inputs) >= MAX_FOLLOW_UP_ROUNDS) {
+      settle();
+      return;
+    }
+    void this.askFollowUp(open, taskId, config, inputs, answers).then(
+      (questions) => {
+        if (questions.length === 0) {
+          settle();
+          return;
+        }
+        open.hub.repark(requestId, nextRoundInputs(config, inputs, answers, questions));
+      },
+      (e: unknown) => {
+        this.log({
+          level: "warn",
+          source: "run",
+          message: `follow-up questions could not be asked; the answers given stand: ${(e as Error).message}`,
+          project: open.key,
+          ...(taskId !== "" ? { taskId } : {}),
+          ...stackDetail(e),
+        });
+        settle();
+      },
+    );
+  }
+
+  /**
+   * One model call, outside any run: does this round of answers open more questions?
+   *
+   * The DEFAULT executor, built the way every UI-initiated call is (`defaultTree`) and under the
+   * task's scripted rules when it has them, so a headless test of the loop answers from its script.
+   * A bare call: no session, no tools, no gate — a question about some answers, with the state's
+   * other inputs as context, needs none of them.
+   */
+  private async askFollowUp(
+    open: ProjectSession,
+    taskId: string,
+    config: ChooseOptionConfig,
+    inputs: Record<string, JsonValue>,
+    answers: Record<string, JsonValue>,
+  ): Promise<ChoiceQuestion[]> {
+    const project = open.project.config;
+    const fakeRules = open.fakeRules.get(taskId);
+    const fake = fakeRules !== undefined;
+    const secrets = this.secretResolver(open);
+    const prompt = buildPromptExecutor({
+      ...(fakeRules !== undefined ? { fakeRules } : {}),
+      ...this.promptWiring(project, { fake, secrets }),
+      tree: this.defaultTree(project, { rootId: "follow_up", states: {} }, fake, secrets, false).prompt,
+    });
+    const op = followUpOperation(config, inputs, answers);
+    const result = await prompt.start(op, followUpServices()).result;
+    if ("error" in result) throw new Error(result.error.reason);
+    return followUpQuestionsOf(result.value as JsonValue | undefined, askedSoFar(config, inputs));
   }
 
   /**

@@ -104,6 +104,14 @@ export class InteractionHub {
    * and no live hub behind it. This is one shot, and everything after it parks normally.
    */
   private readonly seeded = new Map<string, JsonValue[]>();
+  /**
+   * Requests taken OFF the pending list without being settled — see {@link hold}.
+   *
+   * A follow-up round: the person answered, the host is asking a model whether to ask more, and the
+   * engine's promise has to stay open through that. Not on {@link pending}, because nothing on screen
+   * should offer the answered question again; not settled, because the answer is not final.
+   */
+  private readonly held = new Map<string, { request: HubRequest; resolve: (r: FunctionResult<ResolvedValue, WorkflowMetrics>) => void }>();
   private counter = 0;
 
   constructor(private readonly options: InteractionHubOptions = {}) {}
@@ -183,6 +191,48 @@ export class InteractionHub {
     return this.settle(requestId, { value }, "settled");
   }
 
+  /**
+   * Take a parked request off the list while the host decides what to do with its answer.
+   *
+   * Reported to the host as SETTLED — the durable row closes and the renderer drops the gate — but
+   * the engine's promise stays open on {@link held}, to be {@link release}d with a value or
+   * {@link repark}ed as a new request. `undefined` when the id is not a live park.
+   */
+  hold(requestId: string): HubRequest | undefined {
+    const entry = this.pending.get(requestId);
+    if (!entry) return undefined;
+    this.pending.delete(requestId);
+    this.held.set(requestId, entry);
+    this.options.onResolved?.(requestId, "settled");
+    return entry.request;
+  }
+
+  /** Settle a held request with its final value. False when nothing is held under the id. */
+  release(requestId: string, value: JsonValue): boolean {
+    const entry = this.held.get(requestId);
+    if (!entry) return false;
+    this.held.delete(requestId);
+    entry.resolve({ value } as FunctionResult<ResolvedValue, WorkflowMetrics>);
+    return true;
+  }
+
+  /**
+   * Park a held request AGAIN, as a new request with new inputs — the next round of a gate that
+   * asks follow-up questions. Same component, same task, same engine promise; a fresh id, because a
+   * request id names one question put to a person and this is a different one. Published like any
+   * park, so it gets its durable row and its place on screen.
+   */
+  repark(requestId: string, inputs: Record<string, JsonValue>): HubRequest | undefined {
+    const entry = this.held.get(requestId);
+    if (!entry) return undefined;
+    this.held.delete(requestId);
+    const next = this.options.nextId?.() ?? `ui-${++this.counter}`;
+    const request: HubRequest = { ...entry.request, requestId: next, inputs };
+    this.pending.set(next, { request, resolve: entry.resolve });
+    this.options.onRequest?.(request);
+    return request;
+  }
+
   /** Fail a parked request — a declined gate, as DATA (the engine's contract). */
   reject(requestId: string, reason: string): boolean {
     return this.settle(requestId, { error: failureOf(new Error(reason)) }, "settled");
@@ -201,6 +251,12 @@ export class InteractionHub {
   rejectAll(reason: string, fate: RequestFate = "abandoned"): void {
     for (const requestId of [...this.pending.keys()]) {
       this.settle(requestId, { error: failureOf(new Error(reason)) }, fate);
+    }
+    // A held request has no row and no place on screen any more — its answer is with the host,
+    // mid-decision — so there is nothing to keep; the engine is simply unblocked.
+    for (const [requestId, entry] of [...this.held.entries()]) {
+      this.held.delete(requestId);
+      entry.resolve({ error: failureOf(new Error(reason)) });
     }
   }
 

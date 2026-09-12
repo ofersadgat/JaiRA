@@ -12,6 +12,7 @@ import {
   artifactOf,
   isComponentName,
   choicesOfConfig,
+  sendBackOption,
   choicesOfQuestions,
   diffStrategyFor,
   displayText,
@@ -101,6 +102,11 @@ function recordedDraft(seed: string, content: JsonValue | undefined): DraftBox {
   return { text, dirty: text !== seed, set: () => undefined, revert: () => undefined };
 }
 
+/** What a settled multi-part answer said about follow-ups — `false` when it said nothing. */
+function followUpOfValue(value: JsonValue | undefined): boolean {
+  return value !== undefined && value !== null && typeof value === "object" && !Array.isArray(value) && (value as Record<string, JsonValue>)["follow_up"] === true;
+}
+
 /**
  * An authored decision, drawn by the same control an agent's question uses (decision 0002).
  *
@@ -114,6 +120,8 @@ function ChooseOption({ config, onSubmit, settled }: ComponentProps<ChooseOption
   const [answers, setAnswers] = useState<Record<string, Answer>>(() =>
     settled !== undefined ? answersOfValue(choices, settled.value) : initialAnswers(choices),
   );
+  // Off until ticked: a follow-up round is the person's to ask for, never the default.
+  const [followUp, setFollowUp] = useState<boolean>(() => followUpOfValue(settled?.value));
 
   // The multi-part gate: the same stepper an agent's batch of questions uses, and the answer is a
   // record keyed by each question's `name` rather than one `decision` — a question passed on stays
@@ -125,7 +133,7 @@ function ChooseOption({ config, onSubmit, settled }: ComponentProps<ChooseOption
         const value = answerOf(choice, answers[choice.question] ?? EMPTY_ANSWER);
         if (value !== undefined) out[choice.name ?? choice.question] = value;
       }
-      onSubmit({ answers: out });
+      onSubmit({ answers: out, ...(config.followUp === true ? { follow_up: followUp } : {}) });
     };
     return (
       <ChoiceSteps
@@ -134,6 +142,18 @@ function ChooseOption({ config, onSubmit, settled }: ComponentProps<ChooseOption
         onAnswer={(question, next) => setAnswers((prev) => ({ ...prev, [question]: next }))}
         onSubmit={submit}
         readOnly={readOnly}
+        {...(config.followUp === true
+          ? {
+              // Beside the last step's button, where the answers are about to go: whether the turn
+              // that raised them may raise more. Settled, it reads what was chosen and changes nothing.
+              extra: (
+                <label className="run-bool follow-up">
+                  <input type="checkbox" checked={followUp} disabled={readOnly} onChange={(e) => setFollowUp(e.target.checked)} />
+                  <span className="sub">The model may ask follow-up questions</span>
+                </label>
+              ),
+            }
+          : {})}
       />
     );
   }
@@ -216,20 +236,20 @@ function ReviewArtifact({
    * The same rule the plural applies across a set, applied to one artifact (decision 0002).
    *
    * A review with anything written on it is not an approval — it is a round going back — and the
-   * button has to say so before it is pressed. The VALUE submitted is still the author's option;
-   * only the words change, because which of the author's options this is remains their vocabulary
-   * and not this component's to reinterpret.
+   * button has to say so before it is pressed. What it SUBMITS is the author's send-back option
+   * (`sendBackOption`): the gate's transitions read the decision word, and nothing downstream of
+   * the singular reinterprets an approval that happens to carry a comment. Submitting the
+   * affirmative here once walked a commented review straight into publish.
    */
   const speaking = comments !== "" || notes.length > 0;
   const choices = choicesOfConfig(config);
+  const sendBack = sendBackOption(choices[0]!.options);
   /**
-   * Which option a send-back submits.
-   *
-   * The first non-destructive one — the affirmative. Sending work back with notes is not a refusal;
-   * it is the ordinary outcome of a review that has something to say, and the plural spells it the
-   * same way: comments mean the round is not final, and nothing about that is a rejection.
+   * A vocabulary with no send-back word (`merged` / `reverted`) cannot collapse to one button
+   * honestly, so the row stays and the comment rides alongside whatever is clicked.
    */
-  const affirmative = choices[0]!.options.find((o) => o.tone !== "danger") ?? choices[0]!.options[0]!;
+  const collapsed = speaking && sendBack !== undefined;
+  const sendBackLabel = sendBack === undefined ? "" : (sendBack.label ?? sendBack.value);
 
   const send = (decision: string): void => {
     onSubmit({
@@ -283,9 +303,11 @@ function ReviewArtifact({
           </span>
         ) : null}
         <span className="review-verdict">
-          {speaking
-            ? "comments left — your decision goes back with them"
-            : "no comments — your decision stands on its own"}
+          {collapsed
+            ? `comments left — this goes back as "${sendBackLabel}"`
+            : speaking
+              ? "comments left — your decision goes back with them"
+              : "no comments — your decision stands on its own"}
         </span>
       </div>
       {/* Comments change the SHAPE of the footer, not only its words — exactly as in the plural.
@@ -297,8 +319,9 @@ function ReviewArtifact({
         // As it was decided, in the shape it was decided in. A review that went back with comments
         // never showed a row of options — it showed the comment and one button — and drawing the
         // row here would say a choice was made among options nobody was offered. A review decided
-        // in silence showed the row, so the row it is, with the decision lit.
-        speaking ? (
+        // in silence showed the row, so the row it is, with the decision lit — as does one recorded
+        // before comments implied the send-back, whose `approve` beside a comment is what happened.
+        collapsed && recorded["decision"] === sendBack!.value ? (
           <>
             <ChoiceList choices={[{ ...choices[0]!, options: [] }]} answers={answers} onAnswer={() => undefined} readOnly />
             <div className="options">
@@ -310,7 +333,7 @@ function ReviewArtifact({
         ) : (
           <ChoiceList choices={choices} answers={answers} onAnswer={() => undefined} readOnly />
         )
-      ) : speaking ? (
+      ) : collapsed ? (
         <>
           <ChoiceList
             choices={[{ ...choices[0]!, options: [] }]}
@@ -318,7 +341,7 @@ function ReviewArtifact({
             onAnswer={(question, next) => setAnswers((prev) => ({ ...prev, [question]: next }))}
           />
           <div className="options">
-            <button className="primary" onClick={() => send(affirmative.value)}>
+            <button className="primary" onClick={() => send(sendBack!.value)}>
               Send back with comments
             </button>
           </div>
@@ -638,7 +661,7 @@ function seedValue(field: FormField): unknown {
  * separator makes it unspellable as a JSON string an author would write, and it never leaves the
  * form — what is submitted is the text typed under it.
  */
-const CUSTOM_CHOICE = " custom";
+const CUSTOM_CHOICE = "\u0000custom";
 
 function FillForm({ config, onSubmit, settled }: ComponentProps<FillFormConfig>): JSX.Element {
   const readOnly = settled !== undefined;

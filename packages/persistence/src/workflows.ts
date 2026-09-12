@@ -378,8 +378,8 @@ function browseLayers(
     // reporting a state outside this workflow against it would attribute the fault to a root that
     // never mounts it.
     const inClosure = Object.fromEntries(states.map((id) => [id, effective[id]]));
-    for (const issue of componentConfigIssues(inClosure)) {
-      issues.push({ ...issue, severity: "error" });
+    for (const { severity, ...issue } of componentConfigIssues(inClosure)) {
+      issues.push({ ...issue, severity: severity ?? "error" });
     }
     // A `label` that references an input the state does not declare. Reported here rather than
     // discovered as an unlabelled card three states into a run — the whole value of naming a run by

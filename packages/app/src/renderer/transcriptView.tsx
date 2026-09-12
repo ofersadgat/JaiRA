@@ -404,9 +404,15 @@ export function producedArtifact(result: JsonValue | undefined): JsonValue | und
  * record there is: the agent's own `toolUseResult` keeps them as a map, and the wire result the
  * model saw spells them out as text, which is parsed when the map was not captured. A call still in
  * flight, or a dismissal, answers nothing and is drawn unanswered.
+ *
+ * A call that FAILED is not a question. The binary refuses the tool's input on its own rules — five
+ * questions where it takes four — before any person is asked, and the agent goes on as if answered.
+ * Drawn as a question, that read as one nobody could answer: options a reader could not pick and a
+ * run that did not wait. It is the failed tool call it was, with the refusal behind the row.
  */
 export function askedOf(entry: ToolEntry): { questions: AgentQuestion[]; answers: Record<string, JsonValue> | undefined } | undefined {
   if (entry.name !== "AskUserQuestion" && !entry.name.endsWith("__AskUserQuestion")) return undefined;
+  if (entry.ok === false) return undefined;
   const args = entry.args;
   if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
   const questions = (args as Record<string, JsonValue>)["questions"];
@@ -440,7 +446,13 @@ export function askedOf(entry: ToolEntry): { questions: AgentQuestion[]; answers
     return { questions: asked, answers: kept as Record<string, JsonValue> };
   }
   const text = resultTextOf(entry.result);
-  const parsed = text === undefined ? undefined : answersOfAnsweredText(text);
+  const parsed =
+    text === undefined
+      ? undefined
+      : answersOfAnsweredText(
+          text,
+          asked.map((q) => q.question),
+        );
   return { questions: asked, answers: parsed };
 }
 

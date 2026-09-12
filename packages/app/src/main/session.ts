@@ -14,6 +14,7 @@
  * about a project: the executor probes and the availability snapshot. A `claude` binary that answers
  * answers for every project, and asking again per project would pay for the same socket twice.
  */
+import type { FakeRule } from "@jaira/runtime";
 import type { FSWatcher } from "node:fs";
 import type { Project } from "@jaira/persistence";
 import { LiveCalls } from "@jaira/runtime";
@@ -154,6 +155,13 @@ export class ProjectSession {
    * this thread has going.
    */
   readonly chatTurns = new Map<string, Set<AbortController>>();
+  /**
+   * The scripted rules a run was started with, by task — for a model call the run's OWN executor
+   * cannot make. A gate's follow-up questions are asked by the host while the engine waits on the
+   * gate, so the call is built here; under a scripted run it has to answer from the same script,
+   * or a headless test of the loop would reach for a provider.
+   */
+  readonly fakeRules = new Map<string, FakeRule[]>();
   /**
    * The newest typed turn's COMPLETION, by task — what the message behind it waits for.
    *

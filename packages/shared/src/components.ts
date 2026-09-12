@@ -178,6 +178,27 @@ export function choicesOfConfig(config: ChooseOptionConfig | ReviewArtifactConfi
   return [choice];
 }
 
+/**
+ * The option a review WITH COMMENTS submits — the author's send-back word.
+ *
+ * A comment on a review means the round is not final: what was reviewed goes back to whoever made
+ * it, with the words. That is the rule the plural derives from gestures (a commented change is a
+ * `comment`, and any comment anywhere means nothing is applied). The singular has no per-artifact
+ * layer to derive from and no status step after it — a gate's transitions read `decision` as the
+ * author wrote it — so the decision itself has to carry the send-back. Submitting the affirmative
+ * beside a comment routed a commented review as an approval (2026-09-08).
+ *
+ * The author's options are read in the order they were written: the first non-destructive one is
+ * the affirmative (the same convention that draws it as the primary action), and the NEXT
+ * non-destructive one is the send-back — `approve` / `revise` / `cut` names it `revise`. A
+ * vocabulary with no second non-destructive option (`merged` / `reverted`) has no word for "go
+ * back", so this returns `undefined` and the row of options stays for the person to choose from.
+ */
+export function sendBackOption(options: readonly ComponentOption[]): ComponentOption | undefined {
+  const routable = options.filter((o) => o.tone !== "danger");
+  return routable[1];
+}
+
 /** A field of a `fill_form` schema — the JSON-Schema subset DESIGN §7.1 allows. */
 export interface FormField {
   name: string;
@@ -246,6 +267,15 @@ export interface ChooseOptionConfig {
    * `require_confirm`) are refused at the top level: each question carries its own.
    */
   questions?: ChoiceQuestion[];
+  /**
+   * Offer "the model may ask follow-up questions" beside the last step (`follow_up` when authored).
+   *
+   * Only with `questions`. The renderer's answer then carries `follow_up: boolean` beside `answers`;
+   * a `true` makes the host hold the call, ask a model what the answers opened, and park this same
+   * gate again with those questions (runtime `followUp.ts`). The state sees one `{ answers }` with
+   * every round's keys, and never the flag.
+   */
+  followUp?: boolean;
   /** A glyph beside the question. Absent ⇒ a message bubble. */
   icon?: string;
 }
@@ -473,8 +503,12 @@ export function parseComponentConfig(component: ComponentName, raw: unknown): Co
           options: [],
           questions: questions(config["questions"], "choose_option.questions"),
         };
+        if (config["follow_up"] === true) parsed.followUp = true;
         if (config["icon"] !== undefined) parsed.icon = str(config["icon"], "choose_option.icon");
         return parsed;
+      }
+      if (config["follow_up"] !== undefined) {
+        throw new ConfigError("choose_option.follow_up needs questions: a single decision has no turn to ask more");
       }
       const parsed: ChooseOptionConfig = {
         component,
@@ -705,6 +739,11 @@ export function validateComponentResult(
         for (const key of Object.keys(record)) {
           if (!known.has(key)) return bad(`result.answers.${key} names no question of this state`);
         }
+        // The follow-up flag rides beside the answers, and only where the state offered it.
+        if (result["follow_up"] !== undefined) {
+          if (config.followUp !== true) return bad("result.follow_up: this state did not offer follow-up questions");
+          if (typeof result["follow_up"] !== "boolean") return bad("result.follow_up must be a boolean");
+        }
         for (const question of config.questions) {
           const value = record[question.name];
           if (value === undefined || value === null || value === "") {
@@ -824,12 +863,17 @@ const CONFIG_KEY_PLACEHOLDERS: Record<string, unknown> = {
   editable: false,
 };
 
-/** One thing wrong with a component operation's authored `args`. */
+/** One thing wrong with a component operation's authored state. */
 export interface ComponentConfigIssue {
   stateId: string;
-  /** Where in the state file — always `operation.args`, which is what `config` is authored as. */
+  /**
+   * Where in the state file — `operation.args` (what `config` is authored as) for a config the
+   * component cannot read, `outputs` for a result field the state would drop.
+   */
   path: string;
   message: string;
+  /** Absent ⇒ error: the component cannot show. A warning is a gate that shows but loses something. */
+  severity?: "warning";
 }
 
 /**
@@ -889,6 +933,25 @@ export function componentConfigIssues(states: Record<string, unknown>): Componen
       parseComponentConfig(name, { ...fromInputs, ...(op.args as Record<string, unknown> | undefined) });
     } catch (e) {
       issues.push({ stateId, path: "operation.args", message: (e as Error).message });
+      continue;
+    }
+    // The engine resolves a state's DECLARED outputs and nothing else, so a result field the state
+    // does not name is dropped without a word. `review_artifact` returns anchored `notes` beside
+    // `comments`, and a state declaring only the latter loses every comment a reviewer pinned to a
+    // passage — which read, the first time, as a send-back that said nothing. A warning rather than
+    // an error: the gate shows and answers, it just forgets.
+    if (name === "review_artifact") {
+      const outputs = (def as { outputs?: unknown }).outputs;
+      const declaresNotes =
+        outputs !== null && typeof outputs === "object" && !Array.isArray(outputs) && Object.prototype.hasOwnProperty.call(outputs, "notes");
+      if (!declaresNotes) {
+        issues.push({
+          stateId,
+          path: "outputs",
+          message: "review_artifact returns anchored `notes` beside `comments`; declare a `notes` output or comments pinned to a passage are dropped",
+          severity: "warning",
+        });
+      }
     }
   }
   return issues;
