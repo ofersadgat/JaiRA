@@ -114,7 +114,7 @@ describe("the hub holds a request and parks it again", () => {
     h.register(registry, "choose_option", "t-1");
     const entry = registry.functions.get("choose_option")!;
     if (entry.kind !== "host") throw new Error("a gate registers as a host function");
-    const promise = entry.impl({ prompt: "?", questions: inputs["questions"] }, {} as never);
+    const promise = entry.impl({ prompt: "?", questions: inputs["questions"]! }, {} as never);
     await Promise.resolve();
     return { promise, requestId: h.list()[0]!.requestId };
   }
