@@ -1,0 +1,1122 @@
+{
+  "label": "Engineering",
+  "description": "What Engineering does this feature need? The plan names the units that already exist and serve it, and the ones that must be written; a person verifies the plan; then the item runs once per new unit, one doc each. Nothing new means nothing is entered.",
+  "inputs": {
+    "feature": {
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "story",
+          "importance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "story": {
+            "type": "string"
+          },
+          "importance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "doc_path": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "patterns": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "components": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "severity_threshold": {
+      "kind": "text",
+      "schema": {
+        "type": "string",
+        "enum": [
+          "blocker",
+          "significant",
+          "minor",
+          "note"
+        ]
+      }
+    },
+    "threshold_rank": {
+      "kind": "json",
+      "schema": {
+        "type": "integer"
+      }
+    },
+    "ask_below": {
+      "kind": "json",
+      "schema": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "returned_findings": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "reuse": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "plan"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "reuse"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "reuse"
+    },
+    "built": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "item"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "id"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "built"
+    },
+    "units": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "concat",
+          "input": {
+            "a": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "op.member",
+                          "input": {
+                            "value": {
+                              "kind": "json",
+                              "binding": {
+                                "op": {
+                                  "kind": "function",
+                                  "functionRef": "op.member",
+                                  "input": {
+                                    "value": {
+                                      "kind": "json",
+                                      "binding": {
+                                        "op": {
+                                          "kind": "function",
+                                          "functionRef": "context.get",
+                                          "input": {
+                                            "name": {
+                                              "kind": "text",
+                                              "binding": {
+                                                "text": "children"
+                                              }
+                                            }
+                                          },
+                                          "output": {
+                                            "name": "value",
+                                            "kind": "json"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "prop": {
+                                      "kind": "text",
+                                      "binding": {
+                                        "text": "plan"
+                                      }
+                                    }
+                                  },
+                                  "output": {
+                                    "name": "value",
+                                    "kind": "json"
+                                  }
+                                }
+                              }
+                            },
+                            "prop": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "output"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "reuse"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "b": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "op.member",
+                          "input": {
+                            "value": {
+                              "kind": "json",
+                              "binding": {
+                                "op": {
+                                  "kind": "function",
+                                  "functionRef": "op.member",
+                                  "input": {
+                                    "value": {
+                                      "kind": "json",
+                                      "binding": {
+                                        "op": {
+                                          "kind": "function",
+                                          "functionRef": "context.get",
+                                          "input": {
+                                            "name": {
+                                              "kind": "text",
+                                              "binding": {
+                                                "text": "children"
+                                              }
+                                            }
+                                          },
+                                          "output": {
+                                            "name": "value",
+                                            "kind": "json"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "prop": {
+                                      "kind": "text",
+                                      "binding": {
+                                        "text": "item"
+                                      }
+                                    }
+                                  },
+                                  "output": {
+                                    "name": "value",
+                                    "kind": "json"
+                                  }
+                                }
+                              }
+                            },
+                            "prop": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "output"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "id"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "units"
+    },
+    "docs": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "item"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "doc"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "docs"
+    },
+    "paths": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "item"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "paths"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "paths"
+    }
+  },
+  "children": {
+    "plan": {
+      "state": "feature/build/engineering/plan",
+      "inputs": {
+        "feature": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "feature"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "patterns": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "patterns"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "components": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "components"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "returned_findings": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "returned_findings"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      }
+    },
+    "verify_plan": {
+      "state": "feature/build/engineering/verify_plan",
+      "inputs": {
+        "reuse": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "plan"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "reuse"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "new": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "plan"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "new"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "rationale": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "plan"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "rationale"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "ask_below": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "ask_below"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      },
+      "transitions": [
+        {
+          "when": ".children.verify_plan.output.decision === 'revise'",
+          "to": "plan",
+          "inputs": {
+            "comments": {
+              "expr": ".children.verify_plan.output.comments"
+            }
+          },
+          "inputRefs": {
+            "comments": {
+              "op": {
+                "kind": "function",
+                "functionRef": "op.member",
+                "input": {
+                  "value": {
+                    "kind": "json",
+                    "binding": {
+                      "op": {
+                        "kind": "function",
+                        "functionRef": "op.member",
+                        "input": {
+                          "value": {
+                            "kind": "json",
+                            "binding": {
+                              "op": {
+                                "kind": "function",
+                                "functionRef": "op.member",
+                                "input": {
+                                  "value": {
+                                    "kind": "json",
+                                    "binding": {
+                                      "op": {
+                                        "kind": "function",
+                                        "functionRef": "context.get",
+                                        "input": {
+                                          "name": {
+                                            "kind": "text",
+                                            "binding": {
+                                              "text": "children"
+                                            }
+                                          }
+                                        },
+                                        "output": {
+                                          "name": "value",
+                                          "kind": "json"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "prop": {
+                                    "kind": "text",
+                                    "binding": {
+                                      "text": "verify_plan"
+                                    }
+                                  }
+                                },
+                                "output": {
+                                  "name": "value",
+                                  "kind": "json"
+                                }
+                              }
+                            }
+                          },
+                          "prop": {
+                            "kind": "text",
+                            "binding": {
+                              "text": "output"
+                            }
+                          }
+                        },
+                        "output": {
+                          "name": "value",
+                          "kind": "json"
+                        }
+                      }
+                    }
+                  },
+                  "prop": {
+                    "kind": "text",
+                    "binding": {
+                      "text": "comments"
+                    }
+                  }
+                },
+                "output": {
+                  "name": "value",
+                  "kind": "json"
+                }
+              }
+            }
+          },
+          "whenRef": {
+            "op": {
+              "kind": "function",
+              "functionRef": "op.strictEq",
+              "input": {
+                "left": {
+                  "kind": "json",
+                  "binding": {
+                    "op": {
+                      "kind": "function",
+                      "functionRef": "op.member",
+                      "input": {
+                        "value": {
+                          "kind": "json",
+                          "binding": {
+                            "op": {
+                              "kind": "function",
+                              "functionRef": "op.member",
+                              "input": {
+                                "value": {
+                                  "kind": "json",
+                                  "binding": {
+                                    "op": {
+                                      "kind": "function",
+                                      "functionRef": "op.member",
+                                      "input": {
+                                        "value": {
+                                          "kind": "json",
+                                          "binding": {
+                                            "op": {
+                                              "kind": "function",
+                                              "functionRef": "context.get",
+                                              "input": {
+                                                "name": {
+                                                  "kind": "text",
+                                                  "binding": {
+                                                    "text": "children"
+                                                  }
+                                                }
+                                              },
+                                              "output": {
+                                                "name": "value",
+                                                "kind": "json"
+                                              }
+                                            }
+                                          }
+                                        },
+                                        "prop": {
+                                          "kind": "text",
+                                          "binding": {
+                                            "text": "verify_plan"
+                                          }
+                                        }
+                                      },
+                                      "output": {
+                                        "name": "value",
+                                        "kind": "json"
+                                      }
+                                    }
+                                  }
+                                },
+                                "prop": {
+                                  "kind": "text",
+                                  "binding": {
+                                    "text": "output"
+                                  }
+                                }
+                              },
+                              "output": {
+                                "name": "value",
+                                "kind": "json"
+                              }
+                            }
+                          }
+                        },
+                        "prop": {
+                          "kind": "text",
+                          "binding": {
+                            "text": "decision"
+                          }
+                        }
+                      },
+                      "output": {
+                        "name": "value",
+                        "kind": "json"
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "text",
+                  "binding": {
+                    "text": "revise"
+                  }
+                }
+              },
+              "output": {
+                "name": "value",
+                "kind": "json"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "item": {
+      "state": "feature/build/engineering/item",
+      "inputs": {
+        "spec": {
+          "op": {
+            "kind": "function",
+            "functionRef": "op.member",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": {
+                    "kind": "function",
+                    "functionRef": "op.member",
+                    "input": {
+                      "value": {
+                        "kind": "json",
+                        "binding": {
+                          "op": {
+                            "kind": "function",
+                            "functionRef": "op.member",
+                            "input": {
+                              "value": {
+                                "kind": "json",
+                                "binding": {
+                                  "op": {
+                                    "kind": "function",
+                                    "functionRef": "context.get",
+                                    "input": {
+                                      "name": {
+                                        "kind": "text",
+                                        "binding": {
+                                          "text": "children"
+                                        }
+                                      }
+                                    },
+                                    "output": {
+                                      "name": "value",
+                                      "kind": "json"
+                                    }
+                                  }
+                                }
+                              },
+                              "prop": {
+                                "kind": "text",
+                                "binding": {
+                                  "text": "plan"
+                                }
+                              }
+                            },
+                            "output": {
+                              "name": "value",
+                              "kind": "json"
+                            }
+                          }
+                        }
+                      },
+                      "prop": {
+                        "kind": "text",
+                        "binding": {
+                          "text": "output"
+                        }
+                      }
+                    },
+                    "output": {
+                      "name": "value",
+                      "kind": "json"
+                    }
+                  }
+                }
+              },
+              "prop": {
+                "kind": "text",
+                "binding": {
+                  "text": "new"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "feature": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "feature"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "reuse": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "plan"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "reuse"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "patterns": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "patterns"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "components": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "components"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "severity_threshold": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "severity_threshold"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "threshold_rank": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "threshold_rank"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "ask_below": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "ask_below"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      },
+      "each": [
+        "spec"
+      ]
+    }
+  },
+  "sequence": [
+    "plan",
+    "verify_plan",
+    "item"
+  ],
+  "sequenceAuthored": false,
+  "slotMeta": {
+    "inputs.patterns": {
+      "optional": true,
+      "description": "The patterns this feature uses, reused and new alike."
+    },
+    "inputs.components": {
+      "optional": true,
+      "description": "The components this feature uses, reused and new alike."
+    },
+    "inputs.severity_threshold": {
+      "default": "significant"
+    },
+    "inputs.threshold_rank": {
+      "default": 2,
+      "description": "blocker=3, significant=2, minor=1, note=0."
+    },
+    "inputs.ask_below": {
+      "default": 0.8
+    },
+    "inputs.returned_findings": {
+      "optional": true,
+      "description": "What a later phase found wrong with this one. Absent on the way down."
+    },
+    "outputs.reuse": {
+      "optional": true,
+      "description": "Existing units this feature uses as they are."
+    },
+    "outputs.built": {
+      "optional": true,
+      "description": "The units written for this feature, in plan order."
+    },
+    "outputs.units": {
+      "optional": true,
+      "description": "Reused and new, together: what the layer below builds against."
+    },
+    "outputs.docs": {
+      "optional": true
+    },
+    "outputs.paths": {
+      "optional": true
+    }
+  },
+  "fanOut": [
+    "item\u0000doc",
+    "item\u0000id",
+    "item\u0000paths",
+    "plan\u0000*",
+    "plan\u0000new",
+    "plan\u0000rationale",
+    "plan\u0000reuse"
+  ]
+}

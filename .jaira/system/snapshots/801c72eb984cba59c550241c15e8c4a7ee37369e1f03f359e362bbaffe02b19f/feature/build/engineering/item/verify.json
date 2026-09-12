@@ -1,0 +1,120 @@
+{
+  "label": "Verify the unit",
+  "description": "Always entered: the person verifies this step's work before the run moves on. Whether it parks or resolves on the recommendation is the component's call from the score, the reasons and the viewer's threshold.",
+  "inputs": {
+    "doc": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "ask_below": {
+      "kind": "json",
+      "schema": {
+        "type": "number"
+      }
+    },
+    "score": {
+      "kind": "json",
+      "schema": {
+        "type": "number"
+      }
+    },
+    "reasons": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "must_ask": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "decision": {
+      "kind": "text",
+      "schema": {
+        "type": "string",
+        "enum": [
+          "approve",
+          "revise"
+        ]
+      },
+      "name": "decision"
+    },
+    "comments": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      },
+      "name": "comments"
+    }
+  },
+  "operation": {
+    "kind": "function",
+    "functionRef": "review_artifact",
+    "input": {
+      "prompt": {
+        "kind": "text",
+        "binding": {
+          "text": "This is one unit doc for the feature. Approve it, or send it back with what to change."
+        }
+      },
+      "artifact": {
+        "kind": "text",
+        "binding": {
+          "text": "doc"
+        }
+      },
+      "options": {
+        "kind": "json",
+        "binding": {
+          "json": [
+            "approve",
+            "revise"
+          ]
+        }
+      },
+      "comments": {
+        "kind": "json",
+        "binding": {
+          "json": true
+        }
+      }
+    },
+    "output": {
+      "name": "output",
+      "kind": "json"
+    }
+  },
+  "slotMeta": {
+    "inputs.doc": {
+      "optional": true
+    },
+    "inputs.score": {
+      "optional": true
+    },
+    "inputs.reasons": {
+      "optional": true,
+      "description": "Shown instead of the bare number."
+    },
+    "inputs.must_ask": {
+      "optional": true,
+      "description": "Non-empty means ask regardless of score."
+    },
+    "outputs.comments": {
+      "optional": true,
+      "description": "What to change, when the answer is revise."
+    }
+  }
+}

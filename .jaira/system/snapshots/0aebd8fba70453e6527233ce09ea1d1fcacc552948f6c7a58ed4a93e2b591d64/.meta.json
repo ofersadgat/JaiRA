@@ -1,0 +1,9 @@
+{
+  "rootId": "feature",
+  "hash": "0aebd8fba70453e6527233ce09ea1d1fcacc552948f6c7a58ed4a93e2b591d64",
+  "moduleDigest": "512f582f35bac3e50a26b71e3be5fb017d457062d4f212072c366b5fe593b653",
+  "modules": {
+    "C:/Users/Ofer/.jaira/functions/confidence.ts": "222b53bee0a65128.cjs",
+    "C:/Users/Ofer/.jaira/functions/renderTemplate.ts": "7348f84fe2e84f55.cjs"
+  }
+}

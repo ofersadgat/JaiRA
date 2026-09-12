@@ -1,0 +1,86 @@
+{
+  "label": "Confirm the irreversible change",
+  "description": "A gate BEFORE the work, not after: the point of confirming an irreversible change is that it has not happened yet (feature.md §5). Entered only when the plan contains one — explore's mount skips straight to implement otherwise.",
+  "inputs": {
+    "plan": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    }
+  },
+  "outputs": {
+    "confirmed": {
+      "kind": "json",
+      "schema": {
+        "type": "boolean"
+      },
+      "name": "confirmed"
+    },
+    "plan": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "scope.get",
+          "input": {
+            "scope": {
+              "kind": "text",
+              "binding": {
+                "text": "inputs"
+              }
+            },
+            "name": {
+              "kind": "text",
+              "binding": {
+                "text": "plan"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "plan"
+    }
+  },
+  "operation": {
+    "kind": "function",
+    "functionRef": "confirm_action",
+    "input": {
+      "prompt": {
+        "kind": "text",
+        "binding": {
+          "text": "This plan contains an irreversible change — a migration that will have run, a contract that will be published, or data that will be deleted. The recovery plan is in the plan beside this prompt. Nothing has happened yet."
+        }
+      },
+      "confirmLabel": {
+        "kind": "text",
+        "binding": {
+          "text": "Go ahead"
+        }
+      },
+      "cancelLabel": {
+        "kind": "text",
+        "binding": {
+          "text": "Stop here"
+        }
+      }
+    },
+    "output": {
+      "name": "output",
+      "kind": "json"
+    }
+  },
+  "slotMeta": {
+    "inputs.plan": {
+      "optional": true,
+      "description": "The chosen decomposition, including its recovery plan."
+    },
+    "outputs.plan": {
+      "description": "The plan as confirmed, republished so a rule about this child can hand it to the drafting turn."
+    }
+  }
+}

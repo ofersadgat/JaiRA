@@ -1,0 +1,60 @@
+{
+  "label": "Confirm the irreversible change",
+  "description": "Entered only when the plan contains something that cannot be undone. Shows the recovery plan.",
+  "inputs": {
+    "plan": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    },
+    "recovery": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    }
+  },
+  "outputs": {
+    "confirmed": {
+      "kind": "json",
+      "schema": {
+        "type": "boolean"
+      },
+      "name": "confirmed"
+    }
+  },
+  "operation": {
+    "kind": "function",
+    "functionRef": "confirm_action",
+    "input": {
+      "prompt": {
+        "kind": "text",
+        "binding": {
+          "text": "This plan contains a change that cannot be undone. The recovery plan is beside it. Proceed?"
+        }
+      },
+      "confirmLabel": {
+        "kind": "text",
+        "binding": {
+          "text": "Proceed"
+        }
+      },
+      "cancelLabel": {
+        "kind": "text",
+        "binding": {
+          "text": "Stop"
+        }
+      }
+    },
+    "output": {
+      "name": "output",
+      "kind": "json"
+    }
+  },
+  "slotMeta": {
+    "inputs.recovery": {
+      "optional": true
+    }
+  }
+}

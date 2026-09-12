@@ -1,0 +1,9 @@
+{
+  "id": "t-u9895uzcg8",
+  "title": "feature #1",
+  "workflow": "feature",
+  "createdAt": "2026-09-11T17:14:36.596Z",
+  "inputs": {
+    "issue": "I want to update the side panel. Files currently shows useful contents, but both chat and tasks can be improved. Tasks should show a list item per top level workflow that you can click on to show the task view contents of that workflow. For chat, there should be a list of runs ordered by completion date descending (uncompleted first, oldest last). Every list should have a sort + group by. The task list groups by the workflow definition. The chat list groups by nothing (but optionally can be status). The task lists group by is fixed, but the chat list can be changed. The sort should be sort by last message / last event timestamp newest first. the group by categories should mirror the badge/pill system. also, when grouped by workflow, those pills should be used to show the tasks in each state. "
+  }
+}

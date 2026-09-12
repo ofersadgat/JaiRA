@@ -1,0 +1,155 @@
+{
+  "label": "Verify the UI plan",
+  "description": "Always entered: the person verifies this step's work before the run moves on. Whether it parks or resolves on the recommendation is the component's call from the score, the reasons and the viewer's threshold.",
+  "inputs": {
+    "reuse": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "new": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "id",
+            "brief"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The doc id under docs/, e.g. ux/patterns/grouped-list."
+            },
+            "kind": {
+              "type": "string",
+              "description": "Which template: pattern | component | surface | unit | contract."
+            },
+            "brief": {
+              "type": "string",
+              "description": "What this concept is and what the feature needs from it, in a few sentences."
+            }
+          }
+        }
+      }
+    },
+    "rationale": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "ask_below": {
+      "kind": "json",
+      "schema": {
+        "type": "number"
+      }
+    },
+    "score": {
+      "kind": "json",
+      "schema": {
+        "type": "number"
+      }
+    },
+    "reasons": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "must_ask": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "decision": {
+      "kind": "text",
+      "schema": {
+        "type": "string",
+        "enum": [
+          "approve",
+          "revise"
+        ]
+      },
+      "name": "decision"
+    },
+    "comments": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      },
+      "name": "comments"
+    }
+  },
+  "operation": {
+    "kind": "function",
+    "functionRef": "choose_option",
+    "input": {
+      "prompt": {
+        "kind": "text",
+        "binding": {
+          "text": "This is what the feature needs from UI: the components it reuses and the ones to write. Approve, or send it back with what to change."
+        }
+      },
+      "options": {
+        "kind": "json",
+        "binding": {
+          "json": [
+            "approve",
+            "revise"
+          ]
+        }
+      },
+      "comments": {
+        "kind": "json",
+        "binding": {
+          "json": true
+        }
+      }
+    },
+    "output": {
+      "name": "output",
+      "kind": "json"
+    }
+  },
+  "slotMeta": {
+    "inputs.reuse": {
+      "optional": true
+    },
+    "inputs.new": {
+      "optional": true
+    },
+    "inputs.rationale": {
+      "optional": true
+    },
+    "inputs.score": {
+      "optional": true
+    },
+    "inputs.reasons": {
+      "optional": true,
+      "description": "Shown instead of the bare number."
+    },
+    "inputs.must_ask": {
+      "optional": true,
+      "description": "Non-empty means ask regardless of score."
+    },
+    "outputs.comments": {
+      "optional": true,
+      "description": "What to change, when the answer is revise."
+    }
+  }
+}

@@ -1,0 +1,216 @@
+{
+  "label": "Publish the unit",
+  "description": "Writes the doc to its path and adds its index row. Publishes only on approve.",
+  "inputs": {
+    "area": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "doc": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "doc_path": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "entry": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      }
+    },
+    "amendment": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "decision": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "catalog": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    }
+  },
+  "outputs": {
+    "paths": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "paths"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "paths"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Write one doc into the doc tree and add its index row.\n\n## The doc\n\n{{.inputs.doc}}\n\n## Its path\n\n{{.inputs.doc_path}}\n\n## The entry it describes\n\n{{.inputs.entry}}\n\n## Mockups\n\n{{.inputs.mockups}}\n\n## The amendment\n\n{{.inputs.amendment}}\n\n## The decision\n\n{{.inputs.decision}}\n\nPublish only on `approve`. On anything else, write nothing and report what you would have written.\n\n## What to do\n\nWrite the doc to its path with `write_file`. Add its row to `{{.inputs.catalog}}`: a row and a link, nothing else. Apply the amendment to the standing doc it names. Change no other text.\n\n## What to produce\n\n`paths`: every path written or edited.\n",
+    "config": {
+      "model": "claude-cli/default"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "paths"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file",
+      "write_file"
+    ],
+    "permissions": {
+      "tools": {
+        "read_file": "allow",
+        "write_file": "allow"
+      },
+      "scopes": [
+        {
+          "path": "docs/product/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/ux/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/ui/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/engineering/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/_templates/**",
+          "tools": {
+            "read_file": "allow"
+          }
+        },
+        {
+          "path": "docs/engineering/**",
+          "tools": {
+            "read_file": "allow",
+            "write_file": "allow"
+          }
+        }
+      ]
+    }
+  },
+  "slotMeta": {
+    "inputs.area": {
+      "default": "engineering"
+    },
+    "inputs.doc": {
+      "optional": true
+    },
+    "inputs.doc_path": {
+      "optional": true
+    },
+    "inputs.entry": {
+      "optional": true
+    },
+    "inputs.amendment": {
+      "optional": true
+    },
+    "inputs.decision": {
+      "optional": true
+    },
+    "inputs.catalog": {
+      "default": "docs/engineering/index.md"
+    }
+  }
+}

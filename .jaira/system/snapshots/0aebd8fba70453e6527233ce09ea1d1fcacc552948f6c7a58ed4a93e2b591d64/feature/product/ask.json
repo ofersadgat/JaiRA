@@ -1,0 +1,94 @@
+{
+  "label": "Ask the person",
+  "description": "Put the product questions only a person can answer to that person, BEFORE the loop spends another pass arguing them (feature.md §0.6). Entered when the draft raises questions, or when the critique targets 'ask'. The questions are the draft's own — a component's config is its `args` merged with the state's resolved inputs, so an input named `questions` IS the multi-part gate: asked one at a time, each with the draft's reading pre-picked, a box for an answer in the person's own words, and a way to pass. Nothing here is a gate in the approval sense: an answer is an answer, not an approval, and the decision about the deliverables is still the gate's.",
+  "inputs": {
+    "questions": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "name",
+            "question",
+            "options"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "question": {
+              "type": "string"
+            },
+            "header": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "default": {
+              "type": "string"
+            },
+            "custom": {
+              "type": "boolean"
+            },
+            "optional": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  },
+  "outputs": {
+    "answers": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      },
+      "name": "answers"
+    }
+  },
+  "operation": {
+    "kind": "function",
+    "functionRef": "choose_option",
+    "input": {
+      "prompt": {
+        "kind": "text",
+        "binding": {
+          "text": "These are the product questions the spec cannot answer from the repo. Each shows the reading the draft took — confirm it, pick another, say it in your own words, or skip it. A skipped question stays open on the doc rather than being decided for you."
+        }
+      }
+    },
+    "output": {
+      "name": "output",
+      "kind": "json"
+    }
+  },
+  "slotMeta": {
+    "inputs.questions": {
+      "default": [],
+      "description": "The questions, already in `choose_option`'s multi-part shape — this is `draft.output.questions` passed straight through. Every one is optional and offers an own answer, because a person who does not know is a real answer and must not be trapped in the dialog, and a person whose answer is neither reading must be able to say so."
+    },
+    "outputs.answers": {
+      "description": "The gate's `{ answers }`, landing on the declared output of the same name the way every gate's result does. One key per question, named by that question's `name`: the option picked, or the words they typed instead. An absent key is 'they did not answer', which the draft must treat as still-open rather than as a decision — and the keys cannot be declared here, because the questions are the draft's."
+    }
+  }
+}

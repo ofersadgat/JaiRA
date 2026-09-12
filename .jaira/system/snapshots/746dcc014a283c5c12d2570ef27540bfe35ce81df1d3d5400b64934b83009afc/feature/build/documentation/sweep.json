@@ -1,0 +1,420 @@
+{
+  "label": "Sweep for stale docs",
+  "description": "Runs the repo's doc lint. clean is true both when it passed and when there is no lint; configured tells the two apart.",
+  "inputs": {
+    "paths": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "command": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    }
+  },
+  "outputs": {
+    "clean": {
+      "kind": "json",
+      "schema": {
+        "type": "boolean"
+      },
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.strictEq",
+          "input": {
+            "left": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "op.member",
+                          "input": {
+                            "value": {
+                              "kind": "json",
+                              "binding": {
+                                "op": {
+                                  "kind": "function",
+                                  "functionRef": "context.get",
+                                  "input": {
+                                    "name": {
+                                      "kind": "text",
+                                      "binding": {
+                                        "text": "operation"
+                                      }
+                                    }
+                                  },
+                                  "output": {
+                                    "name": "value",
+                                    "kind": "json"
+                                  }
+                                }
+                              }
+                            },
+                            "prop": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "output"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "exitCode"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "right": {
+              "kind": "json",
+              "binding": {
+                "json": 0
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "clean"
+    },
+    "configured": {
+      "kind": "json",
+      "schema": {
+        "type": "boolean"
+      },
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.or",
+          "input": {
+            "left": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.gt",
+                  "input": {
+                    "left": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "len",
+                          "input": {
+                            "value": {
+                              "kind": "json",
+                              "binding": {
+                                "op": {
+                                  "kind": "function",
+                                  "functionRef": "op.member",
+                                  "input": {
+                                    "value": {
+                                      "kind": "json",
+                                      "binding": {
+                                        "op": {
+                                          "kind": "function",
+                                          "functionRef": "op.member",
+                                          "input": {
+                                            "value": {
+                                              "kind": "json",
+                                              "binding": {
+                                                "op": {
+                                                  "kind": "function",
+                                                  "functionRef": "context.get",
+                                                  "input": {
+                                                    "name": {
+                                                      "kind": "text",
+                                                      "binding": {
+                                                        "text": "operation"
+                                                      }
+                                                    }
+                                                  },
+                                                  "output": {
+                                                    "name": "value",
+                                                    "kind": "json"
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            "prop": {
+                                              "kind": "text",
+                                              "binding": {
+                                                "text": "output"
+                                              }
+                                            }
+                                          },
+                                          "output": {
+                                            "name": "value",
+                                            "kind": "json"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "prop": {
+                                      "kind": "text",
+                                      "binding": {
+                                        "text": "stdout"
+                                      }
+                                    }
+                                  },
+                                  "output": {
+                                    "name": "value",
+                                    "kind": "json"
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "right": {
+                      "kind": "json",
+                      "binding": {
+                        "json": 0
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "right": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.gt",
+                  "input": {
+                    "left": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "len",
+                          "input": {
+                            "value": {
+                              "kind": "json",
+                              "binding": {
+                                "op": {
+                                  "kind": "function",
+                                  "functionRef": "op.member",
+                                  "input": {
+                                    "value": {
+                                      "kind": "json",
+                                      "binding": {
+                                        "op": {
+                                          "kind": "function",
+                                          "functionRef": "op.member",
+                                          "input": {
+                                            "value": {
+                                              "kind": "json",
+                                              "binding": {
+                                                "op": {
+                                                  "kind": "function",
+                                                  "functionRef": "context.get",
+                                                  "input": {
+                                                    "name": {
+                                                      "kind": "text",
+                                                      "binding": {
+                                                        "text": "operation"
+                                                      }
+                                                    }
+                                                  },
+                                                  "output": {
+                                                    "name": "value",
+                                                    "kind": "json"
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            "prop": {
+                                              "kind": "text",
+                                              "binding": {
+                                                "text": "output"
+                                              }
+                                            }
+                                          },
+                                          "output": {
+                                            "name": "value",
+                                            "kind": "json"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "prop": {
+                                      "kind": "text",
+                                      "binding": {
+                                        "text": "stderr"
+                                      }
+                                    }
+                                  },
+                                  "output": {
+                                    "name": "value",
+                                    "kind": "json"
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "right": {
+                      "kind": "json",
+                      "binding": {
+                        "json": 0
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "configured"
+    },
+    "stale": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "context.get",
+                  "input": {
+                    "name": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "operation"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "output"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "stale"
+    }
+  },
+  "operation": {
+    "kind": "function",
+    "functionRef": "run_command",
+    "input": {
+      "command": {
+        "kind": "text",
+        "binding": {
+          "text": "npm run docs:lint --if-present"
+        }
+      }
+    },
+    "output": {
+      "name": "result",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "required": [
+          "exitCode",
+          "stdout",
+          "stderr"
+        ],
+        "properties": {
+          "exitCode": {
+            "type": "number"
+          },
+          "stdout": {
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "timedOut": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  },
+  "slotMeta": {
+    "inputs.paths": {
+      "optional": true
+    },
+    "inputs.command": {
+      "default": "npm run docs:lint --if-present"
+    },
+    "outputs.configured": {
+      "description": "False means the script is not there: --if-present exits 0 and says nothing."
+    }
+  }
+}

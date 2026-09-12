@@ -1,0 +1,321 @@
+{
+  "label": "Feature workflow",
+  "description": "Builds a feature from an issue. Product decomposes the issue into the smallest self-contained features, in dependency order; build then runs once per feature, entering each layer only where that feature needs something new.",
+  "inputs": {
+    "issue": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    }
+  },
+  "outputs": {
+    "features": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "product"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "features"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "features"
+    },
+    "verdicts": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "build"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "verdict"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "verdicts"
+    },
+    "shipped": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "build"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "shipped"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "shipped"
+    },
+    "paths": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "build"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "paths"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "paths"
+    }
+  },
+  "children": {
+    "product": {
+      "state": "feature/product",
+      "inputs": {
+        "issue": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "issue"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      }
+    },
+    "build": {
+      "state": "feature/build",
+      "inputs": {
+        "feature": {
+          "op": {
+            "kind": "function",
+            "functionRef": "op.member",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": {
+                    "kind": "function",
+                    "functionRef": "op.member",
+                    "input": {
+                      "value": {
+                        "kind": "json",
+                        "binding": {
+                          "op": {
+                            "kind": "function",
+                            "functionRef": "op.member",
+                            "input": {
+                              "value": {
+                                "kind": "json",
+                                "binding": {
+                                  "op": {
+                                    "kind": "function",
+                                    "functionRef": "context.get",
+                                    "input": {
+                                      "name": {
+                                        "kind": "text",
+                                        "binding": {
+                                          "text": "children"
+                                        }
+                                      }
+                                    },
+                                    "output": {
+                                      "name": "value",
+                                      "kind": "json"
+                                    }
+                                  }
+                                }
+                              },
+                              "prop": {
+                                "kind": "text",
+                                "binding": {
+                                  "text": "product"
+                                }
+                              }
+                            },
+                            "output": {
+                              "name": "value",
+                              "kind": "json"
+                            }
+                          }
+                        }
+                      },
+                      "prop": {
+                        "kind": "text",
+                        "binding": {
+                          "text": "output"
+                        }
+                      }
+                    },
+                    "output": {
+                      "name": "value",
+                      "kind": "json"
+                    }
+                  }
+                }
+              },
+              "prop": {
+                "kind": "text",
+                "binding": {
+                  "text": "features"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "features": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "product"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "features"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "issue": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "issue"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      },
+      "each": [
+        "feature"
+      ]
+    }
+  },
+  "sequence": [
+    "product",
+    "build"
+  ],
+  "sequenceAuthored": false,
+  "slotMeta": {
+    "inputs.issue": {
+      "description": "What is being asked for."
+    },
+    "outputs.features": {
+      "optional": true
+    },
+    "outputs.verdicts": {
+      "optional": true,
+      "description": "One per feature, in the order product listed them."
+    },
+    "outputs.shipped": {
+      "optional": true
+    },
+    "outputs.paths": {
+      "optional": true
+    }
+  },
+  "fanOut": [
+    "product\u0000features"
+  ]
+}

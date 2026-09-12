@@ -1,0 +1,516 @@
+{
+  "label": "Critique deliverables",
+  "description": "Judge the deliverables on coverage and substance (feature.md §1). Structure is already machine-checked by publish (§0.2).",
+  "inputs": {
+    "features": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "id",
+            "story",
+            "importance",
+            "metrics"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "story": {
+              "type": "string",
+              "description": "As a [who], I should be able to [what] so that I can [value]."
+            },
+            "importance": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "metrics": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "requires": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "feature_docs": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "standing_amendment": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "issue": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    },
+    "severity_threshold": {
+      "kind": "text",
+      "schema": {
+        "type": "string",
+        "enum": [
+          "blocker",
+          "significant",
+          "minor",
+          "note"
+        ]
+      }
+    },
+    "prior_findings": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "severity",
+            "claim",
+            "disposition"
+          ],
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "blocker",
+                "significant",
+                "minor",
+                "note"
+              ]
+            },
+            "claim": {
+              "type": "string"
+            },
+            "target_id": {
+              "type": "string",
+              "description": "The deliverable, flow, component or unit id this is about."
+            },
+            "disposition": {
+              "type": "string",
+              "enum": [
+                "fixed",
+                "rejected",
+                "blocked"
+              ]
+            },
+            "note": {
+              "type": "string",
+              "description": "What changed, why the finding is wrong, or what the draft would need to make progress."
+            }
+          }
+        }
+      }
+    },
+    "working_set": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "doc_paths": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "findings": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "findings"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "findings"
+    },
+    "max_severity": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "max_severity"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "max_severity"
+    },
+    "max_severity_rank": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "max_severity_rank"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "max_severity_rank"
+    },
+    "target": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "target"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "target"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Judge these deliverables. **Coverage first**: does this set actually capture the\ngoals?\n\nStructure is already checked by the machine — ids resolve, index rows exist,\nrequired sections are present, statuses are legal. Do not spend attention there.\nSpend it on whether two user stories are the same story.\n\n## The issue the deliverables came from\n\n{{.inputs.issue}}\n\n## The deliverables\n\n{{.inputs.features}}\n\n## The file each one was written to\n\n{{.inputs.doc_paths}}\n\nOne path per deliverable, in the same order. A length that disagrees with the\ndeliverables above is itself a finding.\n\n## The docs\n\n{{.inputs.feature_docs}}\n\n## The amendment this draft submits\n\n{{.inputs.standing_amendment}}\n\nWhere that exists, the draft says a standing doc is wrong. It travels here as its own\nvalue rather than inside a doc, so judge it as its own claim — is the principle actually\nwrong, or is the feature bending it? Where it is empty, a doc that cites an amendment is\nciting one that was never submitted, and that IS a finding.\n\n## The docs this phase reads\n\n{{.inputs.working_set}}\n\n**These are paths, not contents.** Open each one with `read_file` before you start. Read the\nfile as it is now — an earlier state in this phase may have edited it since the run began.\n\n## Findings from the previous pass\n\n{{.inputs.prior_findings}}\n\nEach carries the draft's own `disposition` — what it says it did:\n\n- `fixed` — check it. A finding recorded as fixed that is not fixed is worse than one\n  never addressed, and it is the reason this list is here rather than in your memory.\n- `rejected` — the draft says the finding was wrong. It may be right. Read the `note`\n  and let it go if it holds; restating a finding the draft has already answered is how a\n  loop spends four passes going nowhere.\n- `blocked` — the draft cannot see how to make progress. Decide whether that is true. If\n  it is, raise `target: 'ask'` and stop: nothing downstream of you can supply what it\n  needs.\n\nA finding that comes back unchanged twice is a finding about the draft state, not the\ndraft.\n\n## What to check\n\nFour of these are new and they outrank the rest, because they are the defects that\nsurvived every previous pass rather than the ones a pass invents.\n\n- **Process residue — `significant` on sight, every time.** A spec describes the\n  product and answers the questions. It never mentions a pass, a revision, a draft, a\n  critique, a finding, an earlier version of itself, or what the file \"previously\" said.\n  Search the docs for *pass, revision, previously, earlier version, this draft, the last*\n  and quote every hit. Do not soften it and do not accept \"but the correction is\n  informative\": the conclusion is informative, the story of arriving at it is loop\n  exhaust, and a reader who was never shown the loop cannot use it. The fix is always\n  deletion of the scaffolding, never rewording of it.\n- **Two specs in one file.** Does any doc scope a part that could be cut on its own and\n  priced on its own — a \"floor\" and a \"delta\", a core and an addition each carrying its\n  own value? Then it is two deliverables sharing a file, and it must be split into two\n  rows and two docs. Check `doc_paths` against `features`: same length, same order, or\n  say so.\n- **One spec in two files.** Does the catalog, or a sibling doc, restate an argument that\n  belongs to a feature's own doc? An index carries a row and a link. A sibling carries a\n  cross-reference. Neither carries a second copy of the reasoning, and a reader who finds\n  the same decision argued twice has no way to know which one is current.\n- **A question written down instead of asked.** Every row in a doc's **Open questions**\n  whose answer a person could give in a sentence is a defect, not a deliverable. It\n  should have been a `questions` entry. Raise `target: 'ask'` and name the rows.\n- **Goals with no story.** Take each goal from the issue in turn: which\n  deliverable delivers it? Name anything unclaimed. Do not gloss it.\n- **Stories with no goal.** The reverse. A deliverable nothing in the issue asked\n  for is either a missing goal or scope that crept in — say which.\n- **Duplicates and near-duplicates.** Are any two stories the same thing in\n  different words? Is one a special case of another, or the same job for two\n  audiences? Say which, and merge or distinguish them explicitly. This is the\n  most common defect in a first draft and the most expensive later, because each\n  duplicate grows its own flow, its own component and its own unit.\n- **Value, or restatement?** Does each `so that I can …` name something the\n  person wanted before this feature existed?\n- **Does the person fit?** Would the named audience recognize this as their job?\n  A story that says \"developer\" while describing support's work will produce the\n  wrong flow three phases from now.\n- **Do the metrics measure the value or the activity?** Which of these would move\n  if the feature were popular and useless?\n- **Is the importance ordering defensible?** Read the `1.0` set alone: is that a\n  thing worth shipping? Then read the low ones: is any of them actually\n  load-bearing for a `1.0`?\n- **Departures from principles** are an exception or an amendment, never silence.\n\n## What to produce\n\n`findings` — each with a `severity` (`blocker` · `significant` · `minor` ·\n`note`), the `claim`, the `evidence` (quote it), and the `target_id` it is about.\n\n`max_severity` and `max_severity_rank` (blocker=3, significant=2, minor=1,\nnote=0) — the highest present. With no findings, `note` and 0.\n\n`target` — where this should go next:\n\n- `draft` — the framing is right, the execution is not.\n- `explore` — the framing itself is wrong: the criteria missed something, or the\n  winning candidate loses on a criterion nobody wrote down.\n- `upstream` — this phase cannot fix it; the issue itself is the problem. A\n  person always sees this one.\n- `ask` — neither you nor the draft can see how to make progress: what is missing is a\n  measurement nobody has taken, a decision only a person can make, or a fact that is not\n  in the repo. A person always sees this one too, and it leaves the loop AT ONCE rather\n  than spending the passes that remain. Raise it the pass you know, not the pass you run\n  out — being stuck on pass 1 is not improved by two more passes of the same.\n\nDo not manufacture findings to look diligent, and do not suppress them to look\nfinished. A critique that always finds something would never exit the loop; one\nthat must find nothing to exit teaches you to be quiet.\n\n**A finding costs a pass, and a pass costs twenty minutes.** There is one revision\nafter you, not three. Spend it on something that changes what gets built: a goal with\nno story, a duplicate, a metric that measures the wrong thing, a spec split across two\nfiles. A finding whose fix is more prose is a finding that makes the document worse —\nif the last pass answered a point at length and the point is still arguable, that is a\n`questions` entry and `target: 'ask'`, not another round of drafting. **A document that\ngot longer without settling anything did not improve.**\n",
+    "config": {
+      "model": "claude-opus-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "severity",
+                "claim"
+              ],
+              "properties": {
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "blocker",
+                    "significant",
+                    "minor",
+                    "note"
+                  ]
+                },
+                "claim": {
+                  "type": "string"
+                },
+                "evidence": {
+                  "type": "string",
+                  "description": "A path:line, a quotation, or a reproduction."
+                },
+                "target_id": {
+                  "type": "string",
+                  "description": "The deliverable, flow, component or unit id this is about."
+                }
+              }
+            }
+          },
+          "max_severity": {
+            "type": "string",
+            "enum": [
+              "blocker",
+              "significant",
+              "minor",
+              "note"
+            ]
+          },
+          "max_severity_rank": {
+            "type": "integer"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "explore",
+              "upstream",
+              "ask"
+            ]
+          }
+        },
+        "required": [
+          "findings",
+          "max_severity",
+          "max_severity_rank",
+          "target"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "session": null,
+    "tools": [
+      "read_file"
+    ],
+    "permissions": {
+      "profile": "read-only",
+      "tools": {
+        "read_file": "allow"
+      }
+    }
+  },
+  "scopeSession": null,
+  "slotMeta": {
+    "inputs.features": {
+      "optional": true
+    },
+    "inputs.feature_docs": {
+      "optional": true
+    },
+    "inputs.standing_amendment": {
+      "optional": true,
+      "description": "The amendment this draft submits against a standing doc, when it submits one. It travels beside the deliverables rather than inside them, so judge it as its own claim — and do not report it missing when it is present here."
+    },
+    "inputs.severity_threshold": {
+      "description": "Substantial means at or above this."
+    },
+    "inputs.prior_findings": {
+      "optional": true,
+      "description": "The previous pass's findings AND what the draft did with each, so the loop converges instead of rediscovering the same weakness. A `blocked` disposition is the draft saying it cannot see how to make progress — judge it, and raise `target: 'ask'` where it is right."
+    },
+    "inputs.working_set": {
+      "optional": true,
+      "description": "Paths to the docs this phase reads — its standing docs and the catalog entries that bear on the feature. Open them with read_file: the file as it is now, not a copy taken before this phase started editing."
+    },
+    "inputs.doc_paths": {
+      "optional": true,
+      "description": "One path per deliverable, in the same order as `features`. Two lists of different lengths mean a spec was merged into a neighbour's file or split across two, and that is a finding."
+    }
+  }
+}

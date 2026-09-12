@@ -1,0 +1,379 @@
+{
+  "label": "Draft surfaces and components",
+  "description": "Surface and component docs: anatomy, states, interactions, copy, behavior (feature.md §3 step 3). ONE TURN in this phase’s conversation: the prompt arrives already rendered, from whichever transition sent control here, so this state declares no per-arrival slots. What it still owns is the OUTPUT CONTRACT — the shape every arrival is held to — and the session that makes the conversation the accumulator.",
+  "inputs": {
+    "prompt": {
+      "kind": "blob",
+      "schema": {
+        "type": "string",
+        "contentMediaType": "text/markdown"
+      }
+    }
+  },
+  "outputs": {
+    "components": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "components"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "components"
+    },
+    "surfaces": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "surfaces"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "surfaces"
+    },
+    "component_docs": {
+      "kind": "blob",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "component_docs"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "component_docs"
+    },
+    "responses": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "responses"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "responses"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "{{.inputs.prompt}}",
+    "config": {
+      "model": "claude-opus-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "surfaces": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "component_docs": {
+            "type": "string",
+            "contentMediaType": "text/markdown"
+          },
+          "responses": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "severity",
+                "claim",
+                "disposition"
+              ],
+              "properties": {
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "blocker",
+                    "significant",
+                    "minor",
+                    "note"
+                  ]
+                },
+                "claim": {
+                  "type": "string"
+                },
+                "target_id": {
+                  "type": "string",
+                  "description": "The deliverable, flow, component or unit id this is about."
+                },
+                "disposition": {
+                  "type": "string",
+                  "enum": [
+                    "fixed",
+                    "rejected",
+                    "blocked"
+                  ],
+                  "description": "fixed: this pass changed to answer it. rejected: the finding is wrong, and `note` says why. blocked: this pass cannot see how to make progress on it — `note` says what it would need."
+                },
+                "note": {
+                  "type": "string",
+                  "description": "What changed, why the finding is wrong, or what is missing. Required for rejected and blocked."
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "components",
+          "surfaces",
+          "component_docs"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "session": {
+      "name": "ui-draft",
+      "in": "feature/ui"
+    },
+    "tools": [
+      "read_file"
+    ],
+    "permissions": {
+      "profile": "read-only",
+      "tools": {
+        "read_file": "allow"
+      }
+    }
+  },
+  "scopeSession": {
+    "name": "ui-draft",
+    "in": "feature/ui"
+  },
+  "slotMeta": {
+    "inputs.prompt": {
+      "description": "The turn to append, rendered by `renderTemplate` at the call site that sent control here. Replaces the per-arrival slots this state used to declare (flows, near_matches, design, working_set, prior_findings, returned_findings, reviewer_comments): each is either already in this conversation or is an argument to one of the turns under $BASE/prompts/feature/ui/turns/."
+    },
+    "outputs.responses": {
+      "optional": true,
+      "description": "One entry per prior finding, saying what this pass did with it. Feeds the critique so it can tell an addressed finding from a restated one — the loop's only memory of its own passes."
+    }
+  }
+}

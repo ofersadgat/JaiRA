@@ -1,0 +1,131 @@
+{
+  "label": "Mutation check",
+  "description": "Breaks the feature deliberately and checks that a test fails and says why. An agent, because it edits and runs.",
+  "inputs": {
+    "acceptance_tests": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "changes": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "diagnosability": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "diagnosability"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "diagnosability"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Check that the acceptance tests can tell when the feature is broken.\n\n## The tests\n\n{{.inputs.acceptance_tests}}\n\n## The changes\n\n{{.inputs.changes}}\n\nFor each change, break it in one plausible way, run the suite, and restore it. A break no test catches, or a failure that does not say what broke, is a finding.\n\n## What to produce\n\n`diagnosability`: one row per mutation: `{ broke, caught_by, said }`.\n",
+    "config": {
+      "model": "claude-cli/default"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "diagnosability": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "diagnosability"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file",
+      "write_file",
+      "bash"
+    ]
+  },
+  "slotMeta": {
+    "inputs.acceptance_tests": {
+      "optional": true
+    },
+    "inputs.changes": {
+      "optional": true
+    }
+  }
+}

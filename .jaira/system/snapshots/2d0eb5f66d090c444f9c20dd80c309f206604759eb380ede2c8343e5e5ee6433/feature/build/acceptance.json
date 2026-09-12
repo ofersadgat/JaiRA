@@ -1,0 +1,2993 @@
+{
+  "label": "Acceptance",
+  "description": "Prove the feature, not the units: can the person in the story get the value? One acceptance test per claim, run, checked for diagnosability, linked back to the doc. A failure is classified as the code's, the design's or the spec's, and leaves for the layer that owns it.",
+  "limits": {
+    "max_iterations": 3
+  },
+  "inputs": {
+    "feature": {
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "required": [
+          "id",
+          "story",
+          "importance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "story": {
+            "type": "string"
+          },
+          "importance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "doc_path": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "patterns": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "units": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "changes": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "unit_tests": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "severity_threshold": {
+      "kind": "text",
+      "schema": {
+        "type": "string",
+        "enum": [
+          "blocker",
+          "significant",
+          "minor",
+          "note"
+        ]
+      }
+    },
+    "threshold_rank": {
+      "kind": "json",
+      "schema": {
+        "type": "integer"
+      }
+    },
+    "ask_below": {
+      "kind": "json",
+      "schema": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "returned_findings": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "acceptance_tests": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "write"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "acceptance_tests"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "acceptance_tests"
+    },
+    "diagnosability": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "mutate"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "diagnosability"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "diagnosability"
+    },
+    "verified_by": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "link"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "verified_by"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "verified_by"
+    },
+    "manual_procedures": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "manual"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "manual_procedures"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "manual_procedures"
+    },
+    "design_findings": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "classify"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "design_findings"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "design_findings"
+    },
+    "finding_class": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "classify"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "finding_class"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "finding_class"
+    },
+    "unverified": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "link"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "unverified"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "unverified"
+    },
+    "decision": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "select",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": "verify"
+              }
+            },
+            "key": {
+              "kind": "text",
+              "binding": {
+                "text": "decision"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "decision"
+    }
+  },
+  "children": {
+    "write": {
+      "state": "feature/build/acceptance/write",
+      "inputs": {
+        "prompt": {
+          "op": {
+            "kind": "function",
+            "functionRef": "user:C:/Users/Ofer/.jaira/functions/renderTemplate.ts#default",
+            "input": {
+              "template": {
+                "kind": "text",
+                "index": 0,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "values": {
+                "kind": "json",
+                "index": 1,
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                },
+                "binding": {
+                  "json": {}
+                }
+              }
+            },
+            "output": {
+              "name": "result",
+              "kind": "text",
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "parameters": {
+            "template": {
+              "kind": "text",
+              "binding": {
+                "text": "Write the acceptance tests for this feature. They prove the feature, not the units.\n\n{{.inputs.standard}}\n\n## The feature\n\n{{.inputs.feature}}\n\n## The patterns it delivers through\n\n{{.inputs.patterns}}\n\n## The units under it\n\n{{.inputs.units}}\n\n## What the unit tests already cover\n\n{{.inputs.covered}}\n\n## What came back\n\n{{.inputs.returned}}\n\n## How to write them\n\nOne test per claim in the feature's story and metrics. Walk the pattern's steps the way the person does and assert the success signal: the observable that says the person got the value. Make real what has to be real for the test to mean anything. Take no shortcut the person cannot take. Assert nothing the unit tests already assert. Delete tests this feature invalidates.\n\nBefore writing each test, imagine the feature working and worthless: the data loads but is wrong, the run starts but never finishes. A test that still passes asserts an intermediate, not the value.\n\n## What to produce\n\n`acceptance_tests`: one row per test: `{ claim, signal, drives, real, faked, file }`.\n\n`responses`: nothing on a first pass.\n"
+              }
+            },
+            "values": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.record",
+                  "input": {
+                    "standard": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "## How a doc is written\n\nA doc is a standalone source of truth. Someone who has never seen this run, this conversation, or any earlier draft reads it and knows what is true.\n\n- **Only what is true.** Every sentence states a fact about the product, the design or the code. Nothing is hedged, argued or defended.\n- **As little as achieves the goal.** Keep a detail only if a reader would otherwise build the wrong thing, pick the wrong pattern, or miss something they need. Cut everything else.\n- **Headings carry the idea.** Every heading is a sentence that states its conclusion. Reading the headings alone gives the whole doc; the text under a heading holds only the detail a builder needs.\n- **One concept per file.** One feature, one pattern, one component, one unit. A doc that describes two things is two docs.\n- **Layers reference upward only.** Product names people, goals and what they can do. UX names patterns and product features. UI names components, patterns and features. Engineering names units, components, patterns and features. No layer names anything from a layer below it: a product doc never names a class, a file, a table, a column or a component.\n- **Each layer writes at its own altitude.** Product describes outcomes: what a person can now do and why it matters, never how. A list, an order, a row, a click, a panel or a screen in a product doc is a defect. UX describes interactions: the steps, the states, what the person knows at each. It never describes visuals. UI describes visuals: hierarchy, copy, states drawn. It never describes code. Engineering describes code.\n- **No questions.** A doc holds answers. What cannot be settled from the docs is asked of the person now, through `questions`, and the answer is written in as a plain statement.\n- **No alternatives, unless the choice goes against the usual way.** A doc does not list what was considered. Where it departs from the normal way of doing things, it states the departure and the reason in one line.\n- **No process.** A doc never mentions a draft, a pass, a revision, a critique, a finding, a conversation, an earlier version of itself, or anything \"previously\" said. Where a decision changed, the doc states the decision that holds.\n- **Frontmatter is the record.** The fields the template declares carry the links between layers. They are complete and they resolve.\n\nWrite in plain sentences. No em-dashes, no parentheses, no rhetorical questions.\n"
+                      }
+                    },
+                    "feature": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "op.member",
+                          "input": {
+                            "value": {
+                              "kind": "json",
+                              "binding": {
+                                "op": {
+                                  "kind": "function",
+                                  "functionRef": "context.get",
+                                  "input": {
+                                    "name": {
+                                      "kind": "text",
+                                      "binding": {
+                                        "text": "inputs"
+                                      }
+                                    }
+                                  },
+                                  "output": {
+                                    "name": "value",
+                                    "kind": "json"
+                                  }
+                                }
+                              }
+                            },
+                            "prop": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "feature"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "patterns": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "op.member",
+                          "input": {
+                            "value": {
+                              "kind": "json",
+                              "binding": {
+                                "op": {
+                                  "kind": "function",
+                                  "functionRef": "context.get",
+                                  "input": {
+                                    "name": {
+                                      "kind": "text",
+                                      "binding": {
+                                        "text": "inputs"
+                                      }
+                                    }
+                                  },
+                                  "output": {
+                                    "name": "value",
+                                    "kind": "json"
+                                  }
+                                }
+                              }
+                            },
+                            "prop": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "patterns"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "units": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "op.member",
+                          "input": {
+                            "value": {
+                              "kind": "json",
+                              "binding": {
+                                "op": {
+                                  "kind": "function",
+                                  "functionRef": "context.get",
+                                  "input": {
+                                    "name": {
+                                      "kind": "text",
+                                      "binding": {
+                                        "text": "inputs"
+                                      }
+                                    }
+                                  },
+                                  "output": {
+                                    "name": "value",
+                                    "kind": "json"
+                                  }
+                                }
+                              }
+                            },
+                            "prop": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "units"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "covered": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "op.member",
+                          "input": {
+                            "value": {
+                              "kind": "json",
+                              "binding": {
+                                "op": {
+                                  "kind": "function",
+                                  "functionRef": "context.get",
+                                  "input": {
+                                    "name": {
+                                      "kind": "text",
+                                      "binding": {
+                                        "text": "inputs"
+                                      }
+                                    }
+                                  },
+                                  "output": {
+                                    "name": "value",
+                                    "kind": "json"
+                                  }
+                                }
+                              }
+                            },
+                            "prop": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "unit_tests"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "returned": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "op.member",
+                          "input": {
+                            "value": {
+                              "kind": "json",
+                              "binding": {
+                                "op": {
+                                  "kind": "function",
+                                  "functionRef": "context.get",
+                                  "input": {
+                                    "name": {
+                                      "kind": "text",
+                                      "binding": {
+                                        "text": "inputs"
+                                      }
+                                    }
+                                  },
+                                  "output": {
+                                    "name": "value",
+                                    "kind": "json"
+                                  }
+                                }
+                              }
+                            },
+                            "prop": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "returned_findings"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "run": {
+      "state": "feature/build/acceptance/run",
+      "inputs": {
+        "acceptance_tests": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "write"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "acceptance_tests"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "changes": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "changes"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      }
+    },
+    "mutate": {
+      "state": "feature/build/acceptance/mutate",
+      "inputs": {
+        "acceptance_tests": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "write"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "acceptance_tests"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "changes": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "changes"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      }
+    },
+    "classify": {
+      "state": "feature/build/acceptance/classify",
+      "inputs": {
+        "results": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "run"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "results"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "feature": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "feature"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "patterns": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "patterns"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      },
+      "transitions": [
+        {
+          "when": ".children.classify.output.design_findings.length > 0",
+          "to": "terminate.success",
+          "whenRef": {
+            "op": {
+              "kind": "function",
+              "functionRef": "op.gt",
+              "input": {
+                "left": {
+                  "kind": "json",
+                  "binding": {
+                    "op": {
+                      "kind": "function",
+                      "functionRef": "op.member",
+                      "input": {
+                        "value": {
+                          "kind": "json",
+                          "binding": {
+                            "op": {
+                              "kind": "function",
+                              "functionRef": "op.member",
+                              "input": {
+                                "value": {
+                                  "kind": "json",
+                                  "binding": {
+                                    "op": {
+                                      "kind": "function",
+                                      "functionRef": "op.member",
+                                      "input": {
+                                        "value": {
+                                          "kind": "json",
+                                          "binding": {
+                                            "op": {
+                                              "kind": "function",
+                                              "functionRef": "op.member",
+                                              "input": {
+                                                "value": {
+                                                  "kind": "json",
+                                                  "binding": {
+                                                    "op": {
+                                                      "kind": "function",
+                                                      "functionRef": "context.get",
+                                                      "input": {
+                                                        "name": {
+                                                          "kind": "text",
+                                                          "binding": {
+                                                            "text": "children"
+                                                          }
+                                                        }
+                                                      },
+                                                      "output": {
+                                                        "name": "value",
+                                                        "kind": "json"
+                                                      }
+                                                    }
+                                                  }
+                                                },
+                                                "prop": {
+                                                  "kind": "text",
+                                                  "binding": {
+                                                    "text": "classify"
+                                                  }
+                                                }
+                                              },
+                                              "output": {
+                                                "name": "value",
+                                                "kind": "json"
+                                              }
+                                            }
+                                          }
+                                        },
+                                        "prop": {
+                                          "kind": "text",
+                                          "binding": {
+                                            "text": "output"
+                                          }
+                                        }
+                                      },
+                                      "output": {
+                                        "name": "value",
+                                        "kind": "json"
+                                      }
+                                    }
+                                  }
+                                },
+                                "prop": {
+                                  "kind": "text",
+                                  "binding": {
+                                    "text": "design_findings"
+                                  }
+                                }
+                              },
+                              "output": {
+                                "name": "value",
+                                "kind": "json"
+                              }
+                            }
+                          }
+                        },
+                        "prop": {
+                          "kind": "text",
+                          "binding": {
+                            "text": "length"
+                          }
+                        }
+                      },
+                      "output": {
+                        "name": "value",
+                        "kind": "json"
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "json",
+                  "binding": {
+                    "json": 0
+                  }
+                }
+              },
+              "output": {
+                "name": "value",
+                "kind": "json"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "link": {
+      "state": "feature/build/acceptance/link",
+      "inputs": {
+        "acceptance_tests": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "write"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "acceptance_tests"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "results": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "run"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "results"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "feature": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "feature"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      }
+    },
+    "manual": {
+      "state": "feature/build/acceptance/manual",
+      "inputs": {
+        "feature": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "feature"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "unverified": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "link"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "unverified"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      }
+    },
+    "critique": {
+      "state": "feature/build/acceptance/critique",
+      "inputs": {
+        "acceptance_tests": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "write"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "acceptance_tests"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "results": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "run"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "results"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "diagnosability": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "mutate"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "diagnosability"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "feature": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "feature"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "covered": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "unit_tests"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "severity_threshold": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "severity_threshold"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "prior_findings": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "write"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "responses"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      },
+      "transitions": [
+        {
+          "when": ".children.critique.output.max_severity_rank < .inputs.threshold_rank",
+          "to": "confidence",
+          "whenRef": {
+            "op": {
+              "kind": "function",
+              "functionRef": "op.lt",
+              "input": {
+                "left": {
+                  "kind": "json",
+                  "binding": {
+                    "op": {
+                      "kind": "function",
+                      "functionRef": "op.member",
+                      "input": {
+                        "value": {
+                          "kind": "json",
+                          "binding": {
+                            "op": {
+                              "kind": "function",
+                              "functionRef": "op.member",
+                              "input": {
+                                "value": {
+                                  "kind": "json",
+                                  "binding": {
+                                    "op": {
+                                      "kind": "function",
+                                      "functionRef": "op.member",
+                                      "input": {
+                                        "value": {
+                                          "kind": "json",
+                                          "binding": {
+                                            "op": {
+                                              "kind": "function",
+                                              "functionRef": "context.get",
+                                              "input": {
+                                                "name": {
+                                                  "kind": "text",
+                                                  "binding": {
+                                                    "text": "children"
+                                                  }
+                                                }
+                                              },
+                                              "output": {
+                                                "name": "value",
+                                                "kind": "json"
+                                              }
+                                            }
+                                          }
+                                        },
+                                        "prop": {
+                                          "kind": "text",
+                                          "binding": {
+                                            "text": "critique"
+                                          }
+                                        }
+                                      },
+                                      "output": {
+                                        "name": "value",
+                                        "kind": "json"
+                                      }
+                                    }
+                                  }
+                                },
+                                "prop": {
+                                  "kind": "text",
+                                  "binding": {
+                                    "text": "output"
+                                  }
+                                }
+                              },
+                              "output": {
+                                "name": "value",
+                                "kind": "json"
+                              }
+                            }
+                          }
+                        },
+                        "prop": {
+                          "kind": "text",
+                          "binding": {
+                            "text": "max_severity_rank"
+                          }
+                        }
+                      },
+                      "output": {
+                        "name": "value",
+                        "kind": "json"
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "json",
+                  "binding": {
+                    "op": {
+                      "kind": "function",
+                      "functionRef": "op.member",
+                      "input": {
+                        "value": {
+                          "kind": "json",
+                          "binding": {
+                            "op": {
+                              "kind": "function",
+                              "functionRef": "context.get",
+                              "input": {
+                                "name": {
+                                  "kind": "text",
+                                  "binding": {
+                                    "text": "inputs"
+                                  }
+                                }
+                              },
+                              "output": {
+                                "name": "value",
+                                "kind": "json"
+                              }
+                            }
+                          }
+                        },
+                        "prop": {
+                          "kind": "text",
+                          "binding": {
+                            "text": "threshold_rank"
+                          }
+                        }
+                      },
+                      "output": {
+                        "name": "value",
+                        "kind": "json"
+                      }
+                    }
+                  }
+                }
+              },
+              "output": {
+                "name": "value",
+                "kind": "json"
+              }
+            }
+          }
+        },
+        {
+          "when": ".children.critique.output.target === 'upstream'",
+          "to": "confidence",
+          "whenRef": {
+            "op": {
+              "kind": "function",
+              "functionRef": "op.strictEq",
+              "input": {
+                "left": {
+                  "kind": "json",
+                  "binding": {
+                    "op": {
+                      "kind": "function",
+                      "functionRef": "op.member",
+                      "input": {
+                        "value": {
+                          "kind": "json",
+                          "binding": {
+                            "op": {
+                              "kind": "function",
+                              "functionRef": "op.member",
+                              "input": {
+                                "value": {
+                                  "kind": "json",
+                                  "binding": {
+                                    "op": {
+                                      "kind": "function",
+                                      "functionRef": "op.member",
+                                      "input": {
+                                        "value": {
+                                          "kind": "json",
+                                          "binding": {
+                                            "op": {
+                                              "kind": "function",
+                                              "functionRef": "context.get",
+                                              "input": {
+                                                "name": {
+                                                  "kind": "text",
+                                                  "binding": {
+                                                    "text": "children"
+                                                  }
+                                                }
+                                              },
+                                              "output": {
+                                                "name": "value",
+                                                "kind": "json"
+                                              }
+                                            }
+                                          }
+                                        },
+                                        "prop": {
+                                          "kind": "text",
+                                          "binding": {
+                                            "text": "critique"
+                                          }
+                                        }
+                                      },
+                                      "output": {
+                                        "name": "value",
+                                        "kind": "json"
+                                      }
+                                    }
+                                  }
+                                },
+                                "prop": {
+                                  "kind": "text",
+                                  "binding": {
+                                    "text": "output"
+                                  }
+                                }
+                              },
+                              "output": {
+                                "name": "value",
+                                "kind": "json"
+                              }
+                            }
+                          }
+                        },
+                        "prop": {
+                          "kind": "text",
+                          "binding": {
+                            "text": "target"
+                          }
+                        }
+                      },
+                      "output": {
+                        "name": "value",
+                        "kind": "json"
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "text",
+                  "binding": {
+                    "text": "upstream"
+                  }
+                }
+              },
+              "output": {
+                "name": "value",
+                "kind": "json"
+              }
+            }
+          }
+        },
+        {
+          "when": ".run.iteration >= .limits.max_iterations",
+          "to": "confidence",
+          "whenRef": {
+            "op": {
+              "kind": "function",
+              "functionRef": "op.ge",
+              "input": {
+                "left": {
+                  "kind": "json",
+                  "binding": {
+                    "op": {
+                      "kind": "function",
+                      "functionRef": "op.member",
+                      "input": {
+                        "value": {
+                          "kind": "json",
+                          "binding": {
+                            "op": {
+                              "kind": "function",
+                              "functionRef": "context.get",
+                              "input": {
+                                "name": {
+                                  "kind": "text",
+                                  "binding": {
+                                    "text": "run"
+                                  }
+                                }
+                              },
+                              "output": {
+                                "name": "value",
+                                "kind": "json"
+                              }
+                            }
+                          }
+                        },
+                        "prop": {
+                          "kind": "text",
+                          "binding": {
+                            "text": "iteration"
+                          }
+                        }
+                      },
+                      "output": {
+                        "name": "value",
+                        "kind": "json"
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "json",
+                  "binding": {
+                    "op": {
+                      "kind": "function",
+                      "functionRef": "op.member",
+                      "input": {
+                        "value": {
+                          "kind": "json",
+                          "binding": {
+                            "op": {
+                              "kind": "function",
+                              "functionRef": "context.get",
+                              "input": {
+                                "name": {
+                                  "kind": "text",
+                                  "binding": {
+                                    "text": "limits"
+                                  }
+                                }
+                              },
+                              "output": {
+                                "name": "value",
+                                "kind": "json"
+                              }
+                            }
+                          }
+                        },
+                        "prop": {
+                          "kind": "text",
+                          "binding": {
+                            "text": "max_iterations"
+                          }
+                        }
+                      },
+                      "output": {
+                        "name": "value",
+                        "kind": "json"
+                      }
+                    }
+                  }
+                }
+              },
+              "output": {
+                "name": "value",
+                "kind": "json"
+              }
+            }
+          }
+        },
+        {
+          "when": ".children.critique.output.target === 'ask'",
+          "to": "confidence",
+          "whenRef": {
+            "op": {
+              "kind": "function",
+              "functionRef": "op.strictEq",
+              "input": {
+                "left": {
+                  "kind": "json",
+                  "binding": {
+                    "op": {
+                      "kind": "function",
+                      "functionRef": "op.member",
+                      "input": {
+                        "value": {
+                          "kind": "json",
+                          "binding": {
+                            "op": {
+                              "kind": "function",
+                              "functionRef": "op.member",
+                              "input": {
+                                "value": {
+                                  "kind": "json",
+                                  "binding": {
+                                    "op": {
+                                      "kind": "function",
+                                      "functionRef": "op.member",
+                                      "input": {
+                                        "value": {
+                                          "kind": "json",
+                                          "binding": {
+                                            "op": {
+                                              "kind": "function",
+                                              "functionRef": "context.get",
+                                              "input": {
+                                                "name": {
+                                                  "kind": "text",
+                                                  "binding": {
+                                                    "text": "children"
+                                                  }
+                                                }
+                                              },
+                                              "output": {
+                                                "name": "value",
+                                                "kind": "json"
+                                              }
+                                            }
+                                          }
+                                        },
+                                        "prop": {
+                                          "kind": "text",
+                                          "binding": {
+                                            "text": "critique"
+                                          }
+                                        }
+                                      },
+                                      "output": {
+                                        "name": "value",
+                                        "kind": "json"
+                                      }
+                                    }
+                                  }
+                                },
+                                "prop": {
+                                  "kind": "text",
+                                  "binding": {
+                                    "text": "output"
+                                  }
+                                }
+                              },
+                              "output": {
+                                "name": "value",
+                                "kind": "json"
+                              }
+                            }
+                          }
+                        },
+                        "prop": {
+                          "kind": "text",
+                          "binding": {
+                            "text": "target"
+                          }
+                        }
+                      },
+                      "output": {
+                        "name": "value",
+                        "kind": "json"
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "text",
+                  "binding": {
+                    "text": "ask"
+                  }
+                }
+              },
+              "output": {
+                "name": "value",
+                "kind": "json"
+              }
+            }
+          }
+        },
+        {
+          "when": ".run.iteration > 0 && isEmpty(.children.write.output.responses) === false && contains(pluck(.children.write.output.responses, 'disposition'), 'fixed') === false",
+          "to": "confidence",
+          "whenRef": {
+            "op": {
+              "kind": "function",
+              "functionRef": "op.and",
+              "input": {
+                "left": {
+                  "kind": "json",
+                  "binding": {
+                    "op": {
+                      "kind": "function",
+                      "functionRef": "op.and",
+                      "input": {
+                        "left": {
+                          "kind": "json",
+                          "binding": {
+                            "op": {
+                              "kind": "function",
+                              "functionRef": "op.gt",
+                              "input": {
+                                "left": {
+                                  "kind": "json",
+                                  "binding": {
+                                    "op": {
+                                      "kind": "function",
+                                      "functionRef": "op.member",
+                                      "input": {
+                                        "value": {
+                                          "kind": "json",
+                                          "binding": {
+                                            "op": {
+                                              "kind": "function",
+                                              "functionRef": "context.get",
+                                              "input": {
+                                                "name": {
+                                                  "kind": "text",
+                                                  "binding": {
+                                                    "text": "run"
+                                                  }
+                                                }
+                                              },
+                                              "output": {
+                                                "name": "value",
+                                                "kind": "json"
+                                              }
+                                            }
+                                          }
+                                        },
+                                        "prop": {
+                                          "kind": "text",
+                                          "binding": {
+                                            "text": "iteration"
+                                          }
+                                        }
+                                      },
+                                      "output": {
+                                        "name": "value",
+                                        "kind": "json"
+                                      }
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "kind": "json",
+                                  "binding": {
+                                    "json": 0
+                                  }
+                                }
+                              },
+                              "output": {
+                                "name": "value",
+                                "kind": "json"
+                              }
+                            }
+                          }
+                        },
+                        "right": {
+                          "kind": "json",
+                          "binding": {
+                            "op": {
+                              "kind": "function",
+                              "functionRef": "op.strictEq",
+                              "input": {
+                                "left": {
+                                  "kind": "json",
+                                  "binding": {
+                                    "op": {
+                                      "kind": "function",
+                                      "functionRef": "isEmpty",
+                                      "input": {
+                                        "value": {
+                                          "kind": "json",
+                                          "binding": {
+                                            "op": {
+                                              "kind": "function",
+                                              "functionRef": "op.member",
+                                              "input": {
+                                                "value": {
+                                                  "kind": "json",
+                                                  "binding": {
+                                                    "op": {
+                                                      "kind": "function",
+                                                      "functionRef": "op.member",
+                                                      "input": {
+                                                        "value": {
+                                                          "kind": "json",
+                                                          "binding": {
+                                                            "op": {
+                                                              "kind": "function",
+                                                              "functionRef": "op.member",
+                                                              "input": {
+                                                                "value": {
+                                                                  "kind": "json",
+                                                                  "binding": {
+                                                                    "op": {
+                                                                      "kind": "function",
+                                                                      "functionRef": "context.get",
+                                                                      "input": {
+                                                                        "name": {
+                                                                          "kind": "text",
+                                                                          "binding": {
+                                                                            "text": "children"
+                                                                          }
+                                                                        }
+                                                                      },
+                                                                      "output": {
+                                                                        "name": "value",
+                                                                        "kind": "json"
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                },
+                                                                "prop": {
+                                                                  "kind": "text",
+                                                                  "binding": {
+                                                                    "text": "write"
+                                                                  }
+                                                                }
+                                                              },
+                                                              "output": {
+                                                                "name": "value",
+                                                                "kind": "json"
+                                                              }
+                                                            }
+                                                          }
+                                                        },
+                                                        "prop": {
+                                                          "kind": "text",
+                                                          "binding": {
+                                                            "text": "output"
+                                                          }
+                                                        }
+                                                      },
+                                                      "output": {
+                                                        "name": "value",
+                                                        "kind": "json"
+                                                      }
+                                                    }
+                                                  }
+                                                },
+                                                "prop": {
+                                                  "kind": "text",
+                                                  "binding": {
+                                                    "text": "responses"
+                                                  }
+                                                }
+                                              },
+                                              "output": {
+                                                "name": "value",
+                                                "kind": "json"
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      "output": {
+                                        "name": "value",
+                                        "kind": "json"
+                                      }
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "kind": "json",
+                                  "binding": {
+                                    "json": false
+                                  }
+                                }
+                              },
+                              "output": {
+                                "name": "value",
+                                "kind": "json"
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "output": {
+                        "name": "value",
+                        "kind": "json"
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "json",
+                  "binding": {
+                    "op": {
+                      "kind": "function",
+                      "functionRef": "op.strictEq",
+                      "input": {
+                        "left": {
+                          "kind": "json",
+                          "binding": {
+                            "op": {
+                              "kind": "function",
+                              "functionRef": "contains",
+                              "input": {
+                                "value": {
+                                  "kind": "json",
+                                  "binding": {
+                                    "op": {
+                                      "kind": "function",
+                                      "functionRef": "pluck",
+                                      "input": {
+                                        "value": {
+                                          "kind": "json",
+                                          "binding": {
+                                            "op": {
+                                              "kind": "function",
+                                              "functionRef": "op.member",
+                                              "input": {
+                                                "value": {
+                                                  "kind": "json",
+                                                  "binding": {
+                                                    "op": {
+                                                      "kind": "function",
+                                                      "functionRef": "op.member",
+                                                      "input": {
+                                                        "value": {
+                                                          "kind": "json",
+                                                          "binding": {
+                                                            "op": {
+                                                              "kind": "function",
+                                                              "functionRef": "op.member",
+                                                              "input": {
+                                                                "value": {
+                                                                  "kind": "json",
+                                                                  "binding": {
+                                                                    "op": {
+                                                                      "kind": "function",
+                                                                      "functionRef": "context.get",
+                                                                      "input": {
+                                                                        "name": {
+                                                                          "kind": "text",
+                                                                          "binding": {
+                                                                            "text": "children"
+                                                                          }
+                                                                        }
+                                                                      },
+                                                                      "output": {
+                                                                        "name": "value",
+                                                                        "kind": "json"
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                },
+                                                                "prop": {
+                                                                  "kind": "text",
+                                                                  "binding": {
+                                                                    "text": "write"
+                                                                  }
+                                                                }
+                                                              },
+                                                              "output": {
+                                                                "name": "value",
+                                                                "kind": "json"
+                                                              }
+                                                            }
+                                                          }
+                                                        },
+                                                        "prop": {
+                                                          "kind": "text",
+                                                          "binding": {
+                                                            "text": "output"
+                                                          }
+                                                        }
+                                                      },
+                                                      "output": {
+                                                        "name": "value",
+                                                        "kind": "json"
+                                                      }
+                                                    }
+                                                  }
+                                                },
+                                                "prop": {
+                                                  "kind": "text",
+                                                  "binding": {
+                                                    "text": "responses"
+                                                  }
+                                                }
+                                              },
+                                              "output": {
+                                                "name": "value",
+                                                "kind": "json"
+                                              }
+                                            }
+                                          }
+                                        },
+                                        "key": {
+                                          "kind": "text",
+                                          "binding": {
+                                            "text": "disposition"
+                                          }
+                                        }
+                                      },
+                                      "output": {
+                                        "name": "value",
+                                        "kind": "json"
+                                      }
+                                    }
+                                  }
+                                },
+                                "item": {
+                                  "kind": "text",
+                                  "binding": {
+                                    "text": "fixed"
+                                  }
+                                }
+                              },
+                              "output": {
+                                "name": "value",
+                                "kind": "json"
+                              }
+                            }
+                          }
+                        },
+                        "right": {
+                          "kind": "json",
+                          "binding": {
+                            "json": false
+                          }
+                        }
+                      },
+                      "output": {
+                        "name": "value",
+                        "kind": "json"
+                      }
+                    }
+                  }
+                }
+              },
+              "output": {
+                "name": "value",
+                "kind": "json"
+              }
+            }
+          }
+        },
+        {
+          "when": ".children.critique.outcome === 'success'",
+          "to": "write",
+          "inputs": {
+            "prompt": "renderTemplate($BASE/prompts/feature/acceptance/turns/revise.md, { findings: .children.critique.output.findings, iteration: .run.iteration })"
+          },
+          "inputRefs": {
+            "prompt": {
+              "op": {
+                "kind": "function",
+                "functionRef": "user:C:/Users/Ofer/.jaira/functions/renderTemplate.ts#default",
+                "input": {
+                  "template": {
+                    "kind": "text",
+                    "index": 0,
+                    "schema": {
+                      "type": "string"
+                    }
+                  },
+                  "values": {
+                    "kind": "json",
+                    "index": 1,
+                    "schema": {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": false
+                    },
+                    "binding": {
+                      "json": {}
+                    }
+                  }
+                },
+                "output": {
+                  "name": "result",
+                  "kind": "text",
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              },
+              "parameters": {
+                "template": {
+                  "kind": "text",
+                  "binding": {
+                    "text": "## The critique\n\n{{.inputs.findings}}\n\nThis is revision {{.inputs.iteration}}. For each finding: fix it, or say in one line why it is wrong, or say that it cannot be fixed here.\n\n`responses`: one entry per finding, in order: `{ severity, claim, target_id, disposition: fixed | rejected | blocked, note }`.\n\nRe-emit `acceptance_tests` in full.\n"
+                  }
+                },
+                "values": {
+                  "kind": "json",
+                  "binding": {
+                    "op": {
+                      "kind": "function",
+                      "functionRef": "op.record",
+                      "input": {
+                        "findings": {
+                          "kind": "json",
+                          "binding": {
+                            "op": {
+                              "kind": "function",
+                              "functionRef": "op.member",
+                              "input": {
+                                "value": {
+                                  "kind": "json",
+                                  "binding": {
+                                    "op": {
+                                      "kind": "function",
+                                      "functionRef": "op.member",
+                                      "input": {
+                                        "value": {
+                                          "kind": "json",
+                                          "binding": {
+                                            "op": {
+                                              "kind": "function",
+                                              "functionRef": "op.member",
+                                              "input": {
+                                                "value": {
+                                                  "kind": "json",
+                                                  "binding": {
+                                                    "op": {
+                                                      "kind": "function",
+                                                      "functionRef": "context.get",
+                                                      "input": {
+                                                        "name": {
+                                                          "kind": "text",
+                                                          "binding": {
+                                                            "text": "children"
+                                                          }
+                                                        }
+                                                      },
+                                                      "output": {
+                                                        "name": "value",
+                                                        "kind": "json"
+                                                      }
+                                                    }
+                                                  }
+                                                },
+                                                "prop": {
+                                                  "kind": "text",
+                                                  "binding": {
+                                                    "text": "critique"
+                                                  }
+                                                }
+                                              },
+                                              "output": {
+                                                "name": "value",
+                                                "kind": "json"
+                                              }
+                                            }
+                                          }
+                                        },
+                                        "prop": {
+                                          "kind": "text",
+                                          "binding": {
+                                            "text": "output"
+                                          }
+                                        }
+                                      },
+                                      "output": {
+                                        "name": "value",
+                                        "kind": "json"
+                                      }
+                                    }
+                                  }
+                                },
+                                "prop": {
+                                  "kind": "text",
+                                  "binding": {
+                                    "text": "findings"
+                                  }
+                                }
+                              },
+                              "output": {
+                                "name": "value",
+                                "kind": "json"
+                              }
+                            }
+                          }
+                        },
+                        "iteration": {
+                          "kind": "json",
+                          "binding": {
+                            "op": {
+                              "kind": "function",
+                              "functionRef": "op.member",
+                              "input": {
+                                "value": {
+                                  "kind": "json",
+                                  "binding": {
+                                    "op": {
+                                      "kind": "function",
+                                      "functionRef": "context.get",
+                                      "input": {
+                                        "name": {
+                                          "kind": "text",
+                                          "binding": {
+                                            "text": "run"
+                                          }
+                                        }
+                                      },
+                                      "output": {
+                                        "name": "value",
+                                        "kind": "json"
+                                      }
+                                    }
+                                  }
+                                },
+                                "prop": {
+                                  "kind": "text",
+                                  "binding": {
+                                    "text": "iteration"
+                                  }
+                                }
+                              },
+                              "output": {
+                                "name": "value",
+                                "kind": "json"
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "output": {
+                        "name": "value",
+                        "kind": "json"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "whenRef": {
+            "op": {
+              "kind": "function",
+              "functionRef": "op.strictEq",
+              "input": {
+                "left": {
+                  "kind": "json",
+                  "binding": {
+                    "op": {
+                      "kind": "function",
+                      "functionRef": "op.member",
+                      "input": {
+                        "value": {
+                          "kind": "json",
+                          "binding": {
+                            "op": {
+                              "kind": "function",
+                              "functionRef": "op.member",
+                              "input": {
+                                "value": {
+                                  "kind": "json",
+                                  "binding": {
+                                    "op": {
+                                      "kind": "function",
+                                      "functionRef": "context.get",
+                                      "input": {
+                                        "name": {
+                                          "kind": "text",
+                                          "binding": {
+                                            "text": "children"
+                                          }
+                                        }
+                                      },
+                                      "output": {
+                                        "name": "value",
+                                        "kind": "json"
+                                      }
+                                    }
+                                  }
+                                },
+                                "prop": {
+                                  "kind": "text",
+                                  "binding": {
+                                    "text": "critique"
+                                  }
+                                }
+                              },
+                              "output": {
+                                "name": "value",
+                                "kind": "json"
+                              }
+                            }
+                          }
+                        },
+                        "prop": {
+                          "kind": "text",
+                          "binding": {
+                            "text": "outcome"
+                          }
+                        }
+                      },
+                      "output": {
+                        "name": "value",
+                        "kind": "json"
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "text",
+                  "binding": {
+                    "text": "success"
+                  }
+                }
+              },
+              "output": {
+                "name": "value",
+                "kind": "json"
+              }
+            }
+          },
+          "handles": [
+            "critique"
+          ]
+        }
+      ]
+    },
+    "confidence": {
+      "state": "feature/build/acceptance/confidence",
+      "inputs": {
+        "max_severity_rank": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "critique"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "max_severity_rank"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "target": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "critique"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "target"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "threshold_rank": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "threshold_rank"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "iteration": {
+          "op": {
+            "kind": "function",
+            "functionRef": "op.member",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": {
+                    "kind": "function",
+                    "functionRef": "context.get",
+                    "input": {
+                      "name": {
+                        "kind": "text",
+                        "binding": {
+                          "text": "run"
+                        }
+                      }
+                    },
+                    "output": {
+                      "name": "value",
+                      "kind": "json"
+                    }
+                  }
+                }
+              },
+              "prop": {
+                "kind": "text",
+                "binding": {
+                  "text": "iteration"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "max_iterations": {
+          "op": {
+            "kind": "function",
+            "functionRef": "op.member",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": {
+                    "kind": "function",
+                    "functionRef": "context.get",
+                    "input": {
+                      "name": {
+                        "kind": "text",
+                        "binding": {
+                          "text": "limits"
+                        }
+                      }
+                    },
+                    "output": {
+                      "name": "value",
+                      "kind": "json"
+                    }
+                  }
+                }
+              },
+              "prop": {
+                "kind": "text",
+                "binding": {
+                  "text": "max_iterations"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "ask_below": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "ask_below"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      }
+    },
+    "verify": {
+      "state": "feature/build/acceptance/verify",
+      "inputs": {
+        "unverified": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "link"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "unverified"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "acceptance_tests": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "write"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "acceptance_tests"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "ask_below": {
+          "op": {
+            "kind": "function",
+            "functionRef": "scope.get",
+            "input": {
+              "scope": {
+                "kind": "text",
+                "binding": {
+                  "text": "inputs"
+                }
+              },
+              "name": {
+                "kind": "text",
+                "binding": {
+                  "text": "ask_below"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "score": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "confidence"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "score"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "reasons": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "confidence"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "reasons"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        },
+        "must_ask": {
+          "op": {
+            "kind": "function",
+            "functionRef": "select",
+            "input": {
+              "value": {
+                "kind": "json",
+                "binding": {
+                  "op": "confidence"
+                }
+              },
+              "key": {
+                "kind": "text",
+                "binding": {
+                  "text": "must_ask"
+                }
+              }
+            },
+            "output": {
+              "name": "value",
+              "kind": "json"
+            }
+          }
+        }
+      },
+      "transitions": [
+        {
+          "when": ".children.verify.output.decision === 'revise'",
+          "to": "write",
+          "inputs": {
+            "prompt": "renderTemplate($BASE/prompts/feature/acceptance/turns/override.md, { comments: .children.verify.output.comments })"
+          },
+          "inputRefs": {
+            "prompt": {
+              "op": {
+                "kind": "function",
+                "functionRef": "user:C:/Users/Ofer/.jaira/functions/renderTemplate.ts#default",
+                "input": {
+                  "template": {
+                    "kind": "text",
+                    "index": 0,
+                    "schema": {
+                      "type": "string"
+                    }
+                  },
+                  "values": {
+                    "kind": "json",
+                    "index": 1,
+                    "schema": {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": false
+                    },
+                    "binding": {
+                      "json": {}
+                    }
+                  }
+                },
+                "output": {
+                  "name": "result",
+                  "kind": "text",
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              },
+              "parameters": {
+                "template": {
+                  "kind": "text",
+                  "binding": {
+                    "text": "## What the person said\n\n{{.inputs.comments}}\n\nApply it. Re-emit `acceptance_tests` in full.\n"
+                  }
+                },
+                "values": {
+                  "kind": "json",
+                  "binding": {
+                    "op": {
+                      "kind": "function",
+                      "functionRef": "op.record",
+                      "input": {
+                        "comments": {
+                          "kind": "json",
+                          "binding": {
+                            "op": {
+                              "kind": "function",
+                              "functionRef": "op.member",
+                              "input": {
+                                "value": {
+                                  "kind": "json",
+                                  "binding": {
+                                    "op": {
+                                      "kind": "function",
+                                      "functionRef": "op.member",
+                                      "input": {
+                                        "value": {
+                                          "kind": "json",
+                                          "binding": {
+                                            "op": {
+                                              "kind": "function",
+                                              "functionRef": "op.member",
+                                              "input": {
+                                                "value": {
+                                                  "kind": "json",
+                                                  "binding": {
+                                                    "op": {
+                                                      "kind": "function",
+                                                      "functionRef": "context.get",
+                                                      "input": {
+                                                        "name": {
+                                                          "kind": "text",
+                                                          "binding": {
+                                                            "text": "children"
+                                                          }
+                                                        }
+                                                      },
+                                                      "output": {
+                                                        "name": "value",
+                                                        "kind": "json"
+                                                      }
+                                                    }
+                                                  }
+                                                },
+                                                "prop": {
+                                                  "kind": "text",
+                                                  "binding": {
+                                                    "text": "verify"
+                                                  }
+                                                }
+                                              },
+                                              "output": {
+                                                "name": "value",
+                                                "kind": "json"
+                                              }
+                                            }
+                                          }
+                                        },
+                                        "prop": {
+                                          "kind": "text",
+                                          "binding": {
+                                            "text": "output"
+                                          }
+                                        }
+                                      },
+                                      "output": {
+                                        "name": "value",
+                                        "kind": "json"
+                                      }
+                                    }
+                                  }
+                                },
+                                "prop": {
+                                  "kind": "text",
+                                  "binding": {
+                                    "text": "comments"
+                                  }
+                                }
+                              },
+                              "output": {
+                                "name": "value",
+                                "kind": "json"
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "output": {
+                        "name": "value",
+                        "kind": "json"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "whenRef": {
+            "op": {
+              "kind": "function",
+              "functionRef": "op.strictEq",
+              "input": {
+                "left": {
+                  "kind": "json",
+                  "binding": {
+                    "op": {
+                      "kind": "function",
+                      "functionRef": "op.member",
+                      "input": {
+                        "value": {
+                          "kind": "json",
+                          "binding": {
+                            "op": {
+                              "kind": "function",
+                              "functionRef": "op.member",
+                              "input": {
+                                "value": {
+                                  "kind": "json",
+                                  "binding": {
+                                    "op": {
+                                      "kind": "function",
+                                      "functionRef": "op.member",
+                                      "input": {
+                                        "value": {
+                                          "kind": "json",
+                                          "binding": {
+                                            "op": {
+                                              "kind": "function",
+                                              "functionRef": "context.get",
+                                              "input": {
+                                                "name": {
+                                                  "kind": "text",
+                                                  "binding": {
+                                                    "text": "children"
+                                                  }
+                                                }
+                                              },
+                                              "output": {
+                                                "name": "value",
+                                                "kind": "json"
+                                              }
+                                            }
+                                          }
+                                        },
+                                        "prop": {
+                                          "kind": "text",
+                                          "binding": {
+                                            "text": "verify"
+                                          }
+                                        }
+                                      },
+                                      "output": {
+                                        "name": "value",
+                                        "kind": "json"
+                                      }
+                                    }
+                                  }
+                                },
+                                "prop": {
+                                  "kind": "text",
+                                  "binding": {
+                                    "text": "output"
+                                  }
+                                }
+                              },
+                              "output": {
+                                "name": "value",
+                                "kind": "json"
+                              }
+                            }
+                          }
+                        },
+                        "prop": {
+                          "kind": "text",
+                          "binding": {
+                            "text": "decision"
+                          }
+                        }
+                      },
+                      "output": {
+                        "name": "value",
+                        "kind": "json"
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "kind": "text",
+                  "binding": {
+                    "text": "revise"
+                  }
+                }
+              },
+              "output": {
+                "name": "value",
+                "kind": "json"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "sequence": [
+    "write",
+    "run",
+    "mutate",
+    "classify",
+    "link",
+    "manual",
+    "critique",
+    "confidence",
+    "verify"
+  ],
+  "sequenceAuthored": false,
+  "slotMeta": {
+    "inputs.patterns": {
+      "optional": true,
+      "description": "The patterns this feature uses, reused and new alike."
+    },
+    "inputs.units": {
+      "optional": true,
+      "description": "The units this feature uses, reused and new alike."
+    },
+    "inputs.changes": {
+      "optional": true
+    },
+    "inputs.unit_tests": {
+      "optional": true
+    },
+    "inputs.severity_threshold": {
+      "default": "significant"
+    },
+    "inputs.threshold_rank": {
+      "default": 2,
+      "description": "blocker=3, significant=2, minor=1, note=0."
+    },
+    "inputs.ask_below": {
+      "default": 0.8
+    },
+    "inputs.returned_findings": {
+      "optional": true,
+      "description": "What a later phase found wrong with this one. Absent on the way down."
+    },
+    "outputs.acceptance_tests": {
+      "optional": true
+    },
+    "outputs.diagnosability": {
+      "optional": true
+    },
+    "outputs.verified_by": {
+      "optional": true
+    },
+    "outputs.manual_procedures": {
+      "optional": true
+    },
+    "outputs.design_findings": {
+      "optional": true
+    },
+    "outputs.finding_class": {
+      "optional": true
+    },
+    "outputs.unverified": {
+      "optional": true
+    },
+    "outputs.decision": {
+      "optional": true
+    }
+  },
+  "fanOut": [
+    "link\u0000unverified",
+    "mutate\u0000diagnosability",
+    "run\u0000results",
+    "write\u0000acceptance_tests"
+  ]
+}

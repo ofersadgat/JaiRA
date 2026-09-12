@@ -1,0 +1,203 @@
+{
+  "label": "Unit tests",
+  "description": "A separate agent writes the tests from the units' invariants, not from the diff, and reports any invariant it cannot assert.",
+  "inputs": {
+    "units": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "changes": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "unit_tests": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "unit_tests"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "unit_tests"
+    },
+    "unassertable": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "unassertable"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "unassertable"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Write the unit and contract tests for these units, from their invariants.\n\n## The units\n\n{{.inputs.units}}\n\n## The changes just landed\n\n{{.inputs.changes}}\n\nOpen each unit doc with `read_file` and take its invariants verbatim. Write one test per invariant, beside the code it checks. Read the code only to find the seams. Do not read the diff to decide what to test.\n\n## What to produce\n\n`unit_tests`: one row per test: `{ invariant, unit, file }`.\n\n`unassertable`: the invariants no test can express, each with why.\n",
+    "config": {
+      "model": "claude-cli/default"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "unit_tests": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "unassertable": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "unit_tests",
+          "unassertable"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file"
+    ]
+  },
+  "slotMeta": {
+    "inputs.units": {
+      "optional": true
+    },
+    "inputs.changes": {
+      "optional": true
+    },
+    "outputs.unassertable": {
+      "optional": true
+    }
+  }
+}

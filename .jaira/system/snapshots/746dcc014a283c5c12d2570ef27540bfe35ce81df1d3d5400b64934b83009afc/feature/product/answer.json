@@ -1,0 +1,93 @@
+{
+  "label": "Answer the questions",
+  "description": "The questions the draft could not settle from the docs, put to the person one at a time with the draft's reading pre-picked. A passed question means the draft's reading stands. Entered only when the draft raised any.",
+  "inputs": {
+    "questions": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "name",
+            "question",
+            "options"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "question": {
+              "type": "string"
+            },
+            "header": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "default": {
+              "type": "string"
+            },
+            "custom": {
+              "type": "boolean"
+            },
+            "optional": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  },
+  "outputs": {
+    "answers": {
+      "kind": "json",
+      "schema": {
+        "type": "object"
+      },
+      "name": "answers"
+    }
+  },
+  "operation": {
+    "kind": "function",
+    "functionRef": "choose_option",
+    "input": {
+      "prompt": {
+        "kind": "text",
+        "binding": {
+          "text": "The product draft could not settle these from the docs. Each shows the reading it took. Confirm it, pick another, say it in your own words, or pass to keep the reading."
+        }
+      }
+    },
+    "output": {
+      "name": "output",
+      "kind": "json"
+    }
+  },
+  "slotMeta": {
+    "inputs.questions": {
+      "default": []
+    },
+    "outputs.answers": {
+      "description": "One key per question, by name. An absent key is a passed question: the draft's default stands."
+    }
+  }
+}

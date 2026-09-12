@@ -1,0 +1,177 @@
+{
+  "label": "Candidates",
+  "inputs": {
+    "brief": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "criteria": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "candidate_kind": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "mandatory_candidate": {
+      "kind": "text",
+      "schema": {
+        "type": "string"
+      }
+    },
+    "guidance": {
+      "kind": "json",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "outputs": {
+    "candidates": {
+      "kind": "json",
+      "binding": {
+        "op": {
+          "kind": "function",
+          "functionRef": "op.member",
+          "input": {
+            "value": {
+              "kind": "json",
+              "binding": {
+                "op": {
+                  "kind": "function",
+                  "functionRef": "op.member",
+                  "input": {
+                    "value": {
+                      "kind": "json",
+                      "binding": {
+                        "op": {
+                          "kind": "function",
+                          "functionRef": "context.get",
+                          "input": {
+                            "name": {
+                              "kind": "text",
+                              "binding": {
+                                "text": "operation"
+                              }
+                            }
+                          },
+                          "output": {
+                            "name": "value",
+                            "kind": "json"
+                          }
+                        }
+                      }
+                    },
+                    "prop": {
+                      "kind": "text",
+                      "binding": {
+                        "text": "output"
+                      }
+                    }
+                  },
+                  "output": {
+                    "name": "value",
+                    "kind": "json"
+                  }
+                }
+              }
+            },
+            "prop": {
+              "kind": "text",
+              "binding": {
+                "text": "candidates"
+              }
+            }
+          },
+          "output": {
+            "name": "value",
+            "kind": "json"
+          }
+        }
+      },
+      "name": "candidates"
+    }
+  },
+  "operation": {
+    "kind": "prompt",
+    "user": "Produce the candidates for this exploration. Each is a **different stance**, not\na variation in degree.\n\n## The brief\n\n{{.inputs.brief}}\n\n## The criteria they will be scored against\n\n{{.inputs.criteria}}\n\n## What a candidate is here\n\nA candidate of kind `{{.inputs.candidate_kind}}`. What that means, and how to\nshape one:\n\n{{.inputs.guidance}}\n\n_Paths — open them with `read_file`._\n\n## The mandatory candidate\n\n**{{.inputs.mandatory_candidate}}** must be among them, argued as well as any\nother. Mark it `is_mandatory: true`.\n\nThis is not a formality. It is the candidate that wins more often than anyone\nexpects, and an exploration that omits it has already decided to build\nsomething.\n\n## Rules\n\n- **At least three**, each a genuinely different stance. Two candidates that\n  differ only in a name or a threshold are one candidate.\n- **Hold the earlier phases fixed.** A candidate that is only good because it\n  changes a decision an earlier phase already made sets\n  `holds_earlier_fixed: false` — that is a finding for `verdict` to report, not a\n  reason to smuggle the change in here.\n- **Argue each one at its best.** A straw candidate makes the scoring worthless\n  and the decision unexamined.\n- Where a candidate would run an irreversible change — a migration that has run,\n  a contract that becomes public, data that is deleted — set\n  `has_irreversible: true`. A human gate is entered on the strength of that flag.\n\n## What to produce\n\n`candidates` — each with `id` (a short slug), `stance` (one line: what this\ncandidate believes that the others do not), `content` (the candidate itself, in\nenough detail to be scored and, if it wins, to be built from), `is_mandatory`,\n`holds_earlier_fixed`, and `has_irreversible` where it applies.\n",
+    "config": {
+      "model": "claude-opus-5"
+    },
+    "input": {},
+    "output": {
+      "name": "output",
+      "kind": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "candidates": {
+            "type": "array",
+            "minItems": 3,
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "stance",
+                "content"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "stance": {
+                  "type": "string"
+                },
+                "is_mandatory": {
+                  "type": "boolean"
+                },
+                "content": {
+                  "type": "string"
+                },
+                "holds_earlier_fixed": {
+                  "type": "boolean",
+                  "description": "False means the candidate is only good because it changes an earlier decision, which is a finding for verdict to report."
+                },
+                "has_irreversible": {
+                  "type": "boolean",
+                  "description": "Implementation decompositions only: does this plan contain a migration that has run, a published contract, or deleted data? feature.md §5 step 3 reads it off the winner to decide whether the confirm gate is entered."
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "candidates"
+        ]
+      }
+    }
+  },
+  "environment": {
+    "tools": [
+      "read_file"
+    ],
+    "permissions": {
+      "profile": "read-only",
+      "tools": {
+        "read_file": "allow"
+      }
+    }
+  },
+  "slotMeta": {
+    "inputs.guidance": {
+      "description": "Paths to what shapes a candidate here. Read them with read_file."
+    }
+  }
+}
