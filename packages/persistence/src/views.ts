@@ -7,12 +7,13 @@
  * from the same code. Anything that *runs* a workflow lives above this.
  */
 import { createLogger } from "@declarative-ai/log";
-import { refusal } from "@jaira/shared";
+import { isTaskId, refusal } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import { loadBundle, type StateDef, type WorkflowBundle } from "@declarative-ai/hw";
-import type { BoardView, InstanceAddress, InstanceNode, TaskDetail, TaskOrigin, TaskSummary, TimelineEntry } from "@jaira/shared";
+import type { BoardView, InstanceAddress, InstanceNode, TaskDetail, TaskMeta, TaskOrigin, TaskSummary, TimelineEntry } from "@jaira/shared";
 import type { Project } from "./project";
 import type { TaskRuntimeRow } from "./runtime";
+import { holdingOf } from "./lifecycle";
 import { workflowLoadOptions } from "./workflowRefs";
 import {
   activePathOf,
@@ -55,7 +56,8 @@ export function functionRefsOf(bundle: WorkflowBundle): Set<string> {
 export function taskSummaries(project: Project): TaskSummary[] {
   return project.runtime.list().map((row) => {
     const meta = project.tasks.tryRead(row.taskId);
-    const origin = taskOriginOf(project, row);
+    const origin = taskOriginOf(project, row, meta);
+    const waitingFor = meta !== undefined ? holdingOf(project, meta) : [];
     return {
       taskId: row.taskId,
       title: meta?.title ?? "(missing task file)",
@@ -65,6 +67,7 @@ export function taskSummaries(project: Project): TaskSummary[] {
       ...(row.snapshotHash !== undefined ? { snapshotHash: row.snapshotHash } : {}),
       ...(meta?.parentTaskId !== undefined ? { parentTaskId: meta.parentTaskId } : {}),
       ...(origin !== undefined ? { origin } : {}),
+      ...(waitingFor.length > 0 ? { waitingFor } : {}),
       createdAt: meta?.createdAt ?? new Date(row.createdAt).toISOString(),
       updatedAt: row.updatedAt,
     };
@@ -72,14 +75,37 @@ export function taskSummaries(project: Project): TaskSummary[] {
 }
 
 /**
- * Where a forked task came from, in words — see `TaskOrigin` and `cut.ts`.
+ * Where a copied task came from, in words — see `TaskOrigin` and `cut.ts`.
  *
  * The label reads the parent's journal at the cut, which is the only place that knows what the
  * point WAS: a state's entry, a rule, a message. Read per ask rather than stored, and cheap enough
  * for a list because it is one row by primary key; a parent that is gone leaves a copy that still
  * says it is one, with the point it can no longer describe.
+ *
+ * A task a fan-out made (decision 0003) says so from its meta instead: a SPLIT copy is a cut like a
+ * fork's and carries the fork stamp too, but its sentence is the mount and the element, not the
+ * event; a mount TASK was never cut from anything and has no seam, so `at` and `boundary` are zero.
  */
-export function taskOriginOf(project: Project, row: TaskRuntimeRow): TaskOrigin | undefined {
+export function taskOriginOf(project: Project, row: TaskRuntimeRow, meta?: TaskMeta): TaskOrigin | undefined {
+  const made = (meta ?? project.tasks.tryRead(row.taskId))?.origin;
+  if (made !== undefined) {
+    const parent = project.tasks.tryRead(made.taskId);
+    const boundary =
+      row.forkBoundarySeq !== undefined
+        ? (project.db.prepare(`SELECT created_at FROM state_machine_events WHERE task_id = ? AND seq = ?`).get(row.taskId, row.forkBoundarySeq) as { created_at: number } | undefined)
+        : undefined;
+    return {
+      kind: made.kind,
+      taskId: made.taskId,
+      ...(parent !== undefined ? { title: parent.title } : {}),
+      key: made.key,
+      index: made.index,
+      at: row.forkedAtSeq ?? 0,
+      boundary: row.forkBoundarySeq ?? 0,
+      boundaryAt: boundary?.created_at ?? 0,
+      label: `element ${made.index + 1} of ${made.key}${made.item !== undefined ? ` (${made.item})` : ""}`,
+    };
+  }
   if (row.parentTaskId === undefined || row.forkedAtSeq === undefined || row.forkBoundarySeq === undefined) return undefined;
   const parent = project.tasks.tryRead(row.parentTaskId);
   const event = project.db
@@ -89,6 +115,7 @@ export function taskOriginOf(project: Project, row: TaskRuntimeRow): TaskOrigin 
     .prepare(`SELECT created_at FROM state_machine_events WHERE task_id = ? AND seq = ?`)
     .get(row.taskId, row.forkBoundarySeq) as { created_at: number } | undefined;
   return {
+    kind: "fork",
     taskId: row.parentTaskId,
     ...(parent !== undefined ? { title: parent.title } : {}),
     at: row.forkedAtSeq,
@@ -485,10 +512,31 @@ export function runCostUsd(project: Project, taskId: string): number | undefined
  * attempt's, which is what the projection keeps as the task's own; sub-workflow trees and older
  * attempts stay in the timeline without being drawn over it.
  */
+/**
+ * Stamp the instances that are tasks a fan-out MADE (decision 0003) — see `InstanceNode.made`.
+ *
+ * A mirrored element is a node with no operation and no children whose instance id is a task's, and
+ * whose provenance names this task. The projection is pure over events and cannot know; this is the
+ * one place the tree meets the task store, so it is where the join happens. Only childless,
+ * operation-less nodes are looked up — every other node is plainly the machine's own.
+ */
+function markMade(project: Project, taskId: string, nodes: readonly InstanceNode[]): void {
+  for (const node of nodes) {
+    if (node.children.length > 0) {
+      markMade(project, taskId, node.children);
+      continue;
+    }
+    if (node.operation !== undefined || !isTaskId(node.instanceId)) continue;
+    const origin = project.tasks.tryRead(node.instanceId)?.origin;
+    if (origin?.taskId === taskId) node.made = { taskId: node.instanceId, kind: origin.kind };
+  }
+}
+
 export function taskRun(project: Project, taskId: string, shape?: WorkflowShape): ProjectedRun {
   const { events, atMs } = eventsOf(project.events.list(taskId));
   if (events.length === 0) return { instances: [], activePath: [], blocked: [] };
   const projected = projectRun(events, shape, atMs);
+  markMade(project, taskId, projected.instances);
   if (projected.instances.length <= 1) return projected;
   // Several parentless trees is history's shape, not the machine's: an in-place restart before
   // re-runs minted tasks grew one per attempt. The NEWEST is the task's own — the same rule the
@@ -544,6 +592,8 @@ export function boardView(project: Project, level?: string, options?: ViewOption
     status: summary.status,
     workflow: summary.workflow,
     ...(summary.labels !== undefined ? { labels: summary.labels } : {}),
+    ...(summary.origin !== undefined ? { origin: summary.origin } : {}),
+    ...(summary.waitingFor !== undefined ? { waitingFor: summary.waitingFor } : {}),
     updatedAt: summary.updatedAt,
     run: taskRun(project, summary.taskId, shape),
   }));
@@ -565,6 +615,7 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
   const run = taskRun(project, taskId, shape);
   const heading = headingOf(run, shape);
   const origin = taskOriginOf(project, row);
+  const waitingFor = meta !== undefined ? holdingOf(project, meta) : [];
   const timeline: TimelineEntry[] = project.events
     .list(taskId)
     .slice(-TIMELINE_LIMIT)
@@ -589,6 +640,7 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
     createdAt: meta?.createdAt ?? new Date(row.createdAt).toISOString(),
     ...(meta?.inputs !== undefined ? { inputs: meta.inputs } : {}),
     ...(origin !== undefined ? { origin } : {}),
+    ...(waitingFor.length > 0 ? { waitingFor } : {}),
     instances: run.instances,
     activePath: run.activePath,
     blocked: run.blocked,

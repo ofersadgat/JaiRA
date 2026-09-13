@@ -127,6 +127,12 @@ export interface InstanceNode {
    */
   inputs?: Record<string, JsonValue>;
   /**
+   * The TASK this element became, when a fan-out made one of it (decision 0003). Such a node has no
+   * operation and no children of its own — its work is in that task — so a conversation draws it as
+   * a line rather than a panel, and a board files the task by it.
+   */
+  made?: { taskId: string; kind: "split" | "task" };
+  /**
    * What to call this RUN, resolved from {@link inputs} — see `resolveLabel`.
    *
    * Distinct from the state's own name, which is the same on every run of it. Absent when the state
@@ -227,6 +233,10 @@ export interface BoardCard {
   labels?: string[];
   /** The name the task's path gives it, when a state on the path declares a title — see {@link TaskHeading}. */
   heading?: TaskHeading;
+  /** The dependencies still unfinished — non-empty means the card is holding. See {@link Holding}. */
+  waitingFor?: Holding[];
+  /** How a fan-out made this task, when one did — the word the card's origin line uses. */
+  origin?: TaskOrigin;
   updatedAt: number;
   /**
    * When the run ENDED, from the journal — the last instance of it to terminate.
@@ -338,6 +348,8 @@ export interface TaskDetail {
   inputs?: Record<string, JsonValue>;
   /** Where this task was forked from, when it is a fork — see {@link TaskOrigin}. */
   origin?: TaskOrigin;
+  /** The dependencies still unfinished — non-empty means the task is holding. See {@link Holding}. */
+  waitingFor?: Holding[];
   /**
    * Instance forest for the TASK — its one machine, projected from its one journal.
    *
@@ -823,7 +835,12 @@ export type TurnKind =
   | "failure"
   /** A child could not be entered at all. Carries no instance, because there never was one. */
   | "blocked"
-  | "transition";
+  | "transition"
+  /**
+   * A fan-out element that became a TASK (decision 0003): the machine made something rather than
+   * entering it. `made` says what — the line links to the task and can nest its conversation.
+   */
+  | "made";
 
 export interface ConversationTurn {
   seq: number;
@@ -864,6 +881,27 @@ export interface ConversationTurn {
   ok?: boolean;
   /** Structured payload, for `output` turns. */
   data?: JsonValue;
+  /** For a `made` turn: the task the element became. */
+  made?: MadeTask;
+}
+
+/**
+ * The task a fan-out element became (decision 0003), as a conversation line says it.
+ *
+ * `status` is the task's standing NOW, read off its row when the view is built — the line says
+ * "made Alpha · running" and then "· completed" on the next read, which the run-end push triggers.
+ * `boundary` is the copy's seam for a split (its own coordinates, as `TaskOrigin.boundary`), so a
+ * nested view of it can start where its own history begins rather than repeating the parent's.
+ */
+export interface MadeTask {
+  taskId: string;
+  title: string;
+  kind: "split" | "task";
+  status: TaskStatus;
+  boundary?: number;
+  boundaryAt?: number;
+  /** How many dependencies it is still holding for. */
+  holding: number;
 }
 
 export interface ConversationView {
@@ -983,6 +1021,8 @@ export interface TaskSummary {
   parentTaskId?: string;
   /** Present when this task is a FORK of {@link parentTaskId} — a copy cut at a point, not a re-run. */
   origin?: TaskOrigin;
+  /** The dependencies still unfinished — non-empty means the task is holding. See {@link Holding}. */
+  waitingFor?: Holding[];
   createdAt: string;
   updatedAt: number;
 }
@@ -1298,14 +1338,34 @@ export interface ChatEditPoint {
  * read, because it may not be readable later (the parent can be deleted, and the copy survives it).
  */
 export interface TaskOrigin {
+  /**
+   * What made the copy. A `fork` is a person's verb; `split` and `task` are a fan-out's (decision
+   * 0003). Absent means `fork`, which is every origin projected before the field existed.
+   */
+  kind?: "fork" | "split" | "task";
   taskId: string;
   /** The parent's title, when the parent is still there to have one. */
   title?: string;
+  /** For a fan-out's task: the mount key in the parent, and which element — what files a mount task in that column. */
+  key?: string;
+  index?: number;
   at: number;
   boundary: number;
   /** When the boundary event happened — where the seam sits among rows laid out by the clock. */
   boundaryAt: number;
   label: string;
+}
+
+/**
+ * A task this one is HOLDING for — a dependency that has not completed (decision 0003).
+ *
+ * Derived wherever a task row is read, never stored: the dependency's status is the fact, and a
+ * stored "holding" would have to be rewritten by whichever process saw the dependency finish.
+ */
+export interface Holding {
+  taskId: string;
+  title: string;
+  status: TaskStatus;
 }
 
 /** How bad an entry is. Filtering by one means "this and worse", not "this exactly". */

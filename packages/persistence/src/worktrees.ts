@@ -15,7 +15,7 @@
 import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
 import { existsSync, mkdirSync } from "node:fs";
-import { worktreePathFor, type JairaExecEnvironment } from "@jaira/shared";
+import { worktreePathFor, type JairaExecEnvironment, type TaskMeta } from "@jaira/shared";
 import { Git, NodeExec, type Exec, type ExecEnv } from "@jaira/runtime";
 import type { Project } from "./project";
 
@@ -66,6 +66,24 @@ export async function ensureWorkspace(
   const meta = project.tasks.read(taskId);
   const git = gitFor(project, project.paths.projectDir, options);
 
+  // A task a mount made (decision 0003, `each: "task"`) is its parent's own work and runs in its
+  // parent's workspace — the worktree the parent's branch materialized, or the project directory
+  // where the parent is unbound. It has no branch of its own and never gets one here.
+  if (meta.origin?.kind === "task") {
+    const parent = project.tasks.tryRead(meta.origin.taskId);
+    const parentRow = project.runtime.get(meta.origin.taskId);
+    if (parent?.branch !== undefined) {
+      const root = parentRow?.worktreePath;
+      if (root === undefined || !existsSync(root)) {
+        throw refusal(log, `task '${taskId}' runs in its parent's worktree, and '${meta.origin.taskId}' has none materialized`, { taskId });
+      }
+      const treeHash = await gitFor(project, root, options).treeHash();
+      return { root, isWorktree: true, branch: parent.branch, ...(treeHash !== undefined ? { treeHash } : {}) };
+    }
+    const treeHash = (await git.isRepo()) ? await git.treeHash() : undefined;
+    return { root: project.paths.projectDir, isWorktree: false, ...(treeHash !== undefined ? { treeHash } : {}) };
+  }
+
   if (meta.branch === undefined) {
     // Unbound: the project directory itself, with a tree hash when it is a repo
     // (so a workspace-mutating op still has an identity to memoize under).
@@ -89,7 +107,11 @@ export async function ensureWorkspace(
     // until it is pruned.
     if (recorded !== undefined) await git.pruneWorktrees();
     mkdirSync(project.paths.worktreesDir, { recursive: true });
-    await git.addWorktree(path, meta.branch);
+    // A branch cut for a task that DEPENDS on another (decision 0003) starts from the head of the
+    // dependency finished most recently — its code is what this task builds on, and the ordering
+    // the dependency expressed is what makes that head exist by now. Only where the branch is new:
+    // an existing branch is what it is, and `addWorktree` ignores the start point for one.
+    await git.addWorktree(path, meta.branch, dependencyBaseOf(project, meta));
   }
 
   // Record the mapping as soon as the worktree exists, so a crash between here and
@@ -104,6 +126,23 @@ export async function ensureWorkspace(
     branch: meta.branch,
     ...(treeHash !== undefined ? { treeHash } : {}),
   };
+}
+
+/**
+ * The branch a dependent task's own branch should start from: the branch of the completed dependency
+ * that ended LAST, since the ordering runs one way and the latest head has the earlier ones under it
+ * where the chain is a chain. A dependency without a branch (an unbound task) or one still unfinished
+ * contributes nothing, and with nothing to go on the branch starts where a fresh one does.
+ */
+export function dependencyBaseOf(project: Project, meta: Pick<TaskMeta, "dependsOn">): string | undefined {
+  let base: { branch: string; endedAt: number } | undefined;
+  for (const dependency of meta.dependsOn ?? []) {
+    const row = project.runtime.get(dependency);
+    if (row === undefined || row.status !== "completed" || row.branch === undefined) continue;
+    const endedAt = row.endedAt ?? 0;
+    if (base === undefined || endedAt > base.endedAt) base = { branch: row.branch, endedAt };
+  }
+  return base?.branch;
 }
 
 export interface RemoveWorktreeResult {

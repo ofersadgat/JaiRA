@@ -572,14 +572,32 @@ export function workflowRoots(project: Project): string[] {
 
 /** Task projections for one workflow, ready for {@link projectBoard}. */
 function projectionsFor(project: Project, shape: WorkflowShape | undefined, workflow?: string): TaskProjection[] {
-  return taskSummaries(project)
-    .filter((summary) => workflow === undefined || summary.workflow === workflow)
+  const summaries = taskSummaries(project);
+  // A task a MOUNT made (decision 0003) runs the mounted state as its workflow, which is not the
+  // root — but it belongs on the root's boards, in its parent's column, so it comes along when its
+  // parent does. The parent's workflow is what says which root that is.
+  const byTaskId = new Map(summaries.map((s) => [s.taskId, s]));
+  const rootOf = (summary: (typeof summaries)[number]): string => {
+    let current = summary;
+    const seen = new Set<string>([current.taskId]);
+    while (current.origin?.kind === "task") {
+      const parent = byTaskId.get(current.origin.taskId);
+      if (parent === undefined || seen.has(parent.taskId)) break;
+      seen.add(parent.taskId);
+      current = parent;
+    }
+    return current.workflow;
+  };
+  return summaries
+    .filter((summary) => workflow === undefined || rootOf(summary) === workflow)
     .map((summary) => ({
       taskId: summary.taskId,
       title: summary.title,
       status: summary.status,
       workflow: summary.workflow,
       ...(summary.labels !== undefined ? { labels: summary.labels } : {}),
+      ...(summary.origin !== undefined ? { origin: summary.origin } : {}),
+      ...(summary.waitingFor !== undefined ? { waitingFor: summary.waitingFor } : {}),
       updatedAt: summary.updatedAt,
       run: taskRun(project, summary.taskId, shape),
     }));
@@ -748,6 +766,11 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
   }
 
   for (const summary of summaries) {
+    // A task a MOUNT made (decision 0003, `each: "task"`) is an element inside its parent's run — one
+    // item of one feature — and shows on the board of the state that mounted it, not here. A task
+    // at this level is a feature; a SPLIT copy is one, and files under its parent's flow like any
+    // other subsidiary.
+    if (summary.origin?.kind === "task") continue;
     // One bundle per workflow would be cheaper, but a card at this level only needs the task's own
     // active path, and `taskRun` without a shape still yields one.
     const bundle = bundleFor(project, summary.workflow, summary.snapshotHash);
@@ -778,6 +801,8 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
       hasSubBoard: path.length > 0,
       ...(summary.labels !== undefined ? { labels: summary.labels } : {}),
       ...(heading !== undefined ? { heading } : {}),
+      ...(summary.origin !== undefined ? { origin: summary.origin } : {}),
+      ...(summary.waitingFor !== undefined ? { waitingFor: summary.waitingFor } : {}),
       updatedAt: summary.updatedAt,
     };
     // Always found: the loop above made a column for every flow the summaries resolve to, whether

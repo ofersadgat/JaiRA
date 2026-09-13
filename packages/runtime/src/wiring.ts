@@ -30,8 +30,10 @@ import {
   createWorkflowExecutor,
   type CallResult,
   type EngineEvent,
+  type FanOutHost,
   type LoadedInstance,
   type Persistence,
+  type SplitEntry,
   type WorkflowBundle,
   type WorkflowMetrics,
 } from "@declarative-ai/hw";
@@ -269,6 +271,14 @@ export interface WorkflowRunConfig {
    * `inputs` is ignored on a load; the description carries what every instance was called with.
    */
   loaded?: LoadedInstance;
+  /**
+   * Where a hosted fan-out's elements go — hw's `EngineConfig.fanOut` (decision 0003). A mount
+   * whose `each` is `"task"` or `"split"` hands its elements here instead of entering them, and the
+   * answer settles the mount. Absent ⇒ such a mount fails with that reason.
+   */
+  fanOut?: FanOutHost;
+  /** The lists this task is split on — hw's `EngineConfig.split`; a split mount over one of them narrows to this task's element. */
+  split?: readonly SplitEntry[];
   abortSignal?: AbortSignal;
   /**
    * The filesystem the run acts within — a task's git worktree, or the project
@@ -401,6 +411,8 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     ...(cfg.answers !== undefined ? { answers: cfg.answers } : {}),
     ...(cfg.newInstanceId !== undefined ? { newInstanceId: cfg.newInstanceId } : {}),
     ...(cfg.persistence !== undefined ? { persistence: cfg.persistence } : {}),
+    ...(cfg.fanOut !== undefined ? { fanOut: cfg.fanOut } : {}),
+    ...(cfg.split !== undefined ? { split: cfg.split } : {}),
   });
   const ctx: ExecServices = {
     validator: new SchemaValidator(),

@@ -25,6 +25,7 @@ import type {
   BoardColumn,
   BoardCrumb,
   BoardView,
+  Holding,
   InstanceAddress,
   InstanceNode,
   InstanceStatus,
@@ -32,6 +33,7 @@ import type {
   OperationView,
   PathStep,
   TaskHeading,
+  TaskOrigin,
   TaskStatus,
 } from "@jaira/shared";
 import type { StoredEvent } from "./eventLog";
@@ -506,6 +508,10 @@ export interface TaskProjection {
   labels?: string[];
   updatedAt: number;
   run: ProjectedRun;
+  /** How a fan-out made this task, when one did (decision 0003) — what files a mount task in its parent's column. */
+  origin?: TaskOrigin;
+  /** The dependencies still unfinished — non-empty means the task is holding. */
+  waitingFor?: Holding[];
 }
 
 const TERMINAL: ReadonlySet<TaskStatus> = new Set(["completed", "failed", "canceled"]);
@@ -540,6 +546,8 @@ function cardOf(
     hasSubBoard: path.length > levelIndex + 2,
     ...(task.labels !== undefined ? { labels: task.labels } : {}),
     ...(heading !== undefined ? { heading } : {}),
+    ...(task.origin !== undefined ? { origin: task.origin } : {}),
+    ...(task.waitingFor !== undefined && task.waitingFor.length > 0 ? { waitingFor: task.waitingFor } : {}),
     updatedAt: task.updatedAt,
   };
 }
@@ -597,12 +605,29 @@ export function projectBoard(
   const byKey = new Map(columns.map((c) => [c.key, c]));
   const atLevel: BoardCard[] = [];
   const finished: BoardCard[] = [];
+  const byTaskId = new Map(tasks.map((task) => [task.taskId, task]));
 
   for (const task of tasks) {
     const path = boardPathOf(task.run);
     // Where does this path sit relative to `level`?
     const at = path.findIndex((step) => step.stateId === level);
     const card = cardOf(task, path, Math.max(at, 0), activeStatusOf(task.run), shape);
+
+    /**
+     * A task a MOUNT made (decision 0003, `each: "task"`) is an element of its parent's fan-out, and
+     * its place on a board is the column of that mount — in the board of the state that mounted it.
+     * Its own path begins at the mounted state, which is below this level and never names it, so
+     * without this it would be on no board at all. Filed where its parent stands: the parent is one
+     * of these tasks, its path passes through this level, and the mount is one of these columns.
+     */
+    const made = task.origin?.kind === "task" && task.origin.key !== undefined ? task.origin : undefined;
+    const parent = made !== undefined ? byTaskId.get(made.taskId) : undefined;
+    const column = made?.key !== undefined ? byKey.get(made.key) : undefined;
+    if (made !== undefined && parent !== undefined && column !== undefined && boardPathOf(parent.run).some((step) => step.stateId === level)) {
+      column.cards.push(card);
+      if (TERMINAL.has(task.status)) finished.push(card);
+      continue;
+    }
 
     if (path.length === 0) {
       // Never run. It will BEGIN at its workflow root, so it is at this level exactly when this

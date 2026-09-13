@@ -44,7 +44,7 @@ import { Icon } from "./icons";
 import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
 import { clockOf, durationOf } from "./transcriptView";
 import { signatureOf } from "./transcript";
-import { addressSegment, segmentKey, type InstanceNode, type TaskOrigin } from "@jaira/shared/browser";
+import { addressSegment, segmentKey, type InstanceNode, type MadeTask, type TaskOrigin } from "@jaira/shared/browser";
 import { StateBlock, StateHeader, headerToneOf, surfaceKindOf } from "./stateSurface";
 import {
   forksOf,
@@ -903,13 +903,28 @@ export function cutNameOf(note: BandNote, root: string): string {
  * is drawn as an annotation on the background the panels sit on: the same place a note would be
  * written in the margin of a printed transcript, at the point in the stack where it happened.
  */
-function NoteRow({ note, root, onCut }: { note: BandNote; root: string; onCut?: CutOffer | undefined }): JSX.Element {
+function NoteRow({
+  note,
+  root,
+  onCut,
+  onSelectTask,
+  nested,
+}: {
+  note: BandNote;
+  root: string;
+  onCut?: CutOffer | undefined;
+  /** Where a made task's title goes when clicked — the task itself. */
+  onSelectTask?: ((taskId: string) => void) | undefined;
+  /** The made task's conversation, nested under its line when the line is expanded. */
+  nested?: ((made: MadeTask) => ReactNode) | undefined;
+}): JSX.Element {
   // Moving is not going wrong: a forking-path glyph and the ordinary text colour, against the alert
   // and `--bad` a failure gets. Same shape and same column either way, because they are the same KIND
   // of thing — a fact about a state, written where the state has no page of its own — and reading a
   // run means reading them interleaved, in the order they happened.
   const moved = note.kind === "entered" || note.kind === "transition";
   const where = pathFrom(note.path, root);
+  if (note.kind === "made" && note.made !== undefined) return <MadeRow note={note} made={note.made} where={where} onSelectTask={onSelectTask} nested={nested} />;
   return (
     // `data-entered` is what a bookmark lands on: the row where the run went INTO the state, which
     // is where a person following the run wants to start reading — not the letterhead below it,
@@ -969,12 +984,78 @@ function NoteRow({ note, root, onCut }: { note: BandNote; root: string; onCut?: 
   );
 }
 
+/**
+ * A fan-out element that became a TASK (decision 0003), as a line: the verb by kind, the task's
+ * title as the link, its standing after it — and a chevron that nests the task's own conversation
+ * under the line, with its own rail, the way a subagent's sidechain nests under the call that
+ * spawned it. Collapsed by default: a parent with twelve items must not open twelve streams.
+ */
+function MadeRow({
+  note,
+  made,
+  where,
+  onSelectTask,
+  nested,
+}: {
+  note: BandNote;
+  made: MadeTask;
+  where: string;
+  onSelectTask?: ((taskId: string) => void) | undefined;
+  nested?: ((made: MadeTask) => ReactNode) | undefined;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const standing = made.holding > 0 ? `waiting for ${made.holding} ${made.holding === 1 ? "task" : "tasks"}` : made.status;
+  return (
+    <div className={`sb-note step sb-made${open ? " sb-made-open" : ""}`} role="note" data-made={made.taskId}>
+      {nested !== undefined ? (
+        <button
+          type="button"
+          className={`lh-chev sb-made-chev${open ? " open" : ""}`}
+          aria-expanded={open}
+          aria-label={open ? `collapse ${made.title}` : `expand ${made.title}`}
+          title={open ? "collapse" : "show this task's conversation here"}
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpen((v) => !v);
+          }}
+        >
+          <Icon name="chevron" />
+        </button>
+      ) : (
+        <Icon name="choice" className="sb-note-icon" />
+      )}
+      <span className="sb-note-verb">{MADE_VERB[made.kind]}</span>
+      {onSelectTask !== undefined ? (
+        <button type="button" className="sb-made-link ellip" title={`open ${made.title} (${made.taskId})`} onClick={() => onSelectTask(made.taskId)}>
+          {made.title}
+        </button>
+      ) : (
+        <span className="sb-made-link ellip">{made.title}</span>
+      )}
+      <span className="sb-note-text sb-made-standing">· {standing}</span>
+      {where === "" ? null : (
+        <span className="sb-note-state mono ellip" title={note.stateId ?? where}>
+          {where}
+        </span>
+      )}
+      {open && nested !== undefined ? <div className="sb-made-nest">{nested(made)}</div> : null}
+    </div>
+  );
+}
+
+/** What the machine did to make the task — "split off Alpha", "made Alpha". */
+const MADE_VERB: Record<MadeTask["kind"], string> = {
+  split: "split off",
+  task: "made",
+};
+
 /** What each kind of note says it is. The row reads as a sentence, so this is its verb. */
 const VERB: Record<BandNote["kind"], string> = {
   entered: "entered",
   transition: "entered",
   blocked: "could not enter",
   failure: "",
+  made: "made",
 };
 
 /**
@@ -988,6 +1069,8 @@ const VERB: Record<BandNote["kind"], string> = {
 export function stepOfNote(note: BandNote, root: string): RailStep {
   const at = segmentsFrom(note.path, root);
   const opens = note.kind === "entered";
+  // A made task's path is the element's (`work[0]`), and the row belongs to the state that made it:
+  // nothing was entered here, so no lane opens, and the line sits against its parent.
   const inside = opens || note.kind === "failure" ? at : at.slice(0, -1);
   return {
     // The instance where there is one: `explore` running twice is two lanes, and a key on the state
@@ -1025,9 +1108,15 @@ export function SessionBandsView({
   onCut,
   armed,
   origin,
+  onSelectTask,
+  nested,
 }: {
   bands: readonly SessionBand[];
   render: (piece: SessionPiece) => ReactNode;
+  /** Where a made task's title goes when clicked — see {@link MadeRow}. */
+  onSelectTask?: ((taskId: string) => void) | undefined;
+  /** A made task's conversation, drawn nested under its line when expanded — see {@link MadeRow}. */
+  nested?: ((made: MadeTask) => ReactNode) | undefined;
   /** The two verbs of a cut, offered on every entered row and knot — see {@link CutOffer}. */
   onCut?: CutOffer | undefined;
   /**
@@ -1185,7 +1274,17 @@ export function SessionBandsView({
         noteRows.set(steps.length, note);
         laneNotes.set(step.key, note);
       }
-      add(step, <NoteRow note={note} root={root} {...(onCut !== undefined ? { onCut } : {})} />, note.at);
+      add(
+        step,
+        <NoteRow
+          note={note}
+          root={root}
+          {...(onCut !== undefined ? { onCut } : {})}
+          {...(onSelectTask !== undefined ? { onSelectTask } : {})}
+          {...(nested !== undefined ? { nested } : {})}
+        />,
+        note.at,
+      );
     }
   };
 

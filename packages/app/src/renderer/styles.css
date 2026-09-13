@@ -12998,3 +12998,45 @@ fieldset.reading {
   background: none;
   color: var(--dim);
 }
+
+/* A fan-out element that became a TASK (decision 0003): a line in the grey, not a panel. The verb,
+   the task's title as the link, its standing — and a chevron that nests the task's own conversation
+   under the line, with its own rail, the way a subagent's sidechain nests under its call. */
+.sb-made {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.sb-made-chev {
+  flex: none;
+  align-self: center;
+}
+.sb-made-link {
+  min-width: 0;
+  max-width: 50%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.sb-made-link:hover {
+  text-decoration: underline;
+}
+.sb-made-standing {
+  flex: none;
+  color: var(--dim);
+}
+/* The nested conversation takes the whole width under the line, set in from the chevron so the
+   child's rail reads as inside the parent's. */
+.sb-made-nest {
+  flex-basis: 100%;
+  min-width: 0;
+  margin: 4px 0 8px 18px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+.sb-made-nest .run-convo-wrap {
+  max-height: 60vh;
+}

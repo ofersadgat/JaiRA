@@ -54,7 +54,7 @@ import { createHash } from "node:crypto";
 import { hashOperation, scopedOperationId } from "@declarative-ai/exec";
 import { uuidv7, type EngineEvent } from "@declarative-ai/hw";
 import { createLogger } from "@declarative-ai/log";
-import { refusal, type TaskStatus } from "@jaira/shared";
+import { refusal, type SplitEntry, type TaskProvenance, type TaskStatus } from "@jaira/shared";
 import { CHAT_INSTANCE_PREFIX } from "@jaira/runtime";
 import type { Project } from "./project";
 import { sessionStoreFor } from "./project";
@@ -142,11 +142,18 @@ interface SeatRow {
   seat: number | null;
 }
 
-/** The task's journal, checked for the two things a cut cannot be made through. */
-function journalOf(project: Project, taskId: string, seq: number): StoredEvent[] {
+/**
+ * The task's journal, checked for the two things a cut cannot be made through.
+ *
+ * `ofLiveTask` lifts the standing check for the one caller that cuts a RUNNING task on purpose: a
+ * split (decision 0003) copies its parent while the parent is parked inside the mount, which is a
+ * stable point — nothing is being appended past it until the host answers. The seq may then be one
+ * past the last event, meaning "everything so far": a cut BEFORE the newest event would drop it.
+ */
+function journalOf(project: Project, taskId: string, seq: number, ofLiveTask = false): StoredEvent[] {
   const row = project.runtime.get(taskId);
   if (row === undefined) throw refusal(log, `unknown task '${taskId}'`, { taskId });
-  if (row.status === "running" || row.status === "stopping") {
+  if (!ofLiveTask && (row.status === "running" || row.status === "stopping")) {
     throw refusal(log, `task '${taskId}' is ${row.status} — stop it before cutting its journal`, { taskId });
   }
   if (isFileBacked(project.config.storage.journal)) {
@@ -156,7 +163,8 @@ function journalOf(project: Project, taskId: string, seq: number): StoredEvent[]
     if (legacy) throw refusal(log, `task '${taskId}' has history in per-run journal files, which a cut cannot address`, { taskId });
   }
   const events = project.events.list(taskId);
-  if (!events.some((event) => event.seq === seq)) {
+  const last = events.length > 0 ? events[events.length - 1]!.seq : 0;
+  if (!events.some((event) => event.seq === seq) && !(ofLiveTask && seq === last + 1)) {
     throw refusal(log, `task '${taskId}' has no journal event ${seq}`, { taskId, seq });
   }
   return events;
@@ -245,9 +253,30 @@ export interface ForkOptions {
   /**
    * How the copy stands once made. `startable` leaves it `interrupted` for the resume that follows
    * (a run fork); `asIs` copies the parent's own standing (a chat fork, whose next message is a chat
-   * turn rather than a resume, and whose row should read as its parent's does).
+   * turn rather than a resume, and whose row should read as its parent's does); `queued` is a copy
+   * that has never run and is not about to — a SPLIT's (decision 0003), which stands where it was
+   * put until somebody or its dependencies release it. It keeps no start, no end and no outcome.
    */
-  standing: "startable" | "asIs";
+  standing: "startable" | "asIs" | "queued";
+  /**
+   * The copy's branch. Absent copies the parent's binding, which is right for a fork — the same
+   * work, tried another way — and wrong for a split, whose copy is other work on the same base:
+   * `null` unbinds the copy, a string binds it to its own branch.
+   */
+  branch?: string | null;
+  /** The copy's parent for the re-run chain. Defaults to the task copied. */
+  parentTaskId?: string;
+  /** How a fan-out made the copy — see `TaskMeta.origin`. */
+  origin?: TaskProvenance;
+  /** The lists the copy is split on — see `TaskMeta.split`. */
+  split?: SplitEntry[];
+  /** Tasks the copy must wait for — see `TaskMeta.dependsOn`. */
+  dependsOn?: string[];
+  /**
+   * The task copied is RUNNING and parked at the point of the cut — a split's parent (decision
+   * 0003). The seq may then be one past its last event: everything so far.
+   */
+  ofLiveTask?: boolean;
   nowMs?: number;
 }
 
@@ -341,7 +370,7 @@ function lastMessageIdOf(resultsNewestFirst: readonly (string | null)[]): string
  */
 export function forkTask(project: Project, taskId: string, seq: number, options: ForkOptions): ForkResult {
   const nowMs = options.nowMs ?? Date.now();
-  const events = journalOf(project, taskId, seq);
+  const events = journalOf(project, taskId, seq, options.ofLiveTask === true);
   const parent = project.runtime.get(taskId)!;
   if (parent.snapshotHash === undefined) throw refusal(log, `task '${taskId}' has never run, so there is nothing to fork`, { taskId });
   const meta = project.tasks.read(taskId);
@@ -428,8 +457,11 @@ export function forkTask(project: Project, taskId: string, seq: number, options:
       ...(meta.description !== undefined ? { description: meta.description } : {}),
       ...(meta.labels !== undefined ? { labels: meta.labels } : {}),
       ...(meta.inputs !== undefined ? { inputs: meta.inputs } : {}),
-      ...(meta.branch !== undefined ? { branch: meta.branch } : {}),
-      parentTaskId: taskId,
+      ...(options.branch === undefined ? (meta.branch !== undefined ? { branch: meta.branch } : {}) : options.branch === null ? {} : { branch: options.branch }),
+      parentTaskId: options.parentTaskId ?? taskId,
+      ...(options.origin !== undefined ? { origin: options.origin } : {}),
+      ...(options.split !== undefined ? { split: options.split } : {}),
+      ...(options.dependsOn !== undefined ? { dependsOn: options.dependsOn } : {}),
     },
     nowMs,
   );
@@ -578,9 +610,9 @@ export function forkTask(project: Project, taskId: string, seq: number, options:
         forkedAtSeq: seq,
         forkBoundarySeq: boundarySeq,
         status: standing,
-        startedAt: parent.startedAt,
-        endedAt: standing === "interrupted" ? nowMs : parent.endedAt,
-        outcome: standing === "interrupted" ? "interrupted" : parent.outcome,
+        startedAt: standing === "queued" ? undefined : parent.startedAt,
+        endedAt: standing === "interrupted" ? nowMs : standing === "queued" ? undefined : parent.endedAt,
+        outcome: standing === "interrupted" ? "interrupted" : standing === "queued" ? undefined : parent.outcome,
       },
       nowMs,
     );
@@ -589,9 +621,10 @@ export function forkTask(project: Project, taskId: string, seq: number, options:
   return { taskId: copy.id, boundarySeq, instanceIds };
 }
 
-/** How a copy stands: its parent's standing where that is settled, `interrupted` otherwise. */
+/** How a copy stands: its parent's standing where that is settled, `interrupted` otherwise — or `queued`, a copy that has not run. */
 function standingOf(parent: TaskStatus, wanted: ForkOptions["standing"]): TaskStatus {
   if (wanted === "startable") return "interrupted";
+  if (wanted === "queued") return "queued";
   return parent === "completed" || parent === "failed" || parent === "canceled" ? parent : "interrupted";
 }
 

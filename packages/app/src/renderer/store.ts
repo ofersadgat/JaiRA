@@ -75,11 +75,8 @@ import {
   defaultEditors,
   defaultLogPolicy,
   defaultRendererChoice,
-  foldWriting,
-  isStreamBookkeeping,
   isTextMime,
   SHARED_SESSION,
-  startsThinking,
   WORKFLOW_JSON,
   type WritingTool,
 } from "@jaira/shared/browser";
@@ -121,6 +118,7 @@ import { applyEditors } from "./editorLook";
 import { publishRenderChoices } from "./renderChoice";
 import { unseenTasks } from "./pill";
 import { sessionKey, withoutSession } from "./sessionCache";
+import { alreadyFolded, foldLiveTurn, liveTurnOfSnapshot, tailIsAhead } from "./liveTurnFold";
 import {
   emptyUiState,
   forgetSeen,
@@ -869,8 +867,6 @@ const EMPTY: AppState = {
 
 /** Keep the live log bounded — a long run would otherwise grow without limit. */
 const STREAM_LIMIT = 300;
-/** Live entries kept per position. An agent loop emits one per turn; the tail is what is read. */
-const LIVE_ENTRY_LIMIT = 500;
 /**
  * How many diagnostics the renderer keeps.
  *
@@ -1583,38 +1579,13 @@ export function useApp() {
         }
         // A tail already AHEAD of the snapshot stays: pushes folded in while the snapshot was in
         // flight would be lost by reverting to it, and `n` says which of the two has seen more.
-        const current = ref.current.liveTurn;
-        const keep =
-          live !== null &&
-          current !== null &&
-          current.sessionId === live.sessionId &&
-          current.seq === live.seq &&
-          (current.n ?? -1) >= live.n;
+        const keep = tailIsAhead(ref.current.liveTurn, live);
         patch({
           sessionHistory: history,
           records,
           session,
           sessionInstance: wanted,
-          ...(keep
-            ? {}
-            : {
-                liveTurn:
-                  live === null
-                    ? null
-                    : {
-                        ...(live.sessionId !== undefined ? { sessionId: live.sessionId } : {}),
-                        ...(live.seq !== undefined ? { seq: live.seq } : {}),
-                        ...(live.stateId !== undefined ? { stateId: live.stateId } : {}),
-                        n: live.n,
-                        text: live.text,
-                        thinking: live.thinking,
-                        ...(live.textStartedAt !== undefined ? { textStartedAt: live.textStartedAt } : {}),
-                        ...(live.thinkingStartedAt !== undefined ? { thinkingStartedAt: live.thinkingStartedAt } : {}),
-                        entries: live.entries,
-                        sidechains: live.sidechains,
-                        ...(live.writing !== undefined ? { writing: live.writing } : {}),
-                      },
-              }),
+          ...(keep ? {} : { liveTurn: liveTurnOfSnapshot(live) }),
         });
         return wanted;
       } catch {
@@ -2396,82 +2367,13 @@ export function useApp() {
           // into the transcript being read. `n` is per task, so a stray one also breaks the merge
           // protocol — the skip rule compares counts that were never counting the same thing.
           if (message.taskId !== ref.current.selected) break;
-          // Accumulated per position: a delta is a fragment, and the fragments of one call belong to one
-          // answer. A delta for a different position REPLACES rather than appends, because that is a
-          // different state speaking and concatenating two would invent a turn neither produced.
-          const live = ref.current.liveTurn;
-          const same = live !== null && live.sessionId === message.sessionId && live.seq === message.seq;
           // Already folded in — the tail was seeded from a `session:live` snapshot that had seen
           // this delta. Applying it again would show the fragment twice.
-          if (same && message.n !== undefined && live.n !== undefined && message.n <= live.n) break;
-          const entries = same ? [...live.entries] : [];
-          const sidechains = same ? { ...live.sidechains } : {};
-          let text = same ? live.text : "";
-          let thinking = same ? live.thinking : "";
-          // The tail CLOCKS, kept in step with the tails themselves — set when a tail starts,
-          // cleared when the finished turn restarts it. Main folds the identical rule (`LiveTurnLog`);
-          // both must agree, because either can be the one holding the tail on screen.
-          let textStartedAt = same ? live.textStartedAt : undefined;
-          let thinkingStartedAt = same ? live.thinkingStartedAt : undefined;
-          let writing = same ? live.writing : undefined;
-          if (message.entry !== undefined) {
-            // A SUBAGENT's turn accumulates under the call that spawned it and nowhere else — the
-            // doorway row renders it there, and folding it into `entries` is the misattribution the
-            // tag exists to prevent.
-            const entry = message.entry as { kind?: string; role?: string; parentToolUseId?: string };
-            if (typeof entry.parentToolUseId === "string") {
-              const chain = [...(sidechains[entry.parentToolUseId] ?? []), message.entry];
-              sidechains[entry.parentToolUseId] = chain.length > LIVE_ENTRY_LIMIT ? chain.slice(-LIVE_ENTRY_LIMIT) : chain;
-            } else {
-              // The identical fold main runs (`LiveTurnLog`), on the identical entry: what the
-              // bookkeeping SAYS is kept, the event itself is dropped rather than queued behind the
-              // cap. Either side can be the one holding the tail on screen, so both must agree.
-              writing = foldWriting(writing, message.entry);
-              if (!isStreamBookkeeping(message.entry)) entries.push(message.entry);
-              // A finished assistant turn carries the same text and thinking its deltas streamed — the
-              // tails restart so nothing is shown twice, once in the turn and once as the live edge.
-              // The half-written call ends with them: it is on that turn now, with a row of its own.
-              if (entry.kind === "message" && entry.role === "assistant") {
-                text = "";
-                thinking = "";
-                textStartedAt = undefined;
-                thinkingStartedAt = undefined;
-                writing = undefined;
-              }
-            }
-          }
-          // Stamped from the entry's own `at` where it has one (main enriches every entry), falling
-          // back to the arrival clock — a delta with neither is a fragment we can still time.
-          const stampedAt = (message.entry as { at?: number } | undefined)?.at ?? Date.now();
-          if (message.text !== undefined) {
-            if (text.length === 0 && message.text.length > 0) textStartedAt = stampedAt;
-            text += message.text;
-          }
-          if (message.thinking !== undefined) {
-            if (thinking.length === 0 && message.thinking.length > 0) thinkingStartedAt = stampedAt;
-            thinking += message.thinking;
-          }
-          // A withheld think streams no text at all, so its start arrives as bookkeeping instead of
-          // as a fragment. The identical rule main folds in `LiveTurnLog`; both must agree, because
-          // either can be the one holding the tail on screen.
-          if (thinkingStartedAt === undefined && text.length === 0 && message.entry !== undefined && startsThinking(message.entry)) {
-            thinkingStartedAt = stampedAt;
-          }
-          patch({
-            liveTurn: {
-              ...(message.sessionId !== undefined ? { sessionId: message.sessionId } : {}),
-              ...(message.seq !== undefined ? { seq: message.seq } : {}),
-              ...(message.stateId !== undefined ? { stateId: message.stateId } : {}),
-              ...(message.n !== undefined ? { n: message.n } : {}),
-              text,
-              thinking,
-              ...(textStartedAt !== undefined ? { textStartedAt } : {}),
-              ...(thinkingStartedAt !== undefined ? { thinkingStartedAt } : {}),
-              entries: entries.length > LIVE_ENTRY_LIMIT ? entries.slice(-LIVE_ENTRY_LIMIT) : entries,
-              sidechains,
-              ...(writing !== undefined ? { writing } : {}),
-            },
-          });
+          const live = ref.current.liveTurn;
+          if (alreadyFolded(live, message)) break;
+          // The fold itself is shared with a made task's nested conversation (`liveTurnFold.ts`),
+          // which holds a tail of its own for its task and must fold identically.
+          patch({ liveTurn: foldLiveTurn(live, message) });
           break;
         }
         case "log:entry": {

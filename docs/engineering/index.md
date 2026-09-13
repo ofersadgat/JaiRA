@@ -32,3 +32,4 @@ Written by hand when a choice departs from the usual way and the reason must out
 | --- | --- | --- | --- |
 | [0001](decisions/0001-decision-brief-gates.md) — gates get a decision brief; confidence decides whether to ask | proposed | — |
 | [0002](decisions/0002-one-gate-vocabulary.md) — one gate vocabulary; a review's decisions come from gestures | proposed | — |
+| [0003](decisions/0003-split.md) — what a fan-out element becomes: `each: "inline"` (was `true`), `"task"` under the parent, `"split"` beside it | built | — |

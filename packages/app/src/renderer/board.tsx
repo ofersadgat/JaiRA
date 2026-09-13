@@ -49,7 +49,9 @@ export const LANE_LABEL: Record<Lane, string> = {
  * parked on a question has task status `running` and says so nowhere else.
  */
 export function laneOf(card: BoardCard): Lane {
-  if (card.status === "queued") return "not-started";
+  // A queued task HOLDING for a dependency (decision 0003) is waiting on something other than
+  // itself, which is what this lane is for; one holding for nothing is simply not started.
+  if (card.status === "queued") return card.waitingFor !== undefined && card.waitingFor.length > 0 ? "paused" : "not-started";
   if (card.status === "completed" || card.status === "failed" || card.status === "canceled") return "finished";
   // Stopped part-way and resumable, which is a pause somebody has to end — not a failure.
   if (card.status === "interrupted") return "paused";
@@ -469,7 +471,18 @@ export function endedLabel(at: number, now: number = Date.now()): string {
 export function waitingKindOf(card: BoardCard): string | undefined {
   if (card.activeStatus === "waiting_for_user") return "gate";
   if (card.activeStatus === "blocked") return "blocked";
+  // Holding for a dependency (decision 0003): a queued task whose `requires` are not done yet.
+  if (card.waitingFor !== undefined && card.waitingFor.length > 0) return "holding";
   return undefined;
+}
+
+/** What a holding card is waiting for, in words — the titles, and how many there are. */
+export function holdingLabelOf(card: Pick<BoardCard, "waitingFor">): string | undefined {
+  const waiting = card.waitingFor ?? [];
+  if (waiting.length === 0) return undefined;
+  const named = waiting.slice(0, 2).map((h) => h.title);
+  const more = waiting.length - named.length;
+  return `waiting for ${named.join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
 }
 
 export function Card({
@@ -536,7 +549,12 @@ export function Card({
         ) : (
           <>
             <span className="ellip">{card.activeStateId ?? card.status}</span>
-            {waitingKindOf(card) !== undefined ? <span className="card-status">{waitingKindOf(card)}</span> : null}
+            {waitingKindOf(card) !== undefined ? (
+              // A holding card names what it holds for in the tooltip; the word is the kind.
+              <span className="card-status" {...(holdingLabelOf(card) !== undefined ? { title: holdingLabelOf(card) } : {})}>
+                {waitingKindOf(card)}
+              </span>
+            ) : null}
           </>
         )
       }

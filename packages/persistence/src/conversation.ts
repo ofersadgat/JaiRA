@@ -21,8 +21,9 @@
 import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
-import { type ConversationTurn, type ConversationView } from "@jaira/shared";
+import { isTaskId, type ConversationTurn, type ConversationView, type MadeTask } from "@jaira/shared";
 import type { Project } from "./project";
+import { holdingOf } from "./lifecycle";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
 const log = createLogger("jaira.persistence.conversation");
@@ -54,6 +55,33 @@ function outcomeText(outcome: unknown, failure: unknown): string {
  * same one. So the journal is projected as it was written, and dropping is left to whoever is
  * reading.
  */
+/**
+ * The task an instance id names, when the id is a task's and that task's provenance says THIS task
+ * made it (decision 0003). The id's shape is only the filter — it spares a file read per ordinary
+ * instance — and the provenance is the join: a task id that happens to sit in another task's journal
+ * for some other reason is not a made task.
+ */
+function madeOf(project: Project, parent: string, instanceId: string): MadeTask | undefined {
+  if (!isTaskId(instanceId)) return undefined;
+  const meta = project.tasks.tryRead(instanceId);
+  if (meta?.origin === undefined || meta.origin.taskId !== parent) return undefined;
+  const row = project.runtime.get(instanceId);
+  const boundary = row?.forkBoundarySeq;
+  const boundaryAt =
+    boundary !== undefined
+      ? (project.db.prepare(`SELECT created_at FROM state_machine_events WHERE task_id = ? AND seq = ?`).get(instanceId, boundary) as { created_at: number } | undefined)?.created_at
+      : undefined;
+  return {
+    taskId: instanceId,
+    title: meta.title,
+    kind: meta.origin.kind,
+    status: row?.status ?? "queued",
+    ...(boundary !== undefined ? { boundary } : {}),
+    ...(boundaryAt !== undefined ? { boundaryAt } : {}),
+    holding: holdingOf(project, meta).length,
+  };
+}
+
 export function conversationView(project: Project, taskId: string, options: ConversationOptions = {}): ConversationView {
   const row = project.runtime.get(taskId);
   // Named with the project it was looked for IN. A task id is a rowid in one database and every
@@ -96,6 +124,8 @@ export function conversationView(project: Project, taskId: string, options: Conv
   const mountedAt = (path: string | undefined): { path?: string } => (path === undefined ? {} : { path });
 
   const turns: ConversationTurn[] = [];
+  /** The instance ids that are tasks a fan-out made — see the `instance.entered` case. */
+  const madeIds = new Set<string>();
   for (const stored of events) {
     const event = stored.event;
     const at = stored.createdAt;
@@ -124,6 +154,15 @@ export function conversationView(project: Project, taskId: string, options: Conv
         // A root has no parent, and its path is the empty string — not "unknown". Every instance is
         // entered before anything else is said about it, so this is what fills the map.
         pathOf.set(event.instanceId, under(event.parentInstanceId, event.childKey, event.element) ?? "");
+        // An element that became a TASK (decision 0003) is the machine making something, not
+        // entering it: its own line, saying what was made and how it stands. The mirrored row's
+        // instance id is the task's id, and the task's provenance is what confirms the join.
+        const made = madeOf(project, taskId, event.instanceId);
+        if (made !== undefined) {
+          madeIds.add(event.instanceId);
+          turns.push({ seq, at, kind: "made", stateId: event.stateId, ...at_(event.instanceId), made });
+          break;
+        }
         turns.push({ seq, at, kind: "entered", stateId: event.stateId, ...at_(event.instanceId) });
         break;
       }
@@ -170,6 +209,9 @@ export function conversationView(project: Project, taskId: string, options: Conv
         turns.push({ seq, at, kind: "transition", stateId: event.stateId, ...at_(event.instanceId), text: event.to });
         break;
       case "instance.terminated":
+        // A made task's end is on its line already, read from its row; a second line saying
+        // "terminated" about a task would be a fact about the mirror, not the machine.
+        if (madeIds.has(event.instanceId)) break;
         turns.push({
           seq,
           at,

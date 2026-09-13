@@ -42,6 +42,7 @@ import {
   type ConversationTurn,
   type InstanceAddress,
   type InstanceNode,
+  type MadeTask,
   type SessionRef,
 } from "@jaira/shared/browser";
 
@@ -115,7 +116,7 @@ export function piecesOf(root: InstanceNode | undefined, history: readonly Sessi
   if (root === undefined) return [];
   /**
    * By INSTANCE ID, which is durable and continues across a stop and its resume (Identity and
-   * Resume �05) — so a node collects every call its instance ever made, however many stretches of
+   * Resume �05) — so a node collects every call its instance ever made, however many stretches of
    * execution they span. History with no node in the tree (a chat child, a legacy attempt the
    * machine-root filter dropped) is synthesised below rather than lost.
    */
@@ -128,6 +129,9 @@ export function piecesOf(root: InstanceNode | undefined, history: readonly Sessi
 
   const out: SessionPiece[] = [];
   const visit = (node: InstanceNode): void => {
+    // An element that became a task (decision 0003) has no conversation here: it is a line in the
+    // grey, and its panels are the task's own.
+    if (node.made !== undefined) return;
     const found = byInstance.get(node.instanceId);
     // In the order they happened, which within one instance is position order.
     const refs = [...(found ?? [])].sort((a, b) => a.seq - b.seq);
@@ -438,9 +442,11 @@ export interface BandNote {
    * "could not enter X" — rather than as a bare reason, because that is what it is. `failure` is
    * everything else that went wrong: a call that failed, a state that gave up.
    */
-  kind: "failure" | "blocked" | "entered" | "transition";
+  kind: "failure" | "blocked" | "entered" | "transition" | "made";
   /** The state DEFINITION the note is about, when the journal named one — what the title shows. */
   stateId?: string;
+  /** For a `made` note: the task the element became — see `MadeTask`. */
+  made?: MadeTask;
   /**
    * The instance the note is about, when it became one.
    *
@@ -614,6 +620,12 @@ export function notesOf(turns: readonly ConversationTurn[], root?: InstanceNode)
       // feature" on a page about `feature` says only that the page is about `feature`.
       if (path === "") continue;
       out.push({ seq: turn.seq, at: turn.at, kind: "entered", ...named, path, text: "" });
+      continue;
+    }
+    // An element that became a TASK (decision 0003): the machine made something, and the line says
+    // what and links to it. Never a panel — the work is in the task — and never a lane.
+    if (turn.kind === "made" && turn.made !== undefined) {
+      out.push({ seq: turn.seq, at: turn.at, kind: "made", ...named, path, text: "", made: turn.made });
       continue;
     }
     if (turn.kind === "transition") {

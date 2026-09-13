@@ -13,6 +13,18 @@ import { RunIndex } from "./runIndex";
 import { stoppedAction } from "./taskAction";
 import { TaskName } from "./taskName";
 
+/** The verb an origin line opens with — who or what made this task out of another (decision 0003). */
+function originVerb(kind: "fork" | "split" | "task" | undefined): string {
+  switch (kind) {
+    case "split":
+      return "split from";
+    case "task":
+      return "made by";
+    default:
+      return "forked from";
+  }
+}
+
 /**
  * What a task IS: its name, where it came from, and the two buttons that operate it.
  *
@@ -57,10 +69,17 @@ export function TaskHead({
         </div>
       ) : null}
       {detail.origin !== undefined ? (
-        // Where a FORK came from, on the line the task's own facts are on. The seam in the
-        // conversation is where the link is; this is the head saying the same thing in words.
-        <div className="sub" title={`forked from ${detail.origin.taskId}`}>
-          <Icon name="choice" className="sub-glyph" /> forked from {detail.origin.title ?? "a task since deleted"}, {detail.origin.label}
+        // Where a copy came from, on the line the task's own facts are on. The seam in the
+        // conversation is where the link is; this is the head saying the same thing in words. The
+        // verb is the origin's kind: a person forked it, or a fan-out split it off or made it.
+        <div className="sub" title={`${originVerb(detail.origin.kind)} ${detail.origin.taskId}`}>
+          <Icon name="choice" className="sub-glyph" /> {originVerb(detail.origin.kind)} {detail.origin.title ?? "a task since deleted"}, {detail.origin.label}
+        </div>
+      ) : null}
+      {detail.waitingFor !== undefined && detail.waitingFor.length > 0 ? (
+        // HOLDING (decision 0003): the dependencies that have to finish before Start is allowed.
+        <div className="sub" title={detail.waitingFor.map((h) => `${h.title} (${h.status})`).join("\n")}>
+          <Icon name="clock" className="sub-glyph" /> waiting for {detail.waitingFor.map((h) => h.title).join(", ")}
         </div>
       ) : null}
       <div className="actions">

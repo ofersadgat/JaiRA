@@ -8,7 +8,7 @@ import { createLogger } from "@declarative-ai/log";
 import { ApprovalRequired, approvalRefusalMessage, refusal } from "@jaira/shared";
 import type { Failure, FunctionCapabilities, JsonValue } from "@declarative-ai/exec";
 import { loadBundle, validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
-import { newTaskId, isStartableStatus, type TaskMeta, type TaskStatus } from "@jaira/shared";
+import { newTaskId, isStartableStatus, type Holding, type SplitEntry, type TaskMeta, type TaskProvenance, type TaskStatus } from "@jaira/shared";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "./snapshots";
 import { freezeForRun, moduleApprovalsFor, moduleEntriesOf, userModules, watchingForUnapproved, type WithheldSymbol } from "./userModules";
 import { nodeVfs } from "./vfs";
@@ -30,6 +30,12 @@ export interface CreateTaskInput {
   inputs?: Record<string, JsonValue>;
   branch?: string;
   parentTaskId?: string;
+  /** How a fan-out made this task, when one did — see `TaskMeta.origin`. */
+  origin?: TaskProvenance;
+  /** The lists this task is split on — see `TaskMeta.split`. */
+  split?: SplitEntry[];
+  /** Tasks that must complete before this one starts — see `TaskMeta.dependsOn`. */
+  dependsOn?: string[];
   id?: string;
 }
 
@@ -51,6 +57,9 @@ export function createTask(project: Project, input: CreateTaskInput, nowMs = Dat
     ...(input.inputs !== undefined ? { inputs: input.inputs } : {}),
     ...(input.branch !== undefined ? { branch: input.branch } : {}),
     ...(input.parentTaskId !== undefined ? { parentTaskId: input.parentTaskId } : {}),
+    ...(input.origin !== undefined ? { origin: input.origin } : {}),
+    ...(input.split !== undefined && input.split.length > 0 ? { split: input.split } : {}),
+    ...(input.dependsOn !== undefined && input.dependsOn.length > 0 ? { dependsOn: input.dependsOn } : {}),
   };
   if (project.runtime.get(meta.id)) throw refusal(log, `task '${meta.id}' already exists`, { taskId: meta.id });
   project.tasks.write(meta);
@@ -134,6 +143,24 @@ export function hasJournalHistory(project: Project, taskId: string): boolean {
   return project.db.prepare(`SELECT 1 FROM state_machine_events WHERE task_id = ? LIMIT 1`).get(taskId) !== undefined;
 }
 
+/**
+ * The dependencies a task is still HOLDING for (decision 0003): every task in `dependsOn` that has
+ * not completed, with its title and standing. Derived, never stored — the dependency's row is the
+ * fact, so a dependency finishing releases every task holding for it without a write to any of them.
+ *
+ * A dependency that no longer exists is not waited for: the task that could have completed it is
+ * gone, and holding for it would hold forever.
+ */
+export function holdingOf(project: Project, meta: Pick<TaskMeta, "dependsOn">): Holding[] {
+  const holding: Holding[] = [];
+  for (const dependency of meta.dependsOn ?? []) {
+    const row = project.runtime.get(dependency);
+    if (row === undefined || row.status === "completed") continue;
+    holding.push({ taskId: dependency, title: project.tasks.tryRead(dependency)?.title ?? dependency, status: row.status });
+  }
+  return holding;
+}
+
 export async function beginTaskRun(project: Project, taskId: string, options: BeginRunOptions = {}): Promise<StartedRun> {
   const nowMs = options.nowMs ?? Date.now();
   const runtime = project.runtime.get(taskId);
@@ -144,18 +171,32 @@ export async function beginTaskRun(project: Project, taskId: string, options: Be
   // A task that ran before is not restarted in place — see {@link BeginRunOptions.continues}. The
   // journal probe is what spares the one safe case: a start that died before the engine journaled
   // anything left no tree and no conversations, and walking it fresh contaminates nothing.
-  if (runtime.status !== "queued" && options.continues !== true) {
-    if (hasJournalHistory(project, taskId)) {
-      throw refusal(
-        log,
-        `task '${taskId}' is ${runtime.status} and already has history — restarting it in place would ` +
-          `continue its old conversations with their whole transcript as preamble. Resume it to continue, ` +
-          `or re-run it as a new task.`,
-        { taskId },
-      );
-    }
+  //
+  // Probed whatever the status says, `queued` included: a task a SPLIT made (decision 0003) has
+  // never run and stands `queued`, and its journal already holds its parent's history up to the
+  // mount. Starting it fresh would run that history again — product deciding the features a second
+  // time, inside one feature's task.
+  if (options.continues !== true && hasJournalHistory(project, taskId)) {
+    throw refusal(
+      log,
+      `task '${taskId}' is ${runtime.status} and already has history — restarting it in place would ` +
+        `continue its old conversations with their whole transcript as preamble. Resume it to continue, ` +
+        `or re-run it as a new task.`,
+      { taskId },
+    );
   }
   const meta = project.tasks.read(taskId);
+  // A task HOLDING for a dependency (decision 0003) does not start until the dependency is done.
+  // Refused here, where every start path ends, with the names — a button that greyed itself out
+  // would be a second copy of this rule, and a CLI would have none.
+  const holding = holdingOf(project, meta);
+  if (holding.length > 0) {
+    throw refusal(
+      log,
+      `task '${taskId}' is waiting for ${holding.map((h) => `'${h.title}' (${h.status})`).join(", ")} to complete`,
+      { taskId },
+    );
+  }
 
   let bundle: WorkflowBundle;
   let hash: string;

@@ -119,12 +119,25 @@ export function primaryAct(detail: Pick<TaskDetail, "resume">): "resume" | "star
 
 /** What the strip offers for a stopped task: the resume verb where there is one, else the fallback. */
 export function stoppedAction(
-  detail: Pick<TaskDetail, "status" | "resume">,
+  detail: Pick<TaskDetail, "status" | "resume" | "waitingFor">,
 ): { said: string; verb: string; hint: string; tone: string; act: "resume" | "start" | "rerun" } | undefined {
   const stopped = STOPPED[detail.status];
   if (stopped === undefined) return undefined;
   const plan = detail.resume;
   const act = primaryAct(detail);
+  // HOLDING (decision 0003): a task whose dependencies are not done. The verb stays what it would
+  // be — the lifecycle refuses the click with the same names — but the strip says what it is
+  // waiting on rather than "Not started", which is true and not the point.
+  const waiting = detail.waitingFor ?? [];
+  if (waiting.length > 0) {
+    return {
+      said: "Waiting",
+      verb: act === "resume" ? "Resume" : stopped.verb,
+      hint: `Waiting for ${waiting.map((h) => `'${h.title}'`).join(", ")} to complete`,
+      tone: "idle",
+      act,
+    };
+  }
   if (act !== "resume") {
     // A record with a hole in it says so on the button that is still offered, rather than leaving a
     // person to wonder why the one they expected is missing.

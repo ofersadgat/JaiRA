@@ -1037,6 +1037,73 @@ the key, and a key is a batch.
 reads the results as one value; it cannot enter a state, park at a gate, or take a
 transition. `each` is the same idea one level up, for a *child*.
 
+### 6.3 What an element becomes: `"inline"`, `"task"`, `"split"`
+
+`each` says what an element **becomes** — a place. `true` is the spelling
+`"inline"` had before the other two existed, and still works.
+
+|  | `each: "inline"` | `each: "task"` | `each: "split"` |
+| --- | --- | --- | --- |
+| What runs per element | the child, here | the child, as a task of its own | the **rest of this state's sequence**, as a task of its own |
+| The task's history | — | fresh, rooted at the child | a copy of this run up to the mount, standing at it |
+| This run | enters the elements, gathers their outputs | waits, then reads the outputs gathered exactly as inline | **ends** — unless a rule on the mount fires |
+| Where the task files | — | under this task, in this mount's column of this state's board | beside this task, as a peer |
+| Worktree | this run's | this run's — it is this run's own work | its own branch, cut when it starts |
+| Order | sequence, `async` for concurrency | the same | concurrent; `requires` orders the starts |
+
+```jsonc
+"children": {
+  "product": {},
+  "ux": {
+    "inputs": {
+      "feature": { "expr": ".children.product.output.features", "each": "split",
+                   "id": "id", "title": "story", "requires": "requires" }
+    }
+  },
+  "ui": {
+    "inputs": {
+      "feature": { "expr": ".children.product.output.features", "each": "split" }
+    }
+  }
+}
+```
+
+**`"task"`.** The child is entered as a task under this one — the host makes it,
+starts it in this run's workspace, and this run waits. Nothing about the parent's
+side changes: one record per key, every output an array in element order, the
+first bad element ends the batch, `async` runs them together. What changes is
+that each element can be stopped, rewound, forked and resumed on its own, and
+that its conversation is one drill-down away rather than inline in this run's
+rail.
+
+**`"split"`.** The task the host makes is a **copy of this run** up to the mount —
+every state entered before it, with its conversations — standing at the mount
+with the element as its own. It then runs the rest of this state's sequence,
+which is why every later mount that needs the element **says the wire again**:
+inside a split task, a wire whose `each: "split"` names the same list resolves to
+the task's one element and runs inline. A split is on one list; a mount that
+fans out over two cannot split.
+
+This run's record for the mount settles with the tasks it made (`{ tasks: [{ id,
+taskId, title }] }`), and then the state **ends successfully** — the sequence
+continues in the tasks, not here. A rule on the mount that fires says otherwise.
+
+**The element's fields.** `id`, `title` and `requires` name properties of an
+element: its identity, what the task is called, and the ids of the elements it
+depends on. Defaults `id`, `title`, `requires`. A task whose `requires` are not
+all complete is **holding**: it stands where it was put, in the paused lane, and
+Start refuses with the names until they are done. `start: "when_ready"` on a
+split wire has the host start each task itself the moment its dependencies are
+complete; the default leaves that to a person. A `"task"` element is always
+started by the host, since this run is waiting on it.
+
+**What the journal holds.** The parent mirrors each element as an
+`instance.entered` under the mount whose instance id is the task's id, and its end
+as `instance.terminated` — so the parent's rail shows the elements as places and
+a resumed parent finds its tasks again by those rows. A split copy holds one
+`instance.entered` for the mount, element 0 of the one-element batch its
+narrowed list will be, and nothing after it.
+
 ---
 
 ## 7. `transitions` and `limits`

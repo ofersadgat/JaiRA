@@ -38,7 +38,55 @@ export interface TaskMeta {
   /** Branch binding (DESIGN §9.2) — recorded now, acted on in phase 5. */
   branch?: string;
   parentTaskId?: string;
+  /**
+   * How this task came to be, when a fan-out made it (decision 0003).
+   *
+   * A `split` copy carries its parent's history up to the mount and stands at it; a `task` is fresh,
+   * rooted at the mounted state. Either way the task exists because an element of a list did, and
+   * this is what lets a list file it under — or beside — the task that had the list.
+   */
+  origin?: TaskProvenance;
+  /**
+   * The lists this task is SPLIT ON, one entry per `each: "split"` it was made from.
+   *
+   * Inside this task, a wire whose `each: "split"` names one of these expressions resolves to the
+   * element at its index rather than the whole list — which is what keeps a feature's task from
+   * fanning out over its siblings' features when its journal is loaded.
+   */
+  split?: SplitEntry[];
+  /**
+   * Tasks that must complete before this one may start — the `requires` of the element that made
+   * it, mapped through its batch. A task with an unfinished dependency is HOLDING: not a status,
+   * a fact derived wherever the row is read, so a dependency finishing releases it without a write.
+   */
+  dependsOn?: string[];
   createdAt: string; // ISO 8601
+}
+
+/** One list a task is split on — see {@link TaskMeta.split}. */
+export interface SplitEntry {
+  /** The wire's expression, verbatim — the key the engine matches a later wire against. */
+  expr: string;
+  /** This task's element in that list. */
+  index: number;
+}
+
+/** Where a fan-out-made task came from — see {@link TaskMeta.origin}. */
+export interface TaskProvenance {
+  /** `split`: a copy of the parent, standing at the mount. `task`: a fresh task rooted at the mounted state. */
+  kind: "split" | "task";
+  /** The task whose list made this one. */
+  taskId: string;
+  /** The mount key the list was on, in that task. */
+  key: string;
+  /** Which entry of that mount — a loop around the mount makes a new batch each pass. Default 0. */
+  occurrence?: number;
+  /** The element's position in the list. */
+  index: number;
+  /** The element's own identity, when the wire named an id field. */
+  item?: string;
+  /** For a split: the host starts this task itself once its dependencies are done. Absent means a person does. */
+  start?: "when_ready";
 }
 
 const TERMINAL: ReadonlySet<TaskStatus> = new Set(["completed", "failed", "canceled"]);

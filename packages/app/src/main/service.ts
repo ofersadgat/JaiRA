@@ -83,6 +83,8 @@ import {
   removeWorktree,
   finishTaskRun,
   hasJournalHistory,
+  holdingOf,
+  type TaskRuntimeRow,
   historySize,
   initProject,
   isProject,
@@ -401,6 +403,7 @@ import type {
   PermissionMode,
   ToolChoice,
 } from "@jaira/shared";
+import { fanOutHostFor } from "./fanOut";
 
 export type Publish = (message: PushMessage) => void;
 
@@ -2850,6 +2853,16 @@ export class AppService {
     // demo run never parks waiting for a human.
     scripted?.register(registry);
 
+    // A task HOLDING for a dependency (decision 0003) is refused before anything is materialized for
+    // it: `beginTaskRun` refuses the same way, but a worktree cut for a task that then does not start
+    // is a worktree somebody has to explain. The names are the message either way.
+    {
+      const meta = project.tasks.tryRead(taskId);
+      const holding = meta !== undefined ? holdingOf(project, meta) : [];
+      if (holding.length > 0) {
+        throw this.refusal("run", `task '${taskId}' is waiting for ${holding.map((h) => `'${h.title}' (${h.status})`).join(", ")} to complete`);
+      }
+    }
     // Materialize the worktree before marking the task running, so a git failure
     // leaves it startable rather than `running` with nowhere to run (DESIGN §9.2).
     const workspace = opts.workspace ?? (await ensureWorkspace(project, taskId));
@@ -3223,6 +3236,26 @@ export class AppService {
           prompt: streaming,
           ...(opts.loaded !== undefined ? { loaded: opts.loaded } : {}),
           ...(opts.answers !== undefined ? { answers: opts.answers } : {}),
+          // A hosted fan-out's elements become tasks (decision 0003) — made, started and waited
+          // for here, in the process that holds this run. The lists this task is split on travel
+          // beside it, so a split mount over one of them narrows to this task's element.
+          fanOut: fanOutHostFor({
+            project,
+            taskId,
+            meta: started.meta,
+            bundle: started.bundle,
+            workspace,
+            // The parent's scripted answers, if any, script the tasks it makes: a fake run's split
+            // copies and mount tasks would otherwise reach for a real provider.
+            startTask: (childId, o) => this.startMadeTask(open, childId, { ...o, ...(opts.fake !== undefined ? { fake: opts.fake } : {}) }),
+            waitForTask: (childId, signal) => this.waitForTask(open, childId, signal),
+            cancelTask: (childId) => {
+              this.cancelTaskIn(open, childId);
+            },
+            tasksChanged: () => this.publishFor(open, { type: "store:invalidate", scope: "tasks" }),
+            log: (level, message, at) => this.log({ level, source: "run", message, project: open.key, ...(at !== undefined ? { taskId: at } : {}) }),
+          }),
+          ...(started.meta.split !== undefined ? { split: started.meta.split } : {}),
           // Tee the journal: persist, then push the same event to the renderer so
           // the detail view streams live without polling the database.
           persistence: {
@@ -3294,6 +3327,8 @@ export class AppService {
               : {}),
         });
         this.publishFor(open, { type: "run:finished", taskId, status });
+        this.settleWaiters(open, taskId);
+        if (status === "completed") this.releaseDependents(open, taskId);
       } catch (e) {
         // A crash between beginTaskRun and finishTaskRun would otherwise leave the
         // task `running` forever (recovery would call it interrupted next open).
@@ -3311,6 +3346,7 @@ export class AppService {
           failure: { classification: "permanent", reason: (e as Error).message },
         });
         this.publishFor(open, { type: "run:finished", taskId, status: "failed" });
+        this.settleWaiters(open, taskId);
       } finally {
         // Give up the claim and close any child still recorded as running, so the
         // next project open sees no phantom owner and no phantom orphans.
@@ -4599,6 +4635,89 @@ export class AppService {
       ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
       ...(request.fake !== undefined ? { fake: request.fake } : {}),
     });
+  }
+
+  /**
+   * Runs waiting on a TASK to end — a parent's hosted fan-out waiting on the tasks it made
+   * (decision 0003). Keyed by project and task; settled by the run-end handler, which is the one
+   * place a row becomes terminal in this process.
+   */
+  private readonly taskWaiters = new Map<string, Set<(row: TaskRuntimeRow) => void>>();
+
+  private waiterKey(open: ProjectSession, taskId: string): string {
+    return `${open.key}\u0000${taskId}`;
+  }
+
+  /**
+   * Resolves when `taskId`'s row is terminal — at once if it already is — or when `signal` fires,
+   * with the row as it then stands. A task that ends in another process is not seen here; the
+   * parent's own resume asks again, from the rows, and reads the answer off the store.
+   */
+  private waitForTask(open: ProjectSession, taskId: string, signal: AbortSignal): Promise<TaskRuntimeRow> {
+    const now = open.project.runtime.get(taskId);
+    if (now === undefined) return Promise.reject(new Error(`unknown task '${taskId}'`));
+    if (isTerminalStatus(now.status) || signal.aborted) return Promise.resolve(now);
+    return new Promise((resolve) => {
+      const key = this.waiterKey(open, taskId);
+      const waiter = (row: TaskRuntimeRow): void => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(row);
+      };
+      const onAbort = (): void => {
+        this.taskWaiters.get(key)?.delete(waiter);
+        resolve(open.project.runtime.get(taskId) ?? now);
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      let set = this.taskWaiters.get(key);
+      if (set === undefined) this.taskWaiters.set(key, (set = new Set()));
+      set.add(waiter);
+    });
+  }
+
+  private settleWaiters(open: ProjectSession, taskId: string): void {
+    const key = this.waiterKey(open, taskId);
+    const set = this.taskWaiters.get(key);
+    if (set === undefined) return;
+    this.taskWaiters.delete(key);
+    const row = open.project.runtime.get(taskId);
+    if (row === undefined) return;
+    for (const waiter of set) waiter(row);
+  }
+
+  /**
+   * Start a task a hosted fan-out made — fresh where it has no history (a mount task), resumed
+   * where it has (a split copy, standing at its mount). Both land in `startRun`; the difference is
+   * whether the machine is walked or loaded, and the journal is what says which.
+   */
+  private async startMadeTask(open: ProjectSession, taskId: string, options: { bundle?: WorkflowBundle; fake?: JsonValue | FakeRule[] }): Promise<void> {
+    if (hasJournalHistory(open.project, taskId)) {
+      await this.resumeTask({ taskId, project: open.dir, ...(options.fake !== undefined ? { fake: options.fake as JsonValue } : {}) });
+      return;
+    }
+    await this.startRun(open, taskId, {
+      config: open.project.config,
+      secrets: this.secretResolver(open),
+      ...(options.bundle !== undefined ? { bundle: options.bundle } : {}),
+      ...(options.fake !== undefined ? { fake: options.fake } : {}),
+    });
+  }
+
+  /**
+   * A task completed: every split task that was holding for it and asked to start when ready, and
+   * now holds for nothing, is started. A task that holds for a person's Start is left standing.
+   */
+  private releaseDependents(open: ProjectSession, completed: string): void {
+    for (const meta of open.project.tasks.list()) {
+      if (meta.origin?.start !== "when_ready" || !(meta.dependsOn ?? []).includes(completed)) continue;
+      const row = open.project.runtime.get(meta.id);
+      if (row?.status !== "queued" || holdingOf(open.project, meta).length > 0) continue;
+      // The completed task's scripted answers, if it had any, script what it releases — the same
+      // rule a parent applies to what it makes, so a fake run stays fake to its last dependent.
+      const fake = open.fakeRules.get(completed);
+      void this.startMadeTask(open, meta.id, fake !== undefined ? { fake } : {}).catch((e: unknown) => {
+        this.log({ level: "error", source: "run", message: `could not start '${meta.title}' once '${completed}' completed: ${(e as Error).message}`, project: open.key, taskId: meta.id });
+      });
+    }
   }
 
   /**

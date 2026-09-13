@@ -492,6 +492,9 @@ const EVENT_TONE: Record<TurnKind, EventEntry["tone"] | undefined> = {
   terminated: undefined,
   tool: undefined,
   output: undefined,
+  // A task the machine made is the grey's to draw too — a line with a link (`MadeRow`), not a
+  // transcript event.
+  made: undefined,
 };
 
 function eventOf(turn: ConversationTurn): EventEntry | undefined {

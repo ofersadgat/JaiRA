@@ -16,8 +16,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type {
   ChatPlanView,
   ChatSettings,
+  ConversationView,
   InstanceNode,
+  MadeTask,
   OperationRecordView,
+  SessionRef,
+  SessionView,
   PendingInteraction,
   PendingQuestion,
   ApprovalScope,
@@ -47,7 +51,8 @@ import { AskDialog, type AskSpec } from "./menu";
 import { paletteOfRun } from "./runIndex";
 import type { FileSurfaceProps } from "./fileTypes";
 import { Composer } from "./composer";
-import { invoke } from "./store";
+import { invoke, subscribe } from "./store";
+import { alreadyFolded, foldLiveTurn, liveTurnOfSnapshot, tailIsAhead, type LiveTurn } from "./liveTurnFold";
 
 // Moved to `trail.ts`, which is where the tree queries live now — it also seeds a walk, and that
 // has to work for a composite, which has no session row to look one up by. Re-exported because this
@@ -1049,6 +1054,8 @@ export function RunConversation({
           {...(detail.origin !== undefined
             ? { origin: { ...detail.origin, onGo: () => context.onSelectTask(detail.origin!.taskId) } }
             : {})}
+          onSelectTask={context.onSelectTask}
+          nested={(made: MadeTask) => <NestedTaskConversation made={made} context={context} />}
         />
         {/* AFTER the bands, always. A wait is the present tense of a run — it is where the thing
             stopped — so it belongs at the bottom of what has happened rather than sorted into it by
@@ -1139,6 +1146,137 @@ export function CutStrip({ armed, onConfirm, onCancel }: { armed: ArmedRewind; o
  * Doorways INSIDE the chain walk deeper: a nested spawn keys its own chain in the same flat map,
  * under the same host, so `onOpen` pushes another sidechain step with the same instance on it.
  */
+/**
+ * A made task's conversation, nested under its line in the parent's (decision 0003).
+ *
+ * The same component the task view uses, over the child's own facts: its detail, its conversation,
+ * its history and its transcripts, fetched here because the store holds those only for the task on
+ * screen. A child is LIVE where a sidechain is history, so this listens for the child's pushes and
+ * re-reads on each — the structural view keeps up; the streaming tail is the store's and stays with
+ * the selected task. Mounted only while expanded, so collapsing is what stops the listening.
+ *
+ * A split copy carries the parent's own prefix — product's conversation, on a page that is product's
+ * conversation — so its nested view starts at the copy's boundary: the turns past the seam, and the
+ * root's children entered after it. A mount task nests whole.
+ */
+export function NestedTaskConversation({ made, context }: { made: MadeTask; context: FileSurfaceProps["context"] }): JSX.Element {
+  const { taskId } = made;
+  const [detail, setDetail] = useState<TaskDetail | null>(null);
+  const [conversation, setConversation] = useState<ConversationView | null>(null);
+  const [history, setHistory] = useState<SessionRef[]>([]);
+  const [sessions, setSessions] = useState<Record<string, SessionView>>({});
+  const [failed, setFailed] = useState<string | null>(null);
+  /**
+   * The child's own tail. The store keeps one and it belongs to the selected task; a nested child
+   * that is speaking right now streams here instead, folded by the same rule (`liveTurnFold.ts`)
+   * and seeded from the same snapshot, with the same `n` protocol between the two.
+   */
+  const [liveTurn, setLiveTurn] = useState<LiveTurn | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async (): Promise<void> => {
+      try {
+        const [d, c, h, snap] = await Promise.all([
+          invoke("task:detail", { taskId }),
+          invoke("task:conversation", { taskId }),
+          invoke("session:history", { taskId }),
+          invoke("session:live", { taskId }).catch(() => null),
+        ]);
+        if (!mounted) return;
+        setDetail(d);
+        setConversation(c);
+        setHistory(h);
+        // A tail already ahead of the snapshot stays — pushes folded in while it was in flight.
+        setLiveTurn((current) => (tailIsAhead(current, snap) ? current : liveTurnOfSnapshot(snap)));
+        setFailed(null);
+      } catch (e) {
+        if (mounted) setFailed((e as Error).message);
+      }
+    };
+    void load();
+    const off = subscribe((message) => {
+      if (!("taskId" in message) || message.taskId !== taskId) return;
+      if (message.type === "session:turn") {
+        setLiveTurn((current) => (alreadyFolded(current, message) ? current : foldLiveTurn(current, message)));
+        return;
+      }
+      if (message.type === "engine:event") {
+        // The record lands when the operation settles: the stored view now holds what the tail held,
+        // so the tail goes — the same two events the store drops its own copy on.
+        const type = (message.event as { type?: string } | undefined)?.type;
+        if (type === "operation.completed" || type === "operation.failed") setLiveTurn(null);
+        void load();
+        return;
+      }
+      if (message.type === "run:finished") void load();
+    });
+    return () => {
+      mounted = false;
+      off();
+    };
+  }, [taskId]);
+
+  const loadSessions = useCallback(
+    (at: ReadonlyArray<{ instanceId: string }>) => {
+      void (async () => {
+        const wanted = at.filter((one) => sessions[sessionKey(one)] === undefined);
+        if (wanted.length === 0) return;
+        const loaded = await Promise.all(
+          wanted.map(async (one) => {
+            try {
+              return [sessionKey(one), await invoke("session:view", { taskId, instanceId: one.instanceId })] as const;
+            } catch {
+              return null;
+            }
+          }),
+        );
+        setSessions((prev) => {
+          const next = { ...prev };
+          for (const entry of loaded) if (entry !== null) next[entry[0]] = entry[1];
+          return next;
+        });
+      })();
+    },
+    [taskId, sessions],
+  );
+
+  // Past the seam, for a split: turns by seq, and the root's children by the clock the seam sits at.
+  const boundary = made.boundary;
+  const boundaryAt = made.boundaryAt;
+  const cutConversation = useMemo(
+    () => (conversation !== null && boundary !== undefined ? { ...conversation, turns: conversation.turns.filter((t) => t.seq > boundary) } : conversation),
+    [conversation, boundary],
+  );
+  const parent = useMemo(() => {
+    const root = detail?.instances[0];
+    if (root === undefined || boundaryAt === undefined) return root;
+    return { ...root, children: root.children.filter((child) => child.startedAt > boundaryAt) };
+  }, [detail, boundaryAt]);
+  const cutHistory = useMemo(() => (boundaryAt !== undefined ? history.filter((ref) => ref.at > boundaryAt) : history), [history, boundaryAt]);
+
+  const nested: FileSurfaceProps["context"] = useMemo(
+    () => ({
+      ...context,
+      detail,
+      conversation: cutConversation,
+      sessions,
+      onLoadSessions: loadSessions,
+      onLoadSession: (instanceId: string) => loadSessions([{ instanceId }]),
+      sessionHistory: cutHistory,
+      records: {},
+      session: null,
+      sessionInstance: null,
+      liveTurn,
+    }),
+    [context, detail, cutConversation, sessions, loadSessions, cutHistory, liveTurn],
+  );
+
+  if (failed !== null) return <p className="empty">Could not read this task: {failed}</p>;
+  if (detail === null) return <p className="empty">Loading…</p>;
+  return <RunConversation parent={parent} detail={detail} context={nested} />;
+}
+
 export function SidechainConversation({
   step,
   context,
