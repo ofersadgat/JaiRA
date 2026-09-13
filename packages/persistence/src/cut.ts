@@ -248,6 +248,12 @@ export function rewindTask(project: Project, taskId: string, seq: number, nowMs 
 }
 
 export interface ForkOptions {
+  /**
+   * The copy's id, when the caller has already chosen — and recorded — it. A split (decision 0003)
+   * writes the ids of every copy into the parent's journal BEFORE cutting them, so that each copy
+   * carries the list; the cut must then land on the id the list names. Minted when absent.
+   */
+  id?: string;
   /** The copy's title. Defaults to the parent's. */
   title?: string;
   /**
@@ -452,6 +458,7 @@ export function forkTask(project: Project, taskId: string, seq: number, options:
   const copy = createTask(
     project,
     {
+      ...(options.id !== undefined ? { id: options.id } : {}),
       title: options.title ?? meta.title,
       workflow: meta.workflow,
       ...(meta.description !== undefined ? { description: meta.description } : {}),

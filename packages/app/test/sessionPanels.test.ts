@@ -13,7 +13,7 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { InstanceNode, SessionRef } from "@jaira/shared/browser";
+import type { InstanceNode, MadeTask, SessionRef } from "@jaira/shared/browser";
 import { bandsOf, piecesOf, sameAddress, type BandNote, type SessionPiece } from "../src/renderer/sessionBands";
 import { SessionBandsView, ZigDefs, stepOfNote } from "../src/renderer/sessionPanels";
 import { keyOfNode, paletteOfRun } from "../src/renderer/runIndex";
@@ -750,50 +750,63 @@ describe("rewind and fork on the grey", () => {
   });
 });
 
-describe("a fan-out element that became a task", () => {
-  const made = (kind: "split" | "task", holding = 0): BandNote => ({
+describe("the runs a fan-out made, as a line at the mount", () => {
+  const run = (taskId: string, title: string, patch: Partial<MadeTask> = {}): MadeTask => ({
+    taskId,
+    element: 0,
+    title,
+    status: "queued",
+    holding: 0,
+    self: false,
+    waitsFor: false,
+    ...patch,
+  });
+  const made = (kind: "split" | "task", runs: MadeTask[]): BandNote => ({
     seq: 7,
     at: 25,
     kind: "made",
-    stateId: "w/work",
-    instanceId: "t-alpha00000",
-    path: "work[0]",
+    stateId: "w",
+    instanceId: "i-root",
+    path: "work",
     text: "",
-    made: { taskId: "t-alpha00000", title: "Alpha", kind, status: "queued", holding },
+    made: { kind, runs },
   });
   const parent = parentOf([{ id: 2, from: 10, to: 20 }]);
   const refs = [ref(2, "planning", 10, 20)];
+  const alpha = run("t-alpha00000", "Alpha", { self: true, element: 0 });
+  const beta = run("t-beta000000", "Beta", { element: 1 });
+  const gamma = run("t-gamma00000", "Gamma", { element: 2, status: "running" });
 
-  it("is a line saying what was made and how it stands, not a panel and not a lane", () => {
-    const html = drawWith(parent, refs, { notes: [made("split")] });
+  it("is a line naming every OTHER run and its standing — not a panel, not a lane, and never itself", () => {
+    const html = drawWith(parent, refs, { notes: [made("split", [alpha, beta, gamma])] });
     expect(html).toContain("split off");
-    expect(html).toContain("Alpha");
+    expect(html).toContain("Beta");
     expect(html).toContain("· queued");
-    expect(html).toContain('data-made="t-alpha00000"');
-    expect(html).not.toContain("said by #t-alpha00000");
-    const step = stepOfNote(made("split"), "");
+    expect(html).toContain("Gamma");
+    expect(html).toContain("· running");
+    expect(html).not.toContain("Alpha");
+    expect(html).toContain('data-made="t-beta000000 t-gamma00000"');
+    expect(html).not.toContain("said by #t-beta000000");
+    const step = stepOfNote(made("split", [alpha, beta]), "");
     expect(step.opens).toBe(false);
     expect(step.at).toEqual([]);
   });
 
-  it("says what it is holding for, and uses the mount verb for a mount task", () => {
-    const html = drawWith(parent, refs, { notes: [made("task", 2)] });
+  it("marks the run this task waits for, says what a run is holding for, and uses the mount verb for a task mount", () => {
+    const html = drawWith(parent, refs, { notes: [made("task", [run("t-beta000000", "Beta", { holding: 2, waitsFor: true })])] });
     expect(html).toContain(">made<");
     expect(html).toContain("waiting for 2 tasks");
+    expect(html).toContain("sb-made-waits");
+    expect(html).toContain(">waits for<");
   });
 
-  it("links the title only when a host can open a task, and offers the chevron only when it can nest one", () => {
-    const bare = drawWith(parent, refs, { notes: [made("split")] });
+  it("links a title only when a host can open a task, and never offers to nest one", () => {
+    const bare = drawWith(parent, refs, { notes: [made("split", [alpha, beta])] });
     expect(bare).not.toContain("aria-expanded");
     expect(bare).not.toContain('class="sb-made-link ellip" title=');
-    const hosted = drawWith(parent, refs, {
-      notes: [made("split")],
-      onSelectTask: () => undefined,
-      nested: () => createElement("p", null, "nested here"),
-    } as never);
-    expect(hosted).toContain('aria-label="expand Alpha"');
-    expect(hosted).toContain('title="open Alpha (t-alpha00000)"');
-    // Collapsed by default: nothing nested until the chevron is pressed.
-    expect(hosted).not.toContain("nested here");
+    const hosted = drawWith(parent, refs, { notes: [made("split", [alpha, beta])], onSelectTask: () => undefined } as never);
+    expect(hosted).toContain('title="open Beta (t-beta000000)"');
+    expect(hosted).not.toContain("aria-expanded");
   });
+
 });

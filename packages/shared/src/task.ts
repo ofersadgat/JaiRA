@@ -85,8 +85,12 @@ export interface TaskProvenance {
   index: number;
   /** The element's own identity, when the wire named an id field. */
   item?: string;
-  /** For a split: the host starts this task itself once its dependencies are done. Absent means a person does. */
-  start?: "when_ready";
+  /**
+   * For a split: who starts this task once its dependencies are done — the host (`"when_ready"`, at
+   * once when it depends on nothing) or a person (`"manual"`). Absent reads as `"when_ready"`, the
+   * wire's default.
+   */
+  start?: "manual" | "when_ready";
 }
 
 const TERMINAL: ReadonlySet<TaskStatus> = new Set(["completed", "failed", "canceled"]);

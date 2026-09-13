@@ -837,8 +837,9 @@ export type TurnKind =
   | "blocked"
   | "transition"
   /**
-   * A fan-out element that became a TASK (decision 0003): the machine made something rather than
-   * entering it. `made` says what — the line links to the task and can nest its conversation.
+   * The runs a fan-out MADE of its elements (decision 0003): the machine made tasks rather than
+   * entering states. One line at the mount, carried by every task in the batch; `made` says what
+   * was made, and the line links to every run but the reader's own.
    */
   | "made";
 
@@ -881,27 +882,44 @@ export interface ConversationTurn {
   ok?: boolean;
   /** Structured payload, for `output` turns. */
   data?: JsonValue;
-  /** For a `made` turn: the task the element became. */
-  made?: MadeTask;
+  /** For a `made` turn: the runs the batch's elements became. */
+  made?: MadeBatch;
 }
 
 /**
- * The task a fan-out element became (decision 0003), as a conversation line says it.
+ * The runs a fan-out MADE of its elements (decision 0003), as the line at the mount says them.
  *
- * `status` is the task's standing NOW, read off its row when the view is built — the line says
- * "made Alpha · running" and then "· completed" on the next read, which the run-end push triggers.
- * `boundary` is the copy's seam for a split (its own coordinates, as `TaskOrigin.boundary`), so a
- * nested view of it can start where its own history begins rather than repeating the parent's.
+ * ONE record, read from many places. The task that split writes the whole list into its journal
+ * before cutting the copies, so every task in the batch carries the same `fanout.made` row — and
+ * each draws it from where it stands: its own run is `self` (the element that runs inline below the
+ * line, never a link), and a run its `dependsOn` names is one it `waitsFor`. A `"task"` mount's
+ * parent is in the list nowhere, since it made every element.
+ */
+export interface MadeBatch {
+  kind: "split" | "task";
+  /** Every element's run, in element order — the reader's own included. */
+  runs: MadeTask[];
+}
+
+/**
+ * One run of a batch. `status` and `holding` are the task's standing NOW, read off its row when the
+ * view is built — the line says "Beta · running" and then "· completed" on the next read, which the
+ * run-end push triggers.
  */
 export interface MadeTask {
   taskId: string;
+  /** The element's position in the list. */
+  element: number;
+  /** The element's own identity, when the wire named an id field. */
+  id?: string;
   title: string;
-  kind: "split" | "task";
   status: TaskStatus;
-  boundary?: number;
-  boundaryAt?: number;
   /** How many dependencies it is still holding for. */
   holding: number;
+  /** This run is the task reading the record — the one drawn inline, not as a link. */
+  self: boolean;
+  /** The reading task holds for this run to complete. */
+  waitsFor: boolean;
 }
 
 export interface ConversationView {

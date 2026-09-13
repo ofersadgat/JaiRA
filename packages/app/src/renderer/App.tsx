@@ -54,6 +54,7 @@ import {
   type MenuPoint,
 } from "./menu";
 import { AppearancePane } from "./appearancePane";
+import { ConversationPane } from "./conversationPane";
 import { FilesPane } from "./filesPane";
 import {
   addCounts,
@@ -347,6 +348,8 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; layered: boolean; ne
   // Not layered and not project-scoped: typography belongs to a PERSON, not to a checkout, and a
   // window with nothing open is exactly where somebody sets it up.
   { id: "appearance", label: "Appearance", layered: false },
+  // The same person-not-checkout rule: how you read a transcript is yours.
+  { id: "conversation", label: "Conversation", layered: false },
   { id: "history", label: "History", layered: false, needsProject: true },
 ];
 
@@ -1304,6 +1307,8 @@ export default function App(): JSX.Element {
     onShowSession: actions.showSession,
     waiting: waiting ? { component: waiting.config?.prompt ?? waiting.component } : undefined,
     onSelectTask: actions.select,
+    // How a sequential batch's elements are laid out — the reader's own setting.
+    batches: state.settings.conversation.sequentialBatches,
     onDrill: actions.selectState,
     // The address bar's tail and the viewer read the same list: the bar draws it, the viewer shows
     // its last element. See `trail.ts`.
@@ -2304,6 +2309,9 @@ export default function App(): JSX.Element {
                     onEditor={actions.setEditorLook}
                     onRenderer={actions.setRenderer}
                   />
+                ) : null}
+                {state.section === "conversation" ? (
+                  <ConversationPane look={state.settings.conversation} busy={state.busy} onChange={actions.setConversation} />
                 ) : null}
                 {state.section === "history" && state.at !== null ? (
                   <History

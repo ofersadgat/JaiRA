@@ -210,6 +210,59 @@ describe("bandsOf", () => {
     ]);
   });
 
+  it("puts the elements of one batch in one band when asked to, even though they ran one after another", () => {
+    const element = (id: number, index: number, from: number, to: number): InstanceNode =>
+      node({
+        instanceId: String(id),
+        stateId: `s${id}`,
+        childKey: "work",
+        element: index,
+        startedAt: from,
+        endedAt: to,
+        address: [{ childKey: "work", occurrence: 0, element: index }],
+      });
+    const parent = node({ instanceId: "1", stateId: "plan", startedAt: 0, children: [element(2, 0, 0, 10), element(3, 1, 10, 20), element(4, 2, 20, 30)] });
+    const refs = [ref(2, "A", 0, 10), ref(3, "B", 10, 20), ref(4, "C", 20, 30)];
+    // Stacked, the default: three sequential pieces are three bands down the page.
+    expect(shape(bandsOf(piecesOf(parent, refs)))).toEqual([[["A", 1]], [["B", 1]], [["C", 1]]]);
+    expect(shape(bandsOf(piecesOf(parent, refs), { batches: "stacked" }))).toEqual([[["A", 1]], [["B", 1]], [["C", 1]]]);
+    // A band: the batch is one band across, siblings rather than passes.
+    expect(shape(bandsOf(piecesOf(parent, refs), { batches: "band" }))).toEqual([
+      [
+        ["A", 1],
+        ["B", 1],
+        ["C", 1],
+      ],
+    ]);
+  });
+
+  it("keeps a later pass of the same mount out of an earlier batch's band, and a plain sequence stacked", () => {
+    const at = (id: number, occurrence: number, index: number | undefined, from: number, to: number): InstanceNode =>
+      node({
+        instanceId: String(id),
+        stateId: `s${id}`,
+        childKey: "work",
+        ...(index !== undefined ? { element: index } : {}),
+        startedAt: from,
+        endedAt: to,
+        address: [{ childKey: "work", occurrence, ...(index !== undefined ? { element: index } : {}) }],
+      });
+    const parent = node({ instanceId: "1", stateId: "plan", startedAt: 0, children: [at(2, 0, 0, 0, 10), at(3, 0, 1, 10, 20), at(4, 1, 0, 20, 30), at(5, 1, 1, 30, 40)] });
+    const refs = [ref(2, "A", 0, 10), ref(3, "B", 10, 20), ref(4, "C", 20, 30), ref(5, "D", 30, 40)];
+    expect(shape(bandsOf(piecesOf(parent, refs), { batches: "band" }))).toEqual([
+      [
+        ["A", 1],
+        ["B", 1],
+      ],
+      [
+        ["C", 1],
+        ["D", 1],
+      ],
+    ]);
+    const plain = node({ instanceId: "1", stateId: "plan", startedAt: 0, children: [at(2, 0, undefined, 0, 10), at(3, 1, undefined, 10, 20)] });
+    expect(shape(bandsOf(piecesOf(plain, [ref(2, "A", 0, 10), ref(3, "B", 10, 20)]), { batches: "band" }))).toEqual([[["A", 1]], [["B", 1]]]);
+  });
+
   it("does not call a concurrent session paused — it never stopped", () => {
     const parent = tree([
       { id: 2, from: 0, to: 30 },

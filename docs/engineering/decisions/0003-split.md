@@ -341,3 +341,72 @@ under it, beside it — and a fourth value would have to be a fourth place.
 - A parent with many made tasks turns out to be read mostly expanded. Then the
   default should flip, or the lines should carry enough of the child's standing
   that expanding is rarely needed.
+
+## Amended 2026-09-13, after the first real run
+
+The first real run of the flat feature workflow decided one feature, and two
+things the decision had chosen read wrong in practice.
+
+**A split over one element is no split.** The parent ended and one copy stood
+beside it — a task with the parent's whole history and nothing the parent could
+not have done itself. There is nothing to put beside a run when the list has one
+element, so the engine now runs that element inline and the sequence continues
+in the parent, exactly as it does on the far side of a real split (the mount
+reads as an ordinary mount either way). A split over no elements is still a
+split: the host makes nothing and the run ends. The rule is the engine's
+(`hostedKindOf`), decided from the batch's count on entry and from the recorded
+rows on a load.
+
+**Holding is for dependencies, and nothing else.** The one copy stood queued
+with nothing to wait for, and reading "not started" beside a parent that had
+just ended was indistinguishable from "stuck". The default of `start` is now
+`"when_ready"`: a split task that holds for nothing is started the moment it is
+made, and a dependent the moment its last dependency completes. `"manual"` is
+the opt-out, and the provenance records whichever the wire said; absent reads as
+the default. The Holding section above, where it says a person chooses the
+moment, is superseded by this.
+
+## Amended 2026-09-13, second: the task that split keeps element 0
+
+The first amendment removed the split over one element. What was left still
+read wrong: a task that split into three ended, and three copies stood beside a
+card that said "split into 3" and nothing else — a parent whose only work after
+`product` was to have been copied.
+
+**Element 0 stays home.** The task that split continues with element 0 as its
+own, retitled by it where the element has a title, and split on the list at
+index 0 exactly as a copy is split at its own — so every later mount narrows to
+it and nothing about the sequence changes. Elements 1 to n become the copies.
+The engine's seam for this is a second answer a split host may give: `continue`
+with the element it kept, on which the engine runs that element inline under
+the mount and appends the split entry to the run's own list. The parent no
+longer ends by splitting; only a split over no elements ends it.
+
+**One record, written before the cut.** The host mints the copies' ids first
+and writes a `fanout.made` row under the mount naming every element's task —
+its own included — before cutting a single copy, so every copy carries the same
+row and a host asked again after a crash finds the ids it chose. The mirrored
+`instance.entered`/`terminated` rows a split used to write are gone; a `task`
+mount still writes them, because they are what a resumed parent reads its
+tasks by, and it now creates every task up front so the list is complete.
+
+**The line at the mount.** Each task draws the row from where it stands: every
+run but itself as a link with its standing, the runs its `dependsOn` names
+marked as what it waits for, and its own element inline right below the line,
+as if there had been no split. No chevron and no nested conversation: a sibling
+is somewhere to go, and the link is how. The board lane reads holding off
+`dependsOn` whatever the task's status, so a task that split and holds for a
+later element sits in the paused lane while it runs.
+
+**Holding, for the task that split.** When element 0 requires another element,
+the task that split holds at the mount, in-process, until that copy completes —
+the same holding a copy does standing queued, read the same way. Stopped while
+holding, it holds by its row like a copy, and is released the same way. Its
+worktree stays on the base it was cut from, which is the trade-off the
+first amendment's "revisit" bullet on branches already names.
+
+**A setting for sequential batches.** A fan-out whose elements ran one after
+another draws stacked down the page by default; the Conversation section of
+Settings can draw it as one band across instead — columns for two, tabs from
+three — the way concurrent elements already are. A person's preference, in
+`user-settings.json` beside the theme.

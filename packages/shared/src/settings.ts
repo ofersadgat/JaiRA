@@ -210,6 +210,31 @@ export interface JairaSettings {
    * this is the escape hatch for when they are not.
    */
   filesHidden: string[];
+  /**
+   * How a run's conversation is drawn — see {@link ConversationLook}. A reading preference belonging
+   * to one person on one machine, like the theme and the typography, and not a fact about any
+   * checkout: it lives beside them, in this file.
+   */
+  conversation: ConversationLook;
+}
+
+/**
+ * How the elements of a fan-out batch whose elements ran ONE AFTER ANOTHER are laid out in a
+ * conversation: `"stacked"` draws them down the page in the order they ran, as any sequence of
+ * states is drawn; `"band"` draws them across — two columns, or tabs from three up — the way
+ * concurrent elements already are. A batch whose elements overlapped is a band either way.
+ */
+export type SequentialBatchLayout = "stacked" | "band";
+export const SEQUENTIAL_BATCH_LAYOUTS: readonly SequentialBatchLayout[] = ["stacked", "band"];
+
+/** The conversation's reading preferences — see {@link JairaSettings.conversation}. */
+export interface ConversationLook {
+  sequentialBatches: SequentialBatchLayout;
+}
+
+/** Stacked: a batch reads as the sequence it was, until somebody asks otherwise. */
+export function defaultConversationLook(): ConversationLook {
+  return { sequentialBatches: "stacked" };
 }
 
 /**
@@ -546,6 +571,7 @@ export function defaultSettings(): JairaSettings {
     projects: [],
     filesHidden: [],
     logging: defaultLogPolicy(),
+    conversation: defaultConversationLook(),
   };
 }
 
@@ -641,8 +667,17 @@ export function parseSettings(raw: unknown): JairaSettings {
           ),
         ]
       : [],
+    conversation: parseConversationLook(doc["conversation"]),
     ...(typeof baseDir === "string" && baseDir.length > 0 ? { baseDir } : {}),
   };
+}
+
+/** Per field, keeping whatever is readable — the forgiveness every other section of this file has. */
+function parseConversationLook(raw: unknown): ConversationLook {
+  const out = defaultConversationLook();
+  const batches = objectOf(raw)["sequentialBatches"];
+  if (SEQUENTIAL_BATCH_LAYOUTS.includes(batches as SequentialBatchLayout)) out.sequentialBatches = batches as SequentialBatchLayout;
+  return out;
 }
 
 /**

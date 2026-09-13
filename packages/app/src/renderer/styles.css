@@ -12999,20 +12999,42 @@ fieldset.reading {
   color: var(--dim);
 }
 
-/* A fan-out element that became a TASK (decision 0003): a line in the grey, not a panel. The verb,
-   the task's title as the link, its standing — and a chevron that nests the task's own conversation
-   under the line, with its own rail, the way a subagent's sidechain nests under its call. */
+/* The runs a fan-out made (decision 0003): a line in the grey, not a panel. The verb, then every
+   sibling run — its title as the link, its standing after it — and a mark on each one this task
+   waits for. The reader's own element is not in the line; it runs inline right below. */
 .sb-made {
   flex-wrap: wrap;
   align-items: center;
 }
-.sb-made-chev {
-  flex: none;
-  align-self: center;
+.sb-made-runs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 4px;
+  min-width: 0;
+}
+.sb-made-run {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+.sb-made-sep {
+  color: var(--dim);
+}
+.sb-made-wait {
+  font-size: var(--fs-small, 0.85em);
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.sb-made-waits .sb-made-link {
+  font-weight: 600;
 }
 .sb-made-link {
   min-width: 0;
-  max-width: 50%;
+  max-width: 24ch;
   padding: 0;
   border: 0;
   background: none;
@@ -13027,16 +13049,4 @@ fieldset.reading {
 .sb-made-standing {
   flex: none;
   color: var(--dim);
-}
-/* The nested conversation takes the whole width under the line, set in from the chevron so the
-   child's rail reads as inside the parent's. */
-.sb-made-nest {
-  flex-basis: 100%;
-  min-width: 0;
-  margin: 4px 0 8px 18px;
-  padding-left: 8px;
-  border-left: 1px solid var(--line);
-}
-.sb-made-nest .run-convo-wrap {
-  max-height: 60vh;
 }

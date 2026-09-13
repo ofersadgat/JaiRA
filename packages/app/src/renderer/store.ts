@@ -41,6 +41,7 @@ import type {
   JairaBridge,
   JairaSettings,
   Appearance,
+  ConversationLook,
   JairaTheme,
   PendingApproval,
   ModuleApproval,
@@ -72,6 +73,7 @@ import type {
 import {
   CONFIG_JSON,
   defaultAppearance,
+  defaultConversationLook,
   defaultEditors,
   defaultLogPolicy,
   defaultRendererChoice,
@@ -778,7 +780,7 @@ export type View = "files" | "tasks" | "chat" | "logs" | "debug" | "gallery" | "
  * `history` is a project's run journal and has no layer to pick — nor anything to show without a
  * project, which is why the shell hides it on an empty window rather than rendering it empty.
  */
-export type SettingsSection = "providers" | "executors" | "files" | "appearance" | "config" | "history";
+export type SettingsSection = "providers" | "executors" | "files" | "appearance" | "conversation" | "config" | "history";
 
 const EMPTY: AppState = {
   at: null,
@@ -812,6 +814,7 @@ const EMPTY: AppState = {
     logging: defaultLogPolicy(),
     projects: [],
     filesHidden: [],
+    conversation: defaultConversationLook(),
   },
   config: null,
   executors: [],
@@ -905,6 +908,8 @@ const STRUCTURAL_EVENTS = new Set(["instance.entered", "instance.terminated", "o
 const NARRATED_EVENTS = new Set([
   ...STRUCTURAL_EVENTS,
   "operation.started",
+  // The runs a fan-out made (decision 0003): a line at the mount, and the copies it names appear.
+  "fanout.made",
   "transition.taken",
   "instance.blocked",
 ]);
@@ -4115,6 +4120,20 @@ export function useApp() {
         patch({ settings: { ...ref.current.settings, appearance } });
         try {
           patch({ settings: keepingUi(await invoke("settings:write", { appearance })) });
+        } catch (e) {
+          fail(e);
+        }
+      },
+
+      /**
+       * How a conversation is drawn — the Conversation section of Settings. Patched locally first
+       * and written whole, like the typography and for the same reason.
+       */
+      setConversation: async (patchTo: Partial<ConversationLook>) => {
+        const conversation = { ...ref.current.settings.conversation, ...patchTo };
+        patch({ settings: { ...ref.current.settings, conversation } });
+        try {
+          patch({ settings: keepingUi(await invoke("settings:write", { conversation })) });
         } catch (e) {
           fail(e);
         }

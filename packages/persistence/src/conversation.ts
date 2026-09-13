@@ -21,7 +21,8 @@
 import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
-import { isTaskId, type ConversationTurn, type ConversationView, type MadeTask } from "@jaira/shared";
+import type { EngineEvent } from "@declarative-ai/hw";
+import { isTaskId, type ConversationTurn, type ConversationView, type MadeBatch } from "@jaira/shared";
 import type { Project } from "./project";
 import { holdingOf } from "./lifecycle";
 
@@ -61,24 +62,33 @@ function outcomeText(outcome: unknown, failure: unknown): string {
  * instance — and the provenance is the join: a task id that happens to sit in another task's journal
  * for some other reason is not a made task.
  */
-function madeOf(project: Project, parent: string, instanceId: string): MadeTask | undefined {
-  if (!isTaskId(instanceId)) return undefined;
-  const meta = project.tasks.tryRead(instanceId);
-  if (meta?.origin === undefined || meta.origin.taskId !== parent) return undefined;
-  const row = project.runtime.get(instanceId);
-  const boundary = row?.forkBoundarySeq;
-  const boundaryAt =
-    boundary !== undefined
-      ? (project.db.prepare(`SELECT created_at FROM state_machine_events WHERE task_id = ? AND seq = ?`).get(instanceId, boundary) as { created_at: number } | undefined)?.created_at
-      : undefined;
+function isMadeRow(project: Project, parent: string, instanceId: string): boolean {
+  return isTaskId(instanceId) && project.tasks.tryRead(instanceId)?.origin?.taskId === parent;
+}
+
+/**
+ * The batch a `fanout.made` row records, read from where THIS task stands — see `MadeBatch`. The
+ * titles and standings are the tasks' own, now; the row's title is the fallback for a task since
+ * deleted.
+ */
+function madeBatchOf(project: Project, taskId: string, event: Extract<EngineEvent, { type: "fanout.made" }>): MadeBatch {
+  const waits = new Set(project.tasks.tryRead(taskId)?.dependsOn ?? []);
   return {
-    taskId: instanceId,
-    title: meta.title,
-    kind: meta.origin.kind,
-    status: row?.status ?? "queued",
-    ...(boundary !== undefined ? { boundary } : {}),
-    ...(boundaryAt !== undefined ? { boundaryAt } : {}),
-    holding: holdingOf(project, meta).length,
+    kind: event.kind,
+    runs: event.runs.map((run) => {
+      const meta = project.tasks.tryRead(run.runId);
+      const row = project.runtime.get(run.runId);
+      return {
+        taskId: run.runId,
+        element: run.element,
+        ...(run.id !== undefined ? { id: run.id } : {}),
+        title: meta?.title ?? run.title,
+        status: row?.status ?? "queued",
+        holding: meta !== undefined ? holdingOf(project, meta).length : 0,
+        self: run.runId === taskId,
+        waitsFor: waits.has(run.runId),
+      };
+    }),
   };
 }
 
@@ -155,17 +165,31 @@ export function conversationView(project: Project, taskId: string, options: Conv
         // entered before anything else is said about it, so this is what fills the map.
         pathOf.set(event.instanceId, under(event.parentInstanceId, event.childKey, event.element) ?? "");
         // An element that became a TASK (decision 0003) is the machine making something, not
-        // entering it: its own line, saying what was made and how it stands. The mirrored row's
-        // instance id is the task's id, and the task's provenance is what confirms the join.
-        const made = madeOf(project, taskId, event.instanceId);
-        if (made !== undefined) {
+        // entering it: the mirrored row is the engine's record of the element, and the line that
+        // says what was made is the batch's own (`fanout.made`, below). The mirrored row's instance
+        // id is the task's id, and the task's provenance is what confirms the join.
+        if (isMadeRow(project, taskId, event.instanceId)) {
           madeIds.add(event.instanceId);
-          turns.push({ seq, at, kind: "made", stateId: event.stateId, ...at_(event.instanceId), made });
           break;
         }
         turns.push({ seq, at, kind: "entered", stateId: event.stateId, ...at_(event.instanceId) });
         break;
       }
+      case "fanout.made":
+        // The runs a fan-out made of its elements (decision 0003): one line at the mount, in every
+        // task of the batch — the task that split wrote it before cutting the copies, so each carries
+        // it — and each reads it from where it stands. Addressed by the MOUNT, not an element: the
+        // line belongs to the state that made them, and the reader's own element enters after it.
+        turns.push({
+          seq,
+          at,
+          kind: "made",
+          stateId: event.stateId,
+          ...mountedAt(under(event.instanceId, event.childKey)),
+          instanceId: event.instanceId,
+          made: madeBatchOf(project, taskId, event),
+        });
+        break;
       case "instance.blocked":
         // Never an instance — the engine's `instanceId` is -1 — so no id is carried at all, and its
         // place comes from the MOUNT the engine reported rather than from a path it never got as far

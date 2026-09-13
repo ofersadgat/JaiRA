@@ -49,10 +49,13 @@ export const LANE_LABEL: Record<Lane, string> = {
  * parked on a question has task status `running` and says so nowhere else.
  */
 export function laneOf(card: BoardCard): Lane {
-  // A queued task HOLDING for a dependency (decision 0003) is waiting on something other than
-  // itself, which is what this lane is for; one holding for nothing is simply not started.
-  if (card.status === "queued") return card.waitingFor !== undefined && card.waitingFor.length > 0 ? "paused" : "not-started";
   if (card.status === "completed" || card.status === "failed" || card.status === "canceled") return "finished";
+  // HOLDING for a dependency (decision 0003) is waiting on something other than itself, whatever
+  // else the task is doing — queued and never started, or running and parked at the split until
+  // the task it requires completes — which is what this lane is for. One holding for nothing and
+  // never started is simply not started.
+  if (card.waitingFor !== undefined && card.waitingFor.length > 0) return "paused";
+  if (card.status === "queued") return "not-started";
   // Stopped part-way and resumable, which is a pause somebody has to end — not a failure.
   if (card.status === "interrupted") return "paused";
   const at = card.activeStatus;

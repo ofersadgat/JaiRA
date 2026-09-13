@@ -4703,14 +4703,17 @@ export class AppService {
   }
 
   /**
-   * A task completed: every split task that was holding for it and asked to start when ready, and
-   * now holds for nothing, is started. A task that holds for a person's Start is left standing.
+   * A task completed: every task that was holding for it and now holds for nothing is started — a
+   * split copy standing queued, or a task interrupted while it held (a split's own task holds
+   * in-process while it runs, and after a crash holds by its row like a copy). A copy whose wire said
+   * `start: "manual"` is left to a person; absent reads as the default, `when_ready`.
    */
   private releaseDependents(open: ProjectSession, completed: string): void {
     for (const meta of open.project.tasks.list()) {
-      if (meta.origin?.start !== "when_ready" || !(meta.dependsOn ?? []).includes(completed)) continue;
+      if (!(meta.dependsOn ?? []).includes(completed)) continue;
+      if (meta.origin?.kind === "split" && meta.origin.start === "manual") continue;
       const row = open.project.runtime.get(meta.id);
-      if (row?.status !== "queued" || holdingOf(open.project, meta).length > 0) continue;
+      if (row === undefined || (row.status !== "queued" && row.status !== "interrupted") || holdingOf(open.project, meta).length > 0) continue;
       // The completed task's scripted answers, if it had any, script what it releases — the same
       // rule a parent applies to what it makes, so a fake run stays fake to its last dependent.
       const fake = open.fakeRules.get(completed);

@@ -73,6 +73,7 @@ import type { EditorServices } from "./components";
 import type { Drafts, SetDraft } from "./drafts";
 import type { EditorTab } from "./editorChrome";
 import type { TrailStep } from "./trail";
+import type { SequentialBatchLayout } from "@jaira/shared/browser";
 
 /**
  * Which half of the panel a rendering lands in — DERIVED, never declared.
@@ -264,6 +265,11 @@ export interface FileSurfaceContext {
    */
   onDeliverUserEvent: (requestId: string) => void;
   onSelectTask: (taskId: string) => void;
+  /**
+   * How the elements of a SEQUENTIAL fan-out batch are laid out in a conversation — the reader's
+   * preference (`JairaSettings.conversation`). Absent reads as stacked, the default.
+   */
+  batches?: SequentialBatchLayout | undefined;
   onDrill: (stateId: string) => void;
   /**
    * The runs walked into below this file, and the two moves that change them.

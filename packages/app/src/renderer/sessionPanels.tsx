@@ -44,7 +44,7 @@ import { Icon } from "./icons";
 import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
 import { clockOf, durationOf } from "./transcriptView";
 import { signatureOf } from "./transcript";
-import { addressSegment, segmentKey, type InstanceNode, type MadeTask, type TaskOrigin } from "@jaira/shared/browser";
+import { addressSegment, segmentKey, type InstanceNode, type MadeBatch, type MadeTask, type TaskOrigin } from "@jaira/shared/browser";
 import { StateBlock, StateHeader, headerToneOf, surfaceKindOf } from "./stateSurface";
 import {
   forksOf,
@@ -908,15 +908,12 @@ function NoteRow({
   root,
   onCut,
   onSelectTask,
-  nested,
 }: {
   note: BandNote;
   root: string;
   onCut?: CutOffer | undefined;
   /** Where a made task's title goes when clicked — the task itself. */
   onSelectTask?: ((taskId: string) => void) | undefined;
-  /** The made task's conversation, nested under its line when the line is expanded. */
-  nested?: ((made: MadeTask) => ReactNode) | undefined;
 }): JSX.Element {
   // Moving is not going wrong: a forking-path glyph and the ordinary text colour, against the alert
   // and `--bad` a failure gets. Same shape and same column either way, because they are the same KIND
@@ -924,7 +921,7 @@ function NoteRow({
   // run means reading them interleaved, in the order they happened.
   const moved = note.kind === "entered" || note.kind === "transition";
   const where = pathFrom(note.path, root);
-  if (note.kind === "made" && note.made !== undefined) return <MadeRow note={note} made={note.made} where={where} onSelectTask={onSelectTask} nested={nested} />;
+  if (note.kind === "made" && note.made !== undefined) return <MadeRow note={note} made={note.made} where={where} onSelectTask={onSelectTask} />;
   return (
     // `data-entered` is what a bookmark lands on: the row where the run went INTO the state, which
     // is where a person following the run wants to start reading — not the letterhead below it,
@@ -985,66 +982,64 @@ function NoteRow({
 }
 
 /**
- * A fan-out element that became a TASK (decision 0003), as a line: the verb by kind, the task's
- * title as the link, its standing after it — and a chevron that nests the task's own conversation
- * under the line, with its own rail, the way a subagent's sidechain nests under the call that
- * spawned it. Collapsed by default: a parent with twelve items must not open twelve streams.
+ * The runs a fan-out made of its elements (decision 0003), as a line at the mount: the verb by kind,
+ * then every run but this task's own — its title as the link, its standing after it, and a mark on
+ * each one this task waits for. The reader's own element is NOT in the line: it runs inline, right
+ * below, exactly as it would had there been no split. No chevron and nothing nested — a sibling is
+ * somewhere to go, and the link is how.
  */
 function MadeRow({
   note,
   made,
   where,
   onSelectTask,
-  nested,
 }: {
   note: BandNote;
-  made: MadeTask;
+  made: MadeBatch;
   where: string;
   onSelectTask?: ((taskId: string) => void) | undefined;
-  nested?: ((made: MadeTask) => ReactNode) | undefined;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const standing = made.holding > 0 ? `waiting for ${made.holding} ${made.holding === 1 ? "task" : "tasks"}` : made.status;
+  const others = made.runs.filter((run) => !run.self);
   return (
-    <div className={`sb-note step sb-made${open ? " sb-made-open" : ""}`} role="note" data-made={made.taskId}>
-      {nested !== undefined ? (
-        <button
-          type="button"
-          className={`lh-chev sb-made-chev${open ? " open" : ""}`}
-          aria-expanded={open}
-          aria-label={open ? `collapse ${made.title}` : `expand ${made.title}`}
-          title={open ? "collapse" : "show this task's conversation here"}
-          onClick={(e) => {
-            e.stopPropagation();
-            setOpen((v) => !v);
-          }}
-        >
-          <Icon name="chevron" />
-        </button>
-      ) : (
-        <Icon name="choice" className="sb-note-icon" />
-      )}
+    <div className="sb-note step sb-made" role="note" data-made={others.map((run) => run.taskId).join(" ")}>
+      <Icon name="choice" className="sb-note-icon" />
       <span className="sb-note-verb">{MADE_VERB[made.kind]}</span>
-      {onSelectTask !== undefined ? (
-        <button type="button" className="sb-made-link ellip" title={`open ${made.title} (${made.taskId})`} onClick={() => onSelectTask(made.taskId)}>
-          {made.title}
-        </button>
-      ) : (
-        <span className="sb-made-link ellip">{made.title}</span>
-      )}
-      <span className="sb-note-text sb-made-standing">· {standing}</span>
+      <span className="sb-made-runs">
+        {others.map((run, i) => (
+          <span key={run.taskId} className={`sb-made-run${run.waitsFor ? " sb-made-waits" : ""}`}>
+            {i > 0 ? <span className="sb-made-sep">,</span> : null}
+            {run.waitsFor ? (
+              <span className="sb-made-wait" title="this task waits for it to complete">
+                waits for
+              </span>
+            ) : null}
+            {onSelectTask !== undefined ? (
+              <button type="button" className="sb-made-link ellip" title={`open ${run.title} (${run.taskId})`} onClick={() => onSelectTask(run.taskId)}>
+                {run.title}
+              </button>
+            ) : (
+              <span className="sb-made-link ellip">{run.title}</span>
+            )}
+            <span className="sb-note-text sb-made-standing">· {standingOf(run)}</span>
+          </span>
+        ))}
+      </span>
       {where === "" ? null : (
         <span className="sb-note-state mono ellip" title={note.stateId ?? where}>
           {where}
         </span>
       )}
-      {open && nested !== undefined ? <div className="sb-made-nest">{nested(made)}</div> : null}
     </div>
   );
 }
 
-/** What the machine did to make the task — "split off Alpha", "made Alpha". */
-const MADE_VERB: Record<MadeTask["kind"], string> = {
+/** A run's standing in words: what it is still holding for, or its status. */
+function standingOf(run: MadeTask): string {
+  return run.holding > 0 ? `waiting for ${run.holding} ${run.holding === 1 ? "task" : "tasks"}` : run.status;
+}
+
+/** What the machine did to make the runs — "split off Beta, Gamma", "made Alpha, Beta". */
+const MADE_VERB: Record<MadeBatch["kind"], string> = {
   split: "split off",
   task: "made",
 };
@@ -1109,14 +1104,11 @@ export function SessionBandsView({
   armed,
   origin,
   onSelectTask,
-  nested,
 }: {
   bands: readonly SessionBand[];
   render: (piece: SessionPiece) => ReactNode;
   /** Where a made task's title goes when clicked — see {@link MadeRow}. */
   onSelectTask?: ((taskId: string) => void) | undefined;
-  /** A made task's conversation, drawn nested under its line when expanded — see {@link MadeRow}. */
-  nested?: ((made: MadeTask) => ReactNode) | undefined;
   /** The two verbs of a cut, offered on every entered row and knot — see {@link CutOffer}. */
   onCut?: CutOffer | undefined;
   /**
@@ -1281,7 +1273,6 @@ export function SessionBandsView({
           root={root}
           {...(onCut !== undefined ? { onCut } : {})}
           {...(onSelectTask !== undefined ? { onSelectTask } : {})}
-          {...(nested !== undefined ? { nested } : {})}
         />,
         note.at,
       );

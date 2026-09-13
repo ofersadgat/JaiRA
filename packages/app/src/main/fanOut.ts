@@ -9,24 +9,33 @@
  * - `"task"` — a fresh task rooted at the mounted state, run in the parent's workspace, one after
  *   another unless the mount is `async`. The parent waits, and reads the tasks' outputs back
  *   gathered exactly as it would an inline batch's (`combineElements`).
- * - `"split"` — a copy of the parent up to the mount, standing at it with the element as its own,
- *   on a branch of its own, holding for whatever it `requires`. The parent's answer is the tasks it
- *   made; the engine then ends the parent unless a rule on the mount fires.
+ * - `"split"` — element 0 STAYS in this task, which continues with it as its own (the engine is
+ *   answered "continue"); every other element becomes a copy of this task up to the mount, standing
+ *   at it with the element as its own, on a branch of its own, holding for whatever it `requires`
+ *   and started the moment it holds for nothing — unless the wire says `start: "manual"`, which
+ *   leaves every start to a person. This task holds the same way for whatever element 0 requires,
+ *   in-process, before it answers. A split over ONE element never arrives here: the engine runs it
+ *   inline, since there is nothing to put beside the parent.
  *
- * ## The rows are the record
+ * ## The record is written before anything is made
  *
- * Nothing here keeps a table of what it made. Each element's task is MIRRORED into the parent's
- * journal as an `instance.entered` whose instance id IS the task's id, and its end as an
- * `instance.terminated` — the rows a projection needs to draw the parent standing at the mount,
- * and the rows the engine hands back on a resume (`request.loaded`). A task made and not yet
- * mirrored (a crash between the two) is found again by its provenance, which every task made here
- * carries in its meta; so a resumed fan-out never makes an element twice.
+ * A `fanout.made` row in this task's journal lists every element's task id — this task's own for a
+ * split's element 0 — and it is written BEFORE any copy is cut or any task created, so that a copy
+ * cut after it carries the same list, and so that a host asked again after a crash finds the ids it
+ * chose and makes only what is still missing. Every task in the batch draws the line at the mount
+ * from that one row, each excluding itself.
+ *
+ * A `"task"` mount's elements are also MIRRORED into the parent's journal as `instance.entered`
+ * rows whose instance id IS the task's id, and their ends as `instance.terminated` — the rows the
+ * engine hands back on a resume (`request.loaded`), since the parent's mount is history it reads
+ * through the host. A split writes no such rows: its own element is a real instance here, and the
+ * copies are elsewhere.
  */
 import type { Failure, ResolvedValue } from "@declarative-ai/exec";
 import type { JsonValue } from "@declarative-ai/json";
 import { combineElements, uuidv7, type ElementTermination, type EngineEvent, type FanOutHost, type FanOutOutcome, type FanOutRequest, type LoadedInstance, type SpawnFields, type TerminationOutcome, type WorkflowBundle } from "@declarative-ai/hw";
 import { createTask, forkTask as copyTaskPrefix, gitFor, type Project, type TaskRuntimeRow, type TaskWorkspace } from "@jaira/persistence";
-import { isTerminalStatus, type TaskMeta, type TaskProvenance } from "@jaira/shared";
+import { isTerminalStatus, newTaskId, type TaskMeta, type TaskProvenance } from "@jaira/shared";
 
 export interface FanOutDeps {
   project: Project;
@@ -158,7 +167,7 @@ function provenanceOf(deps: FanOutDeps, kind: TaskProvenance["kind"], request: F
     ...(request.occurrence !== 0 ? { occurrence: request.occurrence } : {}),
     index: element.index,
     item: element.id,
-    ...(kind === "split" && request.spawn.start === "when_ready" ? { start: "when_ready" as const } : {}),
+    ...(kind === "split" ? { start: request.spawn.start } : {}),
   };
 }
 
@@ -193,6 +202,38 @@ function refSegment(id: string): string {
 }
 
 // ---------------------------------------------------------------------------------------------------
+// the record
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * The `fanout.made` row this mount already wrote, when it did — the batch's task ids by element.
+ * Written before anything is made (see {@link recordMade}), so a host asked again after a crash
+ * finds the ids it had already chosen and makes only what is still missing.
+ */
+function recordedRuns(deps: FanOutDeps, request: FanOutRequest): Map<number, string> | undefined {
+  for (const stored of deps.project.events.list(deps.taskId)) {
+    const event = stored.event;
+    if (event.type !== "fanout.made" || event.childKey !== request.key || event.occurrence !== request.occurrence) continue;
+    return new Map(event.runs.map((run) => [run.element, run.runId]));
+  }
+  return undefined;
+}
+
+/** The record of the batch, in this task's journal, before the runs exist — so a copy cut after it carries it too. */
+function recordMade(deps: FanOutDeps, request: FanOutRequest, elements: readonly Element[], ids: ReadonlyMap<number, string>): void {
+  const event: EngineEvent = {
+    type: "fanout.made",
+    instanceId: request.instanceId,
+    stateId: request.stateId,
+    childKey: request.key,
+    occurrence: request.occurrence,
+    kind: request.kind,
+    runs: elements.map((element) => ({ element: element.index, id: element.id, runId: ids.get(element.index)!, title: element.title })),
+  };
+  deps.project.events.recorder(deps.taskId).record(event, (deps.now ?? Date.now)());
+}
+
+// ---------------------------------------------------------------------------------------------------
 // split
 // ---------------------------------------------------------------------------------------------------
 
@@ -200,87 +241,103 @@ async function split(deps: FanOutDeps, request: FanOutRequest): Promise<FanOutOu
   const axis = Object.keys(request.exprs)[0];
   const expr = axis !== undefined ? request.exprs[axis] : undefined;
   if (expr === undefined) throw new Error("a split has no axis");
+  if ((request.loaded ?? []).length > 0) throw new Error("a split's mount is continued from its own element, never from recorded rows");
   const elements = batchOf(request, deps.meta.title);
-  const rows = new Map<number, LoadedInstance>((request.loaded ?? []).map((row) => [row.element ?? 0, row]));
-  const made = new Map<number, string>();
-  for (const [index, row] of rows) made.set(index, row.id);
+  // Nothing to split over: nothing is made, and this task ends after the mount as a split does.
+  if (elements.length === 0) return { outcome: "success", outputs: { tasks: [] as unknown as ResolvedValue } };
+  const now = deps.now ?? Date.now;
 
-  // Every copy first, then the mirrors: a copy takes the parent's journal as it stands, and a mirror
-  // of element 0 in that journal would arrive in element 1's copy as a settled element under the
-  // very mount the copy is to stand at.
-  const last = deps.project.events.list(deps.taskId).at(-1)?.seq ?? 0;
-  // A copy gets a branch of its own where a branch can exist: a checkout. A project directory that
-  // is not one takes unbound copies, as it takes unbound tasks — a binding there would refuse at
-  // start, and this is where it can still be decided.
-  const checkout = deps.project.kind === "project" && (await gitFor(deps.project, deps.project.paths.projectDir).isRepo());
+  // Element 0 is this task's own. The rest become copies, under ids chosen — and recorded — before
+  // any copy is cut, so every copy carries the same list and a host asked again finds the same ids.
+  const recorded = recordedRuns(deps, request);
+  const ids = new Map<number, string>();
   for (const element of elements) {
-    if (made.has(element.index)) continue;
-    const existing = existingOf(deps, "split", request, element.index);
-    if (existing !== undefined) {
-      made.set(element.index, existing.id);
-      continue;
-    }
+    ids.set(element.index, element.index === 0 ? deps.taskId : (recorded?.get(element.index) ?? existingOf(deps, "split", request, element.index)?.id ?? newTaskId()));
+  }
+  if (recorded === undefined) recordMade(deps, request, elements, ids);
+  const taskOf = new Map(elements.map((element) => [element.id, ids.get(element.index)!] as const));
+  const dependsOnOf = (element: Element): string[] => element.requires.map((id) => taskOf.get(id)!);
+
+  // A copy takes this task's journal as it stands, the record included. A copy gets a branch of its
+  // own where a branch can exist: a checkout. A project directory that is not one takes unbound
+  // copies, as it takes unbound tasks — a binding there would refuse at start, and this is where it
+  // can still be decided.
+  const last = deps.project.events.list(deps.taskId).at(-1)?.seq ?? 0;
+  const checkout = deps.project.kind === "project" && (await gitFor(deps.project, deps.project.paths.projectDir).isRepo());
+  const base = deps.meta.split ?? [];
+  for (const element of elements) {
+    if (element.index === 0) continue;
+    const taskId = ids.get(element.index)!;
+    if (deps.project.runtime.get(taskId) !== undefined) continue;
     const branch = !checkout ? null : deps.meta.branch !== undefined ? `${deps.meta.branch}/${refSegment(element.id)}` : refSegment(element.id);
     const fork = copyTaskPrefix(deps.project, deps.taskId, last + 1, {
+      id: taskId,
       standing: "queued",
       title: element.title,
       branch,
       parentTaskId: deps.taskId,
       origin: provenanceOf(deps, "split", request, element),
-      split: [...(deps.meta.split ?? []), { expr, index: element.index }],
+      split: [...base, { expr, index: element.index }],
+      dependsOn: dependsOnOf(element),
       ofLiveTask: true,
-      nowMs: (deps.now ?? Date.now)(),
+      nowMs: now(),
     });
     // The copy stands AT the mount: entered, element 0 of the one-element batch its narrowed list
     // will be, with the element's inputs — and nothing after, so its load dispatches from here.
     const entered: EngineEvent = {
       type: "instance.entered",
-      instanceId: uuidv7((deps.now ?? Date.now)()),
+      instanceId: uuidv7(now()),
       stateId: request.state,
       childKey: request.key,
       parentInstanceId: fork.instanceIds.get(request.instanceId) ?? request.instanceId,
       element: 0,
       inputs: element.inputs,
     };
-    deps.project.events.recorder(fork.taskId).record(entered, (deps.now ?? Date.now)());
-    made.set(element.index, fork.taskId);
+    deps.project.events.recorder(fork.taskId).record(entered, now());
     deps.log("info", `split element ${element.index + 1} of ${request.key} ('${element.title}') as ${fork.taskId}`, deps.taskId);
   }
 
-  // Dependencies, now that every id has a task. Written once; a resumed split finds them written.
-  const taskOf = new Map(elements.map((e) => [e.id, made.get(e.index)!] as const));
-  for (const element of elements) {
-    if (element.requires.length === 0) continue;
-    const taskId = made.get(element.index)!;
-    const meta = deps.project.tasks.tryRead(taskId);
-    if (meta === undefined || meta.dependsOn !== undefined) continue;
-    deps.project.tasks.write({ ...meta, dependsOn: element.requires.map((id) => taskOf.get(id)!) });
-  }
-
-  // The parent's own record of what it made, where the rows were not already there.
-  for (const element of elements) {
-    if (rows.has(element.index)) continue;
-    mirrorEntered(deps, request, element, made.get(element.index)!);
-    mirrorTerminated(deps, request, made.get(element.index)!, { outcome: "success" });
+  // This task's own standing, written once: split on the list at element 0 — what makes every later
+  // mount over the list narrow to it — titled by its element where the element has a title, and
+  // holding for whatever element 0 requires, the way a copy holds.
+  const own = elements[0]!;
+  const mine = deps.project.tasks.read(deps.taskId);
+  if (!(mine.split ?? []).some((entry) => entry.expr === expr)) {
+    const titled = stringField(own.item, request.spawn.title);
+    const requires = dependsOnOf(own);
+    deps.project.tasks.write({
+      ...mine,
+      split: [...base, { expr, index: 0 }],
+      ...(titled !== undefined ? { title: titled } : {}),
+      ...(requires.length > 0 ? { dependsOn: requires } : {}),
+    });
   }
   deps.tasksChanged();
 
-  // A split that starts itself starts what has nothing to wait for; the rest are released by their
-  // dependencies finishing, which the service watches for.
-  if (request.spawn.start === "when_ready") {
+  // What has nothing to wait for starts now; the rest are released by their dependencies finishing,
+  // which the service watches for. A wire that says `start: "manual"` leaves both to a person: a
+  // holding task then stands where it was put until someone presses Start.
+  if (request.spawn.start !== "manual") {
     for (const element of elements) {
-      if (element.requires.length > 0) continue;
-      const taskId = made.get(element.index)!;
-      const row = deps.project.runtime.get(taskId);
-      if (row?.status !== "queued") continue;
+      if (element.index === 0 || element.requires.length > 0) continue;
+      const taskId = ids.get(element.index)!;
+      if (deps.project.runtime.get(taskId)?.status !== "queued") continue;
       await deps.startTask(taskId, {});
     }
   }
 
-  return {
-    outcome: "success",
-    outputs: { tasks: elements.map((e) => ({ id: e.id, taskId: made.get(e.index)!, title: e.title })) as unknown as ResolvedValue },
-  };
+  // Element 0 holds HERE, in this process, for what it requires — the same holding a copy does
+  // standing queued, and read the same way by the board and the list (`dependsOn` on the meta).
+  // A task stopped while holding holds by its row instead, and is released as a copy is.
+  for (const dependency of dependsOnOf(own)) {
+    const row = await deps.waitForTask(dependency, request.signal);
+    if (request.signal.aborted) return { outcome: "canceled" };
+    if (row.status !== "completed") {
+      const title = deps.project.tasks.tryRead(dependency)?.title ?? dependency;
+      return { outcome: "error", failure: { classification: "permanent", reason: `element '${own.id}' waits for '${title}', which ended ${row.status}` } };
+    }
+  }
+  return { outcome: "continue", index: 0 };
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -293,32 +350,42 @@ async function tasks(deps: FanOutDeps, request: FanOutRequest): Promise<FanOutOu
   const childDef = deps.bundle.states[request.state];
   const rerooted: WorkflowBundle = { ...deps.bundle, rootId: request.state };
 
-  const runOne = async (element: Element): Promise<ElementTermination> => {
-    const row = rows.get(element.index);
-    let taskId = row?.id ?? existingOf(deps, "task", request, element.index)?.id;
-    if (taskId === undefined) {
-      const meta = createTask(deps.project, {
+  // Every task first, under ids recorded before any is made — the list the line at the mount draws
+  // — and mirrored into this task's journal; then run, in order unless the mount is `async`.
+  const recorded = recordedRuns(deps, request);
+  const ids = new Map<number, string>();
+  for (const element of elements) {
+    ids.set(element.index, rows.get(element.index)?.id ?? recorded?.get(element.index) ?? existingOf(deps, "task", request, element.index)?.id ?? newTaskId());
+  }
+  if (recorded === undefined && elements.length > 0) recordMade(deps, request, elements, ids);
+  for (const element of elements) {
+    const taskId = ids.get(element.index)!;
+    if (deps.project.runtime.get(taskId) === undefined) {
+      createTask(deps.project, {
+        id: taskId,
         title: element.title,
         workflow: request.state,
         inputs: element.inputs as Record<string, JsonValue>,
         parentTaskId: deps.taskId,
         origin: provenanceOf(deps, "task", request, element),
       });
-      taskId = meta.id;
-      mirrorEntered(deps, request, element, taskId);
-      deps.tasksChanged();
       deps.log("info", `made element ${element.index + 1} of ${request.key} ('${element.title}') as ${taskId}`, deps.taskId);
-    } else if (row === undefined) {
-      // Made, never mirrored — the crash the provenance lookup exists for.
-      mirrorEntered(deps, request, element, taskId);
     }
+    // Made, never mirrored — the crash the provenance lookup exists for — or made just now.
+    if (!rows.has(element.index)) mirrorEntered(deps, request, element, taskId);
+  }
+  deps.tasksChanged();
+
+  const runOne = async (element: Element): Promise<ElementTermination> => {
+    const row = rows.get(element.index);
+    const taskId = ids.get(element.index)!;
     // A row that has already ended is history; anything else is work to start or continue.
     let standing = deps.project.runtime.get(taskId);
     if (standing === undefined) throw new Error(`task '${taskId}' made for element ${element.index} is gone`);
     if (!isTerminalStatus(standing.status)) {
       if (request.signal.aborted) return { outcome: "canceled" };
       if (standing.status !== "running" && standing.status !== "stopping") await deps.startTask(taskId, { bundle: rerooted });
-      const onAbort = (): void => deps.cancelTask(taskId!);
+      const onAbort = (): void => deps.cancelTask(taskId);
       request.signal.addEventListener("abort", onAbort, { once: true });
       try {
         standing = await deps.waitForTask(taskId, request.signal);

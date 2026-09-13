@@ -42,7 +42,8 @@ import {
   type ConversationTurn,
   type InstanceAddress,
   type InstanceNode,
-  type MadeTask,
+  type MadeBatch,
+  type SequentialBatchLayout,
   type SessionRef,
 } from "@jaira/shared/browser";
 
@@ -218,6 +219,24 @@ export function piecesOf(root: InstanceNode | undefined, history: readonly Sessi
   return out;
 }
 
+/**
+ * The BATCH a piece belongs to, when it is (or is under) an element of a fan-out: the mount's own
+ * address — every step down to the element's, with the element position dropped — so the elements
+ * of one entry share it and a later pass of the same mount does not. Read off the node's address,
+ * which the projection stamps, because that is the one place the element position is written down.
+ */
+function batchOf(piece: SessionPiece): string | undefined {
+  const address = piece.node.address;
+  if (address === undefined) return undefined;
+  let at = -1;
+  for (const [i, step] of address.entries()) if (step.element !== undefined) at = i;
+  if (at < 0) return undefined;
+  return address
+    .slice(0, at + 1)
+    .map((step, i) => (i === at ? `${step.childKey}#${step.occurrence}` : `${step.childKey}[${step.element ?? ""}]#${step.occurrence}`))
+    .join("/");
+}
+
 /** The keys in a cluster, so two adjacent clusters can be asked whether they hold the same threads. */
 function keysOf(cluster: readonly SessionPiece[]): string {
   return [...new Set(cluster.map(keyOf))].sort().join(" ");
@@ -230,19 +249,27 @@ function keysOf(cluster: readonly SessionPiece[]): string {
  * finished is a HANDOFF, not concurrency, and treating touching spans as overlapping would collapse
  * every sequential run into one band and lose the pause marks entirely.
  */
-export function bandsOf(pieces: readonly SessionPiece[]): SessionBand[] {
+export function bandsOf(pieces: readonly SessionPiece[], options: { batches?: SequentialBatchLayout | undefined } = {}): SessionBand[] {
   const clusters: SessionPiece[][] = [];
   let end = -Infinity;
+  /** The batches the open cluster holds pieces of — what a sequential element joins across time. */
+  let batches = new Set<string>();
   for (const piece of pieces) {
     const stop = piece.endedAt ?? Infinity;
     const last = clusters[clusters.length - 1];
-    if (last === undefined || piece.startedAt >= end) {
+    // The elements of one fan-out batch are ONE band when the reader asked for that
+    // (`JairaSettings.conversation`), whether or not they overlapped: siblings across, not passes
+    // down. A batch whose elements overlapped is across either way, by the overlap rule alone.
+    const batch = options.batches === "band" ? batchOf(piece) : undefined;
+    if (last === undefined || (piece.startedAt >= end && !(batch !== undefined && batches.has(batch)))) {
       clusters.push([piece]);
       end = stop;
+      batches = new Set(batch !== undefined ? [batch] : []);
       continue;
     }
     last.push(piece);
     end = Math.max(end, stop);
+    if (batch !== undefined) batches.add(batch);
   }
 
   // See the module comment: consecutive bands holding the same threads are one stretch of that
@@ -445,8 +472,8 @@ export interface BandNote {
   kind: "failure" | "blocked" | "entered" | "transition" | "made";
   /** The state DEFINITION the note is about, when the journal named one — what the title shows. */
   stateId?: string;
-  /** For a `made` note: the task the element became — see `MadeTask`. */
-  made?: MadeTask;
+  /** For a `made` note: the runs the batch's elements became — see `MadeBatch`. */
+  made?: MadeBatch;
   /**
    * The instance the note is about, when it became one.
    *

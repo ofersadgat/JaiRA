@@ -1046,7 +1046,7 @@ transition. `each` is the same idea one level up, for a *child*.
 | --- | --- | --- | --- |
 | What runs per element | the child, here | the child, as a task of its own | the **rest of this state's sequence**, as a task of its own |
 | The task's history | — | fresh, rooted at the child | a copy of this run up to the mount, standing at it |
-| This run | enters the elements, gathers their outputs | waits, then reads the outputs gathered exactly as inline | **ends** — unless a rule on the mount fires |
+| This run | enters the elements, gathers their outputs | waits, then reads the outputs gathered exactly as inline | **keeps element 0** and continues with it as its own; the rest are copies |
 | Where the task files | — | under this task, in this mount's column of this state's board | beside this task, as a peer |
 | Worktree | this run's | this run's — it is this run's own work | its own branch, cut when it starts |
 | Order | sequence, `async` for concurrency | the same | concurrent; `requires` orders the starts |
@@ -1076,33 +1076,51 @@ that each element can be stopped, rewound, forked and resumed on its own, and
 that its conversation is one drill-down away rather than inline in this run's
 rail.
 
-**`"split"`.** The task the host makes is a **copy of this run** up to the mount —
-every state entered before it, with its conversations — standing at the mount
-with the element as its own. It then runs the rest of this state's sequence,
+**`"split"`.** Element 0 **stays in this task**, which continues with it as its
+own; every other element becomes a **copy of this run** up to the mount — every
+state entered before it, with its conversations — standing at the mount with
+that element as its own. Each task then runs the rest of this state's sequence,
 which is why every later mount that needs the element **says the wire again**:
-inside a split task, a wire whose `each: "split"` names the same list resolves to
-the task's one element and runs inline. A split is on one list; a mount that
-fans out over two cannot split.
+inside a split task — the one that split included — a wire whose `each:
+"split"` names the same list resolves to the task's one element and runs
+inline. A task is retitled by its element where the element has a title, the
+one that split exactly as a copy is. A split is on one list; a mount that fans
+out over two cannot split.
 
-This run's record for the mount settles with the tasks it made (`{ tasks: [{ id,
-taskId, title }] }`), and then the state **ends successfully** — the sequence
-continues in the tasks, not here. A rule on the mount that fires says otherwise.
+A split over **exactly one element is no split**: nothing would stand beside
+this run, so the element runs here and the sequence continues, no host asked.
+A split over no elements makes nothing, and this run ends after the mount.
+
+In every task of the batch the mount's record is the task's own element, run
+inline — the state's own outputs, not one-element arrays of them — and nothing
+ends: the sequence continues here with element 0, and in each copy with its
+own. Read either conversation and it is the same run, with a different element
+under the mount.
 
 **The element's fields.** `id`, `title` and `requires` name properties of an
 element: its identity, what the task is called, and the ids of the elements it
 depends on. Defaults `id`, `title`, `requires`. A task whose `requires` are not
 all complete is **holding**: it stands where it was put, in the paused lane, and
-Start refuses with the names until they are done. `start: "when_ready"` on a
-split wire has the host start each task itself the moment its dependencies are
-complete; the default leaves that to a person. A `"task"` element is always
-started by the host, since this run is waiting on it.
+Start refuses with the names until they are done. The host starts each task
+itself the moment its dependencies are complete — at once, for one that has
+none — so a task holds only while something it requires is unfinished. The
+task that split holds the same way when element 0 requires another element:
+it stands at the mount, running, until that copy completes, then continues.
+`start: "manual"` on the wire leaves every copy's start to a person instead
+(`"when_ready"` is the default). A `"task"` element is always started by the
+host, since this run is waiting on it.
 
-**What the journal holds.** The parent mirrors each element as an
-`instance.entered` under the mount whose instance id is the task's id, and its end
-as `instance.terminated` — so the parent's rail shows the elements as places and
-a resumed parent finds its tasks again by those rows. A split copy holds one
-`instance.entered` for the mount, element 0 of the one-element batch its
-narrowed list will be, and nothing after it.
+**What the journal holds.** Before anything is made, the task that fans out
+writes one `fanout.made` row under the mount listing every element's task — its
+own included, for a split — so that a copy cut after it carries the same list.
+Every task in the batch draws that one row as the line at the mount: the other
+tasks as links with their standing, the ones this task waits for marked, and
+its own element inline below, as if there had been no split. A `"task"` mount's
+parent also mirrors each element as an `instance.entered` under the mount whose
+instance id is the task's id, and its end as `instance.terminated` — the rows a
+resumed parent finds its tasks by. A split copy holds one `instance.entered`
+for the mount, element 0 of the one-element batch its narrowed list will be,
+and nothing after it; the task that split holds the same for its own element.
 
 ---
 

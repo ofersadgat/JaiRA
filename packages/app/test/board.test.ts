@@ -46,6 +46,19 @@ describe("laneOf", () => {
     expect(laneOf(card({ taskId: "t2", status: "running", activeStatus: "blocked" }))).toBe("paused");
   });
 
+  /**
+   * Holding for a dependency (decision 0003) is waiting on something other than itself, whatever
+   * else the task is doing: a queued copy, or the task that split, running and parked at the mount
+   * until the task its element requires completes. Finished is finished either way.
+   */
+  it("pauses a task that holds for another, queued or running, and never a finished one", () => {
+    const holding = [{ taskId: "t9", title: "Beta", status: "queued" as const }];
+    expect(laneOf(card({ taskId: "t1", status: "queued", waitingFor: holding }))).toBe("paused");
+    expect(laneOf(card({ taskId: "t2", status: "running", activeStatus: "running", waitingFor: holding }))).toBe("paused");
+    expect(laneOf(card({ taskId: "t3", status: "completed", waitingFor: holding }))).toBe("finished");
+    expect(laneOf(card({ taskId: "t4", status: "queued", waitingFor: [] }))).toBe("not-started");
+  });
+
   /** Stopped part-way and resumable — a pause somebody has to end, not an ending. */
   it("pauses an interrupted task rather than finishing it", () => {
     expect(laneOf(card({ taskId: "t1", status: "interrupted" }))).toBe("paused");
