@@ -612,7 +612,15 @@ describe("workflow authoring", () => {
   });
 
   it("refuses an absolute state id", () => {
-    expect(() => service.readWorkflow({ stateId: "C:/Windows/System32/x", layer: "project" })).toThrow(
+    // Absolute on THIS platform: on POSIX `C:/Windows/...` is a relative path, and a legal one.
+    const absolute = process.platform === "win32" ? "C:/Windows/System32/x" : "/etc/x";
+    expect(() => service.readWorkflow({ stateId: absolute, layer: "project" })).toThrow(/does not name a state inside/);
+  });
+
+  it.runIf(process.platform === "win32")("refuses a state id on another drive", () => {
+    // `relative` has no answer across drives and returns the absolute path, which has no `..` in it.
+    const drive = dir.slice(0, 1).toUpperCase() === "Z" ? "Y" : "Z";
+    expect(() => service.readWorkflow({ stateId: `${drive}:/escape`, layer: "project" })).toThrow(
       /does not name a state inside/,
     );
   });

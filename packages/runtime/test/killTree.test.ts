@@ -34,15 +34,19 @@ async function waitUntil(predicate: () => boolean, ms: number): Promise<boolean>
 /**
  * A process that spawns one long-lived child, prints its pid, and then waits around itself.
  *
- * The grandchild is `detached` and `unref`d ON PURPOSE, and the test is worthless without it. Windows
- * runs test processes inside a job object that collects ordinary descendants when the tree above them
- * dies, which masks the very bug this is about — measured here: a non-detached grandchild disappears
- * on a plain `child.kill()`, so the assertion below would pass with no fix at all. A detached one
- * survives, which is what the real agent did.
+ * On Windows the grandchild is `detached` and `unref`d ON PURPOSE, and the test is worthless without
+ * it. Windows runs test processes inside a job object that collects ordinary descendants when the tree
+ * above them dies, which masks the very bug this is about — measured here: a non-detached grandchild
+ * disappears on a plain `child.kill()`, so the assertion below would pass with no fix at all. A
+ * detached one survives, which is what the real agent did.
+ *
+ * On POSIX it must NOT be detached. There `detached` means a process group of its own, which a group
+ * kill does not reach by design; an ordinary grandchild already outlives a plain `child.kill()` there
+ * (it is reparented, not collected), so the bug is exposed without it.
  */
 const PARENT_SCRIPT = `
   const { spawn } = require("node:child_process");
-  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", detached: true });
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", detached: ${process.platform === "win32"} });
   child.unref();
   console.log(child.pid);
   setInterval(() => {}, 1000);

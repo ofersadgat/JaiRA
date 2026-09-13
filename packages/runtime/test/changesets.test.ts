@@ -4,7 +4,7 @@
  * design's central one: both producers lower into ONE value, whose source is a pin and whose
  * content changes carry strategy-derived hunks.
  */
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -75,9 +75,11 @@ describe("worktreeChangeset (§2's git: producer)", () => {
   });
 
   it("carries a mode flip as a change with modes — the applicable chmod (§1.1)", async () => {
-    // `update-index --chmod` is how a mode flip is made on Windows too, where the filesystem has no
-    // executable bit to flip — git's index carries it either way.
+    // `update-index --chmod` is how a mode flip is made on Windows, where the filesystem has no
+    // executable bit to flip and git takes the mode from the index. On POSIX git reads the bit off
+    // the file itself, so the file gets it too; `chmod` does nothing to it on Windows.
     await git.run(["update-index", "--chmod=+x", "notes.md"]);
+    chmodSync(join(repo, "notes.md"), 0o755);
     const changeset = await worktreeChangeset(git, (await git.head())!, read);
     const flip = changeset.changes.find((c) => c.path === "notes.md")!;
     expect(flip.modes).toEqual({ before: "100644", after: "100755" });

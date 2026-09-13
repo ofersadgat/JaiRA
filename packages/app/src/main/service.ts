@@ -7236,7 +7236,8 @@ export class AppService {
    * — the untrusted half of the boundary (DESIGN §11.2) — and `../../.ssh/authorized_keys` is a
    * perfectly good relative path. Resolving first and then proving the result is still under the
    * root is the check that cannot be fooled by encoding tricks, because it tests the answer rather
-   * than the input.
+   * than the input. An absolute `rel` is its own escape: on Windows, a file on another drive has no
+   * relative path from the root, so `relative` hands back the absolute one — no `..` in sight.
    */
   private workflowFile(stateId: string, layer: WorkflowLayer, project?: string): string {
     const root =
@@ -7245,7 +7246,7 @@ export class AppService {
         : this.requireProject(project).paths.workflowsDir;
     const file = resolvePath(root, `${stateId}.json`);
     const rel = relative(root, file);
-    if (rel.startsWith("..") || rel.length === 0 || resolvePath(root, rel) !== file) {
+    if (rel.startsWith("..") || rel.length === 0 || isAbsolute(rel) || resolvePath(root, rel) !== file) {
       throw this.refusal("file", `'${stateId}' does not name a state inside the ${layer} workflows directory`);
     }
     return file;
