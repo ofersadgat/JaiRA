@@ -5042,17 +5042,18 @@ export class AppService {
       if (!check.ok) throw this.refusal("run", `invalid ${contract.config.component} response: ${check.errors}`);
     }
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
-    // A multi-part chooser's answer is EVERY round's answers, and the loop's own flag stays out of
-    // what the engine gets — see `followUp.ts`. A first round with no follow-up asked for is the
-    // plain case: its own answers, merged with nothing.
+    // A multi-part chooser's answer is EVERY round's answers, and the loop's own bookkeeping stays
+    // out of what the engine gets — see `followUp.ts`. Whether a round follows is the STATE's
+    // `follow_up`, never the person's; a chooser without it is the plain case: its own answers,
+    // merged with nothing.
     let settled = value;
     if (contract !== undefined && contract.config.component === "choose_option" && contract.config.questions !== undefined) {
       const answers = mergedAnswers(contract.inputs, value);
-      if (owner !== undefined && wantsFollowUp(contract.config, value) && owner.hub.list().some((r) => r.requestId === requestId)) {
+      if (owner !== undefined && wantsFollowUp(contract.config) && owner.hub.list().some((r) => r.requestId === requestId)) {
         this.followUp(owner, requestId, contract.config, contract.inputs, answers);
         return { requestId };
       }
-      // A RECOVERED gate has no live park to hold, so a follow-up asked for on one settles as it is:
+      // A RECOVERED gate has no live park to hold, so a follow-up state's answer settles as it is:
       // the loop needs a run to re-park on, and the resumed run gets these answers seeded.
       settled = settledFollowUp(answers);
     }
@@ -5063,12 +5064,12 @@ export class AppService {
   /**
    * The follow-up round of a multi-part chooser — the loop `choose_option`'s `follow_up: true` runs.
    *
-   * The person answered and asked for more. The park is HELD (off the screen, its row closed, the
-   * engine still waiting), a model is asked whether the answers opened anything only a person can
-   * settle, and the same call is then either parked again with those questions — a new request, a
-   * new row, the same promise — or settled with every round's answers. A model that fails, or a
-   * person who has been round the loop `MAX_FOLLOW_UP_ROUNDS` times, settles too: a follow-up is a
-   * courtesy, and the answers already given are never lost to it.
+   * The person answered a state that asks for follow-ups. The park is HELD (off the screen, its row
+   * closed, the engine still waiting), a model is asked whether the answers opened anything only a
+   * person can settle, and the same call is then either parked again with those questions — a new
+   * request, a new row, the same promise — or settled with every round's answers. A model that
+   * fails, or a loop that has been round `MAX_FOLLOW_UP_ROUNDS` times, settles too: a follow-up is
+   * a courtesy, and the answers already given are never lost to it.
    */
   private followUp(
     open: ProjectSession,

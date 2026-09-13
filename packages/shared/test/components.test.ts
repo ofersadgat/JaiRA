@@ -446,24 +446,15 @@ describe("a multi-part choose_option (questions)", () => {
     expect(validateComponentResult(config, { decision: "below" })).toMatchObject({ ok: false });
   });
 
-  it("offers follow-up questions only beside questions, and takes the flag only where it was offered", () => {
+  it("takes follow-up questions only beside questions, as the state's own parameter", () => {
     expect(() => parse("choose_option", { options: ["a", "b"], follow_up: true })).toThrow(/follow_up needs questions/);
     const plain = parse("choose_option", raw);
     expect(plain).not.toHaveProperty("followUp");
-    // A flag the state never offered is refused: nothing on screen could have produced it.
-    expect(validateComponentResult(plain, { answers: { rows: ["counts"] }, follow_up: true })).toMatchObject({
-      ok: false,
-      errors: "result.follow_up: this state did not offer follow-up questions",
-    });
-    const offered = parse("choose_option", { ...raw, follow_up: true });
-    expect(offered).toMatchObject({ followUp: true });
-    expect(validateComponentResult(offered, { answers: { rows: ["counts"] }, follow_up: true })).toEqual({ ok: true });
-    expect(validateComponentResult(offered, { answers: { rows: ["counts"] }, follow_up: false })).toEqual({ ok: true });
-    expect(validateComponentResult(offered, { answers: { rows: ["counts"] } })).toEqual({ ok: true });
-    expect(validateComponentResult(offered, { answers: { rows: ["counts"] }, follow_up: "yes" })).toMatchObject({
-      ok: false,
-      errors: "result.follow_up must be a boolean",
-    });
+    const asked = parse("choose_option", { ...raw, follow_up: true });
+    expect(asked).toMatchObject({ followUp: true });
+    // The answer is the same shape either way: the loop is the state's, not something the person says.
+    expect(validateComponentResult(asked, { answers: { rows: ["counts"] } })).toEqual({ ok: true });
+    expect(validateComponentResult(plain, { answers: { rows: ["counts"] } })).toEqual({ ok: true });
   });
 
   it("lints a state whose questions arrive from an input rather than its args", () => {

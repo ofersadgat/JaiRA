@@ -242,7 +242,7 @@ const CONFIG_SCHEMAS: Record<ComponentName, { hint: string; document: SchemaDoc;
       },
       follow_up: bool(
         "follow_up",
-        "with questions only: offer 'the model may ask follow-up questions' on the last step; the answer then carries follow_up beside answers",
+        "with questions only: after each round of answers a model asks what they opened, as another round of this gate, until it has nothing to ask; the state gets every round's answers in one answers",
       ),
       icon: str("icon", "a glyph beside the question; absent ⇒ a message bubble"),
     }),
@@ -653,8 +653,8 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
       },
       {
         id: "follow_up",
-        title: "With follow-up questions on offer",
-        note: "`follow_up: true` puts a box on the last step: the model may ask follow-up questions. Ticked, the gate is held while a model reads the answers (and the state's other inputs as context) and asks what they opened; those come back as another round of this same gate, and the state gets every round's answers in one `answers`.",
+        title: "With follow-up questions",
+        note: "`follow_up: true` is the state's decision, not the person's: nothing on screen differs. On submit the gate is held while a model reads the answers (and the state's other inputs as context) and asks what they opened; those come back as another round of this same gate, until the model has nothing to ask, and the state gets every round's answers in one `answers`.",
         sample: {
           prompt: "The product questions the spec cannot answer from the repo.",
           questions: PRODUCT_QUESTIONS,

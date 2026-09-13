@@ -33,12 +33,10 @@ const inputs: Record<string, JsonValue> = {
 const config = parseComponentConfig("choose_option", inputs) as ChooseOptionConfig;
 
 describe("a follow-up round", () => {
-  it("is asked for by the flag, and only where the state offered it", () => {
-    expect(wantsFollowUp(config, { answers: { rows: "counts" }, follow_up: true })).toBe(true);
-    expect(wantsFollowUp(config, { answers: { rows: "counts" }, follow_up: false })).toBe(false);
-    expect(wantsFollowUp(config, { answers: { rows: "counts" } })).toBe(false);
+  it("is the state's to ask for, and nothing in the answer has a say", () => {
+    expect(wantsFollowUp(config)).toBe(true);
     const plain = parseComponentConfig("choose_option", { ...inputs, follow_up: undefined }) as ChooseOptionConfig;
-    expect(wantsFollowUp(plain, { answers: { rows: "counts" }, follow_up: true })).toBe(false);
+    expect(wantsFollowUp(plain)).toBe(false);
   });
 
   it("asks the model with the prompt, every question and its answer, and the state's other inputs as context", () => {
@@ -79,7 +77,7 @@ describe("a follow-up round", () => {
   });
 
   it("carries the questions and answers so far into the next round, and merges them back at the end", () => {
-    const answers = mergedAnswers(inputs, { answers: { rows: "counts" }, follow_up: true });
+    const answers = mergedAnswers(inputs, { answers: { rows: "counts" } });
     expect(answers).toEqual({ rows: "counts" });
     const next = followUpQuestionsOf({ questions: [{ name: "grouping", question: "Group by workflow?", options: ["yes", "no"] }] }, askedSoFar(config, inputs));
     const round2 = nextRoundInputs(config, inputs, answers, next);

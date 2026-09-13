@@ -102,11 +102,6 @@ function recordedDraft(seed: string, content: JsonValue | undefined): DraftBox {
   return { text, dirty: text !== seed, set: () => undefined, revert: () => undefined };
 }
 
-/** What a settled multi-part answer said about follow-ups — `false` when it said nothing. */
-function followUpOfValue(value: JsonValue | undefined): boolean {
-  return value !== undefined && value !== null && typeof value === "object" && !Array.isArray(value) && (value as Record<string, JsonValue>)["follow_up"] === true;
-}
-
 /**
  * An authored decision, drawn by the same control an agent's question uses (decision 0002).
  *
@@ -120,12 +115,11 @@ function ChooseOption({ config, onSubmit, settled }: ComponentProps<ChooseOption
   const [answers, setAnswers] = useState<Record<string, Answer>>(() =>
     settled !== undefined ? answersOfValue(choices, settled.value) : initialAnswers(choices),
   );
-  // Off until ticked: a follow-up round is the person's to ask for, never the default.
-  const [followUp, setFollowUp] = useState<boolean>(() => followUpOfValue(settled?.value));
-
   // The multi-part gate: the same stepper an agent's batch of questions uses, and the answer is a
   // record keyed by each question's `name` rather than one `decision` — a question passed on stays
   // out of it, which is how "they had no view" reaches the state as an absence rather than a word.
+  // Whether a follow-up round follows is the STATE's (`follow_up`), read in main: the answer carries
+  // nothing about it, and nothing here offers the person a say.
   if (config.questions !== undefined) {
     const submit = (): void => {
       const out: Record<string, string | string[]> = {};
@@ -133,7 +127,7 @@ function ChooseOption({ config, onSubmit, settled }: ComponentProps<ChooseOption
         const value = answerOf(choice, answers[choice.question] ?? EMPTY_ANSWER);
         if (value !== undefined) out[choice.name ?? choice.question] = value;
       }
-      onSubmit({ answers: out, ...(config.followUp === true ? { follow_up: followUp } : {}) });
+      onSubmit({ answers: out });
     };
     return (
       <ChoiceSteps
@@ -142,18 +136,6 @@ function ChooseOption({ config, onSubmit, settled }: ComponentProps<ChooseOption
         onAnswer={(question, next) => setAnswers((prev) => ({ ...prev, [question]: next }))}
         onSubmit={submit}
         readOnly={readOnly}
-        {...(config.followUp === true
-          ? {
-              // Beside the last step's button, where the answers are about to go: whether the turn
-              // that raised them may raise more. Settled, it reads what was chosen and changes nothing.
-              extra: (
-                <label className="run-bool follow-up">
-                  <input type="checkbox" checked={followUp} disabled={readOnly} onChange={(e) => setFollowUp(e.target.checked)} />
-                  <span className="sub">The model may ask follow-up questions</span>
-                </label>
-              ),
-            }
-          : {})}
       />
     );
   }

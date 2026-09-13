@@ -86,7 +86,7 @@ person can see, which is why they are not two components.
 | `require_confirm` | no | Picking holds the choice; a Confirm button sends it |
 | `custom` | no | Offer an own-answer box; `decision` may then be any non-empty string. Exclusive with `comments` |
 | `questions` | no | Several questions in one gate — see below. Replaces `options` |
-| `follow_up` | no | With `questions` only: offer "the model may ask follow-up questions" on the last step; the answer then carries `follow_up` beside `answers` |
+| `follow_up` | no | With `questions` only: the model may ask follow-up questions — after each round of answers, as another round of this gate, until it has nothing to ask |
 
 Both callers normalize to one `Choice` — `choicesOfConfig` for a state,
 `choicesOfQuestions` for an agent — and the renderer draws that and nothing else.
@@ -115,16 +115,16 @@ no view" reach the state as an absence it can test for rather than a value it
 has to know to ignore — and why a "no view" option in the list is the wrong
 spelling.
 
-**Follow-up questions are the component's to ask, and the person's to allow.**
-`follow_up: true` puts one box beside the last step's button: *the model may ask
-follow-up questions*. Off unless ticked. Ticked, the gate does not settle on the
-click: the host holds the call, asks a model whether the answers opened anything
+**Follow-up questions are the component's to ask, and the state's to allow.**
+`follow_up: true` is a parameter of the state, never a choice put to the person:
+nothing on screen differs, and the answer carries nothing about it. With it, the
+gate does not settle on the click: the host holds the call, asks a model whether the answers opened anything
 else only a person can settle — with the gate's prompt, every question and answer
 so far, and the state's other inputs as context — and either parks the same call
 again with the new questions (a new request, a new durable row, the same engine
 promise) or settles it. The result the state gets is one `{ answers }` keyed by
-every question asked across the rounds, the follow-ups included; the flag itself
-never reaches the state. A round asks only what the answers opened, never what
+every question asked across the rounds, the follow-ups included; the loop's own
+bookkeeping never reaches the state. A round asks only what the answers opened, never what
 could have been asked the first time; a name already used is dropped; a model
 that fails settles with the answers given; and the loop stops after five rounds.
 The context is whatever inputs the author wired into the state beyond the config,
@@ -332,7 +332,7 @@ what makes a chooser row scannable without separating two hues.
 | `choose_option` with no options | ERROR at parse time, not an empty dialog | Fix the state file |
 | `options` and `questions` together, or `comments` beside `questions` | ERROR at parse time | One spelling; per-question knobs go on the question |
 | An `answers` key naming no question | Refused in the main process | Nothing on screen could have produced it |
-| `follow_up` beside `options`, or in a result the state did not offer it in | ERROR at parse time; refused in the main process | The flag needs `questions`, and a box the person could tick |
+| `follow_up` beside `options` | ERROR at parse time | A single decision has no turn to ask more |
 | A `review_artifacts` result missing an artifact | Refused in the main process | The set must be complete |
 
 Re-validation happens in main because the renderer is the untrusted side of the

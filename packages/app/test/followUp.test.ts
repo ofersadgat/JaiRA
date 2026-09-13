@@ -1,8 +1,8 @@
 /**
  * Follow-up questions run INSIDE the gate (runtime `followUp.ts`, `AppService.followUp`).
  *
- * A person answers a multi-part chooser and ticks "the model may ask follow-up questions". The gate
- * on screen goes away, a model is asked what the answers opened, and the same call is parked again
+ * A person answers a multi-part chooser whose state says `follow_up: true`. The gate on screen goes
+ * away, a model is asked what the answers opened, and the same call is parked again
  * with those questions — a second request, a second row, the one engine promise. What the state
  * finally gets is every round's answers in one `answers`, which the next state reads as its input.
  * That last read is the proof: the engine never saw two calls, and the follow-up's answer arrived
@@ -25,8 +25,8 @@ import { AppService } from "../src/main/service";
 
 const ROOT = "followup";
 
-/** A chooser with follow-ups on offer, and a gate after it that reads what the chooser answered. */
-function files(): Record<string, JsonValue> {
+/** A chooser that asks for follow-ups, and a gate after it that reads what the chooser answered. */
+function files(followUp = true): Record<string, JsonValue> {
   return {
     [ROOT]: {
       label: "Follow-up fixture",
@@ -47,7 +47,7 @@ function files(): Record<string, JsonValue> {
         function: "choose_option",
         args: {
           prompt: "The draft could not settle these.",
-          follow_up: true,
+          ...(followUp ? { follow_up: true } : {}),
           questions: [{ name: "sort", question: "Where does a stopped conversation sort?", options: ["above", "below"], default: "below" }],
         },
       },
@@ -90,13 +90,17 @@ const seen = new Set<string>();
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-follow-up-"));
-  const { workflowsDir } = initProject(dir, testHome());
-  writeWorkflowFiles(workflowsDir, files());
   pushes = [];
   seen.clear();
+});
+
+/** The project under test: the fixture written with or without `follow_up`, and the service on it. */
+async function openWith(followUp: boolean): Promise<void> {
+  const { workflowsDir } = initProject(dir, testHome());
+  writeWorkflowFiles(workflowsDir, files(followUp));
   service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   await service.open(dir);
-});
+}
 
 afterEach(async () => {
   await service.close().catch(() => undefined);
@@ -133,14 +137,16 @@ function statusOf(taskId: string): string {
   }
 }
 
-describe("a chooser that offers follow-up questions", () => {
+describe("a chooser whose state asks for follow-up questions", () => {
   it("asks the model, parks the follow-ups as a second round, and hands the next state every round's answers", async () => {
+    await openWith(true);
     const taskId = await start();
     const first = await nextGate();
     expect(first.config?.component).toBe("choose_option");
     expect(first.config).toMatchObject({ followUp: true });
 
-    service.submitInteraction(first.requestId, { answers: { sort: "below" }, follow_up: true });
+    // The answer says nothing about follow-ups: the state did.
+    service.submitInteraction(first.requestId, { answers: { sort: "below" } });
     // The answered question is gone at once — nothing on screen offers it a second time — and the
     // round the model asked for takes its place under a new id.
     expect(service.pendingInteractions().map((p) => p.requestId)).not.toContain(first.requestId);
@@ -163,8 +169,8 @@ describe("a chooser that offers follow-up questions", () => {
       project.close();
     }
 
-    // Asked again with the box ticked: the script has nothing more to ask, so the gate settles.
-    service.submitInteraction(second.requestId, { answers: { grouping: "yes" }, follow_up: true });
+    // Asked again after the second round: the script has nothing more to ask, so the gate settles.
+    service.submitInteraction(second.requestId, { answers: { grouping: "yes" } });
     const after = await nextGate();
     expect(after.config?.prompt).toBe("done?");
     // ONE result for the state: both rounds' answers, and nothing about the loop.
@@ -176,10 +182,11 @@ describe("a chooser that offers follow-up questions", () => {
     expect(service.pendingInteractions()).toHaveLength(0);
   });
 
-  it("settles on the click when the box is not ticked, with only that round's answers", async () => {
+  it("settles on the click when the state did not ask for follow-ups, with only that round's answers", async () => {
+    await openWith(false);
     await start();
     const first = await nextGate();
-    service.submitInteraction(first.requestId, { answers: { sort: "above" }, follow_up: false });
+    service.submitInteraction(first.requestId, { answers: { sort: "above" } });
     const after = await nextGate();
     expect(after.config?.prompt).toBe("done?");
     expect(after.inputs["answers"]).toEqual({ sort: "above" });
@@ -188,9 +195,10 @@ describe("a chooser that offers follow-up questions", () => {
   it("settles with the answers given when the model cannot be asked", async () => {
     // A script with nothing for the follow-up call: the call fails, and the failure is not the
     // person's problem — their answers stand and the run goes on.
+    await openWith(true);
     await start([]);
     const first = await nextGate();
-    service.submitInteraction(first.requestId, { answers: { sort: "below" }, follow_up: true });
+    service.submitInteraction(first.requestId, { answers: { sort: "below" } });
     const after = await nextGate();
     expect(after.config?.prompt).toBe("done?");
     expect(after.inputs["answers"]).toEqual({ sort: "below" });

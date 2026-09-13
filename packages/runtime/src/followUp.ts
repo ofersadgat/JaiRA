@@ -1,12 +1,14 @@
 /**
  * Follow-up questions, inside the component — the loop `choose_option`'s `follow_up: true` runs.
  *
- * The person answers a round of questions and ticks "the model may ask follow-up questions". The
- * gate does not settle: the host asks a model whether the answers opened anything ELSE only a person
- * can settle, and either parks the same call again with the new questions or settles it with every
- * round's answers merged. The engine sees one function call and one result — `{ answers }` keyed by
- * every question asked across the rounds — which is the contract the person asked for: the extra
- * questions and their answers come back in the same result as the ones that were passed in.
+ * The state says `follow_up: true` and the person answers a round of questions. The gate does not
+ * settle: the host asks a model whether the answers opened anything ELSE only a person can settle,
+ * and either parks the same call again with the new questions or settles it with every round's
+ * answers merged. The flag is the STATE's: the person is never asked whether to allow the round,
+ * and the answer carries nothing about it. The engine sees one function call and one result —
+ * `{ answers }` keyed by every question asked across the rounds — which is the contract the person
+ * asked for: the extra questions and their answers come back in the same result as the ones that
+ * were passed in.
  *
  * The model is asked ONCE per round, with the gate's prompt, every question so far with its answer,
  * and the rest of the state's inputs as context: a `choose_option` state's inputs are one flat
@@ -20,7 +22,7 @@ import type { JsonValue } from "@declarative-ai/json";
 import { SchemaValidator } from "@declarative-ai/validate";
 import { parseComponentConfig, type ChoiceQuestion, type ChooseOptionConfig } from "@jaira/shared";
 
-/** How many rounds one gate may run. A person who keeps ticking the box is asked this many times. */
+/** How many rounds one gate may run. A model that keeps finding more to ask is asked this many times. */
 export const MAX_FOLLOW_UP_ROUNDS = 5;
 
 /**
@@ -103,18 +105,17 @@ export function roundOf(inputs: Record<string, JsonValue>): number {
   return typeof round === "number" && Number.isInteger(round) && round >= 1 ? round : 1;
 }
 
-/** Whether the person asked for a follow-up round on this answer. */
-export function wantsFollowUp(config: ChooseOptionConfig, value: JsonValue): boolean {
-  if (config.followUp !== true || config.questions === undefined) return false;
-  return value !== null && typeof value === "object" && !Array.isArray(value) && (value as Record<string, JsonValue>)["follow_up"] === true;
+/** Whether a round of answers to this gate is followed by the model's check: the state said so. */
+export function wantsFollowUp(config: ChooseOptionConfig): boolean {
+  return config.followUp === true && config.questions !== undefined;
 }
 
 /**
  * The question to the model: has this round of answers opened anything else?
  *
  * Only what the ANSWERS opened, never what could have been asked the first time — a model given a
- * standing invitation to ask more will ask more, and the person ticked a box to hear the questions
- * their answers raised, not to be interviewed. Names already used are ruled out so a follow-up
+ * standing invitation to ask more will ask more, and the state asked to hear the questions the
+ * answers raised, not to have the person interviewed. Names already used are ruled out so a follow-up
  * cannot overwrite an answer in the merge.
  */
 export function followUpOperation(

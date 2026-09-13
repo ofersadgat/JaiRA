@@ -268,12 +268,12 @@ export interface ChooseOptionConfig {
    */
   questions?: ChoiceQuestion[];
   /**
-   * Offer "the model may ask follow-up questions" beside the last step (`follow_up` when authored).
+   * The model may ask follow-up questions (`follow_up` when authored) — the STATE's decision.
    *
-   * Only with `questions`. The renderer's answer then carries `follow_up: boolean` beside `answers`;
-   * a `true` makes the host hold the call, ask a model what the answers opened, and park this same
-   * gate again with those questions (runtime `followUp.ts`). The state sees one `{ answers }` with
-   * every round's keys, and never the flag.
+   * Only with `questions`. Each round of answers makes the host hold the call, ask a model what the
+   * answers opened, and park this same gate again with those questions (runtime `followUp.ts`),
+   * until the model has nothing to ask. The person is never asked whether to allow it and the
+   * answer carries nothing about it; the state sees one `{ answers }` with every round's keys.
    */
   followUp?: boolean;
   /** A glyph beside the question. Absent ⇒ a message bubble. */
@@ -738,11 +738,6 @@ export function validateComponentResult(
         const known = new Set(config.questions.map((q) => q.name));
         for (const key of Object.keys(record)) {
           if (!known.has(key)) return bad(`result.answers.${key} names no question of this state`);
-        }
-        // The follow-up flag rides beside the answers, and only where the state offered it.
-        if (result["follow_up"] !== undefined) {
-          if (config.followUp !== true) return bad("result.follow_up: this state did not offer follow-up questions");
-          if (typeof result["follow_up"] !== "boolean") return bad("result.follow_up must be a boolean");
         }
         for (const question of config.questions) {
           const value = record[question.name];
