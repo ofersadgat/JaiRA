@@ -57,6 +57,7 @@ import {
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 
 import { ON_USER_EVENT, type UserEventRequest } from "@jaira/shared";
+import { RemoteEventHub } from "./remoteEvents";
 
 // The vocabulary lives in `@jaira/shared` — persistence hands the document to the loader, the
 // renderer matches a drop against a pending wait, and neither may depend on this package. Re-exported
@@ -312,6 +313,8 @@ export function hostCalleeSignatures(): ReadonlyMap<string, EntrySignature> {
   // The same call the CLI and the app make. A hub with no `onRequest` never parks anything, which is
   // exactly right for a registry nothing will run: what is wanted here is the entry's declaration.
   new UserEventHub().register(probe);
+  // `on_remote_event`, its sibling on the forge — resolvable from a guard for the same reason.
+  new RemoteEventHub().register(probe, undefined, undefined);
   return signaturesOf(probe);
 }
 

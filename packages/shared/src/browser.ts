@@ -27,6 +27,7 @@ export * from "./executorStack";
 export * from "./executorTree";
 export * from "./configSchema";
 export * from "./forge";
+export * from "./remoteSettlement";
 export * from "./slotTypes";
 export * from "./references";
 export * from "./changeset";

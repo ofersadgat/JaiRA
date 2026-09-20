@@ -436,6 +436,32 @@ the runtime reads it through are in `shared/forge.ts`, because runtime cannot im
 - **Not done:** the CLI does not register the primitives (its registry builder has no task or store
   in scope at its four call sites), so a workflow that calls one fails there as unregistered.
 
+**Step 3 (2026-09-19).** `shared/remoteSettlement.ts` is the mapping, pure (`now` is an argument);
+`runtime/remoteWatch.ts` is the `RemoteEventSource` seam, `PollingSource` and `RemoteWatcher`;
+`runtime/remoteEvents.ts` is `on_remote_event`.
+
+- **Precedence when one read finds several** (a weekend's worth): the request's own state (merged,
+  closed) → a standing "request changes" → the latest decision word → an approval → the window. A
+  request for changes outranks an approval because sending a review back is the cheaper mistake.
+- **The window runs from the COMMENT's own timestamp**, not from when JaiRA read it: "quiet for
+  `settle_after`" is a fact about the conversation, and a late poll must not extend it. A restart
+  never pulls a deadline in. What fires at the deadline is a READ, so a last-minute comment is in
+  what goes back.
+- An UNRESOLVED thread "touches" its change (`comment`); a resolved one is a note and not an
+  objection; a thread only the token's account wrote on touches nothing.
+- A review-level word is answered only if the state's `options` has it (the gate's validator refuses
+  any other). With NO vocabulary given — a bare `on_remote_event` — the table's own words are used,
+  so a guard can read `.decision`.
+- `on_remote_event` resolves with the settlement or `false` (timeout, unattended, nothing opened).
+  A state may read one wait from several rules; those are separate calls to the engine, so the hub
+  remembers a request's last settlement **for the head it was settled at** — the second rule hears
+  the same answer, and the next round, which pushes, waits for news.
+- The probe cursor is composed per connection from its rows (earliest `since`, every ETag) and
+  written back to each, so it survives the process. A project that opens with requests still awaited
+  probes at once.
+- **Not built:** the focus-after-five-minutes and machine-wake probes (`kickRemotes()` is the one
+  entry point they will call), and GitHub's `/notifications` shortcut.
+
 Fixtures are of two kinds and each says which in `_source`: recorded from the public API with an
 unauthenticated GET (the request, approvals, both list shapes, GitHub's pull and its `304`, both
 `401`s), and built from the documented shapes for what needs a token (every write, GitLab's

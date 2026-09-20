@@ -148,6 +148,12 @@ import {
   probeExecutor,
   checkForges,
   registerRemoteFunctions,
+  RemoteEventHub,
+  RemoteWatcher,
+  PollingSource,
+  forgeForHost,
+  type WatchTarget,
+  type RemoteSettled,
   type PublishAnswer,
   type PublishRequest,
   type ForgeHttp,
@@ -259,6 +265,7 @@ import {
   JAIRA_DIR_NAME,
   SHARED_SESSION,
   FORGE_LABELS,
+  resultOfSettlement,
   validateComponentResult,
   WORKFLOW_JSON,
   unnamedRouteOf,
@@ -1043,7 +1050,7 @@ export class AppService {
    * Built per session rather than once, so a gate in one project cannot be answered by a request id
    * minted in another — and so closing a project rejects only its own parked calls.
    */
-  private hubsFor(key: string): { hub: InteractionHub; approvals: ApprovalHub; questions: QuestionHub; userEvents: UserEventHub } {
+  private hubsFor(key: string): { hub: InteractionHub; approvals: ApprovalHub; questions: QuestionHub; userEvents: UserEventHub; remoteEvents: RemoteEventHub } {
     const hub = new InteractionHub({
       onRequest: (request) => this.publishInteraction(key, request),
       onResolved: (requestId, fate) => {
@@ -1120,7 +1127,61 @@ export class AppService {
       },
       nextId: this.options.nextUserEventId ?? (() => `event-${++this.userEventSeq}`),
     });
-    return { hub, approvals, questions, userEvents };
+    // A wait on the forge shows nothing here; what it needs from this process is a probe, now.
+    const remoteEvents = new RemoteEventHub({ onWaiting: () => this.kickRemotes() });
+    return { hub, approvals, questions, userEvents, remoteEvents };
+  }
+
+  // --- watching merge requests (decision 0004) ---------------------------------
+
+  private remoteSource?: PollingSource;
+  private remoteWatcher?: { dispose(): void; watcher: RemoteWatcher };
+
+  /** Every open project, as somewhere awaited requests live. */
+  private watchTargets(): WatchTarget[] {
+    return [...this.sessions.values()].map((session) => ({
+      key: session.key,
+      handles: session.project.remotes,
+      settleAfter: session.project.config.integrations.review.settleAfter,
+      provider: (host: string) =>
+        forgeForHost(session.project.config.integrations, host, {
+          secrets: this.secretResolver(session),
+          ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
+        }),
+    }));
+  }
+
+  /**
+   * Probe the forges NOW: a wait just began, the app just started, the window came back after five
+   * minutes away, the machine woke, or somebody pressed "Check now".
+   *
+   * Also where the watcher is BUILT, on first use — a service that never waits on a forge never
+   * makes one, and one that does still polls nothing while nothing is parked.
+   */
+  kickRemotes(): void {
+    if (this.closed) return;
+    if (this.remoteSource === undefined) {
+      this.remoteSource = new PollingSource({
+        targets: () => this.watchTargets(),
+        onError: (connection, error) => this.log({ level: "warn", source: "runtime", message: `could not check ${connection}: ${error.message}` }),
+      });
+      const watcher = new RemoteWatcher({
+        targets: () => this.watchTargets(),
+        sources: [this.remoteSource],
+        onSettled: (event) => this.remoteSettled(event),
+      });
+      this.remoteWatcher = { watcher, dispose: watcher.start().dispose };
+      return; // `start` kicks.
+    }
+    this.remoteSource.kick();
+  }
+
+  /** The forge settled a request: hand the settlement to whatever is waiting on it. */
+  private remoteSettled(event: RemoteSettled): void {
+    const session = this.sessions.get(event.target);
+    if (session === undefined) return;
+    const result = resultOfSettlement(event.settlement, event.handle) as unknown as JsonValue;
+    session.remoteEvents.deliver(event.row.taskId, event.row.key, result, event.row.pushedHead);
   }
 
   /**
@@ -1217,6 +1278,9 @@ export class AppService {
       ...(project.recovered.length > 0 ? { detail: { recovered: project.recovered } } : {}),
     });
     if (this.options.watchWorkflows !== false) this.watchWorkflows(session);
+    // Requests still awaited from the process before this one: closed for a weekend is the normal
+    // case, so the first thing an open project does is ask what happened while nobody was running.
+    if (project.remotes.awaiting().length > 0) this.kickRemotes();
     if (project.recovered.length > 0) {
       this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
       // Not awaited: the agent's files are on disk and are not going anywhere, while the window
@@ -1516,6 +1580,7 @@ export class AppService {
   async close(): Promise<void> {
     // Terminal. Set FIRST, so a read arriving during the drain cannot re-open what is being closed.
     this.closed = true;
+    this.remoteWatcher?.dispose();
     // Hand the log back, but only if it is still OURS. The sink is process-global, so a second
     // service constructed after this one has already replaced it — resetting unconditionally would
     // silence a service that is still running on behalf of the one shutting down.
@@ -3086,6 +3151,8 @@ export class AppService {
     // Registering it unconditionally costs a map entry and is what makes a guard that calls it work
     // in any workflow rather than in the ones a walker happened to recognise.
     open.userEvents.register(registry, taskId);
+    // Its sibling on the forge, for every run for the same reason: it is called from a guard.
+    open.remoteEvents.register(registry, taskId, project.remotes);
 
     // The remote primitives (decision 0004 §2), for every run for the reason `on_user_event` is: they
     // cost five map entries, and a workflow that reaches for one should find it whatever else it is

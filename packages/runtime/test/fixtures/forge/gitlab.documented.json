@@ -2,30 +2,84 @@
   "_source": "BUILT from GitLab's documented response shapes (docs.gitlab.com/api: users, discussions, members, merge_requests, notes) — every endpoint here needs a token, so none could be recorded without one. Field names and nesting follow the docs; ids, names and bodies are invented. The project and request are the ones the recorded fixtures use (gitlab-org/gitlab-runner !7429), so the two kinds replay as one conversation.",
   "fixtures": [
     {
-      "match": { "method": "GET", "path": "/api/v4/user", "header": { "private-token": "good" } },
-      "response": { "status": 200, "headers": {}, "body": { "id": 900, "username": "jaira-bot", "name": "JaiRA Bot", "state": "active" } }
-    },
-    {
-      "match": { "method": "GET", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429/discussions" },
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/user",
+        "header": {
+          "private-token": "good"
+        }
+      },
       "response": {
         "status": 200,
-        "headers": { "x-next-page": "", "x-total-pages": "1" },
+        "headers": {},
+        "body": {
+          "id": 900,
+          "username": "jaira-bot",
+          "name": "JaiRA Bot",
+          "state": "active"
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429/discussions"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "x-next-page": "",
+          "x-total-pages": "1"
+        },
         "body": [
           {
             "id": "6a9c1d8b3e1f4a2c9d7e5f0b1a2c3d4e5f6a7b8c",
             "individual_note": false,
             "notes": [
               {
-                "id": 1101, "type": "DiffNote", "body": "This cache key ignores the runner's architecture.",
-                "author": { "id": 501, "username": "mara", "name": "Mara" },
-                "created_at": "2026-09-18T09:00:00.000Z", "system": false, "resolvable": true, "resolved": false,
-                "position": { "base_sha": "981e8efeb885f4943f7c56acd9772db123d72011", "start_sha": "981e8efeb885f4943f7c56acd9772db123d72011", "head_sha": "8eee49006c0d827d27228bac5ec8078d86e3354e", "old_path": "commands/helpers/cache.go", "new_path": "commands/helpers/cache.go", "position_type": "text", "old_line": null, "new_line": 42 }
+                "id": 1101,
+                "type": "DiffNote",
+                "body": "This cache key ignores the runner's architecture.",
+                "author": {
+                  "id": 501,
+                  "username": "mara",
+                  "name": "Mara"
+                },
+                "created_at": "2026-09-18T09:00:00.000Z",
+                "system": false,
+                "resolvable": true,
+                "resolved": false,
+                "position": {
+                  "base_sha": "981e8efeb885f4943f7c56acd9772db123d72011",
+                  "start_sha": "981e8efeb885f4943f7c56acd9772db123d72011",
+                  "head_sha": "8eee49006c0d827d27228bac5ec8078d86e3354e",
+                  "old_path": "commands/helpers/cache.go",
+                  "new_path": "commands/helpers/cache.go",
+                  "position_type": "text",
+                  "old_line": null,
+                  "new_line": 42
+                }
               },
               {
-                "id": 1102, "type": "DiffNote", "body": "Fixed in the next push.",
-                "author": { "id": 900, "username": "jaira-bot", "name": "JaiRA Bot" },
-                "created_at": "2026-09-18T09:20:00.000Z", "system": false, "resolvable": true, "resolved": false,
-                "position": { "old_path": "commands/helpers/cache.go", "new_path": "commands/helpers/cache.go", "position_type": "text", "old_line": null, "new_line": 42 }
+                "id": 1102,
+                "type": "DiffNote",
+                "body": "Fixed in the next push.",
+                "author": {
+                  "id": 900,
+                  "username": "jaira-bot",
+                  "name": "JaiRA Bot"
+                },
+                "created_at": "2026-09-18T09:20:00.000Z",
+                "system": false,
+                "resolvable": true,
+                "resolved": false,
+                "position": {
+                  "old_path": "commands/helpers/cache.go",
+                  "new_path": "commands/helpers/cache.go",
+                  "position_type": "text",
+                  "old_line": null,
+                  "new_line": 42
+                }
               }
             ]
           },
@@ -33,21 +87,57 @@
             "id": "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
             "individual_note": true,
             "notes": [
-              { "id": 1103, "type": null, "body": "Looks fine to me", "author": { "id": 777, "username": "visitor", "name": "A Visitor" }, "created_at": "2026-09-18T09:30:00.000Z", "system": false, "resolvable": false }
+              {
+                "id": 1103,
+                "type": null,
+                "body": "Looks fine to me",
+                "author": {
+                  "id": 777,
+                  "username": "visitor",
+                  "name": "A Visitor"
+                },
+                "created_at": "2026-09-18T09:30:00.000Z",
+                "system": false,
+                "resolvable": false
+              }
             ]
           },
           {
             "id": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
             "individual_note": true,
             "notes": [
-              { "id": 1104, "type": null, "body": "requested changes", "author": { "id": 501, "username": "mara", "name": "Mara" }, "created_at": "2026-09-18T09:40:00.000Z", "system": true, "resolvable": false }
+              {
+                "id": 1104,
+                "type": null,
+                "body": "requested changes",
+                "author": {
+                  "id": 501,
+                  "username": "mara",
+                  "name": "Mara"
+                },
+                "created_at": "2026-09-18T09:40:00.000Z",
+                "system": true,
+                "resolvable": false
+              }
             ]
           },
           {
             "id": "d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3",
             "individual_note": true,
             "notes": [
-              { "id": 1105, "type": null, "body": "approved this merge request", "author": { "id": 5878538, "username": "ajwalker", "name": "Arran Walker" }, "created_at": "2026-09-18T02:17:09.910Z", "system": true, "resolvable": false }
+              {
+                "id": 1105,
+                "type": null,
+                "body": "approved this merge request",
+                "author": {
+                  "id": 5878538,
+                  "username": "ajwalker",
+                  "name": "Arran Walker"
+                },
+                "created_at": "2026-09-18T02:17:09.910Z",
+                "system": true,
+                "resolvable": false
+              }
             ]
           },
           {
@@ -55,10 +145,25 @@
             "individual_note": false,
             "notes": [
               {
-                "id": 1106, "type": "DiffNote", "body": "Why was this removed?",
-                "author": { "id": 5878538, "username": "ajwalker", "name": "Arran Walker" },
-                "created_at": "2026-09-18T03:00:00.000Z", "system": false, "resolvable": true, "resolved": true,
-                "position": { "old_path": "go.mod", "new_path": "go.mod", "position_type": "text", "old_line": 10, "new_line": null }
+                "id": 1106,
+                "type": "DiffNote",
+                "body": "Why was this removed?",
+                "author": {
+                  "id": 5878538,
+                  "username": "ajwalker",
+                  "name": "Arran Walker"
+                },
+                "created_at": "2026-09-18T03:00:00.000Z",
+                "system": false,
+                "resolvable": true,
+                "resolved": true,
+                "position": {
+                  "old_path": "go.mod",
+                  "new_path": "go.mod",
+                  "position_type": "text",
+                  "old_line": 10,
+                  "new_line": null
+                }
               }
             ]
           },
@@ -66,58 +171,405 @@
             "id": "f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5",
             "individual_note": false,
             "notes": [
-              { "id": 1107, "type": "DiscussionNote", "body": "Should this wait for the 19.2 branch?", "author": { "id": 501, "username": "mara", "name": "Mara" }, "created_at": "2026-09-18T04:00:00.000Z", "system": false, "resolvable": true, "resolved": false },
-              { "id": 1108, "type": "DiscussionNote", "body": "No — it is a digest bump.", "author": { "id": 502, "username": "sam", "name": "Sam" }, "created_at": "2026-09-18T04:05:00.000Z", "system": false, "resolvable": true, "resolved": false }
+              {
+                "id": 1107,
+                "type": "DiscussionNote",
+                "body": "Should this wait for the 19.2 branch?",
+                "author": {
+                  "id": 501,
+                  "username": "mara",
+                  "name": "Mara"
+                },
+                "created_at": "2026-09-18T04:00:00.000Z",
+                "system": false,
+                "resolvable": true,
+                "resolved": false
+              },
+              {
+                "id": 1108,
+                "type": "DiscussionNote",
+                "body": "No — it is a digest bump.",
+                "author": {
+                  "id": 502,
+                  "username": "sam",
+                  "name": "Sam"
+                },
+                "created_at": "2026-09-18T04:05:00.000Z",
+                "system": false,
+                "resolvable": true,
+                "resolved": false
+              }
             ]
           },
           {
             "id": "a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6",
             "individual_note": true,
             "notes": [
-              { "id": 1109, "type": null, "body": "requested changes", "author": { "id": 502, "username": "sam", "name": "Sam" }, "created_at": "2026-09-18T05:00:00.000Z", "system": true, "resolvable": false }
+              {
+                "id": 1109,
+                "type": null,
+                "body": "requested changes",
+                "author": {
+                  "id": 502,
+                  "username": "sam",
+                  "name": "Sam"
+                },
+                "created_at": "2026-09-18T05:00:00.000Z",
+                "system": true,
+                "resolvable": false
+              }
             ]
           },
           {
             "id": "a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7",
             "individual_note": true,
             "notes": [
-              { "id": 1110, "type": null, "body": "approved this merge request", "author": { "id": 502, "username": "sam", "name": "Sam" }, "created_at": "2026-09-18T06:00:00.000Z", "system": true, "resolvable": false }
+              {
+                "id": 1110,
+                "type": null,
+                "body": "approved this merge request",
+                "author": {
+                  "id": 502,
+                  "username": "sam",
+                  "name": "Sam"
+                },
+                "created_at": "2026-09-18T06:00:00.000Z",
+                "system": true,
+                "resolvable": false
+              }
             ]
           }
         ]
       }
     },
-    { "match": { "method": "GET", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/members/all/501" }, "response": { "status": 200, "headers": {}, "body": { "id": 501, "username": "mara", "access_level": 40 } } },
-    { "match": { "method": "GET", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/members/all/502" }, "response": { "status": 200, "headers": {}, "body": { "id": 502, "username": "sam", "access_level": 30 } } },
-    { "match": { "method": "GET", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/members/all/900" }, "response": { "status": 200, "headers": {}, "body": { "id": 900, "username": "jaira-bot", "access_level": 30 } } },
-    { "match": { "method": "GET", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/members/all/5878538" }, "response": { "status": 200, "headers": {}, "body": { "id": 5878538, "username": "ajwalker", "access_level": 40 } } },
-    { "match": { "method": "GET", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/members/all/777" }, "response": { "status": 404, "headers": {}, "body": { "message": "404 Not found" } } },
-
     {
-      "match": { "method": "GET", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests", "queryLike": { "source_branch": "^jaira/" } },
-      "response": { "status": 200, "headers": {}, "body": [] }
-    },
-    {
-      "match": { "method": "POST", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests", "bodyLike": { "source_branch": "^jaira/" } },
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/members/all/501"
+      },
       "response": {
-        "status": 201, "headers": {},
-        "body": { "id": 990001, "iid": 7430, "project_id": 250833, "title": "Draft: Review the implementation", "state": "opened", "draft": true, "source_branch": "jaira/t-1/review", "target_branch": "main", "sha": "1111111111111111111111111111111111111111", "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/7430" }
+        "status": 200,
+        "headers": {},
+        "body": {
+          "id": 501,
+          "username": "mara",
+          "access_level": 40
+        }
       }
     },
-
-    { "match": { "method": "POST", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429/notes" }, "response": { "status": 201, "headers": {}, "body": { "id": 1201, "body": "" } } },
     {
-      "match": { "method": "POST", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429/discussions", "body": { "position": { "new_line": 999 } } },
-      "response": { "status": 400, "headers": {}, "body": { "message": "400 Bad request - Note {:line_code=>[\"can't be blank\", \"must be a valid line code\"]}" } }
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/members/all/502"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "id": 502,
+          "username": "sam",
+          "access_level": 30
+        }
+      }
     },
-    { "match": { "method": "POST", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429/discussions" }, "response": { "status": 201, "headers": {}, "body": { "id": "0707070707070707070707070707070707070707", "notes": [] } } },
-    { "match": { "method": "POST", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429/discussions/6a9c1d8b3e1f4a2c9d7e5f0b1a2c3d4e5f6a7b8c/notes" }, "response": { "status": 201, "headers": {}, "body": { "id": 1202 } } },
-    { "match": { "method": "PUT", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429/discussions/6a9c1d8b3e1f4a2c9d7e5f0b1a2c3d4e5f6a7b8c" }, "response": { "status": 200, "headers": {}, "body": { "id": "6a9c1d8b3e1f4a2c9d7e5f0b1a2c3d4e5f6a7b8c" } } },
-
-    { "match": { "method": "PUT", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429/merge" }, "response": { "status": 200, "headers": {}, "body": { "iid": 7429, "state": "merged" } } },
-    { "match": { "method": "PUT", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7431/merge" }, "response": { "status": 405, "headers": {}, "body": { "message": "405 Method Not Allowed" } } },
-    { "match": { "method": "PUT", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429", "body": { "state_event": "close" } }, "response": { "status": 200, "headers": {}, "body": { "iid": 7429, "state": "closed" } } },
-
-    { "match": { "method": "GET", "path": "/api/v4/user", "header": { "private-token": "throttled" } }, "response": { "status": 429, "headers": { "retry-after": "60" }, "body": { "message": "429 Too Many Requests" } } }
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/members/all/900"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "id": 900,
+          "username": "jaira-bot",
+          "access_level": 30
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/members/all/5878538"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "id": 5878538,
+          "username": "ajwalker",
+          "access_level": 40
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/members/all/777"
+      },
+      "response": {
+        "status": 404,
+        "headers": {},
+        "body": {
+          "message": "404 Not found"
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests",
+        "queryLike": {
+          "source_branch": "^jaira/"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": []
+      }
+    },
+    {
+      "match": {
+        "method": "POST",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests",
+        "bodyLike": {
+          "source_branch": "^jaira/"
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {},
+        "body": {
+          "id": 990001,
+          "iid": 7430,
+          "project_id": 250833,
+          "title": "Draft: Review the implementation",
+          "state": "opened",
+          "draft": true,
+          "source_branch": "jaira/t-1/review",
+          "target_branch": "main",
+          "sha": "1111111111111111111111111111111111111111",
+          "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/7430"
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "POST",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429/notes"
+      },
+      "response": {
+        "status": 201,
+        "headers": {},
+        "body": {
+          "id": 1201,
+          "body": ""
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "POST",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429/discussions",
+        "body": {
+          "position": {
+            "new_line": 999
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {},
+        "body": {
+          "message": "400 Bad request - Note {:line_code=>[\"can't be blank\", \"must be a valid line code\"]}"
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "POST",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429/discussions"
+      },
+      "response": {
+        "status": 201,
+        "headers": {},
+        "body": {
+          "id": "0707070707070707070707070707070707070707",
+          "notes": []
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "POST",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429/discussions/6a9c1d8b3e1f4a2c9d7e5f0b1a2c3d4e5f6a7b8c/notes"
+      },
+      "response": {
+        "status": 201,
+        "headers": {},
+        "body": {
+          "id": 1202
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "PUT",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429/discussions/6a9c1d8b3e1f4a2c9d7e5f0b1a2c3d4e5f6a7b8c"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "id": "6a9c1d8b3e1f4a2c9d7e5f0b1a2c3d4e5f6a7b8c"
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "PUT",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429/merge"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "iid": 7429,
+          "state": "merged"
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "PUT",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7431/merge"
+      },
+      "response": {
+        "status": 405,
+        "headers": {},
+        "body": {
+          "message": "405 Method Not Allowed"
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "PUT",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429",
+        "body": {
+          "state_event": "close"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "iid": 7429,
+          "state": "closed"
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/user",
+        "header": {
+          "private-token": "throttled"
+        }
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "retry-after": "60"
+        },
+        "body": {
+          "message": "429 Too Many Requests"
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7430"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "id": 990001,
+          "iid": 7430,
+          "project_id": 250833,
+          "title": "Review the implementation",
+          "state": "merged",
+          "draft": false,
+          "source_branch": "jaira/t-1/review",
+          "target_branch": "main",
+          "sha": "1111111111111111111111111111111111111111",
+          "merge_commit_sha": "5555555555555555555555555555555555555555",
+          "squash_commit_sha": null,
+          "merged_by": {
+            "id": 501,
+            "username": "mara",
+            "name": "Mara"
+          },
+          "updated_at": "2026-09-19T12:30:00.000Z",
+          "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/7430",
+          "diff_refs": {
+            "base_sha": "0",
+            "start_sha": "0",
+            "head_sha": "1111111111111111111111111111111111111111"
+          }
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7430/discussions"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "x-next-page": ""
+        },
+        "body": [
+          {
+            "id": "9090909090909090909090909090909090909090",
+            "individual_note": true,
+            "notes": [
+              {
+                "id": 1301,
+                "type": null,
+                "body": "Merging — thanks.",
+                "author": {
+                  "id": 501,
+                  "username": "mara",
+                  "name": "Mara"
+                },
+                "created_at": "2026-09-19T12:29:00.000Z",
+                "system": false,
+                "resolvable": false
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7430/approvals"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "iid": 7430,
+          "approved": false,
+          "approved_by": []
+        }
+      }
+    }
   ]
 }

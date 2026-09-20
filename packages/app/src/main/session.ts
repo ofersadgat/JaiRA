@@ -18,7 +18,7 @@ import type { FakeRule } from "@jaira/runtime";
 import type { FSWatcher } from "node:fs";
 import type { Project } from "@jaira/persistence";
 import { LiveCalls } from "@jaira/runtime";
-import type { ApprovalHub, ApprovalRequest, InteractionHub, QuestionHub, UserEventHub } from "@jaira/runtime";
+import type { ApprovalHub, ApprovalRequest, InteractionHub, QuestionHub, RemoteEventHub, UserEventHub } from "@jaira/runtime";
 import type { SyncDirection, WorkflowLayer } from "@jaira/shared";
 import { LiveTurnLog } from "./liveTurns";
 
@@ -94,6 +94,7 @@ export interface ProjectSessionOptions {
   approvals: ApprovalHub;
   questions: QuestionHub;
   userEvents: UserEventHub;
+  remoteEvents: RemoteEventHub;
 }
 
 /**
@@ -227,6 +228,11 @@ export class ProjectSession {
    */
   readonly userEvents: UserEventHub;
   /**
+   * Transitions waiting on the FORGE (`on_remote_event`, decision 0004 §2). The fifth channel, and
+   * like the fourth it shows nothing: what answers it is something done on a merge request.
+   */
+  readonly remoteEvents: RemoteEventHub;
+  /**
    * The live turn each running task is streaming — main's copy of the renderer's `liveTurn`, held
    * where navigation cannot lose it and served back over `session:live`. See {@link LiveTurnLog}.
    */
@@ -254,6 +260,7 @@ export class ProjectSession {
     this.approvals = options.approvals;
     this.questions = options.questions;
     this.userEvents = options.userEvents;
+    this.remoteEvents = options.remoteEvents;
   }
 
   get dir(): string {
@@ -291,6 +298,9 @@ export class ProjectSession {
     // A wait on a gesture nobody can make any more answers `false`: the transitions behind it get
     // their turn, which is what an author's fallback rule is for.
     this.userEvents.declineAll();
+    // The same for a wait on the forge: this process cannot hear the answer any more. The request's
+    // row keeps its window and its cursor, so a resumed task picks the wait up where it was.
+    this.remoteEvents.declineAll();
     // A sync in flight is one of the live runs below, so aborting it needs nothing special here. What
     // does go is the proposal it was about to produce, which belongs to a project that is going away.
     this.syncTask = undefined;
