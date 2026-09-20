@@ -25,8 +25,12 @@ interface Match {
   header?: Record<string, string>;
   /** A header the request must NOT carry: the unconditional twin of a conditional fixture. */
   withoutHeader?: string;
+  /** Query parameters matched by PATTERN — a branch carries a task id nobody can know in advance. */
+  queryLike?: Record<string, string>;
   /** A deep subset of the JSON body. */
   body?: unknown;
+  /** Top-level string fields of the body, matched by pattern. */
+  bodyLike?: Record<string, string>;
   /** The GraphQL operation the body's `query` names. */
   operation?: string;
 }
@@ -60,6 +64,11 @@ function matches(match: Match, request: ForgeRequest): boolean {
   // Compared ENCODED: `gitlab-org%2Fgitlab-runner` is one path segment, and decoding it makes two.
   if (match.method !== request.method || url.pathname !== match.path) return false;
   for (const [key, value] of Object.entries(match.query ?? {})) if (url.searchParams.get(key) !== value) return false;
+  for (const [key, pattern] of Object.entries(match.queryLike ?? {})) if (!new RegExp(pattern).test(url.searchParams.get(key) ?? "")) return false;
+  for (const [key, pattern] of Object.entries(match.bodyLike ?? {})) {
+    const held = (request.body as Record<string, unknown> | undefined)?.[key];
+    if (typeof held !== "string" || !new RegExp(pattern).test(held)) return false;
+  }
   const headers = Object.fromEntries(Object.entries(request.headers).map(([name, value]) => [name.toLowerCase(), value]));
   for (const [name, value] of Object.entries(match.header ?? {})) if (headers[name] !== value) return false;
   if (match.withoutHeader !== undefined && headers[match.withoutHeader] !== undefined) return false;
@@ -75,6 +84,8 @@ function matches(match: Match, request: ForgeRequest): boolean {
 function weight(match: Match): number {
   return (
     Object.keys(match.query ?? {}).length +
+    Object.keys(match.queryLike ?? {}).length +
+    Object.keys(match.bodyLike ?? {}).length +
     Object.keys(match.header ?? {}).length +
     (match.withoutHeader !== undefined ? 1 : 0) +
     (match.body !== undefined ? JSON.stringify(match.body).length : 0) +

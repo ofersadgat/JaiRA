@@ -378,3 +378,39 @@ describe("fork", () => {
     expect(p.runtime.get(fork.taskId)?.status).toBe("completed");
   });
 });
+
+describe("a task's merge requests across a cut (decision 0004)", () => {
+  const identity = { key: "review", provider: "gitlab" as const, host: "gitlab.com", project: "mistlabs/jaira", remote: "origin", target: "main" };
+
+  it("a rewind keeps the row — the forge cannot be rewound, and the next push adds commits", async () => {
+    const p = project();
+    const { seqs } = await ran(p, "t-1");
+    p.remotes.ensure({ ...identity, taskId: "t-1", branch: "jaira/t-1/review" });
+    p.remotes.update("t-1", "review", { number: 41, url: "https://gitlab.com/mistlabs/jaira/-/merge_requests/41", pushedHead: "abc" });
+    rewindTask(p, "t-1", seqs[7]!, 2_000);
+    expect(p.remotes.get("t-1", "review")).toMatchObject({ number: 41, pushedHead: "abc", branch: "jaira/t-1/review" });
+  });
+
+  it("a fork copies the IDENTITY and not the request: its first push opens its own, on its own branch", async () => {
+    const p = project();
+    const { seqs } = await ran(p, "t-1");
+    p.remotes.ensure({ ...identity, taskId: "t-1", branch: "jaira/t-1/review" });
+    p.remotes.update("t-1", "review", { number: 41, url: "https://gitlab.com/mistlabs/jaira/-/merge_requests/41", pushedHead: "abc", seen: ["n1"], settleAt: 9_999, awaiting: true });
+    const fork = forkTask(p, "t-1", seqs[7]!, { standing: "asIs", nowMs: 2_000 });
+    const copy = p.remotes.get(fork.taskId, "review")!;
+    expect(copy).toMatchObject({ ...identity, branch: `jaira/${fork.taskId}/review`, awaiting: false, seen: [] });
+    expect(copy.number).toBeUndefined();
+    expect(copy.pushedHead).toBeUndefined();
+    expect(copy.settleAt).toBeUndefined();
+    // And the parent's request is still the parent's.
+    expect(p.remotes.get("t-1", "review")).toMatchObject({ number: 41, awaiting: true });
+  });
+
+  it("deleting the task deletes the row, and nothing else knows the request existed", async () => {
+    const p = project();
+    await ran(p, "t-1");
+    p.remotes.ensure({ ...identity, taskId: "t-1", branch: "jaira/t-1/review" });
+    deleteTask(p, "t-1");
+    expect(p.remotes.forTask("t-1")).toEqual([]);
+  });
+});

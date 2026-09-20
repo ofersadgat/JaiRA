@@ -94,11 +94,11 @@
     },
 
     {
-      "match": { "method": "GET", "path": "/repos/cli/cli/pulls", "query": { "head": "cli:jaira/t-1/review" } },
+      "match": { "method": "GET", "path": "/repos/cli/cli/pulls", "queryLike": { "head": "^cli:jaira/" } },
       "response": { "status": 200, "headers": {}, "body": [] }
     },
     {
-      "match": { "method": "POST", "path": "/repos/cli/cli/pulls", "body": { "head": "jaira/t-1/review" } },
+      "match": { "method": "POST", "path": "/repos/cli/cli/pulls", "bodyLike": { "head": "^jaira/" } },
       "response": {
         "status": 201, "headers": {},
         "body": { "number": 14470, "state": "open", "draft": true, "title": "Review the implementation", "html_url": "https://github.com/cli/cli/pull/14470", "head": { "ref": "jaira/t-1/review", "sha": "4444444444444444444444444444444444444444" }, "base": { "ref": "trunk" } }

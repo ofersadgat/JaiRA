@@ -159,6 +159,18 @@ export class InteractionHub {
     return this;
   }
 
+  /**
+   * Put a question to a person on behalf of a HOST FUNCTION, mid-call.
+   *
+   * {@link register} is for a state whose whole operation is the question. This is for a function
+   * that has one to ask on the way to doing something else — `remote_push` asking whether it may
+   * publish. It parks exactly as a registered component does: published, written down by the host,
+   * answered through {@link submit}, and answerable from a seed after a restart.
+   */
+  ask(component: string, inputs: Record<string, JsonValue>, taskId?: string): Promise<FunctionResult<ResolvedValue, WorkflowMetrics>> {
+    return this.park(component, inputs as FunctionInputs, taskId);
+  }
+
   private park(
     component: string,
     inputs: FunctionInputs,

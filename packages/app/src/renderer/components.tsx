@@ -7,7 +7,7 @@
  * main re-validates every submission, so this layer is free to be purely about
  * presentation.
  */
-import { Suspense, useEffect, useMemo, useRef, useState, type JSX } from "react";
+import { Fragment, Suspense, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import {
   artifactOf,
   isComponentName,
@@ -684,15 +684,42 @@ function FillForm({ config, onSubmit, settled }: ComponentProps<FillFormConfig>)
 function ConfirmAction({ config, onSubmit, settled }: ComponentProps<ConfirmActionConfig>): JSX.Element {
   // Settled: the button that was pressed is the filled one, and neither can be pressed again.
   const confirmed = settled === undefined ? undefined : recordOf(settled)["confirmed"];
+  const chosen = settled === undefined ? undefined : recordOf(settled)["choice"];
+  // Answered, the filled button is whichever was pressed. Unanswered, confirm is filled only when
+  // it has alternatives beside it: a row of three peers has no subject, and two never needed one.
+  const several = (config.options ?? []).length > 0;
+  const lit = (mine: boolean): string | undefined => (settled === undefined ? undefined : mine ? "primary" : undefined);
   return (
+    <>
+      {config.details !== undefined && config.details.length > 0 ? (
+        <dl className="publish-what">
+          {config.details.map((row) => (
+            <Fragment key={row.label}>
+              <dt>{row.label}</dt>
+              <dd>{row.value}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      ) : null}
     <div className="options">
       <button
-        className={confirmed === true ? "primary" : undefined}
+        className={settled === undefined ? (several ? "primary" : undefined) : lit(confirmed === true && chosen === undefined)}
         disabled={settled !== undefined}
         onClick={() => onSubmit({ confirmed: true })}
       >
         {config.confirmLabel}
       </button>
+      {(config.options ?? []).map((option) => (
+        <button
+          key={option.value}
+          className={lit(chosen === option.value)}
+          title={option.description}
+          disabled={settled !== undefined}
+          onClick={() => onSubmit({ confirmed: true, choice: option.value })}
+        >
+          {option.label ?? option.value}
+        </button>
+      ))}
       <button
         className={confirmed === false ? "primary" : "ghost"}
         disabled={settled !== undefined}
@@ -701,6 +728,7 @@ function ConfirmAction({ config, onSubmit, settled }: ComponentProps<ConfirmActi
         {config.cancelLabel}
       </button>
     </div>
+    </>
   );
 }
 

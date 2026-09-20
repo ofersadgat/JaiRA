@@ -410,6 +410,32 @@ build settled that the text above left open:
 - GitHub's `/notifications` shortcut is not built. The per-request conditional probe is free, so it
   costs only the cross-repo shortcut, and a fine-grained token cannot read it anyway.
 
+**Step 2 (2026-09-19).** `packages/runtime/src/remote.ts` holds the five primitives;
+`packages/persistence/src/remoteHandles.ts` and migration 18 hold the row (its type and the port
+the runtime reads it through are in `shared/forge.ts`, because runtime cannot import persistence).
+
+- **What picks the forge is the remote's CONFIGURED url** (`git config remote.<to>.url`), read raw
+  and not through `git remote get-url`, which answers after `insteadOf` rewriting. A rewrite says
+  where the bytes travel; the configured url says which forge the project is on.
+- **The scratch worktree of a `tree: "base"` changeset is KEPT** between rounds (the open question
+  below, closed). A rebuilt one would start again from the target and could only reach the branch by
+  force, and there is no `--force` anywhere in the file.
+- **"Once per task" is durable**: a task that has a pushed row has been answered, so a restart in the
+  middle of a week-long review does not ask again. `always` writes `policy.remote.publish: "allow"`
+  into the PROJECT's layer, never the shared root.
+- The question is `confirm_action`, which grew two optional fields for it: `details` (label/value
+  rows — what will be sent and as whom) and `options` (other ways of saying yes; the answer carries
+  `choice`). A host function asks through the new `InteractionHub.ask`, so the question is an
+  ordinary durable gate in the conversation of the state that asked.
+- A request's key is the engine's `$key` beside a scoped name's configuration, else the `key` of a
+  handle passed by value, else `review`. The branch is `jaira/<task>/<key>`, made safe for a ref.
+  A handle passed by value to a task with no row is ADOPTED — how it crosses `each: "task"`.
+- `.jaira/` is excluded from what is committed, as `worktreeChangeset` excludes it from a review.
+- Deleting a task deletes its row and leaves the merge request alone: closing a request on
+  somebody's forge because a card was removed would be an outward act nobody asked for.
+- **Not done:** the CLI does not register the primitives (its registry builder has no task or store
+  in scope at its four call sites), so a workflow that calls one fails there as unregistered.
+
 Fixtures are of two kinds and each says which in `_source`: recorded from the public API with an
 unauthenticated GET (the request, approvals, both list shapes, GitHub's pull and its `304`, both
 `401`s), and built from the documented shapes for what needs a token (every write, GitLab's

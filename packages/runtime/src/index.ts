@@ -41,6 +41,7 @@ export * from "./artifactSink";
 export * from "./secrets";
 // Connections to forges, and the providers behind them (decision 0004 §1).
 export * from "./forge";
+export * from "./remote";
 export * from "./executors";
 export * from "./executorStack";
 export * from "./executorTree";

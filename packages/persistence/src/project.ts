@@ -34,6 +34,7 @@ import { SqliteArtifactStore } from "./artifactStore";
 import { CommandLog } from "./commandLog";
 import { JobStore, type JobRow } from "./jobs";
 import { InteractionStore } from "./interactions";
+import { RemoteHandleStore } from "./remoteHandles";
 import { SqliteEventLog } from "./eventLog";
 import { RuntimeStore } from "./runtime";
 import { TaskFileStore } from "./taskStore";
@@ -70,6 +71,8 @@ export interface Project {
    * rather than taking it with it — see {@link InteractionStore}.
    */
   interactions: InteractionStore;
+  /** The merge requests tasks have opened, and what each has already heard (decision 0004). */
+  remotes: RemoteHandleStore;
   /** What `config.storage` did to this connection — see {@link applyStorage}. Empty when everything
    *  is in the database, which is the default. */
   storage: ShadowReport;
@@ -376,6 +379,7 @@ function openAt(
     artifacts: new SqliteArtifactStore(db, artifactLog),
     jobs,
     interactions: new InteractionStore(db),
+    remotes: new RemoteHandleStore(db),
     recovered,
     orphans,
     storage,

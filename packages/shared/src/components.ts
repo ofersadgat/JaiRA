@@ -365,6 +365,20 @@ export interface ConfirmActionConfig {
   prompt: string;
   confirmLabel: string;
   cancelLabel: string;
+  /**
+   * What EXACTLY is being confirmed, as label/value rows under the prompt.
+   *
+   * For an action whose consequences are not in its name. "Push this review to GitLab?" is a
+   * question nobody can answer without knowing where to, as which branch, and under whose name —
+   * and a sentence carrying five such facts is a sentence nobody reads.
+   */
+  details?: Array<{ label: string; value: string }>;
+  /**
+   * Other ways of saying YES, each a button between confirm and cancel — "always for this
+   * project" beside "push and open". Choosing one answers `confirmed: true` with `choice` set to
+   * its value; the confirm button itself leaves `choice` out.
+   */
+  options?: ComponentOption[];
 }
 
 /**
@@ -422,6 +436,14 @@ function str(raw: unknown, where: string, fallback?: string): string {
   }
   if (typeof raw !== "string" || raw.length === 0) throw new ConfigError(`${where} must be a non-empty string`);
   return raw;
+}
+
+function confirmDetails(raw: unknown): Array<{ label: string; value: string }> {
+  if (!Array.isArray(raw)) throw new ConfigError("confirm_action.details must be an array of { label, value }");
+  return raw.map((entry, i) => {
+    const row = asRecord(entry, `confirm_action.details[${i}]`);
+    return { label: str(row["label"], `confirm_action.details[${i}].label`), value: str(row["value"], `confirm_action.details[${i}].value`) };
+  });
 }
 
 function options(raw: unknown, where: string): ComponentOption[] {
@@ -601,6 +623,8 @@ export function parseComponentConfig(component: ComponentName, raw: unknown): Co
         prompt,
         confirmLabel: str(config["confirmLabel"], "confirm_action.confirmLabel", "Confirm"),
         cancelLabel: str(config["cancelLabel"], "confirm_action.cancelLabel", "Cancel"),
+        ...(config["details"] !== undefined ? { details: confirmDetails(config["details"]) } : {}),
+        ...(config["options"] !== undefined ? { options: options(config["options"], "confirm_action.options") } : {}),
       };
     case "review_artifacts": {
       const tree = config["tree"] ?? "proposal";
@@ -826,8 +850,14 @@ export function validateComponentResult(
     }
     case "edit_artifact":
       return typeof result["content"] === "string" ? { ok: true } : bad("result.content must be a string");
-    case "confirm_action":
-      return typeof result["confirmed"] === "boolean" ? { ok: true } : bad("result.confirmed must be a boolean");
+    case "confirm_action": {
+      if (typeof result["confirmed"] !== "boolean") return bad("result.confirmed must be a boolean");
+      const choice = result["choice"];
+      if (choice === undefined) return { ok: true };
+      // A choice is another way of saying yes, so it cannot ride a no — and it has to be one offered.
+      if (result["confirmed"] !== true) return bad("result.choice is a way of confirming, so it needs confirmed: true");
+      return (config.options ?? []).some((option) => option.value === choice) ? { ok: true } : bad(`result.choice '${String(choice)}' is not one of the options offered`);
+    }
     case "fill_form": {
       const problems: string[] = [];
       for (const field of config.fields) {

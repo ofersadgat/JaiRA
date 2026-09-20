@@ -298,6 +298,24 @@ export interface RemoteHandle {
   head: string;
 }
 
+/** The key of a request the workflow did not name — one per task. */
+export const DEFAULT_REMOTE_KEY = "review";
+
+/**
+ * The branch JaiRA pushes for a request: `jaira/<task>/<key>`, the key made safe for a ref.
+ *
+ * It carries the task's id so two tasks never push to one branch, and the key so two `each` elements
+ * of one task do not either. A scoped name's key is `name#address`; what a ref cannot hold becomes `-`.
+ */
+export function remoteBranchName(taskId: string, key: string): string {
+  const slug = key
+    .replace(/[^A-Za-z0-9._/-]+/g, "-")
+    .replace(/\.{2,}/g, ".")
+    .replace(/\/{2,}/g, "/")
+    .replace(/^[-./]+|[-./]+$/g, "");
+  return `jaira/${taskId}/${slug.length > 0 ? slug : DEFAULT_REMOTE_KEY}`;
+}
+
 export function remoteHandleId(provider: ForgeProviderKind, host: string, project: string, number: number): string {
   return `${host}/${project}${FORGE_LABELS[provider].sigil}${number}`;
 }
@@ -432,4 +450,90 @@ export interface ForgeCheck {
   credential?: SecretOrigin;
   /** Set when the connection names a token and nothing in the chain supplies it. */
   credentialMissing?: string;
+}
+
+// --- the row a task keeps per request ---------------------------------------------------------------
+
+/**
+ * One merge request as a TASK remembers it — the `remote_handles` row (decision 0004).
+ *
+ * Here rather than in `@jaira/persistence` because `@jaira/runtime` reads and writes it through
+ * {@link RemoteHandlePort} and cannot import the package that stores it.
+ */
+export interface RemoteHandleRow {
+  taskId: string;
+  key: string;
+  provider: ForgeProviderKind;
+  host: string;
+  project: string;
+  /** The git remote pushed to — `origin`. */
+  remote: string;
+  branch: string;
+  target: string;
+  /** Absent until the request is opened: a pushed branch is a row before it is a request. */
+  number?: number;
+  url?: string;
+  /** The commit last pushed to `branch`. */
+  pushedHead?: string;
+  cursor: ProbeCursor;
+  /** Ids of comments, threads' comments and reviews already folded into a settlement or shown. */
+  seen: string[];
+  /** Epoch ms at which a quiet window runs out. Absent ⇒ no window is running. */
+  settleAt?: number;
+  /** The window's length for this request, when a state's `remote` overrode the default. */
+  settleAfterMs?: number;
+  /** True while something is parked on this request — the ONLY rows the poller looks at. */
+  awaiting: boolean;
+  /** The parked gate's request id, when a gate (rather than `on_remote_event`) is what waits. */
+  requestId?: string;
+  /** When the forge was last read for this request, and what failed if that read failed. */
+  checkedAt?: number;
+  lastError?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** What a caller may change about a row after it exists. `null` clears a nullable column. */
+export interface RemoteHandlePatch {
+  number?: number;
+  url?: string;
+  pushedHead?: string;
+  target?: string;
+  cursor?: ProbeCursor;
+  seen?: string[];
+  settleAt?: number | null;
+  settleAfterMs?: number | null;
+  awaiting?: boolean;
+  requestId?: string | null;
+  checkedAt?: number;
+  lastError?: string | null;
+}
+
+/** What the primitives and the poller need of the store. `@jaira/persistence` implements it. */
+export interface RemoteHandlePort {
+  get(taskId: string, key: string): RemoteHandleRow | undefined;
+  forTask(taskId: string): RemoteHandleRow[];
+  /** The rows something is parked on — "nothing parked, nothing polled" is this list being empty. */
+  awaiting(): RemoteHandleRow[];
+  /** Make the row for a request, or return the one already there — never a second. */
+  ensure(identity: Pick<RemoteHandleRow, "taskId" | "key" | "provider" | "host" | "project" | "remote" | "branch" | "target">): RemoteHandleRow;
+  update(taskId: string, key: string, patch: RemoteHandlePatch): RemoteHandleRow | undefined;
+  byRequest(requestId: string): RemoteHandleRow | undefined;
+  stopAwaiting(taskId: string): void;
+}
+
+/** A row as the data a function returns. `undefined` until the request has been opened. */
+export function handleOfRow(row: RemoteHandleRow): RemoteHandle | undefined {
+  if (row.number === undefined || row.url === undefined) return undefined;
+  return {
+    id: remoteHandleId(row.provider, row.host, row.project, row.number),
+    provider: row.provider,
+    host: row.host,
+    project: row.project,
+    branch: row.branch,
+    target: row.target,
+    number: row.number,
+    url: row.url,
+    head: row.pushedHead ?? "",
+  };
 }

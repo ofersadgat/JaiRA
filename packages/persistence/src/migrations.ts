@@ -440,6 +440,42 @@ export const MIGRATIONS: Migration[] = [
       addColumn(db, "task_runtime", "fork_boundary_seq", "INTEGER");
     },
   },
+  {
+    version: 18,
+    note: "a task remembers the merge requests it opened, and what it has already heard on each",
+    // Decision 0004. One row per (task, key): the handle a function returns as data, and the WATCH —
+    // the probe cursor, what has been seen, and `settle_at`. `settle_at` is a timestamp and not a
+    // timer so that quitting the app neither loses a quiet window nor extends it; `awaiting` is what
+    // the poller reads, so nothing parked means nothing polled. Never file-backed: the cursor and the
+    // window are facts about THIS machine's conversation with a forge, not about the repository.
+    sql: `
+      CREATE TABLE IF NOT EXISTS remote_handles (
+        task_id         TEXT NOT NULL,
+        key             TEXT NOT NULL,
+        provider        TEXT NOT NULL,
+        host            TEXT NOT NULL,
+        project         TEXT NOT NULL,
+        remote          TEXT NOT NULL,
+        branch          TEXT NOT NULL,
+        target          TEXT NOT NULL,
+        number          INTEGER,
+        url             TEXT,
+        pushed_head     TEXT,
+        cursor_json     TEXT NOT NULL DEFAULT '{}',
+        seen_json       TEXT NOT NULL DEFAULT '[]',
+        settle_at       INTEGER,
+        settle_after_ms INTEGER,
+        awaiting        INTEGER NOT NULL DEFAULT 0,
+        request_id      TEXT,
+        checked_at      INTEGER,
+        last_error      TEXT,
+        created_at      INTEGER NOT NULL,
+        updated_at      INTEGER NOT NULL,
+        PRIMARY KEY (task_id, key)
+      );
+      CREATE INDEX IF NOT EXISTS remote_handles_awaiting ON remote_handles(awaiting) WHERE awaiting = 1;
+    `,
+  },
 ];
 
 /**

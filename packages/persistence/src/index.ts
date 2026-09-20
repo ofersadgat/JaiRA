@@ -36,4 +36,5 @@ export * from "./migrations";
 export * from "./sessionStore";
 export * from "./jobOutput";
 export * from "./interactions";
+export * from "./remoteHandles";
 export * from "./cut";

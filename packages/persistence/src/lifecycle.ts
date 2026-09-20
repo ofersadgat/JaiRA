@@ -404,6 +404,9 @@ export function deleteTask(project: Project, taskId: string): void {
     // A gate outlives the process that parked it, so it also has to leave with its task — otherwise
     // the strip goes on offering a question about a task that is no longer there to answer it.
     project.db.prepare(`DELETE FROM pending_interactions WHERE task_id = ?`).run(taskId);
+    // The ROW goes; the merge request does not. Deleting a task is a local act, and closing a request
+    // on somebody's forge because a card was removed would be an outward one nobody asked for.
+    project.db.prepare(`DELETE FROM remote_handles WHERE task_id = ?`).run(taskId);
     project.db.prepare(`DELETE FROM task_runtime WHERE task_id = ?`).run(taskId);
   })();
   // The task's journal files, for the reason `prune` deletes a run's: with the file as the truth, a

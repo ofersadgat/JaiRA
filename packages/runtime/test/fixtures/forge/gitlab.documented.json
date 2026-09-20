@@ -94,11 +94,11 @@
     { "match": { "method": "GET", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/members/all/777" }, "response": { "status": 404, "headers": {}, "body": { "message": "404 Not found" } } },
 
     {
-      "match": { "method": "GET", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests", "query": { "source_branch": "jaira/t-1/review" } },
+      "match": { "method": "GET", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests", "queryLike": { "source_branch": "^jaira/" } },
       "response": { "status": 200, "headers": {}, "body": [] }
     },
     {
-      "match": { "method": "POST", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests", "body": { "source_branch": "jaira/t-1/review" } },
+      "match": { "method": "POST", "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests", "bodyLike": { "source_branch": "^jaira/" } },
       "response": {
         "status": 201, "headers": {},
         "body": { "id": 990001, "iid": 7430, "project_id": 250833, "title": "Draft: Review the implementation", "state": "opened", "draft": true, "source_branch": "jaira/t-1/review", "target_branch": "main", "sha": "1111111111111111111111111111111111111111", "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/7430" }

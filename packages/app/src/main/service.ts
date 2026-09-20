@@ -147,6 +147,9 @@ import {
   listExecutors,
   probeExecutor,
   checkForges,
+  registerRemoteFunctions,
+  type PublishAnswer,
+  type PublishRequest,
   type ForgeHttp,
   SecretResolver,
   persistEngineArtifacts,
@@ -255,6 +258,7 @@ import {
   sessionKey,
   JAIRA_DIR_NAME,
   SHARED_SESSION,
+  FORGE_LABELS,
   validateComponentResult,
   WORKFLOW_JSON,
   unnamedRouteOf,
@@ -3083,6 +3087,30 @@ export class AppService {
     // in any workflow rather than in the ones a walker happened to recognise.
     open.userEvents.register(registry, taskId);
 
+    // The remote primitives (decision 0004 §2), for every run for the reason `on_user_event` is: they
+    // cost five map entries, and a workflow that reaches for one should find it whatever else it is
+    // allowed. What they may DO is decided per call — `remote.publish` — and not by being registered.
+    registerRemoteFunctions(registry, {
+      taskId,
+      ...(project.tasks.tryRead(taskId)?.title !== undefined ? { taskTitle: project.tasks.tryRead(taskId)!.title } : {}),
+      // Where the task was cut from is what the PROJECT directory has checked out; asked of git only
+      // when a request is actually being made.
+      baseBranch: () => new Git({ exec, repoDir: project.paths.projectDir, execEnv: config.execEnvironment }).currentBranch(),
+      workspaceRoot: workspace.root,
+      scratchDir: join(project.paths.systemDir, "remote-worktrees"),
+      handles: project.remotes,
+      integrations: config.integrations,
+      policy: config.policy,
+      secrets: this.secretResolver(open),
+      exec,
+      execEnv: config.execEnvironment,
+      ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
+      // A scripted run has nobody to ask: left out, `ask` refuses with a sentence instead of parking
+      // a question a test never answers.
+      ...(scripted === undefined ? { confirmPublish: (request: PublishRequest) => this.askToPublish(open, taskId, request) } : {}),
+      grantProject: () => this.grantPublish(open),
+    });
+
     const fakeRules = opts.fake !== undefined ? parseFakeRules(opts.fake) : undefined;
     if (fakeRules !== undefined) open.fakeRules.set(taskId, fakeRules);
     // The scope floor, compiled into a delegated agent's OWN permission rules and folded over every
@@ -5506,6 +5534,58 @@ export class AppService {
       keychain: available,
       ...(available || keychain?.reason === undefined ? {} : { keychainReason: keychain.reason }),
     };
+  }
+
+  /**
+   * Ask whether a task may publish (decision 0004 §1: publishing is a policy decision).
+   *
+   * Through `confirm_action`, parked on the hub like any gate — so it renders in the conversation of
+   * the state that is asking, is written down, and survives the app closing. What it shows is what
+   * will be SENT and AS WHOM, because "push?" cannot be answered without either.
+   */
+  private async askToPublish(open: ProjectSession, taskId: string, request: PublishRequest): Promise<PublishAnswer> {
+    const forge = FORGE_LABELS[request.provider];
+    const result = await open.hub.ask(
+      "confirm_action",
+      {
+        prompt: `Push this review to ${forge.name} and open a ${forge.request}?`,
+        confirmLabel: "Push and open",
+        cancelLabel: "Review here only",
+        details: [
+          { label: "to", value: request.to },
+          { label: "branch", value: `${request.branch} → ${request.target}` },
+          { label: "commits as", value: request.commitsAs },
+          ...(request.openedBy !== undefined ? [{ label: "request opened by", value: `${request.openedBy} (the ${forge.name} connection's token)` }] : []),
+        ],
+        options: [{ value: "always", label: "Always for this project", description: "sets policy.remote.publish to allow in this project's settings" }],
+      },
+      taskId,
+    );
+    // A rejected park is a shutdown or a cancel, never a yes.
+    if ("error" in result && result.error !== undefined) return "no";
+    const value = ((result as { value?: unknown }).value ?? {}) as { confirmed?: unknown; choice?: unknown };
+    if (value.confirmed !== true) return "no";
+    return value.choice === "always" ? "always" : "once";
+  }
+
+  /**
+   * "Always for this project": write `policy.remote.publish = "allow"` into the project's own layer.
+   *
+   * The project layer and never the shared root — the person was asked about THIS project. A write
+   * that fails is logged and swallowed: the push they just approved must not fail because a settings
+   * file could not be rewritten, and the cost is only being asked once more.
+   */
+  private grantPublish(open: ProjectSession): void {
+    try {
+      const layer = open.kind === "shared" ? "base" : "project";
+      const view = this.readConfig(open.key);
+      const doc = structuredClone(((layer === "base" ? view.base : view.project) ?? {}) as Record<string, unknown>);
+      const policy = (doc["policy"] ??= {}) as Record<string, unknown>;
+      policy["remote"] = { ...((policy["remote"] ?? {}) as object), publish: "allow" };
+      this.writeConfig({ layer, project: open.key, config: doc as JsonValue });
+    } catch (e) {
+      this.log({ level: "warn", source: "runtime", message: `could not record the publish grant: ${(e as Error).message}`, project: open.key });
+    }
   }
 
   /**
