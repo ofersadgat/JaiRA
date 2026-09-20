@@ -36,7 +36,7 @@ checker has to re-implement:
 
 ## 1. Expressions lower to producer trees
 
-`{"expr": ".children.review.outputs.severity === 'high'"}` currently lowers to **one** edge carrying
+`{"$expr": ".children.review.outputs.severity === 'high'"}` currently lowers to **one** edge carrying
 the source text, which the engine re-parses and interprets at resolution time:
 
 ```jsonc
@@ -82,7 +82,7 @@ questions later in this document.
 
 ### 1.1 Status: **done**. `expr.eval` is gone
 
-`{ expr }` lowers to a tree of operator producer edges. An expression is parsed exactly once, at
+`{ $expr }` lowers to a tree of operator producer edges. An expression is parsed exactly once, at
 load; no source string is carried through the document, and there is no interpreter left to invoke
 at resolution time. `expr.eval` has been deleted from `RESOLVER_REFS`.
 
@@ -136,7 +136,7 @@ both directions (`operand`, `produced`) in `runResolver`.
 
 ### 1.4 Superseded: what the flip needed before it landed
 
-Reading `validate.ts` before flipping: `producerSchemaOf` handles an `{ expr }` edge by parsing its
+Reading `validate.ts` before flipping: `producerSchemaOf` handles an `{ $expr }` edge by parsing its
 source and calling `inferExpression(ast, scope)` — **the inferred type IS the leaf's producer
 schema**, which is what makes `isSubschema` binding checks work on expressions. It also reports
 unresolved references and runs the reachability obligation over `referencesOf(ast)`.
@@ -157,7 +157,7 @@ getting it wrong is silent.
 
 `fanout.ts` counts how many consumers read each child output; a count of two makes the engine
 **materialize** a blob output once rather than letting two readers race the same byte stream. Its
-`{ expr }` case re-parses the source and reads `children.*` paths out of it, with a distinction that
+`{ $expr }` case re-parses the source and reads `children.*` paths out of it, with a distinction that
 is easy to miss: `children.P.outputs.X` is a read of one output, a coarser `children.P` is a read of
 *every* output, and `children.P.outcome` is a read of **none** — it is the termination status, not
 an output, and counting it would force a materialization nothing needs.
@@ -209,7 +209,7 @@ Nothing to build. This is the single largest piece of the design that already ex
 
 ## 2. The operator set is a registry — **built**
 
-**Status:** built and in use — `{ expr }` lowers onto these, and the built-in library (§3) joins them
+**Status:** built and in use — `{ $expr }` lowers onto these, and the built-in library (§3) joins them
 as ordinary entries in the same set.
 
 `RESOLVER_REFS` gained `context.get`, `op.member`, `op.not`, the eight comparisons, and the three
@@ -391,6 +391,28 @@ wrapper. A prompt callee goes through `promptExecutor.start` and does.
 **Scope.** `map`, `filter` and `flatMap` all fit this shape. `reduce` does not — each step depends on
 the previous, so the operations cannot be constructed up front; it wants a sequential runner and is
 worth doing separately. `zip` is pure and belongs in `builtins.ts` with the rest.
+
+### 3.6 Receiver calls — **built**
+
+`recv.name(args)` is sugar for `name(recv, args)` and lowers to the same tree, exactly as `xs[i]`
+lowers to `at(xs, i)` (NAMES.md §8). It applies when `recv` is a RUNTIME value — a leading-dot read or
+a call's result — and `name` is an operation:
+
+```text
+.any.map('remaining').indexOf(max)      ≡  indexOf(map(.any, 'remaining'), max)
+sort(.inputs.xs).reverse().at(0)        ≡  at(reverse(sort(.inputs.xs)), 0)
+```
+
+Two readings are deliberately left alone. A BARE dotted name — `confidence.score(…)` — is one name,
+a module symbol, never a receiver. And `.inputs.f(x)` stays a call of a callable VALUE when the
+declared type of `.inputs` has a property `f`: the loader and the type checker both answer from the
+state's DECLARED inputs — a slot, or a property its schema names — so what is checked is what runs.
+A child's output that happens to have a property called `max` does not make `.children.k.output.stats.max()`
+a call of it; to call a callable that is not an input, parenthesize it: `(.children.k.output.f)(x)`.
+
+Two builtin spellings make the pick in NAMES.md §6 read as written: `map(xs, 'key')` with a STRING
+is `pluck(xs, 'key')`, and `indexOf(xs, v)` answers where `v` is (`-1` for nowhere), with
+`indexOf(xs, op)` meaning `indexOf(xs, op(xs))`. `max` and `min` take two numbers or one list.
 
 ### Dispatch: what reading the engine actually showed
 
@@ -1088,7 +1110,7 @@ standard route out of a sandbox — so this had to be settled first.
 
 | Site | What leaked |
 | --- | --- |
-| `expr.ts` member access | `{"expr": ".inputs.o.constructor"}` → a function as a slot value |
+| `expr.ts` member access | `{"$expr": ".inputs.o.constructor"}` → a function as a slot value |
 | `inferExpr.ts` `projectProperty` | typed a prototype name as `ANY` instead of reporting a bad reference |
 | `resolve.ts` `select` | `{"child":"c","output":"constructor"}` → a function, not "no such output" |
 | `reference.ts` `selectProperty` | `$/types/user.constructor` → a function spliced in by transclusion |
@@ -1140,7 +1162,7 @@ all four by hashing the resolved definition instead.
 **Status: built.** A binding may be written as an expression with no wrapper, the leading dot is
 required in every position, and a bare name anywhere resolves along the search `path`.
 
-The starting complaint was small: `{"expr": "add(children.a.outputs.n, 1)"}` needed a wrapper that
+The starting complaint was small: `{"$expr": "add(children.a.outputs.n, 1)"}` needed a wrapper that
 `".inputs.issue"` did not, for no reason a reader could name. Fixing it turned out to need a rule
 rather than a special case, because a binding string and an expression string overlap: both can be
 a dotted path, and something has to decide what one means.
@@ -1187,7 +1209,7 @@ REFERENCES.md §3's mismatch principle applied to the target rather than to the 
 
 | Resolved node | Reads as |
 | --- | --- |
-| a binding form (`{child}`, `{expr}`, `.inputs.x`) | that binding, re-entering the desugarer |
+| a binding form (`{child}`, `{$expr}`, `.inputs.x`) | that binding, re-entering the desugarer |
 | an operation document | the operation — §3.1's higher-order value |
 | text (a `.md`) | a text literal |
 | anything else | a JSON literal |
@@ -1266,7 +1288,7 @@ moved INTO `desugarRuntimeReference`, the only caller that still needed them —
 builds its `scope.get` edge directly rather than round-tripping through an `{input}` object
 the loader then takes apart again.
 
-`{expr}` survives, and not as compatibility: §14 makes a bare string an expression too, so
+`{$expr}` survives (spelled with its `$` since NAMES.md §2), and not as compatibility: §14 makes a bare string an expression too, so
 the wrapper is a choice about emphasis rather than a second mechanism.
 
 `resolve.ts`'s `NON_TREE_FORMS` shrank with them. It listed every sugar keyword so a form

@@ -6,8 +6,10 @@ document in code, and [WORKFLOWS.md](WORKFLOWS.md) is the authoring reference.
 
 Fully built, including §10: the tagged binding forms (`{"child": …}`, `{"input": …}`,
 `{"artifact": …}`, `{"conversation": …}`) were kept alongside the new spelling while workflows
-migrated and have since been REMOVED. `{"expr": …}` survives — not as compatibility, but because
-§5 makes a bare string an expression too, so the wrapper is a choice about emphasis.
+migrated and have since been REMOVED. `{"$expr": …}` survives — not as compatibility, but because
+§5 makes a bare string an expression too, so the wrapper is a choice about emphasis. (It was spelled
+`{"expr": …}` until [NAMES.md](NAMES.md) §2 made every key the state system acts on a `$`-key; the
+old spelling is refused by name.)
 
 Today "point at a thing" has three unrelated spellings: a state id is a path
 (`feature/plan`), a binding is a tagged object (`{"child": "c", "output": "x"}`), and an
@@ -229,7 +231,7 @@ unchanged; only the spelling is.
 ```
 
 The leading dot is **required everywhere**, including inside an expression. ⚠️ This
-reverses an earlier rule — the dot used to be optional in an `{"expr": …}`, on the
+reverses an earlier rule — the dot used to be optional in an `{"$expr": …}`, on the
 reasoning that an expression "can only ever address runtime space, so there is no
 file-path alternative in that position."
 
@@ -248,10 +250,10 @@ because a binding string and an expression are now the same grammar:
 ```jsonc
 "binding": ".inputs.issue"
 "binding": "add(.inputs.n, 1)"
-"binding": { "expr": "add(.inputs.n, 1)" }   // identical; the wrapper is emphasis
+"binding": { "$expr": "add(.inputs.n, 1)" }  // identical; the wrapper is emphasis
 ```
 
-`{"expr": …}` therefore stays as a spelling rather than as a necessity.
+`{"$expr": …}` therefore stays as a spelling rather than as a necessity.
 
 Literal bindings — `{"text": …}`, `{"json": …}` — stay as they are.
 
@@ -439,7 +441,8 @@ One pass, not two. Every authored workflow changes.
 | `{"input": "issue"}` | `".inputs.issue"` |
 | `{"artifact": "design_doc"}` | `".artifacts.design_doc"` |
 | `{"conversation": "review", "message": 0}` | `"at(messages(<session ref>), 0)"` — by ref, since a name no longer addresses a conversation |
-| `{"text": …}`, `{"json": …}`, `{"expr": …}` | unchanged |
+| `{"text": …}`, `{"json": …}` | unchanged |
+| `{"expr": …}` | `{"$expr": …}` (NAMES.md §2) |
 | `"prompt": {"template": "…"}` | `"prompt": "…"` |
 | `"prompt": {"skill": "x"}` | `"prompt": {"$ref": "$/prompts/x.md"}` |
 | `"state": "feature/plan/critique"` | omit it, or `"./critique"` |

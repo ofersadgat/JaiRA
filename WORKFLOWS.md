@@ -351,7 +351,7 @@ schema stays unconstrained unless you write one.
   "weaknesses":  { "schema": { "type": "array", "items": { "type": "string" } } },   // produced
   "summary":     { "binding": ".operation.output.report" },                          // from the call
   "features":    { "binding": ".operation.output" },                                 // the whole return
-  "outcome":     { "binding": { "expr": ".children.critique.outputs.outcome" } },     // derived
+  "outcome":     { "binding": { "$expr": ".children.critique.outputs.outcome" } },     // derived
   "plan_doc":    { "binding": ".children.context.outputs.plan_doc" },                // derived
   "critique":    { "binding": ".children.critique.outputs" }                         // whole child
 }
@@ -719,19 +719,36 @@ mounted twice, under two different agents.
 
 ### 5.1 The execution-environment fields
 
-`session`, `tools`, `conversation` and `permissions` are ordinary operation
+`session`, `workspace`, `tools`, `conversation` and `permissions` are ordinary operation
 fields — they say how the call runs rather than what it is, but every one of them
 is a per-call decision, so they are written in the same block and inherited by
 the same rule.
 
-- **`session`** — the logical session owning the conversation transcript,
-  workspace and permissions. Operations sharing an id share a conversation.
+- **`session`** — the conversation this call joins. A name is a **scoped name**
+  (§5.3): `"review"`, `{ "$ref": "review", "$in": "parent" }`, `{ "$join": "nearest" }`,
+  `{ "$expr": … }` for a position computed at run time, each taking `"$fork": true`.
+  Operations that resolve to the same `(name, scope)` share a conversation. It names
+  a conversation and NOTHING ELSE — the workspace and the permission ledger are
+  `workspace`'s, below. ⚠️ The old keys `name`, `in`, `join`, `fork`, `expr` are
+  refused, each naming its replacement.
   ⚠️ Absent ⇒ a FRESH stream private to this operation — not a shared `"default"`
   session, which is what it used to mean. An implicit process-wide transcript is
   the thing that drives unbounded context growth, so sharing one is now something
   you ask for by naming it. The run's shared *workspace* is unaffected, being a
   separate concern. There is one spelling: `sessionId` is refused, not accepted
   as a synonym.
+- **`workspace`** — the RESOURCE BUNDLE the call runs in: the directory its tools
+  act within, the permission ledger, the scope a `"session"` approval covers. A
+  scoped name like `session`'s (`"impl"`, `{ "$ref": "impl", "$in": "parent" }`,
+  `{ "$join": "nearest" }`), or `null` for a FRESH private one — the bundle of the
+  state that wrote it, shared with the subtree below and nothing else, exactly as
+  `session: null` is a fresh conversation. Absent inherits; the run's own bundle is
+  reached by declaring nothing, or by a name scoped at the run
+  (`{ "$ref": "main", "$in": "global" }`). What the
+  host needs to make one — a base branch — is the name's `names` entry
+  (`"impl": { "from": "main" }`). Separate from `session` on purpose: many sessions
+  may share one workspace, and one session may cross several. It cannot be
+  computed (`$expr`), because a bundle is fixed when its instance is created.
 - **`tools`** — logical tool names the operation may call mid-loop, resolved
   through `registry.tools`. JaiRA registers `bash`. **Listing a tool here is what
   puts an agent's commands under the policy at all.**
@@ -836,6 +853,96 @@ exists in the declaring state. It is meaningless once inherited; use
 
 ---
 
+### 5.3 Scoped names, `names`, and `functions`
+
+A **scoped name** is an identity: the pair `(name, scope)`. Two uses that resolve to
+the same pair are the same thing, and nothing else makes them so ([NAMES.md](NAMES.md)).
+
+It rides the shape-mismatch rule (§2.1) with one more reading of it. A string where
+an object is expected is a *variable string*: starting with `$` it is a reference,
+resolved as ever; anything else is a **scoped name** if an enclosing scope declares
+it or the position provides what it is bound to (`session`, `workspace`) — and only
+then a path off the default root. Where a string is expected, write `{ "$ref": … }`,
+read the same two ways; in `args`, only that explicit form counts.
+
+**Every key the state system acts on is a `$`-key** — `$ref`, `$in`, `$join`,
+`$fork`, `$any`, `$pick`, `$expr`, `$binding` — so an instruction is visibly not
+payload. The format's own structural keys (`inputs`, `children`, a slot's
+`binding`, a mount wire's `each`) stay bare.
+
+**Where a name lives.** If an `environment.names.<name>` entry is visible at the
+use, the scope is the state that wrote the ENTRY; otherwise it is the state that
+wrote the use; `$in` (`"parent"`, `"global"`, an ancestor's id) redirects either.
+At run time the scope resolves to its nearest enclosing *instance*, so the key is
+`name#<instance address>`: above a loop it is one thing on every pass, inside it a
+new one per pass, and per `each` element `key[i]`.
+
+```jsonc
+"environment": {
+  "names": {
+    "impl":   { "from": "main" },
+    "plan":   { "$any": [ … ], "$pick": "…" },
+    "review": {}                       // scoped here, so children that write "review" share it
+  },
+  "session":   "draft",                // needs no entry: the position provides
+  "workspace": "impl",
+  "model":     { "$ref": "plan" },
+  "functions": { "review_artifacts": { "args": { "remote": { "$ref": "review", "to": "origin" } } } }
+}
+```
+
+| An inner entry of the same name | Means |
+| --- | --- |
+| `"impl": { "from": "dev" }` | **override**: a new `impl` scoped here, configured only by this block |
+| `"impl": { "$ref": "impl", "from": "dev" }` | the same, with the ENCLOSING entry pasted in and overridden — templating, not a cycle |
+| `"impl": { "$in": "parent", "branch": "x" }` | **contribute**: the parent's `impl`, with this added |
+
+`names` is the one key in `environment` that does NOT deep-merge down the tree.
+Contributions, and the plain keys beside a use's `$ref`, are collected over the
+whole tree before anything reads them — a sibling sees what a sibling contributed —
+and two writers giving one identity conflicting configuration are a lint error
+(compared by value — key order is never a disagreement). The plain keys beside a
+`$ref` are overrides of the NAME wherever a name goes — `session` and `workspace`
+included. One name is one type: bound as a session it cannot also be a workspace or
+a value, and the error is at the bind that disagrees. Its configuration is held to
+the position's type at that bind too: a function's parameter or a typed call setting
+checks it like a literal, and `session` / `workspace` check it against the schema the
+host declares for the position.
+
+In a value position a name reads as its configuration with its key beside it
+(`{ "to": "origin", "$key": "review#/" }`). It may sit inside a literal argument, at
+any depth, and is read in place — whatever the argument is called (`workspace`,
+`session`, `schema` are ordinary parameter names inside `args`). ⚠️ A name is usable
+only where a VALUE is read: in a structural position (`inputs`, `operation.input`,
+`children`) a declared name is passed over and the string is the file path it always
+was. A name nothing declares, in a position that cannot provide one, naming no file,
+is a load error.
+
+**`functions.<name>.args`** are a function's default arguments for the subtree,
+typed by that function's signature where they are written. Precedence: the state's
+own `args`, then the nearest block (merged per key down the tree), then the
+function's own default; `null` takes one away. A nearer literal REPLACES a name (or
+any other `$`-instruction) at the key where they meet, at any depth — the two are
+never merged into each other. Defaults in a child mount's `environment` are checked
+against the function at that line, like a state's own. It is not the operation's `args`, so
+a layer that changes `kind` does not drop it.
+
+**`$any` / `$pick`.** A value may be alternatives and a rule:
+`{ "$any": [ … ], "$pick": ".any[.any.map(model_limits).map('remaining').indexOf(max)]" }`.
+`$pick` is an expression; what it returns is the value used; it reads the
+alternatives as `.any`. Absent, the first alternative wins. `null` is a value — it
+may be listed and chosen; what is not *usable* is an alternative that references
+something that is not there (`{ "$ref": "$/roles.plan" }` with no such file, or no
+`plan` in it), which is skipped with a warning. ⚠️ Only the alternative's OWN
+reference is asked: a role file that exists and points at something missing is a load
+error, not a skip. A role (a `names` entry with `$any`) is declared whole where it is
+scoped; the plain keys beside a use of one (`{ "$ref": "plan", "reasoning": … }`)
+are that use's own override, laid over whichever alternative is chosen. WHEN it runs
+belongs to the position: a `model` is fixed when its session is created (journaled,
+reused by every later call — one that continues the session by ref included — and by
+a resumed task; the next session picks afresh),
+and anything else when the state that reads it is entered.
+
 ## 6. `children` and `sequence`
 
 ```jsonc
@@ -854,7 +961,7 @@ exists in the declaring state. It is meaningless once inherited; use
 | `children.<key>.inputs` | optional | Wiring into the child's declared inputs, as **bare bindings** (§8) — no `binding:` wrapper. Every required input of the child must be wired. |
 | `children.<key>.async` | optional | `true` ⇒ the cursor does not wait for this child (see below). On a mount that fans out (§6.2), also: the elements run concurrently. |
 | `children.<key>.environment` | optional | Defaults for **this mount** of the child and its subtree (§6.1). |
-| `children.<key>.inputs.<name>` as `{ "expr": …, "each": true }` | optional | **Fan out** (§6.2): the wire must produce an array, and the child is entered once per element with `<name>` holding the element. |
+| `children.<key>.inputs.<name>` as `{ "$expr": …, "each": true }` | optional | **Fan out** (§6.2): the wire must produce an array, and the child is entered once per element with `<name>` holding the element. |
 
 ### 6.1 `environment` on a child: one state, mounted twice
 
@@ -980,7 +1087,7 @@ element's schema — nothing names the element twice.
   "component": {
     "state": "./component",                                   // declares `component`, one object
     "inputs": {
-      "component": { "expr": ".children.plan.output.new_components", "each": true },
+      "component": { "$expr": ".children.plan.output.new_components", "each": true },
       "flow":      ".inputs.flows[.each.index]",              // a parallel array, by position
       "position":  ".each.axis.component"
     }
@@ -1056,13 +1163,13 @@ transition. `each` is the same idea one level up, for a *child*.
   "product": {},
   "ux": {
     "inputs": {
-      "feature": { "expr": ".children.product.output.features", "each": "split",
+      "feature": { "$expr": ".children.product.output.features", "each": "split",
                    "id": "id", "title": "story", "requires": "requires" }
     }
   },
   "ui": {
     "inputs": {
-      "feature": { "expr": ".children.product.output.features", "each": "split" }
+      "feature": { "$expr": ".children.product.output.features", "each": "split" }
     }
   }
 }
@@ -1290,8 +1397,8 @@ the preferred spelling, and the one the rest of this file uses:
 | `{ "text": "hello" }` | A literal string |
 | `{ "json": { "a": 1 } }` | A literal JSON value |
 | `"add(.children.a.outputs.n, 1)"` | A computation (§9) — no wrapper needed |
-| `{ "expr": "add(.children.a.outputs.n, 1)" }` | The same computation, wrapped |
-| `{ "expr": ".children.plan.outputs.items", "each": true }` | On a child mount's input only: enter the child once per element (§6.2) |
+| `{ "$expr": "add(.children.a.outputs.n, 1)" }` | The same computation, wrapped |
+| `{ "$expr": ".children.plan.outputs.items", "each": true }` | On a child mount's input only: enter the child once per element (§6.2) |
 
 **One rule decides all of these: a leading dot is *data*, a bare name is a
 *document*.** It holds at every depth — at the top of a binding, inside an
@@ -1309,7 +1416,7 @@ A bare name is resolved along `config.workflows.path` (§2.1), and **what it res
 to decides how it reads** — a binding form is that binding, an operation document is
 that operation, a `.md` is text, anything else is a JSON literal.
 
-`{"expr": …}` stays as the explicit spelling. It says nothing the bare string does not,
+`{"$expr": …}` stays as the explicit spelling. It says nothing the bare string does not,
 and it is worth reaching for when a reader would otherwise have to squint to see that a
 value is computed.
 
@@ -1323,12 +1430,12 @@ see [REFERENCES.md §10](REFERENCES.md) for what each one became.
 
 ## 9. Expressions
 
-Used in transition guards, in `{ "expr": … }` bindings, and — since they are the same
+Used in transition guards, in `{ "$expr": … }` bindings, and — since they are the same
 thing — in a **bare string binding**:
 
 ```jsonc
 "binding": "add(.children.a.outputs.n, 1)"          // no wrapper needed
-"binding": { "expr": "add(.children.a.outputs.n, 1)" }  // identical
+"binding": { "$expr": "add(.children.a.outputs.n, 1)" }  // identical
 ```
 
 **Namespaces** — all reached through the leading dot, which is what tells a read of this
@@ -1402,9 +1509,9 @@ An expression can apply an operation, and the operation may be anything the syst
 run — a built-in, a function, or a PROMPT:
 
 ```jsonc
-{ "expr": "add(.children.a.outputs.n, 1)" }
-{ "expr": "classify(.inputs.issue).severity === 'high'" }
-{ "expr": "$JAIRA/prompts/review(.inputs.plan)" }
+{ "$expr": "add(.children.a.outputs.n, 1)" }
+{ "$expr": "classify(.inputs.issue).severity === 'high'" }
+{ "$expr": "$JAIRA/prompts/review(.inputs.plan)" }
 ```
 
 The callee is a **reference**, resolved the same way every other reference is (§2.1):
@@ -1424,7 +1531,7 @@ Where a call takes an options bag rather than a list of values, write an **objec
 literal** — the aggregate literal, and the only place keys are written in an expression:
 
 ```jsonc
-{ "expr": "notify(.inputs.owner, { channel: 'email', urgent: .inputs.severity > 2 })" }
+{ "$expr": "notify(.inputs.owner, { channel: 'email', urgent: .inputs.severity > 2 })" }
 ```
 
 Keys are bare identifiers or quoted strings, never computed (`get(o, k)` is the
@@ -1567,9 +1674,9 @@ all, which for the numeric cases — a weighted score, a winning row, a margin �
 whole cost.
 
 ```jsonc
-{ "expr": "sum(pluck(.inputs.scores, 'total'))" }
-{ "expr": "maxBy(.inputs.scores, 'total').candidate_id" }
-{ "expr": "max(0, 1 - dot(.inputs.weights, .inputs.signals))" }
+{ "$expr": "sum(pluck(.inputs.scores, 'total'))" }
+{ "$expr": "maxBy(.inputs.scores, 'total').candidate_id" }
+{ "$expr": "max(0, 1 - dot(.inputs.weights, .inputs.signals))" }
 ```
 
 ### A key an identifier cannot spell
@@ -1578,7 +1685,7 @@ A property name after `.` may be **quoted**, which reaches the keys the identifi
 grammar cannot — a hyphen (now subtraction), a dot (the accessor itself), a space:
 
 ```jsonc
-{ "expr": ".inputs.config.\"claude-cli\".model" }
+{ "$expr": ".inputs.config.\"claude-cli\".model" }
 ```
 
 `get(.inputs.config, 'claude-cli')` is the same read; the quoted form is the one that
@@ -1590,8 +1697,8 @@ chains.
 `reduce` folds with one, taking the accumulator first and the element second:
 
 ```jsonc
-{ "expr": "map(.inputs.issues, classify)" }
-{ "expr": "reduce(.inputs.parts, joinTwo, '')" }
+{ "$expr": "map(.inputs.issues, classify)" }
+{ "$expr": "reduce(.inputs.parts, joinTwo, '')" }
 ```
 
 Elements run in parallel (`reduce` in sequence, since each step needs the last), and
@@ -1692,7 +1799,7 @@ parses and every reference resolves":
 
 1. **Binding compatibility** — a producer's output schema must be a subschema of
    the consuming slot's schema.
-2. **Expression typing** — every guard and `{ expr }` leaf is inferred; a guard
+2. **Expression typing** — every guard and `{ $expr }` leaf is inferred; a guard
    that is not boolean is an error, and a declared schema on an expr leaf is
    checked against the inferred type.
 3. **Reachability** — referencing a producer that is not provably run on every
@@ -1950,7 +2057,7 @@ the jump against.
   "outputs": {
     "outcome": {
       "schema": { "type": "string", "enum": ["complete", "blocked"] },
-      "binding": { "expr": ".children.critique.outputs.outcome === 'clean' ? 'complete' : 'blocked'" }
+      "binding": { "$expr": ".children.critique.outputs.outcome === 'clean' ? 'complete' : 'blocked'" }
     },
     "plan_doc": { "binding": ".children.context.outputs.plan_doc" },
     // A "passthrough" output: the whole child result as one value.
@@ -2094,7 +2201,7 @@ mounts load as two variants (§5).
     "input": {
       "prompt": {
         "kind": "text",
-        "binding": { "expr": "concat('Review this change and list what is wrong: ', .inputs.change)" }
+        "binding": { "$expr": "concat('Review this change and list what is wrong: ', .inputs.change)" }
       }
     },
     "output": { "name": "report", "kind": "blob" }
@@ -2202,7 +2309,7 @@ any other; nothing in them knows a person is watching.
   "operation": {
     "kind": "function",
     "function": "claude-cli",
-    "input": { "prompt": { "kind": "text", "binding": { "expr": "concat('Summarize and classify this ticket: ', .inputs.issue)" } } },
+    "input": { "prompt": { "kind": "text", "binding": { "$expr": "concat('Summarize and classify this ticket: ', .inputs.issue)" } } },
     "output": { "name": "summary", "kind": "blob" }
   }
 }
