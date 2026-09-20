@@ -103,6 +103,12 @@ export function registerApplyChangeset(registry: CapabilityRegistry<WorkflowMetr
           const changeset = changesetOf(inputs["changeset"]);
           const checked = checkDecisions(changeset, { decisions: inputs["decisions"] });
           if (!checked.ok) return { error: failureOf(new Error(`apply-changeset: ${checked.errors}`)) };
+          // After a REMOTE merge there is nothing left to write (decision 0004): the task's worktree
+          // already IS the forge's history, and that history is not necessarily what was pushed — the
+          // reviewer may have squashed or added a fixup. Writing `after` over it would undo their work
+          // with ours, so the settled-by that says "adopt" makes this step a no-op.
+          const by = (inputs["settled_by"] ?? {}) as { via?: unknown; effect?: unknown };
+          if (by.via === "remote" && by.effect === "adopt") return { value: { applied: [], writes: [] } as unknown as ResolvedValue };
           // A function op's `args` block arrives as the single `config` input (the loader's
           // lowering); a direct input of the same name wins so a caller can bind it dynamically.
           const config = (inputs["config"] ?? {}) as Record<string, JsonValue>;
@@ -431,6 +437,14 @@ export interface ChangesetReviewLoopOptions extends ChangesetReviewOptions {
   respondPrompt?: string;
   /** Model for the respond state. Absent ⇒ the run's default executor answers. */
   model?: string;
+  /**
+   * Also open the review as a merge request (decision 0004 §3) — `{ to, target, settle_after, draft }`.
+   *
+   * The request is carried BY NAME: `review` is scoped on the loop's root, above the loop, so every
+   * round's gate resolves the same `(name, scope)` and pushes to the same branch and the same
+   * request. The configuration is the plain keys beside the `$ref` (NAMES.md §4).
+   */
+  remote?: Record<string, JsonValue>;
 }
 
 /**
@@ -466,9 +480,22 @@ export function changesetReviewLoopFiles(options: ChangesetReviewLoopOptions = {
   const CURRENT = "coalesce(.children.revise.output.changeset, .inputs.changeset)";
   const changesetSlot = { schema: CHANGESET_SLOT.schema, default: EMPTY_CHANGESET };
   const decisionsSlot = { ...DECISIONS_SLOT, default: [] };
+  const remote = options.remote;
+  // With a second door, the review answers a routing question too: a forge APPROVAL leaves every
+  // change `approved` — approving is not merging — which is not "settled" and is not a comment either.
+  const level = ".children.gate.output.decision";
   return {
     [CHANGESET_REVIEW_LOOP_ID]: {
       label: "Review a changeset, in rounds",
+      ...(remote !== undefined
+        ? {
+            environment: {
+              // Scoped HERE, above the loop: one request on every pass (NAMES.md §3).
+              names: { review: {} },
+              functions: { [REVIEW_ARTIFACTS]: { args: { remote: { $ref: "review", ...remote } } } },
+            },
+          }
+        : {}),
       description: "Comments go back to the model, the revised changeset comes back to the gate; settled decisions apply.",
       inputs: { changeset: CHANGESET_SLOT },
       outputs: {
@@ -479,7 +506,13 @@ export function changesetReviewLoopFiles(options: ChangesetReviewLoopOptions = {
       children: {
         gate: { inputs: { changeset: CURRENT } },
         status: { inputs: { decisions: ".children.gate.output.decisions" } },
-        apply: { inputs: { changeset: CURRENT, decisions: ".children.gate.output.decisions" } },
+        apply: {
+          inputs: {
+            changeset: CURRENT,
+            decisions: ".children.gate.output.decisions",
+            ...(remote !== undefined ? { settled_by: ".children.gate.output.settled_by" } : {}),
+          },
+        },
         // Entered by TRANSITION only, and deliberately OUTSIDE the sequence: the loop-back to
         // `gate` clears the spine, and these two surviving it is what carries a round's answer
         // into the next round's gate.
@@ -494,6 +527,14 @@ export function changesetReviewLoopFiles(options: ChangesetReviewLoopOptions = {
       },
       sequence: ["gate", "status", "apply"],
       transitions: [
+        // Approved or cut, on the forge or here, with nothing applied: the review is over. What
+        // happens to the request afterwards is the caller's to say (`remote_merge`, `remote_close`).
+        ...(remote !== undefined
+          ? [
+              { to: "terminate.success", when: `.run.cursor === 'status' && .children.status.output.settled === false && ${level} === 'approve'` },
+              { to: "terminate.success", when: `.run.cursor === 'status' && .children.status.output.settled === false && ${level} === 'cut'` },
+            ]
+          : []),
         { to: "respond", when: ".run.cursor === 'status' && .children.status.output.settled === false && .run.iteration < .limits.max_iterations" },
         { to: "revise", when: ".run.cursor === 'respond' && .children.respond.outcome === 'success'" },
         { to: "gate", when: ".run.cursor === 'revise' && .children.revise.outcome === 'success'" },
@@ -508,12 +549,22 @@ export function changesetReviewLoopFiles(options: ChangesetReviewLoopOptions = {
     [`${CHANGESET_REVIEW_LOOP_ID}/gate`]: {
       label: "Approve the changes",
       inputs: { changeset: changesetSlot },
-      outputs: { decisions: DECISIONS_SLOT },
+      outputs: {
+        decisions: DECISIONS_SLOT,
+        ...(remote !== undefined
+          ? {
+              decision: { schema: { type: "string" }, optional: true },
+              settled_by: { schema: { type: "object" }, optional: true },
+              remote: { schema: { type: "object" }, optional: true },
+            }
+          : {}),
+      },
       operation: {
         kind: "function",
         function: REVIEW_ARTIFACTS,
-        // No `changeset` arg — see the note on the non-looping gate above.
-        args: { prompt: options.prompt ?? "Review the proposed changes", tree },
+        // No `changeset` arg — see the note on the non-looping gate above. And no `remote` either:
+        // it arrives from the root's `environment.functions`, under the name scoped there.
+        args: { prompt: options.prompt ?? "Review the proposed changes", tree, ...(remote !== undefined ? { options: ["approve", "revise", "cut"] } : {}) },
       },
     },
     [`${CHANGESET_REVIEW_LOOP_ID}/status`]: {
@@ -550,7 +601,7 @@ export function changesetReviewLoopFiles(options: ChangesetReviewLoopOptions = {
     },
     [`${CHANGESET_REVIEW_LOOP_ID}/apply`]: {
       label: "Apply the settled decisions",
-      inputs: { changeset: changesetSlot, decisions: decisionsSlot },
+      inputs: { changeset: changesetSlot, decisions: decisionsSlot, ...(remote !== undefined ? { settled_by: { schema: { type: "object" }, default: {} } } : {}) },
       outputs: {
         applied: { schema: { type: "array", items: { type: "string" } } },
         writes: { schema: { type: "array", items: { type: "object" } } },

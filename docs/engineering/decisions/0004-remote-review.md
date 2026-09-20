@@ -462,6 +462,38 @@ the runtime reads it through are in `shared/forge.ts`, because runtime cannot im
 - **Not built:** the focus-after-five-minutes and machine-wake probes (`kickRemotes()` is the one
   entry point they will call), and GitHub's `/notifications` shortcut.
 
+**Steps 4–5 (2026-09-19).** `app/src/main/remoteReview.ts` is the two-door gate; `RemotePrimitives
+.adopt` is the merge sequence; `changesetReviewLoopFiles({ remote })` carries the request by name.
+
+- The gate's registration parks through a WRAPPER: publish (push, then open-or-find), mark the row
+  awaited with the gate's request id, park exactly as before. Declining the publish question
+  ("Review here only") runs the gate as the local one it always was.
+- **Everything that follows an answer lives after the park**, not in whoever answered: adopting the
+  history, posting the notes, the closing comment. An answer may arrive as a seed on a RESUMED run,
+  days later, in a process that was not there when it was given — and it does: a forge settlement
+  with no live run goes through `answerRecoveredInteraction`, the same door a recovered gate answered
+  by hand uses. `settled_by.effect` rides the result for that reason.
+- A forge settlement is submitted to the hub directly, not through `submitInteraction`: that
+  validates a renderer's claim, and this value is computed in main by the mapping the tests pin.
+- **The race is closed on both sides.** The hub settles a request once; and a forge read that was in
+  flight when the person answered re-checks the row and is dropped.
+- A shutdown leaves the row AWAITED (the question is still open); a stop or a cancel clears it; a new
+  run clears it and re-parks what it re-reaches, keeping the window, the cursor and the seen set.
+- **Notes to the forge are posted when the gate settles locally**, not live while it is open: each
+  note written in JaiRA as an inline thread (its line found from the words it quotes), a change's
+  comment and the review's comment as general comments, then one closing line. A note that came FROM
+  the forge carries `source` and is not posted back; it also carries `thread`, so a later state can
+  reply on it with `remote_comment`. Automatic per-thread replies by the responder are not built.
+- **Dirty means the person's work.** The "is `<target>` checked out dirty?" test excludes `.jaira/`,
+  which is the recorder's own writing and would otherwise make a checked-out target look dirty
+  almost always. A task with no worktree of its own is not reset — that checkout is the person's.
+- `apply-changeset` is a no-op when `settled_by` says `adopt`: the worktree already is the forge's
+  history, and writing `after` over it would undo a reviewer's squash or fixup.
+- In the built-in loop a remote adds the review-level options `approve` / `revise` / `cut` and two
+  transitions: approved or cut with nothing applied ends the loop (a forge approval leaves every
+  change `approved`, which is neither settled nor a comment). What happens to the request afterwards
+  is the caller's to say.
+
 Fixtures are of two kinds and each says which in `_source`: recorded from the public API with an
 unauthenticated GET (the request, approvals, both list shapes, GitHub's pull and its `304`, both
 `401`s), and built from the documented shapes for what needs a token (every write, GitLab's

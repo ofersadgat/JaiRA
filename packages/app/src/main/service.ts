@@ -36,7 +36,7 @@ import {
   type LoadedState,
   type WorkflowBundle,
 } from "@declarative-ai/hw";
-import type { ExecServices, MemoCache, RecordRef } from "@declarative-ai/exec";
+import { hostFunction, type ExecServices, type FunctionInputs, type MemoCache, type RecordRef } from "@declarative-ai/exec";
 import type { ExecPolicy } from "@declarative-ai/permissions";
 import type { JsonValue } from "@declarative-ai/json";
 import {
@@ -230,6 +230,7 @@ import {
   CHANGESET_REVIEW_ID,
   CHANGESET_REVIEW_LOOP_ID,
   REVIEW_ARTIFACTS,
+  INTERACTIVE,
   QuestionHub,
   type ApprovalRequest,
   type ExecObserver,
@@ -249,6 +250,8 @@ import {
   isStartableStatus,
   isTextMime,
   changesetOf,
+  changesetInputOf,
+  type Changeset,
   parseChangesetSource,
   jairaBasePaths,
   DEFAULT_EXECUTOR,
@@ -314,6 +317,7 @@ let installed: LogSink | undefined;
 let installedPolicy: LevelPolicy | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
 import { ProjectSession, type SyncHolder, SUSPENDED_WAITING } from "./session";
+import { reviewWithRemote } from "./remoteReview";
 import type {
   Scope,
   ApprovalScope,
@@ -1168,7 +1172,9 @@ export class AppService {
       const watcher = new RemoteWatcher({
         targets: () => this.watchTargets(),
         sources: [this.remoteSource],
+        subjectOf: (target, row) => this.remoteSubject(target, row.requestId),
         onSettled: (event) => this.remoteSettled(event),
+        onProgress: (event) => this.publish({ type: "store:invalidate", scope: "task", taskId: event.row.taskId, project: this.refOf(event.target) }),
       });
       this.remoteWatcher = { watcher, dispose: watcher.start().dispose };
       return; // `start` kicks.
@@ -1181,7 +1187,39 @@ export class AppService {
     const session = this.sessions.get(event.target);
     if (session === undefined) return;
     const result = resultOfSettlement(event.settlement, event.handle) as unknown as JsonValue;
-    session.remoteEvents.deliver(event.row.taskId, event.row.key, result, event.row.pushedHead);
+    if (event.requestId === undefined) {
+      session.remoteEvents.deliver(event.row.taskId, event.row.key, result, event.row.pushedHead);
+      return;
+    }
+    // A GATE was parked on it: the forge's answer goes through the same door a person's does. Live,
+    // the engine is waiting on the promise. Not live — closed for a weekend is the normal case — the
+    // answer is seeded and the task resumed, exactly as for a recovered gate answered by hand.
+    // Deliberately not through `submitInteraction`: that validates a RENDERER's claim, and this value
+    // was computed here, from the forge, by the mapping the tests pin.
+    if (session.hub.submit(event.requestId, result)) return;
+    try {
+      this.answerRecoveredInteraction(event.requestId, result);
+    } catch (e) {
+      this.log({ level: "warn", source: "runtime", message: `the forge settled a review nothing was waiting on: ${(e as Error).message}`, project: event.target, taskId: event.row.taskId });
+    }
+  }
+
+  /** What a parked gate is deciding — its changeset and its vocabulary — for the settlement mapping. */
+  private remoteSubject(target: string, requestId: string | undefined): { changeset?: Changeset; options?: readonly string[] } | undefined {
+    if (requestId === undefined) return undefined;
+    const session = this.sessions.get(target);
+    const inputs = session?.hub.list().find((r) => r.requestId === requestId)?.inputs ?? session?.project.interactions.get(requestId)?.inputs;
+    if (inputs === undefined) return undefined;
+    const changeset = changesetInputOf(inputs).changeset;
+    let options: string[] = [];
+    try {
+      const parsed = parseComponentConfig(REVIEW_ARTIFACTS, inputs);
+      if (parsed.component === REVIEW_ARTIFACTS) options = (parsed.options ?? []).map((o) => o.value);
+    } catch {
+      // An unreadable contract decides nothing at review level; the per-change decisions still stand.
+    }
+    // Given even when empty: a gate may only answer a word its state named.
+    return { ...(changeset !== undefined ? { changeset } : {}), options };
   }
 
   /**
@@ -3038,6 +3076,9 @@ export class AppService {
     // answerable only by resuming a task that is already running. What this run re-reaches it
     // re-asks; what it does not, nobody should be answering.
     project.interactions.clearTask(taskId);
+    // And the same for what it was waiting on from the forge: this run re-parks what it re-reaches,
+    // with a request id of its own. The row keeps its window, its cursor and what it has seen.
+    project.remotes.stopAwaiting(taskId);
 
     const started = await beginTaskRun(project, taskId, {
       functions: registry.functions,
@@ -3157,7 +3198,7 @@ export class AppService {
     // The remote primitives (decision 0004 §2), for every run for the reason `on_user_event` is: they
     // cost five map entries, and a workflow that reaches for one should find it whatever else it is
     // allowed. What they may DO is decided per call — `remote.publish` — and not by being registered.
-    registerRemoteFunctions(registry, {
+    const remotePrimitives = registerRemoteFunctions(registry, {
       taskId,
       ...(project.tasks.tryRead(taskId)?.title !== undefined ? { taskTitle: project.tasks.tryRead(taskId)!.title } : {}),
       // Where the task was cut from is what the PROJECT directory has checked out; asked of git only
@@ -3177,6 +3218,35 @@ export class AppService {
       ...(scripted === undefined ? { confirmPublish: (request: PublishRequest) => this.askToPublish(open, taskId, request) } : {}),
       grantProject: () => this.grantPublish(open),
     });
+    // The gate's second door (decision 0004 §3). `review_artifacts` is interactive and was routed to
+    // the hub above like every component; with a `remote` it ALSO lives on the forge, so this run's
+    // registration parks through a wrapper that publishes first and tells the forge afterwards. With
+    // no `remote` the wrapper is the plain park. Not for a scripted run, whose answers win.
+    if (scripted === undefined && open.interactive.has(REVIEW_ARTIFACTS)) {
+      const title = project.tasks.tryRead(taskId)?.title;
+      registry.functions.set(
+        REVIEW_ARTIFACTS,
+        hostFunction(
+          (inputs: FunctionInputs, ctx: unknown) =>
+            reviewWithRemote(
+              {
+                taskId,
+                ...(title !== undefined ? { taskTitle: title } : {}),
+                hub: open.hub,
+                handles: project.remotes,
+                primitives: remotePrimitives,
+                workspace: { root: workspace.root, isWorktree: workspace.isWorktree === true },
+                who: async () => (await new Git({ exec, repoDir: workspace.root, execEnv: config.execEnvironment }).identity()).name,
+                onAwaiting: () => this.kickRemotes(),
+                log: (message) => this.log({ level: "warn", source: "runtime", message, project: open.key, taskId }),
+              },
+              inputs,
+              ctx,
+            ),
+          INTERACTIVE,
+        ),
+      );
+    }
 
     const fakeRules = opts.fake !== undefined ? parseFakeRules(opts.fake) : undefined;
     if (fakeRules !== undefined) open.fakeRules.set(taskId, fakeRules);
@@ -4973,6 +5043,9 @@ export class AppService {
       session.approvals.stop(taskId);
       // And so does a parked question — dismissed, not errored: nobody is going to answer it.
       session.questions.dismissFor(taskId);
+      // A stopped task waits on nothing from the forge either. (A SHUTDOWN is different and leaves the
+      // rows awaited — the question is still open; this is a person saying stop.)
+      session.project.remotes.stopAwaiting(taskId);
       // SAY SO, for the interval between the decision and the end of the stream.
       //
       // The task used to jump to `canceled` here, while output was visibly still arriving — the panel
@@ -4997,6 +5070,9 @@ export class AppService {
       // `canceled` — so the status transition is a no-op and the offer would be the only thing left,
       // which is a question about a task the person has just said they are done with.
       session.project.interactions.clearTask(taskId);
+      // The same for the forge: a cancelled task waits on nothing, so its requests stop being polled.
+      // The merge request itself is left as it is — closing it is the workflow's or the person's to do.
+      session.project.remotes.stopAwaiting(taskId);
       if (this.cancelable(session, taskId)) {
         cancelTask(session.project, taskId);
         this.publishFor(session, { type: "store:invalidate", scope: "tasks" });

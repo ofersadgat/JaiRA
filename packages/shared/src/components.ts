@@ -28,6 +28,7 @@
 import type { JsonValue } from "@declarative-ai/json";
 import { changesetOf, checkDecisions, DECISION_KINDS, type Changeset } from "./changeset";
 import { checkNotes } from "./reviewNotes";
+import { parseDuration } from "./forge";
 
 export const COMPONENT_NAMES = [
   "choose_option",
@@ -408,6 +409,39 @@ export interface ReviewArtifactsConfig {
    * no options gets, and that is a default rather than a different component.
    */
   options?: ComponentOption[];
+  /**
+   * The gate's SECOND DOOR (decision 0004 §3): also open this review as a merge request, and let
+   * whichever side settles first answer the state.
+   *
+   * An ordinary object parameter — its default comes from `environment.functions.review_artifacts
+   * .args.remote`, its identity across loop rounds from a scoped name (NAMES.md). Absent or `null`
+   * is the gate as it always was. Once the gate has parked, the same object also carries where the
+   * request lives (`number`, `url`, …), which is what the remote strip draws.
+   */
+  remote?: ReviewRemote;
+}
+
+/** `review_artifacts.remote` — every field optional; see the table in decision 0004. */
+export interface ReviewRemote {
+  /** Which git remote to push to. Default: the project's only one. */
+  to?: string;
+  /** The branch the request asks to merge into. Default: the task's base branch. */
+  target?: string;
+  /** The quiet window after a comment, as a duration. Default: Settings → Integrations. */
+  settle_after?: string;
+  draft?: boolean;
+  title?: string;
+  description?: string;
+  workspace?: string;
+  /** Where the request lives, once it does — filled in by the host when the gate parks. */
+  provider?: string;
+  host?: string;
+  project?: string;
+  branch?: string;
+  number?: number;
+  url?: string;
+  id?: string;
+  key?: string;
 }
 
 export type ComponentConfig =
@@ -436,6 +470,30 @@ function str(raw: unknown, where: string, fallback?: string): string {
   }
   if (typeof raw !== "string" || raw.length === 0) throw new ConfigError(`${where} must be a non-empty string`);
   return raw;
+}
+
+const REMOTE_TEXT = ["to", "target", "settle_after", "title", "description", "workspace", "provider", "host", "project", "branch", "url", "id", "key"] as const;
+
+function reviewRemote(raw: unknown): ReviewRemote {
+  const spec = asRecord(raw, "review_artifacts.remote");
+  const out: ReviewRemote = {};
+  for (const key of REMOTE_TEXT) {
+    const held = spec[key];
+    if (held === undefined) continue;
+    if (typeof held !== "string" || held.length === 0) throw new ConfigError(`review_artifacts.remote.${key} must be a non-empty string`);
+    out[key] = held;
+  }
+  if (out.settle_after !== undefined && parseDuration(out.settle_after) === undefined) {
+    throw new ConfigError(`review_artifacts.remote.settle_after must be a duration like "10m", "2h" or "0"`);
+  }
+  if (spec["draft"] !== undefined) {
+    if (typeof spec["draft"] !== "boolean") throw new ConfigError("review_artifacts.remote.draft must be true or false");
+    out.draft = spec["draft"];
+  }
+  if (typeof spec["number"] === "number") out.number = spec["number"];
+  // The engine's `$key` beside a scoped name's configuration: which request, per instance.
+  if (out.key === undefined && typeof spec["$key"] === "string") out.key = spec["$key"];
+  return out;
 }
 
 function confirmDetails(raw: unknown): Array<{ label: string; value: string }> {
@@ -636,6 +694,8 @@ export function parseComponentConfig(component: ComponentName, raw: unknown): Co
       // and a reviewer should not have to remember which of the two spells it which way.
       const named = config["options"] ?? config["decisions"];
       if (named !== undefined) parsed.options = options(named, "review_artifacts.options");
+      // `null` is how a state opts OUT of a remote its environment would otherwise give it.
+      if (config["remote"] !== undefined && config["remote"] !== null) parsed.remote = reviewRemote(config["remote"]);
       return parsed;
     }
   }

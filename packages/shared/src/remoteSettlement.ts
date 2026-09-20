@@ -33,15 +33,18 @@ import type { ForgeComment, ForgeThread, RemoteHandle, RemoteState } from "./for
 import type { NoteReply, ReviewNote } from "./reviewNotes";
 
 /** What the forge did that settled it. */
-export type RemoteAct = "merged" | "closed" | "changes_requested" | "approved" | "decision_word" | "quiet";
+export type RemoteAct = "merged" | "closed" | "changes_requested" | "approved" | "decision_word" | "quiet" | "answered";
 
 export interface SettledBy {
-  via: "remote";
+  /** Which door answered: the forge, or the gate in the conversation. */
+  via: "remote" | "local";
   /** Whose act it was, where the forge says. The quiet window is nobody's: it is the LAST commenter. */
   who?: string;
   act: RemoteAct;
   /** The word, when the act was one. */
   word?: string;
+  /** What the host still has to do about it — see {@link RemoteSettlement.effect}. Rides the result so a RESUMED run does it too. */
+  effect?: "adopt" | "apply";
 }
 
 export interface RemoteSettlement {
@@ -89,6 +92,8 @@ export interface SettleContext {
   settleAt?: number;
   settleAfterMs: number;
   now: number;
+  /** Which forge this is, stamped on every note that came from it. */
+  source?: string;
 }
 
 /** The verb forms a decision word may take — "the obvious verb form of one". */
@@ -161,7 +166,7 @@ function replyOf(comment: ForgeComment): NoteReply {
 }
 
 /** A forge thread as the note it is: the opening comment, with the rest as replies. */
-export function noteOfThread(thread: ForgeThread, artifact: string, change?: Change): ReviewNote | undefined {
+export function noteOfThread(thread: ForgeThread, artifact: string, change?: Change, source?: string): ReviewNote | undefined {
   const [first, ...rest] = thread.comments;
   if (first === undefined) return undefined;
   const anchor = thread.anchor;
@@ -173,6 +178,8 @@ export function noteOfThread(thread: ForgeThread, artifact: string, change?: Cha
     author: first.who,
     at: first.at,
     ...(rest.length > 0 ? { replies: rest.map(replyOf) } : {}),
+    ...(source !== undefined ? { source } : {}),
+    thread: thread.id,
   } as ReviewNote;
 }
 
@@ -200,12 +207,12 @@ export function settleRemote(state: RemoteState, context: SettleContext): Settle
     const change = changeOf(context.changeset, thread);
     if (change === undefined) {
       // A thread about nothing under review — the request as a whole, or a file outside the set.
-      const note = noteOfThread(thread, REVIEW_NOTE_ARTIFACT);
+      const note = noteOfThread(thread, REVIEW_NOTE_ARTIFACT, undefined, context.source);
       if (note !== undefined) general.push(note);
       continue;
     }
     const held = slot(change.id);
-    const note = noteOfThread(thread, change.id, change);
+    const note = noteOfThread(thread, change.id, change, context.source);
     if (note !== undefined) held.notes.push(note);
     if (!thread.resolved && thread.comments.some((c) => !c.own)) held.open = true;
     // A reply on a file's thread that is a decision word decides THAT change, and settles nothing.
@@ -217,7 +224,7 @@ export function settleRemote(state: RemoteState, context: SettleContext): Settle
   }
   for (const comment of state.comments) {
     if (decisionWordOf(comment.body, options) !== undefined && counts(comment)) continue; // an act, not a remark
-    general.push({ artifact: REVIEW_NOTE_ARTIFACT, quote: "", body: comment.body, author: comment.who, at: comment.at } as ReviewNote);
+    general.push({ artifact: REVIEW_NOTE_ARTIFACT, quote: "", body: comment.body, author: comment.who, at: comment.at, ...(context.source !== undefined ? { source: context.source } : {}) } as ReviewNote);
   }
 
   const decide = (rest: DecisionKind | "threads"): ChangeDecision[] =>
@@ -316,7 +323,7 @@ export function resultOfSettlement(settlement: RemoteSettlement, remote: RemoteH
     ...(settlement.decision !== undefined ? { decision: settlement.decision } : {}),
     decisions: settlement.decisions,
     ...(settlement.notes.length > 0 ? { notes: settlement.notes } : {}),
-    settled_by: settlement.settledBy,
+    settled_by: { ...settlement.settledBy, ...(settlement.effect !== undefined ? { effect: settlement.effect } : {}) },
     remote,
   };
 }

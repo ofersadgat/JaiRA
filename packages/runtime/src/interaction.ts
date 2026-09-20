@@ -167,14 +167,21 @@ export class InteractionHub {
    * publish. It parks exactly as a registered component does: published, written down by the host,
    * answered through {@link submit}, and answerable from a seed after a restart.
    */
-  ask(component: string, inputs: Record<string, JsonValue>, taskId?: string): Promise<FunctionResult<ResolvedValue, WorkflowMetrics>> {
-    return this.park(component, inputs as FunctionInputs, taskId);
+  ask(
+    component: string,
+    inputs: Record<string, JsonValue>,
+    taskId?: string,
+    /** Told the request's id the moment it parks — never called for a seeded answer, which parks nothing. */
+    onParked?: (requestId: string) => void,
+  ): Promise<FunctionResult<ResolvedValue, WorkflowMetrics>> {
+    return this.park(component, inputs as FunctionInputs, taskId, onParked);
   }
 
   private park(
     component: string,
     inputs: FunctionInputs,
     taskId?: string,
+    onParked?: (requestId: string) => void,
   ): Promise<FunctionResult<ResolvedValue, WorkflowMetrics>> {
     // The answer somebody already gave, if this is the park it was given for — see {@link seeded}.
     // Consumed before a request id is minted, because there is no request: nothing is shown, nothing
@@ -195,6 +202,7 @@ export class InteractionHub {
     return new Promise<FunctionResult<ResolvedValue, WorkflowMetrics>>((resolve) => {
       this.pending.set(requestId, { request, resolve });
       this.options.onRequest?.(request);
+      onParked?.(requestId);
     });
   }
 

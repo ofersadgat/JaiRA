@@ -57,6 +57,16 @@ export interface ReviewNote {
    * several unrelated complaints about one sentence.
    */
   replies?: NoteReply[];
+  /**
+   * Where the note was WRITTEN, when that is not here (decision 0004): `gitlab`, `github`.
+   *
+   * A message that came from the forge says so, once, beside its author. Absent means it was written
+   * in JaiRA — which is also what decides which notes are posted to the forge when a gate settles
+   * locally: the ones the forge has not already got.
+   */
+  source?: string;
+  /** The forge's id for the thread, so a later state can reply on it (`remote_comment` `thread`). */
+  thread?: string;
 }
 
 /** One message after the opening one. */
@@ -171,6 +181,12 @@ export function checkNotes(raw: unknown): NotesCheck {
     if (side !== undefined) {
       if (side !== "before" && side !== "after") return badAt(i, `side must be "before" or "after"`);
       note.side = side;
+    }
+    for (const key of ["source", "thread"] as const) {
+      const held = row[key];
+      if (held === undefined) continue;
+      if (typeof held !== "string" || held.length === 0) return badAt(i, `${key} must be a non-empty string when present`);
+      note[key] = held;
     }
     const replies = row["replies"];
     if (replies !== undefined) {

@@ -241,6 +241,8 @@ export interface WatchSubject {
 
 export interface RemoteSettled {
   target: string;
+  /** The gate that was parked on this request, when one was — absent for a bare `on_remote_event`. */
+  requestId?: string;
   row: RemoteHandleRow;
   handle: RemoteHandle;
   settlement: RemoteSettlement;
@@ -321,6 +323,12 @@ export class RemoteWatcher {
         return undefined;
       }
 
+      // The read took time, and the OTHER door may have been used during it: a person answered the
+      // gate, or the run was stopped. Whichever settles first answers — so a read that comes back to a
+      // row nobody awaits any more is dropped, not acted on.
+      const still = target.handles.get(row.taskId, row.key);
+      if (still === undefined || !still.awaiting || still.requestId !== row.requestId) return undefined;
+
       const subject = this.options.subjectOf?.(target.key, row);
       const settleAfterMs = row.settleAfterMs ?? parseDuration(target.settleAfter) ?? 0;
       const step = settleRemote(state, {
@@ -330,6 +338,7 @@ export class RemoteWatcher {
         ...(row.settleAt !== undefined ? { settleAt: row.settleAt } : {}),
         settleAfterMs,
         now: this.clock.now(),
+        source: row.provider,
       });
 
       if (step.kind === "settled") {
@@ -337,7 +346,7 @@ export class RemoteWatcher {
         const done = target.handles.update(row.taskId, row.key, { seen: step.seen, settleAt: null, awaiting: false, requestId: null, checkedAt: this.clock.now(), lastError: null }) ?? row;
         this.disarm(id);
         this.options.onProgress?.({ target: target.key, row: done, state, step });
-        await this.options.onSettled({ target: target.key, row: done, handle: { ...handle, head: state.mergeCommit ?? state.head }, settlement: step.settlement, state });
+        await this.options.onSettled({ target: target.key, ...(row.requestId !== undefined ? { requestId: row.requestId } : {}), row: done, handle: { ...handle, head: state.mergeCommit ?? state.head }, settlement: step.settlement, state });
         return step;
       }
       const waiting = target.handles.update(row.taskId, row.key, { seen: step.seen, settleAt: step.settleAt ?? null, checkedAt: this.clock.now(), lastError: null }) ?? row;

@@ -570,6 +570,33 @@
           "approved_by": []
         }
       }
+    },
+    {
+      "match": {
+        "method": "POST",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7430/notes"
+      },
+      "response": {
+        "status": 201,
+        "headers": {},
+        "body": {
+          "id": 1401
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "POST",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7430/discussions"
+      },
+      "response": {
+        "status": 201,
+        "headers": {},
+        "body": {
+          "id": "1414141414141414141414141414141414141414",
+          "notes": []
+        }
+      }
     }
   ]
 }

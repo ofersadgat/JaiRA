@@ -274,9 +274,14 @@ describe("threads as notes", () => {
           author: "mara",
           at: at(1),
           replies: [{ body: "Fixed in the next push.", author: "jaira-bot", at: at(2) }],
+          // The forge's own id for the thread, so a later state can reply on it.
+          thread: expect.stringMatching(/^t\d+$/),
         },
       ],
     });
+    // And where it came from, when the caller says which forge this is.
+    const marked = settleRemote(open({ reviews: [review("mara", "changes_requested", 5)], threads: [thread("src/cache.ts", 2, [comment("mara", "x", 1)])] }), ctx({ source: "gitlab" }));
+    expect(settledOf(marked).decisions[0]!.notes![0]!.source).toBe("gitlab");
   });
 
   it("leaves a RESOLVED thread as a note and not as an objection", () => {

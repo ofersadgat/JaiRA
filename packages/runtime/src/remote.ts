@@ -87,6 +87,19 @@ export interface PublishRequest {
   openedBy?: string;
 }
 
+/** What adopting the forge's history did — what the gate's settled line says. */
+export interface AdoptReport {
+  /** What landed on the target: the merge commit, as fetched. */
+  head: string;
+  /** Whether the task's worktree was moved onto it. */
+  reset: boolean;
+  /** Where the worktree's old tip was kept, when it held anything the merge did not. */
+  dropped?: string;
+  /** The person's own `<target>`: moved, already there, not a branch here — or left alone, with {@link why}. */
+  target: "fast-forwarded" | "up-to-date" | "absent" | "left-alone";
+  why?: string;
+}
+
 /** `once` lets this task publish; `always` also grants the project; `no` refuses. */
 export type PublishAnswer = "once" | "always" | "no";
 
@@ -412,6 +425,97 @@ export class RemotePrimitives {
     const { row, handle } = await this.opened(inputs, ctx);
     await this.provider(row.host).close(handle);
     return { remote: this.valueOf(row) };
+  }
+
+  /**
+   * Push and open in one step, for the gate — the same two primitives, the same publish question.
+   * Returns the row, which by then says where the request lives.
+   */
+  async publish(inputs: FunctionInputs, ctx: unknown): Promise<RemoteHandleRow> {
+    await this.push(inputs, ctx);
+    await this.open(inputs, ctx);
+    const { key } = remoteArg(inputs);
+    return this.options.handles.get(this.options.taskId, key)!;
+  }
+
+  /** Reach the forge for a request this task already has — the gate's closing comment, its notes. */
+  providerFor(row: RemoteHandleRow): ForgeProvider {
+    return this.provider(row.host);
+  }
+
+  /**
+   * After a remote merge, the forge's history IS the history (decision 0004).
+   *
+   * The reviewer may have squashed, rebased, or pushed a fixup of their own, so what landed is not
+   * necessarily what was pushed, and nothing here tries to reconcile the two. In order:
+   *
+   *  1. `git fetch <to> <target>`.
+   *  2. The task's worktree drops what it holds and moves to the fetched target. First the old tip —
+   *     and a commit of any uncommitted drift, if the worktree was edited while the gate was parked —
+   *     is kept under `refs/jaira/dropped/<task>/<n>`, so "drop" never destroys the only copy of
+   *     anything.
+   *  3. The local `<target>` is fast-forwarded, and ONLY fast-forwarded. Checked out somewhere with a
+   *     dirty tree, or holding commits the forge does not, it is left alone and the report says so:
+   *     JaiRA never merges or rebases a branch the person owns.
+   *
+   * A task with no worktree of its own runs in the person's checkout, on a branch that is theirs —
+   * so step 2 is skipped there and said so, for the same reason step 3 is careful.
+   */
+  async adopt(row: RemoteHandleRow, workspace: string, isWorktree: boolean): Promise<AdoptReport> {
+    const git = this.git(workspace);
+    const upstream = `${row.remote}/${row.target}`;
+    await git.run(["fetch", row.remote, row.target], { timeoutMs: 120_000 });
+    const landed = (await git.revParse(upstream)) ?? "";
+    const report: AdoptReport = { head: landed, reset: false, target: "left-alone" };
+
+    if (isWorktree) {
+      // Drift first, as a commit: what is kept under the ref has to include it.
+      await git.run(["add", "-A", "--", ".", ":(exclude).jaira"]);
+      if ((await git.tryRun(["diff", "--cached", "--quiet"])) === undefined) {
+        await git.run(["commit", "-m", `jaira: work in ${row.taskId} that was not part of the merged request`]);
+      }
+      const tip = await git.head();
+      if (tip !== undefined && tip !== landed) {
+        const kept = ((await git.tryRun(["for-each-ref", "--format=%(refname)", `refs/jaira/dropped/${row.taskId}/`])) ?? "").split(/\r?\n/).filter((r) => r.length > 0).length;
+        report.dropped = `refs/jaira/dropped/${row.taskId}/${kept + 1}`;
+        await git.run(["update-ref", report.dropped, tip]);
+      }
+      await git.run(["reset", "--hard", upstream]);
+      report.reset = true;
+    } else {
+      report.why = "this task has no worktree of its own, so the checkout it ran in was left as it is";
+    }
+
+    // The person's own `<target>`: fast-forward, or leave alone and say why.
+    const local = await git.revParse(`refs/heads/${row.target}`);
+    if (local === undefined) {
+      report.target = "absent";
+    } else if (local === landed) {
+      report.target = "up-to-date";
+    } else if ((await git.tryRun(["merge-base", "--is-ancestor", local, landed])) === undefined) {
+      report.why = `your ${row.target} has commits ${upstream} does not, so it was left alone`;
+    } else {
+      const holder = (await git.listWorktrees()).find((entry) => entry.branch === row.target || entry.branch === `refs/heads/${row.target}`);
+      if (holder === undefined) {
+        await git.run(["update-ref", `refs/heads/${row.target}`, landed, local]);
+        report.target = "fast-forwarded";
+      } else if (resolve(holder.path) === resolve(workspace) && report.reset) {
+        report.target = "up-to-date"; // the reset above already moved it
+      } else {
+        const there = this.git(holder.path);
+        // Dirty means the PERSON's work. `.jaira/` is the recorder's own writing — task records, a
+        // snapshot per run — and counting it would make a checked-out target look dirty almost
+        // always, which would quietly turn "fast-forward when clean" into "never".
+        const dirty = ((await there.tryRun(["status", "--porcelain", "--", ".", ":(exclude).jaira"])) ?? "x").length > 0;
+        if (dirty) {
+          report.why = `your ${row.target} is checked out with uncommitted changes, so it was left alone`;
+        } else {
+          await there.run(["merge", "--ff-only", landed]);
+          report.target = "fast-forwarded";
+        }
+      }
+    }
+    return report;
   }
 
   /**
